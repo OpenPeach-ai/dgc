@@ -112,8 +112,9 @@ class LiveControlTests(unittest.TestCase):
         self.wait("steering_update", request_id="follow", state="applied")
         self.assertFalse(self.backend._steer_payloads)
         history = self.backend._history()
-        followup = next(row for row in history if row["role"] == "user" and "Check this image" in row["text"])
-        self.assertNotIn("user-interjection", followup["text"])
+        followup = next(row for row in history if row.get("type") == "turn_start"
+                        and "Check this image" in row["prompt"])
+        self.assertNotIn("user-interjection", followup["prompt"])
 
     def test_cancel_and_preparation_error_return_unconsumed_steering(self):
         for failed in (False, True):

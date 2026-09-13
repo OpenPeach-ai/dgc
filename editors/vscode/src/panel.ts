@@ -1017,9 +1017,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const how = signal ? `killed by ${signal}`
         : code === null ? "killed by an unreported signal" : `code ${code}`;
       const up = Math.round(be.uptimeMs / 1000);
+      // The instance's own flag, not the panel's: restart() clears the panel flag synchronously
+      // while the old child is still dying, so by the time this ran it always read "no".
+      const asked = be.intentional || this.intentionalShutdown;
       this.backendNote(`[dgc serve exited: ${how} · extension asked for it: `
-        + `${this.intentionalShutdown ? "yes" : "no"} · up ${up}s]`);
+        + `${asked ? "yes" : "no"} · up ${up}s]`);
       this.mcpUrls.clear();
+      if (be.intentional) { return; }          // our own teardown: logged above, nothing to recover
       this.setReadyContext(false);
       if (this.backend === be) {
         this.changesRefreshRevision++;
@@ -1094,6 +1098,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // A deliberate restart is not a crash: it must not spend the automatic-recovery budget, and
     // the respawn below is the one that counts.
     this.backendNote("[extension: restarting the backend on request]");
+    if (this.backend) { this.backend.intentional = true; }
     this.intentionalShutdown = true;
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     this.backendRecoveries = [];

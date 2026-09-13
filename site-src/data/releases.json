@@ -1,7 +1,6 @@
 {
-  "refreshed_at": "2026-09-10T17:05:24Z",
+  "refreshed_at": "2026-09-13T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 16,
   "cli": [
     {
       "version": "0.38.1",

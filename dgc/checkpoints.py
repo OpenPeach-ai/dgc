@@ -69,6 +69,7 @@ def _restore(path: Path, snapshot: _Snapshot) -> bool:
 class CheckpointManager:
     def __init__(self, project_root=None, on_change: Callable[[], bool | None] | None = None):
         self.points: list[dict] = []   # {"msg_count", "preview", "files": {path: _Snapshot}}
+        self.last_record_error = ""    # why the most recent record_file() refused, for the user
         self.project_root = (Path(project_root).resolve(strict=False) if project_root is not None
                              else None)
         self._on_change = on_change
@@ -216,28 +217,59 @@ class CheckpointManager:
         return False
 
     def record_file(self, path: str) -> bool:
-        """Save a path's exact current state before editing it (once per file per turn)."""
-        if not self.points or self._pending_rewind is not None:
+        """Save a path's exact current state before editing it (once per file per turn).
+
+        On failure `last_record_error` says which of the several reasons it was. One sentence for
+        all of them left the user — and the model, which then routed its writes through the shell —
+        with no way to tell a spent budget from a symlinked path from a session that would not save.
+        """
+        self.last_record_error = ""
+        if self._pending_rewind is not None:
+            self.last_record_error = "a rewind is being applied to this session"
+            return False
+        if not self.points:
+            self.last_record_error = "this turn has no recovery point to record into"
             return False
         files = self.points[-1]["files"]
         if path in files:
             return True
         if len(files) >= _MAX_FILES_PER_POINT:
+            self.last_record_error = (f"this turn has already captured {_MAX_FILES_PER_POINT} files")
             return False
         p = Path(path)
         if self._lexically_within_project(path) and self._relative_project_path(path) is None:
+            self.last_record_error = "the path leaves the project through a symlink"
+            return False
+        remaining = _MAX_SNAPSHOT_BYTES - self._snapshot_bytes_total
+        if remaining <= 0:
+            # Say the budget is spent rather than letting _capture report a "0-byte safety limit",
+            # which reads like the file is at fault.
+            self.last_record_error = (f"this session's {_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB "
+                                      "snapshot budget is spent")
             return False
         try:
-            snapshot = _capture(p, _MAX_SNAPSHOT_BYTES - self._snapshot_bytes_total)
-        except (OSError, ValueError):
+            snapshot = _capture(p, remaining)
+        except (OSError, ValueError) as exc:
+            detail = str(exc)[:200] or type(exc).__name__
+            if "safety limit" in detail:
+                # The limit it hit is what is LEFT of the session budget, not a property of the
+                # file. Saying "file exceeds the 524288-byte safety limit" blamed the file for the
+                # session's own accounting.
+                detail = (f"only {remaining // 1024} KB of this session's "
+                          f"{_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB snapshot budget is left, "
+                          "and the file is larger than that")
+            self.last_record_error = detail
             return False
         if self._snapshot_bytes_total + len(snapshot.data) > _MAX_SNAPSHOT_BYTES:
+            self.last_record_error = (f"this session's {_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB "
+                                      "snapshot budget is spent")
             return False
         files[path] = snapshot
         self._snapshot_bytes_total += len(snapshot.data)
         if not self._notify():
             files.pop(path, None)
             self._snapshot_bytes_total -= len(snapshot.data)
+            self.last_record_error = "the session could not be saved"
             return False
         return True
 

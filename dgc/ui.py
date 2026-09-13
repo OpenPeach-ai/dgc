@@ -16,7 +16,14 @@ class AgentUI(Protocol):
     # streaming (agent → front-end) --------------------------------------------
     def on_text(self, chunk: str) -> None: ...
     def on_thinking(self, chunk: str) -> None: ...
-    def end_stream(self) -> None: ...
+    # ``phase`` is the backend's own classification of the prose block just closed:
+    # "commentary" when the same model round also called tools, "answer" when it did not.
+    # Optional on purpose -- every existing implementation stays valid, and an empty phase
+    # means "undetermined", which front-ends must treat as their pre-existing behaviour.
+    def end_stream(self, phase: str = "") -> None: ...
+    # What the loop is doing right now. Front-ends that show a running-turn verb read this
+    # instead of inferring one; the ones that do not simply ignore it.
+    def turn_activity(self, state: str, label: str, detail: str = "") -> None: ...
     # tool lifecycle -----------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None: ...
     def tool_progress(self, name: str, message: str, *, progress=None, total=None,
@@ -44,6 +51,30 @@ class AgentUI(Protocol):
 
 
 # ---- shared formatters (used by both the REPL and the JSON backend) ----------
+
+# The present-tense verb a running tool earns in the activity row. Deliberately the same
+# vocabulary the TUI status line already uses, so both surfaces name a step the same way.
+_ACTIVITY_VERBS = {
+    "bash": "Running a command", "bash_output": "Reading command output",
+    "read_file": "Reading a file", "write_file": "Writing a file", "edit_file": "Editing a file",
+    "multi_edit": "Editing a file", "apply_patch": "Applying a patch", "grep": "Searching",
+    "glob": "Finding files", "ls": "Listing files", "repo_map": "Mapping the repo",
+    "code_intel": "Reading code structure", "web_search": "Searching the web",
+    "web_fetch": "Fetching a page", "todo": "Updating the plan", "task": "Delegating a task",
+    "skill": "Reading a skill", "present_plan": "Presenting the plan",
+    "memory": "Updating memory", "artifact": "Building an artifact",
+}
+
+
+def activity_verb(name: str) -> str:
+    """A present-tense label for what the named tool is doing, for the activity row."""
+    key = str(name or "")
+    if key in _ACTIVITY_VERBS:
+        return _ACTIVITY_VERBS[key]
+    if key.startswith("mcp_") or key.startswith("mcp__"):
+        return "Using an integration"
+    return "Running " + (key or "a tool")
+
 
 def arg_summary(name: str, args: dict) -> str:
     """A one-line human summary of a tool call's primary argument."""

@@ -7,9 +7,7 @@ RESPONSE_GUIDANCE = (
     "Use CommonMark: blank lines between paragraphs and before lists, nested lists for hierarchy, "
     "and fenced code with a language label when code is useful. "
     "Link relevant workspace files as [name](relative/path:line) and sources as [label](https://...). "
-    "At each phase change, briefly report findings and continue with the next required action. "
-    "When the user scoped you to one part of a larger piece of work, finish that part and end by "
-    "naming what comes next and asking whether to continue or to look at what just landed."
+    "At each phase change, briefly report findings and continue with the next required action."
 )
 
 

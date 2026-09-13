@@ -225,33 +225,21 @@ class _DeadlineCancel:
         return self.parent.is_set() or time.monotonic() >= self.deadline
 
 
-def _tool_batch_preamble(calls: list[ToolCall], *, did_tools: bool = False,
-                         edited_before: bool = False) -> str:
-    """Truthful fallback narration for local models that emit a bare tool-call batch."""
-    names = {c.name for c in calls}
-    if "present_plan" in names:
-        return ("I’ve finished the read-only review. I’m presenting the implementation plan "
-                "for your approval.")
-    if names & {"write_file", "edit_file", "multi_edit", "apply_patch"}:
-        return ("I’ve got the target context. I’m applying the focused changes now."
-                if did_tools else "I’ll apply the focused changes now.")
-    if "bash" in names:
-        return ("The changes are in. I’m running the relevant verification now."
-                if edited_before else "I’m running the relevant command and checking its result now.")
-    if names == {"task"}:
-        return ("I’m delegating these independent workstreams, then I’ll reconcile and "
-                "verify their results." if len(calls) > 1 else
-                "I’m delegating this self-contained workstream, then I’ll review its result.")
-    if names == {"mcp_search"}:
-        return "I’m locating the relevant configured integration before I use it."
-    if "mcp_call" in names or any(name.startswith("mcp__") for name in names):
-        return "I’ve found the relevant integration. I’m running it and checking the result now."
-    if names and names <= _PARALLEL_READS:
-        return ("I’ve got the initial context. I’m checking the next relevant details."
-                if did_tools else "I’ll inspect the relevant code and current behavior first.")
-    if "todo" in names:
-        return "I’m organizing the work into concrete steps first."
-    return "I’m taking the next concrete step now."
+def _within_own_checkout(agent, path) -> bool:
+    """Is this write inside the checkout the agent may treat as disposable?
+
+    A sub-agent in its own worktree needs no per-edit snapshot — the worktree is thrown away and
+    its result is captured on integration. That reasoning covers only its OWN checkout: a write by
+    absolute path into the parent's tree is an ordinary mutation of the user's files and must be
+    captured like any other, or nothing can take it back.
+    """
+    try:
+        from .workspace import resolve_path
+        root = Path(agent.config.project_root).resolve(strict=False)
+        target = Path(resolve_path(str(path), agent.config.project_root, allow_external=True)).resolve(strict=False)
+        return target == root or root in target.parents
+    except Exception:
+        return False        # unknown shape → require the capture
 
 
 def _file_edit_landed(name: str, output: str) -> bool:
@@ -701,11 +689,17 @@ class _SubUI:
     def on_thinking(self, chunk):
         self._emit("on_thinking", chunk)
 
-    def end_stream(self):
+    def end_stream(self, phase: str = ""):
         if self._buf:
             self._last = "".join(self._buf)
             self._buf = []
-        self._emit("end_stream")
+        # A delegated child's prose is commentary to the PARENT turn, whatever the child's own loop
+        # called it — including the UNPHASED closes its cancel, error, timeout and overflow paths
+        # use, which the compatibility rule would otherwise let designate the parent's answer.
+        self._emit("end_stream", "commentary")
+
+    def turn_activity(self, state, label, detail=""):
+        self._emit("turn_activity", state, label, detail)
 
     def tool_call(self, name, args, call_id=None):
         self._emit("tool_call", name, args, self._call_id(call_id))
@@ -770,9 +764,10 @@ class _SubUI:
         return self._interact("propose_questions", None, questions)
 
     def on_todo(self, todos):
-        # A child todo list is useful inside its own prompt but must not replace the parent's plan.
-        if not self._buffered:
-            self._direct("on_todo", todos)
+        # A child's checklist is useful inside its own prompt and nowhere else. Forwarding it
+        # repainted the SESSION's rail with a sub-task's steps — the comment below already said it
+        # must not replace the parent's plan, while the line under it did exactly that.
+        return
 
     def artifact_ready(self, art):
         return self._emit("artifact_ready", art)
@@ -968,6 +963,12 @@ class Agent(GoalLifecycle):
         self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
         self._metrics_parent: Agent | None = None  # isolated child counters roll into the root session
+        # Whether an edit must be snapshotted before it lands. True everywhere a rewind can reach:
+        # a top-level turn, and a sub-agent sharing this checkout (it records into the parent's
+        # point). A sub-agent in its own disposable worktree sets it False — nothing there is
+        # rewindable by construction, and its result is captured when the parent integrates it.
+        # It used to be unconditional, which meant an isolated child could not edit a file at all.
+        self._edit_checkpoints_required = True
         self._last_task_integrated = False         # structured convergence signal; never infer from model text
         self._usage_lock = threading.Lock()       # title/suggestion work may finish off the main thread
         self.reset()
@@ -1667,8 +1668,10 @@ class Agent(GoalLifecycle):
         target = to_mode or self.plan_return_mode or "default"
         self.plan_return_mode = None
         # Leaving plan mode with a plan behind you means the user approved it; the next turns are
-        # its execution, and the answer contract for them is different (see system_prompt).
+        # its execution, and the answer contract for them is different (see system_prompt). Not
+        # THIS turn, though: the approval's own tool result tells the model to execute the plan now.
         self._executing_plan = bool(getattr(self, "_plan_presented", False))
+        self._plan_approved_this_turn = self._executing_plan
         self.set_mode(target)
         return target
 
@@ -1690,6 +1693,7 @@ class Agent(GoalLifecycle):
         self._goal_stated = False           # is the full objective already in this context?
         self._plan_presented = False        # a plan was proposed in THIS session…
         self._executing_plan = False        # …and approved, so later turns are its execution
+        self._plan_approved_this_turn = False
         self._goal_progress = None
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
@@ -1796,20 +1800,35 @@ class Agent(GoalLifecycle):
             "- When ready, give a final response in normal text, never only thinking or tool calls.",
         ]
 
-        if getattr(self, "_executing_plan", False) and mode != "plan":
-            # The user approved a plan and then scoped this turn to part of it. Finishing that part
-            # is the whole job: rolling straight into the next phase takes the decision away from
-            # them, and saying nothing about what is next leaves them to reconstruct the plan.
+        goal = getattr(self, "goal", "")
+        goal_status = getattr(self, "goal_status", "none")
+        # Everything this block says is wrong somewhere, so it is fenced in hard:
+        #   - not on the approving turn itself, whose tool result already said "Execute the plan
+        #     now" — two instructions, opposite meanings, same context;
+        #   - only while the checklist still has an open item, which is what "a plan with phases
+        #     left" actually means, and which makes the block clear itself when the plan is done;
+        #   - never beside a standing goal ("keep making progress every turn") or in auto mode,
+        #     which exist precisely to not hand back.
+        # "Open" is the codebase's own definition (goals.py): anything not done. A phase the model
+        # parked as `blocked` is still a phase left, and the hand-back is exactly where it should
+        # say so — dropping the block there would hide the one case the user most needs told.
+        plan_open = any(str(item.get("status", "")) != "done"
+                        for item in getattr(self.ctx, "todos", []) if isinstance(item, dict))
+        if (getattr(self, "_executing_plan", False)
+                and not getattr(self, "_plan_approved_this_turn", False)
+                and mode not in ("plan", "auto")
+                and goal_status != "active"
+                and plan_open):
             parts += [
                 "",
                 "# Approved plan",
-                "You are carrying out a plan the user approved. Do the part they asked for and stop "
-                "there. End your answer by naming what comes next and asking whether to continue or "
-                "to review what just landed first — unless they asked for the whole plan in one go.",
+                "You are carrying out a plan the user approved, and its checklist still has open "
+                "items. If they approved the plan as a whole, carry it out — keep going through "
+                "the remaining items. If they scoped this turn to one part of it, finish that part "
+                "and hand back: name what comes next and ask whether to continue or to review what "
+                "just landed first.",
             ]
 
-        goal = getattr(self, "goal", "")
-        goal_status = getattr(self, "goal_status", "none")
         if goal and goal_status == "active":  # a standing /goal — keep it in view every turn until met
             parts += [
                 "",
@@ -2647,6 +2666,12 @@ class Agent(GoalLifecycle):
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""
             self._draft_mcp_context = []
+            # Plan state belongs to the session we are leaving. Carried into a resumed one it told
+            # the model an unrelated chat was the execution of a plan the user had approved — and
+            # it had to be cleared HERE, before messages[0] is rebuilt from system_prompt().
+            self._plan_presented = False
+            self._executing_plan = False
+            self._plan_approved_this_turn = False
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
             checkpoint_state = record.get("checkpoints")
@@ -2710,6 +2735,19 @@ class Agent(GoalLifecycle):
         return explain_llm_error(prefix + str(exc),
                                  model=str(getattr(client, "model", "") or self.config.model or ""),
                                  base_url=str(getattr(client, "base_url", "") or self.config.base_url or ""))
+
+    def _activity(self, state: str, label: str, detail: str = "") -> None:
+        """Say what the loop is doing, for any front-end that shows a running-turn verb.
+
+        The gates below each continue the turn AFTER a round that looked finished. They were
+        correct and silent, which is exactly why a finished-looking answer was followed by a
+        burst of tool calls under a spinner that could only ever say "working". Narrating them
+        costs one event per state change; the ``info`` lines stay, because they are the durable
+        transcript record and this is the transient verb.
+        """
+        announce = getattr(self.ui, "turn_activity", None)
+        if callable(announce):
+            announce(state, label, detail)
 
     def _fail_turn(self, message: str) -> bool:
         """Record and render one handled terminal failure for every frontend."""
@@ -2791,6 +2829,10 @@ class Agent(GoalLifecycle):
         return rc, (out or "(no output)")
 
     def _run_turn(self, user_text: str) -> bool:
+        if self.depth == 0:
+            # A new top-level turn: the approval and its "Execute the plan now" tool result are
+            # behind us, so the hand-back contract applies from here on.
+            self._plan_approved_this_turn = False
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
             blocked, hout = self._run_lifecycle_hooks(
@@ -2905,7 +2947,8 @@ class Agent(GoalLifecycle):
                 if marker:
                     held_final_messages[-1]["content"] = marker
             clear_held_final()
-            self.ui.end_stream()
+            # The completion claim was not accepted, so this block is not an answer.
+            self.ui.end_stream("commentary")
             if notice:
                 self.ui.info(notice)
 
@@ -2914,7 +2957,7 @@ class Agent(GoalLifecycle):
             if text:
                 self.ui.on_text(text)
             clear_held_final()
-            self.ui.end_stream()
+            self.ui.end_stream("answer")
 
         def can_finish_on_verified() -> bool:
             # A passing test is evidence about that check, not proof that the user's entire
@@ -3036,7 +3079,7 @@ class Agent(GoalLifecycle):
                 final += "\n\nVerification: the test command passed."
                 self.messages.append({"role": "assistant", "content": final})
                 self.ui.on_text(final)
-                self.ui.end_stream()
+                self.ui.end_stream("answer")
                 return True
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
             tools = self._tool_schemas() if self.client.tools_supported else None
@@ -3059,6 +3102,9 @@ class Agent(GoalLifecycle):
             defer_completion = bool(
                 mutating_total > 0 and self.config.get("verify_before_done")
                 and self.config.get("verify_command"))
+            # Every continuation lands here, so this is the one place that can honestly name the
+            # gap between "a gate decided to keep going" and "the model started answering".
+            self._activity("waiting", "Waiting for the model")
             try:
                 result = self._chat(tools, effort, cancel=chat_cancel, read_timeout=chat_timeout,
                                     defer_text=defer_completion,
@@ -3160,14 +3206,10 @@ class Agent(GoalLifecycle):
                     self.ui.end_stream()
                 self.ui.info("turn cancelled")
                 return False
-            # Some local models emit valid tool calls but no user-facing text. Preserve genuine model
-            # commentary; otherwise add a deterministic, non-speculative preamble BEFORE tool cards.
-            if (result.tool_calls and result.finish_reason not in _INCOMPLETE_FINISH_REASONS
-                    and not (result.content or "").strip()):
-                result.content = _tool_batch_preamble(
-                    result.tool_calls, did_tools=did_tools, edited_before=edited_total > 0)
-                if not defer_completion:
-                    self.ui.on_text(result.content)
+            # A round that calls tools and writes nothing is not a silent round: the tool card IS
+            # the narration, and it says what is actually happening. DGC used to invent a sentence
+            # here ("I'll apply the focused changes now.") from the tool names alone, which read as
+            # the model talking when the model had said nothing.
             if result.tool_calls:
                 # A tool call proves this is progress commentary, not an attempted final. Flush any
                 # prior incomplete final separately, then preserve commentary-before-tool ordering.
@@ -3177,9 +3219,11 @@ class Agent(GoalLifecycle):
                         "incomplete completion withheld — continuing with model tool calls")
                 if defer_completion and (result.content or ""):
                     self.ui.on_text(result.content)
-                self.ui.end_stream()
+                # This round provably continues: prose beside a tool call is commentary, and the
+                # harness knows it here for certain instead of the panel guessing it later.
+                self.ui.end_stream("commentary")
             elif not defer_completion:
-                self.ui.end_stream()
+                self.ui.end_stream("answer")
 
             native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
@@ -3263,6 +3307,7 @@ class Agent(GoalLifecycle):
                     self.ui.info(
                         "↻ no user-facing output — retrying finalization with thinking off")
                     next_request_reason = "empty_final"
+                    self._activity("continuing", "Asking for a written answer")
                     continue
                 if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
                     if continues < _MAX_CONTINUE:
@@ -3276,6 +3321,7 @@ class Agent(GoalLifecycle):
                             "Your previous response was cut off at the length limit. Continue exactly "
                             "where you left off — do not repeat what you already wrote.")})
                         next_request_reason = "output_continue"
+                        self._activity("continuing", "Continuing the cut-off response")
                         continue
                     if defer_completion:
                         withhold_final(
@@ -3308,6 +3354,7 @@ class Agent(GoalLifecycle):
                             "[Completion withheld by DGC: open todos required the turn to continue.]",
                             "completion withheld — open todos still require action")
                     next_request_reason = "todo_gate"
+                    self._activity("continuing", "Finishing open todos")
                     continue
                 if not (result.content or "").strip():
                     if not summary_nudged:
@@ -3324,6 +3371,7 @@ class Agent(GoalLifecycle):
                         if defer_completion:
                             withhold_final()
                         next_request_reason = "empty_final"
+                        self._activity("continuing", "Asking for a written answer")
                         continue
                     if defer_completion:
                         withhold_final()
@@ -3335,6 +3383,7 @@ class Agent(GoalLifecycle):
                             "[Completion withheld by DGC: a newer user instruction continued the turn.]",
                             "completion withheld — applying the newer user instruction")
                     next_request_reason = "steering"
+                    self._activity("continuing", "Applying your newer instruction")
                     continue
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
                         and not self._pending_goal_report and not goal_nudged and did_tools):
@@ -3350,11 +3399,13 @@ class Agent(GoalLifecycle):
                             "[Completion withheld by DGC: the active standing goal required another step.]",
                             "completion withheld — checking the active standing goal")
                     next_request_reason = "goal_gate"
+                    self._activity("continuing", "Checking the standing goal")
                     continue
                 if self.autonomous_gate and autonomous_gate_tries < self.autonomous_max_turns:
                     # Autonomous gate: bound the run by a real check command. The model may not end the
                     # turn until it exits 0; a nonzero exit feeds its output back and continues. This is
                     # the LAST gate before stopping, so a passing gate falls through to the final stop.
+                    self._activity("verifying", "Running the check", str(self.autonomous_gate))
                     rc, gate_out = self._run_autonomous_gate()
                     if rc != 0:
                         autonomous_gate_tries += 1
@@ -4042,14 +4093,19 @@ class Agent(GoalLifecycle):
         else:
             try:
                 path_error = ""
-                if name in ("write_file", "edit_file", "multi_edit", "apply_patch") and args.get("path"):
+                if (name in ("write_file", "edit_file", "multi_edit", "apply_patch")
+                        and args.get("path")
+                        and (getattr(self, "_edit_checkpoints_required", True)
+                             or not _within_own_checkout(self, args.get("path")))):
                     from .workspace import resolve_path
                     try:
                         abs_path = resolve_path(str(args["path"]), self.config.project_root,
                                                 allow_external=bool(external_paths))
                         if not self.checkpoints.record_file(str(abs_path)):
-                            path_error = ("error: could not durably capture the file's pre-edit state; "
-                                          "the file was not changed")
+                            why = (getattr(self.checkpoints, "last_record_error", "")
+                                   or self._last_persist_error or "the reason is not recorded")
+                            path_error = ("error: the file was not changed — DGC could not capture "
+                                          f"its pre-edit state first: {why}")
                     except ValueError as e:
                         path_error = f"error: {e}"
                 if path_error:
@@ -4381,6 +4437,8 @@ class Agent(GoalLifecycle):
             sub.ctx.cancelled = self.cancelled
             if not isolated:
                 sub.checkpoints = self.checkpoints
+            else:
+                sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
             sub._metrics_parent = self
             override = self._subagent_client(adef)
             if override is not None:
@@ -4921,6 +4979,10 @@ class Agent(GoalLifecycle):
                      if bool(getattr(self.client, "tools_supported", False)) else None)
         if not force and self.estimate_tokens(tools=tools) < budget:
             return "none", "below the automatic threshold"
+        # Past this line compaction is really happening, and it can cost a model round of its own.
+        # Announcing it here rather than at the call site keeps the claim true: every round asks
+        # whether to compact, and almost none of them do.
+        self._activity("compacting", "Summarising earlier conversation")
         # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
         pruned = self._mechanical_prune(aggressive=force)
         if pruned and not force and self.estimate_tokens(tools=tools) < budget:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import signal
 import subprocess
 import sys
 import threading
@@ -117,51 +118,161 @@ class ServeShutdownLogTests(unittest.TestCase):
         self.assertIn("the editor asked us to shut down", log)
         self.assertNotIn("stdin closed", log)
 
+    def test_a_sigterm_closes_the_backend_instead_of_killing_it_between_two_bytecodes(self):
+        """The default disposition runs no `finally`: the goal was never paused, only abandoned."""
+        home = tempfile.TemporaryDirectory(prefix="dgc-serve-signal-")
+        self.addCleanup(home.cleanup)
+        work = tempfile.TemporaryDirectory(prefix="dgc-serve-signal-proj-")
+        self.addCleanup(work.cleanup)
+        env = dict(os.environ, HOME=home.name, PYTHONPATH=str(PROJECT))
+        for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+            env[var] = home.name
+        proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                cwd=work.name, env=env)
+        self.addCleanup(proc.kill)
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            self.addCleanup(pipe.close)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:      # the handler is installed once serve() is running
+            line = proc.stdout.readline()
+            self.assertTrue(line, "the backend exited before it was ready")
+            if '"ready"' in line:
+                break
+        proc.send_signal(signal.SIGTERM)
+        status = proc.wait(timeout=60)
+        log = (Path(home.name) / ".dgc" / "logs" / "serve.log").read_text(encoding="utf-8")
+        self.assertIn("SIGTERM — the parent asked us to stop", log)
+        self.assertIn("backend closed cleanly", log)    # the finally ran: work is saved, not lost
+        # The stack dump still runs first and now chains INTO our handler instead of the kernel.
+        self.assertIn("Current thread", log)
+        # And we still die OF the signal — a 0 would tell a supervisor we chose to stop.
+        self.assertEqual(status, -signal.SIGTERM)
+
 
 class PlanHandoffPromptTests(unittest.TestCase):
-    """After an approved plan, the answer contract changes: finish the part, then hand back."""
+    """After an approved plan the answer contract changes — but only where that is true.
 
-    def agent(self):
-        tmp = tempfile.TemporaryDirectory(prefix="dgc-plan-prompt-")
-        self.addCleanup(tmp.cleanup)
+    Unfenced, the block contradicts three things already in the same context: the approval's own
+    tool result ("Execute the plan now"), a standing goal ("keep making progress every turn"), and
+    auto mode. And a plan whose checklist has nothing open is not a plan in progress at all.
+    """
+
+    def agent(self, root: Path | None = None, **settings):
+        if root is None:
+            tmp = tempfile.TemporaryDirectory(prefix="dgc-plan-prompt-")
+            self.addCleanup(tmp.cleanup)
+            root = Path(tmp.name)
         cfg = Config()
-        cfg.project_root = Path(tmp.name)
+        cfg.project_root = root
         cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "default"})
+        cfg.data.update(settings)
         agent = Agent(cfg, QuietUI())
         self.addCleanup(agent.mcp.stop_all)
+        agent.session_file = sessions.new_path(root)
         return agent
 
-    def test_no_plan_means_no_extra_instructions(self):
-        self.assertNotIn("# Approved plan", self.agent().system_prompt())
+    OPEN = (("Phase 1 — the part asked for", "in_progress"), ("Phase 2", "pending"))
+    # "done" is what the store holds: the todo tool normalises "completed" → "done", so a fixture
+    # spelled the other way would pass by being coerced to pending, not by being finished.
+    DONE = (("Phase 1 — the part asked for", "done"), ("Phase 2", "done"))
+    BLOCKED = (("Phase 1 — the part asked for", "done"), ("Phase 2", "blocked"))
 
-    def test_leaving_plan_mode_after_presenting_one_adds_the_hand_back(self):
-        agent = self.agent()
+    def approve(self, agent, checklist=OPEN):
+        """Present a plan, have the user approve it, and leave the checklist it produced."""
         agent.set_mode("plan")
         agent._plan_presented = True                 # present_plan succeeded
         agent.exit_plan("default")                   # the user approved it
-        prompt = agent.system_prompt()
+        agent.ctx.todos = [{"content": c, "status": s} for c, s in checklist]
+        return agent
+
+    def next_turn_prompt(self, agent):
+        """The system prompt exactly as the NEXT top-level turn sends it."""
+        seen = {}
+
+        def fake_chat(*a, **k):
+            seen["system"] = agent.messages[0]["content"]
+            from dgc.llm import ChatResult
+            return ChatResult(content="phase 1 done", tool_calls=[], finish_reason="stop")
+        agent._chat = fake_chat
+        agent.run_turn("do phase 1")
+        return seen.get("system", "<no model request was made>")
+
+    def test_the_approving_turn_is_never_told_to_hand_back(self):
+        agent = self.approve(self.agent())
+        # The approval tool result in this very turn says "Execute the plan now".
+        self.assertNotIn("# Approved plan", agent.system_prompt())
+        self.assertIn("# Approved plan", self.next_turn_prompt(agent))
+
+    def test_a_plan_with_open_phases_asks_for_the_hand_back_without_refusing_the_plan(self):
+        prompt = self.next_turn_prompt(self.approve(self.agent()))
         self.assertIn("# Approved plan", prompt)
-        self.assertIn("naming what comes next", prompt)
+        self.assertIn("carry it out", prompt)        # approved as a whole → keep going
+        self.assertIn("finish that part", prompt)    # scoped to one part → hand back
         self.assertIn("whether to continue", prompt)
+
+    def test_a_checklist_with_nothing_open_clears_the_block_by_itself(self):
+        self.assertNotIn("# Approved plan",
+                         self.next_turn_prompt(self.approve(self.agent(), self.DONE)))
+        self.assertNotIn("# Approved plan",
+                         self.next_turn_prompt(self.approve(self.agent(), ())))
+
+    def test_a_standing_goal_and_auto_mode_both_win(self):
+        goal_agent = self.approve(self.agent())
+        self.assertTrue(goal_agent.set_goal("Ship the thing"))
+        goal_agent._plan_approved_this_turn = False   # a later turn; the goal loop owns run_turn
+        prompt = goal_agent.system_prompt()
+        self.assertIn("# Standing goal", prompt)
+        self.assertNotIn("# Approved plan", prompt)
+
+        auto_agent = self.approve(self.agent())
+        auto_agent._plan_approved_this_turn = False
+        auto_agent.set_mode("auto")
+        self.assertNotIn("# Approved plan", auto_agent.system_prompt())
+        auto_agent.set_mode("default")
+        self.assertIn("# Approved plan", auto_agent.system_prompt())
+
+    def test_no_plan_means_no_extra_instructions(self):
+        plain = self.agent()
+        self.assertNotIn("# Approved plan", plain.system_prompt())
+        self.assertNotIn("# Approved plan", self.next_turn_prompt(plain))
+        # ... and the same agent, once a plan is approved and a turn has passed, does get it.
+        self.assertIn("# Approved plan", self.next_turn_prompt(self.approve(plain)))
 
     def test_leaving_plan_mode_without_a_plan_adds_nothing(self):
         agent = self.agent()
         agent.set_mode("plan")
-        agent.exit_plan("default")
-        self.assertNotIn("# Approved plan", agent.system_prompt())
+        agent.exit_plan("default")                   # no present_plan call behind it
+        agent.ctx.todos = [{"content": c, "status": s} for c, s in self.OPEN]
+        self.assertNotIn("# Approved plan", self.next_turn_prompt(agent))
+        # Same agent, same checklist — only a presented plan makes the difference.
+        self.assertIn("# Approved plan", self.next_turn_prompt(self.approve(agent)))
+
+    def test_a_plan_whose_remaining_phase_is_blocked_still_hands_back(self):
+        # A parked phase is still a phase left; the hand-back is where the user hears about it.
+        blocked = self.next_turn_prompt(self.approve(self.agent(), self.BLOCKED))
+        self.assertIn("# Approved plan", blocked)
+        finished = self.next_turn_prompt(self.approve(self.agent(), self.DONE))
+        self.assertNotIn("# Approved plan", finished)
 
     def test_a_new_chat_forgets_the_plan(self):
-        agent = self.agent()
-        agent._plan_presented = True
-        agent.exit_plan("default")
-        self.assertIn("# Approved plan", agent.system_prompt())
+        agent = self.approve(self.agent())
+        self.assertIn("# Approved plan", self.next_turn_prompt(agent))
         agent.reset()
         self.assertNotIn("# Approved plan", agent.system_prompt())
 
-    def test_the_shared_guidance_asks_for_the_hand_back_everywhere(self):
-        from dgc.presentation import RESPONSE_GUIDANCE
-        self.assertIn("finish that part", RESPONSE_GUIDANCE)
-        self.assertIn("whether to continue", RESPONSE_GUIDANCE)
+    def test_a_resumed_session_does_not_inherit_someone_else_s_approved_plan(self):
+        project = tempfile.TemporaryDirectory(prefix="dgc-plan-resume-")
+        self.addCleanup(project.cleanup)
+        other = self.agent(Path(project.name))
+        self.next_turn_prompt(other)                 # an ordinary chat, saved to disk
+        resumed = self.approve(self.agent(Path(project.name)))
+        self.assertIn("# Approved plan", self.next_turn_prompt(resumed))
+        resumed.load_session(other.session_file)
+        self.assertFalse(resumed._executing_plan)
+        self.assertFalse(resumed._plan_presented)
+        self.assertNotIn("# Approved plan", resumed.messages[0]["content"])
+        self.assertNotIn("# Approved plan", resumed.system_prompt())
 
 
 class GracefulShutdownTests(unittest.TestCase):
@@ -236,6 +347,153 @@ class GracefulShutdownTests(unittest.TestCase):
         self.assertEqual(len(requests), 1, "no second model request after the pipe closed")
         self.assertIn("backend was shut down mid-turn", agent._last_turn_error)
         self.assertIn("saved", agent._last_turn_error)
+
+
+class DelegatedEditCheckpointTests(unittest.TestCase):
+    """A delegated task in its own worktree must still be able to edit files.
+
+    Every sub-task in a Git project gets an isolated worktree; the child runs at depth 1, so it
+    never opens a recovery point, and it only inherits the parent's manager when it shares the
+    checkout. The pre-edit capture gate then refused every write inside every delegated task —
+    and the model, reasonably, routed its writes through the shell instead, landing them outside
+    rewind. The gate now applies only where a rewind can actually reach.
+    """
+
+    def agent(self):
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-delegated-")
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        cfg = Config()
+        cfg.project_root = root
+        cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "acceptEdits"})
+        agent = Agent(cfg, QuietUI())
+        self.addCleanup(agent.mcp.stop_all)
+        agent.session_file = sessions.new_path(root)
+        return agent, root
+
+    def write(self, agent, path, text="hello\n"):
+        from dgc.agent import ToolCall
+        return agent._handle_call(ToolCall("w1", "write_file", {"path": path, "content": text}))
+
+    def test_a_top_level_turn_still_requires_a_recovery_point(self):
+        agent, _ = self.agent()
+        self.assertTrue(agent._edit_checkpoints_required)
+        out = self.write(agent, "a.txt")                       # no point opened in this fixture
+        self.assertIn("could not capture", out)
+        self.assertIn("no recovery point", out, "the refusal names its actual cause")
+
+    def test_the_refusal_names_the_cause_it_hit(self):
+        agent, root = self.agent()
+        self.assertTrue(agent.checkpoints.open(0, "turn", []))
+        agent.checkpoints._snapshot_bytes_total = 128 * 1024 * 1024
+        (root / "b.txt").write_text("x" * 64)
+        out = self.write(agent, "b.txt")
+        self.assertIn("snapshot budget is spent", out)
+
+    def test_a_worktree_sub_agent_writes_without_a_recovery_point(self):
+        agent, root = self.agent()
+        agent._edit_checkpoints_required = False               # what an isolated child is given
+        out = self.write(agent, "c.txt", "from the sub-agent\n")
+        self.assertNotIn("error", out.lower())
+        self.assertEqual((root / "c.txt").read_text(), "from the sub-agent\n")
+        self.assertEqual(agent.checkpoints.points, [], "nothing was snapshotted, by design")
+
+    def test_a_shared_checkout_sub_agent_still_snapshots_into_the_parents_point(self):
+        parent, root = self.agent()
+        self.assertTrue(parent.checkpoints.open(0, "turn", []))
+        (root / "d.txt").write_text("before\n")
+        child = Agent(parent.config, QuietUI())
+        self.addCleanup(child.mcp.stop_all)
+        child.depth = 1
+        child.checkpoints = parent.checkpoints                 # what a shared-checkout child is given
+        child.session_file = parent.session_file
+        self.assertTrue(child._edit_checkpoints_required)
+        out = self.write(child, "d.txt", "after\n")
+        self.assertNotIn("error", out.lower())
+        captured = parent.checkpoints.points[-1]["files"]
+        self.assertTrue(any(str(k).endswith("d.txt") for k in captured), captured)
+
+
+class AuditRegressionTests(unittest.TestCase):
+    """The eleven things an independent audit found still broken after the first round of fixes."""
+
+    def test_a_child_never_designates_the_parents_answer_even_unphased(self):
+        from dgc.agent import _SubUI
+        seen = []
+
+        class Parent:
+            def end_stream(self, phase=""):
+                seen.append(phase)
+
+            def __getattr__(self, name):
+                return lambda *a, **k: None
+
+        sub = _SubUI(Parent(), "audit")
+        sub.end_stream("answer")
+        sub.end_stream()                       # the cancel/error/timeout paths close unphased
+        sub.end_stream("commentary")
+        self.assertEqual(seen, ["commentary", "commentary", "commentary"])
+
+    def test_a_childs_checklist_never_repaints_the_sessions_rail(self):
+        from dgc.agent import _SubUI
+        pushed = []
+
+        class Parent:
+            def on_todo(self, todos):
+                pushed.append(list(todos))
+
+            def __getattr__(self, name):
+                return lambda *a, **k: None
+
+        _SubUI(Parent(), "audit").on_todo([{"content": "child step", "status": "in_progress"}])
+        self.assertEqual(pushed, [], "the session's plan stays the session's")
+
+    def test_an_isolated_child_still_captures_writes_into_the_parent_checkout(self):
+        from dgc.agent import _within_own_checkout
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-own-checkout-")
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "worktree"
+        (root / "src").mkdir(parents=True)
+        outside = Path(tmp.name) / "parent"
+        outside.mkdir()
+        cfg = Config()
+        cfg.project_root = root
+        cfg.data.update({"model": "fixture", "base_url": "http://fixture"})
+        agent = Agent(cfg, QuietUI())
+        self.addCleanup(agent.mcp.stop_all)
+        agent._edit_checkpoints_required = False          # what an isolated child is given
+        self.assertTrue(_within_own_checkout(agent, "src/a.py"))
+        self.assertTrue(_within_own_checkout(agent, str(root / "src" / "a.py")))
+        self.assertFalse(_within_own_checkout(agent, str(outside / "b.py")),
+                         "a write into the parent's tree is not the child's to skip")
+
+    def test_close_never_calls_a_cancelled_turn_idle(self):
+        from dgc.headless import Backend
+        backend = object.__new__(Backend)
+        backend.agent = type("A", (), {"stopping": False, "cancelled": __import__("threading").Event(),
+                                       "mcp": None})()
+        backend._queue = []
+        backend._worker = backend._foreground_worker = None
+        backend.pending = __import__("dgc.headless", fromlist=["PendingRequests"]).PendingRequests()
+        backend._turn_state_lock = lambda: __import__("threading").RLock()
+        backend._busy = lambda: True
+        self.assertEqual(backend.close(grace_s=0.0), "cancelled")   # the editor asked; a turn ran
+        backend._busy = lambda: False
+        self.assertEqual(backend.close(grace_s=0.0), "idle")
+
+    def test_the_logo_glint_follows_the_canvas(self):
+        import dgc.style as style_mod
+        from dgc.logo import _glint, _REST
+        try:
+            style_mod.set_theme("light")
+            light = _glint()
+            style_mod.set_theme("dark")
+            dark = _glint()
+        finally:
+            style_mod.set_theme("dark")
+        self.assertNotEqual(light, dark, "a lavender glint is invisible on the white canvas")
+        self.assertNotEqual(light.lower(), "#d9ccff")
+        self.assertNotEqual(light, _REST)
 
 
 if __name__ == "__main__":

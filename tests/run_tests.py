@@ -1477,12 +1477,15 @@ def unit_tests(tmp: Path):
     _hist_be = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
     _hist_be.em = _HistEm(); _hist_be.agent = _HistAgent()
     _hist_items = _headless_mod2.Backend._history(_hist_be)
-    _hist_users = [i for i in _hist_items if i.get("role") == "user"]
+    # Scaffolding is not a prompt AND not a turn boundary: every one of those reminders is a gate
+    # continuing the SAME turn, so a restored turn must not fracture into one bubble per gate.
+    _hist_starts = [i for i in _hist_items if i.get("type") == "turn_start"]
     check("agent scaffolding never replays as something the user typed",
-          [i["text"] for i in _hist_users] == ["build the thing", "carry on"],
-          [i["text"][:50] for i in _hist_users])
+          [i["prompt"] for i in _hist_starts] == ["build the thing", "carry on"],
+          [i["prompt"][:50] for i in _hist_starts])
     check("and the goal spec it embedded does not leak into the transcript",
-          not any("BUILD A POLISHED APP" in i.get("text", "") for i in _hist_items))
+          not any("BUILD A POLISHED APP" in str(i.get("text") or i.get("prompt") or "")
+                  for i in _hist_items))
 
     # Recall paging must bound the FRAME, not just the row count: 200 rows x 20,000 chars is about
     # 4MB before escaping, and an over-ceiling frame is shrunk to an EMPTY page -- the user scrolls
@@ -1752,21 +1755,31 @@ def unit_tests(tmp: Path):
     _hist_backend = _headless_mod.Backend.__new__(_headless_mod.Backend)
     _hist_backend.agent = _HistoryAgent()
     _hist_items = _hist_backend._history()
+    _hist_text = lambda i: str(i.get("text") or i.get("prompt") or "")
     check("a compacted transcript reports one marker, not a user message",
-          [i["role"] for i in _hist_items]
-          == ["compaction", "resume", "assistant", "user", "assistant"],
-          [i["role"] for i in _hist_items])
+          [i.get("type") or i.get("role") for i in _hist_items]
+          == ["compaction", "turn_start", "text_delta", "stream_end", "turn_end",
+              "turn_start", "text_delta", "stream_end", "turn_end"],
+          [i.get("type") or i.get("role") for i in _hist_items])
     # The resume instruction is written to the transcript so the model receives it, but the user
-    # never typed it. Reopening a resumed session must not show it as a prompt they sent.
+    # never typed it. Reopening a resumed session must not show it as a prompt they sent -- it is
+    # the same turn_start kind=resume marker a live resumed turn already publishes.
     check("the resume instruction is a marker in history, not a prompt the user sent",
-          _hist_items[1] == {"role": "resume", "text": "Resumed the standing goal"}
-          and all(_RESUME_P not in str(i.get("text", "")) for i in _hist_items),
+          _hist_items[1] == {"type": "turn_start", "turn_id": "h1",
+                             "prompt": "Resumed the standing goal", "kind": "resume"}
+          and all(_RESUME_P not in _hist_text(i) for i in _hist_items),
           _hist_items[1])
     check("the marker keeps the summary without the internal prefix",
           _hist_items[0]["text"].startswith("Goal: ship it.")
           and _CPRE not in _hist_items[0]["text"], _hist_items[0]["text"][:60])
     check("the acknowledgement nobody wrote is not reported as an answer",
-          all(_CACK not in str(i.get("text", "")) for i in _hist_items))
+          all(_CACK not in _hist_text(i) for i in _hist_items))
+    # Restored prose is classified by the same rule the live path states, and each restored turn
+    # names the block it designates -- the two paths can no longer disagree about the answer.
+    check("a restored turn designates its answer the way a live one does",
+          [i["phase"] for i in _hist_items if i.get("type") == "stream_end"] == ["answer", "answer"]
+          and [i["final_message_id"] for i in _hist_items if i.get("type") == "turn_end"]
+              == ["h1:1", "h2:1"])
 
     # ---- Ollama cloud streams are labelled application/json ----------------------------------
     # A local Ollama labels a stream application/x-ndjson; Ollama's cloud serves the same
@@ -2639,8 +2652,15 @@ def unit_tests(tmp: Path):
         def run_turn(self, text, *, reset_cancel=True):
             raise RuntimeError("cannot connect to the model endpoint")
         def estimate_tokens(self): return 0
+    # The worker hands the UI the turn it is numbering prose against and reads back the id the
+    # turn designates, so every Backend fixture that runs a turn needs that seam.
+    class _TurnUI:
+        turn_id = ""
+        final_message_id = None
+        def reset_turn_messages(self): pass
     b = object.__new__(Backend)
     b.em, b.agent, b._queue, b._turn_n, b._emit_context = _Em(), _StubAgent(), [], 0, lambda: None
+    b.ui = _TurnUI()
     b._start_turn("Hi")
     b.em.done.wait(5)
     check("headless failing turn emits error", "error" in b.em.evs)
@@ -2655,6 +2675,7 @@ def unit_tests(tmp: Path):
         def estimate_tokens(self): return 0
     titled = object.__new__(Backend); titled.em = _Em(); titled.agent = _TitledAgent()
     titled._queue, titled._turn_n, titled._emit_context = [], 0, lambda: None
+    titled.ui = _TurnUI()
     titled._start_turn("  Audit the answer formatter and final response lifecycle in detail  ")
     titled.em.done.wait(5)
     titled_events = [row for row in titled.em.rows
@@ -2672,6 +2693,7 @@ def unit_tests(tmp: Path):
     rejected = object.__new__(Backend)
     rejected.em, rejected.agent = _Em(), _RejectedAgent()
     rejected._queue, rejected._turn_n, rejected._emit_context = [], 0, lambda: None
+    rejected.ui = _TurnUI()
     rejected._start_turn("must be rejected")
     rejected.em.done.wait(5)
     rejected_end = next((row for row in rejected.em.rows if row["type"] == "turn_end"), {})
@@ -2687,6 +2709,7 @@ def unit_tests(tmp: Path):
             super().emit(t, **fields)
     boundary.em, boundary.agent = _BoundaryEm(), _TitledAgent()
     boundary._queue, boundary._turn_n, boundary._emit_context = [], 0, lambda: None
+    boundary.ui = _TurnUI()
     boundary._start_turn("finish before acknowledging")
     boundary.em.done.wait(5)
     check("headless releases an idle worker before acknowledging turn_end for goal controls",
@@ -2710,6 +2733,7 @@ def unit_tests(tmp: Path):
     _queue_backend.em, _queue_backend.agent = _queue_cap, _queue_agent
     _queue_backend.pending = PendingRequests(); _queue_backend._queue = []
     _queue_backend._turn_n = 0; _queue_backend._emit_context = lambda: None
+    _queue_backend.ui = _TurnUI()
     _queue_backend._start_turn("first"); _queue_agent.started.wait(2)
     _queue_backend.dispatch({"type": "cancel"})
     _queue_backend.dispatch({"type": "prompt", "text": "after cancel"})
@@ -2997,7 +3021,8 @@ def unit_tests(tmp: Path):
     check("headless rewind acknowledges success before repainting restored history",
           [event["type"] for event in rewind_backend.em.events] ==
           ["rewound", "history", "context"]
-          and rewind_backend.em.events[1]["items"][-1]["text"] == "restored answer")
+          and [item for item in rewind_backend.em.events[1]["items"]
+               if item.get("type") == "text_delta"][-1]["text"] == "restored answer")
 
     compact_backend = object.__new__(Backend)
     compact_backend.em = type("CompactCapture", (), {
@@ -3064,21 +3089,31 @@ def unit_tests(tmp: Path):
           [event["seq"] for event in _ordered_events] == list(range(100)))
     _wire = _io2.StringIO(); _pending = PendingRequests()
     _hui = HeadlessUI(Emitter(_wire), _pending, approval_timeout_s=0.01)
+    _hui.turn_id = "t1"          # the worker hands the UI the turn its events belong to
     _hui.tool_call("bash", {"command": "false"}, "call-7")
     _hui.tool_progress("bash", "halfway", progress=1, total=2, call_id="call-7")
     _hui.tool_result("bash", "exit code: 1\nfailed", "call-7")
     _hui.hook_activity("PreToolUse", "started", configured=1)
     _hui.hook_activity("PreToolUse", "completed", configured=1, duration_ms=7)
     _events = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
+    _lifecycle = [e for e in _events
+                  if e["type"] in ("tool_call", "tool_progress", "tool_result")]
     check("headless tool lifecycle events preserve call IDs and typed progress",
-          [e.get("call_id") for e in _events[:3]] == ["call-7", "call-7", "call-7"]
-          and _events[1].get("type") == "tool_progress"
-          and _events[1].get("progress") == 1 and _events[1].get("total") == 2)
-    check("headless marks failed tool results", _events[2].get("is_error") is True)
+          [e.get("call_id") for e in _lifecycle] == ["call-7", "call-7", "call-7"]
+          and _lifecycle[1].get("type") == "tool_progress"
+          and _lifecycle[1].get("progress") == 1 and _lifecycle[1].get("total") == 2)
+    check("headless marks failed tool results", _lifecycle[2].get("is_error") is True)
+    _hooks = [e for e in _events if e["type"] == "hook_activity"]
     check("headless hook activity is structured and command-free",
-          [event.get("status") for event in _events[3:]] == ["started", "completed"]
-          and _events[-1].get("event") == "PreToolUse"
-          and _events[-1].get("duration_ms") == 7)
+          [event.get("status") for event in _hooks] == ["started", "completed"]
+          and _hooks[-1].get("event") == "PreToolUse"
+          and _hooks[-1].get("duration_ms") == 7)
+    # The same lifecycle also states what the turn is doing, so the panel's verb is a function of
+    # a backend fact instead of a literal that can only say "working".
+    check("the tool lifecycle narrates itself for the activity row",
+          [(e["state"], e["label"]) for e in _events if e["type"] == "turn_activity"]
+          == [("tool", "Running a command"), ("waiting", "Waiting for the model"),
+              ("hook", "Running PreToolUse hooks")])
     _verdict = _hui.mcp_input("fixture", "sampling_request", {})
     _expiry = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
     _rid = next(e["id"] for e in _expiry if e["type"] == "mcp_input_request")
@@ -3965,7 +4000,7 @@ def unit_tests(tmp: Path):
     from dgc.agent import (Agent as _Ag, _MAX_CONTINUE as _AGENT_MAX_CONTINUE,
                            _MAX_FINALIZATION_RETRIES as _AGENT_MAX_FINALIZATION_RETRIES,
                            _MAX_PROVIDER_PAUSE_CONTINUE as _AGENT_MAX_PROVIDER_PAUSE,
-                           _sampling as _samp, _tool_batch_preamble,
+                           _sampling as _samp,
                            _tool_transcript_errors as _tool_errors)
     from dgc.config import Config as _Cfg
     from dgc.llm import ChatResult as _ChatResult, LLMError as _LLMError, ToolCall as _ToolCall
@@ -4056,39 +4091,37 @@ def unit_tests(tmp: Path):
           "present_plan" not in {t["function"]["name"] for t in _plan_agent._tool_schemas()}
           and "only" in _plan_agent._handle_call(
               _ToolCall("p3", "present_plan", {"plan": "1. no"})).lower())
-    check("fallback tool cadence identifies inspect/edit/verify phases",
-          "inspect" in _tool_batch_preamble([_ToolCall("r", "read_file", {"path": "x"})]).lower()
-          and "changes" in _tool_batch_preamble(
-              [_ToolCall("b", "bash", {"command": "pytest"})], edited_before=True).lower()
-          and "locating" in _tool_batch_preamble(
-              [_ToolCall("m1", "mcp_search", {"query": "issue"})]).lower()
-          and "integration" in _tool_batch_preamble(
-              [_ToolCall("m2", "mcp_call", {"name": "mcp__x__y", "arguments": {}})]).lower())
-    check("multi-task cadence announces delegation before execution",
-          "delegating" in _tool_batch_preamble([
-              _ToolCall("t1", "task", {"description": "one", "prompt": "one"}),
-              _ToolCall("t2", "task", {"description": "two", "prompt": "two"}),
-          ]).lower())
-
     class _CadenceUI(_AgUI):
         def __init__(self): self.events = []
         def on_text(self, text): self.events.append(("text", text))
-        def end_stream(self): self.events.append(("end", ""))
+        def end_stream(self, phase=""): self.events.append(("end", phase))
         def tool_call(self, name, args, call_id=None): self.events.append(("tool", name))
         def tool_result(self, name, out, call_id=None): self.events.append(("result", name))
     _cu = _CadenceUI(); _ca = _Ag(_Cfg(tmp), _cu); _ca.config.data["mode"] = "auto"
+    def _cadence_chat(self, *a, **k):
+        self.n += 1
+        result = (_ChatResult(tool_calls=[_ToolCall("r1", "read_file", {"path": "a/b.txt"})])
+                  if self.n == 1 else _ChatResult(content="Inspection complete."))
+        if result.content:
+            k["on_text"](result.content)      # prose reaches the UI by streaming, as it does live
+        return result
     _ca.client = type("CadenceClient", (), {
-        "tools_supported": True,
-        "n": 0,
-        "chat": lambda self, *a, **k: (
-            setattr(self, "n", self.n + 1) or
-            (_ChatResult(tool_calls=[_ToolCall("r1", "read_file", {"path": "a/b.txt"})])
-             if self.n == 1 else _ChatResult(content="Inspection complete."))),
+        "tools_supported": True, "n": 0, "chat": _cadence_chat,
     })()
     _ca.run_turn("inspect it")
     _kinds = [kind for kind, _ in _cu.events]
-    check("bare tool calls get a preamble before the tool card",
-          _kinds.index("text") < _kinds.index("tool") and "inspect" in _cu.events[0][1].lower())
+    # A round that calls tools and writes nothing says nothing: the tool card is the narration.
+    # DGC used to synthesize a sentence from the tool names, which read as the model talking when
+    # the model had not.
+    check("a bare tool-call round emits no invented narration before its tool card",
+          _kinds.index("tool") < _kinds.index("text")
+          and [text for kind, text in _cu.events if kind == "text"] == ["Inspection complete."]
+          and not any(m.get("content") for m in _ca.messages
+                      if m.get("role") == "assistant" and m.get("tool_calls")))
+    # ... and the harness states what each closed block was, instead of leaving the panel to guess
+    # from whether a tool card happened to arrive after it.
+    check("each closed prose block states its own phase",
+          [phase for kind, phase in _cu.events if kind == "end"] == ["commentary", "answer"])
     check("native tool calls increment monotonic session activity",
           _ca.activity_totals == {"tool_calls": 1, "edits": 0, "edit_fails": 0})
 
@@ -4593,7 +4626,7 @@ def unit_tests(tmp: Path):
     class _VerifyVisibilityUI(_AgUI):
         def __init__(self): self.events = []
         def on_text(self, chunk): self.events.append(("text", str(chunk)))
-        def end_stream(self): self.events.append(("end", ""))
+        def end_stream(self, phase=""): self.events.append(("end", phase))
         def tool_call(self, name, args, call_id=None): self.events.append(("tool", name))
         def tool_result(self, name, out, call_id=None): self.events.append(("result", name))
         def info(self, message): self.events.append(("info", str(message)))
@@ -5691,15 +5724,22 @@ def unit_tests(tmp: Path):
                                      {"type": "image_url", "image_url": {"url": "data:x"}}]},
     ]
     items = Backend._history(_FakeBackend(msgs))
-    check("resume history skips system", all(i["role"] != "system" for i in items))
+    _kinds = [i.get("type") or i.get("role") for i in items]
+    check("resume history skips system", all(i.get("role") != "system" for i in items))
     check("resume history keeps user turns",
-          items[0] == {"role": "user", "text": "add a weather widget"})
+          items[0] == {"type": "turn_start", "turn_id": "h1",
+                       "prompt": "add a weather widget", "kind": "prompt"})
     check("resume history captures assistant tools",
-          items[1]["role"] == "assistant" and items[1]["tools"] == ["write_file", "bash"])
+          [i["name"] for i in items if i.get("type") == "tool_call"] == ["write_file", "bash"])
     check("resume history drops tool_results envelope",
-          not any("<tool_results>" in i.get("text", "") for i in items))
+          not any("<tool_results>" in str(i.get("text") or i.get("prompt") or "") for i in items))
     check("resume history keeps multimodal user text",
-          items[-1]["role"] == "user" and "make it bold" in items[-1]["text"])
+          items[-2]["type"] == "turn_start" and "make it bold" in items[-2]["prompt"])
+    # The tool_results envelope is scaffolding, not a prompt: it must not open a second turn.
+    check("resume history groups a turn, and scaffolding does not start a new one",
+          _kinds == ["turn_start", "text_delta", "stream_end", "tool_call", "tool_call",
+                     "text_delta", "stream_end", "turn_end", "turn_start", "turn_end"],
+          _kinds)
 
     # --- named sub-agent defs + model/host resolution
     from dgc.agents import _parse_agent, AgentDef
@@ -7739,7 +7779,8 @@ os._exit(0 if lock.acquire(timeout=1) else 2)
     harness.cancelled = threading.Event()
     harness.ctx = SimpleNamespace(
         project_root=root, config=harness.config, cancelled=harness.cancelled)
-    harness.checkpoints = SimpleNamespace(record_file=capture_checkpoint)
+    harness.checkpoints = SimpleNamespace(record_file=capture_checkpoint, last_record_error="")
+    harness._edit_checkpoints_required = True
     harness.mcp = SimpleNamespace(call=lambda *_args: "unexpected MCP call")
     ordered_outcome = []
     held = lock.acquire(timeout=1)
@@ -9293,7 +9334,8 @@ def test_durable_checkpoints():
     edit_result = edit_agent._handle_call(_ToolCall(
         "guard-write", "write_file", {"path": "guard.txt", "content": "changed\n"}))
     check("ordinary edits fail closed when their pre-edit snapshot cannot be persisted",
-          edit_file.read_text() == "original\n" and "durably capture" in edit_result,
+          edit_file.read_text() == "original\n" and "could not capture its pre-edit state" in edit_result
+          and "the session could not be saved" in edit_result,   # the refusal names its cause
           detail=repr(edit_result))
 
     # Full Agent/session integration, including the TUI fleet shape where transcript discovery is
@@ -9442,7 +9484,8 @@ def test_durable_checkpoints():
             "stale-write", "write_file", {"path": "stale-edit.txt", "content": "changed\n"}))
         check("stale session generation blocks an edit before touching the workspace",
               checkpoint_opened and advanced and edit_path.read_text() == "original\n"
-              and "durably capture" in stale_edit,
+              and "could not capture its pre-edit state" in stale_edit
+              and "the session could not be saved" in stale_edit,
               detail=stale_edit)
         deleted_concurrent = sessions.delete(
             concurrent_path, source_root,
@@ -9796,7 +9839,7 @@ def test_isolated_subagents():
         def __init__(self):
             super().__init__(); self.stream_events = []
         def on_text(self, chunk): self.stream_events.append(str(chunk))
-        def end_stream(self): self.stream_events.append("<end>")
+        def end_stream(self, phase=""): self.stream_events.append("<end>")
 
     class ParallelTaskClient:
         tools_supported = True
@@ -10789,11 +10832,7 @@ def test_benchmark_integrity():
               and len(_prompt_probe.get("tools", [])) == 9
               and not ({"skill", "repo_map", "code_intel"}
                        & {tool.get("name") for tool in _prompt_probe.get("tools", [])})
-              # 2,350 is a deliberate ceiling, raised once from 2,300 (2026-09-13) to pay for the
-              # hand-back sentence in RESPONSE_GUIDANCE. It exists so a small local context is
-              # not spent on instructions before the first file is read: raise it knowingly or
-              # not at all, and never by deleting an unrelated rule to make room.
-              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2350
+              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2300
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
                       "# Permission mode: auto"})
@@ -18668,7 +18707,7 @@ def test_subscription_engines():
             def tool_result(self, name, out, call_id=None): self.rows.append(("result", name, call_id))
             def info(self, text): self.rows.append(("info", text))
             def error(self, text): self.rows.append(("error", text))
-            def end_stream(self): self.rows.append(("end",))
+            def end_stream(self, phase=""): self.rows.append(("end",))
         editor_backend = object.__new__(SubscriptionBackend)
         editor_backend.config = _SubscriptionConfig()
         editor_backend.agent = _SubscriptionAgent()

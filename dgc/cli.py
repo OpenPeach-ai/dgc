@@ -71,6 +71,7 @@ class UI:
 
     def __init__(self):
         self.console = Console(theme=render.markdown_theme(), highlight=False)
+        self._theme_pushed = False   # did refresh_theme() already stack a palette on this console?
         self._thinking = False
         self._streamed = False
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
@@ -80,6 +81,19 @@ class UI:
         self.deny_reason = ""   # optional steer captured when the user denies a tool
         self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
         self.non_interactive = False   # `dgc -p`: never wait on a menu, answer on the spot
+
+    def refresh_theme(self) -> None:
+        """Re-resolve this console's palette after /bg or /theme changed it.
+
+        A rich Theme is baked into a Console when it is built, so the console the classic CLI has
+        been printing through kept emitting dark-palette markdown onto a canvas `/bg light` had
+        just turned white. Push onto the SAME console object rather than building a new one:
+        `CLI.console` is an alias of it, and a replacement would leave that alias behind.
+        """
+        if getattr(self, "_theme_pushed", False):
+            self.console.pop_theme()
+        self.console.push_theme(render.markdown_theme())
+        self._theme_pushed = True
 
     # --------------------------------------------------- working indicator ---
     def start_working(self, label: str = "working") -> None:
@@ -159,11 +173,16 @@ class UI:
         self.console.file.flush()
         self._streamed = True
 
-    def end_stream(self) -> None:
+    def end_stream(self, phase: str = "") -> None:
+        # The REPL prints one prose stream per round and has no turn envelope to designate an
+        # answer inside, so the phase is accepted and intentionally unused.
         if self._streamed:
             self.console.print()
             self._streamed = False
             self._thinking = False
+
+    def turn_activity(self, state: str, label: str, detail: str = "") -> None:
+        """The REPL's spinner already names its own phase; the loop's activity adds nothing here."""
 
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
@@ -1031,6 +1050,7 @@ class CLI:
         elif cmd in ("bg", "background"):
             from . import termbg
             if termbg.switch(cfg, rest.strip().lower()):
+                self.ui.refresh_theme()      # the canvas moved; the console must move with it
                 self.ui.info(f"background → {cfg.get('background')}"
                              + (" (applies on next launch)" if cfg.get("background") == "auto" else ""))
             else:
@@ -1039,10 +1059,19 @@ class CLI:
             from . import termbg
             if not rest:
                 self.ui.info(f"theme: {style_mod.theme().name}  ·  available: auto, dark, light")
-            elif termbg.switch_theme(cfg, rest.strip().lower()):
-                self.banner()
             else:
-                self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")
+                canvas_before = cfg.get("background")
+                if termbg.switch_theme(cfg, rest.strip().lower()):
+                    self.ui.refresh_theme()
+                    self.banner()
+                    canvas_after = cfg.get("background")
+                    if canvas_after != canvas_before:   # readability forced the canvas to follow
+                        self.ui.info(f"background → {canvas_after} — {rest.strip().lower()} text "
+                                     f"would not have been readable on the {canvas_before} canvas")
+                else:
+                    # The handler takes auto as well; listing only style_mod.THEMES told the user
+                    # that the value the info line offers them is not a value.
+                    self.ui.error(f"unknown theme {rest!r} — choose from auto, dark, light")
         elif cmd == "compact":
             if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self.ui.error(self.agent._last_persist_error or "context compaction failed")
@@ -2289,6 +2318,17 @@ def main(argv: list[str] | None = None) -> int | None:
         from . import termbg
         termbg.apply(config)                 # dark canvas on a light terminal, for the whole session
         atexit.register(termbg.reset)
+        # atexit does NOT run when SIGTERM or SIGHUP takes the default disposition, and a closed
+        # terminal window sends exactly those: without this the user's shell inherits DGC's canvas
+        # and keeps it until they reset(1) by hand. Handle the signal, hand the colors back, then
+        # finish dying the way an unhandled signal would (see termbg.resend).
+        _stop_handlers: dict = {}
+
+        def _restore_terminal_and_die(signum) -> None:
+            termbg.reset()
+            termbg.resend(signum, _stop_handlers)
+
+        _stop_handlers.update(termbg.install_stop_handler(_restore_terminal_and_die))
         try:
             from .trust import confirm_trust
             if not confirm_trust(config, config.project_root):   # first-run trust gate
@@ -2307,6 +2347,7 @@ def main(argv: list[str] | None = None) -> int | None:
                 from .tui import TUI
                 TUI(config, agent=cli.agent).run()
         finally:
+            termbg.restore_stop_handlers(_stop_handlers)
             termbg.reset()
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
 

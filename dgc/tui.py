@@ -232,6 +232,7 @@ class AgentSession:
         self._streaming = False
         self._thinking = False
         self._cur_tool: str | None = None
+        self._backend_activity: tuple[str, str, str] | None = None   # (state, label, detail)
         self._think_t0: float | None = None
         self._tool_count = 0
         self._turn = threading.Event()     # set while this session's turn runs
@@ -326,6 +327,7 @@ class TUI:
     _streaming = _active_prop("_streaming")
     _thinking = _active_prop("_thinking")
     _cur_tool = _active_prop("_cur_tool")
+    _backend_activity = _active_prop("_backend_activity")
     _think_t0 = _active_prop("_think_t0")
     _tool_count = _active_prop("_tool_count")
     _turn = _active_prop("_turn")
@@ -499,8 +501,10 @@ class TUI:
         "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
                   ("Plan — read-only", "plan"), ("Auto — full access", "auto")],
                  lambda s: s.agent.mode),
-        "bg": ([("Auto", "auto"), ("Dark", "dark"), ("Inherit", "inherit")],
-               lambda s: s.config.get("background", "auto")),
+        # Same order and the same four canvases as Settings → Display → Background: a picker that
+        # cannot reach `light` is a picker that cannot undo `/bg light`.
+        "bg": ([("Auto", "auto"), ("Dark", "dark"), ("Light", "light"), ("Inherit", "inherit")],
+               lambda s: s.config.get("background", "inherit")),
         "theme": ([("Auto — match the terminal", "auto"), ("Dark", "dark"), ("Light", "light")],
                   lambda s: s.config.get("theme", "auto")),
         "sandbox": ([("On — project only, no network", "on"), ("Off", "off")],
@@ -512,6 +516,14 @@ class TUI:
             return
         parts = text[1:].split(maxsplit=1)
         cmd = parts[0].lower()
+        # The composer refuses a mid-turn command through _handle_running_local_command, but the
+        # `/` palette reaches this method directly — so a command declared unsafe during a turn
+        # (/todo clear, /rewind, /compact…) ran anyway when picked from the menu.
+        if self._turn.is_set():
+            spec = resolve_command(cmd, "tui")
+            if spec is not None and not spec.available_while_running:
+                self._flash(f"/{spec.name} waits for this turn to finish \u00b7 Esc stops the turn")
+                return
         if cmd in self._SUBMENUS and len(parts) == 1:   # bare option-command → open a sub-menu
             self._open_submenu(cmd)
         else:
@@ -2450,7 +2462,7 @@ class TUI:
             self._menu_rows = {}
             t = Text()
             t.append("╱╱╱ ", style=f"bold {th.accent}")
-            t.append("Vibe DGC", style="bold #FFFFFF")
+            t.append("Vibe DGC", style=f"bold {th.text_strong}")
             t.append(f" v{__version__}", style=th.faint)
             t.append(f"  {glyphs.MIDDOT} /help", style=th.faint)
             if upd:
@@ -2505,7 +2517,7 @@ class TUI:
             return t
 
         # title
-        title = Text(); title.append("Vibe DGC", style="bold #FFFFFF")
+        title = Text(); title.append("Vibe DGC", style=f"bold {th.text_strong}")
         title.append(f"  v{__version__}", style=th.faint)
         if self.agent.session_name:
             title.append(f"  {glyphs.MIDDOT}  "
@@ -2519,14 +2531,14 @@ class TUI:
             add(msg)
             ci = len(content); h = hot(ci)
             cta = Text("› " if h else "", style=f"bold {self._GOLD}")
-            cta.append("[ Update now ]", style=f"bold {'#FFFFFF' if h else self._GOLD}")
+            cta.append("[ Update now ]", style=f"bold {th.text_strong if h else self._GOLD}")
             cta.append("  or type ", style=th.faint); cta.append("/update", style=f"bold {self._GOLD}")
             add(cta, "update")
         else:
             add(Text("a coding agent for the models you run", style=th.muted))
         add(Text(""))
         ci = len(content); h = hot(ci)
-        newc = Text("[ New session ]", style=f"bold {'#FFFFFF' if h else th.accent}")
+        newc = Text("[ New session ]", style=f"bold {th.text_strong if h else th.accent}")
         newc.append("  or just start typing", style=th.faint)
         add(newc, "new")
         add(Text(""))
@@ -2581,6 +2593,11 @@ class TUI:
                 act = self._cur_tool            # "Run npm test" · "Read x.py" · "Search …"
             elif self._thinking:
                 act = "Thinking"
+            elif self._between_rounds():
+                # The loop is between model rounds because a gate continued the turn, ran a check,
+                # compacted, or fired a hook. That is the one thing the status line could not see,
+                # and the reason it fell back to a bare "Waiting" for however long the gate took.
+                act = self._backend_activity[1]
             else:
                 act = "Waiting"                 #  never shows a bare "Working" for an inference turn
             # per-phase timer : reset whenever the activity label changes.
@@ -2597,6 +2614,17 @@ class TUI:
                      + f"  [{th.faint}]⇣{toks}[/]  [{th.err}][stop][/]")
             return self._pad_lr(left, right)
         return ANSI("")                          # idle: the context bar now lives top-right in the header
+
+    def turn_activity(self, state: str, label: str, detail: str = "") -> None:
+        """What the loop says it is doing. Used only when nothing more specific is streaming."""
+        self._backend_activity = (str(state), str(label)[:80], str(detail or "")[:120])
+        self._invalidate()
+
+    _BETWEEN_ROUND_STATES = ("continuing", "verifying", "compacting", "hook")
+
+    def _between_rounds(self) -> bool:
+        activity = getattr(self, "_backend_activity", None)
+        return bool(activity and activity[0] in self._BETWEEN_ROUND_STATES and activity[1])
 
     def _pad_lr(self, left: str, right: str, indent: str = "  "):
         """One row with `left` markup at the start and `right` markup flush to the terminal edge —
@@ -2658,6 +2686,7 @@ class TUI:
         if self._thinking:
             self._thinking = False
         self._cur_tool = None
+        self._backend_activity = None       # streaming outranks whatever the loop last announced
         self._flush_think()                 # finalize any reasoning above the answer
         self._buf += style_mod.terminal_safe_text(chunk)
         self._streaming = True
@@ -2665,6 +2694,7 @@ class TUI:
 
     def on_thinking(self, chunk: str) -> None:
         self._thinking = True
+        self._backend_activity = None
         if self._think_t0 is None:
             self._think_t0 = time.monotonic()   # start timing this reasoning block
         if self.config.get("show_reasoning", True):
@@ -2686,7 +2716,9 @@ class TUI:
         self._thinking = False        # reasoning is done → clear the "Thinking…" latch (a reasoning-only
         #                               turn never calls on_text, so this is the only reset it gets)
 
-    def end_stream(self) -> None:
+    def end_stream(self, phase: str = "") -> None:
+        # The TUI transcript has one block kind for assistant prose and no commentary/final
+        # concept, so the phase is accepted and deliberately unused here.
         self._flush_think()
         if self._buf.strip():
             self._append_md(self._buf)
@@ -2717,6 +2749,7 @@ class TUI:
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
+        self._backend_activity = None       # the tool label below is the more specific truth
         self._tool_count += 1
         summary = _arg_summary(args)
         safe_name = style_mod.terminal_safe_text(name)
@@ -4414,11 +4447,18 @@ class TUI:
         elif cmd == "theme":
             from . import termbg
             val = rest or ("light" if cfg.get("theme") == "dark" else "dark")
+            canvas_before = cfg.get("background")
             if not termbg.switch_theme(cfg, val.lower()):
                 self._flash("choose /theme auto|dark|light")
             else:
                 self._refresh_appearance()
-                self._flash(f"theme → {val}")
+                # /theme owns the text palette, not the canvas. On the one path where readability
+                # forces the canvas to follow, the user hears about it instead of finding their
+                # /bg choice silently rewritten.
+                canvas_after = cfg.get("background")
+                moved = ("" if canvas_after == canvas_before else
+                         f" · canvas → {canvas_after}, or the text would not have been readable")
+                self._flash(f"theme → {val}{moved}")
         elif cmd == "context":
             self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
@@ -5056,6 +5096,7 @@ class TUI:
         self._cancel_auxiliary()
         self._cancel.clear()
         self._turn.set()
+        self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._turn_t0 = time.monotonic()
         def work():
             self._tls.session = sess
@@ -6091,6 +6132,7 @@ class TUI:
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
+        self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._turn_t0 = time.monotonic()
 
         def work():
@@ -6227,6 +6269,7 @@ class TUI:
         self._scroll_off = 0
         self._follow = True
         self._turn.set()
+        self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._turn_t0 = time.monotonic()
 
         def work() -> None:

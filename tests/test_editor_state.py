@@ -25,10 +25,41 @@ class EditorStateTests(unittest.TestCase):
             {"role": "assistant", "content": "Tests failed."},
         ]
         history = backend._history()
-        self.assertEqual(history[0]["tool_details"][0]["output"], "Error: exit code 1")
-        self.assertEqual(history[0]["tool_details"][0]["status"], "returned")
-        self.assertTrue(history[0]["commentary"])
-        self.assertEqual(history[-1]["text"], "Tests failed.")
+        # Restored work is replayed through the SAME events a live turn emits, so the panel drives
+        # the same builders: a real tool card with its real output, not prose.
+        kinds = [item.get("type") or item.get("role") for item in history]
+        self.assertEqual(kinds, ["turn_start", "text_delta", "stream_end", "tool_call",
+                                 "tool_result", "text_delta", "stream_end", "turn_end"])
+        result = history[4]
+        self.assertEqual(result["output"], "Error: exit code 1")
+        self.assertEqual(result["call_id"], "__proto__")
+        self.assertEqual(result["name"], "bash")
+        self.assertTrue(result["is_error"])          # the saved output classifies itself
+        self.assertEqual(history[3]["args"], {"command": "npm test"})
+        # Prose beside a tool call is commentary; prose with no call is the answer, and the turn
+        # says which block that was instead of leaving the panel to guess from position.
+        self.assertEqual(history[2]["phase"], "commentary")
+        self.assertEqual(history[6]["phase"], "answer")
+        self.assertEqual(history[5]["text"], "Tests failed.")
+        self.assertEqual(history[-1]["final_message_id"], history[6]["message_id"])
+
+    def test_history_recovers_a_reviewed_diff_from_the_saved_output_alone(self):
+        # No session-file migration: split_diff is a pure function of the output string, so a
+        # restored patch comes back as a diff card exactly as the live one did.
+        backend = self.backend()
+        patch = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n"
+        backend.agent.messages = [
+            {"role": "user", "content": "Patch it"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {
+                "name": "apply_patch", "arguments": '{"path":"x.py"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "Applied.\n" + patch},
+        ]
+        result = next(item for item in backend._history() if item.get("type") == "tool_result")
+        self.assertTrue(result["is_diff"])
+        self.assertTrue(result["diff"].startswith("--- a/x.py"))
+        self.assertFalse(result["is_error"])
+        # A round that called tools and wrote nothing contributes no prose block at all.
+        self.assertFalse([i for i in backend._history() if i.get("type") == "text_delta"])
 
     def test_large_unicode_history_stays_within_wire_budget_and_keeps_latest(self):
         backend = self.backend()
@@ -37,7 +68,10 @@ class EditorStateTests(unittest.TestCase):
         history = backend._history()
         self.assertLess(len(json.dumps(history)), 1_001_000)
         self.assertEqual(history[0]["role"], "notice")
-        self.assertEqual(history[-1]["text"], "Latest request")
+        self.assertEqual(history[-1]["type"], "turn_end")
+        self.assertEqual(history[-2]["prompt"], "Latest request")
+        # A dropped prefix must never leave the panel a turn that begins in the middle.
+        self.assertIn(history[1].get("type"), (None, "turn_start"))
         self.assertEqual(len(backend.agent.messages), 31)
 
     def test_prompt_acknowledgement_and_rejections_are_correlated(self):

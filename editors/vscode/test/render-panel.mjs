@@ -42,6 +42,127 @@ await page.evaluate(([mjs, mdjs]) => {
 }, [mainJs, markdownJs]);
 const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: e } })), event);
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+// ---- the anatomy of a turn, live and after a reload -------------------------------------------
+//   npm run shot -- /tmp/live.png --turn        a turn: bare tool batches, prose, a burst, an answer
+//   npm run shot -- /tmp/reload.png --reload    the same conversation restored from the session file
+// The two must look the same. Replay drives the same builders as the live path, so anything that
+// differs between these two images is a bug in that claim.
+const GATE_SOURCE = `def gate(report):
+    if report.coverage < MIN_COVERAGE:
+        return Fail("coverage")
+    if report.duration > MAX_SECONDS:
+        return Fail("slow")
+    return Pass()
+`;
+const TEST_OUTPUT = `> dgc@0.38.1 test
+> node --test "test/**/*.test.mjs"
+
+\u2716 release gate rejects a slow report (12.4ms)
+  AssertionError: expected Fail("slow"), got Pass()
+      at Object.<anonymous> (test/gate.test.mjs:41:3)
+\u2716 release gate reports the reason (3.1ms)
+1 passing, 2 failing`;
+const GATE_DIFF = `--- a/scripts/release_gate.py
++++ b/scripts/release_gate.py
+@@ -1,6 +1,6 @@
+ def gate(report):
+     if report.coverage < MIN_COVERAGE:
+         return Fail("coverage")
+-    if report.duration > MAX_SECONDS:
++    if report.duration >= MAX_SECONDS:
+         return Fail("slow")
+     return Pass()
+`;
+const COMMENTARY = "`MAX_SECONDS` is compared with `>`, so a report that lands exactly on the "
+  + "budget passes. The fixture uses the budget exactly, which is why only that case fails.\n";
+const ANSWER = [
+  "## The gate was off by one report\n\n",
+  "`scripts/release_gate.py` compared the duration with `>`, so a run that finished at exactly ",
+  "`MAX_SECONDS` was treated as inside the budget. The fixture sits on the boundary, which is why ",
+  "the suite failed on that one case and nothing else.\n\n",
+  "1. `scripts/release_gate.py` \u2014 `>` became `>=`.\n",
+  "2. `test/gate.test.mjs` \u2014 a case either side of the boundary, so the next edit cannot ",
+  "silently move it back.\n\n",
+  "```python\nif report.duration >= MAX_SECONDS:\n    return Fail(\"slow\")\n```\n\n",
+  "The suite is green: 3 passing, 0 failing.\n",
+].join("");
+const TURN = (id) => [
+  { type: "turn_start", turn_id: id, prompt: "The release gate is failing on CI but passes here \u2014 why?", kind: "prompt" },
+  { type: "turn_activity", turn_id: id, state: "waiting", label: "Waiting for the model" },
+  { type: "turn_activity", turn_id: id, state: "tool", label: "Reading a file", detail: "scripts/release_gate.py" },
+  { type: "tool_call", call_id: "c1", name: "read_file", args: { path: "scripts/release_gate.py" }, summary: "scripts/release_gate.py" },
+  { type: "tool_result", call_id: "c1", name: "read_file", output: GATE_SOURCE },
+  { type: "turn_activity", turn_id: id, state: "tool", label: "Running a command", detail: "npm test" },
+  { type: "tool_call", call_id: "c2", name: "bash", args: { command: "npm test" }, summary: "npm test" },
+  { type: "tool_result", call_id: "c2", name: "bash", output: TEST_OUTPUT, is_error: true },
+  { type: "turn_activity", turn_id: id, state: "responding", label: "Responding" },
+  { type: "text_delta", text: COMMENTARY },
+  { type: "stream_end", message_id: `${id}:1`, phase: "commentary" },
+  { type: "turn_activity", turn_id: id, state: "tool", label: "Searching", detail: "MAX_SECONDS" },
+  { type: "tool_call", call_id: "c3", name: "grep", args: { pattern: "MAX_SECONDS" }, summary: "MAX_SECONDS" },
+  { type: "tool_result", call_id: "c3", name: "grep", output: "scripts/release_gate.py:4\nscripts/config.py:11\ntest/gate.test.mjs:38" },
+  { type: "turn_activity", turn_id: id, state: "tool", label: "Editing a file", detail: "scripts/release_gate.py" },
+  { type: "tool_call", call_id: "c4", name: "edit_file", args: { path: "scripts/release_gate.py" }, summary: "scripts/release_gate.py" },
+  { type: "tool_result", call_id: "c4", name: "edit_file", output: GATE_DIFF, is_diff: true, diff: GATE_DIFF },
+  { type: "tool_call", call_id: "c5", name: "write_file", args: { path: "test/gate.test.mjs" }, summary: "test/gate.test.mjs" },
+  { type: "tool_result", call_id: "c5", name: "write_file", output: "wrote 14 lines" },
+  { type: "tool_call", call_id: "c6", name: "bash", args: { command: "npm test" }, summary: "npm test" },
+  { type: "tool_result", call_id: "c6", name: "bash", output: "> dgc@0.38.1 test\n\n\u2714 release gate rejects a slow report\n\u2714 release gate reports the reason\n\u2714 release gate accepts a fast report\n3 passing, 0 failing" },
+  { type: "turn_activity", turn_id: id, state: "continuing", label: "Finishing open todos" },
+  { type: "turn_activity", turn_id: id, state: "responding", label: "Responding" },
+  { type: "text_delta", text: ANSWER },
+  { type: "stream_end", message_id: `${id}:2`, phase: "answer" },
+  { type: "turn_end", turn_id: id, reason: "completed", token_estimate: 2618, final_message_id: `${id}:2` },
+];
+if (process.argv.includes("--turn") || process.argv.includes("--reload")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  const reload = process.argv.includes("--reload");
+  await send({ type: "session", kind: "new", session_id: "s2" });
+  if (reload) {
+    // What the backend hands a reopened panel: the same turn, in the same vocabulary, minus the
+    // live-only frames (no activity to replay, no real clock, no token estimate).
+    const items = TURN("h1").filter(e => e.type !== "turn_activity")
+      .map(e => e.type === "turn_end" ? { ...e, token_estimate: 0 } : e);
+    await send({ type: "session", kind: "resumed", session_id: "s2" });
+    await send({ type: "history", items, todos: [] });
+    await send({ type: "recall", items: [], before: 0, more: false });   // the archive is exhausted
+  } else {
+    for (const event of TURN("t1")) { await send(event); }
+  }
+  await page.waitForTimeout(500);
+  // Grow the window until the whole conversation is on screen: this is a picture of a transcript,
+  // not of a scrollport.
+  for (let i = 0; i < 3; i++) {
+    const need = await page.evaluate(() => {
+      const log = document.getElementById("log");
+      return Math.ceil(log.scrollHeight - log.clientHeight);
+    });
+    if (need <= 0) break;
+    const view = page.viewportSize();
+    await page.setViewportSize({ width: view.width, height: Math.min(2600, view.height + need + 8) });
+    await page.waitForTimeout(250);
+  }
+  const shape = await page.evaluate(() => {
+    const answer = document.querySelector(".answer");
+    const tools = [...document.querySelectorAll(".tool")];
+    return {
+      answers: document.querySelectorAll(".answer").length,
+      finals: document.querySelectorAll(".text.final").length,
+      commentary: document.querySelectorAll(".text.commentary").length,
+      bareText: [...document.querySelectorAll(".text")].filter(t => !t.className.includes("commentary") && !t.className.includes("final")).length,
+      groupOpen: [...document.querySelectorAll(".tool-group")].map(g => g.open),
+      toolsShowingOutput: tools.filter(t => t.querySelector(".body") && getComputedStyle(t.querySelector(".body")).display !== "none").length,
+      tools: tools.length,
+      verb: document.querySelector(".thinking.done")?.textContent || "",
+      actionsInAnswer: !!answer?.querySelector(".response-actions"),
+      summaryInAnswer: !!answer?.querySelector(".turn-summary"),
+    };
+  });
+  console.log(JSON.stringify(shape, null, 1));
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out);
+  await browser.close(); process.exit(0);
+}
 await send({ type: "turn_start", turn_id: "t1", prompt: "Fix the clamp bounds and prove it with a test" });
 await send({ type: "text_delta", text: "I'll read the file, correct the bounds and run the test.\n\n" });
 await send({ type: "tool_call", call_id: "c1", name: "read_file", args: { path: "src/clamp.py" }, summary: "src/clamp.py" });

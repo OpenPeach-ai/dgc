@@ -36,7 +36,8 @@ from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
-from .ui import arg_summary, edit_preview, split_diff, tool_output_is_error
+from .ui import (activity_verb, arg_summary, edit_preview, split_diff,
+                 tool_output_is_error)
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
 _MAX_QUEUED_TURNS = 32
@@ -215,6 +216,15 @@ class _Shutdown(Exception):
     pass
 
 
+class _Terminated(BaseException):
+    """SIGTERM/SIGHUP reached the serve loop. BaseException on purpose: the per-command
+    `except Exception` must not swallow the one signal that means "stop now"."""
+
+    def __init__(self, signum: int):
+        super().__init__(signum)
+        self.signum = int(signum)
+
+
 def _command_lines(stream):
     """Yield bounded UTF-8 command lines and recover after an oversized/malformed frame."""
     binary = getattr(stream, "buffer", None)
@@ -240,6 +250,61 @@ def _command_lines(stream):
             yield None, "command frame was not valid UTF-8"
 
 
+# A restored turn must be built by the same code that builds a live one, so history is not a
+# second projection with its own rules -- it is the live event vocabulary, replayed. Anything in
+# this set is a turn fragment: it is meaningless without the ``turn_start`` above it.
+_MID_TURN_ITEMS = ("text_delta", "thinking_delta", "stream_end",
+                   "tool_call", "tool_result", "tool_denied", "turn_end")
+
+
+def _safe_busy(backend) -> bool:
+    """Is a turn in flight? Never let a status read break the log line that reports it."""
+    try:
+        return bool(backend._busy())
+    except Exception:
+        return False
+
+
+def _goal_scaffold(content: str) -> str:
+    """The label for a goal-continuation prompt DGC wrote as the user, or "" if a person typed it.
+
+    Matched by CONTENT, not equality: goal attachments and staged editor context are prepended to
+    these prompts, so an exact comparison missed every one of them and the whole objective came
+    back in the transcript as something the user had apparently just sent.
+    """
+    from .goals import AUTO_RESUME_MARKER, CYCLE_MARKER, RESUME_PROMPT
+    text = str(content or "")
+    if AUTO_RESUME_MARKER in text:
+        return "Retried the standing goal after the last attempt stopped"
+    if CYCLE_MARKER in text:
+        return "Continued the standing goal"
+    if RESUME_PROMPT[:60] in text:
+        return "Resumed the standing goal"
+    return ""
+
+
+def _history_args(raw) -> dict:
+    """The saved tool arguments as a bounded object, so a replayed card shows what a live one did."""
+    value = raw
+    if not isinstance(value, dict):
+        try:
+            value = json.loads(str(raw or "") or "{}")
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    args: dict = {}
+    for key, item in list(value.items())[:16]:
+        name = str(key)[:64]
+        if isinstance(item, str):
+            args[name] = item[:1000] + ("…" if len(item) > 1000 else "")
+        elif isinstance(item, bool) or item is None or isinstance(item, (int, float)):
+            args[name] = item
+        else:
+            args[name] = json.dumps(item, ensure_ascii=False)[:1000]
+    return args
+
+
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
 
@@ -255,16 +320,85 @@ class HeadlessUI:
         self.plan_feedback = ""         # one-shot feedback consumed by Agent after rejection
         self.deny_reason = ""           # the editor's note on a denial, consumed by Agent
         self.preview_root = None        # project root for edit previews on approval cards
+        # Per-turn prose identity. The panel must not have to guess which block was the answer,
+        # so every prose block that actually streamed gets an id and the turn carries the id it
+        # designates. Backend sets ``turn_id`` and calls ``reset_turn_messages()`` at turn_start.
+        self.turn_id = ""
+        self._message_n = 0
+        self._stream_open = False       # text arrived since the last end_stream
+        self._answer_message_id = None  # last stream_end whose phase was "answer"
+        self._unphased_message_id = None  # last stream_end that stated no phase (compat path)
+        self._activity_key = None       # (state, label, detail) of the last emitted turn_activity
+
+    def reset_turn_messages(self) -> None:
+        """Start a new turn's prose numbering and forget the previous turn's designation."""
+        self._message_n = 0
+        self._stream_open = False
+        self._answer_message_id = None
+        self._unphased_message_id = None
+        self._activity_key = None
+
+    @property
+    def final_message_id(self):
+        """Which prose block this turn designates as its answer -- Codex's rule, exactly.
+
+        The last block the loop called an answer wins. Failing that, and only because ``turn_end``
+        is by construction terminal, the last block that stated no phase at all wins, so a seam
+        that never passes a phase keeps working. Failing both, the turn had no answer to point at.
+        """
+        return self._answer_message_id or self._unphased_message_id
 
     # streaming ----------------------------------------------------------------
     def on_text(self, chunk: str) -> None:
+        self.turn_activity("responding", "Responding")
+        self._stream_open = True
         self.em.emit("text_delta", text=chunk)
 
     def on_thinking(self, chunk: str) -> None:
+        self.turn_activity("thinking", "Thinking")
         self.em.emit("thinking_delta", text=chunk)
 
-    def end_stream(self) -> None:
-        self.em.emit("stream_end")
+    def end_stream(self, phase: str = "") -> None:
+        """Close a prose block, naming it and saying what the loop already knows about it.
+
+        An id is minted only when prose actually streamed, so ``final_message_id`` can never
+        designate a block the panel has no node for. A round that produced only tool calls closes
+        an empty stream and is simply not a message.
+        """
+        fields: dict = {}
+        if self._stream_open and self.turn_id:
+            self._message_n += 1
+            message_id = f"{self.turn_id}:{self._message_n}"
+            fields["message_id"] = message_id
+            if phase == "answer":
+                self._answer_message_id = message_id
+            elif not phase:
+                self._unphased_message_id = message_id
+        if phase in ("commentary", "answer"):
+            fields["phase"] = phase
+        self._stream_open = False
+        self.em.emit("stream_end", **fields)
+
+    def turn_activity(self, state: str, label: str, detail: str = "") -> None:
+        """State what the turn is doing, once per change.
+
+        The guard is load-bearing: ``on_text`` runs per streamed chunk, so without it a long
+        answer would spend thousands of frames saying the same word. A changed tool target is a
+        new step and does emit; churn inside an unchanged step does not.
+        """
+        if not self.turn_id:
+            # Activity is a fact ABOUT a turn. Outside one -- a `-p --output-format json` run, a
+            # compaction on resume -- there is no turn to describe, and a frame saying so would be
+            # noise on a surface that never shows a verb.
+            return
+        key = (str(state), str(label)[:80], str(detail or "")[:120])
+        if key == self._activity_key:
+            return
+        self._activity_key = key
+        fields = {"turn_id": self.turn_id, "state": key[0], "label": key[1]}
+        if key[2]:
+            fields["detail"] = key[2]
+        self.em.emit("turn_activity", **fields)
 
     def steering_applied(self, request_id: str) -> None:
         hook = getattr(self, "_steering_hook", None)
@@ -273,8 +407,10 @@ class HeadlessUI:
 
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
+        summary = arg_summary(name, args)
+        self.turn_activity("tool", activity_verb(name), summary)
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
-                     summary=arg_summary(name, args))
+                     summary=summary)
 
     def tool_progress(self, name: str, message: str, *, progress=None, total=None,
                       level: str = "", call_id: str | None = None) -> None:
@@ -288,6 +424,7 @@ class HeadlessUI:
         self.em.emit("tool_progress", **fields)
 
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
+        self.turn_activity("waiting", "Waiting for the model")
         is_diff, diff = split_diff(out)
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
                      is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
@@ -315,6 +452,7 @@ class HeadlessUI:
 
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
+        self.turn_activity("waiting", "Waiting for the model")
         self.em.emit("tool_denied", call_id=call_id, name=name, args=args, reason=reason)
 
     def on_todo(self, todos: list) -> None:
@@ -322,6 +460,8 @@ class HeadlessUI:
 
     def hook_activity(self, event: str, status: str, *, configured: int = 0,
                       duration_ms: int = 0, message: str = "") -> None:
+        if status == "started":
+            self.turn_activity("hook", f"Running {event} hooks")
         self.em.emit("hook_activity", event=event, status=status,
                      configured=max(0, int(configured)),
                      duration_ms=max(0, int(duration_ms)), message=message or None)
@@ -702,6 +842,12 @@ class Backend:
                     title = _prompt_thread_title(shown_prompt)
                     if title and name_session(title):
                         self.em.emit("session_named", name=title)
+                # The prose identity of a turn belongs to the turn, so hand the UI the id it is
+                # numbering against before the first event of that turn can be emitted.
+                self.ui.turn_id = tid
+                reset_messages = getattr(self.ui, "reset_turn_messages", None)
+                if callable(reset_messages):
+                    reset_messages()
                 self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt, kind=turn_kind)
                 eta_stop = self._start_eta_ticker(tid)
                 failed = False
@@ -750,9 +896,15 @@ class Backend:
                     # delete, model changes and workspace updates may arrive immediately on that
                     # acknowledgement. Serialize publication with enqueue so a newer turn_start
                     # cannot overtake this turn_end or be consumed by the retiring worker.
+                    # Which block was the answer is a fact the UI accumulated while the loop
+                    # ran; the panel should never have to re-derive it from node position.
+                    final_message_id = getattr(self.ui, "final_message_id", None)
+                    if not isinstance(final_message_id, str):
+                        final_message_id = None
                     self.em.emit("turn_end", turn_id=tid,
                                  reason="cancelled" if cancelled else ("error" if failed else "completed"),
-                                 token_estimate=est)
+                                 token_estimate=est, final_message_id=final_message_id)
+                    self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._emit_context()
                 if idle:
                     return
@@ -1146,9 +1298,15 @@ class Backend:
         if inspection is not None:
             inspection.close()
         self.agent.stopping = True              # the process is going down, nobody pressed stop
-        outcome = "idle"
-        if grace_s > 0 and self._busy():
-            outcome = "cancelled"
+        # Read busy BEFORE the grace decision: with grace_s == 0 (the editor asked us to stop) a
+        # turn in flight was still being cancelled, and the log called it "idle" one line under its
+        # own "turn running: yes".
+        # A decision nobody can answer is not work in flight: with the pipe closed no approval can
+        # arrive, so release them first rather than spending the whole grace window waiting.
+        self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
+        busy = self._busy()
+        outcome = "cancelled" if busy else "idle"
+        if grace_s > 0 and busy:
             deadline = time.monotonic() + grace_s
             while time.monotonic() < deadline:
                 if not self._busy():
@@ -1309,9 +1467,20 @@ class Backend:
                      **_request_fields(request_id))
 
     def _history(self) -> list:
-        """A display transcript of the current conversation (for resuming in a UI)."""
-        items = []
-        calls = {}
+        """A replayable event log of the current conversation (for resuming in a UI).
+
+        Restored history used to be a flat message projection with its own idea of what an answer
+        was (``commentary = bool(tool_calls)``), which disagreed with the live path and rendered
+        tool work as prose. This emits the SAME events a live turn emits, so the panel drives the
+        same builders and a restored turn is a turn: one block, real tool cards, real diffs, and
+        one designated answer. Turns are derived, not persisted -- a turn opens at every message
+        the user actually sent and at every resume marker, which is exactly what the scaffolding
+        filter below already identifies, so no session file has to change.
+        """
+        items: list = []
+        calls: dict = {}                # saved tool_call id -> the name its result belongs to
+        turn_n = 0
+        turn: dict | None = None
         # Compaction rewrites the transcript as a user message carrying the summary followed by an
         # assistant message accepting it. That is how the model is given its own history back, but
         # it is not something the user said or the agent answered, and showing it as two chat
@@ -1319,6 +1488,39 @@ class Backend:
         # pair into one marker the panel can show quietly, with the summary behind it.
         from .agent import _COMPACT_ACK, _COMPACT_PREFIX
         from .goals import RESUME_PROMPT
+        from .workflows import display_prompt
+
+        def close_turn() -> None:
+            nonlocal turn
+            if turn is None:
+                return
+            if calls:                       # tool calls still waiting for a result when the turn ended
+                turn["interrupted"] = True
+            # The turn reason is not persisted, but two things the file does support are whether
+            # the turn produced an answer and whether its work finished: a call with no result, or
+            # a result that says the session was interrupted, is a turn that did not complete —
+            # however confident the prose above it sounded. Reporting "Worked" over either is the
+            # same class of lie as calling a shutdown the user's own stop.
+            finished = bool(turn["final"]) and not turn["interrupted"]
+            items.append({"type": "turn_end", "turn_id": turn["id"],
+                          "reason": "completed" if finished else "cancelled",
+                          "token_estimate": 0,
+                          "final_message_id": turn["final"] if finished else None})
+            turn = None
+
+        def open_turn(prompt: str, kind: str) -> None:
+            nonlocal turn, turn_n
+            close_turn()
+            turn_n += 1
+            turn = {"id": f"h{turn_n}", "n": 0, "final": None, "interrupted": False}
+            items.append({"type": "turn_start", "turn_id": turn["id"],
+                          "prompt": prompt, "kind": kind})
+
+        def ensure_turn() -> dict:
+            if turn is None:
+                open_turn("", "prompt")     # saved work with no prompt above it still belongs to a turn
+            return turn
+
         skip_next_ack = False
         for m in self.agent.messages:
             role = m.get("role")
@@ -1328,9 +1530,10 @@ class Backend:
             # The resume instruction is written to the transcript as a user turn so the model
             # receives it, but the user did not type it. Live turns already render it as a marker
             # via turn_start kind=resume; replaying history has to say the same thing, or
-            # reopening a resumed session shows a prompt nobody sent.
-            if role == "user" and isinstance(content, str) and content.strip() == RESUME_PROMPT:
-                items.append({"role": "resume", "text": "Resumed the standing goal"})
+            # reopening a resumed session shows a prompt nobody sent. It is also a turn boundary:
+            # without it an unattended goal's whole run collapses into one enormous turn.
+            if role == "user" and isinstance(content, str) and _goal_scaffold(content):
+                open_turn(_goal_scaffold(content), "resume")
                 continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",
@@ -1342,7 +1545,6 @@ class Backend:
                 if role == "assistant" and content == _COMPACT_ACK and not m.get("tool_calls"):
                     continue
             if role == "user":
-                from .workflows import display_prompt
                 if isinstance(content, list):
                     text = display_prompt(_strip_editor_context(" ".join(p.get("text", "") for p in content
                                     if isinstance(p, dict) and p.get("type") == "text"))) + " 📷"
@@ -1352,48 +1554,71 @@ class Backend:
                 # the standing-goal reminder (which embeds the whole objective), the open-todo
                 # nudge, the reasoning-budget note. The user typed none of it, and replaying a
                 # restored session as chat bubbles pasted their entire goal spec back at them as
-                # though they had just sent it.
+                # though they had just sent it. It is also not a turn boundary: every one of these
+                # is a gate continuing the SAME turn.
                 if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
-                items.append({"role": "user", "text": text})
+                open_turn(text, "prompt")
             elif role == "assistant":
-                tools = [str((tc.get("function") or {}).get("name", ""))[:128] for tc in (m.get("tool_calls") or [])[:16]]
-                details = []
-                for tc in (m.get("tool_calls") or [])[:16]:
+                current = ensure_turn()
+                text = str(content or "")
+                tool_calls = list(m.get("tool_calls") or [])[:16]
+                if text.strip():
+                    # One delta per saved message: the panel's text path is the same, and a saved
+                    # message has no chunk boundaries left to reproduce.
+                    current["n"] += 1
+                    message_id = f'{current["id"]}:{current["n"]}'
+                    phase = "commentary" if tool_calls else "answer"
+                    items.append({"type": "text_delta", "text": text})
+                    items.append({"type": "stream_end", "message_id": message_id, "phase": phase})
+                    if phase == "answer":
+                        current["final"] = message_id
+                for tc in tool_calls:
                     function = tc.get("function") or {}
-                    arguments = function.get("arguments") or ""
-                    detail = {"name": str(function.get("name") or "tool")[:128],
-                              "arguments": (arguments if isinstance(arguments, str) else
-                                            json.dumps(arguments, ensure_ascii=False))[:1000],
-                              "output": "", "status": "unknown"}
-                    if tc.get("id"):
-                        calls[str(tc["id"])] = detail
-                    details.append(detail)
-                items.append({"role": "assistant", "text": str(content or ""), "tools": tools,
-                              "tool_details": details, "commentary": bool(tools)})
+                    name = str(function.get("name") or "tool")[:128]
+                    args = _history_args(function.get("arguments"))
+                    call_id = str(tc.get("id") or "") or None
+                    items.append({"type": "tool_call", "call_id": call_id, "name": name,
+                                  "args": args, "summary": arg_summary(name, args)})
+                    if call_id:
+                        calls[call_id] = name
             elif role == "tool":
-                detail = calls.pop(str(m.get("tool_call_id") or ""), None)
-                if detail is not None:
-                    output = str(content or "")
-                    detail["output"] = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
-                    # The saved protocol lacks a reliable success flag. Preserve the result without
-                    # inventing a green success state for failed commands or denials.
-                    detail["status"] = "returned"
+                call_id = str(m.get("tool_call_id") or "")
+                name = calls.pop(call_id, None)
+                if name is None:        # a result whose call is no longer in the transcript
+                    continue
+                ensure_turn()
+                output = str(content or "")
+                output = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
+                # Both of these are pure functions of the saved output string, so a reviewed patch
+                # comes back as a diff card and a failed command comes back red, with no migration.
+                is_diff, diff = split_diff(output)
+                if "tool result unavailable after session interruption" in output:
+                    turn["interrupted"] = True
+                items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
+                              "output": output, "is_error": tool_output_is_error(output),
+                              "is_diff": is_diff, "diff": diff})
+        close_turn()
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
         # history remains intact; this limit applies only to the restored webview payload.
         retained, size = [], 0
         for item in reversed(items):
-            text = str(item.get("text") or "")
-            if len(text) > 50000:
-                item["text"] = text[:50000] + "\n[Long saved message truncated for display]"
+            for key in ("text", "prompt"):
+                value = item.get(key)
+                if isinstance(value, str) and len(value) > 50000:
+                    item[key] = value[:50000] + "\n[Long saved message truncated for display]"
             cost = len(json.dumps(item, ensure_ascii=True))
             if retained and size + cost > 1_000_000:
                 break
             retained.append(item)
             size += cost
         retained.reverse()
+        # Never hand the panel a turn that begins in the middle. Trimming from the front is the
+        # honest cut: the dropped fragments are the oldest, and the notice below says so.
+        while retained and retained[0].get("type") in _MID_TURN_ITEMS:
+            retained.pop(0)
         if len(retained) < len(items):
             retained.insert(0, {"role": "notice", "text": "Showing the most recent saved context. Earlier messages remain in the session file."})
         return retained
@@ -2488,18 +2713,76 @@ def _open_crash_log(config: Config):
                      f"{time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         handle.flush()
         faulthandler.enable(file=handle, all_threads=True)
-        # SIGTERM is how a parent asks us to stop, and it is also how a confused one kills us mid
-        # turn. Dumping every thread's stack at that moment says WHERE the backend was, which is
-        # the difference between "it exited" and a diagnosis.
-        for name in ("SIGTERM", "SIGHUP"):
-            try:
-                faulthandler.register(getattr(signal, name), file=handle,
-                                      all_threads=True, chain=True)
-            except Exception:
-                pass                           # not every platform or thread context allows it
+        _register_signal_dumps(handle)
         return handle
     except Exception:
         return None                            # logging must never stop the backend from serving
+
+
+def _register_signal_dumps(handle) -> None:
+    """Dump every thread's stack on SIGTERM/SIGHUP, then chain into whatever handler is installed.
+
+    SIGTERM is how a parent asks us to stop, and it is also how a confused one kills us mid turn.
+    Dumping every thread's stack at that moment says WHERE the backend was, which is the difference
+    between "it exited" and a diagnosis. `chain=True` captures the handler installed RIGHT NOW as
+    the one to run after the dump, and only on a signal faulthandler does not already own — so
+    anything that claims the signal afterwards must call `_unregister_signal_dumps()` first and
+    this again after, or the dump and the new handler silently replace each other.
+    """
+    import faulthandler
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue                           # Windows has neither
+        try:
+            faulthandler.register(sig, file=handle, all_threads=True, chain=True)
+        except Exception:
+            pass                               # not every platform or thread context allows it
+
+
+def _unregister_signal_dumps() -> None:
+    """Release SIGTERM/SIGHUP so a new handler can be installed under a fresh dump registration."""
+    import faulthandler
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            faulthandler.unregister(sig)
+        except Exception:
+            pass
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return f"signal {signum}"
+
+
+def _parent_status(parent_pid: int) -> tuple[str, int]:
+    """Say whether our original parent is really gone — confirmed, never inferred.
+
+    Our stdin can hit EOF a beat before the kernel reparents us, so a getppid() read the instant
+    the loop ends still returns the original pid for a parent that is already dead. Re-check for a
+    quarter of a second and ask the OS directly with signal 0. Windows has neither a stable ppid to
+    compare nor signal 0 to send, so there it answers "unknown" rather than guessing.
+    """
+    if os.name == "nt":
+        return "unknown", parent_pid
+    now_parent = parent_pid
+    for _ in range(5):
+        now_parent = os.getppid()
+        if now_parent != parent_pid:
+            return "gone", now_parent
+        try:
+            os.kill(parent_pid, 0)
+        except ProcessLookupError:
+            return "gone", now_parent
+        except OSError:
+            break                              # it exists; it is simply not ours to signal
+        time.sleep(0.05)
+    return "alive", now_parent
 
 
 def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
@@ -2532,7 +2815,6 @@ def serve(config: Config) -> None:
                        args.exc_value)
         threading.excepthook = _thread_crash
     backend = Backend(config)
-    backend.start()
     # Enough context to tell the three shutdowns apart in a log read days later: the editor asking
     # us to stop, the editor's host dying under us (our stdin closes and we are reparented), and a
     # live host closing the pipe anyway — which is a bug on that side, not ours.
@@ -2542,7 +2824,40 @@ def serve(config: Config) -> None:
     commands = 0
     last_command = ""
     shutdown_requested = False
+    # A SIGTERM taken at its default disposition kills us between two bytecodes: the `finally`
+    # below never runs, Backend.close() never runs, and a goal that was running is left claiming
+    # it is still active. Handle the signal instead — tell the agent to stop, unwind the stdin
+    # loop through the SAME finally as a closed pipe, and only then die of the signal we were
+    # sent. (termbg owns the helper because restoring the terminal is the other half of this
+    # problem; a headless backend has no terminal to restore, so it uses only the signal half.)
+    from . import termbg
+    stop_handlers: dict = {}
+    stopped_by: dict = {}
+    reading = {"stdin": True}
+
+    def _on_stop(signum) -> None:
+        termbg.restore_stop_handlers(stop_handlers)   # a second signal kills us outright
+        stopped_by["signum"] = signum
+        try:
+            backend.agent.stopping = True             # the turn loop lands at its next boundary
+        except Exception:
+            pass
+        if reading["stdin"]:
+            # Blocked on the editor's pipe: only an exception gets us out of that read and into
+            # the finally. Once the loop has ended we are already on our way there — let it run.
+            raise _Terminated(signum)
+
+    # faulthandler claimed these signals when the log opened, with SIG_DFL as its chain target.
+    # Hand them back, install ours, then put the dump on top again: the stack dump still happens
+    # first and now chains INTO us instead of into the kernel.
+    _unregister_signal_dumps()
+    stop_handlers.update(termbg.install_stop_handler(_on_stop))
+    if crash_log is not None:
+        _register_signal_dumps(crash_log)
     try:
+        # Inside the try on purpose: start() is where the first model metadata and context
+        # estimates happen, and a parent that gives up during it must still reach the finally.
+        backend.start()
         for line, frame_problem in _command_lines(sys.stdin):
             if frame_problem:
                 backend.em.emit("error", message=frame_problem)
@@ -2559,7 +2874,7 @@ def serve(config: Config) -> None:
                 backend.em.emit("error", message="command must be a JSON object")
                 continue
             commands += 1
-            last_command = str(cmd.get("type", "?"))
+            last_command = str(cmd.get("type", "?"))[:64]   # a log line, not a payload channel
             try:
                 backend.dispatch(cmd)
             except _Shutdown:
@@ -2571,19 +2886,31 @@ def serve(config: Config) -> None:
                 backend.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
                 _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
+        reading["stdin"] = False               # past this point a signal has nothing to interrupt
     except (KeyboardInterrupt, BrokenPipeError) as interrupt:
         _log_crash(crash_log, f"serve loop ended: {type(interrupt).__name__}")
+    except _Terminated as terminated:
+        _log_crash(crash_log,
+                   f"serve loop ended: {_signal_name(terminated.signum)} — the parent asked us "
+                   f"to stop; up {time.monotonic() - started_at:.0f}s, {commands} commands, "
+                   f"last {last_command or 'none'!r}, turn running: "
+                   + ("yes" if _safe_busy(backend) else "no"))
     except BaseException as fatal:             # never exit without saying why, in our own log
         _log_crash(crash_log, "serve loop raised", fatal)
         raise
     else:
-        now_parent = os.getppid()
         if shutdown_requested:
             cause = "the editor asked us to shut down"
-        elif now_parent != parent_pid:
-            cause = f"stdin closed: the parent ({parent_pid}) is gone — reparented to {now_parent}"
         else:
-            cause = f"stdin closed while the parent ({parent_pid}) is still alive"
+            status, now_parent = _parent_status(parent_pid)
+            if status == "gone":
+                cause = (f"stdin closed: the parent ({parent_pid}) is gone — reparented to "
+                         f"{now_parent}" if now_parent != parent_pid else
+                         f"stdin closed: the parent ({parent_pid}) is gone")
+            elif status == "alive":
+                cause = f"stdin closed while the parent ({parent_pid}) is still alive"
+            else:
+                cause = f"stdin closed; this platform cannot confirm whether {parent_pid} is alive"
         try:
             busy = "yes" if backend._busy() else "no"
         except Exception:
@@ -2592,10 +2919,17 @@ def serve(config: Config) -> None:
                               f"{commands} commands, last {last_command or 'none'!r}, turn running: {busy}")
     finally:
         # An editor asking us to stop is waiting on us; a pipe that closed under a running turn is
-        # not. Only the second case gets the grace period.
+        # not, and neither is a signal. Only those get the grace period.
         grace = 0.0 if shutdown_requested else SHUTDOWN_GRACE_S
         outcome = backend.close(grace_s=grace)
+        # Only now: for the whole grace window the process must keep the handler that makes a
+        # second SIGTERM land cleanly instead of killing the turn we are busy saving.
+        termbg.restore_stop_handlers(stop_handlers)
         _log_crash(crash_log, f"backend closed cleanly (work in flight: {outcome})")
         if crash_log is not None:
             try: crash_log.close()
             except Exception: pass
+    if stopped_by:
+        # The work is saved and the log is written; now finish dying of the signal we were sent,
+        # so a supervisor reads "terminated by SIGTERM" and not a voluntary exit 0.
+        termbg.resend(stopped_by["signum"], stop_handlers)

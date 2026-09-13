@@ -273,6 +273,39 @@ def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:
     return "".join(rows)
 
 
+RELEASE_WINDOW_DAYS = 14
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def release_window(releases: dict[str, Any], days: int = RELEASE_WINDOW_DAYS) -> tuple[int, str]:
+    """Count the releases in the trailing window and name that window from the same rows.
+
+    The homepage stat prints a number beside a date range. Deriving both from the release
+    rows is what keeps them describing each other: a data refresh moves the range with the
+    count, so the caption cannot go on advertising a window the rows no longer cover.
+    Month names are spelled here rather than through strftime, which follows LC_TIME and
+    would otherwise make the built page depend on the builder's locale. The same pass
+    refuses a refreshed_at stamp older than the newest row, so the file cannot claim to
+    have been refreshed before the releases it lists.
+    """
+    every_row = [row for key in ("cli", "extension") for row in releases[key]]
+    dates = sorted(dt.date.fromisoformat(str(row["date"])) for row in releases["cli"])
+    if not dates:
+        raise ValueError("releases.json: no rows to derive the release window from")
+    newest = max(dt.date.fromisoformat(str(row["date"])) for row in every_row)
+    refreshed = dt.date.fromisoformat(str(releases["refreshed_at"])[:10])
+    if refreshed < newest:
+        raise ValueError(
+            f"releases.json: refreshed_at ({refreshed}) predates its newest row ({newest}); "
+            "refresh the stamp with the rows"
+        )
+    end = dates[-1]
+    start = end - dt.timedelta(days=days - 1)
+    count = sum(1 for date in dates if date >= start)
+    label = f"{_MONTHS[start.month - 1]} {start.day}–{_MONTHS[end.month - 1]} {end.day}"
+    return count, label
+
+
 def generic_markdown_page(filename: str, eyebrow: str) -> str:
     meta, raw = read_markdown(CONTENT / filename)
     first = re.search(r"^#\s+(.+)$", raw, re.MULTILINE)
@@ -386,6 +419,7 @@ def build_outputs() -> dict[str, str | bytes]:
     ctx.update(marketplace_proof(load_json(DATA / "site-metrics.json")))
     ctx.update(capture_context(load_json(DATA / "capture-media.json")))
     releases = load_json(DATA / "releases.json")
+    release_count, release_span = release_window(releases)
     protocol_source = (ROOT / "dgc" / "editor_protocol.py").read_text(encoding="utf-8")
     protocol_match = re.search(r"^PROTOCOL_VERSION\s*=\s*(\d+)\s*$", protocol_source, re.MULTILINE)
     if not protocol_match:
@@ -393,7 +427,7 @@ def build_outputs() -> dict[str, str | bytes]:
     ctx.update({
         "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "FIG6": partial("fig6.html", ctx), "FIG7": partial("fig7.html", ctx), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
-        "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"], prefix="release-ext"),
+        "RELEASE_COUNT": release_count, "RELEASE_WINDOW": release_span, "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"], prefix="release-ext"),
         "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": _ext_notes(releases)[0], "EXT_NOTE_REST": _ext_note_rest(releases),
     })
     pages: dict[str, tuple[str, str, str, str]] = {

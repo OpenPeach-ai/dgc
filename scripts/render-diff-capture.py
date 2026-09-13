@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Record the real /diff focus pane during a real local-model turn (FIG.7 on vibedgc.com).
 
+DORMANT — running this publishes output the site no longer declares. FIG.7 is a scripted
+illustration now, and the site declares only the ``cli`` and ``editor`` capture sets, so a run
+that reaches publish() leaves ``site/assets/diff-capture.{webm,mp4}``,
+``diff-capture-poster.jpg`` and ``assets/diff-replay.json`` in the public tree plus a
+``captures.diff`` entry in ``site-src/data/capture-media.json`` — and check-site.py then fails
+both its public-tree gate ("undeclared outputs") and its capture-manifest gate. Kept, unchanged,
+for the day the live-diff capture is published again: re-declaring the set (CAPTURE_MEDIA_FILES,
+STATIC_PUBLIC_FILES and the figure partial) has to land with the recording.
+
 Runs the same isolated, allowlisted fixture turn as ``render-real-cli-capture.py`` — same prompt,
 same one-line edit, same verification — and, while the model works, drives ``/diff`` with real
 keystrokes through tmux: open the panel before anything has changed, watch the model's edit appear

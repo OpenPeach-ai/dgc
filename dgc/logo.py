@@ -54,6 +54,18 @@ _REST = "#7C5CFF"     # resting colour of the mark = brand PURPLE (matches the w
 # on 256-colour terminals (downsamples to a couple of neighbouring purples) — it never scatters into
 # cyan/rainbow the way a full-spectrum gradient would. (Verified across the whole sweep.)
 _GLINT = "#D9CCFF"
+# …on a DARK canvas. On the white canvas /bg light paints, a lavender highlight is 1.5:1 — the mark
+# disappears for the part of every sweep that reaches the glint. Light mode sweeps the other way,
+# toward a deeper violet, so the shimmer stays visible against the page it is drawn on.
+_GLINT_LIGHT = "#4B2ECC"
+
+
+def _glint() -> str:
+    """The sweep's highlight for the canvas actually in front of the user."""
+    try:
+        return _GLINT_LIGHT if getattr(style.theme(), "name", "") == "light" else _GLINT
+    except Exception:
+        return _GLINT
 def _char_style(r: int, c: int, secs: float, hi: str, rows: int = _ROWS, cols: int = _COLS) -> str:
     """Colour a mark cell — the /// gets a grey→white glint sweeping bottom-left→top-right."""
     diag = (c + (rows - 1 - r)) / (cols + rows)
@@ -71,7 +83,7 @@ def _shine_opacity(diag: float, secs: float) -> float:
 
 def _frame(secs: float, indent: bool = True):
     from rich.text import Text
-    hi = _GLINT                               # light-grey glint (terminal-safe)
+    hi = _glint()                             # glint chosen for the active canvas (terminal-safe)
     t = Text()
     for r, line in enumerate(LOGO):             # keep leading spaces — they form the /// diagonal
         for c, ch in enumerate(line):
@@ -96,7 +108,7 @@ def shimmer_lines(secs: float, pad: int = 0, small: bool = False):
     from rich.text import Text
     art = LOGO_SMALL if small else LOGO
     rows, cols = len(art), max(len(r) for r in art)
-    hi = _GLINT
+    hi = _glint()
     out = []
     for r, line in enumerate(art):              # NOT lstripped — leading spaces form the /// diagonal
         t = Text()
@@ -119,7 +131,7 @@ def frame_ansi(secs: float, width: int = 80) -> str:
     c = Console(file=_io.StringIO(), force_terminal=True, color_system="truecolor",
                 width=max(_COLS + 2, width), highlight=False)
     pad = max(0, (width - _COLS) // 2)
-    hi = _GLINT
+    hi = _glint()
     from rich.text import Text
     body = Text("\n")
     for r, line in enumerate(LOGO):

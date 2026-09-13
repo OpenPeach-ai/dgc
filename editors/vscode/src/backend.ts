@@ -55,6 +55,10 @@ export class DgcBackend extends EventEmitter {
   private respondedRequests = new Set<string>();
   private draining = false;
   private startedAt = 0;
+  private exiting: ChildProcessWithoutNullStreams | undefined;
+
+  /** Set when this instance is being torn down on purpose (restart/dispose/protocol failure). */
+  intentional = false;
 
   /** The child's pid and how long it has been up — for the log that explains a lost turn. */
   get childPid(): number | undefined { return this.proc?.pid; }
@@ -161,7 +165,15 @@ export class DgcBackend extends EventEmitter {
     // killed process, and reporting only the code made a crash indistinguishable from a clean
     // exit(0) -- both surfaced as "dgc backend exited" with nothing after it.
     child.on("exit", (code, signal) => {
-      if (this.proc !== child) {
+      const disposed = this.exiting === child;
+      if (this.proc !== child && !disposed) {
+        return;
+      }
+      if (disposed) {
+        // A shutdown we asked for. Report it — silently swallowing it is what left a lost turn
+        // with no record of who ended it — but do not disturb a newer instance's state.
+        this.exiting = undefined;
+        this.emit("exit", code, signal);
         return;
       }
       this.proc = undefined;
@@ -608,6 +620,11 @@ export class DgcBackend extends EventEmitter {
     this.respondedRequests.clear();
     const p = this.proc;
     this.proc = undefined;
+    // Keep the doomed child addressable until its exit is observed. Dropping the reference here
+    // made the exit guard swallow the event, so the log line that says whether WE asked for the
+    // shutdown — the one question a lost turn needs answered — could never print "yes".
+    this.exiting = p;
+    this.intentional = true;
     this.emit("disposed");
     if (!p) {
       return;

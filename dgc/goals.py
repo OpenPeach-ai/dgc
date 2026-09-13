@@ -195,11 +195,19 @@ class ReportFilter:
 AUTO_RESUME_MAX = 2          # consecutive automatic resumes before DGC stops and waits for a human
 
 
+# The three sentences DGC writes into the transcript AS THE USER so the model reads them. They are
+# not anything a person typed: a goal cycle carries the whole objective, and replaying one as a
+# chat bubble pastes the user's entire goal spec back at them as though they had just sent it.
+# `_history()` matches on these, so they live here, once.
+CYCLE_MARKER = "Continue the active goal from the current session state."
+AUTO_RESUME_MARKER = "The previous attempt at this goal stopped early:"
+
+
 def auto_resume_prompt(reason: str) -> str:
     """The instruction that restarts a standing goal after a turn stopped on its own."""
     detail = " ".join(str(reason or "").split())[:600] or "the turn stopped before finishing"
     return (
-        f"The previous attempt at this goal stopped early: {detail}\n\n"
+        f"{AUTO_RESUME_MARKER} {detail}\n\n"
         "Do not repeat whatever stopped it. Check the todos and the most recent work, then take "
         "the first unfinished step a DIFFERENT way -- a narrower step, a different tool, or read "
         "something you have not read yet. If you cannot make progress, record what is blocking "
@@ -565,7 +573,7 @@ class GoalLifecycle:
                 refusal = str(getattr(self, "_goal_refusal_note", "") or "")
                 self._goal_refusal_note = ""
                 prompt = ((refusal + "\n\n") if refusal else "") + (
-                          "Continue the active goal from the current session state. Take the next concrete "
+                          CYCLE_MARKER + " Take the next concrete "
                           "step; preserve finished work and existing permissions. If fully achieved, "
                           "report completion with evidence; if externally blocked, report the blocker.\n\n"
                           "Goal: " + self.goal)

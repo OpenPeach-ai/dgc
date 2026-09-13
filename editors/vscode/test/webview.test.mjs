@@ -648,24 +648,82 @@ test("MCP command errors and cancellation settle the picker while preserving the
   assert.deepEqual(errors, []);
 });
 
-test("restored history pages and tool disclosure preserve live content and safe output", () => {
-  const { dom, doc, send, errors } = makeDom();
-  send({ type: "event", event: { type: "turn_start" } });
+// Saved history is the live event vocabulary, replayed. A restored turn must therefore be a
+// turn -- one block, real tool cards, the same designated answer -- and not the flat projection
+// of message text that made a reloaded session read as one wall of prose.
+const savedTurn = (n) => [
+  { type: "turn_start", turn_id: `h${n}`, prompt: `Saved prompt ${n}`, kind: "prompt" },
+  { type: "text_delta", text: `Checking ${n}` },
+  { type: "stream_end", message_id: `h${n}:1`, phase: "commentary" },
+  { type: "tool_call", call_id: `h${n}c1`, name: "bash", args: { command: "npm test" }, summary: "npm test" },
+  { type: "tool_result", call_id: `h${n}c1`, name: "bash", output: "<script>unsafe()</script>", is_error: false },
+  { type: "text_delta", text: `Answer ${n}` },
+  { type: "stream_end", message_id: `h${n}:2`, phase: "answer" },
+  { type: "turn_end", turn_id: `h${n}`, reason: "completed", token_estimate: 0, final_message_id: `h${n}:2` },
+];
+
+test("a restored session replays into real turns, pages by turn, and keeps live content", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start", turn_id: "live" } });
   send({ type: "event", event: { type: "text_delta", text: "Live response" } });
-  const items = Array.from({ length: 120 }, (_, i) => ({ role: "user", text: `Saved ${i}` }));
-  items.push({ role: "assistant", text: "Inspecting", tools: ["bash"], commentary: true,
-    tool_details: [{ name: "bash", arguments: "npm test", output: '<script>unsafe()</script>', status: "returned" }] });
+  const items = [{ role: "notice", text: "Showing the most recent saved context." }];
+  for (let n = 1; n <= 12; n++) items.push(...savedTurn(n));
   send({ type: "event", event: { type: "history", items } });
-  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 50);
-  assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/);
-  const detail = doc.querySelector(".history-tools");
-  assert.equal(detail.querySelector(".out"), null);
-  detail.open = true; detail.dispatchEvent(new dom.window.Event("toggle"));
-  assert.match(detail.querySelector(".out").textContent, /<script>unsafe/);
-  assert.equal(detail.querySelector("script"), null);
-  assert.ok(doc.querySelector(".history-pages .text.commentary"));
+  const pages = doc.querySelector(".history-pages");
+  // A page is whole turns -- 50 events deep, never cut through the middle of one.
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 7);
+  assert.equal(pages.querySelectorAll(".msg.dgc .thinking.done").length, 7, "every restored turn is closed");
+  assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/,
+    "the live turn keeps streaming below the restored transcript");
+  assert.match(doc.querySelector("#log > .msg.dgc:not(.hist) .text").textContent, /^Live response/);
+  // One block per turn, built by the live builders: real tool cards, escaped output, no prose dump.
+  const block = [...pages.querySelectorAll(".msg.dgc")].at(-1);   // the newest restored turn
+  assert.equal(pages.querySelectorAll(".history-tool, .nm, .history-tools").length, 0,
+    "the second projection is gone");
+  const card = block.querySelector(".tool");
+  assert.equal(card.dataset.status, "completed");
+  assert.equal(card.querySelector(".verb").textContent, "Ran");
+  assert.match(card.querySelector(".arg").textContent, /npm test/, "the command is on screen");
+  assert.match(card.querySelector(".body pre").textContent, /<script>unsafe/, "so is its output");
+  assert.equal(card.querySelector("script"), null);
+  assert.ok(card.classList.contains("has-output"), "a restored card shows its output without a click");
+  // The backend designated the answer; the panel promotes exactly that block and demotes the rest.
+  const finals = [...block.querySelectorAll(".text.final")];
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0].textContent.trim(), "Answer 12");
+  assert.equal(finals[0].dataset.messageId, "h12:2");
+  assert.ok(finals[0].closest(".answer"), "the restored answer gets the same block a live one gets");
+  assert.equal(block.querySelectorAll(".answer > .response-actions").length, 1);
+  assert.equal(block.querySelector(".text.commentary").textContent.trim(), "Checking 12");
+  assert.equal([...pages.querySelectorAll(".text")]
+    .filter((t) => !t.classList.contains("commentary") && !t.classList.contains("final")).length, 0,
+    "after a turn ends no prose is left unclassified");
+  // Replay is silent and costs nothing: no clock it cannot know, no spinner for finished work.
+  assert.equal(block.querySelector(".thinking.done").textContent, "Worked",
+    "a restored turn has no elapsed time to report and does not invent one");
+  assert.equal(pages.querySelectorAll(".dot.run").length, 0);
   doc.querySelector(".history-older").click();
-  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 100);
+  assert.equal(pages.querySelectorAll(".msg.dgc").length, 12);
+  assert.match(pages.querySelector(".sys").textContent, /most recent saved context/);
+  assert.deepEqual(errors, []);
+});
+
+test("a history payload only ever drives the replayable events", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "history", items: [
+    ...savedTurn(1),
+    { type: "permission_request", id: "p1", name: "bash", command: "rm -rf /", args: {} },
+    { type: "session", kind: "new", session_id: "wiped" },
+    { type: "handoff_started" },
+    { type: "not_a_real_event", text: "ignored" },
+    { role: "compaction", text: "earlier summary" },
+  ] } });
+  assert.equal(doc.querySelector(".card"), null, "a saved approval request is never re-asked");
+  assert.equal(doc.querySelectorAll(".msg.dgc").length, 1, "and nothing else invents a turn");
+  assert.match(doc.querySelector(".compaction").textContent, /summarised/);
+  assert.equal(doc.querySelector(".compaction-body").textContent, "earlier summary");
+  assert.deepEqual(posted.filter((m) => m.type !== "webviewReady" && m.type !== "getRecall"), [],
+    "replay posts nothing to the extension host but the pager's own request for the archive");
   assert.deepEqual(errors, []);
 });
 
@@ -749,6 +807,11 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   send({ type: "event", event: { type: "text_delta", text: "then run the tests.\n" } });
   assert.match(doc.querySelector(".text").textContent, /iat/);
   assert.ok(doc.querySelector(".text code"), "inline code did not render");
+  // The round that produced this prose also called tools, and the backend says so. The panel no
+  // longer infers it from a tool card arriving afterwards.
+  send({ type: "event", event: { type: "stream_end", message_id: "t1:1", phase: "commentary" } });
+  assert.ok(doc.querySelector(".text.commentary"), "a stated phase classifies the block it closed");
+  assert.equal(doc.querySelector(".text.commentary").dataset.messageId, "t1:1");
 
   // tool card 1 — read_file (glyph →)
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/auth.ts", call_id: "c1" } });
@@ -823,7 +886,8 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.equal(doc.querySelector(".msg.dgc").lastElementChild, doc.querySelector(".thinking.done"),
     "turn timing should remain below the completed response");
   assert.equal(doc.querySelector(".text.final"), null,
-    "commentary before tools must not become a final answer");
+    "prose the backend called commentary is never promoted to the answer");
+  assert.equal(doc.querySelector(".answer"), null, "and a turn with no designated answer gets no block");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
   dom.window.close();
@@ -842,6 +906,9 @@ test("live activity follows the newest response content without stealing an inte
     scrollTop: { configurable: true, writable: true, value: 900 },
   });
   send({ type: "event", event: { type: "text_delta", text: "First streamed line.\nSecond streamed line." } });
+  // The round that follows calls a tool, and the backend says so when the block closes: this is
+  // mid-turn commentary, not the turn's answer, so nothing is promoted out from under the row.
+  send({ type: "event", event: { type: "stream_end", message_id: "t1:1", phase: "commentary" } });
   assert.equal(response.lastElementChild, activity,
     "working status should sit below the latest streamed text");
   assert.equal(log.scrollTop, 1000, "a reader at the tail should follow new streamed text");
@@ -928,7 +995,11 @@ test("CommonMark preserves semantic structure and only explicit safe navigation"
   send({ type: "event", event: { type: "turn_end", reason: "completed" } });
   const final = doc.querySelector(".text.final");
   assert.ok(final);
-  assert.equal(final.previousElementSibling, doc.querySelector(".thinking.done"));
+  // The answer sits in a block of its own, below the work and its timing, with its actions inside.
+  const answer = final.closest(".answer");
+  assert.ok(answer, "the designated answer is promoted into its own block");
+  assert.equal(answer.previousElementSibling, doc.querySelector(".thinking.done"));
+  assert.equal(answer.querySelector(".response-actions").parentElement, answer);
   doc.querySelector(".ract-copy").click();
   assert.equal(posted.at(-1).text, text, "copy response preserves Markdown source");
   assert.deepEqual(errors, []);
@@ -960,23 +1031,191 @@ test("tool correlation accepts opaque IDs and preserves denial evidence", () => 
   dom.window.close();
 });
 
-test("tool batches collapse without hiding failures or misclassifying preceding commentary", () => {
+test("a tool batch shows the work while it runs, bounded, with the rest one click away", () => {
   const { dom, errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
-  event({ type: "turn_start" });
+  event({ type: "turn_start", turn_id: "t1" });
   event({ type: "text_delta", text: "I am checking the implementation." });
-  event({ type: "stream_end" });
+  event({ type: "stream_end", message_id: "t1:1", phase: "commentary" });
   event({ type: "tool_call", call_id: "one", name: "Read", summary: "app.ts" });
-  event({ type: "tool_result", call_id: "one", name: "Read", output: "source" });
+  event({ type: "tool_result", call_id: "one", name: "Read", output: "source line\nsecond line" });
   event({ type: "tool_call", call_id: "two", name: "Bash", summary: "npm test" });
   const group = doc.querySelector(".tool-group");
   assert.match(group.querySelector("summary").textContent, /Running npm test/);
-  assert.equal(group.open, false);
+  assert.equal(group.open, true, "work you cannot see is work you cannot check");
+  const first = group.querySelector(".tool");
+  assert.match(first.querySelector(".arg").textContent, /app\.ts/, "the target is on screen");
+  assert.ok(first.classList.contains("has-output"), "and so is what it returned, without a click");
+  assert.match(first.querySelector(".body pre").textContent, /second line/);
+  assert.equal(first.classList.contains("open"), false, "the rest is one click away, not on screen");
+  first.querySelector(".tool-toggle").click();
+  assert.equal(first.classList.contains("open"), true);
+  assert.equal(first.querySelector(".tool-toggle").getAttribute("aria-expanded"), "true");
   event({ type: "tool_result", call_id: "two", name: "Bash", is_error: true, output: "test failed" });
-  assert.equal(group.open, true, "errors must remain visible in collapsed batches");
+  assert.equal(group.open, true, "errors must remain visible");
+  // The sentence a colleague would say, kept: it is the group's header whether open or folded.
+  assert.match(group.querySelector("summary").textContent, /Read 1 file and ran 1 command/);
   assert.match(group.querySelector("summary").textContent, /1 issue/);
+  event({ type: "turn_end", reason: "completed", final_message_id: null });
+  assert.equal(doc.querySelector(".text.final"), null, "the backend designated no answer, so there is none");
+  assert.ok(doc.querySelector(".text.commentary"), "and the prose it did state stays commentary");
+  // Stated null and never stated are different claims. A turn that ended mid-tool designates no
+  // answer and gets none; a backend too old to say anything keeps the old positional rule.
+  event({ type: "turn_start", turn_id: "t2" });
+  event({ type: "text_delta", text: "Interrupted while a tool was running." });
+  event({ type: "turn_end", reason: "completed", final_message_id: null });
+  assert.equal(doc.querySelectorAll(".text.final").length, 0, "an explicit null invents no answer");
+  assert.equal(doc.querySelectorAll(".answer").length, 0);
+  event({ type: "turn_start", turn_id: "t3" });
+  event({ type: "text_delta", text: "An older backend states nothing at all." });
   event({ type: "turn_end", reason: "completed" });
-  assert.equal(doc.querySelector(".text.final"), null, "stream_end before a tool is still commentary");
+  assert.equal(doc.querySelectorAll(".text.final").length, 1, "and a field that is absent keeps the floor");
+  assert.match(doc.querySelector(".text.final").textContent, /older backend/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+// The turn the founder actually hit: an answer, a gate that continued the loop, more tool work,
+// and then the real answer. The panel used to promote the LAST prose node it could see, which was
+// the gate round's, and leave the block he had read as bare unclassified text.
+test("a gate round promotes the answer the backend designated, and demotes everything else", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Fix the gate" });
+  event({ type: "text_delta", text: "Here is the fix." });
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });      // a candidate, not the answer
+  event({ type: "text_delta", text: "Actually the todos are still open." });
+  event({ type: "stream_end", message_id: "t1:2", phase: "commentary" });
+  event({ type: "tool_call", call_id: "c1", name: "bash", summary: "npm test" });
+  event({ type: "tool_result", call_id: "c1", name: "bash", output: "3 passing" });
+  event({ type: "text_delta", text: "Done: the gate is green." });
+  event({ type: "stream_end", message_id: "t1:3", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 9, final_message_id: "t1:3" });
+  const finals = [...doc.querySelectorAll(".text.final")];
+  assert.equal(finals.length, 1, "exactly one block is the answer");
+  assert.equal(finals[0].dataset.messageId, "t1:3");
+  assert.match(finals[0].textContent, /the gate is green/);
+  for (const id of ["t1:1", "t1:2"]) {
+    const node = doc.querySelector(`[data-message-id="${id}"]`);
+    assert.ok(node.classList.contains("commentary"), `${id} is commentary once the turn designates another answer`);
+    assert.equal(node.classList.contains("final"), false);
+  }
+  assert.equal([...doc.querySelectorAll(".text")]
+    .filter((t) => !t.classList.contains("commentary") && !t.classList.contains("final")).length, 0,
+    "no bare third state is left behind");
+  assert.equal(doc.querySelectorAll(".response-actions").length, 1);
+  assert.ok(doc.querySelector(".answer > .response-actions"), "the actions belong to the answer");
+  assert.ok(doc.querySelectorAll(".turn-summary").length <= 1);
+  assert.equal(finals[0].closest(".answer").previousElementSibling, doc.querySelector(".thinking.done"));
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+// Replay parity. The live path and the restore path are the same builders driven by the same
+// events, so the DOM a reload produces must equal the DOM the live turn produced. Anything that
+// legitimately differs -- an elapsed clock nobody saved, per-document element ids, the `hist`
+// marker -- is normalised away; everything else has to match exactly.
+test("a turn replayed from history renders identically to the live turn it came from", () => {
+  const events = [
+    { type: "turn_start", turn_id: "t1", prompt: "Why is the gate failing?", kind: "prompt" },
+    { type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting for the model" },
+    { type: "text_delta", text: "Reading the gate, then running the suite." },
+    { type: "stream_end", message_id: "t1:1", phase: "commentary" },
+    { type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: "npm test" },
+    { type: "tool_call", call_id: "c1", name: "bash", args: { command: "npm test" }, summary: "npm test" },
+    { type: "tool_result", call_id: "c1", name: "bash", output: "1 passing, 2 failing", is_error: true },
+    { type: "tool_call", call_id: "c2", name: "edit_file", args: { path: "gate.py" }, summary: "gate.py" },
+    { type: "tool_result", call_id: "c2", name: "edit_file", is_diff: true,
+      diff: "--- a/gate.py\n+++ b/gate.py\n@@ -1,2 +1,2 @@\n-if d > MAX:\n+if d >= MAX:\n",
+      output: "--- a/gate.py\n+++ b/gate.py\n@@ -1,2 +1,2 @@\n-if d > MAX:\n+if d >= MAX:\n" },
+    { type: "text_delta", text: "## Fixed\n\nThe comparison was off by one report." },
+    { type: "stream_end", message_id: "t1:2", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 2618, final_message_id: "t1:2" },
+  ];
+  const live = makeDom();
+  for (const event of events) live.send({ type: "event", event });
+  // What `_history()` hands back for the same turn: the same vocabulary, minus what it cannot
+  // know (no live activity to replay, no clock, no token estimate) and with its own turn id.
+  const items = events.filter((e) => e.type !== "turn_activity").map((e) => {
+    const copy = { ...e };
+    if (copy.turn_id) copy.turn_id = "h1";
+    if (copy.message_id) copy.message_id = copy.message_id.replace("t1", "h1");
+    if (copy.final_message_id) copy.final_message_id = copy.final_message_id.replace("t1", "h1");
+    if (copy.type === "turn_end") copy.token_estimate = 0;
+    return copy;
+  });
+  const restored = makeDom();
+  restored.send({ type: "event", event: { type: "history", items } });
+  const normalise = (html) => html
+    .replace(/tool-output-\d+/g, "tool-output-N")
+    .replace(/reasoning-\d+/g, "reasoning-N")
+    .replace(/\b[a-z]\d+:(\d+)\b/g, "m:$1")          // t1:2 and h1:2 are the same block
+    .replace(/Worked for \d+s/g, "Worked")            // a replayed turn has no clock to print
+    .replace(/ hist\b/g, "")
+    .replace(/\s+/g, " ").trim();
+  const pages = restored.doc.querySelector(".history-pages").cloneNode(true);
+  pages.querySelector(".history-older").remove();
+  const shape = normalise(live.doc.getElementById("log").innerHTML);
+  assert.ok(shape.length > 1000, "the comparison must be of a real turn, not an empty transcript");
+  assert.equal(normalise(pages.innerHTML), shape);
+  // And the thing that made it worth doing: the answer is an answer on both paths.
+  for (const doc of [live.doc, restored.doc]) {
+    assert.equal(doc.querySelectorAll(".text.final").length, 1);
+    assert.ok(doc.querySelector(".answer > .text.final"));
+    assert.ok(doc.querySelector(".answer > .response-actions"));
+    assert.equal(doc.querySelectorAll(".tool").length, 2);
+    assert.ok(doc.querySelector(".diff"), "a saved unified diff comes back as a diff card");
+  }
+  assert.deepEqual(live.errors, []);
+  assert.deepEqual(restored.errors, []);
+});
+
+// The verb was written once, as the literal "working…", and no code path could ever change it --
+// so it said "working…" through six gates and every tool call, including after the answer landed.
+test("the activity verb is the backend's, and does not outlive the turn", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const verb = () => doc.querySelector(".thinking .verb")?.textContent;
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  assert.equal(verb(), "Working", "the floor, and only until the backend says something");
+  event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: "npm test" });
+  assert.equal(verb(), "Running a command · npm test");
+  event({ type: "turn_activity", turn_id: "other", state: "thinking", label: "Thinking" });
+  assert.equal(verb(), "Running a command · npm test", "another turn's activity is not this turn's");
+  event({ type: "turn_activity", turn_id: "t1", state: "continuing", label: "Finishing open todos" });
+  assert.equal(verb(), "Finishing open todos", "a gate continuing the loop says so");
+  assert.match(doc.querySelector(".thinking .meta").textContent, /^\(\d+s/);
+  // A question on screen is a fact about this client and outranks whatever the backend is doing.
+  event({ type: "permission_request", id: "p1", name: "bash", command: "npm test", args: { command: "npm test" } });
+  assert.equal(verb(), "waiting for your input");
+  assert.ok(doc.querySelector(".thinking").classList.contains("waiting-input"));
+  doc.querySelector('.card button[data-d="deny"]').click();
+  assert.equal(verb(), "Finishing open todos", "answered, and the backend's own state comes back");
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  assert.equal(verb(), undefined, "the verb does not outlive the turn");
+  assert.match(doc.querySelector(".thinking.done").textContent, /^Worked for \d+s$/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("a backend restart that is recovering does not relabel an answered turn as failed", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  event({ type: "text_delta", text: "The fix is in `gate.py`." });
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true });
+  assert.equal(doc.querySelector(".thinking.done"), null, "the work is being picked back up, not lost");
+  assert.equal(doc.querySelector(".thinking .verb").textContent, "Reconnecting");
+  assert.match(doc.querySelector(".sys.err").textContent, /reconnecting/);
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  assert.match(doc.querySelector(".text.final").textContent, /The fix is in/);
+  assert.match(doc.querySelector(".thinking.done").textContent, /^Worked/);
+  // A backend that is not coming back still ends the turn, and says so.
+  event({ type: "turn_start", turn_id: "t2", prompt: "Again" });
+  event({ type: "text_delta", text: "Starting." });
+  send({ type: "backend_exit", code: 1, recovering: false });
+  assert.match(doc.querySelectorAll(".thinking.done")[1].textContent, /^Failed/);
   assert.deepEqual(errors, []);
   dom.window.close();
 });

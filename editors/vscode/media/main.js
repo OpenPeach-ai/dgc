@@ -15,6 +15,15 @@
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
+  // ---- one renderer, two sources ----
+  // A restored turn is built by the builders that build a live one -- same classes, same answer
+  // promotion, same tool cards -- because a second projection is how the panel came to disagree
+  // with itself about what an answer was. `replaying` is the only thing that tells the two apart,
+  // and it suppresses exactly what would lie (clocks, spinners, announcements, "new" pills) or
+  // cost (posts to the extension host). `appendTarget` is where a new block lands: the transcript
+  // live, a detached fragment while a history page is being built.
+  let replaying = false, appendTarget = log;
+
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
   const MODES = {
     default:     { icon: "shield",    desc: "ask before edits & commands" },
@@ -455,7 +464,9 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
-  function speak(message) { announcer.textContent = String(message || ""); }
+  // Replay says nothing: a restored transcript is not something that just happened, and
+  // announcing fifty saved turns on reload buries whatever the reader is actually doing.
+  function speak(message) { if (replaying) return; announcer.textContent = String(message || ""); }
 
   // One CommonMark renderer for live answers, history, skills, and documentation.
   const md = (source) => DgcMarkdown.render(source);
@@ -570,7 +581,7 @@
   window.__dgcPanelBuild = "follow-4";   // proves which panel code a recording actually ran
   let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
-  function scroll() { log.scrollTop = log.scrollHeight; following = true; }
+  function scroll() { if (replaying) return; log.scrollTop = log.scrollHeight; following = true; }
   // ---- reading back without losing the end ----
   // Scrolling up during a run is normal; being stranded there is not. The pill appears only
   // while you are away from the bottom, and turns into the accent once something has arrived
@@ -633,42 +644,75 @@
     // The composer renders what the user typed there. A turn begun anywhere else — a slash
     // command, an editor action, a queued follow-up, a retry, the terminal beside us — must
     // still show its prompt, or the transcript reads as answers to questions nobody asked.
-    const last = [...log.querySelectorAll(".msg.user > .bubble")].at(-1);
+    const last = [...appendTarget.querySelectorAll(".msg.user > .bubble")].at(-1);
     if (last && sameProse(last.textContent, body)) return;
-    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(body)));
-    log.appendChild(m); settleBlock(m);
+    appendTarget.appendChild(m); if (!replaying) settleBlock(m);
   }
-  function startTurn(prompt = "", kind = "prompt") {
-    if (turn) endTurn("cancelled");
+  function startTurn(prompt = "", kind = "prompt", id = "") {
+    // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
+    if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
     // A resumed goal is not something the user just typed. Show it as what it is instead of
     // echoing the objective back into the chat as a fresh prompt.
     if (kind === "resume") {
-      const note = el("div", "resume-note");
+      const note = el("div", replaying ? "resume-note hist" : "resume-note");
       note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
         + '<span>Resumed the standing goal</span>';
-      log.appendChild(note);
+      appendTarget.appendChild(note);
     } else {
       echoPrompt(prompt);
     }
-    const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
-    const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
-    block.appendChild(act); log.appendChild(block);
-    const t0 = Date.now();
+    const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
+    block.appendChild(el("div", "role dgc", "DGC"));
+    // The verb starts empty and is written only by renderTurnMeta, from what the backend says the
+    // turn is doing. A literal here is a claim the panel cannot keep: it was "working…" from the
+    // first byte to the last, through six gates and every tool call.
+    const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
+    block.appendChild(act); appendTarget.appendChild(block);
+    // No clock for a replayed turn: the session file does not record when it started, and a
+    // fabricated 0s is worse than no number at all.
+    const t0 = replaying ? null : Date.now();
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
+             id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
-    turn.timer = setInterval(renderTurnMeta, 200);
-    renderTurnMeta();
-    scroll();
+    if (!replaying) {
+      turn.timer = setInterval(renderTurnMeta, 200);
+      renderTurnMeta();
+      scroll();
+    }
   }
+  // The one writer of the activity row. Everything it can say is a fact somebody stated: the
+  // panel's own open request card, the handoff this panel asked for, or the backend's
+  // `turn_activity`. "Working" is the floor, and only until the first activity arrives.
   function renderTurnMeta() {
-    const meta = turn?.act?.querySelector(".meta");
-    if (!turn || !meta) return;
+    if (!turn?.act) return;
+    const verb = turn.act.querySelector(".verb"), meta = turn.act.querySelector(".meta");
+    if (!verb || !meta) return;
+    // A question on screen is a fact about THIS client and beats anything the backend is doing.
+    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
+    turn.act.classList.toggle("waiting-input", waiting);
+    const activity = turn.activity;
+    verb.textContent = waiting ? "waiting for your input"
+      : turn.handoff ? "generating handoff…"
+        : activity ? activity.label + (activity.detail ? ` · ${activity.detail}` : "")
+          : "Working";
+    if (turn.t0 == null) { meta.textContent = ""; return; }   // a replayed turn has no clock
+    const now = Date.now();
+    const total = Math.floor((now - turn.t0) / 1000);
+    const phase = Math.floor((now - (turn.phaseT0 || turn.t0)) / 1000);
+    // Two clocks only once they differ: how long this step has taken, then the whole turn. It is
+    // the TUI's shape, and it is what makes a long gate visible instead of a growing total.
+    const clock = activity && phase !== total ? `${phase}s · ${total}s` : `${total}s`;
     const eta = turn.eta ? ` · ${turn.eta}` : "";
-    meta.textContent = `(${Math.floor((Date.now() - turn.t0) / 1000)}s${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
+    meta.textContent = `(${clock}${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
   }
-  function endTurn(reason = "completed") {
+  // `finalId` is the backend's own designation of which prose block this turn answered with
+  // (`turn_end.final_message_id`). The panel used to guess it from the position of the last
+  // `.text` node, which made a gate round's prose the answer and left the block the user had
+  // actually read as bare, unclassified text.
+  function endTurn(reason = "completed", finalId) {
     if (!turn) return;
     flushText();
     finishReasoning();
@@ -679,26 +723,53 @@
       if (dot) dot.className = "dot deny";
     });
     clearInterval(turn.timer);
-    const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
-    if (lastText && !lastText.classList.contains("commentary")) {
+    clearTimeout(turn.recoverTimer);
+    const nodes = [...turn.block.querySelectorAll(".text")];
+    let answer = finalId != null ? nodes.find((n) => n.dataset.messageId === String(finalId)) : null;
+    // Absent and null are different answers to the same question. A backend that never states the
+    // field (or an internal caller ending a turn the protocol did not) keeps the old positional
+    // rule -- the compatibility floor, exactly as a null MessagePhase means "legacy behaviour".
+    // An explicit null is a statement: this turn designated no answer (it ended mid-tool), and
+    // inventing one from the last node on screen is the guess this change exists to remove.
+    if (!answer && (finalId === undefined
+        // A stated id the panel has no node for is a lost message, not a statement that the turn
+        // had no answer: without this the turn rendered with no answer block at all.
+        || (finalId != null && !nodes.some((n) => n.dataset.messageId === String(finalId))))) {
+      const last = nodes.at(-1);
+      if (last && !last.classList.contains("commentary")) answer = last;
+    }
+    // After a turn ends there is no third state left: every block is either the answer or the
+    // commentary around it. A bare `.text` was how a gate-round answer came to look finished.
+    for (const n of nodes) if (n !== answer) n.classList.add("commentary");
+    if (answer) {
+      answer.classList.remove("commentary");        // the stated id outranks any earlier guess
       const complete = reason === "completed";
-      if (complete) lastText.classList.add("final");   // unfinished prose is not a final answer
+      if (complete) answer.classList.add("final");   // unfinished prose is not a final answer
+      // The answer gets a block of its own: separated from the work above it, with room to
+      // breathe, and its own actions inside it rather than floating underneath the turn.
       // What this turn changed, then what you can do about it — the two things a reader wants
       // at the end of an answer, in that order. A stopped or failed turn gets the actions too:
       // a partial answer is exactly the one a reader wants to copy or retry, and denying Copy
       // there was the opposite of helpful. The change summary stays gated on completion, because
       // a turn that did not finish has not finished changing things.
+      const box = el("div", complete ? "answer complete" : "answer partial");
+      answer.replaceWith(box);
+      box.appendChild(answer);
       const summary = complete ? turnSummaryCard(turn.edits, turn.prompt) : null;
-      const actions = responseActions(lastText, turn.prompt, !complete);
-      lastText.after(actions);
-      if (summary) lastText.after(summary);
+      if (summary) box.appendChild(summary);
+      box.appendChild(responseActions(answer, turn.prompt, !complete));
       // The work summary separates the collapsed activity from the final response.
-      turn.block.insertBefore(turn.act, lastText);
+      turn.block.insertBefore(turn.act, box);
     }
     turn.act.classList.add("done");
-    turn.act.textContent = `${reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked"} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
+    const outcome = reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
+    // A replayed turn has no clock — the session file never recorded when it began — so it says
+    // what happened and stops there rather than printing a fabricated 0s.
+    turn.act.textContent = turn.t0 == null ? outcome
+      : `${outcome} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     const finished = turn.block;
     turn = null;
+    if (replaying) return;
     // After every mutation this turn will make, so the height that gets pinned is the final one.
     // The end of a finished turn is its result — the summary of what it changed and what you can
     // do about it — so unless you have scrolled away to read something else, show it. Once now
@@ -981,7 +1052,8 @@
   function appendText(value) {
     turn._buf = (turn._buf || "") + value;
     const node = textBlock(); node._markdown = turn._buf;
-    if (!turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
+    // Replay renders inline: a batch timer would hand the fragment back to the pager half empty.
+    if (replaying || !turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
       const stick = atBottom(); flushText(); if (stick || following) scroll(); else noteNewContent();
     }, 48);
@@ -1048,6 +1120,11 @@
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
       turn.toolGroup.innerHTML = '<summary><span class="codicon codicon-tools" aria-hidden="true"></span><span class="tool-group-label">Working</span></summary>';
+      // Open, because work you cannot see is work you cannot check. The group collapsed itself
+      // the moment it was created, so a run of twenty commands showed one grey line and the
+      // reader had no idea what had just been done to their project. The summary sentence still
+      // sits in the header when the group is folded by hand.
+      turn.toolGroup.open = true;
     }
     turn.toolGroup.appendChild(card);
     refreshToolGroup(turn.toolGroup);
@@ -1074,7 +1151,7 @@
           : value === "failed" ? `${copy.past} · failed`
             : value === "blocked" ? `${copy.past} · blocked, repeated call`
               : value === "denied" ? `${copy.present} · denied`
-              : value === "stopped" ? `${copy.present} · stopped` : copy.past;
+              : value === "stopped" ? `${copy.past} · stopped` : copy.past;
     }
     if (value !== "running") {
       clearInterval(card._timer);
@@ -1103,20 +1180,32 @@
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
-    [...turn.block.querySelectorAll(".text")].at(-1)?.classList.add("commentary");
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
-    const dot = el("span", "dot run"); dot.setAttribute("aria-hidden", "true");
+    // Nothing is running in a replayed turn, so neither the pulse nor the stopwatch is started:
+    // both would be animating a step that finished before the window was reopened.
+    const dot = el("span", replaying ? "dot" : "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
     const elapsed = el("span", "tool-time", ""); head.appendChild(elapsed);
-    c._timer = setInterval(() => {
+    if (!replaying) c._timer = setInterval(() => {
       const seconds = (Date.now() - c._startedAt) / 1000;
       elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
     }, 200);
     setToolStatus(c, "running");
     appendTool(c); breakText(); return c;
+  }
+  // A tool card shows its output as soon as there is any: the head says what ran, the body shows
+  // the first few lines of what came back, and the toggle opens the rest. The body used to be
+  // hidden until clicked, so a collapsed group inside a collapsed body meant the work was
+  // invisible twice over.
+  function setToolOutput(card, text) {
+    const value = String(text || "");
+    const pre = card.querySelector(".body pre");
+    if (pre) pre.textContent = value;
+    card.classList.toggle("has-output", !!value.trim());
+    return value;
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");
@@ -1240,13 +1329,7 @@
       sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
     }
   }
-  function updateInputActivity() {
-    if (!turn?.act) return;
-    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
-    turn.act.classList.toggle("waiting-input", waiting);
-    turn.act.querySelector(".verb").textContent = waiting ? "waiting for your input" : "working…";
-  }
-  function requestCard(c, id) { c.dataset.requestId = String(id); updateInputActivity(); return c; }
+  function requestCard(c, id) { c.dataset.requestId = String(id); renderTurnMeta(); return c; }
   function showQuestionForm(ev) {
     const grouped = Array.isArray(ev.questions);
     const questions = grouped ? ev.questions : [{ id: "q1", header: "Question", question: ev.question, options: ev.options }];
@@ -1314,7 +1397,7 @@
     c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
     c.querySelectorAll("button, input, select, textarea")
       .forEach((control) => { control.disabled = true; });
-    updateInputActivity();
+    renderTurnMeta();
     return true;
   }
   function expireOpenRequests() {
@@ -1857,11 +1940,28 @@
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
-      case "turn_start": startTurn(ev.prompt, ev.kind); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "turn_start":
+        startTurn(ev.prompt, ev.kind, ev.turn_id);
+        if (!replaying) { setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } }
+        break;
+      // What the turn is doing, stated by the backend rather than guessed here. A turn that is
+      // between model rounds because a gate continued it now says so, instead of a static verb
+      // that could not be wrong because it never changed.
+      case "turn_activity": {
+        if (!turn || (ev.turn_id && turn.id && ev.turn_id !== turn.id)) break;
+        const label = String(ev.label || "").slice(0, 80);
+        const detail = String(ev.detail || "").slice(0, 120);
+        const changed = !turn.activity || turn.activity.state !== ev.state
+          || turn.activity.label !== label || turn.activity.detail !== detail;
+        turn.activity = { state: String(ev.state || ""), label, detail };
+        if (changed) turn.phaseT0 = Date.now();      // the phase clock restarts with the phase
+        renderTurnMeta();
+        break;
+      }
       case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
-        if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
+        if (turn) { turn.handoff = true; renderTurnMeta(); }
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
       case "prompt_accepted": {
@@ -1907,7 +2007,19 @@
           appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
         }
         turn.reasonEl.textContent += ev.text; break;
-      case "stream_end": finishReasoning(); breakText(); break;
+      // The block that just closed, named and classified by the backend. `phase` absent means
+      // undetermined (a cancelled or errored round genuinely does not know), and then nothing is
+      // claimed here: `turn_end` still designates the answer.
+      case "stream_end": {
+        finishReasoning();
+        const closed = turn?.textEl;
+        if (closed) {
+          if (ev.message_id) closed.dataset.messageId = String(ev.message_id);
+          if (ev.phase === "commentary") closed.classList.add("commentary");
+        }
+        breakText();
+        break;
+      }
       case "tool_call": {
         ensureTurn(); finishReasoning();
         turn._tools = turn._tools || Object.create(null);
@@ -1926,7 +2038,7 @@
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         const numeric = Number.isFinite(ev.progress);
         const hasTotal = numeric && Number.isFinite(ev.total) && ev.total !== 0;
-        c.querySelector(".body pre").textContent = String(ev.message || "").slice(0, 500);
+        setToolOutput(c, String(ev.message || "").slice(0, 500));
         c.querySelector(".badge").textContent = hasTotal
           ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
           : (numeric ? String(ev.progress) : "");
@@ -1968,7 +2080,10 @@
           const rendered = renderDiff(ev.diff); c.after(rendered);
           if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del);
         }
-        else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
+        else {
+          const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
+          c.querySelector(".badge").textContent = out.split("\n").length + " ln";
+        }
         breakText(); break;
       }
       case "tool_denied": {
@@ -1978,7 +2093,7 @@
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny";
         setToolStatus(c, "denied");
-        c.querySelector(".body pre").textContent = String(ev.reason || "Permission denied");
+        setToolOutput(c, String(ev.reason || "Permission denied"));
         c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         break;
       }
@@ -2261,8 +2376,15 @@
         break;
       }
       case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
-      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(ev.reason); setSending(false); break;
+      case "turn_end":
+        speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
+        endTurn(ev.reason, ev.final_message_id);
+        if (!replaying) setSending(false);
+        break;
     }
+    // A replayed page anchors its own scroll position and is not news: no jump to the bottom, and
+    // no "New" pill for a turn that finished before the window was reopened.
+    if (replaying) return;
     if (stick || following) scroll(); else noteNewContent();
   }
 
@@ -2922,6 +3044,72 @@
     closeSettings(); vscode.postMessage({ type: "slash", action: button.dataset.openSurface });
   });
 
+  // ---- replay ----
+  // Everything a saved turn is made of. Anything else in a history payload is not dispatched:
+  // `onEvent` carries cases with real side effects (posting to the extension host, registering
+  // approval cards, flipping the composer), and a reload must not fire any of them.
+  const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "stream_end",
+                              "tool_call", "tool_result", "tool_denied", "turn_end"]);
+  // One whole turn, or one standalone marker. Paging cuts between units, never inside one.
+  function historyUnits(items) {
+    const units = [];
+    let open = null;
+    for (const it of items) {
+      if (!it || typeof it !== "object") continue;
+      const type = typeof it.type === "string" ? it.type : "";
+      if (type === "turn_start") { open = [it]; units.push(open); continue; }
+      if (!type) {                           // a marker: part of the turn it fell inside, if any
+        if (open) open.push(it); else units.push([it]);
+        continue;
+      }
+      if (!REPLAYABLE.has(type)) continue;
+      if (open) { open.push(it); if (type === "turn_end") open = null; }
+      else units.push([it]);                 // a fragment with no turn above it still renders
+    }
+    return units;
+  }
+  // Drive the live reducer with saved events, into a detached fragment. The live turn is set
+  // aside first: a history page can arrive while a turn is streaming, and the replay must not
+  // adopt, finish or otherwise touch it.
+  function replayInto(list, frag) {
+    const live = turn, wasFollowing = following;
+    turn = null; replaying = true; appendTarget = frag;
+    try {
+      for (const it of list) {
+        if (it && typeof it.type === "string") { if (REPLAYABLE.has(it.type)) onEvent(it); }
+        else legacyItem(it);
+      }
+      if (turn) endTurn("completed");        // a page that ends mid-turn still settles its block
+    } finally {
+      replaying = false; appendTarget = log; turn = live; following = wasFollowing;
+    }
+  }
+  // Items the backend still sends in their own shape because they are not turn events, plus the
+  // flat projection an older backend sends — translated into events rather than given a second
+  // renderer of their own.
+  function legacyItem(it) {
+    if (!it || typeof it !== "object") return;
+    if (it.role === "compaction") {
+      // Earlier turns were summarised so the run could keep going. Say so plainly; the summary
+      // is the model's own context, available on request rather than pasted into the chat.
+      const note = el("details", "compaction hist");
+      note.innerHTML = '<summary><span class="codicon codicon-fold" aria-hidden="true"></span>'
+        + "<span>Earlier conversation summarised to keep it in context</span></summary>";
+      const body = el("pre", "compaction-body");
+      body.textContent = String(it.text || "").slice(0, 20000);
+      note.appendChild(body);
+      appendTarget.appendChild(note);
+      return;
+    }
+    if (it.role === "notice") { appendTarget.appendChild(el("div", "sys hist", esc(it.text))); return; }
+    if (it.role === "resume") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "resume" }); return; }
+    if (it.role === "user") { onEvent({ type: "turn_start", prompt: String(it.text || ""), kind: "prompt" }); return; }
+    if (it.role === "assistant" && it.text) {
+      onEvent({ type: "text_delta", text: String(it.text) });
+      onEvent({ type: "stream_end", phase: it.tools?.length ? "commentary" : "answer" });
+    }
+  }
+
   function renderHistory(items) {
     // Non-destructive: replace only the history block, and place it ABOVE any live
     // content. A resumed session's `history` event can arrive AFTER the user has
@@ -2932,63 +3120,18 @@
     const older = el("button", "act history-older", "Show earlier messages");
     older.title = "Load the previous page of this chat\u2019s history";
     history.appendChild(older);
-    let cursor = items.length;
+    // Saved history IS the live event vocabulary, so a page of it renders by driving the same
+    // reducer that renders a live turn: same classes, same answer promotion, same tool cards,
+    // same diffs. What used to be here was a second projection with its own idea of what an
+    // answer was, which is why a reloaded session read as one long wall of text.
+    const units = historyUnits(items);
+    let cursor = units.length;
     function page() {
-      const frag = document.createDocumentFragment(), start = Math.max(0, cursor - 50);
-      let lastUserPrompt = "";       // what each restored answer was replying to
-      items.slice(start, cursor).forEach((it) => {
-      if (it.role === "user") {
-        lastUserPrompt = String(it.text || "");
-        const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
-        m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
-      } else if (it.role === "compaction") {
-        // Earlier turns were summarised so the run could keep going. Say so plainly; the summary
-        // is the model's own context, available on request rather than pasted into the chat.
-        const note = el("details", "compaction hist");
-        note.innerHTML = '<summary><span class="codicon codicon-fold" aria-hidden="true"></span>'
-          + "<span>Earlier conversation summarised to keep it in context</span></summary>";
-        const body = el("pre", "compaction-body");
-        body.textContent = String(it.text || "").slice(0, 20000);
-        note.appendChild(body);
-        frag.appendChild(note);
-      } else if (it.role === "resume") {
-        const note = el("div", "resume-note hist");
-        note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
-          + `<span>${esc(it.text || "Resumed the standing goal")}</span>`;
-        frag.appendChild(note);
-      } else if (it.role === "notice") {
-        frag.appendChild(el("div", "sys hist", esc(it.text)));
-      } else {
-        const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
-        if (it.text) {
-          const commentary = it.commentary || it.tools?.length;
-          const text = el("div", commentary ? "text commentary" : "text final", md(it.text));
-          enrichMarkdown(text);
-          text._markdown = it.text; m.appendChild(text);
-          // A restored answer is still an answer. Reloading the window used to strip Copy, rate,
-          // branch and retry from everything above the fold, which read as the panel losing them.
-          if (!commentary) m.appendChild(responseActions(text, lastUserPrompt));
-        }
-        if (it.tools?.length) {
-          const group = el("details", "tool-group history-tools");
-          const summary = el("summary"); summary.textContent = `Used ${it.tools.length} ${it.tools.length === 1 ? "tool" : "tools"} · ${it.tools.join(", ")}`;
-          group.appendChild(summary);
-          // Output is constructed only on expansion, keeping long restored threads responsive.
-          group.addEventListener("toggle", () => {
-            if (!group.open || group.dataset.loaded) return;
-            group.dataset.loaded = "true";
-            (it.tool_details || []).forEach(detail => {
-              const row = el("div", "tool history-tool"), label = el("div", "nm"), pre = el("pre", "out");
-              label.textContent = `${detail.name} · ${detail.status === "returned" ? "saved result" : "result unavailable"}`;
-              pre.textContent = [detail.arguments, detail.output].filter(Boolean).join("\n\n");
-              row.append(label, pre); group.appendChild(row);
-            });
-          });
-          m.appendChild(group);
-        }
-        frag.appendChild(m);
-      }
-      });
+      const frag = document.createDocumentFragment();
+      // Take whole turns until the page is about fifty events deep, and never fewer than one.
+      let start = cursor, count = 0;
+      while (start > 0 && count < 50) { start--; count += units[start].length; }
+      replayInto(units.slice(start, cursor).flat(), frag);
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
       const landed = [...frag.children];
       older.after(frag); cursor = start;
@@ -3063,8 +3206,14 @@
     const copy = event.target.closest?.(".copy");
     if (copy) {
       vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c) });
-      copy.textContent = "Copied";
-      setTimeout(() => { if (copy.isConnected) copy.textContent = "Copy"; }, 1600);
+      const glyph = copy.querySelector(".codicon");
+      copy.classList.add("done");
+      if (glyph) { glyph.classList.remove("codicon-copy"); glyph.classList.add("codicon-check"); }
+      setTimeout(() => {
+        if (!copy.isConnected) return;
+        copy.classList.remove("done");
+        if (glyph) { glyph.classList.remove("codicon-check"); glyph.classList.add("codicon-copy"); }
+      }, 1600);
     }
   });
 
@@ -3151,7 +3300,22 @@
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
-      sessionReady = !draftScope; endTurn("error"); expireOpenRequests();
+      sessionReady = !draftScope;
+      // The extension is restarting the backend and will pick the work back up, so the turn has
+      // not failed. Ending it here relabelled an already-answered turn "Failed for 41s" and took
+      // its answer chrome away. Say what is happening instead — and bound it: if nothing arrives
+      // within thirty seconds, it really did fail.
+      if (msg.recovering && turn) {
+        const stale = turn;
+        turn.activity = { state: "waiting", label: "Reconnecting", detail: "" };
+        turn.phaseT0 = Date.now();
+        renderTurnMeta();
+        clearTimeout(turn.recoverTimer);
+        turn.recoverTimer = setTimeout(() => {
+          if (turn === stale) { endTurn("error"); setSending(false); }
+        }, 30000);
+      } else endTurn("error");
+      expireOpenRequests();
       for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
       renderUnconfirmedDrafts();
       // The goal clock is driven from this side: it keeps adding elapsed time for as long as the
@@ -3167,7 +3331,7 @@
       sysLine(msg.recovering
         ? "dgc backend stopped" + why + "\u2009\u2014\u2009reconnecting and picking the work back up"
         : "dgc backend exited" + why, true);
-      setSending(false);
+      if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });
   loadDraftState();

@@ -98,7 +98,7 @@ function codeBlock(content: string, info: string): string {
     catch { /* Preserve readable escaped source if a grammar cannot parse this block. */ }
   }
   // Keep the source in a data attribute for exact copy, separate from syntax/presentation markup.
-  return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code">Copy</button><code>${highlighted}</code></pre>`;
+  return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code" title="Copy code"><span class="codicon codicon-copy" aria-hidden="true"></span></button><code>${highlighted}</code></pre>`;
 }
 
 // A table is the one block a reader reliably wants out of the panel and into a document, and it
@@ -107,7 +107,7 @@ function codeBlock(content: string, info: string): string {
 parser.renderer.rules.table_open = (tokens, index) => {
   const source = tableSource(tokens, index);
   const copy = source
-    ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy table">Copy</button>`
+    ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy table" title="Copy table"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`
     : "";
   return `<div class="md-table-wrap">${copy}<table class="md-table">`;
 };

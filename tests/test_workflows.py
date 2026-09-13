@@ -159,7 +159,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(expanded.count("CAPTURED_FILE"), 1)
         self.assertEqual(display_prompt(expanded), "/review " + request)
         self.agent.messages.append({"role": "user", "content": "$verify\n\n" + expanded})
-        self.assertEqual(self.backend._history()[-1]["text"], "$verify\n\n/review " + request)
+        self.assertEqual(self.backend._history()[-2]["prompt"], "$verify\n\n/review " + request)
         self.assertIn("Return findings first", self.agent.messages[-1]["content"])
         self.assertEqual(display_prompt("ordinary prefix\n" + prepared), "ordinary prefix\n" + prepared)
         self.assertEqual(display_prompt("<dgc-workflow-json>\ninvalid\n</dgc-workflow-json>\n\nbody"),

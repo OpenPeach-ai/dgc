@@ -33,7 +33,7 @@ export default defineConfig({
   use: {
     baseURL: QA_ORIGIN,
     browserName: "chromium",
-    colorScheme: "dark",
+    colorScheme: "light",
     deviceScaleFactor: 1,
     locale: "en-US",
     reducedMotion: "no-preference",

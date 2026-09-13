@@ -63,9 +63,15 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # objective as though the user had just typed it.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
                    "kind": _f("string", required=False, enum=("prompt", "resume"))},
+    # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
+    # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
+    # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose
+    # phase was absent; else null. Reported for every reason, not just "completed": a stopped turn
+    # still has an answer block, and the panel decides what chrome a partial one earns.
     "turn_end": {
         "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error")),
         "token_estimate": _I(),
+        "final_message_id": _NS(False),
     },
     # A calibrated range for the running turn; emitted only while it changes, never as a promise.
     "turn_eta": {
@@ -73,9 +79,30 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "remaining_high_seconds": _N(), "confidence": _N(), "label": _S(),
         "tasks_done": _I(False), "tasks_total": _I(False),
     },
+    # What the turn is doing right now, stated by the backend instead of guessed by the panel.
+    # A turn that is between model rounds because a gate continued it says so, rather than showing
+    # a static spinner verb that is structurally incapable of changing. Emitted only when the
+    # (state, label, detail) key changes, so a 500-chunk answer costs exactly one frame.
+    "turn_activity": {
+        "turn_id": _S(),
+        "state": _f("string", enum=("thinking", "responding", "tool", "verifying",
+                                    "compacting", "hook", "continuing", "waiting")),
+        "label": _S(),
+        "detail": _S(False),
+    },
     "text_delta": {"text": _S()},
     "thinking_delta": {"text": _S()},
-    "stream_end": {},
+    # A prose block's identity and what the backend knows about it the moment it closes.
+    # ``phase`` absent means "undetermined": the front-end must keep its legacy behaviour, exactly
+    # as a null MessagePhase instructs. "commentary" is stated when the model round that produced
+    # this prose ALSO produced tool calls -- the harness knows that for certain, so it says so
+    # instead of letting the panel infer it from a tool card arriving afterwards. "answer" is a
+    # CANDIDATE answer: at stream_end the loop has not reached its gates and cannot honestly claim
+    # finality. ``message_id`` is absent when no prose was streamed, or outside a turn.
+    "stream_end": {
+        "message_id": _S(False),
+        "phase": _f("string", required=False, enum=("commentary", "answer")),
+    },
     "tool_call": {"call_id": _NS(False), "name": _S(), "args": _O(), "summary": _S()},
     "tool_progress": {
         "call_id": _NS(False), "name": _S(), "message": _S(),

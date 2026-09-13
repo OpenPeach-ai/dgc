@@ -210,7 +210,21 @@ body {
    prose; the final answer is separated by space, not by making everything else quieter. */
 .text.commentary { color: var(--text); }
 .text.final { margin-top: var(--sp-1); }
-.md-table-wrap { max-width: 100%; overflow-x: auto; margin: var(--sp-2) 0; }
+/* ...so the answer is lifted instead. At the end of a turn the designated answer is moved into a
+   block of its own: clear of the work above it, with room around the prose and its own actions
+   inside it rather than floating under the turn. Before this it was one more paragraph with 4px
+   of margin, and after a page of commentary and twenty tool cards a reader could not tell which
+   text was the reply -- which is exactly what "it just stopped mid turn" turned out to be. */
+.answer { margin-top: var(--sp-3); padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.answer > .text.final { margin-top: 0; }
+/* The action row belongs to the answer, so inside the block it is always legible rather than a
+   secret kept until hover. Outside it -- a stopped turn's partial prose -- it stays quiet. */
+.answer > .response-actions { margin-top: var(--sp-2); opacity: .85; }
+.msg.dgc:hover .answer > .response-actions { opacity: 1; }
+/* One card inside another reads as a seam; the summary sits inset on the panel ground instead. */
+.answer > .turn-summary { background: var(--bg); }
+.md-table-wrap { position: relative; max-width: 100%; overflow-x: auto; margin: var(--sp-2) 0; }
 .md-table { width: 100%; border-collapse: collapse; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); white-space: normal; }
 .md-table th, .md-table td { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .md-table th { background: var(--surface2); color: var(--text-strong); font-weight: var(--w-bold); }
@@ -268,7 +282,7 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool.open .chev { transform: rotate(90deg); }
 .tool .glyph { color: var(--muted); font-weight: var(--w-bold); width: 13px; text-align: center; flex: none; }
 .tool .verb { color: var(--text); font-weight: var(--w-semi); white-space: nowrap; }
-.tool .arg { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tool .arg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool .badge { color: var(--faint); font-size: var(--t-xs); flex: none; }
 .tool .tool-time { color: var(--faint); font-size: var(--t-xs); text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .tool .tool-time:not(:empty) { min-width: 30px; }
@@ -280,8 +294,16 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool[data-status="blocked"] .dot { background: var(--muted); }
 .tool[data-status="blocked"] .verb { color: var(--muted); }
 .tool .dot.deny { background: var(--faint); }
+/* Show the work. The body used to be hidden until the card was clicked, inside a group that was
+   itself collapsed the moment it was created -- so the command, its output and the fact that
+   anything had run at all were two clicks away, and nobody clicked. Now a card shows the first
+   few lines as soon as it has any, and the toggle opens the rest. */
 .tool .body { display: none; margin: 0 var(--sp-2) var(--sp-2) var(--sp-6); padding: 0 0 0 var(--sp-2); border-left: 1px solid var(--border-strong); }
-.tool.open .body { display: block; }
+.tool.open .body, .tool.has-output .body { display: block; }
+/* Bounded, not hidden: four lines with an ellipsis where it was cut, so a card costs the same
+   amount of the transcript whether it printed nine lines or nine hundred. */
+.tool.has-output:not(.open) .body pre { display: -webkit-box; -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical; overflow: hidden; max-height: none; }
 /* A step whose whole result is the diff card beneath it has nothing left to disclose. */
 .tool.no-body .body, .tool.no-body .chev { display: none; }
 .tool.no-body .tool-toggle { cursor: default; padding-left: var(--sp-3); }
@@ -752,10 +774,19 @@ pre.code .fold {
   border-radius: var(--r-full); padding: var(--sp-1) var(--sp-3);
 }
 pre.code .fold:hover { border-color: var(--accent); }
-pre.code .copy { position: absolute; top: 6px; right: 6px; font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; background: var(--surface2); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); opacity: 0; }
-pre.code:hover .copy { opacity: 1; }
-pre.code .copy:hover { color: var(--text); border-color: var(--accent); }
-pre.code .copy:focus-visible { opacity: 1; }
+/* One copy affordance for every copyable block: an icon in the corner of the thing it copies,
+   revealed on hover or focus, confirming with a check. A table used to get the same button with
+   no position rule, so it rendered as a word floating above the table instead. */
+pre.code .copy, .md-table-wrap .copy { position: absolute; top: 6px; right: 6px; z-index: 1;
+  height: var(--control-sm); min-width: var(--control-sm); display: inline-flex; align-items: center;
+  justify-content: center; cursor: pointer; background: var(--surface2); color: var(--muted);
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 0;
+  opacity: 0; transition: opacity .12s, color .12s, border-color .12s; }
+pre.code .copy .codicon, .md-table-wrap .copy .codicon { font-size: var(--t-sm); }
+pre.code:hover .copy, .md-table-wrap:hover .copy { opacity: 1; }
+pre.code .copy:hover, .md-table-wrap .copy:hover { color: var(--text); border-color: var(--accent); }
+pre.code .copy:focus-visible, .md-table-wrap .copy:focus-visible { opacity: 1; }
+pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good); border-color: var(--good); }
 
 /* artifact ready card — propose opening a localhost preview */
 .artifact { margin: var(--sp-2) 0; padding: var(--sp-3) var(--sp-3); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }

@@ -59,9 +59,70 @@ class SessionRestoreTests(unittest.TestCase):
         self.assertEqual(self.events[0]["type"], "session")
         self.assertEqual(self.events[0]["request_id"], "restore-1")
         self.assertEqual(self.events[0]["session_id"], saved_path.stem)
-        self.assertEqual(self.events[1]["items"], [{"role": "user", "text": "Original request"}])
+        # History is the live event vocabulary, replayed: one turn envelope, not a flat list of
+        # bubbles with its own rules about what an answer was.
+        self.assertEqual(self.events[1]["items"], [
+            {"type": "turn_start", "turn_id": "h1", "prompt": "Original request", "kind": "prompt"},
+            {"type": "turn_end", "turn_id": "h1", "reason": "cancelled", "token_estimate": 0,
+             "final_message_id": None}])   # a turn with no answer is not restored as a success
         self.assertEqual(self.agent.goal_status, "paused")
         self.assertEqual(self.agent._draft_mcp_context, [])
+
+    def test_restored_history_is_the_live_event_vocabulary_grouped_into_turns(self):
+        """Replay parity: the panel drives the same builders from the same items a live turn sends."""
+        from dgc.goals import RESUME_PROMPT
+        self.agent.messages = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "Fix the failing test"},
+            {"role": "assistant", "content": "Checking the suite.", "tool_calls": [
+                {"id": "c1", "function": {"name": "bash", "arguments": '{"command":"npm test"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "Error: exit code 1"},
+            {"role": "assistant", "content": "One test fails."},
+            # A gate reminder. The agent wrote it so the model would read it; the user typed none
+            # of it, and it continues the SAME turn rather than starting a new one.
+            {"role": "user", "content": "<system-reminder>\nYou're stopping but these todos are "
+                                        "still open: fix it.\n</system-reminder>"},
+            {"role": "assistant", "content": "Fixed and re-run: green."},
+            {"role": "user", "content": RESUME_PROMPT},
+            {"role": "assistant", "content": "Continuing the standing goal."},
+        ]
+        items = self.backend._history()
+        self.assertEqual([item.get("type") or item.get("role") for item in items], [
+            "turn_start", "text_delta", "stream_end", "tool_call", "tool_result",
+            "text_delta", "stream_end", "text_delta", "stream_end", "turn_end",
+            "turn_start", "text_delta", "stream_end", "turn_end"])
+        first, second = items[0], items[10]
+        self.assertEqual((first["turn_id"], first["kind"], first["prompt"]),
+                         ("h1", "prompt", "Fix the failing test"))
+        # The resume marker is a turn boundary of its own; without it an unattended goal's whole
+        # run collapses into one enormous turn.
+        self.assertEqual((second["turn_id"], second["kind"]), ("h2", "resume"))
+        # The gate's continuation prose is the block the turn designates -- the same rule the live
+        # path applies, so restore and live can no longer disagree about which prose was the answer.
+        self.assertEqual([item["phase"] for item in items if item.get("type") == "stream_end"],
+                         ["commentary", "answer", "answer", "answer"])
+        self.assertEqual(items[9]["final_message_id"], "h1:3")
+        self.assertEqual(items[8]["message_id"], "h1:3")
+        self.assertEqual(items[13]["final_message_id"], "h2:1")
+        # Every replayable item is a valid protocol event, because the panel feeds it to the same
+        # reducer a live event goes through.
+        for item in items:
+            if item.get("type"):
+                self.assertIsNone(event_error({"seq": 0, **item}), item)
+
+    def test_a_turn_whose_last_round_called_tools_designates_no_answer(self):
+        # A session interrupted mid-tool has no answer block, and says so instead of promoting
+        # whatever prose happens to sit last.
+        self.agent.messages = [
+            {"role": "user", "content": "Start the migration"},
+            {"role": "assistant", "content": "Starting.", "tool_calls": [
+                {"id": "c1", "function": {"name": "bash", "arguments": '{"command":"./migrate"}'}}]},
+        ]
+        items = self.backend._history()
+        self.assertIsNone(items[-1]["final_message_id"])
+        # The reason is not persisted, but whether the turn ever answered is. A turn interrupted
+        # mid-tool did not "work"; saying so beats restoring it under a success line.
+        self.assertEqual(items[-1]["reason"], "cancelled")
 
     def test_missing_and_external_sessions_reject_the_exact_request_without_changing_chat(self):
         original = self.agent.session_file
@@ -84,7 +145,7 @@ class SessionRestoreTests(unittest.TestCase):
         event = self.events[-1]
         self.assertEqual(event["type"], "history")
         self.assertEqual(event["request_id"], "snapshot-1")
-        self.assertIn("truncated for display", event["items"][0]["text"])
+        self.assertIn("truncated for display", event["items"][0]["prompt"])
         self.assertEqual(len(self.agent.messages[-1]["content"]), 60000)
         self.assertIsNone(event_error({"seq": 1, **event}))
         self.events.clear()
@@ -288,3 +349,29 @@ class SessionRestoreTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertIn("Verify the template", captured[0])
         self.assertNotIn("goal-template-fixture-secret", captured[0])
+
+
+class GoalScaffoldNeverLooksTypedTests(unittest.TestCase):
+    """DGC writes goal continuations into the transcript as user messages so the model reads them.
+    Replaying one as a chat bubble hands the user their own objective back as something they
+    apparently just sent — the report that produced this test, twice."""
+
+    def test_every_goal_continuation_is_a_marker_whatever_is_prepended_to_it(self):
+        from dgc.goals import CYCLE_MARKER, RESUME_PROMPT, auto_resume_prompt
+        from dgc.headless import _goal_scaffold
+        objective = "Build the entire application, with " + "every requirement " * 50
+        cases = {
+            "bare cycle": CYCLE_MARKER + " Take the next concrete step.\n\nGoal: " + objective,
+            "cycle behind attachments": "[attached spec]\n\n" + CYCLE_MARKER + "\n\nGoal: " + objective,
+            "auto-resume": auto_resume_prompt("6 edits in a row failed to match"),
+            "resume behind context": "<editor-context-json>{}</editor-context-json>\n" + RESUME_PROMPT,
+        }
+        for label, text in cases.items():
+            with self.subTest(case=label):
+                marker = _goal_scaffold(text)
+                self.assertTrue(marker, f"{label} would render as a typed prompt")
+                self.assertNotIn(objective[:40], marker, "the marker must not restate the goal")
+                self.assertLess(len(marker), 80)
+        self.assertEqual(_goal_scaffold("continue the migration please"), "",
+                         "a real prompt that says continue is still the user's")
+        self.assertEqual(_goal_scaffold(""), "")

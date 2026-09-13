@@ -303,7 +303,8 @@
     render(); schedule();
   });
 
-  // Scripted illustrations are separate from the real terminal-cell recordings above.
+  // These panels are scripted illustrations, not footage: the page's only recordings are
+  // the CLI and editor videos, which play in their own capture dialogs.
   document.querySelectorAll('[data-scripted-demos]').forEach(demo => {
     const tabs = [...demo.querySelectorAll('[role=tab]')];
     const panels = [...demo.querySelectorAll('[role=tabpanel]')];

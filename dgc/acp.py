@@ -620,8 +620,12 @@ class _ACPUi:
     def on_thinking(self, chunk):
         self._update({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": chunk}})
 
-    def end_stream(self):
+    def end_stream(self, phase: str = ""):
+        # ACP has no event for "this block was the answer"; the phase is accepted and unused.
         pass
+
+    def turn_activity(self, state, label, detail=""):
+        """ACP clients render their own progress from tool calls; nothing to forward."""
 
     # tools
     def tool_call(self, name, args, call_id=None):
