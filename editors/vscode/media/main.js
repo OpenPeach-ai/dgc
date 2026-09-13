@@ -1381,7 +1381,10 @@
       elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
         : (text === goalState.text ? priorElapsed : 0) };
     goalObservedAt = Date.now();
-    goalBar.hidden = !text;
+    // A finished goal stops being a pinned goal. Leaving it on the rail with a play button meant
+    // the obvious next click RESUMED work that was already done -- which is exactly what happened:
+    // a completed objective was resumed and started over. The transcript keeps the record.
+    goalBar.hidden = !text || status === "completed";
     syncComposerRail();
     if (!text) { closeGoalEditor(false); closeGoalReview(false); return; }
     $("goal-text").textContent = text;
@@ -1390,7 +1393,7 @@
     goalBar.dataset.status = status;
     const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
     toggle.hidden = false;
-    const resume = paused || blocked || completed;
+    const resume = paused || blocked;   // never offer to resume something already finished
     icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
     toggle.title = resume ? "Resume goal" : "Pause goal";
     toggle.setAttribute("aria-label", resume ? "Resume goal" : "Pause goal");

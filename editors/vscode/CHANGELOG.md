@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.22.4 — 2026-09-13
+
+- **A finished goal stops being a pinned goal.** A completed objective stayed on the rail with a play button, so the obvious next click resumed work that was already done — and did exactly that to a real goal. Paused and blocked goals still offer Resume; completed ones unpin, and the transcript keeps the record.
+- **The backend's log survives even when nobody is watching.** An output channel only reaches disk once somebody opens one, which is never the case for an unattended run. `dgc serve`'s stderr and exit reason are now also appended, timestamped, to `backend.log` in the extension's log directory, bounded at 4MB.
+- Pairs with DGC CLI 0.37.3; editor protocol v11 unchanged.
+
 ## 0.22.3 — 2026-09-12
 
 - **When the backend dies, you can now find out why.** The extension forwarded `dgc serve`'s stderr to a webview message type that nothing handled, so every Python traceback it ever wrote was silently discarded — a backend could die repeatedly and leave no evidence anywhere. It goes to a **DGC Backend** output channel now, alongside the exit reason.

@@ -2558,3 +2558,33 @@ test("a killed backend is told apart from one that stopped cleanly", () => {
     /dgc backend exited \(killed by SIGKILL\)/, "the signal is named");
   assert.deepEqual([...clean.errors, ...killed.errors], []);
 });
+
+test("a finished goal stops being a pinned goal", () => {
+  // Leaving a completed objective on the rail with a play button made the obvious next click
+  // resume work that was already done — which is exactly what happened to a real goal.
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "goal_changed", goal: "ship BloomCare", status: "active",
+          elapsed_seconds: 10, details: { running: true } });
+  assert.equal(doc.getElementById("goalbar").hidden, false, "an active goal is pinned");
+
+  event({ type: "goal_changed", goal: "ship BloomCare", status: "completed",
+          elapsed_seconds: 99, details: {} });
+  assert.equal(doc.getElementById("goalbar").hidden, true,
+    "a completed goal is unpinned, so it cannot be resumed by reflex");
+  assert.deepEqual(errors, []);
+});
+
+test("a paused or blocked goal still offers to resume", () => {
+  for (const status of ["paused", "blocked"]) {
+    const { send, doc, errors } = makeDom();
+    send({ type: "event", event: { type: "ready", capabilities: {} } });
+    send({ type: "event", event: { type: "goal_changed", goal: "ship it", status,
+                                   elapsed_seconds: 5, details: {} } });
+    assert.equal(doc.getElementById("goalbar").hidden, false, `${status} stays pinned`);
+    assert.equal(doc.getElementById("goal-toggle").title, "Resume goal",
+      `${status} still offers resume`);
+    assert.deepEqual(errors, []);
+  }
+});

@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
 import { realpath } from "fs/promises";
+import * as fs from "fs";
+import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
@@ -957,6 +959,35 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Resolved on first use: a field initializer would run before `context` is assigned. */
+  private backendLogPath(): string {
+    if (this.backendLogFileCache !== undefined) { return this.backendLogFileCache; }
+    this.backendLogFileCache = "";
+    try {
+      const dir = (this.context as any)?.logUri?.fsPath;
+      if (dir) {
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, "backend.log");
+        // Keep it bounded: a chatty backend must not fill the user's disk.
+        try {
+          if (fs.statSync(file).size > 4 * 1024 * 1024) { fs.rmSync(file); }
+        } catch { /* no file yet */ }
+        this.backendLogFileCache = file;
+      }
+    } catch { /* no writable log directory; the output channel still has it */ }
+    return this.backendLogFileCache;
+  }
+
+  /** Record one line of backend output in both places, and never let logging break a turn. */
+  private backendNote(line: string): void {
+    this.backendLog.appendLine(line);
+    const file = this.backendLogPath();
+    if (!file) { return; }
+    try {
+      fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
+    } catch { /* a full or read-only disk must not take the panel down with it */ }
+  }
+
   private ensureBackend(): DgcBackend {
     if (vscode.workspace.isTrusted === false) {
       throw new Error("DGC is disabled until this workspace is trusted.");
@@ -978,10 +1009,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
-    be.on("stderr", (line: string) => { this.backendLog.appendLine(line); this.post({ type: "stderr", line }); });
+    be.on("stderr", (line: string) => { this.backendNote(line); this.post({ type: "stderr", line }); });
     be.on("exit", (code: number | null, signal?: string | null) => {
       let recovering = false;
-      this.backendLog.appendLine(`[dgc serve exited: ${
+      this.backendNote(`[dgc serve exited: ${
         signal ? `killed by ${signal}` : code === null ? "killed by an unreported signal" : `code ${code}`}]`);
       this.mcpUrls.clear();
       this.setReadyContext(false);
@@ -1405,6 +1436,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * across restarts and can be copied into a bug report.
    */
   private readonly backendLog = vscode.window.createOutputChannel("DGC Backend");
+  /**
+   * ...and to a file, because an output channel only reaches disk once somebody opens it. The
+   * crash we needed evidence for happened while nobody was looking at one, which is the normal
+   * case: a backend that dies unattended must still leave its traceback behind.
+   */
+  private backendLogFileCache: string | undefined;
 
   /** Views whose listeners are already wired; re-resolving one must not double-register them. */
   private readonly adoptedViews = new WeakSet<vscode.WebviewView>();

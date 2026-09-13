@@ -1388,3 +1388,29 @@ test("the backend's own words are kept where they can be read", async () => {
     vs.window.createOutputChannel = savedChannel;
   }
 });
+
+test("a backend that dies unattended still leaves its traceback on disk", async () => {
+  // An output channel only reaches disk once somebody opens one. The crash we needed evidence for
+  // happened while nobody was looking — which is the normal case for an unattended goal.
+  const { mkdtempSync, readFileSync, existsSync } = await import("node:fs");
+  const logDir = mkdtempSync(join(tmpdir(), "dgc-backend-log-"));
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [],
+    logUri: { fsPath: logDir },
+    globalState: { get() {}, async update() {} },
+    workspaceState: { get() {}, async update() {} },
+  });
+  provider.post = () => {};
+
+  provider.backendNote('Traceback (most recent call last):');
+  provider.backendNote('ValueError: invalid protocol event');
+  provider.backendNote('[dgc serve exited: killed by SIGKILL]');
+
+  const file = join(logDir, "backend.log");
+  assert.ok(existsSync(file), "the backend log is written without anyone opening a panel");
+  const body = readFileSync(file, "utf8");
+  assert.match(body, /ValueError: invalid protocol event/);
+  assert.match(body, /killed by SIGKILL/);
+  assert.match(body, /^\d{4}-\d\d-\d\dT/m, "each line is timestamped");
+  provider.dispose();
+});

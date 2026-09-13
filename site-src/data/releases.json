@@ -4,10 +4,19 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.37.3",
+      "date": "2026-09-13",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.3",
+      "status": "current",
+      "notes": [
+        "Scrolling back into the compacted archive is bounded by frame size, not just by row count. A page was clamped to 200 rows of up to 20,000 characters each \u2014 about 4MB before JSON escaping, and past the protocol's 4MB frame ceiling once real transcript punctuation is escaped. An over-ceiling page was reduced to an empty one, so scrolling past the summary showed nothing. Pages now fill to a byte budget and report exactly where they stopped, so the next page resumes there."
+      ]
+    },
+    {
       "version": "0.37.2",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.2",
-      "status": "current",
+      "status": "past",
       "notes": [
         "The backend can no longer emit a frame that gets it killed. A protocol event larger than the 4MB ceiling is refused by the editor as a protocol violation, and nothing measured the WIRE size before sending: a screenshot is capped at 4MB of PNG, which is about 5.6MB once base64 and JSON-escaped, so any screenshot over 3MB breached it. Frames are now bounded at the writer, and a batch of screenshots is split into frames that fit rather than sent as one oversized event.",
         "An event too large to send keeps its envelope instead of being replaced wholesale. A frame carrying a correlation id is a question, not a notification \u2014 replacing an approval request with a generic error left the editor nothing to answer and the turn waiting on a decision that could never arrive."
@@ -332,10 +341,21 @@
   ],
   "extension": [
     {
+      "version": "0.22.4",
+      "date": "2026-09-13",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.3",
+      "status": "current",
+      "notes": [
+        "A finished goal stops being a pinned goal: a completed objective stayed on the rail with a play button, so the obvious next click resumed work that was already done. Paused and blocked goals still offer Resume.",
+        "The backend's log survives when nobody is watching \u2014 an output channel only reaches disk once opened, which is never the case for an unattended run. stderr and the exit reason are also appended, timestamped, to backend.log in the extension's log directory.",
+        "Editor protocol v11 unchanged; pairs with DGC 0.37.3."
+      ]
+    },
+    {
       "version": "0.22.3",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.2",
-      "status": "current",
+      "status": "past",
       "notes": [
         "When the backend dies you can now find out why: its stderr was forwarded to a webview message type nothing handled, so every traceback was silently discarded. It goes to a DGC Backend output channel now, with the exit code or signal beside it.",
         "A killed backend is distinguished from one that stopped cleanly \u2014 the line collapsed both, because exit code 0 is falsy in JavaScript and the signal was thrown away at the listener.",
