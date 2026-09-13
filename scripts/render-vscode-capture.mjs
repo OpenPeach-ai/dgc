@@ -697,8 +697,13 @@ async function main() {
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
     await frame.getByText("Verification:", { exact: false }).last()
       .waitFor({ state: "visible", timeout: 10_000 });
+    // A finished goal unpins itself from the rail (0.22.4), so asserting it is VISIBLE would now
+    // be asserting the bug. Prove both halves instead: the goal really reached completed, and the
+    // rail stopped offering it -- the element stays in the DOM, hidden.
     await frame.locator('#goalbar[data-status="completed"]')
-      .waitFor({ state: "visible", timeout: 10_000 });
+      .waitFor({ state: "attached", timeout: 10_000 });
+    await frame.locator('#goalbar[data-status="completed"]')
+      .waitFor({ state: "hidden", timeout: 10_000 });
     // The fixture edits on disk outside VS Code's extension host. Force the real editor to reload
     // that file, then prove the visible Monaco buffer agrees with the rendered diff and test result.
     await commandPalette(page, "File: Revert File");
