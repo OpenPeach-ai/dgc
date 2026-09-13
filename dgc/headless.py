@@ -12,7 +12,9 @@ import json
 import math
 import re
 import sys
+import signal
 import threading
+import os
 import time
 from pathlib import Path
 
@@ -2420,8 +2422,67 @@ class Backend:
             self.em.emit("error", message=f"unknown command: {t!r}")
 
 
+def _open_crash_log(config: Config):
+    """A crash log the BACKEND owns, so a death is diagnosable without the editor's cooperation.
+
+    An editor gets `dgc serve`'s stderr on a pipe and may do nothing with it -- DGC's own extension
+    dropped every byte for months -- and an ACP or a third-party front-end owes us nothing at all.
+    A backend that dies unattended has to leave its own evidence. faulthandler matters most here:
+    a segfault or an abort inside a C extension produces NO Python traceback, which is exactly the
+    shape of death that leaves nothing to go on.
+    """
+    import faulthandler
+    try:
+        root = Path(getattr(config, "user_root", "") or Path.home() / ".dgc") / "logs"
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "serve.log"
+        try:                                   # bounded: never fill the user's disk
+            if path.stat().st_size > 4 * 1024 * 1024:
+                path.rename(root / "serve.log.1")
+        except OSError:
+            pass
+        handle = path.open("a", encoding="utf-8", errors="replace")
+        handle.write(f"\n=== dgc serve {__version__} pid {os.getpid()} started "
+                     f"{time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        handle.flush()
+        faulthandler.enable(file=handle, all_threads=True)
+        # SIGTERM is how a parent asks us to stop, and it is also how a confused one kills us mid
+        # turn. Dumping every thread's stack at that moment says WHERE the backend was, which is
+        # the difference between "it exited" and a diagnosis.
+        for name in ("SIGTERM", "SIGHUP"):
+            try:
+                faulthandler.register(getattr(signal, name), file=handle,
+                                      all_threads=True, chain=True)
+            except Exception:
+                pass                           # not every platform or thread context allows it
+        return handle
+    except Exception:
+        return None                            # logging must never stop the backend from serving
+
+
+def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
+    if handle is None:
+        return
+    try:
+        import traceback
+        handle.write(f"[{time.strftime('%H:%M:%S')}] {label}\n")
+        if exc is not None:
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=handle)
+        handle.flush()
+    except Exception:
+        pass
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
+    crash_log = _open_crash_log(config)
+    # A worker thread that dies takes its traceback with it unless someone is listening. The
+    # turn worker is exactly such a thread, and a silent death there strands the turn.
+    if crash_log is not None:
+        def _thread_crash(args):
+            _log_crash(crash_log, f"unhandled exception in thread {args.thread and args.thread.name}",
+                       args.exc_value)
+        threading.excepthook = _thread_crash
     backend = Backend(config)
     backend.start()
     try:
@@ -2449,6 +2510,17 @@ def serve(config: Config) -> None:
                 detail = str(e).strip() or e.__class__.__name__
                 backend.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
-    except (KeyboardInterrupt, BrokenPipeError):
-        pass
-    backend.close()
+                _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
+    except (KeyboardInterrupt, BrokenPipeError) as interrupt:
+        _log_crash(crash_log, f"serve loop ended: {type(interrupt).__name__}")
+    except BaseException as fatal:             # never exit without saying why, in our own log
+        _log_crash(crash_log, "serve loop raised", fatal)
+        raise
+    else:
+        _log_crash(crash_log, "serve loop ended: stdin closed or shutdown requested")
+    finally:
+        backend.close()
+        _log_crash(crash_log, "backend closed cleanly")
+        if crash_log is not None:
+            try: crash_log.close()
+            except Exception: pass

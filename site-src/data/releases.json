@@ -9,6 +9,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.3",
       "status": "current",
       "notes": [
+        "The backend keeps its own crash log. An editor gets dgc serve's stderr on a pipe and may do nothing with it \u2014 DGC's own extension dropped every byte of it \u2014 and an ACP or third-party front-end owes us nothing at all, so a backend that dies unattended left no evidence anywhere. `dgc serve` now writes ~/.dgc/logs/serve.log itself: start, exit reason, command failures with tracebacks, and a full stack dump of every thread on a segfault, abort or SIGTERM \u2014 the deaths that produce no Python traceback at all.",
         "Reopening a session no longer pastes your own goal back at you. The agent writes scaffolding into the transcript so the MODEL reads it \u2014 the standing-goal reminder, which embeds the entire objective, and the open-todo nudge. Those are user-role messages, so replaying a restored session rendered them as chat bubbles: the whole goal spec appeared as a prompt nobody sent.",
         "Scrolling back into the compacted archive is bounded by frame size, not just by row count. A page was clamped to 200 rows of up to 20,000 characters each \u2014 about 4MB before JSON escaping, and past the protocol's 4MB frame ceiling once real transcript punctuation is escaped. An over-ceiling page was reduced to an empty one, so scrolling past the summary showed nothing. Pages now fill to a byte budget and report exactly where they stopped, so the next page resumes there."
       ]
