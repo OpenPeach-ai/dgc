@@ -163,6 +163,7 @@ Tab / →              accept the ghost-text next-prompt suggestion
 /files [PATH]        file explorer in the focus pane · Enter inserts @path
 /diff [PATH]         every changed file, its counts and its diff, live · select lines for your prompt
 /todo clear          drop the checklist the model left behind
+/bg light|white      readable light terminal mode · /bg dark · /bg inherit
 /eta [stats]         how long the running turn still needs · calibration
 /notify [on|off]     ping when the turn finishes
 /goal <objective>    run objective · pause | resume | review | clear
