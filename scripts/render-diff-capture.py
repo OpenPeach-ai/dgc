@@ -77,6 +77,16 @@ def _send(socket: str, keys: list[str]) -> None:
         time.sleep(0.14)
 
 
+def _pane_rows(rows: list[str]) -> list[str]:
+    """Only the focus pane's rows. The transcript above it shows the model's own edit diff, whose
+    `-     return min(...)` line otherwise matches first and makes the row arithmetic negative."""
+    top = next((i for i, x in enumerate(rows) if "╭─ DIFF" in x), None)
+    if top is None:
+        return []
+    bottom = next((i for i, x in enumerate(rows) if i > top and x.lstrip().startswith("╰─")), None)
+    return rows[top:bottom + 1] if bottom is not None else rows[top:]
+
+
 def _until(socket: str, predicate, timeout: float, *, every: float = 0.25) -> list[str]:
     deadline = time.monotonic() + timeout
     rows: list[str] = []
@@ -88,7 +98,17 @@ def _until(socket: str, predicate, timeout: float, *, every: float = 0.25) -> li
     return []
 
 
+DRIVE_DONE = threading.Event()
+
+
 def _drive(socket: str) -> None:
+    try:
+        _drive_steps(socket)
+    finally:
+        DRIVE_DONE.set()
+
+
+def _drive_steps(socket: str) -> None:
     try:
         time.sleep(1.6)                                  # let the prompt finish typing first
         _send(socket, ["/diff", "Enter"])
@@ -102,19 +122,22 @@ def _drive(socket: str) -> None:
         time.sleep(0.4)
         # The model reads two files first; the edit lands some seconds later and the list re-reads
         # git every two seconds, so wait for clamp.py to appear rather than guessing the moment.
-        rows = _until(socket, lambda r: any(re.search(r"\bclamp\.py\s+\+1\s+[−-]1", x) for x in r), 120)
+        rows = _until(socket, lambda r: any(re.search(r"\bclamp\.py\s+\+1\s+[−-]1", x) for x in _pane_rows(r)), 120)
         if not rows:
             return
         STAGES["edit_listed"] = True
         time.sleep(2.2)                                  # let the viewer see the change arrive
         _send(socket, ["Enter"])
-        rows = _until(socket, lambda r: any("@@ -1,3 +1,3 @@" in x for x in r)
-                      and any("-     return min(lower, max(upper, value))" in x for x in r), 6)
+        rows = _until(socket, lambda r: any("@@ -1,3 +1,3 @@" in x for x in _pane_rows(r))
+                      and any("-     return min(lower, max(upper, value))" in x for x in _pane_rows(r)), 6)
         if not rows:
             return
         STAGES["diff_opened"] = True
-        hunk = next(i for i, x in enumerate(rows) if "@@ -1,3 +1,3 @@" in x)
-        removed = next(i for i, x in enumerate(rows) if "-     return min(lower, max(upper, value))" in x)
+        pane = _pane_rows(rows)
+        hunk = next(i for i, x in enumerate(pane) if "@@ -1,3 +1,3 @@" in x)
+        removed = next(i for i, x in enumerate(pane) if "-     return min(lower, max(upper, value))" in x)
+        if removed <= hunk:
+            return                                       # the pane is not laid out as expected; do not guess
         time.sleep(1.6)
         for _ in range(max(0, removed - hunk)):          # the cursor opens on the hunk header
             _send(socket, ["j"])
@@ -200,6 +223,37 @@ class _FrameRecorder(threading.Thread):
 
 RECORDER: dict[str, _FrameRecorder | None] = {"value": None}
 _original_type_prompt = base.type_prompt
+_original_tmux = base.tmux
+_EXTRA_CANCEL_SENT = {"value": False}
+_original_wait_for = base.wait_for
+
+
+def _wait_for_turn_then_drive(predicate, message: str, timeout: float) -> None:
+    """After the fixture turn finishes, hold the recording until the /diff drive has finished
+    too (bounded). Without this the base script stopped ffmpeg and quit the TUI about 1.5 s
+    after the turn passed, cutting a drive that was still selecting lines on a slow turn."""
+    _original_wait_for(predicate, message, timeout)
+    if message == "the real DGC turn did not finish in time":
+        DRIVE_DONE.wait(45)
+        time.sleep(1.0)
+
+
+base.wait_for = _wait_for_turn_then_drive
+
+
+def _tmux_draft_aware(socket: str, *arguments: str, check: bool = True, env=None):
+    """The drive deliberately leaves the attached lines in the composer, so the base script's
+    two Ctrl+C presses (clear the draft, arm quitting) stop one short of quitting. Send one more
+    press with the first, so the sequence becomes: clear draft, arm, quit."""
+    result = _original_tmux(socket, *arguments, check=check, env=env)
+    if tuple(arguments[:4]) == ("send-keys", "-t", "capture", "C-c") and not _EXTRA_CANCEL_SENT["value"]:
+        _EXTRA_CANCEL_SENT["value"] = True
+        time.sleep(0.3)
+        _original_tmux(socket, *arguments, check=False, env=env)
+    return result
+
+
+base.tmux = _tmux_draft_aware
 
 
 def _type_prompt_and_drive(socket: str, text: str) -> None:
@@ -223,6 +277,12 @@ base.update_cli_manifest = _remember_factor
 def publish(staged_dir: Path, model: str) -> None:
     missing = [name for name, seen in STAGES.items() if not seen]
     if missing:
+        recorder = RECORDER["value"]
+        if recorder is not None:
+            recorder.stop()
+            debug = Path(tempfile.gettempdir()) / "diff-capture-debug-frames.json"
+            debug.write_text(json.dumps({"stages": STAGES, "keystrokes": KEYSTROKES,
+                                         "frames": recorder.encoded()}, ensure_ascii=False))
         raise RuntimeError("the /diff drive did not complete on screen; refusing to publish: "
                            + ", ".join(missing))
     assets = ROOT / "site" / "assets"
