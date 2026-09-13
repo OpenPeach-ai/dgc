@@ -1422,6 +1422,39 @@ def unit_tests(tmp: Path):
           _dropped)
     check("an ordinary event is written untouched",
           _kept["type"] == "text_delta" and _kept["text"] == "a normal event")
+    # The backend must be able to explain its own death without the editor's cooperation. DGC's own
+    # extension dropped every byte of stderr for months, and an ACP or third-party front-end owes us
+    # nothing at all -- so `dgc serve` keeps its own log. faulthandler matters most: a segfault or a
+    # signal produces NO Python traceback, which is exactly the death that leaves nothing to go on.
+    import faulthandler as _fh
+    _crash_home = Path(tempfile.mkdtemp())
+    class _CrashCfg: pass
+    _crash_cfg = _CrashCfg(); _crash_cfg.user_root = str(_crash_home / ".dgc")
+    _was_enabled = _fh.is_enabled()
+    _crash_handle = _headless_mod2._open_crash_log(_crash_cfg)
+    _crash_path = _crash_home / ".dgc" / "logs" / "serve.log"
+    check("the backend opens a crash log it owns, under its own user root",
+          _crash_handle is not None and _crash_path.is_file())
+    check("and arms faulthandler, so a signal or segfault still leaves a stack",
+          _fh.is_enabled())
+    _headless_mod2._log_crash(_crash_handle, "probe label", ValueError("probe failure"))
+    _crash_handle.flush()
+    _crash_text = _crash_path.read_text()
+    check("a crash log entry carries the label and the traceback",
+          "probe label" in _crash_text and "ValueError: probe failure" in _crash_text
+          and "dgc serve" in _crash_text)
+    try: _crash_handle.close()
+    except Exception: pass
+    if not _was_enabled:
+        _fh.disable()
+    # Logging must never be the reason a backend fails to serve.
+    class _BadCfg:
+        user_root = "/proc/cannot-create-here/nope"
+    check("an unusable log location degrades to no log, never to a failure",
+          _headless_mod2._open_crash_log(_BadCfg()) is None)
+    check("and _log_crash tolerates having no handle at all",
+          _headless_mod2._log_crash(None, "ignored") is None)
+
     # The agent writes scaffolding into the transcript so the MODEL reads it -- the standing-goal
     # reminder (which embeds the whole objective), the open-todo nudge. Replaying a restored session
     # rendered those as chat bubbles, pasting the user's entire goal spec back at them as a prompt
