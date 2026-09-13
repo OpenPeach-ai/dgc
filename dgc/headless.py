@@ -2156,19 +2156,36 @@ class Backend:
                 before = total
             before = max(0, min(before, total))
             start = max(0, before - limit)
-            items = []
-            for row in rows[start:before]:
+            # The row clamp alone does not bound the FRAME: 200 rows x 20,000 characters is about
+            # 4MB before JSON escaping, which is the protocol ceiling, and an over-ceiling frame is
+            # shrunk to an empty page -- the user scrolls back and sees nothing. Fill the page
+            # backwards from `before` until the next row would not fit, and report where it
+            # actually stopped so the following page resumes exactly there.
+            budget = int(MAX_EVENT_BYTES * 0.9)
+            selected: list = []
+            used = 0
+            cursor = before
+            while cursor > start:
+                cursor -= 1
+                row = rows[cursor]
                 who = str(row.get("who") or "")
                 body = str(row.get("body") or "")
                 if not body.strip():
                     continue
-                items.append({
+                item = {
                     "role": "user" if who == "user" else "assistant",
                     "text": body[:20_000],
                     "tools": [t for t in str(row.get("tools") or "").split(",") if t][:16],
                     "archived": True,
-                })
-            self.em.emit("recall", items=items, before=start, more=start > 0, total=total,
+                }
+                cost = len(json.dumps(item, default=str, ensure_ascii=False).encode("utf-8")) + 2
+                if selected and used + cost > budget:
+                    cursor += 1          # this row belongs to the next page, not this one
+                    break
+                selected.append(item)
+                used += cost
+            items = list(reversed(selected))
+            self.em.emit("recall", items=items, before=cursor, more=cursor > 0, total=total,
                          **_request_fields(request_id))
 
         elif t == "list_sessions":

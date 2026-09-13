@@ -1422,6 +1422,41 @@ def unit_tests(tmp: Path):
           _dropped)
     check("an ordinary event is written untouched",
           _kept["type"] == "text_delta" and _kept["text"] == "a normal event")
+    # Recall paging must bound the FRAME, not just the row count: 200 rows x 20,000 chars is about
+    # 4MB before escaping, and an over-ceiling frame is shrunk to an EMPTY page -- the user scrolls
+    # back past the summary and sees nothing at all.
+    class _RecallEm:
+        def __init__(self): self.frames = []
+        def emit(self, _t, /, **f): self.frames.append(f)
+    _recall_be = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
+    _recall_be.em = _RecallEm()
+    class _RecallCfg:
+        project_root = "/tmp"
+        def get(self, k, d=None): return d
+    _recall_be.config = _RecallCfg()
+    class _RecallAgent: session_file = "/tmp/fake-session.json"
+    _recall_be.agent = _RecallAgent()
+    # Plain ASCII at the row clamp lands just UNDER the ceiling (200 x 20,000 = 4.02MB vs 4.19MB),
+    # so a fixture of "z" proves nothing. Real transcripts carry quotes, newlines and backslashes,
+    # each of which JSON-escapes to two bytes -- that is what pushes a full page over.
+    _fat_rows = [{"who": "user" if i % 2 else "assistant", "body": '"' * 20_000, "tools": ""}
+                 for i in range(200)]
+    _real_load = _headless_mod2.sessions_mod.load_recall
+    _headless_mod2.sessions_mod.load_recall = lambda *a, **k: _fat_rows
+    try:
+        _headless_mod2.Backend.dispatch(_recall_be, {"type": "get_recall", "limit": 200})
+    finally:
+        _headless_mod2.sessions_mod.load_recall = _real_load
+    _page = _recall_be.em.frames[-1]
+    _page_bytes = len(json.dumps({"type": "recall", "seq": 0, **_page},
+                                 default=str, ensure_ascii=False).encode("utf-8"))
+    check("a recall page is bounded by frame size, not just row count",
+          _page["items"] and _page_bytes <= _MAX_FRAME,
+          (len(_page["items"]), _page_bytes))
+    check("and it reports where it stopped so the next page resumes exactly there",
+          _page["before"] == 200 - len(_page["items"]) and _page["more"] is True,
+          (_page["before"], len(_page["items"]), _page["more"]))
+
     # A frame that carries a correlation id is a QUESTION, not a notification: replacing it
     # wholesale leaves the front-end nothing to answer and the worker waiting on an approval that
     # can never arrive (a human review waits with no deadline). Shrink the payload, keep the
