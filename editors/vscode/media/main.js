@@ -931,6 +931,27 @@
     expireOpenRequests();
     turn = null;
   }
+  // A checklist belongs to the session, not to a single assistant bubble. Keep one current
+  // projection, and restore it without inventing a running turn or starting a timer.
+  function renderTodos(value) {
+    const rows = (Array.isArray(value) ? value : []).filter(t => t && typeof t.content === "string").slice(0, 100);
+    let card = log.querySelector(".todos");
+    if (!rows.length) { card?.remove(); return; }
+    if (!card) {
+      card = el("div", "todos");
+      card.setAttribute("role", "region");
+      card.setAttribute("aria-label", "Current task list");
+    }
+    const glyph = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
+    const complete = rows.filter(t => t.status === "done").length;
+    card.innerHTML = `<div class="thead">Tasks <span>${complete}/${rows.length}</span></div>` +
+      rows.map(t => { const g = glyph[t.status] || glyph.pending;
+        return `<div class="t ${g[1]}"><span class="ti">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
+      }).join("");
+    log.appendChild(card);
+    scroll();
+  }
+
   function ensureTurn() { if (!turn) startTurn(); }
   // Keep the live activity row at the visual edge of the active turn. New response text,
   // tool cards, diffs and decisions are inserted immediately before it, so a user following
@@ -1792,7 +1813,10 @@
         renderContext();
         break;
       }
-      case "history": renderHistory(ev.items || []); break;
+      case "history":
+        renderHistory(ev.items || []);
+        if (Array.isArray(ev.todos)) renderTodos(ev.todos);
+        break;
       case "recall": renderHistory._absorbRecall?.(ev); break;
       case "rewound":
         if (ev.ok) {
@@ -2086,13 +2110,7 @@
         break;
       }
       case "todos": {
-        ensureTurn();
-        if (!turn._todo) { turn._todo = appendTurnContent(el("div", "todos")); }
-        const TG = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
-        const dn = ev.todos.filter((t) => t.status === "done").length;
-        turn._todo.innerHTML = `<div class="thead">Tasks <span>${dn}/${ev.todos.length}</span></div>` +
-          ev.todos.map((t) => { const g = TG[t.status] || TG.pending;
-            return `<div class="t ${g[1]}"><span class="ti">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`; }).join("");
+        renderTodos(ev.todos);
         break;
       }
       case "artifact_ready": {

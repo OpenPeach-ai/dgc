@@ -222,9 +222,9 @@ TOOL_SCHEMAS = [
                                                    "Omit to list the most recent notes."},
          "file": {"type": "string", "description": "Only notes about this file"},
          "limit": {"type": "integer", "description": "How many notes (default 8, max 25)"}}, []),
-    _fn("todo", "Replace the session todo list. Use it to track multi-step work.",
-        {"todos": {"type": "array", "items": {"type": "object", "properties": {
-            "content": {"type": "string"},
+    _fn("todo", "Replace the full checklist; retain completed steps and update statuses as work progresses.",
+        {"todos": {"type": "array", "maxItems": 100, "items": {"type": "object", "properties": {
+            "content": {"type": "string", "minLength": 1, "maxLength": 500},
             "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}},
             "required": ["content", "status"]}}}, ["todos"]),
     _fn("skill", "Load a skill (reusable instruction package) by name. Use when a listed skill matches the task.",
@@ -3217,13 +3217,29 @@ def notes_tool(args: dict, ctx) -> str:
 
 
 def todo(args: dict, ctx) -> str:
-    ctx.todos = [{"content": str(t.get("content", "")),
-                  "status": t.get("status", "pending")} for t in args.get("todos", [])]
+    # Validate before replacing state: malformed/local-model tool output must not erase a plan
+    # or emit a checklist too large for the editor protocol and session persistence.
+    rows = args.get("todos")
+    if not isinstance(rows, list) or len(rows) > 100:
+        return "error: todos must be an array of at most 100 tasks"
+    normalized = []
+    for item in rows:
+        if not isinstance(item, dict):
+            return "error: each todo must have content and status"
+        content, status = item.get("content"), item.get("status")
+        if not isinstance(content, str) or not content.strip() or len(content) > 500:
+            return "error: todo content must contain 1-500 characters"
+        if status not in ("pending", "in_progress", "done"):
+            return "error: todo status must be pending, in_progress, or done"
+        normalized.append({"content": content.strip(), "status": status})
+    ctx.todos = normalized
     if ctx.on_todo:
         ctx.on_todo(ctx.todos)
+    if not ctx.todos:
+        return "todo list cleared"
     return "todo list updated:\n" + "\n".join(
         f"[{'x' if t['status'] == 'done' else '~' if t['status'] == 'in_progress' else ' '}] {t['content']}"
-        for t in ctx.todos) or "todo list cleared"
+        for t in ctx.todos)
 
 
 def skill_tool(args: dict, ctx) -> str:

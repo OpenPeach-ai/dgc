@@ -123,6 +123,31 @@ function makeDom(options = {}) {
   return { dom, errors, posted, send, doc: dom.window.document, savedState: () => savedState };
 }
 
+test("session tasks update across turns, restore without a phantom turn, and clear with the chat", () => {
+  const { doc, send, errors } = makeDom();
+  const tasks = [{ content: "Inspect", status: "done" }, { content: "Verify <script>", status: "pending" }];
+  const event = data => send({ type: "event", event: data });
+  event({ type: "history", items: [], todos: tasks });
+  assert.match(doc.querySelector(".todos").textContent, /1\/2/);
+  assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0, "restoring tasks is read-only");
+  event({ type: "turn_start", prompt: "Continue" });
+  event({ type: "todos", todos: tasks });
+  event({ type: "turn_end", reason: "completed" });
+  event({ type: "turn_start", prompt: "Finish" });
+  event({ type: "todos", todos: tasks.map(t => ({ ...t, status: "done" })) });
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(doc.querySelectorAll(".todos").length, 1, "only the current session checklist remains");
+  assert.match(doc.querySelector(".todos").textContent, /2\/2/);
+  assert.match(doc.querySelector(".todos").textContent, /Verify <script>/);
+  assert.equal(doc.querySelector(".todos script"), null);
+  event({ type: "session", kind: "new", session_id: "next-chat" });
+  assert.equal(doc.querySelectorAll(".todos").length, 0);
+  event({ type: "todos", todos: tasks });
+  event({ type: "todos", todos: [] });
+  assert.equal(doc.querySelectorAll(".todos").length, 0);
+  assert.deepEqual(errors, []);
+});
+
 test("draft reload retains text, cursor, skills and MCP context only in its workspace", () => {
   const first = makeDom({ scope: "workspace-a" });
   first.send({ type: "session_ready", sessionId: "chat-alpha" });

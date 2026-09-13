@@ -2142,6 +2142,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "todos": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "recall": {

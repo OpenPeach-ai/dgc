@@ -332,6 +332,7 @@ class ACPServer:
             agent.load_session(path)
             self._install_state(config.project_root, agent, ui)
             ui.replay(agent.messages)
+            ui.on_todo(agent.todos)
             ui.available_commands(custom_command_names(config.project_root))
             self.respond(rid, {"modes": _mode_state(agent),
                                "goal": {"text": agent.goal, "status": agent.goal_status}})

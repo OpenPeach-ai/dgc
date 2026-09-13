@@ -2138,14 +2138,16 @@ class Backend:
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
-                self.em.emit("history", items=self._history())
+                self.em.emit("history", items=self._history(),
+                             todos=redact_value(self.agent.todos, secret_values(self.config)))
                 self._emit_context()
                 self._emit_goal()
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
-            self.em.emit("history", items=self._history(), request_id=cmd["request_id"])
+            self.em.emit("history", items=self._history(), request_id=cmd["request_id"],
+                         todos=redact_value(self.agent.todos, secret_values(self.config)))
 
         elif t == "get_recall":
             # Compaction folds older turns into a summary and drops them from the live message

@@ -256,7 +256,7 @@ class AgentSession:
         self.workspace_branch = ""
         self._turn_marks: list[tuple[int, str]] = []
         self._suggestion: str | None = None
-        self._todos: list = []
+        self._todos: list = list(getattr(self.agent, "todos", []))
         self._scroll_off = 0
         self._follow = True                # True = pin to the live bottom; a manual scroll-up drops it
         # a per-session cross-thread blocking request (approve / plan / options)
@@ -1434,7 +1434,8 @@ class TUI:
 
     def _console(self) -> Console:
         return Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
-                       width=max(20, self._width - 2), highlight=False,
+                       width=max(20, self._width - 2), height=max(1, getattr(self, "_height", 25)),
+                       highlight=False,
                        theme=render_mod.markdown_theme())
 
     def _rich(self, *renderables, **kw) -> str:
@@ -4798,6 +4799,7 @@ class TUI:
         earlier turns are archived beside the session, so the seam offers them back instead of
         pretending they never happened.
         """
+        self._todos = list(getattr(self.agent, "todos", []))
         th = style_mod.theme()
         segments = self._message_rows(self.agent.messages)
         for rows, brief in segments:

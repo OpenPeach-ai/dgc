@@ -1203,6 +1203,7 @@ class CLI:
         if si is None:
             return
         n = self.agent.load_session(items[si][0])
+        self.ui.on_todo(self.agent.todos)
         self.ui.info(f"resumed session ({n} messages)"
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
@@ -2217,6 +2218,7 @@ def main(argv: list[str] | None = None) -> int | None:
         p = sessions_mod.latest(config.project_root)
         if p:
             n = cli.agent.load_session(p)
+            cli.ui.on_todo(cli.agent.todos)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
             cli.agent.compact_resumed_session()
         else:
@@ -2226,6 +2228,7 @@ def main(argv: list[str] | None = None) -> int | None:
         p = sessions_mod.by_id(config.project_root, args.resume)
         if p:
             n = cli.agent.load_session(p)
+            cli.ui.on_todo(cli.agent.todos)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
             cli.agent.compact_resumed_session()
         else:
@@ -2241,6 +2244,7 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
+                cli.ui.on_todo(cli.agent.todos)
                 cli.agent.compact_resumed_session()
             else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)

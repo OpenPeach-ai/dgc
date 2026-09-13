@@ -254,7 +254,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "name": _S(False),
         "request_id": _S(False),
     },
-    "history": {"items": _A(), "request_id": _S(False)},
+    "history": {"items": _A(), "request_id": _S(False), "todos": _A(False)},
     "recall": {"items": _A(), "before": _I(), "more": _B(), "total": _I(),
                "request_id": _S(False)},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},

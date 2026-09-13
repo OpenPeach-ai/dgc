@@ -397,10 +397,11 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
     try:
         path = resolve_path(project_root, path)
         if redact_secrets is not None:
-            from .redaction import redact_checkpoint_state, redact_messages, redact_text
+            from .redaction import redact_checkpoint_state, redact_messages, redact_text, redact_value
             messages = redact_messages(messages, redact_secrets)
             name = redact_text(name, redact_secrets) if name else name
             goal = redact_text(goal, redact_secrets) if goal else goal
+            todos = redact_value(todos, redact_secrets) if todos else todos
             if checkpoints is not None:
                 checkpoints = redact_checkpoint_state(checkpoints, redact_secrets)
         data = {"schema_version": SCHEMA_VERSION, "id": path.stem,
