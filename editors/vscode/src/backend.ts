@@ -54,6 +54,11 @@ export class DgcBackend extends EventEmitter {
   private activeRequests = new Map<string, string>();
   private respondedRequests = new Set<string>();
   private draining = false;
+  private startedAt = 0;
+
+  /** The child's pid and how long it has been up — for the log that explains a lost turn. */
+  get childPid(): number | undefined { return this.proc?.pid; }
+  get uptimeMs(): number { return this.startedAt ? Date.now() - this.startedAt : 0; }
   private stopping = false;
   private released = false;
   private lastSeq = -1;
@@ -86,6 +91,7 @@ export class DgcBackend extends EventEmitter {
       return;
     }
     this.proc = child;
+    this.startedAt = Date.now();
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {

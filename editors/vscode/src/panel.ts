@@ -1012,8 +1012,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("stderr", (line: string) => { this.backendNote(line); this.post({ type: "stderr", line }); });
     be.on("exit", (code: number | null, signal?: string | null) => {
       let recovering = false;
-      this.backendNote(`[dgc serve exited: ${
-        signal ? `killed by ${signal}` : code === null ? "killed by an unreported signal" : `code ${code}`}]`);
+      // "code 0" alone reads like a clean, asked-for stop. Whether WE asked is the whole question
+      // when a turn disappears, so the log says it outright, next to how long the child had been up.
+      const how = signal ? `killed by ${signal}`
+        : code === null ? "killed by an unreported signal" : `code ${code}`;
+      const up = Math.round(be.uptimeMs / 1000);
+      this.backendNote(`[dgc serve exited: ${how} · extension asked for it: `
+        + `${this.intentionalShutdown ? "yes" : "no"} · up ${up}s]`);
       this.mcpUrls.clear();
       this.setReadyContext(false);
       if (this.backend === be) {
@@ -1037,6 +1042,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     });
     be.start();
     this.backend = be;
+    this.backendNote(`[dgc serve started: pid ${be.childPid ?? "?"}, host pid ${process.pid}]`);
     return be;
   }
 
@@ -1087,6 +1093,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.workspaceChanges = [];
     // A deliberate restart is not a crash: it must not spend the automatic-recovery budget, and
     // the respawn below is the one that counts.
+    this.backendNote("[extension: restarting the backend on request]");
     this.intentionalShutdown = true;
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     this.backendRecoveries = [];
@@ -3627,6 +3634,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    // Note first, dispose the channel after: a panel teardown is one of the three things that can
+    // end a turn, and it is the one the user never sees.
+    this.backendNote("[extension: panel disposed — stopping the backend]");
     this.backendLog.dispose();
     this.intentionalShutdown = true;                 // shutting down; do not respawn behind us
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }

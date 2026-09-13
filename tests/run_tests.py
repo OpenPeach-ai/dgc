@@ -10789,7 +10789,11 @@ def test_benchmark_integrity():
               and len(_prompt_probe.get("tools", [])) == 9
               and not ({"skill", "repo_map", "code_intel"}
                        & {tool.get("name") for tool in _prompt_probe.get("tools", [])})
-              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2300
+              # 2,350 is a deliberate ceiling, raised once from 2,300 (2026-09-13) to pay for the
+              # hand-back sentence in RESPONSE_GUIDANCE. It exists so a small local context is
+              # not spent on instructions before the first file is read: raise it knowingly or
+              # not at all, and never by deleting an unrelated rule to make room.
+              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2350
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
                       "# Permission mode: auto"})

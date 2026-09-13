@@ -1138,6 +1138,7 @@ class Backend:
         if inspection is not None:
             inspection.close()
         with self._turn_state_lock():
+            self.agent.stopping = True          # the process is going down, nobody pressed stop
             self.agent.cancelled.set()
             self._queue.clear()
             workers = [getattr(self, "_worker", None),
@@ -2508,6 +2509,15 @@ def serve(config: Config) -> None:
         threading.excepthook = _thread_crash
     backend = Backend(config)
     backend.start()
+    # Enough context to tell the three shutdowns apart in a log read days later: the editor asking
+    # us to stop, the editor's host dying under us (our stdin closes and we are reparented), and a
+    # live host closing the pipe anyway — which is a bug on that side, not ours.
+    started_at = time.monotonic()
+    parent_pid = os.getppid()
+    _log_crash(crash_log, f"parent pid {parent_pid}")
+    commands = 0
+    last_command = ""
+    shutdown_requested = False
     try:
         for line, frame_problem in _command_lines(sys.stdin):
             if frame_problem:
@@ -2524,9 +2534,12 @@ def serve(config: Config) -> None:
             if not isinstance(cmd, dict):
                 backend.em.emit("error", message="command must be a JSON object")
                 continue
+            commands += 1
+            last_command = str(cmd.get("type", "?"))
             try:
                 backend.dispatch(cmd)
             except _Shutdown:
+                shutdown_requested = True
                 break
             except Exception as e:             # one bad command must NOT kill the whole backend
                 import traceback
@@ -2540,7 +2553,19 @@ def serve(config: Config) -> None:
         _log_crash(crash_log, "serve loop raised", fatal)
         raise
     else:
-        _log_crash(crash_log, "serve loop ended: stdin closed or shutdown requested")
+        now_parent = os.getppid()
+        if shutdown_requested:
+            cause = "the editor asked us to shut down"
+        elif now_parent != parent_pid:
+            cause = f"stdin closed: the parent ({parent_pid}) is gone — reparented to {now_parent}"
+        else:
+            cause = f"stdin closed while the parent ({parent_pid}) is still alive"
+        try:
+            busy = "yes" if backend._busy() else "no"
+        except Exception:
+            busy = "unknown"
+        _log_crash(crash_log, f"serve loop ended: {cause}; up {time.monotonic() - started_at:.0f}s, "
+                              f"{commands} commands, last {last_command or 'none'!r}, turn running: {busy}")
     finally:
         backend.close()
         _log_crash(crash_log, "backend closed cleanly")

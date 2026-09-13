@@ -435,6 +435,14 @@ class GoalLifecycle:
             self._refresh_system()
             return False
 
+    def _cancel_reason(self) -> str:
+        """Why the cycle stopped. `Agent.stopping` means the backend is going down — a person
+        pressing stop and a process being torn down both cancel the turn, and recording the second
+        as "Stopped by user" told the user they had done something they had not."""
+        if getattr(self, "stopping", False):
+            return "DGC's backend stopped while this goal was running; resume to continue it"
+        return "Stopped by user"
+
     def _gate_completion_report(self, report: dict) -> dict | None:
         """Hold a "completed" report against the checklist it claims to have finished.
 
@@ -515,7 +523,7 @@ class GoalLifecycle:
                     after_tokens = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
                 self._goal_details["tokens_used"] += max(0, after_tokens - before_tokens)
                 if self.cancelled.is_set() or not ok:
-                    reason = "Stopped by user" if self.cancelled.is_set() else (
+                    reason = self._cancel_reason() if self.cancelled.is_set() else (
                         self._last_turn_error or (result.get("error") if isinstance(result, dict) else "")
                         or "The last work cycle did not finish successfully")
                     if getattr(self, "_requested_goal_action", "") == "clear":
@@ -563,7 +571,7 @@ class GoalLifecycle:
                 if getattr(self, "_requested_goal_action", "") == "clear":
                     self.set_goal("")
                 else:
-                    return finish("paused", result, reason="Stopped by user")
+                    return finish("paused", result, reason=self._cancel_reason())
             return result
         except BaseException:
             if self.goal_status == "active":
