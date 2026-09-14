@@ -122,7 +122,7 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string", "description": "File path (relative to project root or absolute)"},
          "offset": {"type": "integer", "description": "1-based start line"},
          "limit": {"type": "integer", "description": "Max lines to read"}}, ["path"]),
-    _fn("view_image", "Look at an image file in the workspace (PNG, JPEG, GIF, WebP or BMP, up to "
+    _fn("view_image", "Look at an image file in the workspace (PNG, JPEG, GIF or WebP, up to "
         "8 MB) when the task depends on what it shows: a screenshot, mockup, diagram, icon or "
         "rendered output. The image is attached for you to see after this batch.",
         {"path": {"type": "string"}}, ["path"]),
@@ -2097,6 +2097,16 @@ def shutdown_browsers(owner: str | None = None) -> None:
 atexit.register(shutdown_browsers)
 
 
+def _shows_images(ctx) -> bool:
+    """Does the front end show the user tool images? ``ctx.shows_images`` is a bool or a callable
+    (the agent's asks its UI); a context without one is assumed to."""
+    value = getattr(ctx, "shows_images", True)
+    try:
+        return bool(value() if callable(value) else value)
+    except Exception:
+        return False
+
+
 def _vision_available(ctx) -> bool:
     """Can the active model read images? ``ctx.vision`` is a bool or a callable returning one (the
     agent's reads the live client, so a client swap or an endpoint's image refusal counts at once)."""
@@ -2209,8 +2219,8 @@ def browser_tool(args: dict, ctx) -> str:
                 seen = "The image follows this batch, so you can look at it directly."
             else:
                 seen = ("This model does not accept images, so you cannot look at it — use "
-                        "`snapshot` to read the page structure instead. The user can see the "
-                        "screenshot in the chat.")
+                        "`snapshot` to read the page structure instead."
+                        + (" The user can see the screenshot in the chat." if _shows_images(ctx) else ""))
             return (f"screenshot of {session.current_url or 'the current page'} "
                     f"({len(png) // 1024} KB) saved to {where}. {seen}")
         if operation == "find":
@@ -3511,6 +3521,12 @@ def view_image(args: dict, ctx) -> str:
     entry = _image_entry(data, name=p.name, source="view_image", path=str(p))
     _queue_image(_tool_owner(ctx), entry)
     size = f"{entry['width']}×{entry['height']}, " if entry["width"] and entry["height"] else ""
+    if mime not in image_views.MODEL_MIMES:
+        kind = mime.split("/", 1)[-1].upper()
+        return (f"viewed {_safe_output(rel, ctx)} ({mime}, {size}{image_views.human_size(len(data))}). "
+                f"{kind} cannot be sent to the model"
+                + (", so it is shown in the chat only" if _shows_images(ctx) else "")
+                + "; convert it to PNG to look at it.")
     return (f"viewed {_safe_output(rel, ctx)} ({mime}, {size}{image_views.human_size(len(data))}). "
             "The image follows this batch, so you can look at it directly.")
 

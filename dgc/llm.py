@@ -1859,8 +1859,10 @@ class LLMClient:
                 value = value.get("url") or ""
             match = _ANTHROPIC_IMAGE_RE.fullmatch(str(value))
             if not match:
-                raise LLMError(
-                    "Anthropic Messages image input must be a validated base64 JPEG, PNG, GIF, or WebP")
+                # Raising here failed every later request too: the image stays in the transcript.
+                blocks.append({"type": "text", "text": "[An image was left out here: only JPEG, PNG, "
+                               "GIF and WebP images can be sent to this model.]"})
+                continue
             blocks.append({
                 "type": "image",
                 "source": {"type": "base64", "media_type": match.group(1).lower(),
@@ -2973,6 +2975,13 @@ class LLMClient:
                 last_err = body
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    # images: /api/show can be silent about capabilities, so a text-only model's
+                    # "Multimodal data provided, but model does not support multimodal requests"
+                    # is the first word. It refuses the image, not tools: retry once without it.
+                    messages = self._without_images(messages, refused=True)
+                    payload["messages"] = self._ollama_messages(messages)
+                    continue
                 if (r.status_code == 400 and self.tools_supported and "tools" in payload
                         and re.search(r"tool|function", low)):
                     self._mark_rejected("tools")
@@ -2999,9 +3008,14 @@ class LLMClient:
                     continue
                 raise LLMError(f"{r.status_code} from Ollama: {body}")
             if r.status_code >= 500:
-                transient += 1
                 status = r.status_code
                 body = _error_body(r)
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    payload["messages"] = self._ollama_messages(
+                        _repair_for_retry(messages) if repaired else messages)
+                    continue
+                transient += 1
                 last_err = f"HTTP {status}: {body[:300]}"
                 if transient < 4:
                     if transient >= 2 and not repaired:

@@ -3469,16 +3469,39 @@ class Backend:
                 "caption": "", "items": [record.to_item() for record in records]}
 
     def _history_begin_images(self) -> None:
-        """Reset per-call image replay state at the start of one `_history` projection."""
+        """Reset per-call image replay state at the start of one `_history` projection. Everything a
+        message loop needs is indexed once here, so replay stays linear in messages plus records."""
+        from .agent import _COMPACT_PREFIX
         records = [record for record in list(getattr(getattr(self, "agent", None), "image_views", None) or [])
                    if hasattr(record, "to_item")]
         messages = list(getattr(getattr(self, "agent", None), "messages", None) or [])
-        tool_positions: dict = {}
+        tool_calls: set = set()
+        summary = None
         for position, message in enumerate(messages):
-            if isinstance(message, dict) and message.get("role") == "tool":
-                tool_positions.setdefault(str(message.get("tool_call_id") or ""), []).append(position)
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "tool":
+                tool_calls.add(str(message.get("tool_call_id") or ""))
+            elif (summary is None and message.get("role") == "user"
+                  and isinstance(message.get("content"), str)
+                  and message["content"].startswith(_COMPACT_PREFIX)):
+                summary = position
+        folded, orphans, by_call = [], [], {}
+        for position, record in enumerate(records):
+            if getattr(record, "compacted", False):
+                folded.append(position)
+            elif str(record.call_id or "") in tool_calls:
+                by_call.setdefault(str(record.call_id or ""), []).append(position)
+            else:
+                orphans.append(position)
+        anchor = lambda position: records[position].anchor
+        orphans.sort(key=anchor)                       # stable: equal anchors keep record order
+        for positions in by_call.values():
+            positions.sort(key=anchor)
         self._history_images = {
-            "records": records, "done": set(), "index": -1, "tool_positions": tool_positions,
+            "records": records, "done": set(), "index": -1, "summary": summary,
+            "folded": folded, "orphans": orphans, "orphan_next": 0,
+            "by_call": by_call, "call_next": {},
         }
 
     def _history_image_state(self) -> dict:
@@ -3491,18 +3514,36 @@ class Backend:
     def _history_before_message(self, index: int, turn: dict | None) -> list:
         """Image records anchored at or before message ``index`` whose call has no native tool
         message, as ``tool_images`` items with ``call_id: null``. ``turn`` is None when no turn is
-        open; the records then wait for a later call or `_history_finish_images`."""
+        open; the records then wait for a later call or `_history_finish_images`. Images whose
+        steps a compaction folded into its summary come back as one row just after the summary."""
         state = self._history_image_state()
         state["index"] = index
+        items: list = []
+        if state["folded"] and (state["summary"] is None or index > state["summary"]):
+            folded, state["folded"] = state["folded"], []
+            rows = self._history_orphans(state, folded)
+            if turn is None:
+                # The summary opens no turn: the row gets a quiet one of its own ("h0" never
+                # collides, history turns count from h1).
+                items.append({"type": "turn_start", "turn_id": "h0", "prompt": "", "kind": "prompt"})
+                items.extend(rows)
+                items.append({"type": "turn_end", "turn_id": "h0", "reason": "completed",
+                              "token_estimate": 0, "final_message_id": None})
+            else:
+                items.extend(rows)
         if turn is None:
-            return []
-        due = [position for position, record in enumerate(state["records"])
-               if position not in state["done"] and record.anchor <= index
-               and str(record.call_id or "") not in state["tool_positions"]]
-        return self._history_orphans(state, due)
+            return items
+        orphans, start = state["orphans"], state["orphan_next"]
+        end = start
+        while end < len(orphans) and state["records"][orphans[end]].anchor <= index:
+            end += 1
+        state["orphan_next"] = end
+        items.extend(self._history_orphans(state, orphans[start:end]))
+        return items
 
     def _history_orphans(self, state: dict, positions: list) -> list:
         items = []
+        positions = [position for position in positions if position not in state["done"]]
         for start in range(0, len(positions), 64):
             chunk = positions[start:start + 64]
             state["done"].update(chunk)
@@ -3510,23 +3551,24 @@ class Backend:
         return items
 
     def _history_after_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
-        """``tool_images`` items for the call whose ``tool_result`` was just replayed."""
+        """``tool_images`` items for the call whose ``tool_result`` was just replayed. A call id can
+        repeat across turns: an image belongs to the first result at or after where it was recorded
+        (compaction keeps anchors on the live numbering, so no leftover is guessed onto a result)."""
         state = self._history_image_state()
         call = str(call_id or "")
-        if not call:
+        positions = state["by_call"].get(call) if call else None
+        if not positions:
             return []
         index = state["index"]
-        positions = state["tool_positions"].get(call, [])
-        last = not positions or index >= positions[-1]
-        # A call id can repeat across turns: an image belongs to the first result at or after the
-        # point it was recorded. Compaction renumbers messages, so the last result for an id also
-        # takes whatever is left for it.
-        due = [position for position, record in enumerate(state["records"])
-               if position not in state["done"] and str(record.call_id or "") == call
-               and (record.anchor <= index or last)]
+        start = state["call_next"].get(call, 0)
+        end = start
+        while end < len(positions) and state["records"][positions[end]].anchor <= index:
+            end += 1
+        state["call_next"][call] = end
         items = []
-        for start in range(0, len(due), 64):
-            chunk = due[start:start + 64]
+        due = [position for position in positions[start:end] if position not in state["done"]]
+        for offset in range(0, len(due), 64):
+            chunk = due[offset:offset + 64]
             state["done"].update(chunk)
             items.append(self._history_image_item(call, [state["records"][p] for p in chunk]))
         return items

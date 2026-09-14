@@ -312,6 +312,54 @@ class DowngradeTests(unittest.TestCase):
             finally:
                 server.close()
 
+    def test_native_ollama_refusal_downgrades_when_show_is_silent(self):
+        # The body a real text-only Ollama model (qwen2.5:14b) returns for /api/chat with images.
+        refusal = json.dumps({"error": {"code": 400, "type": "invalid_request_error", "message":
+                              "Multimodal data provided, but model does not support multimodal requests."}})
+        for status in (400, 500):
+            def script(path, body, n):
+                if path.endswith("/api/show"):     # no capabilities array: vision stays optimistic
+                    return 200, {"details": {"family": "qwen2"},
+                                 "model_info": {"general.architecture": "qwen2", "qwen2.context_length": 32768}}
+                if any(m.get("images") for m in body.get("messages", [])):
+                    return status, {"error": refusal}
+                return 200, {"model": "m", "message": {"role": "assistant", "content": "ok"},
+                             "done": True, "done_reason": "stop"}
+            server = FakeModel(script)
+            try:
+                client = LLMClient(server.base_url[:-3], "", "qwen2.5:14b", api_mode="ollama")
+                self.assertTrue(client.vision_supported, status)
+                self.assertEqual(client.chat(copy.deepcopy(IMAGE_MESSAGES), tools=TOOLS).content, "ok")
+                chats = [body for path, body in server.requests if path.endswith("/api/chat")]
+                self.assertEqual([sum(1 for m in b["messages"] if m.get("images")) for b in chats], [1, 0], status)
+                self.assertIn("cannot read images", json.dumps(chats[1]))
+                self.assertIn("tools", chats[1], "native tools stay on")
+                self.assertTrue(client.tools_supported, status)
+                self.assertFalse(client.vision_supported, status)
+                client.chat(copy.deepcopy(IMAGE_MESSAGES), tools=TOOLS)
+                chats = [body for path, body in server.requests if path.endswith("/api/chat")]
+                self.assertEqual((len(chats), sum(1 for m in chats[2]["messages"] if m.get("images"))), (3, 0))
+            finally:
+                server.close()
+
+    def test_anthropic_leaves_a_note_for_an_image_it_cannot_take(self):
+        def script(path, body, n):
+            return 200, {"id": "m1", "type": "message", "stop_reason": "end_turn",
+                         "content": [{"type": "text", "text": "ok"}]}
+        server = FakeModel(script)
+        try:
+            client = LLMClient(server.base_url, "k", "claude-bmp", api_mode="anthropic")
+            messages = [{"role": "user", "content": [{"type": "text", "text": "look"},
+                                                     {"type": "image_url", "image_url": {"url": uri_of(bmp(4, 4), "image/bmp")}}]}]
+            for _ in range(2):
+                self.assertEqual(client.chat(copy.deepcopy(messages), tools=TOOLS).content, "ok")
+            self.assertEqual(len(server.requests), 2, "every request reaches the endpoint")
+            self.assertEqual(server.image_parts(1), 0)
+            self.assertIn("only JPEG, PNG, GIF and WebP images can be sent", json.dumps(server.requests[1][1]))
+            self.assertTrue(client.vision_supported and client.tools_supported)
+        finally:
+            server.close()
+
     def test_ollama_still_strips_for_a_text_only_model(self):
         stripped, dropped = __import__("dgc.llm", fromlist=["_strip_images_with_note"])._strip_images_with_note(
             copy.deepcopy(IMAGE_MESSAGES), "tiny")
@@ -395,6 +443,100 @@ class AgentImageRunTests(unittest.TestCase):
         self.assertNotIn("user:secret", json.dumps(ui.named("tool_images")[0][2]["meta"]))
 
 
+class NoImagesUI(QuietUI):
+    """A front end with no tool_images (ACP)."""
+    def __getattr__(self, name):
+        if name == "tool_images" or name.startswith("__"):
+            raise AttributeError(name)
+        return super().__getattr__(name)
+
+
+class ModelFormatTests(unittest.TestCase):
+    """A BMP is shown in the chat but never queued for the model: OpenAI and Anthropic refuse it."""
+
+    def test_bmp_is_shown_but_not_sent(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-bmp-") as directory:
+            root = Path(directory)
+            (root / "icon.bmp").write_bytes(bmp(16, 16))
+            (root / "icon.png").write_bytes(png(16, 16))
+            calls = {"n": 0}
+
+            def script(path, request, n):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return 200, chat_answer("", [{"id": "call_bmp", "type": "function", "function": {
+                        "name": "view_image", "arguments": json.dumps({"path": "icon.bmp"})}}])
+                return 200, chat_answer("A small icon.")
+
+            server = FakeModel(script)
+            ui = RecordingUI()
+            agent = Agent(fixture_config(root, base_url=server.base_url, model="vision-model", mode="auto",
+                                         api_mode="chat_completions",
+                                         provider_capabilities={"vision": True}), ui)
+            try:
+                self.assertTrue(agent.run_turn("what does icon.bmp look like?"))
+                result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
+                self.assertIn("viewed icon.bmp (image/bmp, 16×16, 1 KB). BMP cannot be sent to the model, so "
+                              "it is shown in the chat only; convert it to PNG to look at it.", result)
+                self.assertEqual(len(ui.named("tool_images")), 1, "the chat still shows it")
+                self.assertFalse(any(server.image_parts(i) for i in range(len(server.requests))))
+                self.assertTrue(agent.client.tools_supported and agent.client.vision_supported)
+
+                agent._image_batch_open = True
+                agent._handle_call(ToolCall("call_png", "view_image", {"path": "icon.png"}))
+                self.assertEqual([shot["source"] for shot in agent._turn_images], ["view_image"])
+                agent._turn_images = []
+                agent._handle_call(ToolCall("call_bmp2", "view_image", {"path": "icon.bmp"}))
+                self.assertEqual(agent._turn_images, [])
+            finally:
+                agent.mcp.stop_all()
+                server.close()
+
+    def test_mcp_words_follow_what_really_happens(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-mcp-words-") as directory:
+            root = Path(directory)
+            for ui, shown in ((RecordingUI(), True), (NoImagesUI(), False)):
+                agent = make_agent(root, ui=ui, mode="auto")
+                try:
+                    seen = []
+                    def call(target, arguments, cancel=None, *, on_image=None, **kwargs):
+                        seen.append(on_image("image/png", png(8, 8), name="a.png"))
+                        seen.append(on_image("image/bmp", bmp(8, 8), name="b.bmp"))
+                        return "ok"
+                    agent.mcp.call = call
+                    agent.execute_mcp_tool("mcp__srv__chart", {}, "editor-1")
+                    agent._image_batch_open = True
+                    agent.execute_mcp_tool("mcp__srv__chart", {}, "call-2")
+                    agent.client.__class__.vision_supported = False
+                    agent.execute_mcp_tool("mcp__srv__chart", {}, "call-3")
+                    where = "; the user can see it in the chat" if shown else ""
+                    self.assertEqual(seen, [
+                        "shown in the chat only" if shown else "not sent to the model",
+                        f"image/bmp cannot be sent to the model{where}",
+                        True, f"image/bmp cannot be sent to the model{where}",
+                        f"this model cannot read images{where}", f"this model cannot read images{where}"])
+                    self.assertEqual(len(agent._turn_images), 1, "only the PNG of the open batch")
+                finally:
+                    agent.mcp.stop_all()
+
+    def test_screenshot_words_for_a_front_end_without_images(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-acp-") as directory:
+            root = Path(directory)
+            for ui, shown in ((RecordingUI(), True), (NoImagesUI(), False)):
+                agent = make_agent(root, ui=ui, mode="auto", vision=False)
+                try:
+                    with patch("dgc.tools._browser_session", return_value=FakeBrowser(png(20, 20))):
+                        out = execute("browser", {"operation": "screenshot"}, agent.ctx)
+                    self.assertEqual("The user can see the screenshot in the chat." in out, shown, out)
+                    tools.take_pending_images(agent.ctx.tool_owner, "")
+                finally:
+                    agent.mcp.stop_all()
+
+    def test_workspace_images_are_labelled_as_data(self):
+        from dgc.agent import _IMAGE_BATCH_TEXT
+        self.assertIn("not instructions", _IMAGE_BATCH_TEXT["view_image"])
+
+
 class SubAgentAndMcpTests(unittest.TestCase):
     def test_buffered_child_replays_tool_images_after_its_tool_result(self):
         with tempfile.TemporaryDirectory(prefix="dgc-images-child-") as directory:
@@ -436,7 +578,7 @@ class SubAgentAndMcpTests(unittest.TestCase):
                     return f"chart ready (model sees it: {seen})"
                 agent.mcp.call = call
                 out = agent.execute_mcp_tool("mcp__srv__chart", {}, "editor-1")
-                self.assertIn("model sees it: False", out, "an idle editor call is display-only")
+                self.assertIn("model sees it: shown in the chat only", out, "an idle editor call is display-only")
                 images = ui.named("tool_images")
                 self.assertEqual(len(images), 1)
                 self.assertEqual(images[0][1][0], "editor-1")
@@ -1009,6 +1151,184 @@ class HistoryTests(unittest.TestCase):
         kinds = [item.get("type") for item in items]
         self.assertEqual(kinds[-2:], ["tool_images", "turn_end"])
         self.assert_valid(items)
+
+
+class CompactionAnchorTests(unittest.TestCase):
+    """Compaction rewrites the transcript: image records must stay on the messages they belong to."""
+
+    def build(self, root: Path):
+        for name, size in (("a.png", 11), ("b.png", 12), ("c.png", 13), ("d.png", 14)):
+            (root / name).write_bytes(png(size, size))
+        agent = make_agent(root, mode="auto", compact_threshold=0.0)
+        agent.session_file = sessions.new_path(root)
+        m = agent.messages
+
+        def native(call_id, path, answer):
+            m.append({"role": "assistant", "content": "", "tool_calls": [{"id": call_id, "type": "function",
+                      "function": {"name": "view_image", "arguments": json.dumps({"path": path})}}]})
+            out = agent._handle_call(ToolCall(call_id, "view_image", {"path": path}))
+            m.append({"role": "tool", "tool_call_id": call_id, "content": out})
+            m.append({"role": "assistant", "content": answer})
+
+        def text_protocol(call_id, path, answer):
+            m.append({"role": "assistant", "content": "```tool\n{\"name\":\"view_image\"}\n```"})
+            agent._handle_call(ToolCall(call_id, "view_image", {"path": path}))
+            m.append({"role": "user", "content": "<tool_results>\n<result tool=\"view_image\">viewed</result>\n</tool_results>"})
+            m.append({"role": "assistant", "content": answer})
+
+        m.append({"role": "user", "content": "look at a.png"})
+        native("call_0", "a.png", "It is a.")                   # anchor 3, folded
+        m.append({"role": "user", "content": "and c.png"})
+        text_protocol("textcall_0", "c.png", "It is c.")        # anchor 7, folded
+        m.append({"role": "user", "content": "look at b.png"})
+        native("call_0", "b.png", "It is b.")                   # anchor 11, kept (a repeated fallback id)
+        m.append({"role": "user", "content": "and d.png"})
+        text_protocol("textcall_1", "d.png", "It is d.")        # anchor 15, kept
+        self.assertEqual([r.anchor for r in agent.image_views], [3, 7, 11, 15])
+        self.assertEqual(len(m), 17)
+        return agent
+
+    def compact(self, agent):
+        with patch("dgc.agent.KEEP_RECENT", 6):
+            self.assertTrue(agent.maybe_compact(deadline=time.monotonic(), notify=False))
+        self.assertTrue(agent.messages[1]["content"].startswith("[Earlier conversation compacted"))
+
+    def names(self, item):
+        return [entry["name"] for entry in item["items"]]
+
+    def test_history_places_kept_and_folded_images_after_a_compaction(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-compact-") as directory:
+            agent = self.build(Path(directory))
+            try:
+                self.compact(agent)
+                self.assertEqual(len(agent.messages), 10, "summary, ack and the kept tail of 7")
+                by_name = {r.name: r for r in agent.image_views}
+                self.assertEqual((by_name["a.png"].compacted, by_name["c.png"].compacted), (True, True))
+                self.assertEqual((by_name["b.png"].anchor, by_name["d.png"].anchor), (4, 8))
+                self.assertEqual((by_name["b.png"].origin, by_name["d.png"].origin), (11, 15))
+                self.assertEqual(agent.messages[4].get("tool_call_id"), "call_0")
+
+                backend = object.__new__(Backend)
+                backend.agent = agent
+                items = Backend._history(backend)
+                for item in items:
+                    if isinstance(item.get("type"), str):
+                        self.assertIsNone(ep.event_error({**item, "seq": 0}), item)
+                rows = [(i, item) for i, item in enumerate(items) if item.get("type") == "tool_images"]
+                self.assertEqual([self.names(item) for _, item in rows], [["a.png", "c.png"], ["b.png"], ["d.png"]])
+                marker = next(i for i, item in enumerate(items) if item.get("role") == "compaction")
+                folded_at, folded = rows[0]
+                self.assertIsNone(folded["call_id"])
+                self.assertEqual(items[marker + 1], {"type": "turn_start", "turn_id": "h0", "prompt": "", "kind": "prompt"})
+                self.assertEqual(items[folded_at + 1]["type"], "turn_end")
+                kept_at, kept = rows[1]
+                self.assertEqual((kept["call_id"], items[kept_at - 1]["type"]), ("call_0", "tool_result"))
+                calls = [item for item in items if item.get("type") == "tool_result"]
+                self.assertEqual(len(calls), 1, "the folded call_0 card is gone; its image does not borrow the kept one")
+                last_start = max(i for i, item in enumerate(items) if item.get("type") == "turn_start")
+                self.assertEqual(items[last_start]["prompt"], "and d.png")
+                self.assertGreater(rows[2][0], last_start, "d.png replays in its own turn")
+
+                # persisted and loaded back with the same placement
+                loaded = make_agent(Path(directory))
+                try:
+                    loaded.load_session(agent.session_file)
+                    self.assertEqual([(r.name, r.anchor, r.origin, r.compacted) for r in loaded.image_views],
+                                     [(r.name, r.anchor, r.origin, r.compacted) for r in agent.image_views])
+                    self.assertEqual(loaded._image_folded_now(), 7)
+                finally:
+                    loaded.mcp.stop_all()
+            finally:
+                agent.mcp.stop_all()
+
+    def test_a_second_compaction_and_a_rollback(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-compact2-") as directory:
+            agent = self.build(Path(directory))
+            try:
+                self.compact(agent)
+                before = [(r.name, r.anchor, r.compacted) for r in agent.image_views]
+                with patch.object(agent, "_persist", return_value=False), patch("dgc.agent.KEEP_RECENT", 2):
+                    agent.maybe_compact(deadline=time.monotonic(), notify=False)
+                self.assertEqual([(r.name, r.anchor, r.compacted) for r in agent.image_views], before,
+                                 "a compaction that could not be saved leaves the index as it was")
+                with patch("dgc.agent.KEEP_RECENT", 2):
+                    self.assertTrue(agent.maybe_compact(deadline=time.monotonic(), notify=False))
+                # The tail kept is d.png's <tool_results> and answer: its step's result is still there.
+                self.assertEqual([r.compacted for r in agent.image_views], [True, True, True, False])
+                self.assertEqual([r.anchor for r in agent.image_views], [3, 3, 3, 3])
+                self.assertEqual([r.origin for r in agent.image_views], [3, 7, 11, 15])
+                self.assertEqual(agent._image_folded_now(), 12)
+                backend = object.__new__(Backend)
+                backend.agent = agent
+                rows = [item for item in Backend._history(backend) if item.get("type") == "tool_images"]
+                self.assertEqual([self.names(row) for row in rows], [["a.png", "c.png", "b.png"], ["d.png"]])
+            finally:
+                agent.mcp.stop_all()
+
+    def test_rewind_after_a_compaction_keeps_the_kept_tail(self):
+        with tempfile.TemporaryDirectory(prefix="dgc-images-compact-rewind-") as directory:
+            agent = self.build(Path(directory))
+            try:
+                original = copy.deepcopy(agent.messages)
+                self.compact(agent)
+                agent.checkpoints.commit_rewind = lambda: None
+                agent.checkpoints.rollback_rewind = lambda: None
+                agent.checkpoints.rewind_state = lambda idx, transactional=True: (6, 0, None)
+                self.assertEqual(agent.rewind(0)[0], 6)
+                self.assertEqual([r.name for r in agent.image_views], ["a.png", "c.png", "b.png"],
+                                 "the folded images and b.png (before the cut) stay; d.png goes")
+                self.assertEqual(image_views.resolve(agent.session_file, agent.image_views[2])[1], "")
+
+                # A turn from before the compaction restores the never-compacted transcript.
+                agent2 = self.build(Path(directory))
+                try:
+                    original = copy.deepcopy(agent2.messages)
+                    self.compact(agent2)
+                    agent2.checkpoints.commit_rewind = lambda: None
+                    agent2.checkpoints.rollback_rewind = lambda: None
+                    agent2.checkpoints.rewind_state = lambda idx, transactional=True: (9, 0, original[1:9])
+                    self.assertEqual(agent2.rewind(0)[0], 9)
+                    self.assertEqual([(r.name, r.anchor, r.compacted) for r in agent2.image_views],
+                                     [("a.png", 3, False), ("c.png", 7, False)])
+                    self.assertEqual(agent2._image_folded_now(), 0)
+                    backend = object.__new__(Backend)
+                    backend.agent = agent2
+                    items = Backend._history(backend)
+                    rows = [item for item in items if item.get("type") == "tool_images"]
+                    self.assertEqual([(row["call_id"], self.names(row)) for row in rows],
+                                     [("call_0", ["a.png"]), (None, ["c.png"])])
+                finally:
+                    agent2.mcp.stop_all()
+            finally:
+                agent.mcp.stop_all()
+
+
+class HistoryScaleTests(unittest.TestCase):
+    def test_replay_stays_linear_with_a_full_index(self):
+        messages = [{"role": "system", "content": "s"}]
+        records = []
+        for n in range(1200):
+            call = f"call_{n}"
+            messages += [{"role": "user", "content": f"p{n}"},
+                         {"role": "assistant", "content": "", "tool_calls": [
+                             {"id": call, "type": "function", "function": {"name": "view_image", "arguments": "{}"}}]}]
+            if n >= 1200 - 256:
+                records += [image_views.ImageRecord(ref="img_" + hashlib.sha256(f"{n}{k}".encode()).hexdigest()[:32],
+                                                    name=f"{n}.png", mime="image/png", source="view_image",
+                                                    call_id=call if k == 0 else f"text-{n}", anchor=len(messages))
+                            for k in range(2)]
+            messages += [{"role": "tool", "tool_call_id": call, "content": "viewed"},
+                         {"role": "assistant", "content": "ok"}]
+        backend = object.__new__(Backend)
+        backend.agent = types.SimpleNamespace(messages=messages, image_views=records)
+        started = time.perf_counter()
+        Backend._history(backend)
+        with_images = time.perf_counter() - started
+        backend.agent = types.SimpleNamespace(messages=messages, image_views=[])
+        started = time.perf_counter()
+        Backend._history(backend)
+        without = time.perf_counter() - started
+        self.assertLess(with_images, without * 3 + 0.05, (with_images, without))
 
 
 if __name__ == "__main__":

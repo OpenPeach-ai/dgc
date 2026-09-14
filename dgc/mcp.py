@@ -1456,7 +1456,9 @@ class MCPServer:
             return f"[MCP image: {mime} · not shown: {reason}]"
         width, height = dimensions(data)
         shape = f"{width}×{height} · " if width and height else ""
-        seen = on_image(mime, data, name=name)      # True: the model sees it; False: the chat only
+        seen = on_image(mime, data, name=name)      # True: the model sees it; words: why it does not
+        if isinstance(seen, str) and seen:
+            return f"[MCP image: {mime} · {shape}{human_size(len(data))} — {seen[:160]}]"
         if seen is None:
             return (f"[MCP image: {mime} · {shape}{human_size(len(data))} — not kept: DGC keeps up to "
                     "8 images per step]")

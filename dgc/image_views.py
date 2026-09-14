@@ -26,6 +26,9 @@ from urllib.parse import urlsplit
 from .attachments import MAX_IMAGE_FILE_BYTES, _IMAGE_TYPES, _image_matches
 
 IMAGE_MIMES = frozenset(_IMAGE_TYPES.values())
+# The formats every provider DGC talks to accepts as image input. A BMP is kept and shown in the chat,
+# but OpenAI and Anthropic refuse it, and a refused image stays in the transcript.
+MODEL_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 MIME_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
                    "image/webp": "webp", "image/bmp": "bmp"}
 MAX_VIEW_BYTES = MAX_IMAGE_FILE_BYTES        # 8 MB: view_image and the store's per-file ceiling
@@ -171,6 +174,19 @@ class ImageRecord:
     tool: str = ""
     anchor: int = 0                     # the root transcript's message count when it was recorded
     created: float = 0.0
+    # Compaction rewrites the transcript, so ``anchor`` is kept on the live numbering (see
+    # Agent._rebase_image_anchors). ``origin`` is the position in the never-compacted numbering
+    # (a rewind to a turn before the first compaction restores that transcript), ``folded`` is how
+    # many messages compaction had removed when the record was last placed, and ``compacted`` marks
+    # an image whose step was folded into a compaction summary.
+    origin: int = -1
+    folded: int = 0
+    compacted: bool = False
+
+    @property
+    def position(self) -> int:
+        """The record's place in the never-compacted transcript."""
+        return self.origin if self.origin >= 0 else self.anchor + self.folded
 
     def to_item(self) -> dict:
         """The v14 ``tool_images.items[i]`` shape."""
@@ -209,7 +225,12 @@ class ImageRecord:
                    source=source, host=safe_host(raw.get("host")) if source == "browser" else "",
                    call_id=call_id, live_call_id=live, tool=str(raw.get("tool") or "")[:128],
                    anchor=_bounded_int(raw.get("anchor"), 1 << 40),
-                   created=created if created == created and created >= 0 else 0.0)
+                   created=created if created == created and created >= 0 else 0.0,
+                   origin=(_bounded_int(raw.get("origin"), 1 << 40)
+                           if isinstance(raw.get("origin"), int) and not isinstance(raw.get("origin"), bool)
+                           and raw.get("origin") >= 0 else -1),
+                   folded=_bounded_int(raw.get("folded"), 1 << 40),
+                   compacted=raw.get("compacted") is True)
 
 
 def load_index(raw) -> list[ImageRecord]:
@@ -245,7 +266,7 @@ def _store_path(session_file, ref: str, mime: str) -> Path:
 
 def store(session_file, data: bytes, *, name: object = "", source: str = "browser",
           host: object = "", tool: str = "", call_id: str | None = None,
-          live_call_id: str | None = None, anchor: int = 0) -> ImageRecord:
+          live_call_id: str | None = None, anchor: int = 0, folded: int = 0) -> ImageRecord:
     """Keep ``data`` in the session's store and return its record. Idempotent: identical bytes are
     one file. Raises ValueError for bytes that are not a supported image or exceed 8 MB."""
     data = bytes(data or b"")
@@ -288,7 +309,8 @@ def store(session_file, data: bytes, *, name: object = "", source: str = "browse
                        bytes=len(data), source=source,
                        host=safe_host(host) if source == "browser" else "", call_id=call_id,
                        live_call_id=live_call_id, tool=str(tool or "")[:128], anchor=max(0, int(anchor)),
-                       created=time.time())
+                       created=time.time(), origin=max(0, int(anchor)) + max(0, int(folded)),
+                       folded=max(0, int(folded)))
 
 
 def resolve(session_file, record: ImageRecord) -> tuple[bytes | None, str, str]:
