@@ -51,9 +51,9 @@ metadata and the full text of documents queried through code intelligence.
 
 ## Install
 
-Requires **Python 3.10+**. The installer creates its own virtualenv under
-`~/dgc` and links the launcher into `~/.local/bin`, so it never touches your
-system Python:
+Requires **Python 3.10+**. The installer builds each version in its own
+directory with its own virtualenv under `~/.local/share/dgc/versions` and links
+the launcher into `~/.local/bin`, so it never touches your system Python:
 
 ```
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -71,12 +71,22 @@ If that reports `command not found`, add the bin directory to your PATH:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
-Two environment variables let you override where things land: `DGC_DIR` (the
-install directory, default `~/dgc`) and `DGC_BIN` (the launcher directory,
-default `~/.local/bin`).
+Two environment variables let you override where things land: `DGC_DATA_DIR`
+(where versions live, default `~/.local/share/dgc`; the older name `DGC_DIR` still
+works) and `DGC_BIN` (the launcher directory, default `~/.local/bin`). `dgc update`
+remembers both: it updates the install it was started from.
 
-If `cursor`, `code`, or `codium` is already on `PATH`, the installer also verifies
-and installs the self-hosted editor extension into the first one it finds. Set
+An update builds the new version beside the current one and switches the `dgc`
+launcher only once the build is complete, so a failed update leaves the version
+you had running, and `dgc` exits non-zero. The active version and the two newest
+others are kept: `dgc update --rollback` switches back, `dgc update --version X`
+switches to a kept version, and `dgc update --list` shows them. An install made
+by an older installer (under `~/dgc`) moves to the new layout on its next update;
+the old directory is left in place for you to delete. `dgc doctor` shows which
+install is running, where the launcher points and what `dgc update` would change.
+
+If `cursor`, `code`, or `codium` is on `PATH`, the installer also verifies and
+installs the self-hosted editor extension into each of them. Set
 `DGC_SKIP_EXTENSION=1` before the install command to leave editor-managed state
 untouched and install an extension later from the editor page.
 
@@ -238,8 +248,9 @@ API-key environment reference is process-only:
 ## Subcommands
 
 - `dgc setup` — configure provider / model / context.
-- `dgc doctor` — check that the endpoint and model are reachable.
-- `dgc update` — update DGC to the latest version.
+- `dgc doctor` — check that the endpoint and model are reachable, and show the installation.
+- `dgc update` — install the latest DGC beside the current version; `--rollback`,
+  `--version X` and `--list` switch between the versions kept on disk.
 - `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
 - `dgc protocol describe` — print the installed headless/editor contract as JSON.
 - `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is

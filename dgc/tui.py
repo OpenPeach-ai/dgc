@@ -6705,7 +6705,7 @@ class TUI:
                 sess, "DGC exited before this fleet agent fully stopped",
                 retain_if_running=bool(worker and worker.is_alive()))
 
-    def run(self) -> None:
+    def run(self) -> int | None:
         # keep the width in sync + drive the idle/turn animation
         def sizer():
             while True:
@@ -6724,8 +6724,7 @@ class TUI:
             termbg.reset()
         if getattr(self, "_pending_update", False):     # user ran /update — install on the raw TTY
             from .update import run_update
-            run_update()
-            return
+            return run_update()          # the exit status of `dgc` reports a failed update
         # NOTE: the resume hint on exit is printed ONCE by the CLI (cli._print_resume_hint), which
         # offers BOTH `dgc --continue` and `dgc --resume <id>` in a single block. Don't print a second
         # one here or the user sees two separate "Resume this session" notices.
