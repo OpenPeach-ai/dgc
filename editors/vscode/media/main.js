@@ -398,6 +398,16 @@
     if (source) for (const image of pendingImages) if (image.session === source) image.session = session;
     const draft = cleanDraft(draftEntries.get(session)) || { text: "", attachments: [], start: 0, end: 0 };
     restoringDraft = true;
+    // Another chat gets its own undo history. Assigning a new value does not reliably drop the old
+    // chat's steps: going from an empty composer to an empty chat changed nothing, and Ctrl+Z then
+    // brought back the prompt sent in the chat that was left. Chromium does drop every undo step of
+    // an element that leaves the document, so take the box out and put the same node straight back.
+    if (session !== prior && input.parentNode) {
+      const focused = document.activeElement === input, parent = input.parentNode, next = input.nextSibling;
+      input.remove(); parent.insertBefore(input, next);
+      if (focused) input.focus({ preventScroll: true });
+      shownPastes.length = 0;
+    }
     input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
     input.selectionStart = draft.start; input.selectionEnd = draft.end;
     renderAtts(); autosizeComposer();
@@ -2722,8 +2732,14 @@
   function renderComposerControls() {
     const hasDraft = hasComposerInput(), stop = streaming && !hasDraft;
     const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
-    send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
-    send.title = label; send.setAttribute("aria-label", label);
+    // This runs on every keystroke. Replacing a node's children while typing closes Chromium's open
+    // typing step, which made each Ctrl+Z take back one character, so write only what changed.
+    const icon = stop ? "debug-stop" : "arrow-up";
+    if (send._icon !== icon) {
+      send.innerHTML = `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
+      send._icon = icon;
+    }
+    if (send.getAttribute("aria-label") !== label) { send.title = label; send.setAttribute("aria-label", label); }
     // Filled (DGC purple) only when the button will actually do something: text to send, or a
     // run to stop. Empty composer leaves it a quiet surface, so the accent stays meaningful.
     send.classList.toggle("ready", hasDraft || streaming);
@@ -2731,7 +2747,8 @@
     $("queue-send").disabled = !hasDraft;
     $("stop-run").hidden = !streaming || !hasDraft;
     $("followup-hint").hidden = !streaming;
-    $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+    const hint = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+    if ($("followup-hint").textContent !== hint) $("followup-hint").textContent = hint;
   }
   function settleCustomCommand() {
     if (!customCommandPending) return;
@@ -2900,8 +2917,13 @@
         show.title = "Put this text back into the composer";
         show.onclick = () => {
           const at = input.selectionStart ?? input.value.length;
+          const before = input.value;
           editComposer(at, at, a.pasted);
           input.selectionStart = input.selectionEnd = at + a.pasted.length;
+          // The insert is in the textarea's undo history; the chip leaving is not. Remember both
+          // sides so Ctrl+Z folds the text back into its chip instead of deleting the paste.
+          shownPastes.push({ before, after: input.value, item: a, index: i });
+          if (shownPastes.length > 8) shownPastes.shift();
           attachments.splice(i, 1);
           renderAtts();
           input.focus();
@@ -2954,8 +2976,9 @@
       replacePopToken();
     } else if (popMode === "/") {
       if (it.action?.startsWith("workflow:")) {
-        replacePopToken();
-        prepareWorkflowDraft(it.action.slice("workflow:".length));
+        // One edit, so one Ctrl+Z returns to what was typed: removing the token and adding the
+        // prefix as two edits left a blank box between them in the undo history.
+        prepareWorkflowDraft(it.action.slice("workflow:".length), popStart, popEnd);
         hidePop(); input.focus(); return;
       }
       if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
@@ -2979,13 +3002,24 @@
     }
     hidePop(); input.focus();
   }
-  function prepareWorkflowDraft(name) {
+  // `tokenStart`/`tokenEnd`: the slash-menu token this replaces, removed in the same edit.
+  function prepareWorkflowDraft(name, tokenStart = 0, tokenEnd = tokenStart) {
     if (!["plan", "review", "init"].includes(name)) return;
     const prefix = `/${name} `;
-    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(input.value);
+    const value = input.value;
+    const token = tokenEnd > tokenStart;
+    const without = token ? value.slice(0, tokenStart) + value.slice(tokenEnd) : value;
+    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(without);
     const removed = current ? current[0].length : 0;
-    const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
-    editComposer(0, removed, prefix);
+    const caret = Math.max(0, (token ? tokenStart : input.selectionStart) - removed) + prefix.length;
+    const next = prefix + without.slice(removed);
+    // The smallest single replacement that turns the box into `next`.
+    let head = 0;
+    while (head < value.length && head < next.length && value[head] === next[head]) head++;
+    let tail = 0;
+    while (tail < value.length - head && tail < next.length - head
+      && value[value.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+    editComposer(head, value.length - tail, next.slice(head, next.length - tail));
     input.selectionStart = input.selectionEnd = caret;
     autosizeComposer();
     persistDraft(); input.focus();
@@ -3013,11 +3047,13 @@
   window.addEventListener("focus", autosizeComposer);
 
   // ---- composer edits that Cmd/Ctrl+Z can take back ----
-  // A textarea keeps its own undo history, which is what makes Cmd+Z (and Edit → Undo) work in
-  // Claude's and Codex's composers. Assigning .value wipes that history, so undo did nothing here
-  // after a send, a completion or an inserted command. Edits made through the browser's own editing
-  // command stay in the history instead: undo after sending brings the prompt back. Where that
-  // command is unavailable (a test DOM), the edit still happens, just without history.
+  // A textarea keeps its own undo history, which is what makes Cmd+Z and Ctrl+Z work in Claude's
+  // and Codex's composers. (VS Code's Edit → Undo menu item does not reach it: the workbench sends
+  // that command to the active editor, and opening the menu takes focus out of this view.)
+  // Assigning .value wipes that history, so undo did nothing here after a send, a completion or an
+  // inserted command. Edits made through the browser's own editing command stay in the history
+  // instead: undo after sending brings the prompt back. Where that command is unavailable (a test
+  // DOM), the edit still happens, just without history.
   let composerEditing = false;
   function editComposer(start, end, text) {
     start = Math.max(0, Math.min(start, input.value.length));
@@ -3042,6 +3078,24 @@
   function setComposerText(text) { editComposer(0, input.value.length, String(text ?? "")); }
   function clearComposer() { setComposerText(""); autosizeComposer(); }
 
+  // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
+  // either side of that edit, put the chip back or take it away again to match.
+  const shownPastes = [];
+  function syncShownPaste(event) {
+    if (!shownPastes.length || (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")) return;
+    for (const entry of [...shownPastes].reverse()) {
+      const attached = attachments.includes(entry.item);
+      if (event.inputType === "historyUndo" && !attached && input.value === entry.before) {
+        attachments.splice(Math.min(entry.index, attachments.length), 0, entry.item);
+        renderAtts(); return;
+      }
+      if (event.inputType === "historyRedo" && attached && input.value === entry.after) {
+        attachments.splice(attachments.indexOf(entry.item), 1);
+        renderAtts(); return;
+      }
+    }
+  }
+  input.addEventListener("input", syncShownPaste);
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     scheduleDraftSave();
