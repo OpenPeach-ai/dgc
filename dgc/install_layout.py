@@ -187,12 +187,13 @@ def launcher_refusal(launcher: Launcher, force: bool) -> str | None:
     if launcher.kind == "checkout":
         return (f"{launcher.path} runs {launcher.tree}, which is a git checkout — refusing to repoint it.\n"
                 "    Keep the checkout and put the release launcher elsewhere:  "
-                "DGC_BIN=$HOME/.dgc-release/bin bash install.sh\n"
+                "curl -fsSL https://vibedgc.com/install.sh | DGC_BIN=$HOME/.dgc-release/bin bash\n"
                 f"    Or repoint {launcher.path} anyway (the checkout's files are not touched):  "
                 "DGC_FORCE_OVERWRITE=1")
     if launcher.kind == "foreign":
         return (f"{launcher.path} was not created by the DGC installer — refusing to replace it.\n"
-                "    Move it aside, or choose another launcher directory:  DGC_BIN=<dir> bash install.sh\n"
+                "    Move it aside, or choose another launcher directory:  "
+                "curl -fsSL https://vibedgc.com/install.sh | DGC_BIN=<dir> bash\n"
                 "    Or replace it anyway:  DGC_FORCE_OVERWRITE=1")
     return None
 
@@ -336,6 +337,22 @@ def running_version_dir(prefix: str | None = None) -> Path | None:
     return vdir
 
 
+_RUNTIME_LOCKS: list[tuple[Path, int]] = []
+
+
+def release_runtime_lock() -> None:
+    """Remove this process's runtime lock now. `dgc serve` finishes dying from SIGTERM by
+    re-raising it under the default disposition, which runs no atexit handler, so it calls this
+    first; a lock left behind would claim a version is in use after its process is gone."""
+    while _RUNTIME_LOCKS:
+        path, pid = _RUNTIME_LOCKS.pop()
+        if os.getpid() == pid:   # a forked child must not remove its parent's lock
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
 def hold_runtime_lock(prefix: str | None = None) -> Path | None:
     """Record that this process runs its version, so retention will not delete it underneath us.
 
@@ -353,13 +370,9 @@ def hold_runtime_lock(prefix: str | None = None) -> Path | None:
     except OSError:
         return None
 
-    def _release(path=lock, pid=os.getpid()):
-        if os.getpid() == pid:   # a forked child must not remove its parent's lock
-            try:
-                path.unlink()
-            except OSError:
-                pass
-    atexit.register(_release)
+    if not _RUNTIME_LOCKS:
+        atexit.register(release_runtime_lock)
+    _RUNTIME_LOCKS.append((lock, os.getpid()))
     return lock
 
 
@@ -455,6 +468,13 @@ def activate(data_dir: Path, bin_dir: Path, version: str, *, force: bool = False
         return 1
     previous = (launcher.tree.name if launcher.kind == "managed" and launcher.tree is not None
                 else None)
+    if previous == version:
+        # Re-activating what already runs (an update with nothing new) is not a switch: keep the
+        # version that really came before, which is what --rollback returns to.
+        recorded = read_record()
+        previous = (recorded.get("previous_version")
+                    if recorded.get("version") == version
+                    and recorded.get("previous_version") != version else None)
     try:
         flip_launcher(launcher.path, target)
     except OSError as exc:
@@ -494,15 +514,25 @@ class Location:
 
 
 def _launcher_from_argv0(prefix: Path, argv0: str | None) -> Path | None:
+    """The directory of the launcher this dgc was started through.
+
+    A user's own link to a custom launcher (~/.local/bin/dgc -> ~/opt/bin/dgc -> the venv) is not
+    the launcher: the install's launcher is the last link of the chain, the one that points at the
+    venv script. Updating the outer link instead left the real launcher on the old version."""
     if not argv0 or os.sep not in argv0:
         return None
     candidate = Path(os.path.abspath(argv0))
     try:
-        if candidate.is_symlink() and _real(candidate) == _real(prefix / "bin" / "dgc"):
-            return candidate.parent
+        if not (candidate.is_symlink() and _real(candidate) == _real(prefix / "bin" / "dgc")):
+            return None
+        for _ in range(16):
+            step = Path(os.path.join(str(candidate.parent), os.readlink(str(candidate))))
+            if not step.is_symlink():
+                break
+            candidate = Path(os.path.abspath(str(step)))
+        return candidate.parent
     except OSError:
         return None
-    return None
 
 
 def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Location:

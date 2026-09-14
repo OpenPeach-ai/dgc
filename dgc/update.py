@@ -117,9 +117,11 @@ def _list_versions(c, location) -> int:
     active = (launcher.tree.name if launcher.kind == "managed" and launcher.tree is not None
               and launcher.tree.parent == L.versions_dir(location.data_dir) else None)
     if not versions:
-        c.print(f"no versioned DGC installs in {L.versions_dir(location.data_dir)}", highlight=False, markup=False)
+        c.print(f"no versioned DGC installs in {L.versions_dir(location.data_dir)}", highlight=False, markup=False,
+                soft_wrap=True)
         return EXIT_OK
-    c.print(f"DGC versions in {L.versions_dir(location.data_dir)}:", highlight=False, markup=False)
+    c.print(f"DGC versions in {L.versions_dir(location.data_dir)}:", highlight=False, markup=False,
+            soft_wrap=True)
     for name in versions:
         notes = []
         if name == active:
@@ -131,7 +133,7 @@ def _list_versions(c, location) -> int:
             notes.append("running (pid " + ", ".join(map(str, others)) + ")")
         mark = "*" if name == active else " "
         c.print(f"  {mark} {name}" + (f"   {'; '.join(notes)}" if notes else ""), highlight=False,
-                markup=False)
+                markup=False, soft_wrap=True)
     return EXIT_OK
 
 
@@ -156,13 +158,23 @@ def _switch_to(c, location, version: str | None) -> int:
                 c.print(f"[bold red]nothing to roll back:[/bold red] {escape(str(launcher.path))} does not run a "
                         f"versioned install in {escape(str(L.versions_dir(location.data_dir)))}", highlight=False)
                 return EXIT_FAILED
-            older = [name for name in L.installed_versions(location.data_dir)
-                     if L.version_key(name) < L.version_key(current)]
-            if not older:
-                c.print(f"[bold red]nothing to roll back to:[/bold red] no version older than "
-                        f"{current} is kept in {escape(str(L.versions_dir(location.data_dir)))}", highlight=False)
-                return EXIT_FAILED
-            version = older[0]
+            kept = L.installed_versions(location.data_dir)
+            record = L.read_record()
+            previous = record.get("previous_version")
+            if (record.get("version") == current and previous and previous != current
+                    and previous in kept):
+                # The version that was active before the last switch, older or newer: after
+                # `--version 0.38.7` from 0.39.1, rollback returns to 0.39.1.
+                version = previous
+            else:
+                older = [name for name in kept if L.version_key(name) < L.version_key(current)]
+                if not older:
+                    c.print(f"[bold red]nothing to roll back to:[/bold red] no previous version is "
+                            f"recorded and none older than {current} is kept in "
+                            f"{escape(str(L.versions_dir(location.data_dir)))}", highlight=False,
+                            soft_wrap=True)
+                    return EXIT_FAILED
+                version = older[0]
         elif current == version:
             c.print(f"DGC {version} is already active → {launcher.path}", highlight=False, markup=False)
             return EXIT_OK
@@ -199,17 +211,17 @@ def run_update(args: list[str] | None = None) -> int:
     action, requested = parsed
     location = L.locate()
     force = os.environ.get("DGC_FORCE_OVERWRITE") == "1"
+    if action == "list":                 # read-only: listing changes nothing, even from a checkout
+        return _list_versions(c, location)
     if location.kind == "checkout" and not force:
         c.print(f"[bold red]this dgc runs from {escape(str(location.tree))}, a git checkout[/bold red] — "
                 "`dgc update` will not repoint it at a release.\n"
                 "  Update the checkout with git, or install a release elsewhere:\n"
-                "    DGC_DATA_DIR=$HOME/.local/share/dgc DGC_BIN=$HOME/.dgc-release/bin "
-                "bash install.sh\n"
+                f"    curl -fsSL {escape(_base_url())}/install.sh | DGC_DATA_DIR=$HOME/.local/share/dgc "
+                "DGC_BIN=$HOME/.dgc-release/bin bash\n"
                 "  Or repoint the launcher anyway: DGC_FORCE_OVERWRITE=1 dgc update",
-                highlight=False, markup=True)
+                highlight=False, markup=True, soft_wrap=True)
         return EXIT_FAILED
-    if action == "list":
-        return _list_versions(c, location)
     if action == "rollback":
         return _switch_to(c, location, None)
     if action == "version":
@@ -221,7 +233,7 @@ def run_update(args: list[str] | None = None) -> int:
 
     url = _base_url() + "/install.sh"
     c.print(f"[bold]DGC update[/bold] — installing into {escape(str(location.data_dir))}/versions, "
-            f"launcher {escape(str(location.bin_dir))}/dgc\n", highlight=False)
+            f"launcher {escape(str(location.bin_dir))}/dgc\n", highlight=False, soft_wrap=True)
     env = dict(os.environ)
     # Say exactly where: the installer's defaults are not necessarily where THIS dgc lives.
     env["DGC_DATA_DIR"] = str(location.data_dir)

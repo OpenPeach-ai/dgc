@@ -838,5 +838,217 @@ class LauncherRefusals(unittest.TestCase):
             os.path.realpath(vdir / ".venv" / "bin" / "python")))))
 
 
+
+# --------------------------------------------------------- QA 0.39 regressions ---
+
+def fake_version(data: Path, name: str) -> Path:
+    """A complete versions/<name> whose dgc just names itself (no build)."""
+    vdir = data / "versions" / name
+    (vdir / ".venv" / "bin").mkdir(parents=True)
+    (vdir / ".complete").write_text(f"version={name}\nsha256=x\n")
+    script = vdir / ".venv" / "bin" / "dgc"
+    script.write_text(f"#!/bin/sh\necho 'dgc {name}'\n")
+    script.chmod(0o755)
+    return vdir
+
+
+def fake_legacy_tree(tree: Path, launcher: Path) -> None:
+    """The shape of a 0.38 single-tree install: requirements.lock, .venv/bin/dgc and a link to it."""
+    (tree / ".venv" / "bin").mkdir(parents=True)
+    (tree / "requirements.lock").write_text("rich==15.0.0\n")
+    (tree / ".venv" / "bin" / "dgc").write_text("#!/bin/sh\necho 'dgc 0.38.1'\n")
+    (tree / ".venv" / "bin" / "dgc").chmod(0o755)
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.symlink_to(tree / ".venv" / "bin" / "dgc")
+
+
+class QaInstallerRegressions(unittest.TestCase):
+
+    def test_a_custom_install_on_path_is_updated_in_place_when_no_location_is_given(self):
+        # A 0.38 CLI's `dgc update` pipes the installer into bash with no DGC_DIR or DGC_BIN. The
+        # installer used to build a second copy in the defaults and say "updated" while the
+        # user's `dgc` stayed on 0.38 forever.
+        home = new_home("adopt-path")
+        tree, bin_dir = home / "tools" / "dgc", home / "tools" / "bin"
+        fake_legacy_tree(tree, bin_dir / "dgc")
+        env = clean_env(home)
+        env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+        SITE.publish(release("0.90.2"))
+        done = subprocess.run(["bash", "-c", f'curl -fsSL "{SITE.url}/install.sh" | bash'],
+                              env=env, capture_output=True, text=True, timeout=BUILD_TIMEOUT,
+                              cwd=str(home))
+        text = output(done)
+        self.assertEqual(done.returncode, 0, text[-3000:])
+        self.assertIn(f"found DGC on your PATH at {bin_dir / 'dgc'}", text)
+        self.assertEqual(link_target(bin_dir / "dgc"),
+                         str(tree / "versions" / "0.90.2" / ".venv" / "bin" / "dgc"))
+        self.assertFalse(os.path.lexists(home / ".local" / "bin" / "dgc"), "no second launcher")
+        self.assertFalse((home / ".local" / "share" / "dgc" / "versions").exists())
+        self.assertNotIn("`dgc` on your PATH is", text)
+        # An update prints an update result, not first-install guidance; nothing else is kept, so
+        # there is no rollback hint, and a skipped extension is not said to be installed.
+        self.assertNotIn("DGC is installed. Next", text)
+        self.assertNotIn("dgc update --rollback", text)
+        self.assertNotIn("Editor extension", text)
+
+        again = run_installer(env)
+        self.assertEqual(again.returncode, 0, output(again)[-3000:])
+        self.assertIn("DGC 0.90.2 is already installed and active", output(again))
+        self.assertIn("DGC 0.90.2 is active →", output(again))
+        self.assertNotIn("installed DGC 0.90.2", output(again))
+        self.assertNotIn("switching to it", output(again))
+
+    def test_a_launcher_outside_home_is_not_adopted_and_the_path_mismatch_is_named(self):
+        home = new_home("adopt-outside")
+        outside = home.parent / "elsewhere"
+        fake_legacy_tree(outside / "dgc", outside / "bin" / "dgc")
+        env = clean_env(home)
+        env["PATH"] = str(outside / "bin") + os.pathsep + env["PATH"]
+        SITE.publish(release("0.90.2"))
+        done = run_installer(env)
+        text = output(done)
+        self.assertEqual(done.returncode, 0, text[-3000:])
+        self.assertNotIn("found DGC on your PATH", text)
+        launcher = home / ".local" / "bin" / "dgc"
+        self.assertEqual(link_target(launcher), str(home / ".local" / "share" / "dgc" / "versions"
+                                                     / "0.90.2" / ".venv" / "bin" / "dgc"))
+        self.assertIn(f"`dgc` on your PATH is {outside / 'bin' / 'dgc'}", text)
+        self.assertIn("DGC is installed. Next", text, "a first install still gets the guidance")
+        self.assertNotIn("Editor extension", text, "DGC_SKIP_EXTENSION=1: nothing was installed")
+        self.assertNotIn("dgc update --rollback", text, "nothing to roll back to")
+
+    def test_a_damaged_archive_with_a_matching_checksum_is_reported_as_damaged(self):
+        home = new_home("damaged")
+        SITE.publish(release("0.90.2")[:4000])
+        done = run_installer(clean_env(home))
+        self.assertEqual(done.returncode, 1, output(done))
+        self.assertIn("the downloaded archive is damaged", output(done))
+        self.assertNotIn("does not name a valid version", output(done))
+        self.assertFalse(os.path.lexists(home / ".local" / "bin" / "dgc"))
+
+    def test_a_stale_runtime_lock_with_an_unrelated_live_pid_does_not_keep_a_republished_build(self):
+        home = new_home("stale-lock")
+        env = clean_env(home)
+        data = home / ".local" / "share" / "dgc"
+        active = fake_version(data, "0.90.3")
+        vdir = fake_version(data, "0.90.4")                       # built from another archive
+        launcher = home / ".local" / "bin" / "dgc"
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to(active / ".venv" / "bin" / "dgc")
+        unrelated = subprocess.Popen(["sleep", "120"])
+        try:
+            (data / "locks" / "0.90.4").mkdir(parents=True)
+            (data / "locks" / "0.90.4" / str(unrelated.pid)).write_text("{}\n")
+            SITE.publish(release("0.90.4"))
+            done = run_installer(env)
+        finally:
+            unrelated.kill()
+            unrelated.wait(10)
+        text = output(done)
+        self.assertEqual(done.returncode, 0, text[-3000:])
+        self.assertIn("installed from a different archive — rebuilding it", text)
+        self.assertNotIn("in use — keeping it", text)
+        self.assertEqual(L.read_complete(vdir)["sha256"], hashlib.sha256(release("0.90.4")).hexdigest())
+
+    def test_a_process_that_dies_of_sigterm_releases_its_runtime_lock(self):
+        home = new_home("lock-sigterm")
+        vdir = fake_version(home / "data", "1.2.3")
+        program = ("import os, signal, sys\n"
+                   "from dgc import install_layout, termbg\n"
+                   "lock = install_layout.hold_runtime_lock(prefix=sys.argv[1])\n"
+                   "print(lock, flush=True)\n"
+                   "termbg.resend(signal.SIGTERM, {})\n")
+        done = subprocess.run([sys.executable, "-c", program, str(vdir / ".venv")],
+                              capture_output=True, text=True, timeout=60,
+                              env=dict(os.environ, PYTHONPATH=str(PROJECT)))
+        self.assertEqual(done.returncode, -signal.SIGTERM, done.stderr)
+        lock = Path(done.stdout.strip())
+        self.assertEqual(lock.parent, home / "data" / "locks" / "1.2.3")
+        self.assertFalse(lock.exists(), "dying of the signal must not leave the lock behind")
+
+    def test_rollback_returns_to_the_previous_version_and_a_no_op_keeps_it_recorded(self):
+        home = new_home("rollback-previous")
+        data, bin_dir = home / "data", home / "bin"
+        for name in ("0.39.1", "0.39.0", "0.38.7"):
+            fake_version(data, name)
+        from dgc import update
+        with mock.patch.object(L.Path, "home", return_value=home):
+            quiet = []
+            self.assertEqual(L.activate(data, bin_dir, "0.39.0", out=quiet.append), 0)
+            self.assertEqual(L.activate(data, bin_dir, "0.39.1", out=quiet.append), 0)
+            self.assertEqual(L.read_record()["previous_version"], "0.39.0")
+            # An update with nothing new re-activates the same version: not a switch.
+            self.assertEqual(L.activate(data, bin_dir, "0.39.1", out=quiet.append), 0)
+            self.assertEqual((L.read_record()["version"], L.read_record()["previous_version"]),
+                             ("0.39.1", "0.39.0"))
+            self.assertEqual(L.activate(data, bin_dir, "0.38.7", out=quiet.append), 0)
+            location = L.Location("versions", data, bin_dir, data / "versions" / "0.38.7", "0.38.7")
+            printed = io.StringIO()
+            from rich.console import Console
+            code = update._switch_to(Console(file=printed, width=200), location, None)
+            self.assertEqual(code, 0, printed.getvalue())
+            self.assertEqual(L.inspect_launcher(bin_dir / "dgc").tree.name, "0.39.1",
+                             "rollback returns to the version before the last switch, even a newer one")
+            self.assertEqual(L.read_record()["previous_version"], "0.38.7")
+
+    def test_the_launcher_reached_through_another_link_is_the_one_that_points_at_the_venv(self):
+        home = new_home("argv0-chain")
+        vdir = fake_version(home / "opt" / "dgc", "0.39.0")
+        inner = home / "opt" / "bin" / "dgc"
+        inner.parent.mkdir(parents=True)
+        inner.symlink_to(vdir / ".venv" / "bin" / "dgc")
+        outer = home / ".local" / "bin" / "dgc"
+        outer.parent.mkdir(parents=True)
+        outer.symlink_to(inner)
+        self.assertEqual(L._launcher_from_argv0(vdir / ".venv", str(outer)), inner.parent)
+        self.assertEqual(L._launcher_from_argv0(vdir / ".venv", str(inner)), inner.parent)
+
+    def test_update_list_runs_from_a_checkout_and_refusals_give_a_runnable_command(self):
+        home = new_home("list-checkout")
+        checkout = home / "src" / "dgc"
+        (checkout / ".git").mkdir(parents=True)
+        (checkout / ".venv").mkdir()
+        location = L.locate(env={}, prefix=str(checkout / ".venv"), argv0="")
+        self.assertEqual(location.kind, "checkout")
+        from dgc import update
+        printed = io.StringIO()
+        with mock.patch.object(L, "locate", return_value=location), \
+                mock.patch.object(update, "_download_installer", side_effect=AssertionError("downloaded")), \
+                mock.patch.dict(os.environ, {"DGC_FORCE_OVERWRITE": "", "COLUMNS": "60"}), \
+                contextlib.redirect_stdout(printed):
+            listed = update.run_update(["--list"])
+            refused = update.run_update([])
+        self.assertEqual(listed, 0, printed.getvalue())
+        self.assertIn("no versioned DGC installs in", printed.getvalue())
+        self.assertEqual(refused, 1)
+        self.assertIn("install.sh | DGC_DATA_DIR=", printed.getvalue())
+        self.assertNotIn("bash install.sh", printed.getvalue())
+        refusal = L.launcher_refusal(L.Launcher(home / "bin" / "dgc", "foreign"), False)
+        self.assertIn("curl -fsSL https://vibedgc.com/install.sh | DGC_BIN=<dir> bash", refusal)
+        installer = INSTALLER.read_text()
+        self.assertNotIn("bash install.sh", installer.split("set -euo pipefail", 1)[1])
+
+    def test_update_list_prints_long_paths_whole(self):
+        home = new_home("soft-wrap")
+        data = home / ("a-very-long-directory-name-" * 4) / "data"
+        fake_version(data, "0.39.0")
+        from dgc import update
+        from rich.console import Console
+        printed = io.StringIO()
+        location = L.Location("versions", data, home / "bin", data / "versions" / "0.39.0", "0.39.0")
+        update._list_versions(Console(file=printed, width=60), location)
+        self.assertIn(str(L.versions_dir(data)), printed.getvalue())
+
+    def test_update_help_names_the_base_url_and_every_exit_status(self):
+        from dgc import cli
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            cli._subcommand_help("update")
+        text = printed.getvalue()
+        self.assertIn("$DGC_BASE_URL", text)
+        self.assertIn("2 usage error", text)
+        self.assertIn("version that was active before the last switch", text)
+
+
 if __name__ == "__main__":
     unittest.main()

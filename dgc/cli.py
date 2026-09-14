@@ -2117,13 +2117,16 @@ def _subcommand_help(name: str) -> int:
     """`--help` on a subcommand prints its usage and exits; it never runs the subcommand."""
     print("usage: " + SUBCOMMAND_USAGE[name])
     if name == "update":
-        print("  Downloads https://vibedgc.com/install.sh to a temporary file and runs it with bash.\n"
-              "  The new version is built in its own directory; the dgc launcher switches to it only\n"
-              "  once it is complete, so a failed update leaves the current version running.\n"
-              "  --rollback     switch back to the newest kept version older than the active one\n"
+        print("  Downloads install.sh from $DGC_BASE_URL (default https://vibedgc.com) to a temporary\n"
+              "  file and runs it with bash. The new version is built in its own directory; the dgc\n"
+              "  launcher switches to it only once it is complete, so a failed update leaves the\n"
+              "  current version running.\n"
+              "  --rollback     switch back to the version that was active before the last switch\n"
+              "                 (when none is recorded, the newest kept version older than the active one)\n"
               "  --version X    switch to kept version X, or install X if it is the published release\n"
               "  --list         show the kept versions and which one is active\n"
-              "  Exit status: 0 done, 1 failed (previous version still active), 3 another update is running.")
+              "  Exit status: 0 done, 1 failed (previous version still active), 2 usage error,\n"
+              "  3 another update is running.")
     return 0
 
 
