@@ -1172,8 +1172,14 @@ class Backend:
                     final_message_id = getattr(self.ui, "final_message_id", None)
                     if not isinstance(final_message_id, str):
                         final_message_id = None
-                    self.em.emit("turn_end", turn_id=tid,
-                                 reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                    # A turn the backend's own shutdown cancelled was interrupted, not stopped: close()
+                    # cancels whatever outlasts its grace period, and "cancelled" is what a person
+                    # pressing Stop gets. Ending it "error" (as the agent's own landing does) is what
+                    # lets the editor offer to continue it once the backend is back.
+                    shutting_down = getattr(self.agent, "stopping", False) is True
+                    reason = ("error" if shutting_down else "cancelled") if cancelled else (
+                        "error" if failed else "completed")
+                    self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._emit_context()

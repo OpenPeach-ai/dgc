@@ -4035,3 +4035,31 @@ test("a backend killed without a word says 'killed by SIGKILL' once, on the line
   assert.match(doc.querySelector(".recovery-card").textContent, /during your last turn \(killed by SIGKILL\)\./);
   assert.deepEqual(errors, []);
 });
+
+test("the backend exit line is still there after the reconnect replays the chat", () => {
+  // Before: the reconnect resumed the chat, the resume cleared the transcript for the history
+  // replay, and the only line saying why the turn stopped went with it -- the turn read "Stopped".
+  const { errors, send, doc } = makeDom({ scope: "workspace" });
+  const event = ev => send({ type: "event", event: ev });
+  send({ type: "session_ready", sessionId: "chat" });
+  event({ type: "turn_start", prompt: "run the p2 sleep command", turn_id: "t1" });
+  event({ type: "turn_end", reason: "error", turn_id: "t1" });
+  send({ type: "backend_exit", code: null, signal: "SIGTERM", recovering: true, resumes: "offer",
+         cause: "SIGTERM — a stop signal from another process, not a shutdown command from the editor" });
+  const log = doc.getElementById("log");
+  event({ type: "ready", session_id: "fresh-backend", capabilities: { resume_turn: true } });
+  event({ type: "session", kind: "resumed", session_id: "chat", name: "" });
+  event({ type: "history", items: [
+    { type: "turn_start", prompt: "run the p2 sleep command", turn_id: "t1" },
+    { type: "turn_end", reason: "error", turn_id: "t1" }] });
+  send({ type: "session_ready", sessionId: "chat" });
+  const text = log.textContent;
+  assert.match(text, /dgc backend stopped \(killed by SIGTERM\): SIGTERM — a stop signal from another process/);
+  assert.ok(text.indexOf("run the p2 sleep command") < text.indexOf("dgc backend stopped"), "below the replayed turn");
+  // Once the reconnect is done it is an ordinary line: opening another chat and coming back does
+  // not keep resurrecting it.
+  event({ type: "session", kind: "new", session_id: "other" });
+  event({ type: "session", kind: "resumed", session_id: "chat", name: "" });
+  assert.doesNotMatch(log.textContent, /dgc backend stopped/);
+  assert.deepEqual(errors, []);
+});

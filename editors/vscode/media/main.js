@@ -308,6 +308,9 @@
   const tasksExpanded = new Set();
   // `backendDown`: the backend exited and the extension is not bringing it back on its own.
   let todoClear = null, backendLive = false, backendDown = false;
+  // The exit line of a backend that is being brought back, kept until the reconnect has replayed
+  // the chat it belongs to (see the "session" event).
+  let backendExitNotice = null;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
   function cleanDraft(value) {
@@ -2213,6 +2216,12 @@
       case "session":
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; queuedPrompts.clear(); renderQueued(); setSending(false);
+          // The reconnect after a backend exit resumes this chat, and resuming clears the transcript
+          // for the replay. The line saying why the backend stopped is not in the saved history, so
+          // it would go too and leave the turn reading only "Stopped" or "Failed". Put it back.
+          const notice = backendExitNotice;
+          backendExitNotice = null;
+          if (notice && ev.kind === "resumed" && ev.session_id === notice.session) sysLine(notice.text, true);
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
@@ -3977,6 +3986,7 @@
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "session_ready") {
+      backendExitNotice = null;          // the reconnect has finished; the line is in the transcript
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       backendLive = true; backendDown = false; armTodoClearTimer();
       renderUnconfirmedDrafts();
@@ -4122,9 +4132,11 @@
       const status = why.slice(2, -1);
       const restated = [status, `exited with ${status}`, "killed by an unreported signal"].includes(cause);
       const detail = !cause ? why : restated ? ` (${cause})` : why + ": " + cause;
-      sysLine(msg.recovering
+      const exitLine = msg.recovering
         ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
-        : "dgc backend exited" + detail, true);
+        : "dgc backend exited" + detail;
+      sysLine(exitLine, true);
+      backendExitNotice = msg.recovering ? { text: exitLine, session: draftSession } : null;
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });
