@@ -597,7 +597,7 @@ function walkUp(step) {
     for (let i = 0; i < 400 && log.scrollTop > 0; i += 1) {
       const view = log.getBoundingClientRect();
       const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)
-        ?.closest("p, li, pre, h2, .bubble, .tool, .shots, .text, .thinking, .sys, .resume-note, .msg");
+        ?.closest("p, li, pre, h2, .bubble, .tool-images, .tool, .text, .thinking, .sys, .resume-note, .msg");
       if (!anchor || !log.contains(anchor)) { log.scrollTop -= 40; await frames(2); continue; }
       const top = anchor.getBoundingClientRect().top, from = log.scrollTop;
       log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = from - (step === "half" ? Math.round(log.clientHeight / 2) : step);
@@ -616,41 +616,51 @@ async function assertWalkIsSteady(panel, label, step = 120) {
   assert.deepEqual(walk.jumps, [], `${label}: scrolling back moved the page under the reader`);
 }
 
-// A 200x100 screenshot, as a tool sends it.
+// A 200x100 screenshot, as a tool sends it. It lands inside the step that took it: a count on the
+// collapsed card, chips once the card is open (a failed step opens itself, so its chips are drawn at once).
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAABkCAIAAABM5OhcAAAA0klEQVR42u3SMQ0AAAjAMOZf9DDBwUcrYVlTwIJfYGAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLbw1wAa3mAWHtHrAAAAAASUVORK5CYII=";
-const screenshotTurn = (id, prompt = "Show me the login page") => [
+const screenshotTurn = (id, prompt = "Show me the login page", expanded = false) => [
   { type: "turn_start", turn_id: id, prompt, kind: "prompt" },
   { type: "tool_call", call_id: `${id}c1`, name: "screenshot", args: { url: "http://localhost:3000/login" }, summary: "localhost:3000/login" },
-  { type: "tool_result", call_id: `${id}c1`, name: "screenshot", output: "captured" },
+  { type: "tool_result", call_id: `${id}c1`, name: "screenshot", output: expanded ? "error: captured with 2 console errors" : "captured",
+    ...(expanded ? { is_error: true } : {}) },
   { type: "tool_images", call_id: `${id}c1`, images: [PNG, PNG], caption: "Login page" },
   { type: "text_delta", text: "That is the login page with the Turnstile widget." }, { type: "stream_end", message_id: `${id}:1`, phase: "answer" },
   { type: "turn_end", turn_id: id, reason: "completed", token_estimate: 0, final_message_id: `${id}:1` },
 ];
 // Screenshots that arrive while the panel is on another view: a lazily loaded image has no height,
 // so its block was pinned (and skipped) without it and grew by the strip's height when a scroll
-// finally reached it -- 74px at 460 and 988, 148px at 300.
+// finally reached it -- 74px at 460 and 988, 148px at 300. Collapsed, the card only gains a count;
+// expanded (a failed step opens itself), its fixed-size chips are drawn while the panel is hidden.
 for (const width of WIDTHS) {
   for (const [way, [hide, show]] of Object.entries(hideWays)) {
-    test(`screenshots that arrived while the panel was hidden (${way}) do not move the page when scrolled back to (${width}px)`, async (t) => {
-      if (skipOrFail(t)) return;
-      const panel = await openPanel(width);
-      try {
-        await hide(panel, width);
-        await longChat(panel, 3);
-        await panel.events(screenshotTurn("s1"));
-        await longChat(panel, 8);
-        await wait(panel, 300);
-        await show(panel, width);
-        await panel.settle(); await wait(panel, 600);
-        const strip = await panel.page.evaluate(() => {
-          const block = document.querySelector(".shots").closest(".msg");
-          block.classList.remove("settled"); const real = block.offsetHeight; block.classList.add("settled");
-          return { pinned: block._pinnedHeight, real };
-        });
-        assert.ok(Math.abs(strip.pinned - strip.real) <= 1, `the screenshot turn is pinned at ${strip.pinned}px but is ${strip.real}px tall`);
-        await assertWalkIsSteady(panel, `screenshots while ${way}`);
-      } finally { await panel.page.close(); }
-    });
+    for (const expanded of [false, true]) {
+      test(`screenshots that arrived while the panel was hidden (${way}${expanded ? ", card expanded" : ""}) do not move the page when scrolled back to (${width}px)`, async (t) => {
+        if (skipOrFail(t)) return;
+        const panel = await openPanel(width);
+        try {
+          await hide(panel, width);
+          await longChat(panel, 3);
+          await panel.events(screenshotTurn("s1", undefined, expanded));
+          await longChat(panel, 8);
+          await wait(panel, 300);
+          await show(panel, width);
+          await panel.settle(); await wait(panel, 600);
+          const strip = await panel.page.evaluate((open) => {
+            const card = document.querySelector('.tool[data-call-id="s1c1"]');
+            if (!card.querySelector(".tool-image-count")) return { missing: "the count pill" };
+            if (open && card.querySelectorAll(".tool-images .image-chip img").length !== 2) return { missing: "two chips" };
+            if (!open && card.querySelector(".tool-images")) return { missing: "no chips while collapsed" };
+            const block = card.closest(".msg");
+            block.classList.remove("settled"); const real = block.offsetHeight; block.classList.add("settled");
+            return { pinned: block._pinnedHeight, real };
+          }, expanded);
+          assert.equal(strip.missing, undefined, strip.missing);
+          assert.ok(Math.abs(strip.pinned - strip.real) <= 1, `the screenshot turn is pinned at ${strip.pinned}px but is ${strip.real}px tall`);
+          await assertWalkIsSteady(panel, `screenshots while ${way}`);
+        } finally { await panel.page.close(); }
+      });
+    }
   }
 }
 // Scrolling straight after dragging the sidebar: the re-measure waits for the width to hold still,
@@ -817,9 +827,10 @@ for (const [what, between] of [
 // ---- steering, beside everything a turn can draw ---------------------------------------------------
 // Only the steered prompt's own margins may decide its space: a screenshot strip's 12px, a monitor
 // card's 8px, a tool group's 4px, or the turn's own prompt just above used to add to it (36px above,
-// 20-24px below).
+// 20-24px below). The screenshot step is checked collapsed and with its chips open.
 for (const width of WIDTHS) {
-  test(`a steered prompt is 24px below and 16px above whatever it sits beside in the turn (${width}px)`, async (t) => {
+  for (const expanded of [false, true]) {
+  test(`a steered prompt is 24px below and 16px above whatever it sits beside in the turn (${width}px${expanded ? ", screenshot step expanded" : ""})`, async (t) => {
     if (skipOrFail(t)) return;
     const panel = await openPanel(width, { steering: true });
     const steer = async (text, events = []) => {
@@ -835,9 +846,11 @@ for (const width of WIDTHS) {
       await steer("S2 after prose", [{ type: "tool_call", call_id: "c1", name: "bash", args: { command: "ls" }, summary: "ls" }, { type: "tool_result", call_id: "c1", name: "bash", output: "a\nb" }]);
       await steer("S3 after a tool group", [{ type: "permission_request", id: "p1", name: "bash", command: "rm -rf x", args: {}, summary: "rm -rf x" }]);
       await steer("S4 after a permission card", [{ type: "permission_resolved", id: "p1", decision: "yes", message: "Allowed once" },
-        { type: "tool_call", call_id: "c2", name: "screenshot", args: {}, summary: "shot" }, { type: "tool_result", call_id: "c2", name: "screenshot", output: "ok" },
+        { type: "tool_call", call_id: "c2", name: "screenshot", args: {}, summary: "shot" },
+        { type: "tool_result", call_id: "c2", name: "screenshot", output: expanded ? "error: shot with errors" : "ok", ...(expanded ? { is_error: true } : {}) },
         { type: "tool_images", call_id: "c2", images: [PNG], caption: "Shot" }]);
-      await steer("S5 after a screenshot strip", [{ type: "monitor_event", id: "m1", description: "npm run dev", event_index: 1, lines: ["ready"], omitted_lines: 0, kind: "output", delivery: "inline", turn_id: "t1" }]);
+      if (expanded) assert.equal(await panel.page.evaluate(() => document.querySelectorAll('.tool[data-call-id="c2"].open .tool-images .image-chip').length), 1);
+      await steer("S5 after a screenshot step", [{ type: "monitor_event", id: "m1", description: "npm run dev", event_index: 1, lines: ["ready"], omitted_lines: 0, kind: "output", delivery: "inline", turn_id: "t1" }]);
       await steer("S6 after a monitor card", [{ type: "error", message: "transient: rate limited, retrying" }]);
       await steer("S7 after an error line");
       await steer("S8 straight after S7", [{ type: "text_delta", text: ANSWER }, { type: "stream_end", message_id: "t1:9", phase: "answer" },
@@ -856,4 +869,5 @@ for (const width of WIDTHS) {
         S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "above/below each steered prompt (S7 is followed by a prompt, so 24)");
     } finally { await panel.page.close(); }
   });
+  }
 }

@@ -1817,52 +1817,59 @@ test("finished tool activity reads as a sentence, not a tally of function names"
   assert.deepEqual(errors, []);
 });
 
-test("a screenshot from a tool lands in the transcript, expands, and opens full size", () => {
-  // Protocol v9. A tool result is text, so a browser screenshot arrives on its own event and has
-  // to be visible where the step that took it sits -- not left as a file path the user must hunt.
+test("a screenshot from a tool lands inside its step as a chip, and one click opens the viewer", () => {
+  // A tool result is text, so a browser screenshot arrives on its own event. It belongs to the step
+  // that took it: a count on the collapsed card, a chip in the card once opened, never in the flow.
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
   event({ type: "ready", capabilities: {} });
   event({ type: "turn_start", turn_id: "one", prompt: "check the deployed build" });
-  event({ type: "tool_start", call_id: "c1", name: "browser", args: { operation: "screenshot" } });
+  event({ type: "tool_call", call_id: "c1", name: "browser", args: { operation: "screenshot" }, summary: "screenshot" });
   event({ type: "tool_result", call_id: "c1", name: "browser",
           output: "screenshot of https://vibedgc.com saved", is_error: false, is_diff: false });
   event({ type: "tool_images", call_id: "c1", caption: "browser screenshot",
           images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="] });
 
-  const shot = doc.querySelector(".shots .shot");
-  assert.ok(shot, "the screenshot is rendered in the transcript");
-  assert.equal(shot.querySelector("img").getAttribute("alt"), "browser screenshot",
-               "the image is labelled for a screen reader");
-  assert.match(shot.textContent, /browser screenshot/, "the caption names what it is");
-  assert.ok(!shot.classList.contains("wide"), "it starts as a thumbnail");
-
-  shot.click();
-  assert.ok(shot.classList.contains("wide"), "one click expands it in place");
-  assert.equal(doc.getElementById("lightbox"), null, "expanding in place is not the full viewer");
-
-  shot.click();
-  const box = doc.getElementById("lightbox");
-  assert.ok(box, "a second click opens it full size");
-  assert.equal(box.getAttribute("aria-modal"), "true", "the viewer is a modal dialog");
-  box.click();
-  assert.equal(doc.getElementById("lightbox"), null, "clicking the viewer closes it");
+  const card = doc.querySelector('.tool[data-call-id="c1"]');
+  assert.equal(doc.querySelector(".shots"), null, "no screenshot strip in the flow");
+  assert.equal(card.querySelector(".tool-image-count .n").textContent, "1");
+  assert.equal(card.querySelector("img"), null, "a collapsed card decodes nothing");
+  card.querySelector(".tool-toggle").click();
+  const chip = card.querySelector(".body > .tool-images .image-chip");
+  assert.ok(chip, "the chip is inside the step that took it");
+  assert.equal(chip.querySelector("img").getAttribute("alt"), "", "the chip's label names it, not the image");
+  assert.match(chip.getAttribute("aria-label"), /^Open image 1 of 1: browser screenshot/);
+  chip.click();
+  const viewer = doc.getElementById("image-viewer");
+  assert.ok(viewer, "one click opens the viewer");
+  assert.equal(viewer.getAttribute("aria-modal"), "true", "the viewer is a modal dialog");
+  viewer.querySelector('[aria-label="Close image preview"]').click();
+  assert.equal(doc.getElementById("image-viewer"), null, "Close closes it");
   assert.deepEqual(errors, []);
 });
 
 test("an image the panel cannot vouch for is never injected", () => {
-  // The panel validates every data URI itself rather than trusting the backend that sent it.
+  // The panel validates every data URI and every item itself rather than trusting the backend.
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
   event({ type: "ready", capabilities: {} });
   event({ type: "turn_start", turn_id: "one", prompt: "check it" });
+  event({ type: "tool_call", call_id: "c1", name: "browser", args: {}, summary: "" });
   event({ type: "tool_images", call_id: "c1", caption: "nope", images: [
     "javascript:alert(1)",
     "https://example.com/tracker.png",
     "data:text/html;base64,PHNjcmlwdD4=",
     "data:image/svg+xml;base64,PHN2Zz4=",
   ] });
-  assert.equal(doc.querySelector(".shots"), null, "nothing was rendered for any of them");
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  const item = { ref: "img_" + "a".repeat(32), name: "shot.png", mime: "image/png", width: 1, height: 1,
+                 bytes: 1, source: "browser", host: "" };
+  event({ type: "tool_images", call_id: "c1", caption: "nope", images: [png, png, png],
+          items: [{ ...item, name: "https://user:pw@host/shot.png" }, { ...item, host: "vibedgc.com/login" },
+                  { ...item, mime: "image/svg+xml" }] });
+  const card = doc.querySelector('.tool[data-call-id="c1"]');
+  assert.equal(card._images, undefined, "nothing was recorded for any of them");
+  assert.equal(doc.querySelector(".tool-images, .tool-image-count, .image-orphan"), null, "nothing was rendered");
   assert.deepEqual(errors, []);
 });
 

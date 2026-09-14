@@ -1054,39 +1054,6 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .font-probe-sans { font: var(--w-reg) var(--t-base)/1.62 var(--sans); }
 .font-probe-mono { font: var(--w-reg) var(--t-xs)/1.6 var(--mono); }
 
-/* Tool-produced images: a compact strip under the step that made them, expanding in place, and a
-   full-size viewer over the panel. Same three states Codex gives a screenshot. */
-.shots { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); }
-.shot {
-  display: flex; flex-direction: column; gap: var(--sp-1);
-  padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 4px;
-  background: var(--surface); cursor: zoom-in; overflow: hidden;
-  max-width: 100%; text-align: left; color: inherit; font: inherit;
-}
-.shot:hover { border-color: var(--border-strong); }
-.shot:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.shot img { display: block; width: 148px; height: auto; max-height: 96px; object-fit: cover;
-            object-position: top center; }
-.shot .shot-cap {
-  padding: var(--sp-1) var(--sp-2);
-  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); color: var(--faint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 148px;
-}
-.shot.wide { cursor: zoom-out; }
-.shot.wide img { width: 100%; max-width: 520px; max-height: none; object-fit: contain; }
-.shot.wide .shot-cap { max-width: none; }
-
-#lightbox {
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: var(--sp-3);
-  padding: var(--sp-5); background: rgba(0, 0, 0, .82); cursor: zoom-out;
-}
-#lightbox img {
-  max-width: 100%; max-height: calc(100vh - 96px); object-fit: contain;
-  border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface);
-}
-#lightbox .lb-cap { font: var(--w-reg) var(--t-sm)/1.4 var(--sans); color: #ededf1; }
-
 /* A resumed goal reads as a quiet continuation marker, not a user message. It sits in the log's
    column, whose gap spaces it; padding of its own put 8px more on both sides, so "Stopped", the
    marker and the continued turn read as three loose islands. */
@@ -1138,6 +1105,83 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 
 
 /* ---- 0.40 images ------------------------------------------------------------------------------ */
+/* A step's images: a count on its head, chips inside its body once opened, a viewer over the panel. */
+.tool .tool-image-count { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 18px;
+  padding: 0 6px; border-radius: var(--r-full); background: var(--surface2); color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
+.tool .tool-image-count .codicon { font-size: 12px; }
+/* `.has-output` keeps a collapsed card's body on screen for its clamped text; chips wait for open. */
+.tool:not(.open) .tool-images { display: none; }
+.tool-images { list-style: none; margin: 0 0 var(--sp-2); padding: 3px; display: flex; flex-wrap: nowrap;
+  gap: var(--sp-2); overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scroll-padding-inline: 3px;
+  scrollbar-width: thin; }
+.tool-images > li { flex: none; scroll-snap-align: start; display: flex; }
+.image-chip { display: flex; flex-direction: column; gap: var(--sp-1); width: 80px; padding: 0; margin: 0; border: 0;
+  border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: zoom-in; }
+.image-tile { position: relative; display: grid; place-items: center; width: 80px; height: 80px; box-sizing: border-box;
+  overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface2); color: var(--muted); }
+.image-tile .codicon { font-size: 20px; }
+.image-chip:hover .image-tile { border-color: var(--border-strong); }
+.image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+.image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite; }
+.image-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.image-caption { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.image-chip[data-state="failed"] .image-caption { color: var(--text); }
+.image-omitted { align-self: center; padding: 0 var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
+.tool.image-orphan .glyph.codicon { font-size: 13px; font-weight: var(--w-reg); }
+.tool.image-orphan .verb { color: var(--muted); font-weight: var(--w-med); }
+
+#image-viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-5); background: rgba(0, 0, 0, .72); }
+#image-viewer .iv-bar, #image-viewer .iv-notice { flex: none; min-width: 0; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface)); }
+#image-viewer .iv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); }
+#image-viewer .iv-heading { flex: 1 1 11rem; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); }
+#iv-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
+#iv-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+#image-viewer .iv-controls { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+#image-viewer .iv-pos { padding: 0 var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans);
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+#image-viewer .iv-btn { width: var(--control); height: var(--control); display: inline-grid; place-items: center; padding: 0;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); cursor: pointer; }
+#image-viewer .iv-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text-strong); }
+#image-viewer .iv-btn:disabled { color: var(--faint); cursor: default; }
+#image-viewer .iv-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+#image-viewer .iv-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  border-color: var(--border-strong); color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
+#image-viewer .iv-notice[hidden] { display: none; }
+#image-viewer .iv-stage { flex: 1 1 auto; min-height: 0; display: flex; overflow: auto; overscroll-behavior: contain; }
+/* A checkerboard under the image, so transparency reads as transparency on any theme. */
+#image-viewer .iv-stage img { display: block; margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in;
+  background-color: var(--surface2);
+  background-image: linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%),
+    linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%);
+  background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+#image-viewer.actual .iv-stage img { max-width: none; max-height: none; cursor: zoom-out; }
+#image-viewer .iv-message { margin: auto; max-width: 28rem; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+  background: var(--vscode-editorWidget-background, var(--surface)); color: var(--text-strong);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); text-align: center; }
+@media (max-width: 459px) {
+  #image-viewer { padding: var(--sp-2); gap: var(--sp-1); }
+}
+@media (max-width: 360px) {
+  .image-chip { width: 64px; }
+  .image-tile { width: 64px; height: 64px; }
+  .tool.has-images .body { margin-left: var(--sp-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-tile.skeleton { animation: none; }
+}
+@media (forced-colors: active) {
+  .image-tile, .tool .tool-image-count, #image-viewer .iv-bar, #image-viewer .iv-notice, #image-viewer .iv-message {
+    border: 1px solid CanvasText; }
+  #image-viewer { background: Canvas; }
+  .image-chip:focus-visible, #image-viewer .iv-btn:focus-visible { outline: 2px solid Highlight !important; }
+  #image-viewer .iv-btn:disabled { color: GrayText; }
+}
 /* ---- end 0.40 images -------------------------------------------------------------------------- */
 
 

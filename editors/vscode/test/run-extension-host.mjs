@@ -282,6 +282,28 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   // ---- end 0.40 agents ----
 
   // ---- 0.40 images (fixture command branches) ----
+  // A step that viewed stored images (every slot fetched by ref), and get_image answered with the
+  // stored path the runner prepared for each ref: one real image, one outside DGC's stores, one
+  // symlink and one file that is not an image. The host must open only the first.
+  if (cmd.type === "prompt" && cmd.text === "host images probe") {
+    const refs = Object.keys(JSON.parse(process.env.DGC_EXTENSION_TEST_IMAGES || "{}"));
+    send({ type: "turn_start", turn_id: "images-turn", prompt: cmd.text, kind: "prompt" });
+    send({ type: "tool_call", call_id: "images-call", name: "view_image", args: { path: "shot.png" }, summary: "shot.png" });
+    send({ type: "tool_result", call_id: "images-call", name: "view_image", output: "viewed shot.png",
+      is_error: false, is_diff: false });
+    send({ type: "tool_images", call_id: "images-call", caption: "viewed image", images: refs.map(() => ""),
+      items: refs.map((ref, index) => ({ ref, name: "shot-" + index + ".png", mime: "image/png", width: 1,
+        height: 1, bytes: 67, source: "view_image", host: "" })) });
+    send({ type: "turn_end", turn_id: "images-turn", reason: "completed", token_estimate: 0 });
+    return;
+  }
+  if (cmd.type === "get_image") {
+    const stored = JSON.parse(process.env.DGC_EXTENSION_TEST_IMAGES || "{}")[cmd.ref];
+    send(stored ? { type: "image", request_id: cmd.request_id, ref: cmd.ref, image: "", reason: "too_large",
+      mime: "image/png", width: 1, height: 1, path: stored }
+      : { type: "image", request_id: cmd.request_id, ref: cmd.ref, image: "", reason: "not_found" });
+    return;
+  }
   // ---- end 0.40 images ----
 
   // ---- 0.40 options (fixture command branches) ----
@@ -292,6 +314,28 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 chmodSync(backendPath, 0o700);
 symlinkSync(backendPath, altBackendPath);
 writeFileSync(controlPath, "");
+
+// ---- 0.40 images (stored image files for the Open file checks) ----
+// Open file accepts only a regular image inside ~/.dgc/sessions/**/<session>.images or a workspace's
+// .dgc/screenshots. HOME is the runner's (a throwaway one in every documented run); the session
+// directory made here is removed in finally.
+const imageHome = join(process.env.HOME || scratch, ".dgc", "sessions", `dgc-host-images-${randomUUID()}`);
+const imageStore = join(imageHome, "20260915-000000-host0001.images");
+const onePixelPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+mkdirSync(imageStore, { recursive: true, mode: 0o700 });
+const hostImages = {
+  good: join(imageStore, "a".repeat(32) + ".png"),
+  outside: join(scratch, "outside.png"),
+  symlink: join(imageStore, "b".repeat(32) + ".png"),
+  notImage: join(imageStore, "c".repeat(32) + ".png"),
+};
+writeFileSync(hostImages.good, onePixelPng);
+writeFileSync(hostImages.outside, onePixelPng);
+symlinkSync(hostImages.good, hostImages.symlink);
+writeFileSync(hostImages.notImage, "not an image\n");
+const hostImageRefs = { ["img_" + "1".repeat(32)]: hostImages.good, ["img_" + "2".repeat(32)]: hostImages.outside,
+  ["img_" + "3".repeat(32)]: hostImages.symlink, ["img_" + "4".repeat(32)]: hostImages.notImage };
+// ---- end 0.40 images ----
 
 // This runner intentionally never downloads VS Code. CI or a developer supplies an installed
 // executable; the explicit environment variable also makes Insiders/Cursor-compatible runs easy.
@@ -351,6 +395,7 @@ try {
   env.DGC_EXTENSION_TEST_CONTROL = controlPath;
   env.DGC_EXTENSION_TEST_BACKEND_ALT = altBackendPath;
   env.DGC_EXTENSION_TEST_USER_DATA = userDataDir;
+  env.DGC_EXTENSION_TEST_IMAGES = JSON.stringify(hostImageRefs);      // 0.40 images
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
     env,
@@ -385,6 +430,7 @@ try {
   }
   process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + monitor turns + backend exit paths)\n`);
 } finally {
+  rmSync(imageHome, { recursive: true, force: true });               // 0.40 images
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);
   } else {
