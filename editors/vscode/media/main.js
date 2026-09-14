@@ -5123,7 +5123,8 @@
       node.scrollIntoView?.({ block: "nearest" });
       return true;
     };
-    if (askCardDocked() && focusFirst($("cbox").querySelector(".ask") || $("cbox"))) return;
+    // A docked question takes focus on its highlighted row (the preselected recommendation).
+    if (askCardDocked() && (focusAskCard() || focusFirst($("cbox").querySelector(".ask") || $("cbox")))) return;
     const cards = [...log.querySelectorAll(".card[data-request-id]:not(.resolved), .recovery-card")];
     if (focusFirst(cards.at(-1))) return;
     input.focus();
