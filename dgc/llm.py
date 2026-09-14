@@ -22,6 +22,8 @@ from .image_views import parse_dimensions as _image_dimensions   # one header pa
 from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
                           bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
                           resolve_first_token_timeout, safe_endpoint)
+from .model_watch import is_local_endpoint
+from .model_errors import classify_exception, classify_status, eof_cause, hint_for, scrub_urls
 
 
 _DATA_IMAGE_RE = re.compile(
@@ -423,6 +425,38 @@ def _stall_of(watch, finish_reason: str) -> dict | None:
     return info.as_dict() if isinstance(info, StallInfo) else None
 
 
+def _interruption_of(watch, finish_reason: str, transport: str) -> dict | None:
+    """Why a generation ended before its terminal event, when no stall explains it.
+
+    A transport error the watch saw (a reset, a broken chunked body) names itself; a clean EOF is
+    described by the terminal event this transport never sent. ``None`` for anything that is not
+    an interruption, and for a stall (``ChatResult.stall`` carries that one).
+    """
+    if finish_reason != "incomplete":
+        return None
+    if watch is not None and isinstance(getattr(watch, "stall", None), StallInfo):
+        return None
+    endpoint = str(getattr(watch, "endpoint", "") or "") if watch is not None else ""
+    error = getattr(watch, "transport_error", None) if watch is not None else None
+    cause = eof_cause(transport, endpoint=endpoint)
+    if error is not None:
+        seen = classify_exception(error, endpoint=endpoint, streaming=True)
+        if seen.kind in ("reset", "stream_cut"):
+            cause = seen
+        else:
+            from dataclasses import replace as _replace
+            cause = _replace(cause, detail=seen.detail or cause.detail)
+    return {"kind": cause.kind, "summary": cause.summary, "detail": cause.detail,
+            "endpoint": cause.endpoint, "transport": transport}
+
+
+def _with_cause(error: Exception, cause, attempts: int) -> Exception:
+    """Attach the structured cause and the number of requests made to a raised model error."""
+    error.cause = cause
+    error.attempts = max(0, int(attempts))
+    return error
+
+
 def _raw_chunks(raw, response):
     """Read a close-delimited or Content-Length body as bytes arrive.
 
@@ -581,24 +615,33 @@ def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> s
     text = str(message or "")
     low = text.lower()
     hint = ""
+    kind = ""
     if _STALL_MESSAGE_RE.search(low):
         # The server is up -- it accepted the request -- so "start your server" would be wrong.
-        hint = MODEL_STALL_HINT
-    elif re.search(r"connection refused|failed to establish|max retries|name or service not known"
-                 r"|nodename nor servname|could not connect|connection error|unreachable"
-                 r"|timed out|timeout|no route to host", low):
-        hint = (f"the endpoint {base_url or 'you configured'} is not answering — start your server "
-                "(ollama serve / llama-server / LM Studio) or fix the URL; `dgc doctor` checks both")
+        kind = "stall"
+    elif re.search(r"name or service not known|nodename nor servname|getaddrinfo"
+                   r"|temporary failure in name resolution|nameresolutionerror|could not resolve host",
+                   low):
+        kind = "dns"
+    elif re.search(r"certificate_verify_failed|sslerror|certificate verify failed|tls handshake", low):
+        kind = "tls"
+    elif re.search(r"proxyerror|unable to connect to proxy|the proxy refused", low):
+        kind = "proxy"
+    elif re.search(r"connection refused|failed to establish|max retries|could not connect"
+                   r"|connection error|unreachable|timed out|timeout|no route to host", low):
+        kind = "connect"
     elif re.search(r"\b404\b|not found|no such model|does not exist|unknown model", low):
-        hint = (f"the server offers no model named '{model}'" if model else "the server does not know that model")
-        hint += (f" — pull it (ollama pull {model})" if model else " — pull it") + \
-                ", pick one with /model or `dgc --model NAME`, or run `dgc setup`"
+        kind = "model_not_found"
     elif re.search(r"\b401\b|\b403\b|unauthori[sz]ed|invalid api key|authentication|forbidden", low):
-        hint = "the endpoint rejected the key — set it with /connect, `dgc --api-key-env NAME` or DGC_API_KEY"
+        kind = "auth"
     elif re.search(r"\b429\b|rate limit|too many requests", low):
-        hint = "the endpoint is rate-limiting this key — wait a moment, or lower max_parallel_tasks"
+        kind = "rate_limited"
     elif re.search(r"\b50[023]\b|bad gateway|service unavailable|internal server error", low):
-        hint = "the server failed on its side — check its logs; `dgc doctor` shows what it offers"
+        kind = "http"
+    if kind:
+        # The same words a retry line and an error row show (model_errors.hint_for), with the
+        # endpoint stripped of credentials and query strings before it is printed.
+        hint = hint_for(kind, model=model, base_url=base_url)
     return f"{text}\n  → {hint}" if hint else text
 
 
@@ -1798,6 +1841,45 @@ class LLMClient:
         window = info.window_s if info.window_s > 0 else 10.0
         return _wait_for_retry(min(2 ** (stalls - 1), window, 10.0), cancel)
 
+    def _transport_cause(self, exc: BaseException, url: str):
+        cause = classify_exception(exc, endpoint=url)
+        return cause.with_context(model=self.model, api_mode=self.api_mode,
+                                  hint=hint_for(cause.kind, model=self.model, base_url=self.base_url))
+
+    def _status_cause(self, status: int, body: str, headers, url: str, delay: float):
+        cause = classify_status(status, body, headers, endpoint=url, delay_s=delay)
+        return cause.with_context(model=self.model, api_mode=self.api_mode,
+                                  hint=hint_for(cause.kind, model=self.model, base_url=self.base_url))
+
+    def _retry_transport(self, cause, transient: int, delay: float, cancel) -> bool:
+        """Say that a request failed in a way DGC retries, then back off. True = send it again;
+        False = cancelled while backing off. The delay is the transport's own, unchanged."""
+        channel = getattr(self, "_wait_channel", None)
+        if channel is not None:
+            channel.emit(WaitEvent(
+                kind="retry", since=time.monotonic(), model=self.model, endpoint=cause.endpoint,
+                attempt=int(transient), retries=3, cause=cause.kind, summary=cause.summary,
+                detail=cause.detail, hint=cause.hint, http_status=int(cause.http_status or 0),
+                delay_s=float(delay), api_mode=str(self.api_mode or "")))
+        return _wait_for_retry(delay, cancel)
+
+    def _connect_error(self, cause, exc: BaseException, attempts: int, *, target: str = "",
+                       clause: str = "") -> LLMError:
+        """``cannot connect to …``: the base URL without credentials or query, the scrubbed error."""
+        where = safe_endpoint(target or self.base_url)
+        if clause:
+            message = f"cannot connect to {where} — {clause}\n{scrub_urls(exc)}"
+        else:
+            local = (" — is your local LLM server running?"
+                     if is_local_endpoint(self.base_url, getattr(self, "family", "")) else "")
+            message = f"cannot connect to {where} — {cause.summary}{local}\n{scrub_urls(exc)}"
+        return _with_cause(LLMError(message), cause, attempts)
+
+    def _answer_error(self, message: str, status: int, body: str, url: str, attempts: int) -> LLMError:
+        """A final non-retried HTTP answer, carrying its cause (auth, model not found, 4xx)."""
+        cause = self._status_cause(status, body, None, url, 0.0)
+        return _with_cause(LLMError(message), cause, attempts)
+
     @staticmethod
     def _pre_progress_stall(result: ChatResult) -> StallInfo | None:
         stall = getattr(result, "stall", None)
@@ -2172,7 +2254,8 @@ class LLMClient:
                 response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response", cancel,
                 watch=watch)
             if finish:
-                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
+                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish),
+                                  interruption=_interruption_of(watch, finish, "anthropic"))
             return self._consume_anthropic_json(value, on_text, on_thinking)
         result = ChatResult()
         blocks: dict[int, dict] = {}
@@ -2375,6 +2458,7 @@ class LLMClient:
         if not terminal:
             result.finish_reason = "incomplete"
             result.stall = _stall_of(watch, result.finish_reason)
+            result.interruption = _interruption_of(watch, result.finish_reason, "anthropic")
         return self._anthropic_result_from_blocks(
             blocks, result, retain_provider_state=terminal)
 
@@ -2415,6 +2499,7 @@ class LLMClient:
         lower = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off",
                  "none": "off", "off": "off"}
         last_err = ""
+        last_cause = None
         max_tokens_limit: int | None = None
         stalls = 0
         rounds = 0
@@ -2441,12 +2526,13 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 transient += 1
-                last_err = f"connection: {exc}"
+                last_err = f"connection: {scrub_urls(exc)}"
+                last_cause = self._transport_cause(exc, f"{self.base_url}/messages")
                 if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(f"cannot connect to Anthropic Messages: {exc}") from exc
+                raise self._connect_error(last_cause, exc, transient) from exc
             except requests.Timeout:
                 watch.stop()
                 if cancel is not None and cancel.is_set():
@@ -2469,19 +2555,21 @@ class LLMClient:
             if response.status_code in (408, 429) or response.status_code >= 500:
                 status = response.status_code
                 headers = response.headers
-                body = _error_body(response, 400)
+                body = scrub_urls(_error_body(response, 400))
                 if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
                 last_err = f"HTTP {status}: {body}"
                 transient += 1
+                delay = _retry_delay(headers, 0.5 * transient)
+                last_cause = self._status_cause(status, body, headers, f"{self.base_url}/messages", delay)
                 if transient < 4:
-                    delay = _retry_delay(headers, 0.5 * transient)
-                    if not _wait_for_retry(delay, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"HTTP {status} from Anthropic Messages after {transient} tries: {body}")
+                raise _with_cause(LLMError(
+                    f"HTTP {status} from Anthropic Messages after {transient} tries: {body}"),
+                    last_cause, transient)
             if response.status_code in (400, 413):
                 status = response.status_code
                 body = _error_body(response)
@@ -2513,14 +2601,16 @@ class LLMClient:
                 if "tools" in payload and re.search(r"tool|input_schema", low):
                     self._mark_rejected("tools")
                     raise ToolsUnsupportedError("Anthropic Messages rejected native tool calling")
-                raise LLMError(f"{status} from Anthropic Messages: {body}")
+                raise self._answer_error(f"{status} from Anthropic Messages: {scrub_urls(body)}",
+                                         status, body, f"{self.base_url}/messages", transient + 1)
             if response.status_code != 200:
                 status = response.status_code
-                body = _error_body(response, 400)
+                body = scrub_urls(_error_body(response, 400))
                 if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
-                raise LLMError(f"HTTP {status} from Anthropic Messages: {body}")
+                raise self._answer_error(f"HTTP {status} from Anthropic Messages: {body}",
+                                         status, body, f"{self.base_url}/messages", transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
             try:
@@ -2547,7 +2637,8 @@ class LLMClient:
                 self._report_usage(result)   # the abandoned attempt was a real request
                 continue
             return result
-        raise LLMError(f"Anthropic Messages request failed repeatedly: {last_err}")
+        raise _with_cause(LLMError(f"Anthropic Messages request failed repeatedly: {last_err}"),
+                          last_cause, transient)
 
     @staticmethod
     def _ollama_content(content) -> tuple[str, list[str]]:
@@ -2830,6 +2921,7 @@ class LLMClient:
         if not aborted and not terminal_done:
             result.finish_reason = "incomplete"
             result.stall = _stall_of(watch, result.finish_reason)
+            result.interruption = _interruption_of(watch, result.finish_reason, "ollama")
         for kind, chunk in filt.flush():
             if kind == "think":
                 result.thinking += chunk
@@ -2903,6 +2995,7 @@ class LLMClient:
             payload["keep_alive"] = self.keep_alive
 
         last_err = ""
+        last_cause = None
         transient = 0
         repaired = False
         overthink = 0
@@ -2931,14 +3024,15 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 transient += 1
-                last_err = f"connection: {exc}"
+                last_err = f"connection: {scrub_urls(exc)}"
+                last_cause = self._transport_cause(exc, self._ollama_url)
                 if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"cannot connect to {self._ollama_root} — is Ollama running? "
-                    f"(/connect <url> to change it)\n{exc}") from exc
+                raise self._connect_error(
+                    last_cause, exc, transient, target=self._ollama_root,
+                    clause="is Ollama running? (/connect <url> to change it)") from exc
             except requests.Timeout:
                 watch.stop()
                 if cancel is not None and cancel.is_set():
@@ -2961,14 +3055,16 @@ class LLMClient:
             if r.status_code == 429:
                 transient += 1
                 headers = r.headers
-                body = _error_body(r)
+                body = scrub_urls(_error_body(r))
                 last_err = f"429 rate limited: {body[:200]}"
+                delay = _retry_delay(headers, 0.5 * transient)
+                last_cause = self._status_cause(429, body, headers, self._ollama_url, delay)
                 if transient < 4:
-                    delay = _retry_delay(headers, 0.5 * transient)
-                    if not _wait_for_retry(delay, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
+                raise _with_cause(LLMError(f"rate limited (429) after {transient} tries: {last_err}"),
+                                  last_cause, transient)
             if r.status_code in (400, 413):
                 body = _error_body(r)
                 low = body.lower()
@@ -3006,10 +3102,11 @@ class LLMClient:
                     for key in _SAMPLING_KEYS:
                         native_options.pop(key, None)
                     continue
-                raise LLMError(f"{r.status_code} from Ollama: {body}")
+                raise self._answer_error(f"{r.status_code} from Ollama: {scrub_urls(body)}",
+                                         r.status_code, body, self._ollama_url, transient + 1)
             if r.status_code >= 500:
                 status = r.status_code
-                body = _error_body(r)
+                body = scrub_urls(_error_body(r))
                 if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     payload["messages"] = self._ollama_messages(
@@ -3017,19 +3114,23 @@ class LLMClient:
                     continue
                 transient += 1
                 last_err = f"HTTP {status}: {body[:300]}"
+                last_cause = self._status_cause(status, body, r.headers, self._ollama_url,
+                                                0.5 * transient)
                 if transient < 4:
                     if transient >= 2 and not repaired:
                         payload["messages"] = self._ollama_messages(_repair_for_retry(messages))
                         repaired = True
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"HTTP {status} from {self._ollama_url} after {transient} tries: {body[:400]}")
+                raise _with_cause(LLMError(
+                    f"HTTP {status} from {safe_endpoint(self._ollama_url)} after {transient} tries: "
+                    f"{body[:400]}"), last_cause, transient)
             if r.status_code != 200:
                 status = r.status_code
-                body = _error_body(r, 400)
-                raise LLMError(f"HTTP {status} from {self._ollama_url}: {body}")
+                body = scrub_urls(_error_body(r, 400))
+                raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._ollama_url)}: {body}",
+                                         status, body, self._ollama_url, transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
             try:
@@ -3056,7 +3157,8 @@ class LLMClient:
                 self._report_usage(result)   # the abandoned attempt was a real request
                 continue
             return result
-        raise LLMError(f"Ollama request failed repeatedly: {last_err}")
+        raise _with_cause(LLMError(f"Ollama request failed repeatedly: {last_err}"),
+                          last_cause, transient)
 
     def _chat_completions(
         self,
@@ -3093,6 +3195,7 @@ class LLMClient:
             payload["stream_options"] = {"include_usage": True}
 
         last_err = ""
+        last_cause = None  # the classified cause of the last retried failure (for the final error)
         transient = 0      # count of retried timeouts / 5xx (bounded, with backoff)
         repaired = False   # whether we've swapped in the endpoint-agnostic repaired shape
         overthink = 0      # F4: times the reasoning-watchdog fired this turn (bounded)
@@ -3127,15 +3230,20 @@ class LLMClient:
                     continue
                 # transient network drops (connection reset / broken pipe / socket hang-up) recover on
                 # a retry; a persistent refusal (server down) exhausts the budget and raises the hint.
-                last_err = f"connection: {e}"
+                last_err = f"connection: {scrub_urls(e)}"
                 transient += 1
+                last_cause = self._transport_cause(e, self._url)
                 if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"cannot connect to {self.base_url} — is your local LLM server running? "
-                    f"(/connect <url> to change it)\n{e}") from e
+                if is_local_endpoint(self.base_url, getattr(self, "family", "")):
+                    raise self._connect_error(
+                        last_cause, e, transient,
+                        clause="is your local LLM server running? (/connect <url> to change it)") from e
+                raise self._connect_error(
+                    last_cause, e, transient,
+                    clause=f"{last_cause.summary} (/connect <url> to change it)") from e
             except requests.Timeout:
                 watch.stop()
                 if cancel is not None and cancel.is_set():
@@ -3152,15 +3260,17 @@ class LLMClient:
             if r.status_code == 429:
                 # rate limited — back off (honour Retry-After) and retry within the budget
                 headers = r.headers
-                body = _error_body(r)
+                body = scrub_urls(_error_body(r))
                 last_err = f"429 rate limited: {body[:200]}"
                 transient += 1
+                delay = _retry_delay(headers, 0.5 * transient)
+                last_cause = self._status_cause(429, body, headers, self._url, delay)
                 if transient < 4:
-                    delay = _retry_delay(headers, 0.5 * transient)
-                    if not _wait_for_retry(delay, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
+                raise _with_cause(LLMError(f"rate limited (429) after {transient} tries: {last_err}"),
+                                  last_cause, transient)
             if r.status_code in (400, 413, 422):
                 body = _error_body(r)
                 last_err = body
@@ -3185,7 +3295,9 @@ class LLMClient:
                     usage_retry = True
                     continue
                 if r.status_code == 422:
-                    raise LLMError(f"HTTP 422 from {self._url}: {body[:400]}")
+                    raise self._answer_error(
+                        f"HTTP 422 from {safe_endpoint(self._url)}: {scrub_urls(body)[:400]}",
+                        422, body, self._url, transient + 1)
                 # only disable a capability when the server actually blames THAT capability —
                 # a 400 about something else must not permanently strip tools/reasoning.
                 if (r.status_code == 400 and "parallel_tool_calls" in payload
@@ -3221,13 +3333,14 @@ class LLMClient:
                 if r.status_code == 400 and self.tools_supported and "tools" in payload:
                     self._mark_rejected("tools")
                     raise ToolsUnsupportedError("endpoint rejected native tool calling")
-                raise LLMError(f"{r.status_code} from server: {body}")
+                raise self._answer_error(f"{r.status_code} from server: {scrub_urls(body)}",
+                                         r.status_code, body, self._url, transient + 1)
             if r.status_code >= 500:
                 # Transient upstream error — retry instead of killing the turn (robust
                 # clients do the same). Ollama, for one, intermittently 500s
                 # "no user query found in messages" on long tool-loops.
                 status = r.status_code
-                body = _error_body(r)
+                body = scrub_urls(_error_body(r))
                 if _image_parts_in(payload["messages"]) and _IMAGE_REFUSAL_RE.search(body):
                     # images: a server without an image encoder (llama.cpp without mmproj) says so
                     # with a 500. That is a refusal, not a transient failure: retry without it.
@@ -3238,6 +3351,7 @@ class LLMClient:
                     continue
                 last_err = f"HTTP {status}: {body[:300]}"
                 transient += 1
+                last_cause = self._status_cause(status, body, r.headers, self._url, 0.5 * transient)
                 if transient < 4:
                     # After a plain retry fails, also repair the message SHAPE — collapse
                     # native tool-calls/results into plain user/assistant text that even a
@@ -3246,15 +3360,17 @@ class LLMClient:
                     if transient >= 2 and not repaired:
                         payload["messages"] = _repair_for_retry(messages)
                         repaired = True
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"HTTP {status} from {self._url} after {transient} tries: {body[:400]}")
+                raise _with_cause(LLMError(
+                    f"HTTP {status} from {safe_endpoint(self._url)} after {transient} tries: {body[:400]}"),
+                    last_cause, transient)
             if r.status_code != 200:
                 status = r.status_code
-                body = _error_body(r, 400)
-                raise LLMError(f"HTTP {status} from {self._url}: {body}")
+                body = scrub_urls(_error_body(r, 400))
+                raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._url)}: {body}",
+                                         status, body, self._url, transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
             if usage_retry:
@@ -3288,7 +3404,7 @@ class LLMClient:
                 self._report_usage(res)   # the abandoned attempt was a real request
                 continue
             return res
-        raise LLMError(f"request failed repeatedly: {last_err}")
+        raise _with_cause(LLMError(f"request failed repeatedly: {last_err}"), last_cause, transient)
 
     @staticmethod
     def _responses_input(messages: list[dict]) -> tuple[str, list[dict]]:
@@ -3579,6 +3695,7 @@ class LLMClient:
         if _image_parts_in(messages) and not self.vision_supported:
             messages = self._without_images(messages)      # images: known text-only, skip the try
         transient = 0
+        last_cause = None
         disabled: set[str] = set()
         stalls = 0
         rounds = 0
@@ -3604,11 +3721,12 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 transient += 1
+                last_cause = self._transport_cause(e, f"{self.base_url}/responses")
                 if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
+                raise self._connect_error(last_cause, e, transient) from e
             except requests.Timeout:
                 watch.stop()
                 if cancel is not None and cancel.is_set():
@@ -3633,18 +3751,21 @@ class LLMClient:
             if response.status_code == 429 or response.status_code >= 500:
                 status = response.status_code
                 headers = response.headers
-                body = _error_body(response, 400)
+                body = scrub_urls(_error_body(response, 400))
                 if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
                 transient += 1
+                delay = _retry_delay(headers, 0.5 * transient)
+                last_cause = self._status_cause(status, body, headers, f"{self.base_url}/responses",
+                                                delay)
                 if transient < 4:
-                    delay = _retry_delay(headers, 0.5 * transient)
-                    if not _wait_for_retry(delay, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
-                raise LLMError(
-                    f"HTTP {status} from Responses API after {transient} tries: {body}")
+                raise _with_cause(LLMError(
+                    f"HTTP {status} from Responses API after {transient} tries: {body}"),
+                    last_cause, transient)
             if response.status_code in (400, 413):
                 body = _error_body(response)
                 low = body.lower()
@@ -3689,14 +3810,17 @@ class LLMClient:
                     disabled.add("stateful_responses")
                     self._reset_response_state()
                     continue
-                raise LLMError(f"{response.status_code} from Responses API: {body}")
+                raise self._answer_error(f"{response.status_code} from Responses API: {scrub_urls(body)}",
+                                         response.status_code, body, f"{self.base_url}/responses",
+                                         transient + 1)
             if response.status_code != 200:
                 status = response.status_code
-                body = _error_body(response, 400)
+                body = scrub_urls(_error_body(response, 400))
                 if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     messages = self._without_images(messages, refused=True)   # images: a refusal
                     continue
-                raise LLMError(f"HTTP {status} from Responses API: {body}")
+                raise self._answer_error(f"HTTP {status} from Responses API: {body}",
+                                         status, body, f"{self.base_url}/responses", transient + 1)
             self._usage_opened()
             try:
                 result = self._consume_responses(response, on_text, on_thinking, cancel,
@@ -3720,7 +3844,7 @@ class LLMClient:
             else:
                 self._reset_response_state()
             return result
-        raise LLMError("Responses API request failed repeatedly")
+        raise _with_cause(LLMError("Responses API request failed repeatedly"), last_cause, transient)
 
     def _consume_responses(self, response: requests.Response, on_text, on_thinking,
                            cancel=None, watch: RequestWatch | None = None) -> ChatResult:
@@ -3730,7 +3854,8 @@ class LLMClient:
                 response, _MAX_RESPONSES_JSON_BYTES, "Responses API response", cancel,
                 watch=watch)
             if finish:
-                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
+                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish),
+                                  interruption=_interruption_of(watch, finish, "responses"))
             return self._consume_responses_json(value, on_text, on_thinking)
         result = ChatResult()
         calls: dict[str, dict] = {}
@@ -3940,6 +4065,7 @@ class LLMClient:
                 "max_turn_requests")
             if incomplete_reason == "stream_interrupted":
                 result.stall = _stall_of(watch, result.finish_reason)
+                result.interruption = _interruption_of(watch, result.finish_reason, "responses")
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:
@@ -4217,6 +4343,7 @@ class LLMClient:
             # records non-executable call results or continues partial text on a fresh request.
             result.finish_reason = "incomplete"
             result.stall = _stall_of(watch, result.finish_reason)
+            result.interruption = _interruption_of(watch, result.finish_reason, "chat_completions")
         emit(filt.flush())
 
         for idx in sorted(partial):
@@ -4258,7 +4385,8 @@ class LLMClient:
                 raise LLMError("Chat Completions response returned malformed JSON") from exc
             raise
         if finish:
-            return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
+            return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish),
+                              interruption=_interruption_of(watch, finish, "chat_completions"))
         if not isinstance(obj, dict):
             raise LLMError("Chat Completions emitted a non-object JSON response")
         choices = obj.get("choices")

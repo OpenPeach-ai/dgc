@@ -596,6 +596,110 @@ class HeadlessUI:
         if restore and showing and saved:
             self.turn_activity(*saved)
 
+    # ---- reconnecting: model_retry ----------------------------------------------------------------
+    # A random id per backend process: a retry run outside any turn (`dgc -p --output-format json`)
+    # is "<epoch>:retry<n>", so a restarted backend's first run can never update an old line.
+    backend_epoch = __import__("secrets").token_hex(4)
+    _RETRY_STATES = ("retrying", "recovered", "gave_up", "cancelled")
+
+    @staticmethod
+    def _bounded_text(value, maximum: int) -> str:
+        from .model_errors import scrub_urls
+        from .redaction import bounded_redacted_view
+        text = scrub_urls(str(value or ""))
+        if maximum >= 128:
+            return bounded_redacted_view(text, maximum)
+        return text[:maximum]
+
+    @staticmethod
+    def _bounded_int(value, low: int, high: int):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+            return None
+        return int(min(max(int(value), low), high))
+
+    def _retry_id(self, run_n, agent: str = "") -> str:
+        scope = str(self.turn_id or "") or self.backend_epoch
+        number = self._bounded_int(run_n, 0, 10**9) or 0
+        middle = f":{str(agent)[:64]}" if agent else ""
+        return f"{scope[:48]}{middle}:retry{number}"[:128]
+
+    def model_retry(self, state: str, *, run_n, kind, layer, attempt, summary, endpoint="",
+                    max_attempts=None, model="", api_mode="", detail="", hint="", http_status=0,
+                    delay_ms=None, origin="agent", agent="", engine="") -> None:
+        """One retry run's frame. Every bound is clamped here; only declared fields are sent.
+
+        No ``turn_activity`` de-duplication: each attempt is a new fact. ``run_n`` is the agent's run
+        number, never the envelope ``seq`` (a payload ``seq`` would overwrite it and kill the panel).
+        """
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        from .model_watch import safe_endpoint
+        if state not in self._RETRY_STATES:
+            return
+        fields: dict = {
+            "retry_id": self._retry_id(run_n, agent),
+            "state": state,
+            "kind": kind if kind in MODEL_FAILURE_KINDS else "other",
+            "layer": layer if layer in ("request", "continuation") else "request",
+            "attempt": self._bounded_int(attempt, 1, 100) or 1,
+            "summary": self._bounded_text(summary, 200) or "the model request failed",
+        }
+        maximum = self._bounded_int(max_attempts, 0, 100)
+        if maximum:                     # absent (or nonsense) means no fixed count; never "4/3"
+            fields["max_attempts"] = max(maximum, fields["attempt"])
+        where = str(endpoint or "")
+        if "://" in where:
+            where = safe_endpoint(where)
+        for key, value, bound in (("endpoint", where, 300), ("model", model, 200),
+                                  ("api_mode", api_mode, 40), ("detail", detail, 4000),
+                                  ("hint", hint, 300)):
+            text = self._bounded_text(value, bound)
+            if text:
+                fields[key] = text
+        if self.turn_id:
+            fields["turn_id"] = str(self.turn_id)
+        status = self._bounded_int(http_status, 0, 10**6)
+        if status is not None and 100 <= status <= 599:
+            fields["http_status"] = status
+        delay = self._bounded_int(delay_ms, 0, 600_000)
+        if delay is not None:
+            fields["delay_ms"] = delay
+        fields["origin"] = origin if origin in ("agent", "subagent", "engine") else "agent"
+        if agent:
+            fields["agent"] = str(agent)[:64]
+        if engine:
+            fields["engine"] = str(engine)[:40]
+        self.em.emit("model_retry", **fields)
+
+    def _error_cause(self, cause) -> dict | None:
+        """``error.cause`` with every bound clamped (the nested object is not schema-checked)."""
+        from .editor_protocol import MAX_SAFE_INTEGER, MODEL_FAILURE_KINDS
+        from .model_watch import safe_endpoint
+        if not isinstance(cause, dict):
+            return None
+        out: dict = {"kind": cause.get("kind") if cause.get("kind") in MODEL_FAILURE_KINDS else "other",
+                     "summary": self._bounded_text(cause.get("summary"), 200) or "the model request failed"}
+        where = str(cause.get("endpoint") or "")
+        if "://" in where:
+            where = safe_endpoint(where)
+        for key, value, bound in (("endpoint", where, 300), ("model", cause.get("model"), 200),
+                                  ("api_mode", cause.get("api_mode"), 40),
+                                  ("detail", cause.get("detail"), 4000), ("hint", cause.get("hint"), 300)):
+            text = self._bounded_text(value, bound)
+            if text:
+                out[key] = text
+        status = self._bounded_int(cause.get("http_status"), 0, 10**6)
+        if status is not None and 100 <= status <= 599:
+            out["http_status"] = status
+        attempts = self._bounded_int(cause.get("attempts"), 0, MAX_SAFE_INTEGER)
+        if attempts:
+            out["attempts"] = attempts
+        if cause.get("run_n") is not None and self._bounded_int(cause.get("run_n"), 1, 10**9):
+            out["retry_id"] = self._retry_id(cause["run_n"], str(cause.get("agent") or ""))
+        elif isinstance(cause.get("retry_id"), str) and cause["retry_id"]:
+            out["retry_id"] = cause["retry_id"][:128]
+        return out
+    # ---- end reconnecting: model_retry ------------------------------------------------------------
+
     def steering_applied(self, request_id: str) -> None:
         hook = getattr(self, "_steering_hook", None)
         if hook:
@@ -716,8 +820,12 @@ class HeadlessUI:
         """Carry the exact post-save compaction outcome instead of parsing a status sentence."""
         self.em.emit("compacted", **result)
 
-    def error(self, message: str) -> None:
-        self.em.emit("error", message=message)
+    def error(self, message: str, cause=None) -> None:
+        payload = self._error_cause(cause)
+        if payload is None:
+            self.em.emit("error", message=message)
+        else:
+            self.em.emit("error", message=message, cause=payload)
 
     # blocking decisions -------------------------------------------------------
     def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
@@ -2050,6 +2158,7 @@ class Backend:
             nonlocal turn
             if turn is None:
                 return
+            items.extend(self._history_turn_closing_items(turn))
             if calls:                       # tool calls still waiting for a result when the turn ended
                 turn["interrupted"] = True
             # The turn reason is not persisted, but two things the file does support are whether
@@ -3663,8 +3772,83 @@ class Backend:
     def _history_notice_items(self, message: dict, turn: dict | None):
         """None when ``message`` is not a model-stream recovery notice; otherwise the
         ``model_retry`` items it replays as (possibly empty). A notice never opens a turn: the
-        caller opens one only when none is open, then appends these items and moves on."""
-        return None
+        caller opens one only when none is open, then appends these items and moves on.
+
+        One pass, no look-ahead. ``_history`` calls this for every message it reaches, so the state
+        of each notice is settled by what follows it in the same turn: each notice is its own run
+        (one line per seam) and starts ``retrying``; the next assistant message of that turn with
+        content or tool calls flips it to ``recovered``. A turn that closes first leaves it
+        ``retrying``, which the panel settles as "Reconnect did not finish". The only "Gave up" a
+        replay draws is the one the agent recorded on the partial answer it gave up after.
+        """
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        from .workflows import stream_recovery_notice
+        # A notice read while no turn was open is adopted by the turn the caller opens for it, which
+        # is the turn of the very next call; after that call nothing may adopt it.
+        orphans, self._history_orphan_recoveries = getattr(self, "_history_orphan_recoveries", None), None
+        if isinstance(turn, dict) and orphans and orphans[0].get("turn_id") == turn.get("id"):
+            turn.setdefault("pending_recoveries", []).extend(orphans)
+        notice = stream_recovery_notice(message)
+        if notice is None:
+            if isinstance(turn, dict) and message.get("role") == "assistant":
+                if str(message.get("content") or "").strip() or message.get("tool_calls"):
+                    for item in turn.pop("pending_recoveries", None) or ():
+                        item["state"] = "recovered"
+                gave_up = message.get("_dgc_stream_gave_up")
+                if isinstance(gave_up, dict):
+                    # Drawn after this message's text and tool cards, when the turn closes.
+                    turn["stream_gave_up"] = gave_up
+                    turn["interrupted"] = True
+            return None
+        # A turn is open for any notice DGC wrote after a prompt; only a transcript that starts with
+        # one has none, and the caller then opens the first turn, "h1".
+        turn_id = str(turn["id"]) if isinstance(turn, dict) else "h1"
+        if isinstance(turn, dict):
+            turn["retry_n"] = int(turn.get("retry_n") or 0) + 1
+            number = turn["retry_n"]
+        else:
+            number = 1
+        kind = notice.get("cause") if notice.get("cause") in MODEL_FAILURE_KINDS else "other"
+        item = self._history_retry_item(turn_id, number, "retrying", kind, notice.get("attempt"),
+                                        notice.get("max"), notice.get("summary"), notice.get("endpoint"))
+        if isinstance(turn, dict):
+            turn.setdefault("pending_recoveries", []).append(item)
+        else:
+            self._history_orphan_recoveries = [item]
+        return [item]
+
+    def _history_turn_closing_items(self, turn: dict) -> list:
+        """Items a replayed turn draws last, before its ``turn_end``: the reconnect it gave up on."""
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        turn.pop("pending_recoveries", None)
+        gave_up = turn.pop("stream_gave_up", None)
+        if not isinstance(gave_up, dict):
+            return []
+        turn["retry_n"] = int(turn.get("retry_n") or 0) + 1
+        kind = gave_up.get("cause") if gave_up.get("cause") in MODEL_FAILURE_KINDS else "stream_cut"
+        attempt = gave_up.get("attempt")
+        return [self._history_retry_item(str(turn["id"]), turn["retry_n"], "gave_up", kind, attempt,
+                                          attempt, gave_up.get("summary"), gave_up.get("endpoint"))]
+
+    @staticmethod
+    def _history_retry_item(turn_id: str, number: int, state: str, kind: str, attempt, maximum,
+                            summary, endpoint) -> dict:
+        def bounded(value, low, high):
+            return (int(value) if isinstance(value, int) and not isinstance(value, bool)
+                    and low <= value <= high else None)
+
+        item = {"type": "model_retry", "retry_id": f"{turn_id}:retry{number}", "state": state,
+                "kind": kind, "layer": "continuation",
+                "attempt": bounded(attempt, 1, 100) or min(number, 100),
+                "summary": str(summary or "the stream ended before its terminal event")[:200],
+                "turn_id": turn_id}
+        maximum = bounded(maximum, 1, 100)
+        if maximum is not None:
+            item["max_attempts"] = max(maximum, item["attempt"])
+        endpoint = str(endpoint or "")[:300]
+        if endpoint:
+            item["endpoint"] = endpoint
+        return item
     # ---- end 0.40 reconnecting --------------------------------------------------------------------
 
 

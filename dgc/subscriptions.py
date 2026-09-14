@@ -303,9 +303,87 @@ def _error_text(obj: dict) -> str:
     return str(error or obj.get("message") or "")
 
 
+# ---- reconnecting: a subscription CLI's own retries ----------------------------------------------
+# Codex prints each retry as a top-level `error` whose message is "Reconnecting... n/m (details)" or
+# "Reconnecting... waiting for network (details)"; the details are an error's to_string() and can
+# span lines (an HTTP body), hence DOTALL. Such a line is a retry in progress, never a failure.
+import re  # noqa: E402  (kept inside this section)
+
+_CODEX_RECONNECT_RE = re.compile(
+    r"^Reconnecting(?:\.\.\.|…)?\s+(?:(\d+)/(\d+)|waiting for network)\s*(?:\((.*)\))?\s*$", re.S)
+_CODEX_STATUS_RE = re.compile(r"unexpected status (\d{3})")
+# Claude Code's `system/api_retry.error` is a category, not a message.
+_CLAUDE_RETRY_KINDS = {"overloaded": "overloaded", "rate_limit": "rate_limited",
+                       "authentication_failed": "auth", "server_error": "http"}
+
+
+def _codex_retry(message: str) -> list[dict] | None:
+    match = _CODEX_RECONNECT_RE.match(str(message or "").strip())
+    if not match:
+        return None
+    detail = (match.group(3) or "").strip()
+    low = detail.lower()
+    status = _CODEX_STATUS_RE.search(detail)
+    if "stream disconnected" in low or "stream closed" in low:
+        failure = "stream_cut"
+    elif status is None and ("connection failed" in low or "error sending request" in low
+                             or match.group(1) is None):
+        failure = "connect"
+    else:
+        failure = "engine"          # Codex's own verb is "Reconnecting" for every retry it reports
+    first = detail.splitlines()[0].strip() if detail else ""
+    # The line itself says "Reconnecting · waiting for network" when Codex gives no count, so the
+    # cause is only what Codex said went wrong.
+    summary = (first[:200] or ("waiting for network" if match.group(1) is None else "reconnecting"))
+    event = {"kind": "retry", "failure": failure,
+             "attempt": int(match.group(1)) if match.group(1) else None,
+             "max": int(match.group(2)) if match.group(2) else None,
+             "summary": summary, "detail": detail[:4000]}
+    if status is not None:
+        event["http_status"] = int(status.group(1))
+    return [event]
+
+
+def _claude_retry(obj: dict) -> list[dict]:
+    def number(key):
+        value = obj.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    category = str(obj.get("error") or "unknown")
+    status = number("error_status")
+    if obj.get("no_response"):
+        failure = "stall"
+    elif category in _CLAUDE_RETRY_KINDS:
+        failure = _CLAUDE_RETRY_KINDS[category]
+    else:
+        failure = "connect" if status is None else "engine"
+    delay = number("retry_delay_ms")
+    parts = [f"Claude Code reported {category.replace('_', ' ')}"]
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    if delay is not None:
+        parts.append(f"retrying in {delay / 1000:.1f}s")
+    summary = (f"HTTP {status}" + (f" ({category.replace('_', ' ')})" if category != "unknown" else "")
+               if status is not None else
+               "no response from the model" if failure == "stall" else "no connection to the model")
+    if delay is not None:
+        summary += f" · waiting {delay / 1000:.1f}s"
+    event = {"kind": "retry", "failure": failure, "attempt": number("attempt"), "max": number("max_retries"),
+             "summary": summary, "detail": ", ".join(parts), "category": category,
+             "no_response": bool(obj.get("no_response"))}
+    if delay is not None:
+        event["delay_ms"] = delay
+    if status is not None:
+        event["http_status"] = status
+    return [event]
+# ---- end reconnecting ------------------------------------------------------------------------------
+
+
 def _events_claude(obj: dict) -> list[dict]:
     t = obj.get("type")
     if t == "system":
+        if obj.get("subtype") == "api_retry":
+            return _claude_retry(obj)
         return _session_event(obj.get("session_id"))
     if t == "assistant":
         out = []
@@ -365,6 +443,10 @@ def _events_codex(obj: dict) -> list[dict]:
     top_type = str(obj.get("type") or "")
     if top_type == "thread.started":
         return _session_event(obj.get("thread_id"))
+    if top_type == "error":
+        retry = _codex_retry(_error_text(obj))
+        if retry is not None:
+            return retry
     if top_type in ("turn.failed", "error"):
         return _text_event("error", _error_text(obj) or "Codex turn failed")
     if top_type == "turn.completed" and isinstance(obj.get("usage"), dict):
@@ -637,6 +719,10 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
 
     def on_event(event: dict) -> None:
         kind = event.get("kind")
+        if kind in ("text", "thinking", "tool_call", "tool_result"):
+            progressed = getattr(agent, "_engine_progress", None)   # reconnecting: a retry is over
+            if callable(progressed):
+                progressed()
         if kind == "text" and event.get("text"):
             shown["text"] = True
             ui.on_text(str(event["text"]))
@@ -660,6 +746,10 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
             ui.tool_result(names.get(call_id or "", ""), output, call_id)
         elif kind == "status" and event.get("text"):
             ui.info(str(event["text"]))
+        elif kind == "retry":
+            relay = getattr(agent, "_engine_retry", None)           # reconnecting
+            if callable(relay):
+                relay(event, engine)
         elif kind == "result" and not shown["text"] and str(event.get("text") or "").strip():
             shown["text"] = True
             ui.on_text(str(event["text"]))

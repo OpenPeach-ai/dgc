@@ -646,6 +646,10 @@ class _ACPUi:
     def model_wait(self, label, detail="", *, since=None, restore=True, origin=None):
         """ACP has no transient status channel; a stall that fails the turn still reports an error."""
 
+    def model_retry(self, state, **fields):
+        """ACP has no place for a retry line: ``info`` would write it into the answer text. A retry
+        that ends the turn still reports its error; one that recovers is simply not mentioned."""
+
     # tools
     def tool_call(self, name, args, call_id=None):
         tcid = call_id or f"tc{next(self._tc)}"

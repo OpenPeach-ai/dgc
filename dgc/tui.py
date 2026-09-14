@@ -1939,6 +1939,9 @@ class TUI:
             elif isinstance(blk, dict) and blk.get("kind") == "recall":
                 frags, nl = reuse(blk, lambda b=blk: self._recall_frags(b))
                 add(frags, "text", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "retry":
+                frags, nl = reuse(blk, lambda b=blk: self._retry_frags(b))
+                add(frags, "tool", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
                 frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
                 add(frags, "tool", nl)
@@ -2012,6 +2015,10 @@ class TUI:
             # each carries a handler bound to its own block.
             return ("recall", blk.get("uid"), bool(blk.get("exp")), blk.get("rows"),
                     blk.get("dropped"), bool(blk.get("gone")), self._width, theme_key)
+        if kind == "retry":
+            # rev changes with every frame for this run; the handler is bound to the block's id.
+            return ("retry", blk.get("retry_id"), blk.get("rev", 0), bool(blk.get("exp")),
+                    self._width, theme_key)
         if kind == "md":
             return ("md", blk.get("text", ""), self._width, theme_key)
         if kind == "tool":
@@ -2127,6 +2134,112 @@ class TUI:
             for ln in b.get("text", "").strip().split("\n"):
                 frags.append(("", "\n"))
                 frags.append((f"fg:{th.faint} italic", f"  {glyphs.RAIL} {ln}"))
+        return frags
+
+    # ---- reconnecting: the retry block ------------------------------------------------------------
+    @staticmethod
+    def _retry_label(blk: dict) -> str:
+        """The run's words: "Reconnecting 2/3", "Reconnected after 2 retries", "Gave up after …"."""
+        from .model_errors import BUSY_KINDS
+        state, kind = str(blk.get("state") or ""), str(blk.get("failure") or "other")
+        attempt = max(1, int(blk.get("attempt") or 1))
+        maximum = blk.get("max_attempts")
+        continuation = blk.get("layer") == "continuation"
+        reconnect = kind not in BUSY_KINDS and kind not in ("http", "stall", "loading", "auth",
+                                                            "model_not_found")
+        count = f"{attempt}/{max(int(maximum), attempt)}" if maximum else str(attempt)
+        tries = f"{attempt} {'retry' if attempt == 1 else 'retries'}"
+        if state == "retrying":
+            if kind in BUSY_KINDS:
+                label = f"Server is busy, retrying {count}"
+            elif kind == "http":
+                label = f"Server error, retrying {count}"
+            elif not reconnect:
+                label = f"Retrying {count}"
+            elif not maximum and blk.get("origin") == "engine":
+                label = "Reconnecting · waiting for network"
+            else:
+                label = f"Reconnecting {count}"
+        elif state == "recovered":
+            if continuation:
+                label = ("Reconnected" if reconnect else "Recovered") + (
+                    " · continued from the partial answer" if blk.get("partial", True) else "")
+            else:
+                label = f"{'Reconnected' if reconnect else 'Recovered'} after {tries}"
+        elif state == "gave_up":
+            label = (f"Gave up after {attempt} reconnect{'s' if attempt != 1 else ''}" if continuation
+                     else f"Gave up after {tries}")
+        elif state == "cancelled":
+            label = "Stopped while reconnecting" if reconnect else "Stopped while retrying"
+        else:
+            label = "Reconnect did not finish"
+        origin = blk.get("origin")
+        if origin == "subagent":
+            label = "Sub-agent · " + label
+        elif origin == "engine" and blk.get("engine"):
+            label = f"{blk['engine']} · {label}"
+        return label
+
+    def _retry_body_lines(self, blk: dict) -> list[tuple[str, str]]:
+        """(name, text) rows of an open retry block, wrapped at the transcript width."""
+        import textwrap
+        from .model_watch import format_seconds
+        rows: list[tuple[str, str]] = []
+        width = max(20, int(getattr(self, "_width", 100) or 100) - 16)
+
+        def put(name: str, value) -> None:
+            text = str(value or "").strip()
+            if not text:
+                return
+            first = True
+            for para in text.splitlines() or [""]:
+                for piece in textwrap.wrap(para, width) or [""]:
+                    rows.append((name if first else "", piece))
+                    first = False
+
+        put("cause", blk.get("summary"))
+        put("model", " · ".join(str(v) for v in (blk.get("model"), blk.get("api_mode")) if v))
+        put("endpoint", blk.get("endpoint"))
+        attempts = list(blk.get("attempts") or [])
+        if blk.get("dropped"):
+            put("attempts", f"… {blk['dropped']} earlier attempts")
+        for number, summary, delay in attempts:
+            wait = f" · retried after {format_seconds(delay / 1000)}" if isinstance(delay, (int, float)) else ""
+            put(f"attempt {number}", f"{summary}{wait}")
+        put("details", blk.get("detail"))
+        put("hint", blk.get("hint"))
+        return rows
+
+    def _retry_frags(self, b: dict):
+        """A collapsible reconnect block: `↻ ▸ Reconnecting 2/3 · connection refused by …`, opening on
+        click to the cause, model, endpoint, each attempt, the transport's words and the hint."""
+        from prompt_toolkit.mouse_events import MouseEventType
+        from .model_watch import endpoint_host
+        th = style_mod.theme()
+        caret = "▾" if b.get("exp") else "▸"
+        label = self._retry_label(b)
+        state = b.get("state")
+        where = endpoint_host(str(b.get("endpoint") or "")) or str(b.get("endpoint") or "")
+        tail = (where or str(b.get("summary") or "")) if state == "recovered" else str(b.get("summary") or "")
+
+        def toggle(mouse_event, retry_id=b.get("retry_id")):
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            target = next((x for x in reversed(self.blocks) if isinstance(x, dict)
+                           and x.get("kind") == "retry" and x.get("retry_id") == retry_id), None)
+            if target is not None:
+                target["exp"] = not target.get("exp")
+            self._invalidate()
+
+        frags = [(f"fg:{th.faint}", f"{glyphs.RECONNECT} {caret} ", toggle),
+                 (f"fg:{th.err}" if state == "gave_up" else f"fg:{th.muted}", label, toggle)]
+        if tail:
+            frags.append((f"fg:{th.faint}", f" {glyphs.MIDDOT} {tail}", toggle))
+        if b.get("exp"):
+            for name, text in self._retry_body_lines(b):
+                frags.append(("", "\n"))
+                frags.append((f"fg:{th.faint}", f"  {glyphs.RAIL} {name:<10}"))
+                frags.append((f"fg:{th.muted}", text))
         return frags
 
     _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
@@ -2697,6 +2810,8 @@ class TUI:
             return 1                       # expanded rows are their own blocks
         if isinstance(blk, dict) and blk.get("kind") == "think":
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
+        if isinstance(blk, dict) and blk.get("kind") == "retry":
+            return 1 + (len(self._retry_body_lines(blk)) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "user":
             _, compact, _, rows = self._user_band_layout(
                 blk.get("text", ""), blk.get("tag", ""))
@@ -2800,7 +2915,8 @@ class TUI:
                          ("! command", "run a shell command"), ("# note", "save a memory")]),
             ("This turn", [("Esc", "stop the turn"), ("Ctrl+C", "cancel · clear draft · quit")]),
             ("Navigate", [("PageUp / PageDn", "scroll the transcript"), ("End", "jump to the latest"),
-                          ("click ◆ Thought", "expand the reasoning"), ("click token count", "context details")]),
+                          ("click ◆ Thought", "expand the reasoning"), ("click token count", "context details"),
+                          (f"click {glyphs.RECONNECT} Reconnecting", "show the connection error")]),
             ("Session", [("Ctrl+N", "new session"), ("/resume", "reopen a past one"), ("/name", "rename this one")]),
         ]
         lines = []
@@ -3221,6 +3337,51 @@ class TUI:
             if self._model_wait is not None:
                 remaining = list(waits.values())
                 self._model_wait = remaining[-1] if remaining else None
+        self._invalidate()
+
+    def model_retry(self, state, **fields) -> None:
+        """A model request is being retried (``retrying``) or its retry run ended.
+
+        One transcript block per run, updated in place. Only a ``retrying`` frame creates a block: a
+        terminal frame for a run this session has no block for (it was cleared, or a new session
+        started while the request backed off) is dropped. Blocks are found in this session's own
+        transcript, so they reset wherever the transcript does.
+        """
+        safe = style_mod.terminal_safe_text
+        run_n = fields.get("run_n")
+        agent = str(fields.get("agent") or "")
+        retry_id = f"{agent or fields.get('origin') or 'agent'}:retry{run_n}"
+        blocks = self.blocks
+        blk = next((x for x in reversed(blocks) if isinstance(x, dict)
+                    and x.get("kind") == "retry" and x.get("retry_id") == retry_id), None)
+        if blk is None:
+            if state != "retrying":
+                return
+            blk = {"kind": "retry", "retry_id": retry_id, "exp": False, "rev": 0, "attempts": [],
+                   "dropped": 0,
+                   # "continued from the partial answer" only when that answer is on screen above
+                   "partial": bool(blocks and isinstance(blocks[-1], dict) and blocks[-1].get("kind") == "md")}
+            blocks.append(blk)
+            if self._follow:
+                self._scroll_off = 0
+        for key, bound in (("summary", 200), ("endpoint", 300), ("model", 200), ("api_mode", 40),
+                           ("detail", 4000), ("hint", 300), ("engine", 40), ("layer", 20),
+                           ("origin", 20)):
+            if fields.get(key):
+                blk[key] = safe(str(fields[key]))[:bound]
+        if fields.get("kind"):
+            blk["failure"] = safe(str(fields["kind"]))[:40]     # "kind" names the block itself
+        for key in ("attempt", "max_attempts"):
+            value = fields.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                blk[key] = max(1, min(100, value))
+        blk["state"] = str(state)
+        if state == "retrying":
+            blk["attempts"].append((blk.get("attempt", 1), blk.get("summary", ""), fields.get("delay_ms")))
+            if len(blk["attempts"]) > 20:
+                blk["dropped"] += len(blk["attempts"]) - 20
+                del blk["attempts"][:-20]
+        blk["rev"] = int(blk.get("rev", 0)) + 1
         self._invalidate()
 
     def callback_route(self):
@@ -3731,7 +3892,8 @@ class TUI:
             self._flash("artifacts now localhost-only (this machine)")
         self._open_artifacts()
 
-    def error(self, msg: str) -> None:
+    def error(self, msg: str, cause=None) -> None:
+        # ``cause`` (a model failure) is accepted and not drawn: the message already holds it all.
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]error:[/] {_esc(msg)}"))
 
@@ -4849,15 +5011,28 @@ class TUI:
                 self._flash("earlier conversation hidden" if not target.get("exp")
                             else f"showing {target.get('rows', 0)} earlier messages")
         elif cmd in ("expand", "expandall"):
-            hits = [b for b in self.blocks if isinstance(b, dict) and b.get("kind") == "tool"
-                    and self._tool_collapsible(b)]
+            # The most recent collapsed block that has more to show: a tool's hidden output or a
+            # reconnect's details. /expandall opens every one of both.
+            hits = [b for b in self.blocks if isinstance(b, dict) and not b.get("exp")
+                    and ((b.get("kind") == "tool" and self._tool_collapsible(b))
+                         or b.get("kind") == "retry")]
             if not hits:
                 self._flash("no collapsed tool output to expand")
             else:
-                for b in (hits if cmd == "expandall" else hits[-1:]):
+                chosen = hits if cmd == "expandall" else hits[-1:]
+                for b in chosen:
                     b["exp"] = True
                 self._invalidate()
-                self._flash("expanded all tool output" if cmd == "expandall" else "expanded the last tool output")
+                if cmd == "expandall":
+                    # Name only what was opened: a chat with no reconnect never hears about one.
+                    kinds = {b.get("kind") for b in chosen}
+                    self._flash("expanded all tool output and reconnect details" if kinds == {"tool", "retry"}
+                                else "expanded all reconnect details" if kinds == {"retry"}
+                                else "expanded all tool output")
+                elif chosen[0].get("kind") == "retry":
+                    self._flash("expanded the reconnect details")
+                else:
+                    self._flash("expanded the last tool output")
         elif cmd in ("dashboard", "dash", "home"):
             self._open_dashboard()
         elif cmd == "jump":
@@ -5501,6 +5676,17 @@ class TUI:
                                    "tag": "monitor · woke on an event"})
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
+            elif who == "retry":
+                # A stream-cut continuation DGC wrote: a closed reconnect block, never a user band.
+                blocks.append({"kind": "retry", "retry_id": f"history:{len(blocks)}", "exp": False,
+                               "rev": 0, "attempts": [], "dropped": 0, "layer": "continuation",
+                               "state": row.get("state") or "recovered",
+                               "failure": row.get("kind") or "stream_cut",
+                               "attempt": row.get("attempt") or 1, "max_attempts": row.get("max_attempts"),
+                               "summary": str(row.get("summary") or "")[:200],
+                               "endpoint": str(row.get("endpoint") or "")[:300],
+                               "partial": bool(blocks and isinstance(blocks[-1], dict)
+                                               and blocks[-1].get("kind") == "md")})
             elif who == "assistant":
                 if body:
                     blocks.append({"kind": "md", "text": body})  # rendered at whatever width shows it
@@ -5525,6 +5711,7 @@ class TUI:
             return ""
 
         segments, rows, skip_ack = [], [], False
+        pending_retries: list = []      # replayed reconnects waiting to learn whether the model answered
         for m in messages or ():
             role = m.get("role")
             body = _text(m.get("content")).strip()
@@ -5534,7 +5721,18 @@ class TUI:
             skip_ack = False
             if role == "user":
                 from .editor_context import _strip_editor_context
-                from .workflows import display_prompt, notice_kind
+                from .workflows import display_prompt, notice_kind, stream_recovery_notice
+                recovery = stream_recovery_notice(m)
+                if recovery is not None:
+                    rows.append({"who": "retry", "body": str(recovery.get("summary") or ""), "tools": "",
+                                 "kind": str(recovery.get("cause") or "stream_cut"),
+                                 "attempt": recovery.get("attempt") if isinstance(recovery.get("attempt"), int) else 1,
+                                 "max_attempts": recovery.get("max") if isinstance(recovery.get("max"), int) else None,
+                                 "summary": str(recovery.get("summary") or ""),
+                                 "endpoint": str(recovery.get("endpoint") or ""),
+                                 "state": "unfinished"})
+                    pending_retries.append(rows[-1])
+                    continue
                 if notice_kind(m):
                     notice = m.get("_dgc_notice") or {}
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
@@ -5550,12 +5748,24 @@ class TUI:
                 if body.startswith("<user-interjection>"):
                     body = body.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
                 if body:
+                    pending_retries.clear()     # a new prompt: an earlier reconnect never got its answer
                     rows.append({"who": "user", "body": body, "tools": ""})
             elif role == "assistant":
                 names = ", ".join(tc.get("function", {}).get("name", "?")
                                   for tc in (m.get("tool_calls") or []))
                 if body or names:
+                    for pending in pending_retries:
+                        pending["state"] = "recovered"
+                    pending_retries.clear()
                     rows.append({"who": "assistant", "body": body, "tools": names})
+                gave_up = m.get("_dgc_stream_gave_up")
+                if isinstance(gave_up, dict):
+                    # The partial answer the turn gave up after: its closed "Gave up" block follows it.
+                    attempt = gave_up.get("attempt") if isinstance(gave_up.get("attempt"), int) else 1
+                    rows.append({"who": "retry", "body": str(gave_up.get("summary") or ""), "tools": "",
+                                 "kind": str(gave_up.get("cause") or "stream_cut"), "attempt": attempt,
+                                 "max_attempts": attempt, "summary": str(gave_up.get("summary") or ""),
+                                 "endpoint": str(gave_up.get("endpoint") or ""), "state": "gave_up"})
             # role == "tool" (results) and "system" are omitted — too verbose for the recap
         segments.append((rows, None))
         return segments

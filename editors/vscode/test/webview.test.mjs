@@ -1538,7 +1538,7 @@ test("a backend restart that is recovering does not relabel an answered turn as 
   event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
   send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true });
   assert.equal(doc.querySelector(".thinking.done"), null, "the work is being picked back up, not lost");
-  assert.equal(doc.querySelector(".thinking .verb").textContent, "Reconnecting");
+  assert.equal(doc.querySelector(".thinking .verb").textContent, "Restarting the DGC backend");
   assert.match(doc.querySelector(".sys.err").textContent, /reconnecting/);
   event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
   assert.match(doc.querySelector(".text.final").textContent, /The fix is in/);

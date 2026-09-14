@@ -36,6 +36,7 @@ from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN, plura
 from .subagents import SubagentRegistry
 from .presentation import RESPONSE_GUIDANCE
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
+from .workflows import STREAM_RECOVERY_TEXT, notice_kind as _notice_kind
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
@@ -52,6 +53,7 @@ _VERIFY_INFO_FLAGS = {
     "--fixtures-per-test", "--markers", "--trace-config", "--setup-plan", "--showconfig",
     "--listenvs", "--list-tests", "--listtests",
 }
+_STREAM_RECOVERY_NOTE = "(the stream was cut; DGC asked the model to continue)"
 _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery per turn (a weak local
                         #   model debugging a hard problem legitimately hits its output cap several
                         #   times across a long turn; 3 cut it off mid-convergence)
@@ -337,6 +339,40 @@ def _subagent_progress(agent) -> None:
         tokens = (int(agent.usage_totals.get("input_tokens", 0) or 0)
                   + int(agent.usage_totals.get("output_tokens", 0) or 0))
     registry.progress(agent_id, tool_calls=tool_calls, tokens=tokens or None)
+
+
+def _call_accepting(hook, *args, **options):
+    """Call ``hook`` with only the keyword options its signature declares (all of them for ``**``)."""
+    import inspect
+    try:
+        params = inspect.signature(hook).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        options = {key: value for key, value in options.items() if key in params}
+    return hook(*args, **options)
+
+
+def _prompt_endpoint(base_url) -> str:
+    """The base URL as the system prompt names it: no credentials, no query string or fragment."""
+    from .model_errors import scrub_urls
+    return scrub_urls(base_url or "")
+
+
+def _ui_supports_model_retry(ui) -> bool:
+    """Does this front end draw retry runs itself (the optional ``model_retry`` hook)?
+
+    Read from the CLASS, never through a permissive ``__getattr__`` (test doubles, forwarding
+    wrappers): a UI that only appears to have the hook must keep the plain ``info`` lines. A
+    wrapper that forwards to another UI answers for it through ``model_retry_supported()``.
+    """
+    probe = getattr(type(ui), "model_retry_supported", None)
+    if callable(probe):
+        try:
+            return bool(probe(ui))
+        except Exception:
+            return False
+    return callable(getattr(type(ui), "model_retry", None))
 
 
 class _DeadlineCancel:
@@ -866,6 +902,19 @@ class _SubUI:
         if label:
             return self._direct("turn_activity", "waiting", label, detail)
         return None
+
+    def model_retry(self, state, **fields):
+        # A retry line is as transient as a wait notice: bypass the parallel-child buffer and route
+        # to the parent's originating session, so a child's reconnect shows while it happens, not
+        # after the child finishes. The innermost child's id wins (a nested child's passes through).
+        hook = getattr(self._parent, "model_retry", None)
+        if not callable(hook) or not _ui_supports_model_retry(self._parent):
+            return None
+        fields = {**fields, "origin": "subagent", "agent": fields.get("agent") or self._call_prefix}
+        return self._routed(_call_accepting, hook, state, **fields)
+
+    def model_retry_supported(self) -> bool:
+        return _ui_supports_model_retry(self._parent)
 
     def tool_call(self, name, args, call_id=None):
         self._emit("tool_call", name, args, self._call_id(call_id))
@@ -1991,6 +2040,9 @@ class Agent(GoalLifecycle):
                 self.client.read_timeout = old_timeout
             if watch_client is not None:
                 watch_client.stall_listener, watch_client.stall_route = old_listener, old_route
+            # reconnecting: a call that returned an answer proves the connection worked even when
+            # nothing streamed to report it; a cancelled call ends its retry runs as stopped.
+            self._settle_retry_runs(result)
             if getattr(self, "_model_wait_shown", False):
                 self._model_wait_shown = False      # never leave a stale "no response" on screen
                 # Bring back the activity the notice replaced only when the call really produced a
@@ -2164,7 +2216,7 @@ class Agent(GoalLifecycle):
             f"- Date: {datetime.now().strftime('%Y-%m-%d')}",
             f"- OS: {platform.system()} {platform.release()}",
             f"- Project root (cwd for all tools): {cfg.project_root}",
-            f"- Model: {cfg.model} @ {cfg.base_url}",
+            f"- Model: {cfg.model} @ {_prompt_endpoint(cfg.base_url)}",
             "",
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
@@ -2606,6 +2658,7 @@ class Agent(GoalLifecycle):
                 completed = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text),
                                                  lambda prompt: self._record_chat_step(self._run_turn, prompt))
             finally:
+                self._close_turn_retry_runs(completed)
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._eta_end(completed)
@@ -2704,6 +2757,7 @@ class Agent(GoalLifecycle):
                 completed = self._run_turn(notification.text, source="monitor",
                                            notification=notification)
             finally:
+                self._close_turn_retry_runs(completed)
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._monitor_turn = False
@@ -2890,6 +2944,9 @@ class Agent(GoalLifecycle):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result
             finally:
+                self._close_turn_retry_runs(
+                    isinstance(result, dict) and bool(result.get("ok")),
+                    cancelled=isinstance(result, dict) and bool(result.get("cancelled")))
                 self._explicit_skill_instructions = {}
                 self._active_skill_names.clear()
                 self._refresh_system()
@@ -3145,6 +3202,11 @@ class Agent(GoalLifecycle):
                 if role == "system":
                     continue
                 from .workflows import notice_kind
+                if notice_kind(m) == "stream_recovery":
+                    # DGC's own continuation request after a cut stream: neither the user's words nor
+                    # command output, and never a constraint the handoff should carry forward.
+                    lines.append("dgc-note: (the stream was cut; DGC asked the model to continue)")
+                    continue
                 if notice_kind(m):
                     role = "monitor-output (untrusted)"
                 content = self._safe_text(str(m.get("content", "")))[:2000]
@@ -3427,6 +3489,7 @@ class Agent(GoalLifecycle):
         if kind == "cleared":
             self._model_wait_shown = False
             self._show_model_wait(None)
+            self._close_runs("recovered")   # the first real progress closes every open retry run
             return
         if kind == "notice":
             label, detail = self._model_wait_text(ev)
@@ -3434,6 +3497,9 @@ class Agent(GoalLifecycle):
             self._show_model_wait(label, self._safe_text(detail)[:120], since=ev.since)
             return
         if kind != "retry":
+            return
+        if getattr(ev, "cause", ""):
+            self._transport_retry(ev)       # reconnecting: a refused/reset/DNS/TLS/HTTP retry
             return
         host = endpoint_host(ev.endpoint)
         silent = format_seconds(ev.silent_s)
@@ -3444,7 +3510,14 @@ class Agent(GoalLifecycle):
             what = f"no tokens from {ev.model} at {host} for {silent}"
         else:
             what = f"no response from {ev.model} at {host} for {silent}"
-        self.ui.info(self._safe_text(f"↻ {what} — retrying ({attempt}/{retries})"))
+        if _ui_supports_model_retry(self.ui):
+            # The retry line says it; the legacy transcript line would say it twice.
+            from .model_watch import safe_endpoint
+            self._retry_step("request", "retrying", kind="loading" if ev.phase == "loading" else "stall",
+                             summary=what, max=retries, endpoint=safe_endpoint(ev.endpoint),
+                             model=ev.model, detail="", hint="", http_status=0, delay_ms=None)
+        else:
+            self.ui.info(self._safe_text(f"↻ {what} — retrying ({attempt}/{retries})"))
         self._model_wait_shown = True
         self._show_model_wait(
             "Retrying the model request",
@@ -3472,17 +3545,31 @@ class Agent(GoalLifecycle):
         model = str(stall.get("model") or getattr(self.client, "model", "") or "the model")
         silent = format_seconds(float(stall.get("silent_s") or 0))
         budget = self._stall_retry_budget()
-        self.ui.info(self._safe_text(
-            f"↻ {model} at {host} stopped streaming for {silent} — continuing from the partial "
-            f"output ({recovery}/{budget})"))
+        if _ui_supports_model_retry(self.ui):
+            from .model_errors import stall_cause
+            cause = stall_cause(stall)
+            self._open_continuation_run(kind=cause.kind, summary=cause.summary, attempt=recovery,
+                                        maximum=budget, endpoint=cause.endpoint, model=model,
+                                        hint=cause.hint, delay_s=self._stall_delay(stall, recovery))
+        else:
+            self.ui.info(self._safe_text(
+                f"↻ {model} at {host} stopped streaming for {silent} — continuing from the partial "
+                f"output ({recovery}/{budget})"))
         estimator = getattr(self, "eta", None)
         if estimator is not None:
             try:
                 estimator.on_retry("model_stall")
             except Exception:
                 pass
+        if _wait_for_retry(self._stall_delay(stall, recovery), cancel):
+            return True
+        self._close_runs("cancelled", layers=("continuation",))
+        return False
+
+    @staticmethod
+    def _stall_delay(stall: dict, recovery: int) -> float:
         window = float(stall.get("window_s") or 0) or 10.0
-        return _wait_for_retry(min(2 ** (recovery - 1), window, 10.0), cancel)
+        return min(2 ** (max(1, recovery) - 1), window, 10.0)
 
     def _stall_failure(self, stall: dict, recoveries: int) -> str:
         from .llm import MODEL_STALL_HINT
@@ -3494,11 +3581,392 @@ class Agent(GoalLifecycle):
         return (f"stopped — model '{model}' at {endpoint} stopped streaming: no tokens for {silent} "
                 f"after partial output ({recoveries} {noun})\n  → {MODEL_STALL_HINT}")
 
-    def _fail_turn(self, message: str) -> bool:
-        """Record and render one handled terminal failure for every frontend."""
+    def _stall_notice(self, stall: dict, recoveries: int) -> dict:
+        """The ``_dgc_notice`` for a continuation after a mid-stream stall."""
+        from .model_errors import stall_cause
+        from .model_watch import endpoint_host
+        cause = stall_cause(stall or {})
+        return self._safe_value({"kind": "stream_recovery", "layer": "continuation",
+                                 "attempt": int(recoveries), "max": self._stall_retry_budget(),
+                                 "cause": "stall", "summary": cause.summary[:200],
+                                 "endpoint": endpoint_host(cause.endpoint)})
+
+    def _stall_cause_payload(self, stall: dict, recoveries: int) -> dict:
+        from .model_errors import stall_cause
+        payload = {**stall_cause(stall or {}).as_dict(), "retryable": True}
+        if recoveries:
+            payload["attempts"] = int(recoveries)
+        return payload
+
+    @staticmethod
+    def _stream_cut_failure(template: str, spent: dict) -> str:
+        from .model_watch import endpoint_host
+        host = endpoint_host(str(spent.get("endpoint") or ""))
+        again = bool(spent.get("attempts"))
+        message = (template if again else template.replace(" repeatedly", "")).format(
+            where=f" from {host}" if host else "")
+        summary = str(spent.get("summary") or "")
+        # The template already names the host: add only what the stream never sent ("[DONE]"), or a
+        # summary that does not repeat the host ("connection reset by peer while streaming").
+        marker = " ended before "
+        extra = summary.split(marker, 1)[1] if marker in summary else summary
+        if host and extra:
+            message = f"{message} ({extra})"
+        if not again:       # no reconnect was tried: output-limit continuations spent the budget
+            message += "; this turn's continuations were already spent on output-limit continuations"
+        return message
+
+    def _fail_turn(self, message: str, cause=None) -> bool:
+        """Record and render one handled terminal failure for every frontend.
+
+        ``cause`` (a model failure: a FailureCause or its dict) closes the open retry runs -- as
+        ``recovered`` when the server answered with something no retry would change, else
+        ``gave_up`` -- and reaches a front end whose ``error`` accepts it, linked to the run whose
+        line sits above the error.
+        """
         self._last_turn_error = self._safe_text(message or "the turn failed")
+        payload = self._settle_failed_runs(cause)
+        if payload is not None and self._ui_error_takes_cause():
+            try:
+                self.ui.error(self._last_turn_error, cause=payload)
+                return False
+            except TypeError:
+                pass
         self.ui.error(self._last_turn_error)
         return False
+
+    # ---- reconnecting: retry runs ---------------------------------------------------------------
+    # A run is one sequence of consecutive failed attempts at one layer ("request": retries inside
+    # one model call; "continuation": stream-cut continuations this turn). At most one run is open
+    # per layer; its line is updated in place by id and closed exactly once.
+    _NON_RETRYABLE_KINDS = ("auth", "model_not_found")
+
+    def _retry_state(self):
+        runs = self.__dict__.get("_retry_runs")
+        if runs is None:
+            runs = self.__dict__["_retry_runs"] = {}
+        lock = self.__dict__.get("_retry_lock")
+        if lock is None:
+            lock = self.__dict__["_retry_lock"] = threading.Lock()
+        return runs, lock
+
+    def _model_retry_pending(self) -> bool:
+        """A retry line is still open: the next call's first progress must close it."""
+        runs, _ = self._retry_state()
+        return bool(runs)
+
+    def _ui_error_takes_cause(self) -> bool:
+        import inspect
+        hook = getattr(type(self.ui), "error", None)
+        if not callable(hook):
+            return False
+        try:
+            params = inspect.signature(hook).parameters
+        except (TypeError, ValueError):
+            return False
+        return "cause" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+    def _retry_step(self, layer: str, state: str = "retrying", *, new_run: bool = False,
+                    attempt: int | None = None, **facts) -> dict:
+        """Open (or continue) this layer's run with one more attempt, and say so."""
+        runs, lock = self._retry_state()
+        with lock:
+            run = None if new_run else runs.get(layer)
+            if run is None:
+                seq = int(self.__dict__.get("_retry_run_seq", 0)) + 1
+                self.__dict__["_retry_run_seq"] = seq
+                run = {"run_n": seq, "layer": layer, "attempt": 0, "origin": "agent", "engine": ""}
+                runs[layer] = run
+            run["attempt"] = max(1, int(attempt)) if attempt is not None else run["attempt"] + 1
+            run.update({key: value for key, value in facts.items()})
+            snapshot = dict(run)
+        self._emit_model_retry(state, snapshot)
+        return snapshot
+
+    def _close_runs(self, state: str, *, layers=None) -> list[dict]:
+        """Close every open run (of ``layers``) with one terminal frame each."""
+        runs, lock = self._retry_state()
+        with lock:
+            closing = [runs.pop(layer) for layer in list(runs) if layers is None or layer in layers]
+        for run in closing:
+            self._emit_model_retry(state, run)
+        return closing
+
+    def _settle_retry_runs(self, result) -> None:
+        """``_chat``'s backstop for endpoints whose success produced no progress signal."""
+        runs, _ = self._retry_state()
+        if result is None or not runs:
+            return
+        reason = getattr(result, "finish_reason", "")
+        if reason == "cancelled":
+            self._close_runs("cancelled")
+        elif reason != "incomplete":
+            self._close_runs("recovered")
+
+    def _close_turn_retry_runs(self, completed, *, cancelled: bool = False) -> None:
+        """Every turn exit closes every open run: answered, stopped, or failed."""
+        runs, _ = self._retry_state()
+        if not runs:
+            return
+        stop = getattr(self, "cancelled", None)
+        if completed is True:
+            self._close_runs("recovered")
+        elif cancelled or (stop is not None and stop.is_set()):
+            self._close_runs("cancelled")
+        else:
+            self._close_runs("gave_up")
+
+    def _emit_model_retry(self, state: str, run: dict) -> None:
+        """One ``model_retry`` frame, or for a front end without the hook the plain line."""
+        from .model_errors import scrub_urls
+
+        def text(value) -> str:
+            return self._safe_text(scrub_urls(value or ""))
+
+        try:
+            if not _ui_supports_model_retry(self.ui):
+                self._retry_info_line(state, run)
+                return
+            hook = getattr(self.ui, "model_retry", None)
+            if not callable(hook):
+                return
+            delay_ms = run.get("delay_ms")
+            fields = {
+                "run_n": int(run.get("run_n") or 0), "kind": str(run.get("kind") or "other"),
+                "layer": str(run.get("layer") or "request"), "attempt": max(1, int(run.get("attempt") or 1)),
+                "summary": text(run.get("summary")) or "the model request failed",
+                "endpoint": text(run.get("endpoint")),
+                # One run can span two budgets (a stall retry after transport retries, an auto
+                # fallback's retries): "4/3" is never drawn, the count widens to the attempts made.
+                "max_attempts": (max(int(run["max"]), int(run.get("attempt") or 1))
+                                 if isinstance(run.get("max"), int) and run["max"] > 0 else None),
+                "model": text(run.get("model")), "api_mode": str(run.get("api_mode") or ""),
+                "detail": text(run.get("detail")), "hint": text(run.get("hint")),
+                "http_status": int(run.get("http_status") or 0),
+                "delay_ms": int(delay_ms) if isinstance(delay_ms, (int, float)) and delay_ms >= 0 else None,
+                "origin": str(run.get("origin") or "agent"), "engine": text(run.get("engine")),
+            }
+            _call_accepting(hook, state, **fields)
+        except Exception:
+            pass                            # a front-end failure never breaks a request or a turn
+
+    def _retry_info_line(self, state: str, run: dict) -> None:
+        """``dgc -p`` text and the classic REPL: one line per attempt and one on recovery.
+        Only request-layer transport runs speak here; stalls keep their own lines."""
+        from .model_errors import CONNECT_KINDS
+        from .model_watch import endpoint_host, format_seconds
+        kind = str(run.get("kind") or "")
+        if run.get("layer") != "request" or kind in ("stall", "loading") or run.get("origin") == "engine":
+            return
+        connect = kind in CONNECT_KINDS
+        attempt = max(1, int(run.get("attempt") or 1))
+        if state == "retrying":
+            verb = "reconnecting" if connect else "retrying"
+            maximum = run.get("max")
+            count = f"{attempt}/{max(int(maximum), attempt)}" if isinstance(maximum, int) and maximum > 0 else str(attempt)
+            delay = run.get("delay_ms")
+            wait = f" in {format_seconds(delay / 1000)}" if isinstance(delay, (int, float)) else ""
+            self.ui.info(self._safe_text(f"↻ {run.get('summary')} — {verb} ({count}){wait}"))
+        elif state == "recovered":
+            host = endpoint_host(str(run.get("endpoint") or "")) or "the model"
+            noun = "retry" if attempt == 1 else "retries"
+            lead = f"reconnected to {host}" if connect else f"{host} answered"
+            self.ui.info(self._safe_text(f"↻ {lead} after {attempt} {noun}"))
+
+    def _transport_retry(self, ev) -> None:
+        """A transport failure DGC retries: the retry line, the status row, the ETA."""
+        from .model_errors import BUSY_KINDS, FailureCause, short_cause
+        from .model_watch import endpoint_host, format_seconds, safe_endpoint
+        kind = str(ev.cause or "other")
+        delay = max(0.0, float(getattr(ev, "delay_s", 0.0) or 0.0))
+        run = self._retry_step(
+            "request", kind=kind, summary=ev.summary, detail=ev.detail, hint=ev.hint,
+            http_status=int(ev.http_status or 0), delay_ms=int(round(delay * 1000)),
+            max=int(ev.retries or 0) or None, endpoint=safe_endpoint(ev.endpoint), model=ev.model,
+            api_mode=getattr(ev, "api_mode", ""))
+        label = ("Server is busy" if kind in BUSY_KINDS else "Server error" if kind == "http"
+                 else "Waiting to reconnect")
+        short = short_cause(FailureCause(kind=kind, summary=str(ev.summary or ""),
+                                         http_status=int(ev.http_status or 0)))
+        parts = [short, endpoint_host(ev.endpoint), f"backoff {format_seconds(delay)}",
+                 f"retry {run['attempt']}/{max(int(ev.retries), int(run['attempt']))}" if ev.retries else ""]
+        self._model_wait_shown = True
+        self._show_model_wait(label, self._safe_text(" · ".join(p for p in parts if p))[:120],
+                              since=ev.since)
+        estimator = getattr(self, "eta", None)
+        if estimator is not None:
+            try:
+                estimator.on_retry("model_transport")
+            except Exception:
+                pass
+
+    def _open_continuation_run(self, *, kind: str, summary: str, attempt: int, maximum: int,
+                               endpoint: str = "", model: str = "", hint: str = "", detail: str = "",
+                               delay_s: float = 0.0, produced: bool = True) -> dict:
+        """One seam, one run: a cut after new output opens a new continuation run; a cut before
+        any new output continues the open one. The request layer's run closes: it connected."""
+        runs, _ = self._retry_state()
+        self._close_runs("recovered", layers=("request",))
+        fresh = produced or "continuation" not in runs
+        if fresh:
+            self._close_runs("recovered", layers=("continuation",))
+        return self._retry_step(
+            "continuation", new_run=fresh, attempt=attempt, kind=kind, summary=summary,
+            max=max(1, int(maximum)), endpoint=endpoint, model=model or getattr(self.client, "model", ""),
+            api_mode=str(getattr(self.client, "api_mode", "") or ""), hint=hint, detail=detail,
+            http_status=0, delay_ms=int(round(max(0.0, delay_s) * 1000)))
+
+    def _stream_recovery_delay(self, n: int) -> float:
+        """Backoff before the n-th stream-cut continuation of a turn: 0.25 s doubling, capped."""
+        return min(0.25 * 2 ** (max(1, int(n)) - 1), 8.0)
+
+    @staticmethod
+    def _produced_output(result) -> bool:
+        return bool(str(getattr(result, "content", "") or "").strip() or getattr(result, "tool_calls", None)
+                    or str(getattr(result, "thinking", "") or "").strip())
+
+    def _interruption_facts(self, result) -> dict:
+        """kind / summary / detail / endpoint of a cut stream (a fake client may not say)."""
+        from .model_errors import hint_for
+        from .model_watch import safe_endpoint
+        info = getattr(result, "interruption", None)
+        info = info if isinstance(info, dict) else {}
+        client = getattr(self, "client", None)
+        kind = str(info.get("kind") or "stream_cut")
+        endpoint = str(info.get("endpoint") or "")
+        base_url = str(getattr(client, "base_url", "") or "")
+        if not endpoint and base_url:
+            endpoint = safe_endpoint(base_url)
+        return {"kind": kind if kind in ("stream_cut", "reset") else "stream_cut",
+                "summary": str(info.get("summary") or "the stream ended before its terminal event"),
+                "detail": str(info.get("detail") or ""), "endpoint": endpoint,
+                "hint": hint_for(kind, model=str(getattr(client, "model", "") or ""), base_url=base_url,
+                                 streaming=True)}
+
+    def _begin_stream_recovery(self, result, cuts: int, cancel) -> dict | None:
+        """Open this cut's continuation run and back off. The notice to tag the continuation
+        message with, or None when Stop landed during the backoff (nothing may be appended)."""
+        from .llm import _wait_for_retry
+        from .model_watch import endpoint_host
+        facts = self._interruption_facts(result)
+        delay = self._stream_recovery_delay(cuts)
+        run = self._open_continuation_run(kind=facts["kind"], summary=facts["summary"], attempt=cuts,
+                                          maximum=_MAX_CONTINUE, endpoint=facts["endpoint"],
+                                          hint=facts["hint"], detail=facts["detail"], delay_s=delay,
+                                          produced=self._produced_output(result))
+        if not _wait_for_retry(delay, cancel):
+            self._close_runs("cancelled", layers=("continuation",))
+            return None
+        return self._safe_value({"kind": "stream_recovery", "layer": "continuation",
+                                 "attempt": int(run["attempt"]), "max": _MAX_CONTINUE,
+                                 "cause": facts["kind"], "summary": str(facts["summary"])[:200],
+                                 "endpoint": endpoint_host(facts["endpoint"])})
+
+    def _stream_recovery_exhausted(self, result, cuts: int, message: dict | None = None) -> dict:
+        """E3: the continuation budget is spent. Draw the run that gives up, return its cause.
+
+        No line claims a reconnect that never happened: when output-limit continuations spent the
+        shared budget (``cuts`` is 0) there is no run, only the cause. Otherwise the partial answer
+        ``message`` is tagged (``_dgc_stream_gave_up``, a private key no transport sends) so a
+        replayed session still shows that the turn gave up.
+        """
+        from .model_watch import endpoint_host
+        facts = self._interruption_facts(result)
+        cause = {"kind": facts["kind"], "summary": facts["summary"], "endpoint": facts["endpoint"],
+                 "detail": facts["detail"], "hint": facts["hint"],
+                 "model": str(getattr(self.client, "model", "") or ""), "retryable": True}
+        if int(cuts) <= 0:
+            return cause
+        attempt = int(cuts)
+        run = self._open_continuation_run(kind=facts["kind"], summary=facts["summary"], attempt=attempt,
+                                          maximum=attempt, endpoint=facts["endpoint"], hint=facts["hint"],
+                                          detail=facts["detail"], produced=self._produced_output(result))
+        self._close_runs("gave_up", layers=("continuation",))
+        if isinstance(message, dict):
+            message["_dgc_stream_gave_up"] = self._safe_value({
+                "attempt": attempt, "cause": facts["kind"], "summary": str(facts["summary"])[:200],
+                "endpoint": endpoint_host(facts["endpoint"])})
+        return {**cause, "attempts": attempt, "run_n": int(run["run_n"])}
+
+    def _model_failure_cause(self, exc) -> dict | None:
+        """The structured cause a failed model request raised with, as ``error.cause`` wants it."""
+        from .llm import ModelStallError
+        from .model_errors import FailureCause, stall_cause
+        cause = getattr(exc, "cause", None)
+        if cause is None and isinstance(exc, ModelStallError):
+            cause = stall_cause(exc.info)
+        if not isinstance(cause, FailureCause):
+            return None
+        payload = cause.as_dict()
+        payload["retryable"] = bool(cause.retryable)
+        attempts = getattr(exc, "attempts", None)
+        if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
+            payload["attempts"] = attempts
+        hint = str(getattr(exc, "hint", "") or "")
+        if hint and not payload.get("hint"):
+            payload["hint"] = hint
+        return payload
+
+    def _settle_failed_runs(self, cause) -> dict | None:
+        """Close the open runs for a failed turn and return the cause to show (or None)."""
+        from .model_errors import FailureCause, scrub_urls
+        if isinstance(cause, FailureCause):
+            payload = {**cause.as_dict(), "retryable": bool(cause.retryable)}
+        elif isinstance(cause, dict):
+            payload = dict(cause)
+        else:
+            payload = None
+        runs, _ = self._retry_state()
+        if payload is None:
+            if runs:
+                self._close_runs("gave_up")
+            return None
+        answered = (not payload.pop("retryable", True)
+                    or payload.get("kind") in self._NON_RETRYABLE_KINDS)
+        if answered:
+            # The server answered, so a request run reconnected; but a continuation it answered with
+            # an error continued nothing, and its line must not say "continued from the partial answer".
+            self._close_runs("recovered", layers=("request",))
+            stopped = self._close_runs("gave_up", layers=("continuation",))
+            if "run_n" not in payload and stopped:
+                payload["run_n"] = int(stopped[0]["run_n"])
+        else:
+            closed = self._close_runs("gave_up")
+            if "run_n" not in payload and closed:
+                linked = next((run for run in closed if run.get("layer") == "request"), closed[0])
+                payload["run_n"] = int(linked["run_n"])
+        clean: dict = {}
+        for key, value in payload.items():
+            if isinstance(value, str):
+                clean[key] = self._safe_text(scrub_urls(value))
+            elif isinstance(value, bool):
+                continue
+            elif isinstance(value, int):
+                clean[key] = value
+        return clean
+
+    def _engine_retry(self, event: dict, engine) -> None:
+        """A subscription CLI reported its own retry: relay it as an engine run (no endpoint)."""
+        if not isinstance(event, dict):
+            return
+        attempt = event.get("attempt")
+        maximum = event.get("max")
+        delay = event.get("delay_ms")
+        self._retry_step(
+            "request", attempt=attempt if isinstance(attempt, int) and attempt > 0 else None,
+            kind=str(event.get("failure") or "engine"),
+            summary=str(event.get("summary") or event.get("detail") or "the engine is reconnecting")[:200],
+            detail=str(event.get("detail") or ""), hint="", endpoint="", model="", api_mode="",
+            max=maximum if isinstance(maximum, int) and maximum > 0 else None,
+            http_status=event.get("http_status") if isinstance(event.get("http_status"), int) else 0,
+            delay_ms=delay if isinstance(delay, int) and delay >= 0 else None,
+            origin="engine", engine=str(getattr(engine, "short_label", "") or getattr(engine, "label", "") or ""))
+
+    def _engine_progress(self) -> None:
+        """Content from a subscription engine after its retry: the engine reconnected."""
+        runs, _ = self._retry_state()
+        if runs:
+            self._close_runs("recovered")
 
     def _run_autonomous_gate(self) -> tuple[int, str]:
         """Run the configured autonomous gate command; return (returncode, bounded output).
@@ -3653,6 +4121,7 @@ class Agent(GoalLifecycle):
         summary_only = False        # explicit verifier-only task → deterministic closeout
         continues = 0               # length-truncation auto-continues used this turn
         stall_recoveries = 0        # mid-stream stalls continued from their partial output this turn
+        stream_cuts = 0             # stream-cut continuations used this turn (apart from length ones)
         finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
         paused_assistant_index: int | None = None
@@ -3889,6 +4358,7 @@ class Agent(GoalLifecycle):
                 # The rejected request emitted no stream. Rebuild the system prompt with the
                 # fenced text-tool protocol before retrying; otherwise the first fallback answer
                 # has no instructions for calling tools and commonly stops without acting.
+                self._close_runs("recovered", layers=("request",))     # the server answered
                 self._refresh_system()
                 self.ui.info("↻ endpoint has no native tools — retrying with the text tool protocol")
                 next_request_reason = "transport_retry"
@@ -3896,6 +4366,7 @@ class Agent(GoalLifecycle):
             except ContextOverflowError as e:
                 # the real window is smaller than configured → compact hard and retry ONCE, instead of
                 # killing the turn (as a reference agent does). If it overflows again, fall through as a normal error.
+                self._close_runs("recovered", layers=("request",))     # the server answered
                 if not overflow_retried:
                     overflow_retried = True
                     if held_final_messages:
@@ -3920,8 +4391,10 @@ class Agent(GoalLifecycle):
                     "context window exceeded even after compaction — start a new session "
                     "(Ctrl+N) or lower context_size")
             except LLMError as e:
+                self._last_model_cause = self._model_failure_cause(e)
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
+                    self._close_runs("gave_up")         # the primary's retry lines end here
                     self.ui.info(self._safe_text(f"⤳ primary model failed; falling back to {fb}"))
                     self.client = self._fallback_client(fb)
                     try:
@@ -3930,18 +4403,21 @@ class Agent(GoalLifecycle):
                                             defer_text=defer_completion,
                                             request_reason="fallback")
                     except ToolsUnsupportedError:
+                        self._close_runs("recovered", layers=("request",))
                         self._refresh_system()
                         self.ui.info("↻ fallback endpoint has no native tools — retrying with text tools")
                         next_request_reason = "transport_retry"
                         continue
                     except LLMError as e2:
+                        self._last_model_cause = self._model_failure_cause(e2)
                         if held_final_messages:
                             withhold_final(
                                 "[Completion withheld by DGC: both model endpoints failed before verification.]",
                                 "completion withheld — model endpoints failed before verification")
                         else:
                             self.ui.end_stream()
-                        return self._fail_turn(self._explain_model_error(e2, "fallback model also failed: "))
+                        return self._fail_turn(self._explain_model_error(e2, "fallback model also failed: "),
+                                               cause=self._last_model_cause)
                 else:
                     if held_final_messages:
                         withhold_final(
@@ -3949,7 +4425,7 @@ class Agent(GoalLifecycle):
                             "completion withheld — the model failed before verification")
                     else:
                         self.ui.end_stream()
-                    return self._fail_turn(self._explain_model_error(e))
+                    return self._fail_turn(self._explain_model_error(e), cause=self._last_model_cause)
             if (deadline is not None and chat_cancel.is_set() and not self.cancelled.is_set()):
                 if held_final_messages:
                     withhold_final(
@@ -4093,10 +4569,9 @@ class Agent(GoalLifecycle):
                         if not self._stall_backoff(_result_stall(result), stall_recoveries, chat_cancel):
                             next_request_reason = "output_continue"
                             continue        # cancelled: the next request returns "cancelled"
-                        self.messages.append({"role": "user", "content": (
-                            "Your previous response was interrupted before its terminal provider "
-                            "event. Continue exactly where you left off — do not repeat what you "
-                            "already wrote.")})
+                        stalled_cause = self._stall_notice(_result_stall(result), stall_recoveries)
+                        self.messages.append({"role": "user", "content": STREAM_RECOVERY_TEXT,
+                                              "_dgc_notice": stalled_cause})
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue
@@ -4104,18 +4579,27 @@ class Agent(GoalLifecycle):
                         withhold_final(
                             "[Completion withheld by DGC: the model stopped streaming before completion.]",
                             "completion withheld — the model stopped streaming")
-                    return self._fail_turn(self._stall_failure(_result_stall(result), stall_recoveries))
+                    return self._fail_turn(self._stall_failure(_result_stall(result), stall_recoveries),
+                                           cause=self._stall_cause_payload(_result_stall(result),
+                                                                           stall_recoveries))
                 if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
                     if continues < _MAX_CONTINUE:
                         continues += 1
                         interrupted = result.finish_reason == "incomplete"
-                        self.messages.append({"role": "user", "content": (
-                            "Your previous response was interrupted before its terminal provider "
-                            "event. Continue exactly where you left off — do not repeat what you "
-                            "already wrote."
-                            if interrupted else
-                            "Your previous response was cut off at the length limit. Continue exactly "
-                            "where you left off — do not repeat what you already wrote.")})
+                        if interrupted:
+                            # A cut stream is a connection problem: its own line, a backoff, and a
+                            # continuation message tagged so no transcript shows it as the user's.
+                            stream_cuts += 1
+                            notice = self._begin_stream_recovery(result, stream_cuts, chat_cancel)
+                            if notice is None:
+                                next_request_reason = "output_continue"
+                                continue    # cancelled: the next request returns "cancelled"
+                            self.messages.append({"role": "user", "content": STREAM_RECOVERY_TEXT,
+                                                  "_dgc_notice": notice})
+                        else:
+                            self.messages.append({"role": "user", "content": (
+                                "Your previous response was cut off at the length limit. Continue exactly "
+                                "where you left off — do not repeat what you already wrote.")})
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue
@@ -4125,11 +4609,14 @@ class Agent(GoalLifecycle):
                              "before completion.]" if result.finish_reason == "incomplete" else
                              "[Completion withheld by DGC: the model repeatedly hit its output limit.]"),
                             "completion withheld — the model never produced a complete response")
+                    if result.finish_reason == "incomplete":
+                        spent = self._stream_recovery_exhausted(result, stream_cuts, assistant)
+                        return self._fail_turn(self._stream_cut_failure(
+                            "stopped — the provider stream{where} repeatedly ended before a terminal event",
+                            spent), cause=spent)
                     return self._fail_turn(
-                        ("stopped — the provider stream repeatedly ended before a terminal event"
-                         if result.finish_reason == "incomplete" else
-                         "stopped — the model repeatedly hit the output-token limit before finishing; "
-                         "raise max_tokens or ask for a smaller response"))
+                        "stopped — the model repeatedly hit the output-token limit before finishing; "
+                        "raise max_tokens or ask for a smaller response")
                 # TodoGate: don't stop mid-plan. Only a turn that called tools (work, or the todo
                 # tool itself) is reminded — a one-line question in a session with a standing
                 # checklist (restored on resume, or left by an earlier turn) is not. Once the
@@ -4275,7 +4762,8 @@ class Agent(GoalLifecycle):
                 # that bypass the ordinary JSON-parse net.
                 stalled = _result_stall(result)
                 if stalled and stall_recoveries >= self._stall_retry_budget():
-                    return self._fail_turn(self._stall_failure(stalled, stall_recoveries))
+                    return self._fail_turn(self._stall_failure(stalled, stall_recoveries),
+                                           cause=self._stall_cause_payload(stalled, stall_recoveries))
                 if stalled:
                     # A stall mid tool call is bounded by the stall budget, with a backoff, rather
                     # than by the generic continuation budget that re-issues immediately. The calls
@@ -4284,6 +4772,11 @@ class Agent(GoalLifecycle):
                     self._stall_backoff(stalled, stall_recoveries, chat_cancel)
                     continues = max(0, continues - 1)
                 if continues >= _MAX_CONTINUE:
+                    if result.finish_reason == "incomplete" and not stalled:
+                        spent = self._stream_recovery_exhausted(result, stream_cuts, assistant)
+                        return self._fail_turn(self._stream_cut_failure(
+                            "stopped — the provider stream{where} repeatedly ended before terminal "
+                            "tool-call completion", spent), cause=spent)
                     return self._fail_turn(
                         ("stopped — the provider stream repeatedly ended before terminal tool-call "
                          "completion" if result.finish_reason == "incomplete" else
@@ -4293,10 +4786,16 @@ class Agent(GoalLifecycle):
                 # (a large file → one full write_file).
                 continues += 1
                 interrupted = result.finish_reason == "incomplete"
-                self.ui.info(
-                    "↳ provider stream ended before completion — asked the model to re-issue"
-                    if interrupted else
-                    "↳ response truncated at the token limit — asked the model to re-issue")
+                if interrupted and not stalled:
+                    # Same seam rules and backoff as a cut answer. The re-issue results below are
+                    # appended either way: every tool call needs its result, cancelled or not.
+                    stream_cuts += 1
+                    self._begin_stream_recovery(result, stream_cuts, chat_cancel)
+                if not (interrupted and _ui_supports_model_retry(self.ui)):
+                    self.ui.info(
+                        "↳ provider stream ended before completion — asked the model to re-issue"
+                        if interrupted else
+                        "↳ response truncated at the token limit — asked the model to re-issue")
                 reissue = (
                     "error: the provider stream ended before its terminal event, so this tool call "
                     "may be incomplete and was NOT run. Re-issue it with complete arguments."
@@ -5886,7 +6385,8 @@ class Agent(GoalLifecycle):
                 m["content"] = (_bounded_head_tail(content, max(120, cap - 60))
                                 + "\n… [older tool output pruned] …")
                 changed = True
-            elif m.get("role") == "user" and isinstance(m.get("_dgc_notice"), dict):
+            elif (m.get("role") == "user" and isinstance(m.get("_dgc_notice"), dict)
+                  and _notice_kind(m) == "monitor"):
                 # Monitor output is tool output in the user role: prune it like tool output, but
                 # keep the fence so what is left still reads as untrusted command output.
                 body = content
@@ -6164,12 +6664,15 @@ class Agent(GoalLifecycle):
         from .workflows import notice_kind
         for m in middle:
             role = m.get("role", "?")
-            if notice_kind(m):
+            if notice_kind(m) == "stream_recovery":
+                # Never "user" either: "continue where you left off" is DGC's, not a constraint.
+                role = "dgc-note"
+            elif notice_kind(m):
                 # Never "user": the summary's Goal/Constraints are built from user lines, and this
                 # is attacker-reachable command output.
                 role = "monitor-output (untrusted)"
-            content = _bounded_head_tail(
-                self._safe_text(str(m.get("content", ""))), 1500)
+            content = (_STREAM_RECOVERY_NOTE if role == "dgc-note" else _bounded_head_tail(
+                self._safe_text(str(m.get("content", ""))), 1500))
             calls = ""
             if m.get("tool_calls"):
                 rendered_calls = []

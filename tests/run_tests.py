@@ -4492,6 +4492,7 @@ def unit_tests(tmp: Path):
             self.calls += 1
             return _ChatResult(content=f"interrupted {self.calls}", finish_reason="incomplete")
     _incomplete_turn = _Ag(_Cfg(tmp), _AgUI()); _incomplete_turn.client = _IncompleteOnlyClient()
+    _incomplete_turn._stream_recovery_delay = lambda n: 0.0     # stream-cut backoff is not under test here
     _incomplete_outcome = _incomplete_turn.run_turn("recover bounded provider disconnects")
     check("repeated clean stream EOF is bounded and never published as a complete final",
           _incomplete_outcome is False
@@ -4547,6 +4548,7 @@ def unit_tests(tmp: Path):
             return _ChatResult(content="Recovered safely after the interrupted stream.")
     _interrupted_tool_turn = _Ag(_interrupted_tool_cfg, _AgUI())
     _interrupted_tool_turn.client = _InterruptedToolClient()
+    _interrupted_tool_turn._stream_recovery_delay = lambda n: 0.0
     check("transport-interrupted tool calls reissue without crossing the executor boundary",
           _interrupted_tool_turn.run_turn("recover without executing a partial tool call") is True
           and _interrupted_tool_turn.client.calls == 2
@@ -4568,6 +4570,7 @@ def unit_tests(tmp: Path):
                 })])
     _repeated_interrupted_turn = _Ag(_repeated_interrupted_cfg, _AgUI())
     _repeated_interrupted_turn.client = _RepeatedInterruptedToolClient()
+    _repeated_interrupted_turn._stream_recovery_delay = lambda n: 0.0
     check("repeated transport-interrupted tool calls stop at the shared recovery bound",
           _repeated_interrupted_turn.run_turn("keep recovering partial tool calls") is False
           and _repeated_interrupted_turn.client.calls == _AGENT_MAX_CONTINUE + 1
@@ -13858,6 +13861,23 @@ def test_held_items_0_32_cli():
                                 model="m", base_url="http://h:11434/v1")
     check("a refused connection points at the server and dgc doctor",
           "http://h:11434/v1 is not answering" in refused and "dgc doctor" in refused)
+    _dns_hint = explain_llm_error(
+        "HTTPSConnectionPool(host='api.exmaple.com', port=443): Max retries exceeded (Caused by "
+        "NameResolutionError(\"Failed to resolve 'api.exmaple.com' ([Errno -2] Name or service not known)\"))",
+        model="m", base_url="https://api.exmaple.com/v1")
+    _tls_hint = explain_llm_error(
+        "HTTPSConnectionPool(host='10.0.0.5', port=8443): Max retries exceeded (Caused by SSLError("
+        "SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed')))",
+        model="m", base_url="https://10.0.0.5:8443/v1")
+    check("DNS and TLS failures get their own hint, not 'start your server'",
+          "does not resolve" in _dns_hint and "REQUESTS_CA_BUNDLE" in _tls_hint
+          and "start your server" not in _dns_hint + _tls_hint, _dns_hint + " | " + _tls_hint)
+    _remote_refused = explain_llm_error(
+        "HTTPSConnectionPool(host='api.example.com', port=443): Max retries exceeded (Connection refused)",
+        model="m", base_url="https://u:p@api.example.com/v1?key=SECRET")
+    check("a refused REMOTE endpoint is not told to run ollama serve, and its URL is printed safely",
+          "is not answering" in _remote_refused and "ollama serve" not in _remote_refused
+          and "SECRET" not in _remote_refused and "u:p@" not in _remote_refused, _remote_refused)
     check("a rejected key says where the key goes",
           "/connect" in explain_llm_error("HTTP 401 from https://x/v1: unauthorized", model="m", base_url="u"))
     check("an unrelated failure is left alone",
@@ -20068,6 +20088,124 @@ def test_serve_clear_todos_mid_turn_stdio():
         _shutil.rmtree(work, ignore_errors=True)
 
 
+def test_model_reconnect_surfaces():
+    """0.40 reconnecting: the protocol declares the retry run and the error cause, `dgc serve` shows a
+    refused endpoint's attempts before the unchanged final error, and `dgc -p` says it in both formats."""
+    print("model reconnect lines:")
+    import dgc.editor_protocol as _proto
+    from dgc.editor_protocol import EVENT_FIELDS as _EVENTS, event_error as _event_error
+    from dgc.headless import HeadlessUI as _HeadlessUI
+    from dgc.protocol import Emitter as _Emitter
+    import io as _io
+    import re as _re
+    retry_decl = _EVENTS.get("model_retry") or {}
+    check("model_retry and error.cause are declared, and the generated schema/TS match",
+          {"retry_id", "state", "kind", "layer", "attempt", "summary", "agent"} <= set(retry_decl)
+          and "cause" in (_EVENTS.get("error") or {})
+          and "model_retry" in (PROJECT / "editors" / "vscode" / "src" / "protocol.generated.ts").read_text()
+          and subprocess.run([sys.executable, str(PROJECT / "scripts" / "generate-editor-protocol.py"), "--check"],
+                             cwd=str(PROJECT), capture_output=True, text=True).returncode == 0)
+    source = Path(_proto.__file__).read_text()
+    check("MODEL_FAILURE_KINDS is defined in editor_protocol and the protocol module imports no transport library",
+          "MODEL_FAILURE_KINDS" in source
+          and not _re.search(r"^\s*(?:import|from)\s+[.\w]*(?:requests|urllib3|model_errors)", source, _re.M))
+    headless_source = (PROJECT / "dgc" / "headless.py").read_text()
+    check("ready advertises capabilities.model_retry", '"model_retry": True' in headless_source)
+    sink = _io.StringIO()
+    ui = _HeadlessUI(_Emitter(sink), None)
+    ui.turn_id = "t1"
+    ui.model_retry("retrying", run_n=1, kind="connect", layer="request", attempt=1, summary="refused")
+    hostile = False
+    try:
+        ui.model_retry("retrying", run_n=2, kind="connect", layer="request", attempt=1, summary="x",
+                       seq=10**6, type="error")
+    except TypeError:
+        hostile = True
+    ui.model_retry("recovered", run_n=1, kind="connect", layer="request", attempt=1, summary="refused")
+    frames = [json.loads(line) for line in sink.getvalue().splitlines()]
+    check("model_retry never carries seq/type from its payload",
+          hostile and [f["seq"] for f in frames] == [0, 1] and all(f["type"] == "model_retry" for f in frames)
+          and all(_event_error(f) is None for f in frames))
+
+    import socket
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    dead = closed.getsockname()[1]
+    closed.close()
+    home = Path(tempfile.mkdtemp(prefix="dgc-reconnect-home-"))
+    work = Path(tempfile.mkdtemp(prefix="dgc-reconnect-work-"))
+    (home / ".dgc").mkdir()
+    (home / ".dgc" / "config.json").write_text(json.dumps({
+        "base_url": f"http://127.0.0.1:{dead}/v1", "model": "mock-model", "api_mode": "chat_completions",
+        "suggest": False, "notes": False, "artifact_autostart": False}))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT), PYTHONDONTWRITEBYTECODE="1")
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+        env[var] = str(home)
+    proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=str(work), env=env,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    events: list = []
+    done = threading.Event()
+
+    def read():
+        for line in proc.stdout:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            events.append(event)
+            if event.get("type") == "turn_end":
+                done.set()
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        proc.stdin.write(json.dumps({"type": "prompt", "text": "hello", "request_id": "p1"}) + "\n")
+        proc.stdin.flush()
+        done.wait(60)
+    finally:
+        try:
+            proc.stdin.close()
+            proc.wait(timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+            proc.wait(timeout=10)
+    retries = [e for e in events if e.get("type") == "model_retry"]
+    errors = [e for e in events if e.get("type") == "error"]
+    ends = [e for e in events if e.get("type") == "turn_end"]
+    order = [e.get("type") for e in events if e.get("type") in ("model_retry", "error", "turn_end")]
+    check("a refused endpoint shows reconnect attempts, then the same final error text",
+          [(e["state"], e["attempt"]) for e in retries] == [("retrying", 1), ("retrying", 2), ("retrying", 3), ("gave_up", 3)]
+          and len({e["retry_id"] for e in retries}) == 1 and bool(errors)
+          and errors[-1]["message"].startswith("cannot connect to")
+          and (errors[-1].get("cause") or {}).get("kind") == "connect"
+          and errors[-1]["cause"].get("retry_id") == retries[0]["retry_id"]
+          and bool(ends) and ends[-1]["reason"] == "error"
+          and order[-2:] == ["error", "turn_end"]
+          and all(_event_error(e) is None for e in events), str(order))
+
+    def oneshot(*extra):
+        return subprocess.run([sys.executable, "-m", "dgc", "-p", "hello", "--base-url", f"http://127.0.0.1:{dead}/v1",
+                               "--model", "mock-model", *extra], cwd=str(work), env=env,
+                              capture_output=True, text=True, timeout=90)
+    text_run = oneshot()
+    text_out = text_run.stdout + text_run.stderr
+    check("dgc -p text prints '↻ connection refused by … — reconnecting (1/3)'",
+          f"↻ connection refused by 127.0.0.1:{dead} — reconnecting (1/3)" in text_out
+          and "cannot connect to" in text_out, text_out[-1500:])
+    json_run = oneshot("--output-format", "json")
+    lines = []
+    for line in json_run.stdout.splitlines():
+        try:
+            lines.append(json.loads(line))
+        except ValueError:
+            pass
+    json_retries = [e for e in lines if e.get("type") == "model_retry"]
+    check("dgc -p --output-format json carries model_retry without a turn_id",
+          len(json_retries) == 4 and all("turn_id" not in e for e in json_retries)
+          and all(_event_error(e) is None for e in json_retries), json_run.stdout[-1500:])
+    import shutil as _shutil
+    _shutil.rmtree(home, ignore_errors=True)
+    _shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -20142,6 +20280,7 @@ def main():
         test_training_export()
         test_surfaced_feature_commands()
         test_serve_clear_todos_mid_turn_stdio()
+        test_model_reconnect_surfaces()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

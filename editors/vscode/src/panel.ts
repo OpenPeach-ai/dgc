@@ -286,7 +286,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
   private testProbeNonce = "";
-  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> = [];
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
   private changesRefreshTimer?: NodeJS.Timeout;
@@ -1792,7 +1792,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           // What the status row says (e.g. a silent model request), for the installed-host stall test.
           ...(event.type === "turn_activity" ? { state: String(event.state || ""),
             label: String(event.label || "").slice(0, 80),
-            detail: String(event.detail || "").slice(0, 120) } : {}) } : {}),
+            detail: String(event.detail || "").slice(0, 120) } : {}),
+          // A model retry run's frames, and the cause kind of a model error (installed-host reconnect test).
+          ...(event.type === "model_retry" ? { state: String(event.state || ""), kind: String(event.kind || ""),
+            attempt: Number(event.attempt) || 0, retryId: String(event.retry_id || "").slice(0, 128) } : {}),
+          ...(event.type === "error" && event.cause && typeof event.cause === "object"
+            ? { kind: String(event.cause.kind || ""), retryId: String(event.cause.retry_id || "").slice(0, 128) } : {}) } : {}),
       });
       if (this.testPostedMessages.length > 256) {
         this.testPostedMessages.splice(0, this.testPostedMessages.length - 256);
@@ -1828,7 +1833,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> {
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string; kind?: string; attempt?: number; retryId?: string }> {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }
