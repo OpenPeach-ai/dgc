@@ -3238,6 +3238,8 @@ class TUI:
         blk["running"] = False
         from .ui import tool_output_is_error
         blk["error"] = tool_output_is_error(out)
+        if blk.get("asked"):                            # a settled question: its Q → A lines, not the model text
+            out = "\n".join(blk["asked"][1:]) or blk["asked"][0]
         out = style_mod.terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
@@ -3687,9 +3689,11 @@ class TUI:
         tab = req.get("tab", 0)
         self._open_overlay([], on_pick=pick, tabs=tab_labels() if multi_rows else None, tab=tab,
                            rebuild=rebuild, accent=True,
-                           footer=(f"↑↓ move {dot} 1-{len(questions[tab]['options']) + 2} pick {dot} "
-                                   + (f"Space toggle {dot} Enter next {dot} " if questions[tab]["multi_select"] else "Enter pick ")
-                                   + (f"{dot} ←→ question " if multi_rows else "") + f"{dot} Esc dismiss"))
+                           footer=f" {dot} ".join(
+                               ([] if questions[tab]["multi_select"] else ["↑↓ move"])
+                               + [f"1-{len(questions[tab]['options']) + 2} pick"]
+                               + (["Space toggle", "Enter next"] if questions[tab]["multi_select"] else ["Enter pick"])
+                               + (["←→ question"] if multi_rows else []) + ["Esc dismiss"]))
         self._overlay["selectable"] = True
         self._overlay["questions"] = True
         self._overlay["sel"] = recommended_row(questions[tab])   # (re)opened: cursor on the recommendation
@@ -3819,7 +3823,14 @@ class TUI:
         """The settled batch in the transcript: ``▸ Asked 2 questions`` then one Q → A line each."""
         from .questions import asked_summary
         th = style_mod.theme()
-        lines = asked_summary(questions, answers, outcome)
+        lines = [style_mod.terminal_safe_text(line) for line in asked_summary(questions, answers, outcome)]
+        blk = self._live_tool_block("propose_options", call_id)
+        if blk is not None:
+            # The step's own block says what was asked and answered; the model-facing text stays out.
+            blk["asked"] = lines
+            blk["summary"] = lines[0]
+            self._invalidate()
+            return
         body = f"[{th.accent}]{glyphs.TOOL_ICON.get('propose_options', '>')}[/] [bold]{_esc(lines[0])}[/]"
         for line in lines[1:]:
             body += f"\n  [{th.muted}]{_esc(style_mod.terminal_safe_text(line))}[/]"
