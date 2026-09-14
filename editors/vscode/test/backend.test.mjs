@@ -699,4 +699,51 @@ test("a child that never launched reports launch_failed, not a backend death", a
 
 
 // ---- 0.40 agents -----------------------------------------------------------------------------------
+test("agent frames and snapshots pass the v14 contract; a stray field, a null waiting_for or an ended state in an update fails closed", async () => {
+  const valid = executable("agents-backend", `
+${protocolFixture()}
+send(ready);
+send({ type: "turn_start", turn_id: "t1", prompt: "split", kind: "prompt" });
+send({ type: "agent_started", id: "sub-aaaaaaaaaaaa", parent_id: null, call_id: "call_0", description: "part",
+       depth: 1, state: "queued", started_at: 1789000000.5, isolated: true, parallel: true, agent_type: "reviewer",
+       model: "qwen3.8:27b", turn_id: "t1" });
+send({ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "waiting", waiting_for: "permission", tool_calls: 1 });
+send({ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "running", activity: "", tokens: 20 });
+send({ type: "agent_ended", id: "sub-aaaaaaaaaaaa", state: "failed", duration_ms: 1200, tool_calls: 2,
+       message: "the sub-agent stopped without a final summary" });
+send({ type: "agents", request_id: "agents-restore-1", total: 1, active: 0, items: [{ id: "sub-aaaaaaaaaaaa",
+       parent_id: null, call_id: "call_0", description: "part", depth: 1, state: "failed", tool_calls: 2,
+       isolated: true, parallel: true, restored: false, duration_ms: 1200 }] });
+setInterval(() => {}, 1000);`);
+  const accepted = new DgcBackend(scratch, valid);
+  const seen = [];
+  accepted.on("event", (event) => seen.push(event.type));
+  const listed = waitFor(accepted, "event", (event) => event.type === "agents");
+  accepted.start();
+  await listed;
+  assert.deepEqual(seen.filter((type) => type !== "ready"),
+    ["turn_start", "agent_started", "agent_updated", "agent_updated", "agent_ended", "agents"]);
+  accepted.dispose();
+
+  for (const [name, frame, pattern] of [
+    ["agents-stray", `{ type: "agent_started", id: "sub-aaaaaaaaaaaa", parent_id: null, call_id: "c", description: "d",
+       depth: 1, state: "running", started_at: 1, isolated: false, parallel: false, foo: 1 }`,
+     /agent_started has undeclared field "foo"/],
+    ["agents-null-waiting", `{ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "running", waiting_for: null }`,
+     /agent_updated/],
+    ["agents-ended-update", `{ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "finished" }`, /agent_updated/],
+  ]) {
+    const broken = executable(name, `
+${protocolFixture()}
+send(ready);
+send(${frame});
+setInterval(() => {}, 1000);`);
+    const backend = new DgcBackend(scratch, broken);
+    const failure = waitFor(backend, "event", (event) => event.type === "error" && event.protocol_error === true);
+    backend.start();
+    assert.match((await failure).message, new RegExp(`violated protocol v${DGC_PROTOCOL_VERSION}: `));
+    assert.match((await failure).message, pattern);
+    backend.dispose();
+  }
+});
 // ---- end 0.40 agents -------------------------------------------------------------------------------

@@ -463,6 +463,80 @@ async function run() {
     command.type === "list_monitors" && /^monitors-list-/.test(String(command.request_id || ""))));
 
   // ---- 0.40 agents (installed-host checks; run before the backend-exit paths below) ----
+  {
+    // What the live pill shows, read through the test-only probe (the webview answers, the host
+    // records it with the delivery evidence).
+    const probe = async () => {
+      const before = posted().filter((item) => item.type === "agentsProbeResult").length;
+      await testApi.testOnlyWebviewMessage(testToken, { type: "agentsProbeRequest" });
+      await waitFor(() => posted().filter((item) => item.type === "agentsProbeResult").length > before);
+      return posted().filter((item) => item.type === "agentsProbeResult").at(-1);
+    };
+    const protocolStops = () => logCount(/\[extension: stopping the backend — protocol:/);
+    const stopsBefore = protocolStops();
+
+    // A turn with two task sub-agents, one waiting on a permission card: every frame is accepted.
+    await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host agents probe" });
+    await waitFor(() => posted().some((item) => item.eventType === "permission_request" && item.id === "agents-permission"));
+    const waitingProbe = await probe();
+    assert.deepEqual([waitingProbe.state, waitingProbe.label], ["waiting", "2 agents"],
+      "an agent waiting on a permission card turns the pill blue");
+    await testApi.testOnlyWebviewMessage(testToken, { type: "permission_response", id: "agents-permission", decision: "once" });
+    await waitFor(() => {
+      const items = posted();
+      const ended = items.map((item) => item.eventType).lastIndexOf("agent_ended");
+      return ended !== -1 && items.slice(ended).some((item) => item.eventType === "turn_end");
+    });
+    const agentFrames = posted().filter((item) => ["agent_started", "agent_updated", "agent_ended"].includes(item.eventType));
+    assert.ok(agentFrames.filter((item) => item.eventType === "agent_started").length >= 2, "agent_started reaches the webview");
+    assert.ok(agentFrames.filter((item) => item.eventType === "agent_ended").length >= 2, "agent_ended reaches the webview");
+    assert.equal(protocolStops(), stopsBefore, "the extension accepts every agents frame");
+    const idleProbe = await probe();
+    assert.deepEqual([idleProbe.state, idleProbe.label], ["idle", "2 agents"], "two finished agents: the idle ring");
+
+    // A reloaded webview asks the backend for the list again.
+    const restores = () => backendCommands(backendLogPath).filter((command) => command.type === "list_agents"
+      && /^agents-restore-/.test(String(command.request_id || ""))).length;
+    const restoresBefore = restores();
+    await testApi.testOnlyWebviewMessage(testToken, { type: "webviewReady" });
+    await waitFor(() => restores() > restoresBefore);
+    await waitFor(() => posted().some((item) => item.eventType === "agents"));
+    const restoredProbe = await probe();
+    assert.deepEqual([restoredProbe.state, restoredProbe.label], ["idle", "2 agents"], "the restored list keeps the pill");
+
+    // A new chat hides it.
+    await testApi.testOnlyWebviewMessage(testToken, { type: "slash", action: "new" });
+    await waitFor(() => backendCommands(backendLogPath).some((command) => command.type === "new_session"));
+    await waitFor(() => posted().some((item) => item.eventType === "session"));
+    await sleep(100);
+    assert.equal((await probe()).state, "hidden", "/new hides the pill");
+
+    // The backend exits with two agents running: the pill turns idle, and once the new backend has
+    // answered list_agents with an empty chat, it is hidden.
+    const exitsBefore = posted().filter((item) => item.type === "backend_exit").length;
+    await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host agents exit probe" });
+    await waitFor(() => posted().filter((item) => item.type === "backend_exit").length > exitsBefore, 15_000);
+    const stoppedProbe = await probe();
+    assert.deepEqual([stoppedProbe.state, stoppedProbe.label], ["idle", "2 agents"],
+      "agents of a backend that exited are stopped, not working");
+    const restoresBeforeRestart = restores();
+    await waitFor(() => restores() > restoresBeforeRestart, 15_000);
+    await waitFor(() => rootsCommands().length > 0);
+    await sleep(1500);
+    assert.equal((await probe()).state, "hidden", "the new backend's empty list hides the pill");
+    assert.equal(protocolStops(), stopsBefore);
+
+    // A frame with a field the contract does not name stops the backend with the malformed-frame
+    // message, like any other protocol violation. A fresh backend is started for the checks below.
+    await sleep(1500);
+    await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host agents stray field" });
+    await waitFor(() => /\[extension: stopping the backend — protocol: dgc backend violated protocol v14: agent_started has undeclared field "foo"/
+      .test(backendLogText()), 15_000);
+    const startedAfterStray = startedCount();
+    await vscode.commands.executeCommand("dgc.restart");
+    await waitFor(() => startedCount() > startedAfterStray, 15_000);
+    await sleep(1500);
+  }
   // ---- end 0.40 agents ----
 
   // ---- 0.40 images (installed-host checks) ----
