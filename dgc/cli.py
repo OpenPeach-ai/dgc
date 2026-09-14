@@ -66,11 +66,26 @@ THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
 DELEGATED_THINK_LEVELS = [*THINK_LEVELS, "max"]
 
 
+# What a shell reports for a process a closed pipe (SIGPIPE, 13) ended: 128 + 13.
+EXIT_READER_GONE = 141
+
+
+class _StdoutConsole(Console):
+    """The terminal's console. Rich answers a closed stdout with SystemExit(1) from inside whatever
+    was printing, so `dgc -p … --output-format text | head -1` exited 1, the code of a failed turn,
+    while the same run with --output-format json (its writes raise BrokenPipeError) exited 141."""
+
+    def on_broken_pipe(self) -> None:
+        self.quiet = True
+        _silence_stdout()               # the interpreter's own last flush must not print a traceback
+        raise SystemExit(EXIT_READER_GONE)
+
+
 class UI:
     """All user-facing rendering + interaction. The agent calls back into this."""
 
     def __init__(self):
-        self.console = Console(theme=render.markdown_theme(), highlight=False)
+        self.console = _StdoutConsole(theme=render.markdown_theme(), highlight=False)
         self._theme_pushed = False   # did refresh_theme() already stack a palette on this console?
         self._thinking = False
         self._streamed = False
@@ -2394,7 +2409,7 @@ def main(argv: list[str] | None = None) -> int | None:
             # The reader went away (`dgc -p ... | head -1`). Say nothing more: point stdout at
             # /dev/null so the interpreter's own final flush cannot print a traceback and exit 120.
             _silence_stdout()
-            return 141                          # what a shell reports for a SIGPIPE death
+            return EXIT_READER_GONE
         return code
     else:
         import atexit

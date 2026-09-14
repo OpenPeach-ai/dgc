@@ -69,7 +69,9 @@ class OneShotBrokenPipeTests(unittest.TestCase):
                     os.close(write)
                 self.assertNotIn("BrokenPipeError", done.stderr)
                 self.assertNotIn("Exception ignored", done.stderr)
-                self.assertNotEqual(done.returncode, 120, done.stderr[-2000:])
+                # 141, what a shell reports for a closed pipe, in both formats. Text mode printed
+                # through Rich, whose closed-pipe handler exits 1: the code of a failed turn.
+                self.assertEqual(done.returncode, 141, done.stderr[-2000:])
 
 
 if __name__ == "__main__":
