@@ -158,6 +158,137 @@ _OPTIONAL_TOOL_INTENT = {
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "task": "delegate", "monitor": "monitor",
 }
+
+
+class _OptionsAsk:
+    """Does the user's own text ask DGC to offer them choices on this turn?
+
+    It lifts full-auto's picker removal and, where the picker cannot exist, adds the one note saying
+    why (see Agent._options_unavailable_note). Being offered never forces the picker: the model
+    still decides whether to ask, so an ask the user negates or takes back ("give me options.
+    Actually, never mind, you pick") needs no parsing here. A missed ask is the costly error (the
+    model denies the picker exists); a false one only offers a tool that goes unused.
+
+    It still has to hear an ask addressed to the agent, not a description of software being built,
+    so an ordinary coding turn in full-auto keeps its tool list: "propose me options to select from"
+    and "let me choose" count; "the popup should list the options for me to select a region", "make
+    the screen offer three choices so I can pick a plan" and "write tests for propose_options" do
+    not. A sentence counts when it has all of:
+    * the verb in an imperative position (sentence start, after a comma, "please", "and", "can
+      you", "can't you", "you to"): "the combobox should list options" describes a UI;
+    * the user as the one choosing: "me"/"us" as the recipient ("give me options to choose from",
+      "offer me alternatives"), or a first-person chooser whose object is the choice itself ("so I
+      can pick one", "let me decide which approach"), not a thing in an app ("so I can pick a
+      plan", "let me select the files", "ask me to choose later");
+    * nothing that marks a spec or code (a dropdown, a page, a function, a file path, "should",
+      "when the user ...", "in the TUI"); a file the user @mentions beside an ask is context
+      ("... based on @notes.md"), except to the picker-by-name forms, which also need a message
+      that is not a bug report.
+
+    Only what the user typed is read: attached files, editor context, ACP resources and selected
+    skill bodies arrive in DGC's frames and are cut out first, wherever they sit in the message.
+    """
+
+    _POS = (r"(?:^|(?<=[,:(])|\b(?:please|pls|kindly|just|now|then|and|so|also|first|"
+            r"(?:(?:can|could|would|will)(?:n'?t)?|can'?t|won'?t)\s+you(?:\s+(?:please|just))?|"
+            r"you\s+to)\b)\s*")
+    _DET = (r"a|an|the|some|few|several|couple(?:\s+of)?|more|other|different|your|top|best|possible|"
+            r"multiple|two|three|four|five|\d+")
+    _NOUN = r"(?:options|option|choices|choice|alternatives|alternative)\b"
+    _CHOOSE = r"(?:choose|pick|select|decide)"
+    # What the user chooses: the choice itself, never an object in an app ("which columns to export").
+    _WHICH = (r"(?:which|what)\s+(?:one|ones|option|options|choice|approach|approaches|way|path|plan|"
+              r"design|solution|fix|refactor|change|idea|step|task|next|library|framework|direction|strategy|"
+              r"alternative|of)\b")
+    _TAIL = (r"(?=\s*(?:$|[,:)(]|(?:and|then|before|first)\b|(?:between|among|from|myself|ourselves)\b|"
+             r"for\s+(?:myself|ourselves)\b|one\b(?:\s+of\s+(?:them|these|those))?\s*(?:$|[,:)(])|"
+             + _WHICH + "))")
+    _FIRST_PERSON = (r"(?:so\s+(?:that\s+)?(?:I|we)(?:\s+can|\s+could|'ll|\s+will)?|"
+                     r"(?:and|then)\s+(?:I|we)(?:'ll|\s+will|\s+can)?|(?:I|we)(?:'ll|\s+will|\s+can)|"
+                     r"(?:and|then)\s+let\s+(?:me|us)|for\s+(?:me|us)\s+to)\s+" + _CHOOSE + _TAIL)
+    _ASK = re.compile(
+        # "give me a few options to choose from", "show us some choices so we can pick one"
+        _POS + r"(?:propose|offer|give|show|present|list|suggest)\s+(?:me|us)"
+        r"(?:\s+(?:" + _DET + r"|list\s+of))*\s+" + _NOUN +
+        r".{0,40}?\b(?:to\s+" + _CHOOSE + r"\s+(?:from|between|among)\b|" + _FIRST_PERSON + ")"
+        # "propose me options", "offer us some alternatives"
+        # (not "offer me the option to export as PDF", which is a feature)
+        r"|" + _POS + r"(?:propose|offer|present)\s+(?:me|us)(?:\s+(?:" + _DET + r"))*\s+" + _NOUN +
+        r"(?!\s+to\s+(?!" + _CHOOSE + r"\b))" +
+        # "list the options for me to select", "suggest some alternatives and I'll decide"
+        r"|" + _POS + r"(?:propose|offer|give|show|present|list|suggest)(?:\s+(?:" + _DET + r"))*\s+" +
+        _NOUN + r".{0,40}?\b" + _FIRST_PERSON +
+        # "let me choose", "please ask me to pick between A and B", "ask me which approach"
+        r"|" + _POS + r"(?:let|ask)\s+(?:me|us)\s+(?:to\s+)?" + _CHOOSE + _TAIL +
+        r"|" + _POS + r"ask\s+(?:me|us)\s+(?:a\s+multiple[- ]choice\b|" + _WHICH + ")",
+        re.IGNORECASE)
+    # The picker by name: "show me the options picker", "use propose_options", or just the name.
+    _BY_NAME = re.compile(
+        _POS + r"(?:(?:show|give|bring\s+up|pop\s+up|display|open)\s+(?:me|us)|trigger|demo|try)\s+"
+        r"(?:(?:the|a|an|your|dgc'?s)\s+)?(?:options?|choices?|selection)\s+"
+        r"(?:picker|popup|pop-up|dialog|card|selector)\b"
+        r"|\b(?:use|call|invoke|try|trigger|run|demo|with|via|using|through)\s+(?:the\s+|your\s+)?"
+        r"`?propose_options\b`?(?!\s*(?:tests?|handler|schema|description|function|implementation|"
+        r"code|filter|result)\b)"
+        r"|^\s*`?propose_options`?(?:\s+tool)?\s*$",
+        re.IGNORECASE)
+    _PICKER_NAME = re.compile(r"\b(?:options?|choices?|selection)\s+(?:picker|popup|pop-up|dialog|card|"
+                              r"selector)\b|\bpropose_options\b", re.IGNORECASE)
+    # A file the user @mentions to base the choice on ("... for the title, based on @notes.md") is
+    # context, not a spec marker; "in @src/Dropdown.tsx" still places the options in code.
+    _MENTION = re.compile(r"(?<!\bin\s)(?<!\binto\s)(?<!\binside\s)(?<![\w@/])@[\w./~-]+")
+    # A spec or code being written, not a choice being asked for.
+    _SPEC = re.compile(
+        r"\b(?:drop-?downs?|combo\s?box(?:es)?|list\s?box(?:es)?|select\s+(?:elements?|box(?:es)?|"
+        r"menus?|tags?|inputs?|fields?)|components?|widgets?|modals?|pop-?ups?|dialogs?|menus?|"
+        r"screens?|pages?|(?<!in\sthe\s)forms?|buttons?|check\s?box(?:es)?|radio|wizards?|quiz(?:zes)?|"
+        r"surveys?|onboarding|toolbars?|sidebars?|nav\s?bars?|as\s+you\s+type|should|functions?|"
+        r"methods?|endpoints?|schemas?|handlers?|fixtures?|tests?\s+for|unit\s+tests?|css|html|jsx|tsx|"
+        r"click(?:s|ed|ing)?|taps?|hover(?:s|ed|ing)?|drag(?:s|ged|ging)?|"
+        r"when(?:ever)?\s+(?:I|we|the\s+user|users?|someone|they)|"
+        r"(?:in|on|from|inside)\s+the\s+(?:\w+\s+)?(?:tui|cli|gui|ui|pill|panel|webview|table|export|"
+        r"terminal|status\s?bar|header|footer|view|window|settings|tests?|specs?))\b"
+        r"|<select|<input|[\w./-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|json|md|css|html|go|rs|java|rb|ya?ml|"
+        r"toml)\b",
+        re.IGNORECASE)
+    _BUG = re.compile(
+        r"\b(?:crash(?:es|ed|ing)?|bugs?|broken|errors?|regression|exception|traceback|fix(?:es|ed)?|"
+        r"(?:does|did|is|was)n'?t|(?:does|did|is|was)\s+not|never\s+(?:shows?|opens?|appears?))\b",
+        re.IGNORECASE)
+    _SENTENCE = re.compile(r"[.!?;]+(?=\s|$)|\n+")
+    # Every form names the choosing or the picker; most sentences are dismissed on this alone.
+    _CUE = re.compile(r"option|choice|alternative|choose|pick|select|decide|popup|pop-up|dialog|card|"
+                      r"ask\s+(?:me|us)\b", re.IGNORECASE)
+
+    # DGC's frames around data the user did not type. Their contents are escaped (the JSON frames
+    # escape every angle bracket, attachments rewrite their boundary tags), so the first closing tag
+    # really ends the frame; an unclosed one runs to the end of the text.
+    _FRAME = re.compile(
+        r"<(editor-context-json|embedded-resource-json|resource-link-json|dgc-skill-instructions-json)"
+        r"\b[^>\n]*>.*?(?:</\1>|\Z)|<dgc_attachment>.*?(?:</dgc_attachment>|\Z)",
+        re.DOTALL)
+
+    def search(self, text: str) -> bool:
+        source = _trusted_intent_text(self._FRAME.sub("\n", str(text or ""))).replace("\u2019", "'")
+        if not self._CUE.search(source):
+            return False
+        bug_report = bool(self._BUG.search(source))
+        for sentence in self._SENTENCE.split(source):
+            sentence = sentence.strip()
+            if not self._CUE.search(sentence):
+                continue
+            spec = self._PICKER_NAME.sub(" ", sentence)
+            if self._SPEC.search(self._MENTION.sub(" ", spec)):
+                continue
+            if self._ASK.search(sentence):
+                return True
+            # An @mentioned file is fine beside an ask addressed to the user, never beside the
+            # picker named alone ("use propose_options in @dgc/agent.py").
+            if not bug_report and not self._SPEC.search(spec) and self._BY_NAME.search(sentence):
+                return True
+        return False
+
+
 _TOOL_INTENT_PATTERNS = {
     "git_review": re.compile(
         r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
@@ -225,6 +356,8 @@ _TOOL_INTENT_PATTERNS = {
         r"wait (?:for|until))\b|\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
         r"crash(?:es)?|appears?|prints?|logs?)\b",
         re.IGNORECASE | re.DOTALL),
+    # The user asks to be offered choices on this turn. Not a single regex: see _OptionsAsk.
+    "options": _OptionsAsk(),
 }
 
 
@@ -240,8 +373,10 @@ def _trusted_intent_text(text: str) -> str:
 
 def _tool_intents(text: str) -> set[str]:
     source = _trusted_intent_text(text)
+    # The options judge cuts DGC's reference frames out of the whole text itself (see _OptionsAsk):
+    # an ask to be offered choices must be typed by the user, not found in an attached file.
     return {intent for intent, pattern in _TOOL_INTENT_PATTERNS.items()
-            if pattern.search(source)}
+            if pattern.search(text if isinstance(pattern, _OptionsAsk) else source)}
 
 
 def _result_stall(result) -> dict | None:
@@ -1478,7 +1613,10 @@ class Agent(GoalLifecycle):
         """Activate optional tools from explicit turn/goal intent; return whether it changed."""
         detected = _tool_intents(text)
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
-            detected |= _tool_intents(self.goal)
+            # A goal describes the work, and it is re-read on every cycle and every later turn. An
+            # ask to be offered choices is the user's on the turn they type it, so a goal never
+            # carries one: an unattended full-auto goal run must not keep the picker open.
+            detected |= _tool_intents(self.goal) - {"options"}
         before = set(self._active_tool_intents)
         self._active_tool_intents = detected if replace else before | detected
         return self._active_tool_intents != before
@@ -1602,10 +1740,11 @@ class Agent(GoalLifecycle):
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
-            if self.mode == "auto":
+            if self.mode == "auto" and not self._options_asked_interactively():
                 # Full-auto explicitly promises autonomous execution. A blocking choice prompt in
-                # this mode adds a model/UI round-trip and contradicts that boundary; the user can
-                # switch to default/acceptEdits when they want interactive alternatives.
+                # this mode adds a model/UI round-trip and contradicts that boundary, unless the
+                # user asked on this very turn to be offered choices: then waiting is what they
+                # want, and withholding the picker only makes the model deny it exists.
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "propose_options"]
         if profile != "full":
@@ -1637,6 +1776,70 @@ class Agent(GoalLifecycle):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
         return self._monitor_schema_filter(schemas)
+
+    def _non_interactive(self) -> bool:
+        """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
+        ``__getattr__`` (test fixtures, the prompt-surface probe) does not count."""
+        return getattr(self.ui, "non_interactive", False) is True
+
+    def _options_asked_interactively(self) -> bool:
+        """The user asked on this turn to be offered choices, and someone is there to answer.
+
+        Top-level only: a sub-agent's prompt is written by the parent model, not the user. A wake
+        turn is removed later by _monitor_schema_filter, whatever this says.
+        """
+        return ("options" in getattr(self, "_active_tool_intents", set())
+                and self.depth == 0 and not self._non_interactive())
+
+    def _picker_offered(self) -> bool:
+        return any(tool.get("function", {}).get("name") == "propose_options"
+                   for tool in self._tool_schemas())
+
+    def _options_ask_served(self) -> None:
+        """A round of questions was put to the user's UI: the ask to be offered choices is answered.
+
+        "options" in the active intents stands for an ask still open. Once a round has been shown
+        (answered, dismissed, or refused by `dgc -p`), full-auto withdraws the picker for the rest of
+        the turn, and a later wake turn is not told to list the options again. A sub-agent's round
+        answers its parent's ask too; a parent's tool list only depends on the ask in full-auto,
+        where a sub-agent is never offered the picker, so the parents need no refresh.
+        """
+        offered = self._picker_offered()
+        agent = self
+        while agent is not None:
+            getattr(agent, "_active_tool_intents", set()).discard("options")
+            agent = getattr(agent, "_metrics_parent", None)
+        if self._picker_offered() != offered:
+            self._refresh_system()      # the text tool protocol lists the tools in the prompt
+
+    def _options_unavailable_note(self) -> str:
+        """One system section, only when the user's ask to choose is open and the picker is not offered.
+
+        Without it the model can only say the tool does not exist. Gated on the explicit ask, so a
+        request that did not ask (the prompt-surface probe among them) carries nothing extra.
+        """
+        if "options" not in getattr(self, "_active_tool_intents", set()) or self._picker_offered():
+            return ""
+        if self.depth:
+            # Whatever the parent's situation, a sub-agent answers the parent, never the user.
+            reason = "you are a sub-agent"
+            how = "put them in your result for the parent agent"
+        elif getattr(self, "_monitor_turn", False):
+            reason = "this turn was started by a background event and nobody is at the keyboard"
+            how = "ask the user to reply with their choice in a normal message"
+        elif self._non_interactive():
+            reason = "this is a non-interactive `dgc -p` run"
+            how = ("tell the user the picker appears in the interactive `dgc` terminal and the "
+                   "editor panel")
+        else:
+            reason = "it is not offered in this context"
+            how = "ask the user to reply with their choice"
+        # A sub-agent's prompt is written by the parent model, so it cannot say the user asked.
+        asked = "Your task asks for a choice between options" if self.depth else \
+            "The user asked to choose from options"
+        return (f"# Options picker\n{asked}, but DGC's options picker (propose_options) is not "
+                f"available on this turn because {reason}. It does exist. List the options as a "
+                f"numbered list and {how}.")
 
     def _monitor_delivery(self) -> bool:
         """Does this agent's frontend deliver monitor events and wake on them?
@@ -2218,6 +2421,10 @@ class Agent(GoalLifecycle):
         if self._monitor_exposed():
             parts += ["", _MONITOR_GUIDANCE]
 
+        options_note = self._options_unavailable_note()
+        if options_note:
+            parts += ["", options_note]
+
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:
             parts += ["", "# Reasoning", think]
@@ -2575,6 +2782,10 @@ class Agent(GoalLifecycle):
                 self._refresh_system()
                 completed = self._run_turn(notification.text, source="monitor",
                                            notification=notification)
+                if completed is True and "options" in self._active_tool_intents:
+                    # This turn carried the options note (a wake turn never offers the picker) and
+                    # listed them: the next event must not have the model list them again.
+                    self._last_turn_tool_intents.discard("options")
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -4658,7 +4869,15 @@ class Agent(GoalLifecycle):
                     if not choice:
                         break
                     answers[question["id"]] = choice
+            # One round of questions answers the ask. Full-auto offered the picker only for it, so the
+            # rest of the turn (a whole goal run) goes on unattended; and a wake turn after this one
+            # must not ask the model to list the options again.
+            self._options_ask_served()
             if not valid_answers(questions, answers) or self.cancelled.is_set():
+                if self._non_interactive() and not self.cancelled.is_set():
+                    return ("No one can answer in this non-interactive `dgc -p` run, so no choice was "
+                            "made. Do not assume one: give the options as a numbered list in your "
+                            "final answer.")
                 return "No decision was submitted. Do not assume a choice or act on unanswered questions."
             if grouped:
                 return "The user submitted these decisions: " + json.dumps(answers, ensure_ascii=False)
