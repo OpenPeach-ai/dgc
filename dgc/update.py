@@ -203,7 +203,9 @@ def run_update(args: list[str] | None = None) -> int:
     from rich.console import Console
     from rich.markup import escape
     from . import install_layout as L
-    c = Console()
+    # Soft wrap for every message: they name launchers and version directories, and Rich's hard
+    # wrap at the terminal width split those paths across lines where nobody can copy them.
+    c = Console(soft_wrap=True)
     parsed = _parse_update_args(list(args or []))
     if parsed is None:
         c.print("usage: " + UPDATE_USAGE, highlight=False)

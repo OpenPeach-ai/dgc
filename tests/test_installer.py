@@ -1039,6 +1039,32 @@ class QaInstallerRegressions(unittest.TestCase):
         update._list_versions(Console(file=printed, width=60), location)
         self.assertIn(str(L.versions_dir(data)), printed.getvalue())
 
+    def test_rollback_and_version_switch_print_the_launcher_path_whole(self):
+        # The 'switched <launcher> → DGC X (was Y)' line hard-wrapped at the terminal width and split
+        # the launcher path across lines; every `dgc update` message now prints paths whole.
+        home = new_home("switch-soft-wrap")
+        root = home / ("a-very-long-directory-name-" * 4)
+        data, bin_dir = root / "data", root / "bin"
+        for name in ("0.39.0", "0.38.9"):
+            fake_version(data, name)
+        from dgc import update
+        with mock.patch.object(L.Path, "home", return_value=home):
+            quiet = []
+            self.assertEqual(L.activate(data, bin_dir, "0.39.0", out=quiet.append), 0)
+            self.assertEqual(L.activate(data, bin_dir, "0.38.9", out=quiet.append), 0)
+            launcher = bin_dir / "dgc"
+            for args, target in ((["--rollback"], "0.39.0"), (["--version", "0.38.9"], "0.38.9"),
+                                 (["--version", "0.38.9"], "0.38.9")):
+                location = L.Location("versions", data, bin_dir, None, None)
+                printed = io.StringIO()
+                with mock.patch.object(L, "locate", return_value=location), \
+                        mock.patch.dict(os.environ, {"DGC_FORCE_OVERWRITE": "", "COLUMNS": "60"}), \
+                        contextlib.redirect_stdout(printed):
+                    code = update.run_update(args)
+                self.assertEqual(code, 0, printed.getvalue())
+                self.assertEqual(L.inspect_launcher(launcher).tree.name, target)
+                self.assertIn(str(launcher), printed.getvalue(), printed.getvalue())
+
     def test_update_help_names_the_base_url_and_every_exit_status(self):
         from dgc import cli
         printed = io.StringIO()
