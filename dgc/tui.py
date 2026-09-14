@@ -233,6 +233,7 @@ class AgentSession:
         self._thinking = False
         self._cur_tool: str | None = None
         self._backend_activity: tuple[str, str, str] | None = None   # (state, label, detail)
+        self._model_wait: tuple[str, str, float] | None = None       # (label, detail, silent since)
         self._think_t0: float | None = None
         self._tool_count = 0
         self._turn = threading.Event()     # set while this session's turn runs
@@ -328,6 +329,7 @@ class TUI:
     _thinking = _active_prop("_thinking")
     _cur_tool = _active_prop("_cur_tool")
     _backend_activity = _active_prop("_backend_activity")
+    _model_wait = _active_prop("_model_wait")
     _think_t0 = _active_prop("_think_t0")
     _tool_count = _active_prop("_tool_count")
     _turn = _active_prop("_turn")
@@ -616,7 +618,9 @@ class TUI:
     }
     _CLIENT_KEYS = {"model", "base_url", "api_key", "api_mode", "provider_state", "prompt_cache",
                     "prompt_cache_key", "capability_cache_ttl_s", "temperature", "top_p", "top_k", "min_p",
-                    "max_tokens", "context_size", "thinking", "request_timeout", "ollama_keep_alive"}
+                    "max_tokens", "context_size", "thinking", "request_timeout", "ollama_keep_alive",
+                    "model_first_token_timeout_s", "model_idle_timeout_s", "model_stall_notice_s",
+                    "model_stall_retries", "model_load_timeout_s"}
 
     def _open_settings(self) -> None:
         rows = [{"label": cat, "desc": f"{len(items)} settings", "value": cat}
@@ -2587,7 +2591,14 @@ class TUI:
         if self._turn.is_set():
             el = time.monotonic() - self._turn_t0
             fr = glyphs.THINK_FRAMES[int(time.monotonic() * 6) % len(glyphs.THINK_FRAMES)]
-            if self._streaming:
+            wait = getattr(self, "_model_wait", None)
+            if wait:
+                # A silent model request outranks "Responding"/"Thinking": a stream that stalled
+                # mid-answer used to keep saying "Responding" for as long as the socket stayed open.
+                act = wait[0]
+                if getattr(self, "_phase_act", None) != act:
+                    self._phase_act, self._phase_t0 = act, wait[2]   # the clock shows the real silence
+            elif self._streaming:
                 act = "Responding"
             elif self._cur_tool:
                 act = self._cur_tool            # "Run npm test" · "Read x.py" · "Search …"
@@ -2610,6 +2621,11 @@ class TUI:
             toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
             eta_text = self._eta_status_text()
             left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/] [{th.faint}]{pstr}[/]"
+            if wait and wait[1] and getattr(self, "_width", 0) >= 90:
+                room = max(0, min(72, self._width - 60))
+                detail = wait[1] if len(wait[1]) <= room else wait[1][:max(0, room - 1)] + "…"
+                if detail:
+                    left += f" [{th.faint}]{glyphs.MIDDOT} {_esc(detail)}[/]"
             right = (f"[{th.faint}]{tstr}[/]" + (f"  [{th.muted}]{_esc(eta_text)}[/]" if eta_text else "")
                      + f"  [{th.faint}]⇣{toks}[/]  [{th.err}][stop][/]")
             return self._pad_lr(left, right)
@@ -2619,6 +2635,46 @@ class TUI:
         """What the loop says it is doing. Used only when nothing more specific is streaming."""
         self._backend_activity = (str(state), str(label)[:80], str(detail or "")[:120])
         self._invalidate()
+
+    def model_wait(self, label, detail: str = "", *, since=None) -> None:
+        """The stall watcher: a model request has been silent (label) or is producing again (None)."""
+        if label:
+            try:
+                started = float(since) if since is not None else time.monotonic()
+            except (TypeError, ValueError):
+                started = time.monotonic()
+            self._model_wait = (style_mod.terminal_safe_text(str(label))[:80],
+                                style_mod.terminal_safe_text(str(detail or ""))[:120], started)
+        else:
+            self._model_wait = None
+        self._invalidate()
+
+    def callback_route(self):
+        """A runner that delivers a callback to the session whose worker thread asked for it.
+
+        Agent callbacks find their session through a thread-local; a notice from the stall
+        watcher's own thread would otherwise land on whichever session is on screen.
+        """
+        tls = getattr(self, "_tls", None)
+        session = getattr(tls, "session", None) if tls is not None else None
+
+        def run(fn):
+            if tls is None or session is None:
+                return fn()
+            sentinel = object()
+            previous = getattr(tls, "session", sentinel)
+            tls.session = session
+            try:
+                return fn()
+            finally:
+                if previous is sentinel:
+                    try:
+                        del tls.session
+                    except AttributeError:
+                        pass
+                else:
+                    tls.session = previous
+        return run
 
     _BETWEEN_ROUND_STATES = ("continuing", "verifying", "compacting", "hook")
 
@@ -2685,6 +2741,7 @@ class TUI:
     def on_text(self, chunk: str) -> None:
         if self._thinking:
             self._thinking = False
+        self._model_wait = None
         self._cur_tool = None
         self._backend_activity = None       # streaming outranks whatever the loop last announced
         self._flush_think()                 # finalize any reasoning above the answer
@@ -2694,6 +2751,7 @@ class TUI:
 
     def on_thinking(self, chunk: str) -> None:
         self._thinking = True
+        self._model_wait = None
         self._backend_activity = None
         if self._think_t0 is None:
             self._think_t0 = time.monotonic()   # start timing this reasoning block
@@ -2724,6 +2782,7 @@ class TUI:
             self._append_md(self._buf)
         self._buf = ""; self._think = ""
         self._streaming = False
+        self._model_wait = None
         self._cur_tool = None
 
     _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
@@ -2750,6 +2809,7 @@ class TUI:
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
         self._backend_activity = None       # the tool label below is the more specific truth
+        self._model_wait = None
         self._tool_count += 1
         summary = _arg_summary(args)
         safe_name = style_mod.terminal_safe_text(name)
@@ -4250,7 +4310,9 @@ class TUI:
         elif cmd == "set":
             from .config import DEFAULTS
             tunable = ("temperature", "top_p", "top_k", "min_p", "max_tokens", "context_size",
-                       "bash_timeout", "search_timeout", "request_timeout", "artifact_hostname")
+                       "bash_timeout", "search_timeout", "request_timeout",
+                       "model_first_token_timeout_s", "model_idle_timeout_s", "model_stall_notice_s",
+                       "model_stall_retries", "model_load_timeout_s", "artifact_hostname")
             sp = rest.split(maxsplit=1)
             if not sp:
                 cur = " · ".join(f"{k}={self.config.get(k, '') or '(default)'}" for k in tunable)
@@ -5097,6 +5159,7 @@ class TUI:
         self._cancel.clear()
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
+        self._model_wait = None
         self._turn_t0 = time.monotonic()
         def work():
             self._tls.session = sess
@@ -5116,6 +5179,7 @@ class TUI:
                 self.error(redact_text(str(exc), secret_values(self.config)))
             finally:
                 self._settle_running_tools()
+                self._model_wait = None
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 sess._worker_thread = None
@@ -6133,6 +6197,7 @@ class TUI:
         self._follow = True
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
+        self._model_wait = None
         self._turn_t0 = time.monotonic()
 
         def work():
@@ -6171,6 +6236,7 @@ class TUI:
                                 break
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
+                self._model_wait = None
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
@@ -6270,6 +6336,7 @@ class TUI:
         self._follow = True
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
+        self._model_wait = None
         self._turn_t0 = time.monotonic()
 
         def work() -> None:
@@ -6287,6 +6354,7 @@ class TUI:
             except Exception as exc:
                 self.error(f"{type(exc).__name__}: {exc}")
             finally:
+                self._model_wait = None
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 elapsed = time.monotonic() - self._turn_t0

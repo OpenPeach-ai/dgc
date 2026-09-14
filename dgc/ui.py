@@ -4,6 +4,21 @@
 Nothing in the agent core imports a concrete UI, so the terminal REPL (cli.py) and the headless
 JSON backend (headless.py) are just two implementations of the protocol below. This module
 documents that contract and holds the small formatters both implementations share.
+
+Two optional hooks sit outside the Protocol body (so every existing UI stays valid) and are looked
+up with ``getattr``:
+
+``model_wait(label, detail="", *, since=None)``
+    The stall watcher (dgc/model_watch.py) saw a model request go silent. ``label`` names it
+    ("No response from the model", "Loading the model", "The model stopped streaming", "Retrying
+    the model request"), ``since`` is the ``time.monotonic()`` when the silence began, and
+    ``label=None`` means output resumed. It is called from the watcher's own thread. Without the
+    hook the Agent falls back to ``turn_activity("waiting", label, detail)``.
+
+``callback_route()``
+    Called on the agent's worker thread; returns ``run(fn)`` that invokes ``fn`` as if on that
+    thread's UI session. A multi-session front end (the TUI) needs it so a watcher-thread notice
+    lands on the session that made the request.
 """
 from __future__ import annotations
 
