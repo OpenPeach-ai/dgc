@@ -736,6 +736,126 @@ class AgentDeliveryTests(unittest.TestCase):
         results = [m["content"] for m in agent.messages if m.get("role") == "tool"]
         self.assertTrue(results[0].startswith("exit code: 0"), results)
 
+    def test_a_wake_turns_sub_agent_never_raises_an_approval_card_outside_auto(self):
+        """A `task` the wake turn delegates inherits the refusal: no approval card, no question."""
+        from unittest import mock
+
+        class Recorder(FrontendUI):
+            def __init__(self):
+                super().__init__()
+                self.questions = []
+
+            def propose_options(self, question, options):
+                self.questions.append(question)
+                return options[0]
+
+        def run(mode):
+            tmp = tempfile.TemporaryDirectory(prefix="dgc-monitor-subagent-")
+            self.addCleanup(tmp.cleanup)
+            root = Path(tmp.name)
+            ui = Recorder()
+            agent = Agent(make_config(root, mode=mode), ui)
+            agent.config.permissions = {"allow": ["Task"], "ask": [], "deny": []}
+            self.addCleanup(agent.mcp.stop_all)
+            self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+            agent.session_file = sessions.new_path(root)
+            seen = {"child_tools": set()}
+
+            def fake_chat(me, tools_schema, effort, *, cancel=None, read_timeout=None,
+                          defer_text=False, request_reason="other"):
+                results = [m for m in me.messages if m.get("role") == "tool"]
+                if me.depth == 0:
+                    if not results:
+                        return call("task", description="react to the deploy",
+                                    prompt="CHILD: write child.txt")
+                    return ChatResult(content="delegated")
+                seen["child_tools"] |= {t["function"]["name"] for t in tools_schema or []}
+                if not results:
+                    return call("bash", command="echo from-child > child.txt")
+                if len(results) == 1:
+                    return call("propose_options", question="Which fix?", options=["a", "b"])
+                return ChatResult(content="child done")
+            hub = agent.monitors
+            hub.queue_background_exit("bg1", "deploy", 1, 2.0, "DEPLOY FAILED", hub.epoch)
+            with mock.patch.object(Agent, "_chat", fake_chat):
+                self.assertTrue(agent.run_monitor_turn(hub.take_pending()))
+            return agent, ui, root, seen
+
+        for mode in ("default", "acceptEdits"):
+            agent, ui, root, seen = run(mode)
+            self.assertEqual(ui.approvals, [], f"{mode}: no approval card inside a wake turn's child")
+            self.assertEqual(ui.questions, [], f"{mode}: and no question card")
+            self.assertIn(("bash", "events waiting — approve on your next prompt"), ui.denied, mode)
+            self.assertFalse((root / "child.txt").exists(), mode)
+            self.assertNotIn("propose_options", seen["child_tools"], mode)
+            self.assertFalse(agent._monitor_turn, "the flag ends with the wake turn")
+        agent, ui, root, _ = run("auto")
+        self.assertTrue((root / "child.txt").exists(), "auto mode runs the child's step normally")
+        self.assertEqual(ui.approvals, [])
+
+    def test_background_exit_notice_is_on_wherever_events_are_delivered(self):
+        """The real gating: an adaptive-profile request that never mentions watching still gets it."""
+        agent = self.agent(mode="auto")
+        self.assertEqual(agent.config.get("tool_profile", "adaptive"), "adaptive")
+        calls = scripted(agent, [call("bash", command="echo BUILD-OK; sleep 0.3", background=True),
+                                 ChatResult(content="started it")])
+        self.assertTrue(agent.run_turn("run the build in the background"))
+        self.assertNotIn("monitor", calls[0]["tools"], "the monitor tool itself stays intent-gated")
+        result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
+        self.assertIn("notified once when it exits", result)
+        bash = next(t for t in agent._tool_schemas() if t["function"]["name"] == "bash")
+        self.assertIn("notified once when it exits", bash["function"]["description"])
+        self.assertTrue(wait_for(lambda: agent.monitors.pending_count(), 5))
+        note = agent.monitors.take_pending()
+        self.assertEqual(note.batches[0].kind, "background_exit")
+        self.assertIn("BUILD-OK", note.batches[0].lines)
+
+        for label, change in (("no delivering frontend", lambda a: setattr(a, "ui", QuietUI())),
+                              ("sub-agent", lambda a: setattr(a, "depth", 1)),
+                              ("subscription engine",
+                               lambda a: a.config.data.update(subscription_engine="claude"))):
+            other = self.agent(mode="auto")
+            change(other)
+            self.assertFalse(other._monitor_delivery(), label)
+            out = other._handle_call(ToolCall("b1", "bash", {"command": "true", "background": True}))
+            self.assertNotIn("notified", out, label)
+            bash = next(t for t in other._tool_schemas() if t["function"]["name"] == "bash")
+            self.assertNotIn("notified once", bash["function"]["description"], label)
+
+    def test_models_without_native_tool_calls_get_events_mid_turn(self):
+        """Text-protocol <tool_results> rounds and screenshot rounds are the same safe boundary."""
+        from dgc.workflows import notice_kind
+        agent = self.agent(mode="auto")
+        hub = agent.monitors
+
+        def text_call(name, **arguments):
+            return ChatResult(content="", finish_reason="stop",
+                              tool_calls=[ToolCall(f"textcall_{time.monotonic_ns()}", name, arguments)])
+
+        def first(agent):
+            hub.queue_background_exit("bg5", "build", 0, 1.0, "BUILD-DONE", hub.epoch)
+            return text_call("bash", command="echo step")
+        calls = scripted(agent, [first, ChatResult(content="done")])
+        self.assertTrue(agent.run_turn("run the step"))
+        index = next(i for i, m in enumerate(agent.messages) if notice_kind(m))
+        self.assertTrue(str(agent.messages[index - 1]["content"]).startswith("<tool_results>"),
+                        agent.messages[index - 1])
+        self.assertEqual(agent.messages[index]["_dgc_notice"]["delivery"], "inline")
+        self.assertEqual(calls[1]["reason"], "monitor_event")
+        self.assertIn("BUILD-DONE", agent.messages[index]["content"])
+
+        hub.queue_background_exit("bg6", "build", 0, 1.0, "SHOT", hub.epoch)
+        agent.messages.append({"role": "user", "content": [
+            {"type": "text", "text": "<tool_results>\nThe screenshot(s) requested above follow."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]})
+        self.assertTrue(agent._drain_monitors(), "a screenshot round is a tool-round boundary")
+        self.assertTrue(notice_kind(agent.messages[-1]))
+        hub.queue_background_exit("bg7", "build", 0, 1.0, "LATER", hub.epoch)
+        self.assertFalse(agent._drain_monitors(), "a notice never follows another notice")
+        agent.messages.append({"role": "user", "content": "please look"})
+        self.assertFalse(agent._drain_monitors(), "a user's own prompt is not a tool round")
+        self.assertEqual(hub.pending_count(), 1)
+
     def test_a_wake_turn_is_not_goal_work(self):
         agent = self.agent(mode="auto")
         self.assertTrue(agent.set_goal("Ship the release", token_budget=10_000))

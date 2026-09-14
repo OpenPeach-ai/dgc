@@ -1422,6 +1422,13 @@ def _render_output(oid: str, entry: dict, args: dict, *, background: bool) -> st
 
 
 def bash(args: dict, ctx) -> str:
+    """Run a shell command. ``background: true`` starts it and returns a task id at once.
+
+    A background command takes the workspace mutation lease only while it spawns and releases it
+    as soon as the process exists (see _bash_background), so it never blocks later edits; it must
+    not be used to change the checkout. The model is told so in the start result rather than in
+    the always-sent schema, which stays inside the prompt-surface budget.
+    """
     command = str(args.get("command", ""))
     if not command.strip():
         return "error: bash command is empty"
@@ -1587,6 +1594,14 @@ def direct_bash(command: str, ctx) -> str:
 
 
 def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
+    """Start `bash(background:true)`: return a task id at once, keep its output for bash_output.
+
+    The workspace mutation lease is held only while the process is spawned and is released as soon
+    as it exists, so a dev server or watcher never blocks later edits and foreground commands. A
+    background command must therefore not be used to change the checkout (the sandbox, when on,
+    still confines it). With ``notify_exit`` (set by the agent where its frontend delivers monitor
+    events) the model is told once when the task exits on its own.
+    """
     _reap_background()
     bid = f"bg{next(_BG_N)}"
     from .scheduler import acquire_cancellable, workspace_mutation_lock
@@ -1681,7 +1696,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
     entry["thread"] = reader_thread
     reader_thread.start()
     return (f"started background task {bid}: {safe_command}\n"
-            f"Read its output with bash_output(id=\"{bid}\")."
+            f"Read its output with bash_output(id=\"{bid}\"). It holds no workspace lease once "
+            "started, so do not use it to change files."
             + (" You are notified once when it exits." if hub is not None else ""))
 
 

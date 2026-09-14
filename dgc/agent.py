@@ -31,7 +31,7 @@ from .redaction import (StreamingRedactor, contains_secret, redact_messages,
 from .skills import (discover_skills, matching_skill_names, explicit_skill_instructions,
                      format_skill_instructions)
 from .scheduler import acquire_cancellable, workspace_mutation_lock
-from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN
+from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN, plural
 from .presentation import RESPONSE_GUIDANCE
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
 
@@ -1566,23 +1566,33 @@ class Agent(GoalLifecycle):
                        if tool.get("function", {}).get("name") != "update_goal"]
         return self._monitor_schema_filter(schemas)
 
-    def _monitor_exposed(self) -> bool:
-        """Is the `monitor` tool offered on this request?
+    def _monitor_delivery(self) -> bool:
+        """Does this agent's frontend deliver monitor events and wake on them?
 
         Only a frontend that can deliver its events declares it, by setting ``monitor_wake_enabled``
         on its UI instance: the TUI and the editor backend. A class method would be inherited by
         `dgc -p --output-format json` (which exits after one turn), and a permissive test fixture's
         ``__getattr__`` must not count, hence the identity check on a real instance attribute.
+        Sub-agents and a delegated subscription CLI never deliver them.
         """
-        if self.depth != 0 or getattr(self.ui, "monitor_wake_enabled", False) is not True:
-            return False
-        if self.mode == "plan" or str(self.config.get("subscription_engine", "") or "").strip():
+        return (self.depth == 0 and getattr(self.ui, "monitor_wake_enabled", False) is True
+                and not str(self.config.get("subscription_engine", "") or "").strip())
+
+    def _monitor_exposed(self) -> bool:
+        """Is the `monitor` tool offered on this request?
+
+        Where events are delivered (_monitor_delivery), outside plan mode, under the full tool
+        profile or when the request asks to watch something. Background-bash exit notices do not
+        depend on this: they follow _monitor_delivery alone.
+        """
+        if not self._monitor_delivery() or self.mode == "plan":
             return False
         profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
         return profile == "full" or "monitor" in getattr(self, "_active_tool_intents", set())
 
     def _monitor_schema_filter(self, schemas: list[dict]) -> list[dict]:
         exposed = self._monitor_exposed()
+        notify_exit = self._monitor_delivery()
         hub = getattr(self, "monitors", None)
         running = bool(hub is not None and hub.has_running())
         wake_turn = bool(getattr(self, "_monitor_turn", False))
@@ -1596,7 +1606,7 @@ class Agent(GoalLifecycle):
             # Nobody is watching a turn DGC started on its own: no question, no goal verdict.
             if wake_turn and name in ("propose_options", "update_goal", "present_plan"):
                 continue
-            if name == "bash" and exposed:
+            if name == "bash" and notify_exit:
                 # Said only where it is true: this agent's frontend delivers the exit notice.
                 function = dict(tool["function"])
                 function["description"] = (str(function.get("description", ""))
@@ -2514,21 +2524,53 @@ class Agent(GoalLifecycle):
             before = len(str(message.get("content", "")))
             ids = ", ".join(str(i) for i in (notice.get("monitors") or [])[:4]) or "a monitor"
             message["content"] = (f"{NOTICE_OPEN}\n[earlier monitor events pruned: "
-                                  f"{int(notice.get('events') or 0)} events from {ids}]\n{NOTICE_CLOSE}")
+                                  f"{plural(int(notice.get('events') or 0), 'event')} from {ids}]\n"
+                                  f"{NOTICE_CLOSE}")
             message["_dgc_notice"] = {**notice, "items": [], "pruned": True}
             total -= before - len(message["content"])
+
+    def _after_tool_round(self) -> bool:
+        """Does the transcript end with the results of a tool round?
+
+        A native round ends with ``tool`` messages. A model without native tool calling gets its
+        results as one user message opening with ``<tool_results>`` (reminders fold into it), and a
+        browser screenshot follows a round as a user message whose first text part opens the same
+        way; a native round's reminders follow its tool messages as a ``<system-reminder>`` message.
+        A notice is never itself a round's end.
+        """
+        from .workflows import notice_kind
+
+        def opening(message) -> str:
+            content = message.get("content")
+            if isinstance(content, list):
+                first = next((part for part in content if isinstance(part, dict)
+                              and part.get("type") == "text"), None)
+                content = first.get("text") if first else ""
+            return content if isinstance(content, str) else ""
+        if not self.messages:
+            return False
+        last = self.messages[-1]
+        if last.get("role") == "tool":
+            return True
+        if last.get("role") != "user" or notice_kind(last):
+            return False
+        text = opening(last)
+        if text.startswith("<tool_results>"):
+            return True
+        return (text.startswith("<system-reminder>") and len(self.messages) > 1
+                and self.messages[-2].get("role") == "tool")
 
     def _drain_monitors(self) -> bool:
         """Fold pending monitor events into the running turn, between tool rounds.
 
-        Called only at the loop top right after a tool round (the last message is a tool result),
-        so a notice never sits beside another user message and never lands inside a final answer:
-        events that arrive while the model writes its answer wait and wake the session afterwards.
+        Called only at the loop top right after a tool round (_after_tool_round: native tool
+        results, a text-protocol <tool_results> message, or a screenshot round), so a notice never
+        lands inside a final answer or ahead of the user's own prompt: events that arrive while the
+        model writes its answer wait and wake the session afterwards.
         """
         hub = getattr(self, "monitors", None)
         if (hub is None or self.depth != 0 or self.cancelled.is_set() or self.stopping
-                or not self.messages or self.messages[-1].get("role") != "tool"
-                or not hub.pending_count()):
+                or not hub.pending_count() or not self._after_tool_round()):
             return False
         room = _MAX_TURN_NOTICE_CHARS - self._monitor_turn_notice_chars
         if room < 1_000:
@@ -3435,7 +3477,8 @@ class Agent(GoalLifecycle):
                 # A queued interjection is newer user intent, so let the model process it and
                 # require any resulting mutation to establish a fresh green state.
                 summary_only = False
-            if not summary_only and not held_final_messages and self._drain_monitors():
+            if (not summary_only and not held_final_messages and next_request_reason != "user_turn"
+                    and self._drain_monitors()):
                 # Only a plain tool round is relabelled; user_turn, retries and gates keep theirs.
                 if next_request_reason == "tool_result":
                     next_request_reason = "monitor_event"
@@ -4358,9 +4401,7 @@ class Agent(GoalLifecycle):
             target = self.exit_plan(choice)
             return f"Plan APPROVED. Plan mode exited; permission mode is now '{target}'. Execute the plan now."
 
-        if name == "monitor" and not (
-                self.depth == 0 and getattr(self.ui, "monitor_wake_enabled", False) is True
-                and not str(self.config.get("subscription_engine", "") or "").strip()):
+        if name == "monitor" and not self._monitor_delivery():
             # Only a frontend that delivers the events offers the tool; a call anywhere else would
             # start a process whose output nobody would ever read.
             return "error: the monitor tool is not available here; use bash with background:true"
@@ -4484,8 +4525,10 @@ class Agent(GoalLifecycle):
                 return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
 
         exec_args = dict(args)
-        if name == "bash" and args.get("background") and self._monitor_exposed():
-            exec_args["_dgc_notify_exit"] = True   # internal: this frontend delivers the exit notice
+        if name == "bash" and args.get("background") and self._monitor_delivery():
+            # Internal: this frontend delivers the exit notice. On wherever it can be delivered,
+            # whether or not this request offered the `monitor` tool itself.
+            exec_args["_dgc_notify_exit"] = True
         if external_paths:
             # Executors fail closed by default. This marker is internal and exists only after the
             # permission engine (or explicit auto mode) has approved this exact call.
@@ -4856,6 +4899,11 @@ class Agent(GoalLifecycle):
             else:
                 sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
             sub._metrics_parent = self
+            if getattr(self, "_monitor_turn", False):
+                # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
+                # for everything the turn delegates: the child refuses ASK steps and asks no question,
+                # plan or goal verdict either (auto mode still runs normally; see _handle_call).
+                sub._monitor_turn = True
             override = self._subagent_client(adef)
             if override is not None:
                 sub.client = override

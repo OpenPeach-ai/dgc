@@ -145,6 +145,10 @@ narrow rule only when the action arguments contain no detected credential.
   process-local result; oversized results can be searched literally or paged with `bash_output`
   without relying on a host `/tmp` path that may be invisible inside the sandbox. Background and
   retained-result handles are isolated to the originating agent session and expire after 30 minutes.
+  A background command (`bash` with `background: true`) takes the workspace mutation lease only
+  while it starts and releases it once the process exists, so a dev server or watcher never blocks
+  later edits and commands; do not use one to change files. In the terminal UI and the editor, the
+  model is told once when a background command exits on its own.
   An explicit terminal `!cmd` uses the same sandbox, bounded output, cancellation, checkout lease,
   and process-tree cleanup without asking the model to interpret the command.
 
