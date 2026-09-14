@@ -815,8 +815,9 @@ class MonitorHub:
         return (f'started monitor {mid} ("{description}"): {label}\n'
                 f"It {lifetime}. Events arrive as <monitor-events> notifications. Read retained "
                 f'output and stderr with bash_output(id="{mid}"); stop it with '
-                f'monitor_stop(id="{mid}"). Monitors end when this session ends, on /new, or when '
-                "DGC exits — they do not survive a restart. Do not use a monitor to change files.")
+                f'monitor_stop(id="{mid}"). Monitors end when this conversation is replaced or '
+                "closed (/clear, resuming another session, a rewind) or when DGC exits — they do "
+                "not survive a restart. Do not use a monitor to change files.")
 
     # ---- events ---------------------------------------------------------------------------------
     def _queue_batch(self, monitor: Monitor, batch: Batch) -> None:

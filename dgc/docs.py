@@ -1321,6 +1321,11 @@ The agent starts one with the `monitor` tool: a shell command and a short label.
 command prints to standard output becomes an event, and lines that arrive close together are
 delivered as one event.
 
+The tool is offered when your request asks DGC to watch or wait for something ("watch the build
+log", "tell me when the tests finish", "keep an eye on the server"), or on every request when
+`tool_profile` is `full`. Plan mode never offers it, and an ordinary request such as "run the test
+suite" does not bring it up on its own.
+
 - **While a turn runs,** events reach the model between its tool calls.
 - **When the chat is idle,** an event starts a short turn so the model can read it and act. The
   transcript marks that turn as started by a monitor, never as something you typed.
@@ -1346,8 +1351,12 @@ so it does not have to keep checking.
   each event appears in the transcript as a card.
 - The model can stop one itself with `monitor_stop`.
 
-Monitors belong to one chat. They stop on `/new`, `/clear`, resuming another session, a rewind, or
-when DGC exits, including when it is killed.
+Monitors belong to one chat. They stop when that chat is replaced or closed (`/clear`, resuming
+another session, a rewind, closing an agent in the terminal's agent list) and when DGC exits,
+including when it is killed. In the editor `/new` replaces the chat, so its monitors stop too. In
+the terminal `/new` opens another agent beside the current one: the earlier chat keeps its
+monitors, and they can still wake it, until you switch back and stop them with `/monitors stop` or
+close that agent.
 
 ## Wake-ups
 
@@ -1485,7 +1494,8 @@ are counted once, as its own.
   request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in
   the totals, and the report says so when there are any.
 - **OpenAI-compatible endpoints.** DGC asks these to include usage in the stream. An endpoint that
-  rejects the request is asked again without it and is not asked again for the rest of the session.
+  rejects the request is asked again without it and is not asked again until DGC restarts (the
+  editor's backend keeps that memory across every chat it runs).
   Its requests then show as unmetered rather than as zero tokens.
 - **Not counted:** turns delegated to a subscription CLI (Claude Code, Codex and the others) run in
   the vendor's own tool, so DGC never sees their token counts.
@@ -1494,8 +1504,10 @@ are counted once, as its own.
 
 Everything stays on this machine, in `~/.dgc/usage.sqlite` (readable only by you). No prompt or
 reply text is stored, and an endpoint is recorded by host and port only, never its full address,
-path or any credential. Rows older than 400 days are removed automatically. Delete the file at any
-time to start over; DGC creates a new one.
+path or any credential. Rows older than 400 days are removed automatically. To start over, quit
+DGC and your editor first (a running DGC keeps the file open and would go on counting into the
+deleted copy), then delete `usage.sqlite` together with its `usage.sqlite-wal` and
+`usage.sqlite-shm` companions; DGC creates a new one the next time it runs.
 """.strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions
@@ -1649,8 +1661,9 @@ Useful keys:
   so treat vendor output as sensitive. Exact file rewind snapshots remain byte-for-byte unchanged
   inside the owner-private session so `/rewind` cannot corrupt a file.
 - `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
-  skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
-  `full` to expose the whole execution catalog on every model request.
+  skill-install, memory, goal, delegation and background-monitor tools from explicit
+  turn/standing-goal intent (a monitor, for example, when you ask DGC to watch or wait for
+  something). Use `full` to expose the whole execution catalog on every model request.
 - `code_action` — **off by default.** When `true`, DGC advertises a `python` power tool that runs
   code in a **persistent per-session interpreter** (variables/imports survive across calls). See the
   **Python code-action** guide. It executes arbitrary code and is gated by the same approval path as

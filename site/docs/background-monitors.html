@@ -119,6 +119,7 @@
 <p>Some work is a wait: a build that takes minutes, a test watcher, a dev server, a deploy log. A monitor lets the agent start that command, carry on with something else, and hear about each line the command prints, instead of polling it or sitting idle until it finishes.</p>
 <div class="heading-row h2-row"><h2 id="how-it-works">How it works</h2><a class="anchor" href="#how-it-works" aria-label="Link to this section">#</a></div>
 <p>The agent starts one with the <code>monitor</code> tool: a shell command and a short label. Every line the command prints to standard output becomes an event, and lines that arrive close together are delivered as one event.</p>
+<p>The tool is offered when your request asks DGC to watch or wait for something (&quot;watch the build log&quot;, &quot;tell me when the tests finish&quot;, &quot;keep an eye on the server&quot;), or on every request when <code>tool_profile</code> is <code>full</code>. Plan mode never offers it, and an ordinary request such as &quot;run the test suite&quot; does not bring it up on its own.</p>
 <ul>
 <li><strong>While a turn runs,</strong> events reach the model between its tool calls.</li>
 <li><strong>When the chat is idle,</strong> an event starts a short turn so the model can read it and act. The transcript marks that turn as started by a monitor, never as something you typed.</li>
@@ -134,7 +135,7 @@
 <li><strong>Editor:</strong> a Monitors row above the prompt shows each running monitor with a Stop button, and each event appears in the transcript as a card.</li>
 <li>The model can stop one itself with <code>monitor_stop</code>.</li>
 </ul>
-<p>Monitors belong to one chat. They stop on <code>/new</code>, <code>/clear</code>, resuming another session, a rewind, or when DGC exits, including when it is killed.</p>
+<p>Monitors belong to one chat. They stop when that chat is replaced or closed (<code>/clear</code>, resuming another session, a rewind, closing an agent in the terminal&#x27;s agent list) and when DGC exits, including when it is killed. In the editor <code>/new</code> replaces the chat, so its monitors stop too. In the terminal <code>/new</code> opens another agent beside the current one: the earlier chat keeps its monitors, and they can still wake it, until you switch back and stop them with <code>/monitors stop</code> or close that agent.</p>
 <div class="heading-row h2-row"><h2 id="wake-ups">Wake-ups</h2><a class="anchor" href="#wake-ups" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>On or off.</strong> <code>monitor_wake</code> is on by default. Change it with <code>/monitors wake on|off</code>, with Settings → <strong>Wake on monitor events</strong> in the editor, or in <code>config.json</code>. When it is off, events wait for your next message.</li>

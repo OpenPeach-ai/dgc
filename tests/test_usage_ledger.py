@@ -710,6 +710,14 @@ class LedgerAggregationTests(_LedgerCase):
         self.assertIn("| Total | Count |", text)
         self.assertNotIn("day(s)", text)
 
+    def test_the_privacy_note_says_to_quit_dgc_before_deleting_the_ledger(self):
+        # A running DGC keeps its connection to the deleted file and goes on counting into it.
+        from dgc import docs
+        page = next(body for title, _summary, body in docs.DOCS if title == "Token usage")
+        self.assertNotIn("Delete the file at any\ntime to start over", page)
+        self.assertIn("quit\nDGC and your editor first", page)
+        self.assertIn("usage.sqlite-wal", page)
+
     def test_tui_usage_opens_the_same_report(self):
         from dgc.tui import TUI
         usage_ledger.record(provider="ollama", base_url="http://localhost:11434/v1", model="m",

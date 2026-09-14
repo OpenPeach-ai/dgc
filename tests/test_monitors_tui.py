@@ -310,6 +310,33 @@ class TuiMonitorTests(unittest.TestCase):
         self.assertFalse(hub.policy.paused)
 
 
+    def test_new_in_the_terminal_says_the_previous_agent_keeps_its_monitors(self):
+        # /new in the TUI opens another fleet agent; it does not replace the chat, so the earlier
+        # chat's monitors keep running (and can wake it). That is now said, not hidden.
+        ui = self.tui()
+        out = self.agent.monitors.start({"command": "sleep 30", "description": "keepalive",
+                                         "persistent": True}, self.agent.ctx)
+        self.assertTrue(out.startswith("started"), out)
+        self.assertNotIn("on /new", out, "the tool result no longer promises /new stops it")
+        created = ui._new_session()
+        self.assertIsNotNone(created, ui._flash_msg)
+        self.addCleanup(created.agent.mcp.stop_all)
+        self.addCleanup(lambda: created.agent.monitors.shutdown(wait=3.0))
+        self.assertIn("the previous agent still runs 1 monitor", ui._flash_msg)
+        self.assertEqual(len(self.agent.monitors.running()), 1)
+
+    def test_the_monitor_docs_match_the_terminal_and_the_gating(self):
+        from dgc import docs
+        pages = {title: " ".join(body.split()) for title, _summary, body in docs.DOCS}
+        monitors = pages["Background monitors"]
+        self.assertNotIn("They stop on `/new`", monitors)
+        self.assertIn("In the terminal `/new` opens another agent", monitors)
+        self.assertIn("watch or wait for something", monitors)
+        self.assertIn("`tool_profile` is `full`", monitors)
+        usage = pages["Token usage"]
+        self.assertNotIn("for the rest of the session", usage)
+        self.assertIn("until DGC restarts", usage)
+
     def _blocked_wake(self, ui, sess):
         entered = threading.Event()
 

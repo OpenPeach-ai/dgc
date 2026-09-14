@@ -4359,12 +4359,20 @@ class TUI:
 
         if name:
             self._name_session(sess, name)
+        previous = self.active if getattr(self, "_sessions", None) else None
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
         place = (f"isolated {sess.workspace_branch}" if kind != "shared"
                  else "non-Git shared checkout · writes serialized")
         note = f" · prior workspace unavailable: {attach_error}" if attach_error else ""
+        hub = getattr(getattr(previous, "agent", None), "monitors", None)
+        running = len(hub.running()) if hub is not None else 0
+        if running:
+            # The earlier agent stays alive beside this one, and so do its monitors: they can still
+            # wake it. Say so, rather than let a hidden chat keep spending turns on them.
+            note += (f" · the previous agent still runs {running} monitor"
+                     f"{'' if running == 1 else 's'} (switch back and /monitors stop)")
         self._flash(f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
                     f" · {len(self._sessions)} agents · {place}{note}")
         return sess
