@@ -10,13 +10,14 @@ never chooses its first option. A stopped plan remains unapproved.
 Questions (CLI 0.40.0, extension 0.25.0, editor protocol v14). A model asks with `propose_options`:
 1-4 separate decisions, each with 2-6 options (2-4 advised). The option it recommends comes first with
 its label ending "(Recommended)", and every option carries a one-sentence description. DGC turns the
-suffix into data and never reorders the list. A client always adds free text ("Something else…"), so an
+marker into data (also when a model writes it into the description instead) and never reorders the list. A client always adds free text ("Something else…"), so an
 "Other" option a model adds is dropped. Custom answers are bounded to 4,096 characters.
 
 - **Extension.** The question docks inside the composer frame in place of the text box; Stop, the mode
   and model pickers and the context meter stay, and the unsent draft comes back when the question closes.
-  The recommended option shows a neutral "Recommended" badge and is preselected: it holds the highlight
-  and the focus, so Enter or a click takes it. Nothing is sent without your action. A pick advances to the
+  The recommended option shows a neutral "Recommended" badge and is preselected: it is checked and holds
+  the highlight and the focus, so Enter, a click on it or Next takes it, and Skip sits beside Next as its
+  own button. Nothing is sent without your action. A pick advances to the
   next question and the answers are sent once every question is answered or skipped; Skip is explicit.
   Keys that arrive within 400 ms of the question opening are ignored, and the question takes focus only
   when the composer is empty or unfocused (otherwise it says "Press Tab to answer").
@@ -29,7 +30,8 @@ suffix into data and never reorders the list. A client always adds free text ("S
 - **ACP clients.** One permission request per question; the recommended option is named
   "(recommended)" and descriptions travel in the tool call's content.
 
-Closing a question (× or Esc) is its own outcome: DGC saves the batch's results, ends the turn with no
+Closing a question (× or Esc) is its own outcome: DGC saves the batch's results (calls after the question
+in the same batch do not run), ends the turn with no
 further model request, keeps queued prompts and monitors, and pauses an active goal with "You closed a
 question the goal needs answered". Stop keeps its meaning. Answered questions stay in the transcript as
 "Asked 2 questions" (or "Asked · SQLite file") inside the step, the same after a reload or resume.

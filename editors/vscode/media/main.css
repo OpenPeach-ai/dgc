@@ -1135,7 +1135,13 @@ body.ask-docked #tasks-panel { display: none; }
 .ask:focus { outline: none; }
 .ask:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -2px; }
 .ask-head { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 0 0 var(--sp-2) var(--sp-2); }
-.ask-q { flex: 1; min-width: 0; font: var(--w-med) var(--t-base)/1.45 var(--sans); color: var(--text-strong); overflow-wrap: anywhere; white-space: pre-wrap; }
+/* A long question scrolls inside six lines (or 22vh) so the options and the footer stay reachable. */
+.ask-q { flex: 1; min-width: 0; max-height: min(8.7em, 22vh); overflow-y: auto; overscroll-behavior: contain;
+  font: var(--w-med) var(--t-base)/1.45 var(--sans); color: var(--text-strong); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ask-q:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; border-radius: var(--r-sm); }
+/* The fit rule's last resort: the whole card scrolls and its parts keep their own heights. */
+.ask.ask-squeezed { overflow-y: auto; overscroll-behavior: contain; }
+.ask.ask-squeezed > * { flex-shrink: 0; }
 .ask-x, .ask-page { flex: none; width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0;
   border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .ask-x:hover, .ask-page:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
@@ -1166,23 +1172,29 @@ body.ask-docked #tasks-panel { display: none; }
 .ask-opt.hot .ask-desc { color: color-mix(in srgb, var(--muted) 80%, var(--text)); }
 .ask-arrow { padding-top: 4px; color: var(--muted); font-size: 14px; visibility: hidden; }
 .ask-opt.hot .ask-arrow, .ask-opt:hover .ask-arrow { visibility: visible; }
-.ask-other { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: center;
-  padding: var(--sp-1) var(--sp-1) 2px var(--sp-2); }
-.ask-pencil { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
+.ask-other { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-1) 2px var(--sp-2); }
+.ask-pencil { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
   border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--muted); font-size: 12px; }
-.ask-field { min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text);
+.ask-field { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); padding: 3px 0; overflow: hidden; }
 .ask-field:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; border-radius: var(--r-sm); }
 .ask-field::placeholder { color: var(--muted); }
-.ask-act { min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+.ask-act { flex: none; min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full);
   background: transparent; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .ask-act:hover:not(:disabled) { border-color: var(--text); }
 .ask-act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
 .ask-act.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Skip beside Next/Submit when the question already has a pick or words: quieter, still explicit. */
+.ask-skip { flex: none; min-height: var(--control); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-full); background: transparent;
+  color: var(--muted); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.ask-skip:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .ask-foot { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) 0;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .ask-pg { font-variant-numeric: tabular-nums; }
-.ask-error { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--err-text); }
+/* The shared olive alone reads about 4:1 on the dark input surface and 3.2:1 on a light one; mixed
+   toward the theme's strongest text it keeps its hue and clears 4.5:1 in both. */
+.ask-error { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+  color: color-mix(in srgb, var(--err-text) 60%, var(--text-strong)); }
 .ask-sending { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }
 .ask.sending .ask-opts, .ask.sending .ask-other, .ask.sending .ask-head, .ask.sending .ask-foot { opacity: .6; }
 .ask button:disabled { cursor: default; }
@@ -1218,11 +1230,15 @@ body.ask-docked #tasks-panel { display: none; }
   .ask-opt { border: 1px solid transparent; }
   .ask-opt.hot { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .ask-opt.hot * { color: HighlightText; }
+  /* As specific as the base lifts on the highlighted row, which would otherwise draw literal colours. */
+  .ask-opt.hot .ask-label, .ask-opt.hot .ask-desc, .ask-opt.hot .ask-arrow, .ask-opt.hot .ask-n { color: HighlightText; }
   .ask-opt.hot .ask-n { border-color: HighlightText; }
   .ask-badge { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
   .ask-opt.hot .ask-badge { background: HighlightText; color: Highlight; border-color: HighlightText; }
   .ask-n, .ask-pencil { border-color: CanvasText; }
   .ask-opt.checked .ask-n { forced-color-adjust: none; background: CanvasText; color: Canvas; border-color: CanvasText; }
+  .ask-opt.hot.checked .ask-n { background: HighlightText; color: Highlight; border-color: HighlightText; }
+  .ask-skip { color: ButtonText; }
   .ask-act { border-color: CanvasText; }
   .ask-act.primary { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
   .ask { border-bottom-color: CanvasText; }

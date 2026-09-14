@@ -123,12 +123,59 @@ test("the recommended option is badged and preselected wherever it sits; labels 
   assert.equal(rows[1].tabIndex, 0);
   assert.deepEqual(rows.map((row) => row.tabIndex), [-1, 0, -1], "one roving stop");
   assert.match(rows[1].getAttribute("aria-label"), /recommended/);
-  assert.equal(rows[1].getAttribute("aria-checked"), "false", "nothing is chosen until the reader acts");
+  assert.deepEqual(rows.map((row) => row.getAttribute("aria-checked")), ["false", "true", "false"], "the recommendation is preselected");
+  assert.ok(rows[1].classList.contains("checked"));
   assert.equal(p.doc.activeElement, rows[1]);
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "the pill takes the preselected pick");
+  assert.ok(p.card().querySelector(".ask-act").classList.contains("primary"));
+  assert.equal(p.card().querySelector(".ask-skip").hidden, false, "Skip stays, as its own button");
+  assert.deepEqual(p.responses(), [], "nothing is sent until the reader acts");
   p.advance(400);
+  p.key(rows[1], "ArrowUp");
+  assert.deepEqual(p.rows().map((row) => row.getAttribute("aria-checked")), ["false", "true", "false"], "arrows move focus, not the pick");
+  p.key(p.rows()[0], "ArrowDown");
   p.key(rows[1], "Enter");
   p.advance(150);
   assert.deepEqual(p.responses(), [{ type: "options_response", id: "r1", answers: { q1: { selected: [1], other: "" } } }]);
+  // A click on the pill of an untouched question takes the recommendation.
+  const pill = panel();
+  pill.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(pill, [STORAGE, q("q2", "Second?", [opt("A", "", true), opt("B")])]);
+  assert.equal(pill.card().querySelector(".ask-act").textContent, "Next");
+  pill.click(pill.card().querySelector(".ask-act"));
+  assert.equal(pill.card().querySelector(".ask-q").textContent, "Second?");
+  // Skip beside it clears the preselection and settles the question as skipped.
+  pill.click(pill.card().querySelector(".ask-skip"));
+  assert.deepEqual(pill.responses(), [{ type: "options_response", id: "r1", answers: {
+    q1: { selected: [0], other: "" }, q2: { selected: [], other: "" } } }]);
+  // Words replace the pick in a single choice: the check clears while there is text and returns without it.
+  const words = panel();
+  words.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(words, [STORAGE]);
+  const field = words.card().querySelector(".ask-field");
+  field.value = "Keep it in the settings file";
+  field.dispatchEvent(new words.dom.window.Event("input", { bubbles: true }));
+  assert.deepEqual(words.rows().map((row) => row.getAttribute("aria-checked")), ["false", "false"]);
+  field.value = "";
+  field.dispatchEvent(new words.dom.window.Event("input", { bubbles: true }));
+  assert.deepEqual(words.rows().map((row) => row.getAttribute("aria-checked")), ["true", "false"]);
+  field.value = "Keep it in the settings file";
+  field.dispatchEvent(new words.dom.window.Event("input", { bubbles: true }));
+  words.click(words.card().querySelector(".ask-act"));
+  assert.deepEqual(words.responses(), [{ type: "options_response", id: "r1", answers: { q1: { selected: [], other: "Keep it in the settings file" } } }]);
+  // A marker the model left in the description is the recommendation too, and is not shown as text.
+  const marked = panel();
+  marked.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(marked, [q("q1", "Database?", [opt("Postgres", "Feature rich, good for large scale"),
+    opt("SQLite", "Easy to deploy, best for small apps (Recommended)")])]);
+  assert.equal(marked.rows()[1].querySelector(".ask-desc").textContent, "Easy to deploy, best for small apps");
+  assert.equal(marked.rows()[1].querySelector(".ask-badge").textContent, "Recommended");
+  assert.equal(marked.rows()[1].getAttribute("aria-checked"), "true");
+  const trailing = panel();
+  trailing.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(trailing, [q("q1", "Database?", [opt("SQLite", "Easy to set up; recommended."), opt("JSON", "Quick to try, not recommended")])]);
+  assert.equal(trailing.rows()[0].querySelector(".ask-desc").textContent, "Easy to set up");
+  assert.deepEqual(trailing.rows().map((row) => !!row.querySelector(".ask-badge")), [true, false]);
   // Multi-select preselects nothing: row 1 holds the highlight, no box is checked.
   const m = panel();
   m.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
@@ -145,10 +192,10 @@ test("keyboard: digits, arrows into and out of the field, pages, Home/End, Escap
   ask(p, [STORAGE, q("q2", "Second?", [opt("A"), opt("B"), opt("C")])]);
   p.advance(400);
   const card = p.card();
-  const focusables = [...card.querySelectorAll("button, textarea")].filter((node) => node.tabIndex >= 0 && !node.disabled);
+  const focusables = [...card.querySelectorAll("button, textarea")].filter((node) => node.tabIndex >= 0 && !node.disabled && !node.hidden);
   assert.ok(focusables[0].classList.contains("ask-x"), "× comes first in the Tab order");
   assert.deepEqual(focusables.slice(1).map((node) => node.className.split(" ")[0]).filter((c) => c !== "ask-page"),
-    ["ask-opt", "ask-field", "ask-act"]);
+    ["ask-opt", "ask-field", "ask-skip", "ask-act"]);
   // → and ← page without answering; Home/End move within the list.
   p.key(p.rows()[0], "ArrowRight");
   assert.equal(p.card().querySelector(".ask-q").textContent, "Second?");
@@ -267,7 +314,8 @@ test("Sending… keeps the card; a rejection re-enables it; options_resolved rem
   const card = p.card();
   assert.ok(card.classList.contains("sending"));
   assert.equal(card.querySelector(".ask-sending").textContent, "Sending…");
-  assert.equal(card.querySelector(".ask-status").textContent, "Sending…");
+  assert.equal(p.doc.getElementById("announcer").textContent, "Sending your answers", "announced through the one live region");
+  assert.equal(card.querySelectorAll("[role=status], [role=alert], [aria-live]").length, 0, "the card adds no live region of its own");
   assert.ok([...card.querySelectorAll("button, textarea")].every((node) => node.disabled));
   p.click(p.rows()[1]);
   p.advance(150);
@@ -280,8 +328,13 @@ test("Sending… keeps the card; a rejection re-enables it; options_resolved rem
   assert.equal(p.card().classList.contains("sending"), false);
   assert.equal(p.card().querySelector(".ask-error").hidden, false);
   assert.equal(p.card().querySelector(".ask-error").textContent, "DGC could not use that answer.");
+  assert.equal(p.card().getAttribute("aria-describedby"), p.card().querySelector(".ask-error").id);
+  assert.equal(p.doc.getElementById("announcer").textContent, "DGC could not use that answer.");
   assert.ok([...p.card().querySelectorAll(".ask-opt")].every((node) => !node.disabled));
   assert.equal(p.doc.querySelectorAll("#log .sys.err").length, transcriptErrors, "the reason shows on the card, not in the transcript");
+  assert.equal(p.rows()[0].getAttribute("aria-checked"), "true", "the answer is kept");
+  assert.equal(p.doc.activeElement, p.rows()[0]);
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "one click resends");
   p.advance(400);
   p.click(p.rows()[1]);
   p.advance(150);
@@ -363,13 +416,39 @@ test("the answered state renders inside the tool card, identical live, replayed 
     assert.match(items[1].querySelector(".asked-a").textContent, /“also a size cap”/);
     assert.deepEqual(p.errors, []);
   }
-  // The open state is remembered per call when the card is drawn again (a history reload).
+  // The open state is remembered per turn and call when the card is drawn again (a history reload)...
+  const page = [{ type: "turn_start", turn_id: "h1", prompt: "go", kind: "prompt" }, call, { ...RESOLVED, id: null }, RESULT,
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: null }];
+  replayed.doc.querySelector('.tool[data-call-id="call_q"] .tool-toggle').click();
+  replayed.send({ type: "event", event: { type: "session", kind: "resumed", message_count: 3, session_id: "s1" } });
+  replayed.send({ type: "event", event: { type: "history", items: page } });
+  const reloaded = replayed.doc.querySelectorAll('.tool[data-call-id="call_q"]');
+  assert.equal(reloaded.length, 1);
+  assert.equal(reloaded[0].classList.contains("open"), true);
+  // ...but a later turn that reuses the call id (call_0 style) starts collapsed.
   live.doc.querySelector('.tool[data-call-id="call_q"] .tool-toggle').click();
   live.event({ type: "turn_start", turn_id: "t2", prompt: "again" });
   live.event(call);
   live.event(RESOLVED);
-  const again = [...live.doc.querySelectorAll('.tool[data-call-id="call_q"]')].at(-1);
-  assert.equal(again.classList.contains("open"), true);
+  const opens = [...live.doc.querySelectorAll('.tool[data-call-id="call_q"]')].map((card) => card.classList.contains("open"));
+  assert.deepEqual(opens, [true, false]);
+});
+
+test("keyboard focus returns to the composer when the answered card closes", () => {
+  const p = panel();
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(p, [STORAGE]);
+  p.advance(400);
+  assert.equal(p.doc.activeElement, p.rows()[0]);
+  p.key(p.rows()[0], "Enter");
+  p.advance(150);
+  assert.equal(p.responses().length, 1);
+  assert.equal(p.doc.activeElement, p.card(), "the card holds focus while its controls are disabled");
+  p.event({ type: "options_resolved", id: "r1", call_id: "call_q", outcome: "answered", questions: [STORAGE],
+    answers: { q1: { selected: [0], other: "" } } });
+  assert.equal(p.card(), null);
+  assert.equal(p.doc.activeElement, p.doc.getElementById("input"));
+  assert.deepEqual(p.errors, []);
 });
 
 test("answered variants: one question, skipped, dismissed, cancelled, text protocol with no call id", () => {

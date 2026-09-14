@@ -2,7 +2,7 @@
 // dark-modern/light-modern/hc) plus the named states, as PNGs to look at. Not part of `npm test`.
 //   PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright node test/render-options.mjs <out-dir>
 import { mkdirSync } from "node:fs";
-import { openScene } from "./support/options-scene.mjs";
+import { HEAVY_QUESTIONS, openScene } from "./support/options-scene.mjs";
 
 const out = process.argv[2] || "options-shots";
 mkdirSync(out, { recursive: true });
@@ -40,6 +40,11 @@ await capture("docked-hc-460x900", { width: 460, height: 900, theme: "hc" });
 await capture("answered-row-dark-300", { width: 300, height: 620, theme: "dark-modern", scenario: "answered", rails: false });
 await capture("answered-row-light-460", { width: 460, height: 620, theme: "light-modern", scenario: "answered", rails: false });
 await capture("sending-rejected-dark-460", { width: 460, height: 620, theme: "dark-modern", scenario: "rejected" });
+await capture("heavy-dark-300x480", { width: 300, height: 480, theme: "dark-modern", questions: HEAVY_QUESTIONS });
+await capture("heavy-dark-300x620", { width: 300, height: 620, theme: "dark-modern", questions: HEAVY_QUESTIONS });
+await capture("heavy-light-460x620", { width: 460, height: 620, theme: "light-modern", questions: HEAVY_QUESTIONS });
+await capture("forced-hc-460x900", { width: 460, height: 900, theme: "hc", forcedColors: true });
+await capture("sending-rejected-light-300x620", { width: 300, height: 620, theme: "light-modern", scenario: "rejected" });
 await capture("docked-q1-dark-900w", { width: 900, height: 700, theme: "dark-modern" });
 await capture("docked-q1-light-900w", { width: 900, height: 700, theme: "light-modern" });
 await capture("answered-row-dark-900w", { width: 900, height: 700, theme: "dark-modern", scenario: "answered", rails: false });

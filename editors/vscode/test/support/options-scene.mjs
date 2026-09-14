@@ -23,6 +23,13 @@ export const THEMES = {
     --vscode-disabledForeground:#A5A5A5; --vscode-list-activeSelectionBackground:#000000; --vscode-focusBorder:#F38518;`,
 };
 
+// The heaviest request the normaliser lets through: a 2000-character question and six options with
+// two-line labels and 400-character descriptions.
+const words = (n) => "The migration touches several tables and views, so the order of the steps matters. ".repeat(40).slice(0, n).trim();
+export const HEAVY_QUESTIONS = [{ id: "heavy", header: "Migration", multi_select: false, question: `${words(1999)}?`,
+  options: Array.from({ length: 6 }, (_, k) => ({ label: `Option ${k + 1}: a fairly long label that wraps at this width`.slice(0, 120),
+    description: words(400), recommended: k === 0 })) }];
+
 export const QUESTIONS = [
   { id: "storage", header: "Storage", question: "Which storage backend should settings sync use?", multi_select: false, options: [
     { label: "SQLite file", description: "One local file with transactions; nothing extra to run.", recommended: true },
@@ -53,11 +60,12 @@ export function panelHtml() {
 // Opens a page at width x height in `theme`, runs the scenario, and returns helpers.
 // scenario: "docked" (question 1), "multi" (question 2 with checks), "other" (typing free text),
 // "short" (docked at a short height), "answered" (resolved rows in the transcript), "rejected".
+// `questions` replaces the docked request's questions; `forcedColors` emulates Windows High Contrast.
 export async function openScene(browser, { width, height, theme = "dark-modern", scenario = "docked",
-  reducedMotion = false, rails = true } = {}) {
+  reducedMotion = false, rails = true, questions = QUESTIONS, forcedColors = false } = {}) {
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2,
-    reducedMotion: reducedMotion ? "reduce" : "no-preference" });
+    reducedMotion: reducedMotion ? "reduce" : "no-preference", forcedColors: forcedColors ? "active" : "none" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
@@ -97,7 +105,7 @@ export async function openScene(browser, { width, height, theme = "dark-modern",
     await send({ type: "tool_result", call_id: "call_s", name: "propose_options", output: "The user closed…", is_error: false, is_diff: false, diff: "" });
     await page.evaluate(() => document.querySelectorAll(".tool.asked-card .tool-toggle")[0].click());
   } else {
-    await send({ type: "options_request", id: "r1", call_id: "call_q", questions: QUESTIONS });
+    await send({ type: "options_request", id: "r1", call_id: "call_q", questions });
   }
   await page.waitForTimeout(450);          // past the arrival guard
   if (scenario === "multi") {
