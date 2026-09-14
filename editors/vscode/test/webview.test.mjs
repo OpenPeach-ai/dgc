@@ -1351,7 +1351,8 @@ test("a tool batch shows the work while it runs, bounded, with the rest one clic
   event({ type: "tool_result", call_id: "one", name: "Read", output: "source line\nsecond line" });
   event({ type: "tool_call", call_id: "two", name: "Bash", summary: "npm test" });
   const group = doc.querySelector(".tool-group");
-  assert.match(group.querySelector("summary").textContent, /Running npm test/);
+  assert.equal(group.querySelector("summary").textContent, "Running a command",
+    "the header summarises; the card holds the command");
   assert.equal(group.open, true, "work you cannot see is work you cannot check");
   const first = group.querySelector(".tool");
   assert.match(first.querySelector(".arg").textContent, /app\.ts/, "the target is on screen");
@@ -1489,9 +1490,9 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
   assert.equal(verb(), "Working", "the floor, and only until the backend says something");
   event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: "npm test" });
-  assert.equal(verb(), "Running a command · npm test");
+  assert.equal(verb(), "Running a command", "a tool step's argument belongs to its card, not the activity row");
   event({ type: "turn_activity", turn_id: "other", state: "thinking", label: "Thinking" });
-  assert.equal(verb(), "Running a command · npm test", "another turn's activity is not this turn's");
+  assert.equal(verb(), "Running a command", "another turn's activity is not this turn's");
   event({ type: "turn_activity", turn_id: "t1", state: "continuing", label: "Finishing open todos" });
   assert.equal(verb(), "Finishing open todos", "a gate continuing the loop says so");
   assert.match(doc.querySelector(".thinking .meta").textContent, /^\(\d+s/);
@@ -1506,6 +1507,71 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   assert.match(doc.querySelector(".thinking.done").textContent, /^Worked for \d+s$/);
   assert.deepEqual(errors, []);
   dom.window.close();
+});
+
+// The founder's screenshot: while a command ran, the panel printed it three times -- in the tool
+// group header, on the card, and again on the activity row at the bottom. The card is the one place
+// the argument belongs; the header summarises and the row says what kind of step is running.
+test("a running command is shown once, on its card, while the header and activity row summarise", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const command = "cd /home/founder/projects/app && npm test -- --runInBand --watch=false";
+  event({ type: "turn_start", turn_id: "t1", prompt: "Run the tests" });
+  event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: command.slice(0, 120) });
+  event({ type: "tool_call", call_id: "c1", name: "bash", args: { command }, summary: command });
+  const block = doc.querySelector(".msg.dgc");
+  const occurrences = block.textContent.split(command).length - 1;
+  assert.equal(occurrences, 1, "the command appears exactly once in the turn");
+  assert.match(block.querySelector(".tool .arg").textContent, /npm test -- --runInBand/, "and that once is the card");
+  const label = block.querySelector(".tool-group-label").textContent;
+  assert.equal(label, "Running a command");
+  assert.doesNotMatch(label, /npm|\/home/);
+  const verb = block.querySelector(".thinking .verb").textContent;
+  const meta = block.querySelector(".thinking .meta").textContent;
+  assert.equal(verb, "Running a command", "the activity row names the step");
+  assert.match(meta, /^\(\d+s(?: · \d+s)? · ↓ \d+ tok\)$/, "and keeps its clock and token count");
+  // A stalled model has no card on screen, so its detail stays on the row.
+  event({ type: "tool_result", call_id: "c1", name: "bash", output: "ok", is_error: false, is_diff: false });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting for the model",
+          detail: "qwen2.5:14b at 127.0.0.1 · no reply for 45s+" });
+  assert.equal(block.querySelector(".thinking .verb").textContent,
+    "Waiting for the model · qwen2.5:14b at 127.0.0.1 · no reply for 45s+");
+  assert.equal(block.querySelector(".tool-group-label").textContent, "Ran 1 command", "finished keeps the past tense");
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("a running tool group reads as a present-tense sentence built like the finished one", () => {
+  const { errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const label = () => doc.querySelector(".tool-group-label").textContent;
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  const call = (id, name, summary = "") => event({ type: "tool_call", call_id: id, name, args: {}, summary });
+  const done = (id, name) => event({ type: "tool_result", call_id: id, name, output: "ok", is_error: false, is_diff: false });
+  call("r1", "read_file", "one.py");
+  assert.equal(label(), "Reading a file");
+  call("r2", "read_file", "two.py"); call("r3", "read_file", "three.py");
+  assert.equal(label(), "Reading 3 files");
+  assert.doesNotMatch(label(), /one\.py|two\.py|three\.py/);
+  for (const id of ["r1", "r2", "r3"]) done(id, "read_file");
+  assert.equal(label(), "Read 3 files");
+  call("e1", "edit_file", "a.py"); call("e2", "edit_file", "b.py"); call("b1", "bash", "npm test");
+  assert.equal(label(), "Editing 2 files and running a command", "only what is running now");
+  for (const [id, name] of [["e1", "edit_file"], ["e2", "edit_file"], ["b1", "bash"]]) done(id, name);
+  assert.equal(label(), "Read 3 files, edited 2 files and ran 1 command", "the finished sentence is unchanged");
+  call("g1", "grep", "clamp");
+  assert.equal(label(), "Searching code");
+  done("g1", "grep");
+  call("t1", "todo");
+  assert.equal(label(), "Updating plan", "a tool with its own verb keeps it");
+  done("t1", "todo");
+  call("m1", "mcp__docs__search", "query");
+  assert.equal(label(), "Calling an MCP tool");
+  done("m1", "mcp__docs__search");
+  call("u1", "mystery_tool"); call("u2", "other_tool");
+  assert.equal(label(), "Using 2 tools");
+  assert.deepEqual(errors, []);
 });
 
 test("a backend restart that is recovering does not relabel an answered turn as failed", () => {

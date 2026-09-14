@@ -2590,7 +2590,7 @@ class TUI:
             if self._streaming:
                 act = "Responding"
             elif self._cur_tool:
-                act = self._cur_tool            # "Run npm test" · "Read x.py" · "Search …"
+                act = self._cur_tool            # "Running a command": the tool block holds the argument
             elif self._thinking:
                 act = "Thinking"
             elif self._between_rounds():
@@ -2753,9 +2753,12 @@ class TUI:
         self._tool_count += 1
         summary = _arg_summary(args)
         safe_name = style_mod.terminal_safe_text(name)
-        verb = self._TOOL_VERB.get(name, name)          # bottom status reads "Run npm test", "Read x.py"
-        verb = style_mod.terminal_safe_text(verb)
-        self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
+        # The status line names the step ("Running a command…") and never its argument: the tool
+        # block this appends to the transcript already shows the command or path, and printing it
+        # again on the status line under it only repeated what is on screen (the editor's activity
+        # row follows the same rule).
+        from .ui import activity_verb
+        self._cur_tool = style_mod.terminal_safe_text(activity_verb(name))[:48]
         # ONE stateful block for the whole step: header + result together, live accent rail while
         # it runs. tool_result fills it in. `running` drives the wave; `out`/`diff` are attached on finish.
         self.blocks.append({"kind": "tool", "name": safe_name, "route_name": name,

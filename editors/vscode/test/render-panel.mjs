@@ -8,6 +8,7 @@
 //   npm run shot -- /tmp/tip.png --tip=#btn-add        a hover label
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
 //   npm run shot -- /tmp/tasks.png --tasks [--light]   the Tasks rail row (+ -expanded.png, -long.png)
+//   npm run shot -- /tmp/cmd.png --command [--light]   a command mid-run, shown once (+ -waiting.png)
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -353,6 +354,52 @@ if (process.argv.includes("--steps")) {
   await page.waitForTimeout(300);
   await page.screenshot({ path: out, fullPage: false });
   console.log("shot:", out); await browser.close(); process.exit(0);
+}
+if (process.argv.includes("--command")) {
+  // Mid-command: a long bash command is running. It must be on screen exactly once, on its card;
+  // the tool group header and the activity row summarise ("Running a command") and keep their
+  // clocks and tokens. Writes <out>.png and <out>-waiting.png (a stalled model, whose detail has no
+  // card to live on and so stays on the activity row). --light paints a light host theme.
+  const out = process.argv[2] || "/tmp/command.png";
+  if (process.argv.includes("--light")) {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
+      --vscode-input-background:#FFFFFF; --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
+      --vscode-descriptionForeground:#616161; --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; }` });
+  }
+  const command = "cd /home/founder/projects/release-gate && npm test -- --runInBand --watch=false";
+  await send({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: command });
+  await send({ type: "tool_call", call_id: "c4", name: "bash", args: { command }, summary: command });
+  await page.waitForTimeout(1300);            // let the turn and step clocks tick past zero
+  const probe = () => page.evaluate((command) => {
+    const block = document.querySelector(".msg.dgc");
+    const visible = (node) => node && getComputedStyle(node).display !== "none" && node.getBoundingClientRect().height > 0;
+    return {
+      occurrences: block.innerText.split(command).length - 1,
+      cardHasIt: block.querySelector('.tool[data-status="running"] .arg')?.textContent.includes(command) || false,
+      cardVisible: visible(block.querySelector('.tool[data-status="running"]')),
+      header: block.querySelector(".tool-group-label").textContent,
+      verb: block.querySelector(".thinking .verb").textContent,
+      meta: block.querySelector(".thinking .meta").textContent,
+    };
+  }, command);
+  const running = await probe();
+  console.log("RUNNING " + JSON.stringify(running));
+  await page.screenshot({ path: out, fullPage: false });
+  await send({ type: "tool_result", call_id: "c4", name: "bash", output: "3 passing, 0 failing" });
+  await send({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting for the model",
+               detail: "qwen3.8:27b at 127.0.0.1 · no reply for 45s+" });
+  await page.waitForTimeout(300);
+  const waiting = await probe();
+  console.log("WAITING " + JSON.stringify(waiting));
+  await page.screenshot({ path: out.replace(/\.png$/, "-waiting.png"), fullPage: false });
+  const ok = running.occurrences === 1 && running.cardHasIt && running.cardVisible
+    && running.header === "Running a command" && running.verb === "Running a command"
+    && /^\(\d+s(?: · \d+s)? · ↓ \d+ tok\)$/.test(running.meta)
+    && waiting.verb === "Waiting for the model · qwen3.8:27b at 127.0.0.1 · no reply for 45s+"
+    && /^Read 1 file, edited 1 file, created 1 file and ran 1 command$/.test(waiting.header);
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
 }
 if (process.argv.includes("--tasks")) {
   // The session checklist is a row in the composer rail, directly above the goal row, with the

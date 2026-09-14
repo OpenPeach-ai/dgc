@@ -716,9 +716,14 @@
     const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
     turn.act.classList.toggle("waiting-input", waiting);
     const activity = turn.activity;
+    // A tool step's detail is its argument (the command, the path), and that tool's card is already
+    // on screen holding it: the row says only what kind of step is running, beside the clocks and
+    // tokens. Detail stays for states with no card to show it, such as a stalled model
+    // ("<model> at <host> · no reply for 45s+"). Decided here, so it holds for any CLI.
+    const detail = activity && activity.state !== "tool" ? activity.detail : "";
     verb.textContent = waiting ? "waiting for your input"
       : turn.handoff ? "generating handoff…"
-        : activity ? activity.label + (activity.detail ? ` · ${activity.detail}` : "")
+        : activity ? activity.label + (detail ? ` · ${detail}` : "")
           : "Working";
     if (turn.t0 == null) { meta.textContent = ""; return; }   // a replayed turn has no clock
     const now = Date.now();
@@ -1201,6 +1206,49 @@
     turn.reasonEl = null;
   }
 
+  // Say what the cards did (or are doing) in a sentence, the way a colleague would: "Read 5 files
+  // and searched code", not a tally of function names. Counts only where the number tells you
+  // something. The present tense uses the same buckets, so a running header and the finished one
+  // it becomes read as the same sentence in two tenses.
+  const TOOL_BUCKET = {
+    read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
+    code_intel: "mapped", write_file: "created", create_file: "created",
+    edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
+    bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
+  };
+  function toolSentence(cards, tense) {
+    const counts = Object.create(null);
+    for (const card of cards) {
+      const key = TOOL_BUCKET[canonicalTool(card.dataset.toolName)] || "other";
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    const past = tense !== "present";
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    // The present tense reads "a file" for one: "Reading a file", not "Reading 1 file".
+    const some = (n, one, many) => (past ? plural(n, one, many) : n === 1 ? `a ${one}` : `${n} ${many}`);
+    // One running tool DGC has a specific verb for ("Updating plan", "Delegating") keeps it.
+    const lone = !past && counts.other === 1
+      ? cards.find((card) => !TOOL_BUCKET[canonicalTool(card.dataset.toolName)]) : null;
+    const loneCopy = lone && TOOL_COPY[canonicalTool(lone.dataset.toolName)];
+    const otherPresent = loneCopy ? loneCopy[0].toLowerCase()
+      : lone && String(lone.dataset.toolName).startsWith("mcp__") ? "calling an MCP tool"
+        : `using ${some(counts.other || 0, "tool", "tools")}`;
+    const phrases = [
+      counts.read && `${past ? "read" : "reading"} ${some(counts.read, "file", "files")}`,
+      counts.edited && `${past ? "edited" : "editing"} ${some(counts.edited, "file", "files")}`,
+      counts.created && `${past ? "created" : "creating"} ${some(counts.created, "file", "files")}`,
+      counts.ran && `${past ? "ran" : "running"} ${some(counts.ran, "command", "commands")}`,
+      counts.searched && (past ? "searched code" : "searching code"),
+      counts.mapped && (past ? "mapped the project" : "mapping the project"),
+      counts.looked && `${past ? "looked at" : "looking at"} ${some(counts.looked, "page", "pages")}`,
+      counts.web && (past ? "searched the web" : "searching the web"),
+      counts.other && (past ? `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
+    ].filter(Boolean);
+    const sentence = phrases.length > 1
+      ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
+      : (phrases[0] || (past ? "Worked" : "Working"));
+    return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  }
   function refreshToolGroup(group) {
     if (!group) return;
     const cards = [...group.querySelectorAll(".tool")];
@@ -1208,44 +1256,14 @@
     const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status));
     const summary = group.querySelector(".tool-group-label");
     group.classList.toggle("running", running.length > 0);
-    if (running.length) {
-      const card = running.at(-1);
-      summary.textContent = `${toolCopy(card.dataset.toolName).present} ${card.dataset.summary || ""}`.trim();
-    } else {
-      // Say what happened in a sentence, the way a colleague would: "Read 5 files and searched
-      // code", not a tally of function names. Counts only where the number tells you something.
-      const counts = Object.create(null);
-      const bucket = {
-        read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
-        code_intel: "mapped", write_file: "created", create_file: "created",
-        edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
-        bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
-      };
-      for (const card of cards) {
-        const key = bucket[canonicalTool(card.dataset.toolName)] || "other";
-        counts[key] = (counts[key] || 0) + 1;
-      }
-      const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-      const phrases = [
-        counts.read && `read ${plural(counts.read, "file", "files")}`,
-        counts.edited && `edited ${plural(counts.edited, "file", "files")}`,
-        counts.created && `created ${plural(counts.created, "file", "files")}`,
-        counts.ran && `ran ${plural(counts.ran, "command", "commands")}`,
-        counts.searched && "searched code",
-        counts.mapped && "mapped the project",
-        counts.looked && `looked at ${plural(counts.looked, "page", "pages")}`,
-        counts.web && "searched the web",
-        counts.other && `used ${plural(counts.other, "tool", "tools")}`,
-      ].filter(Boolean);
-      let sentence = phrases.length > 1
-        ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
-        : (phrases[0] || "Worked");
-      sentence = sentence.charAt(0).toUpperCase() + sentence.slice(1);
-      if (failures.length) {
-        sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
-      }
-      summary.textContent = sentence;
+    // Running, the header says what is happening in the present tense ("Running a command",
+    // "Editing 2 files and running a command") and never repeats a card's argument: the card
+    // below holds the command or path, and the header used to print it a second time.
+    let sentence = running.length ? toolSentence(running, "present") : toolSentence(cards, "past");
+    if (!running.length && failures.length) {
+      sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
+    summary.textContent = sentence;
     if (failures.length) group.open = true;
   }
   function appendTool(card) {
