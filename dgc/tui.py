@@ -271,6 +271,17 @@ class AgentSession:
         self.draft = ""                    # unsent composer text, restored when you switch back
         self.created = time.monotonic()
         self.last_activity = time.monotonic()
+        # Background monitors. Reader threads only append to the inbox; the UI loop drains it into
+        # blocks and decides wake-ups, so no monitor callback ever touches the transcript directly.
+        from collections import deque
+        self._monitor_inbox: deque = deque()
+        self._monitor_inbox_lock = threading.Lock()
+        self._wake_turn = False            # this session's running turn was started by a monitor
+        self._wake_yield = False           # ...and is stopping because the user sent a message
+        self._after_wake_command = ""      # a command typed during that turn, run once it ends
+        binder = getattr(ui, "_bind_session_monitors", None)
+        if callable(binder):
+            binder(self)
 
     @property
     def name(self) -> str | None:
@@ -363,6 +374,9 @@ class TUI:
         self._tls = threading.local()      # per-thread: which session a worker thread's turn belongs to
         self._aux_lock = threading.Lock()  # title/suggestion calls serialize across the whole fleet
         self.agent.ui = self               # the agent calls back into this TUI
+        # Exposes the `monitor` tool: this frontend delivers monitor events and wakes on them.
+        self.monitor_wake_enabled = True
+        self._draft_changed_at = 0.0
 
         self._start = time.monotonic()
         self.deny_reason = ""              # set when the user denies a tool "with a reason"
@@ -1023,6 +1037,266 @@ class TUI:
         self._terminal_notification(title, body)
         self._flash(f"{glyphs.DIAMOND} {body}")
 
+    # ------------------------------------------------------------ background monitors ---
+    _WAKE_DRAFT_HOLD_S = 30.0              # a composer draft touched this recently holds wakes off
+
+    def _bind_session_monitors(self, sess: "AgentSession") -> None:
+        """Route one session's monitor callbacks into that session's inbox (never another's)."""
+        hub = getattr(getattr(sess, "agent", None), "monitors", None)
+        if hub is not None:
+            hub.listener = lambda kind, payload, target=sess: self._on_monitor(target, kind, payload)
+
+    def _on_monitor(self, sess: "AgentSession", kind: str, payload: dict) -> None:
+        """Reader threads and the turn worker call this. It only queues; the UI loop renders."""
+        with sess._monitor_inbox_lock:
+            if len(sess._monitor_inbox) < 512:
+                sess._monitor_inbox.append((kind, payload))
+        self._invalidate()
+
+    def _monitor_event_block(self, batch) -> dict:
+        safe = style_mod.terminal_safe_text
+        lines = [safe(line) for line in batch.lines]
+        if batch.kind != "output":
+            head = lines[0] if lines else "ended"
+            summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · {head}'
+            lines = lines[1:]
+        else:
+            summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · event {batch.event_index}'
+            if batch.omitted_lines:
+                lines.append(f"… {batch.omitted_lines} more lines — /monitors show {batch.monitor_id}")
+        return {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
+                "call_id": None, "summary": summary[:200], "running": False, "error": False,
+                "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
+
+    def _service_monitors(self) -> bool:
+        """UI-loop tick: render queued monitor callbacks and start due wake-ups. O(sessions)."""
+        changed = False
+        th = None
+        for sess in list(getattr(self, "_sessions", None) or ()):
+            inbox_lock = getattr(sess, "_monitor_inbox_lock", None)
+            if inbox_lock is None:
+                continue
+            with inbox_lock:
+                items = list(sess._monitor_inbox)
+                sess._monitor_inbox.clear()
+            for kind, payload in items:
+                th = th or style_mod.theme()
+                if kind == "started":
+                    sess.blocks.append(self._rich(
+                        f"[{th.faint}]◉ monitor {_esc(payload.get('id', ''))} started · "
+                        f"{_esc(payload.get('description', ''))}[/]"))
+                    changed = True
+                elif kind == "ended":
+                    sess.blocks.append(self._rich(
+                        f"[{th.faint}]◉ monitor {_esc(payload.get('id', ''))} · "
+                        f"{_esc(payload.get('message', ''))}[/]"))
+                    changed = True
+                elif kind == "delivered":
+                    notification = payload.get("notification")
+                    for batch in getattr(notification, "batches", []):
+                        sess.blocks.append(self._monitor_event_block(batch))
+                    changed = True
+                elif kind == "pending":
+                    changed = True
+            if items and sess._follow:
+                sess._scroll_off = 0
+            deferred = getattr(sess, "_after_wake_command", "")
+            if (deferred and sess is self.active and not sess._turn.is_set()
+                    and not (sess._worker_thread and sess._worker_thread.is_alive())):
+                sess._after_wake_command = ""
+                self._dispatch_composer_text(deferred)
+                changed = True
+                continue
+            if self._maybe_wake_session(sess):
+                changed = True
+        return changed
+
+    def _wake_blocked(self, sess: "AgentSession") -> bool:
+        hub = getattr(sess.agent, "monitors", None)
+        if hub is None or sess._closing or sess._turn.is_set() or sess._req is not None:
+            return True
+        worker = sess._worker_thread
+        if worker is not None and worker.is_alive():
+            return True
+        if (str(sess.config.get("subscription_engine", "") or "").strip()
+                or sess.agent.mode == "plan"):
+            return True
+        if (sess is self.active and getattr(self, "input_buf", None) is not None
+                and self.input_buf.text.strip()
+                and time.monotonic() - getattr(self, "_draft_changed_at", 0.0) < self._WAKE_DRAFT_HOLD_S):
+            return True                        # the user is writing: do not start a turn under them
+        return False
+
+    def _maybe_wake_session(self, sess: "AgentSession") -> bool:
+        hub = getattr(getattr(sess, "agent", None), "monitors", None)
+        if hub is None or not hub.pending_count() or self._wake_blocked(sess):
+            return False
+        if hub.policy.ready_in(sess.config) != 0:
+            return False
+        notification = hub.take_pending()
+        if notification is None:
+            return False
+        prior = getattr(self._tls, "session", None)
+        self._tls.session = sess
+        try:
+            self._submit_monitor_wake(sess, notification)
+        finally:
+            if prior is None:
+                try:
+                    del self._tls.session
+                except AttributeError:
+                    pass
+            else:
+                self._tls.session = prior
+        return True
+
+    def _submit_monitor_wake(self, sess: "AgentSession", notification) -> None:
+        """Start a turn on monitor events: shown as a monitor band, never as a typed prompt."""
+        hub = sess.agent.monitors
+        hub.policy.begin_wake()
+        sess.last_activity = time.monotonic()
+        sess._cancel.clear()
+        sess._tool_count = 0
+        sess._wake_turn, sess._wake_yield = True, False
+        sess.blocks.append({"kind": "user", "text": style_mod.terminal_safe_text(notification.label),
+                            "tag": "monitor · woke on an event"})
+        for batch in notification.batches:
+            sess.blocks.append(self._monitor_event_block(batch))
+        if sess._follow:
+            sess._scroll_off = 0
+        sess._turn.set()
+        sess._backend_activity = None
+        sess._turn_t0 = time.monotonic()
+        if sess is not self.active:
+            self._flash(f"⧉ {sess.name or 'agent'} woke on a monitor event")
+
+        def work():
+            self._tls.session = sess
+            succeeded = False
+            try:
+                self._foreground_aux_barrier()
+                succeeded = sess.agent.run_monitor_turn(notification, reset_cancel=False) is not False
+            except Exception as e:
+                self.error(f"{type(e).__name__}: {e}")
+            finally:
+                take_deferred = getattr(sess.agent, "take_deferred_steers", None)
+                deferred = take_deferred() if callable(take_deferred) else []
+                if deferred:
+                    self._queue_followup(sess, "\n".join(deferred), shown=True, front=True)
+                self._flush_text()
+                self._settle_running_tools()
+                sess._turn.clear()
+                yielded = sess._wake_yield
+                cancelled = sess._cancel.is_set()
+                hub.policy.finish_wake(sess.config, ok=succeeded,
+                                       cancelled=cancelled and not yielded, yielded=yielded)
+                sess._wake_turn = sess._wake_yield = False
+                sess.last_activity = time.monotonic()
+                elapsed = time.monotonic() - sess._turn_t0
+                th = style_mod.theme()
+                verb = ("yielded to your message" if yielded else "stopped · wake-ups paused"
+                        if cancelled else "done" if succeeded else "failed")
+                self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} monitor turn {verb} · "
+                                        f"{elapsed:.0f}s[/]"))
+                # No turn-end notification, no pane pause, no title or suggestion: nobody asked.
+                self._invalidate()
+                if sess._closing:
+                    self._finalize_session_workspace(sess, "fleet session stopped")
+                    sess._worker_thread = None
+                    return
+                queued = self._pop_followup(sess) if (yielded or not cancelled) else None
+                sess._worker_thread = None
+                if queued is not None:
+                    queued_text, shown = queued
+                    self._submit(queued_text, echo=not shown)
+
+        sess._worker_thread = threading.Thread(
+            target=work, name=f"dgc-monitor-turn-{sess.id}", daemon=True)
+        sess._worker_thread.start()
+
+    def _running_monitor_count(self) -> int:
+        hub = getattr(getattr(self, "agent", None), "monitors", None)
+        try:
+            return len(hub.running()) if hub is not None else 0
+        except Exception:
+            return 0
+
+    def _monitor_status_text(self) -> str:
+        hub = getattr(getattr(self, "agent", None), "monitors", None)
+        if hub is None:
+            return ""
+        running = hub.running()
+        pending = hub.pending_events()
+        if not running and not pending:
+            return ""
+        parts = []
+        if running:
+            first = running[0]
+            count = len(running)
+            parts.append(f"{count} monitor{'s' if count != 1 else ''} · {first.id} "
+                         f"{first.description} · {first.events_total} events")
+        if pending:
+            parts.append(f"{pending} event{'s' if pending != 1 else ''} waiting")
+        if hub.policy.paused:
+            parts.append("wake paused · /monitors wake on")
+        return " · ".join(parts)
+
+    def _tui_monitors(self, rest: str) -> None:
+        """/monitors [stop ID|all · wake on|off · show ID]"""
+        th = style_mod.theme()
+        hub = self.agent.monitors
+        parts = rest.split()
+        action = parts[0].lower() if parts else "list"
+        if action == "stop" and len(parts) == 2:
+            if parts[1] == "all":
+                stopped = hub.stop_all("stopped")
+                self._flash(f"stopping {len(stopped)} monitor{'s' if len(stopped) != 1 else ''}"
+                            if stopped else "no running monitors")
+            elif hub.stop(parts[1], "stopped"):
+                self._flash(f"stopping {parts[1]}")
+            else:
+                self._flash(f"no running monitor {parts[1]}")
+            self._invalidate()
+            return
+        if action == "wake" and len(parts) == 2 and parts[1].lower() in ("on", "off"):
+            on = parts[1].lower() == "on"
+            self.config.set("monitor_wake", on)
+            if on:
+                hub.policy.resume()
+            self._flash("monitor wake-ups on" if on else
+                        "monitor wake-ups off · events wait for your next prompt")
+            return
+        if action == "show" and len(parts) == 2:
+            from .tools import bash_output
+            out = bash_output({"id": parts[1]}, self.agent.ctx)
+            self.blocks.append({"kind": "tool", "name": "bash_output", "route_name": "bash_output",
+                                "call_id": None, "summary": parts[1], "running": False,
+                                "error": out.startswith("no bash output"),
+                                "out": style_mod.terminal_safe_text(out), "diff": None, "exp": False,
+                                "lines": len(out.splitlines())})
+            self._scroll_off = 0
+            self._invalidate()
+            return
+        if action != "list":
+            self._flash("usage: /monitors [stop ID|all · wake on|off · show ID]")
+            return
+        items = hub.snapshot()
+        if not items:
+            self._flash("no monitors in this session")
+            return
+        rows = []
+        for item in items:
+            state = item["state"] + (f" ({item.get('end_reason')})" if item.get("end_reason") else "")
+            rows.append(f"  [{th.accent}]{_esc(item['id'])}[/]  {_esc(item['description'])}  "
+                        f"[{th.faint}]{_esc(state)} · {item['events']} events · "
+                        f"{_esc(item['command'][:80])}[/]")
+        wake = ("paused" if hub.policy.paused else
+                "on" if self.config.get("monitor_wake", True) else "off")
+        self._append(self._rich("background monitors\n" + "\n".join(rows)
+                                + f"\n\n[{th.faint}]{hub.pending_events()} events waiting · wake-ups {wake} · "
+                                "/monitors stop ID|all · wake on|off · show ID · monitors do not "
+                                "survive /new or a restart[/]"))
+
     def _clipboard_write(self, text: str) -> tuple[bool, str]:
         """Put text on the system clipboard through the terminal: OSC 52.
 
@@ -1241,7 +1515,11 @@ class TUI:
                     interval = min(interval, float(getattr(occupant, "redraw_interval", interval)))
                 await asyncio.sleep(max(0.04, interval))
                 tick += 1
-                if self._needs_pulse(tick):
+                try:
+                    serviced = self._service_monitors()
+                except Exception:
+                    serviced = False
+                if serviced or self._needs_pulse(tick):
                     app.invalidate()
 
         self._refresh_task = app.create_background_task(pulse())
@@ -1409,11 +1687,34 @@ class TUI:
         self._run_command(text)
         return True
 
+    def _runs_while_turn_runs(self, text: str) -> bool:
+        """A slash command that is handled on the spot even while a turn runs."""
+        if not text.startswith("/"):
+            return False
+        name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+        if text.strip().lower().startswith("/goal"):
+            return True
+        spec = resolve_command(name, "tui")
+        return bool(spec is not None and spec.available_while_running)
+
     def _dispatch_composer_text(self, text: str) -> str:
         """Route a completed composer value, with local mid-turn commands taking priority."""
         if not text:
             return "empty"
+        hub = getattr(getattr(self, "agent", None), "monitors", None)
+        if hub is not None:
+            hub.policy.note_command(self.config)       # no wake lands right on top of an action
         if self._turn.is_set():
+            sess = self.active if getattr(self, "_sessions", None) else None
+            if (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
+                    and not self._runs_while_turn_runs(text)):
+                # A command typed during a turn DGC started on a monitor event: that turn yields,
+                # and the command runs from the UI loop the moment it has ended.
+                sess._after_wake_command = text
+                sess._wake_yield = True
+                sess._cancel.set()
+                self._flash("stopping the monitor turn · your command runs next")
+                return "local-command"
             if self._handle_running_local_command(text):
                 return "local-command"
             if text.startswith("!") or text.startswith("#"):
@@ -2610,9 +2911,14 @@ class TUI:
             toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
             eta_text = self._eta_status_text()
             left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/] [{th.faint}]{pstr}[/]"
-            right = (f"[{th.faint}]{tstr}[/]" + (f"  [{th.muted}]{_esc(eta_text)}[/]" if eta_text else "")
+            running_monitors = self._running_monitor_count()
+            right = ((f"[{th.accent}]◉{running_monitors}[/]  " if running_monitors else "")
+                     + f"[{th.faint}]{tstr}[/]" + (f"  [{th.muted}]{_esc(eta_text)}[/]" if eta_text else "")
                      + f"  [{th.faint}]⇣{toks}[/]  [{th.err}][stop][/]")
             return self._pad_lr(left, right)
+        summary = self._monitor_status_text()
+        if summary:                              # idle with monitors: say what is being watched
+            return ANSI(self._rich(f"  [{th.accent}]◉[/] [{th.muted}]{_esc(summary)}[/]"))
         return ANSI("")                          # idle: the context bar now lives top-right in the header
 
     def turn_activity(self, state: str, label: str, detail: str = "") -> None:
@@ -2727,6 +3033,7 @@ class TUI:
         self._cur_tool = None
 
     _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
+                  "monitor": "Monitor", "monitor_stop": "Stop monitor", "monitor_event": "Monitor event",
                   "edit_file": "Edit", "apply_patch": "Patch", "repo_map": "Map repo",
                   "code_intel": "Inspect code",
                   "grep": "Search", "glob": "Find", "web_search": "Search",
@@ -2735,12 +3042,16 @@ class TUI:
 
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
+                 "monitor": "Starting monitor", "monitor_stop": "Stopping monitor",
+                 "monitor_event": "Monitor event",
                  "write_file": "Writing", "edit_file": "Editing", "apply_patch": "Patching",
                  "repo_map": "Mapping repo", "code_intel": "Inspecting code",
                  "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
                  "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
+                "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
+                "monitor_event": "Monitor event",
                 "edit_file": "Edited", "apply_patch": "Patched", "repo_map": "Mapped repo",
                 "code_intel": "Inspected code",
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
@@ -3208,7 +3519,7 @@ class TUI:
         header = [Text(f"{glyphs.RAIL} Allow ", style="bold").append(
                   style_mod.terminal_safe_text(name), style=f"bold {th.accent}")
                   .append(" to run?", style="bold")]
-        if name == "bash" and args.get("command"):      # show the shell command itself
+        if name in ("bash", "monitor") and args.get("command"):   # show the shell command itself
             for ln in style_mod.terminal_safe_text(args["command"]).splitlines()[:6]:
                 header.append(Text("  $ ", style=th.faint).append(ln, style=th.text))
         else:
@@ -3422,6 +3733,10 @@ class TUI:
     def _build(self) -> None:
         # `/` opens the command palette as an overlay (see the `/` key binding) — no completer.
         self.input_buf = Buffer(multiline=True, auto_suggest=_NextSuggest(self))   # ghost-text next-prompt
+
+        def draft_changed(_buffer) -> None:
+            self._draft_changed_at = time.monotonic()
+        self.input_buf.on_text_changed += draft_changed
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
@@ -3974,6 +4289,7 @@ class TUI:
             sess.agent.cancelled.set()                   # stop its turn if one is running
             sess._req_answer = None
             sess._req_event.set()                        # never strand a worker awaiting approval
+            sess.agent.monitors.new_epoch("shutdown")    # its monitors end with it
             sess.agent.mcp.stop_all()
         except Exception:
             pass
@@ -4106,6 +4422,8 @@ class TUI:
             self._show_eta(rest)
         elif cmd == "notify":
             self._set_notify(rest)
+        elif cmd == "monitors":
+            self._tui_monitors(rest)
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
@@ -4814,6 +5132,13 @@ class TUI:
                     blocks.append({"kind": "user", "text": body[:6000]})
                     if marks:
                         made.append((len(blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
+            elif who == "monitor":
+                # Command output DGC delivered: a marker, never a band that reads as typed text.
+                if row.get("delivery") == "wake":
+                    blocks.append({"kind": "user", "text": body[:200],
+                                   "tag": "monitor · woke on an event"})
+                else:
+                    blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
             elif who == "assistant":
                 if body:
                     blocks.append({"kind": "md", "text": body})  # rendered at whatever width shows it
@@ -4847,7 +5172,12 @@ class TUI:
             skip_ack = False
             if role == "user":
                 from .editor_context import _strip_editor_context
-                from .workflows import display_prompt
+                from .workflows import display_prompt, notice_kind
+                if notice_kind(m):
+                    notice = m.get("_dgc_notice") or {}
+                    rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
+                                 "tools": "", "delivery": str(notice.get("delivery") or "")})
+                    continue
                 body = display_prompt(_strip_editor_context(body))
                 if body.startswith(_COMPACT_PREFIX):
                     segments.append((rows, body.split("\n", 1)[-1].strip()))
@@ -4903,6 +5233,9 @@ class TUI:
                                     "text": brief, "exp": False})
         if self.blocks:
             self.blocks.append(self._rule("resumed here"))
+        note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
+        if note:
+            self.blocks.append(self._rich(f"[{th.faint}]◉ {_esc(note)}[/]"))
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
     def _resume_flow(self) -> None:
@@ -5531,12 +5864,14 @@ class TUI:
         sess._aux_cancel.set()
         sess._autotitle_pending = False
         try:
+            old_agent.monitors.new_epoch("shutdown")     # the old runtime's monitors end with it
             old_agent.mcp.stop_all()
         except Exception:
             pass
         sess.config = new_config
         sess.agent = new_agent
         sess._cancel = new_agent.cancelled
+        self._bind_session_monitors(sess)
         from . import sessions as _sess
         new_agent.session_file = _sess.new_path(self._fleet_root)
         new_agent.session_name = f"worktree {branch}"
@@ -6061,6 +6396,15 @@ class TUI:
     def _route_followup(self, text: str, *, queue_only: bool = False) -> str:
         """Atomically steer the active model turn or retain text as the next turn."""
         sess = self._cur_session()
+        if getattr(sess, "_wake_turn", False):
+            # A turn DGC started on a monitor event yields to the person at the keyboard.
+            if not self._queue_followup(sess, text, shown=False):
+                self._flash("follow-up queue full — wait for this turn")
+                return "full"
+            sess._wake_yield = True
+            sess._cancel.set()
+            self._flash("stopping the monitor turn for your message")
+            return "queued"
         if not queue_only and sess.agent.steer(text):
             sess.blocks.append({"kind": "user", "text": text,
                                 "tag": "follow-up · steering this turn"})
@@ -6118,6 +6462,9 @@ class TUI:
         shown_text = display_prompt(text)
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
+        hub = getattr(sess.agent, "monitors", None)
+        if hub is not None:
+            hub.policy.note_user_prompt()             # a person is here: wake-ups count afresh
         self._cancel_auxiliary()                       # foreground work always preempts title/suggest
         self._cancel.clear()
         self._tool_count = 0
@@ -6176,6 +6523,8 @@ class TUI:
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._turn.clear()
+                if hub is not None:
+                    hub.policy.note_turn_end()
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
                 th = style_mod.theme()
@@ -6337,6 +6686,10 @@ class TUI:
             sess._cancel.set()
             sess._req_answer = None
             sess._req_event.set()
+            try:
+                sess.agent.monitors.shutdown("shutdown")
+            except Exception:
+                pass
             try:
                 sess.agent.mcp.stop_all()
             except Exception:
