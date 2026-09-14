@@ -225,6 +225,31 @@ _TOOL_INTENT_PATTERNS = {
         r"wait (?:for|until))\b|\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
         r"crash(?:es)?|appears?|prints?|logs?)\b",
         re.IGNORECASE | re.DOTALL),
+    # The user explicitly asks to be offered choices ("propose me options to select from", "let me
+    # choose"). Not an optional schema: it lifts full-auto's picker removal for the turn and, where
+    # the picker cannot exist, adds the one note saying why (see _options_unavailable_note).
+    # "What are my options for caching" or "a dropdown with options to select from" is ordinary
+    # coding language, so the choosing has to be the user's.
+    "options": re.compile(
+        r"\bpropose_options\b|"
+        # offer verb, then only determiners/pronouns, then the options and the user's choosing
+        r"\b(?:propos(?:e|es|ed|ing)|offer(?:s|ed|ing)?|give|giving|show|showing|present(?:s|ing)?|"
+        r"list|listing|suggest(?:s|ing)?)"
+        r"(?:\s+(?:me|us|the\s+user|a|an|the|some|few|several|couple|of|more|other|different|your|"
+        r"top|best|available|possible|multiple|two|three|four|five|\d+)){0,4}\s+"
+        r"(?:options?|choices?|alternatives?)\b"
+        r".{0,40}?\b(?:to\s+(?:select|choose|pick)\s+(?:from|between|among)|"
+        r"(?:so\s+(?:that\s+)?|and\s+|then\s+)?(?:I|we)(?:'ll|\s+will|\s+can|\s+could)?\s+"
+        r"(?:select|choose|pick|decide)|for\s+(?:me|us)\s+to\s+(?:select|choose|pick|decide))\b|"
+        r"\b(?:propose|offer|present)\s+(?:me|us)(?:\s+(?:a|an|the|some|few|several|couple|of|more|"
+        r"other|different|possible|two|three|\d+)){0,3}\s+(?:options|choices|alternatives)\b|"
+        # "Let me choose", "can you ask me to pick", but not "the menu should let me choose"
+        r"(?:\A|(?<=[.!?,;:\n])|\b(?:please|and|then|just|you|so|now)\b)\s*(?:let|ask)\s+(?:me|us)\s+"
+        r"(?:(?:to\s+)?(?:choose|pick|select|decide)\b(?!\s+(?:up|out)\b)|(?:a\s+)?multiple[- ]choice\b)|"
+        r"\b(?:show|give|offer|present|send)\s+(?:me|us)\s+(?:(?:a|an|the|your)\s+)?"
+        r"(?:options?|choices?|selection)\s+(?:picker|popup|pop-up|dialog|card|form)\b"
+        r"(?!\s+(?:code|component|implementation|source|files?|styles?|css)\b)",
+        re.IGNORECASE | re.DOTALL),
 }
 
 
@@ -1602,10 +1627,11 @@ class Agent(GoalLifecycle):
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
-            if self.mode == "auto":
+            if self.mode == "auto" and not self._options_asked_interactively():
                 # Full-auto explicitly promises autonomous execution. A blocking choice prompt in
-                # this mode adds a model/UI round-trip and contradicts that boundary; the user can
-                # switch to default/acceptEdits when they want interactive alternatives.
+                # this mode adds a model/UI round-trip and contradicts that boundary, unless the
+                # user asked on this very turn to be offered choices: then waiting is what they
+                # want, and withholding the picker only makes the model deny it exists.
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "propose_options"]
         if profile != "full":
@@ -1637,6 +1663,48 @@ class Agent(GoalLifecycle):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
         return self._monitor_schema_filter(schemas)
+
+    def _non_interactive(self) -> bool:
+        """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
+        ``__getattr__`` (test fixtures, the prompt-surface probe) does not count."""
+        return getattr(self.ui, "non_interactive", False) is True
+
+    def _options_asked_interactively(self) -> bool:
+        """The user asked on this turn to be offered choices, and someone is there to answer.
+
+        Top-level only: a sub-agent's prompt is written by the parent model, not the user. A wake
+        turn is removed later by _monitor_schema_filter, whatever this says.
+        """
+        return ("options" in getattr(self, "_active_tool_intents", set())
+                and self.depth == 0 and not self._non_interactive())
+
+    def _options_unavailable_note(self) -> str:
+        """One system section, only when the user asked to choose and the picker is not offered.
+
+        Without it the model can only say the tool does not exist. Gated on the explicit ask, so a
+        request that did not ask (the prompt-surface probe among them) carries nothing extra.
+        """
+        if "options" not in getattr(self, "_active_tool_intents", set()):
+            return ""
+        if any(tool.get("function", {}).get("name") == "propose_options"
+               for tool in self._tool_schemas()):
+            return ""
+        if getattr(self, "_monitor_turn", False):
+            reason = "this turn was started by a background event and nobody is at the keyboard"
+            how = "ask the user to reply with their choice in a normal message"
+        elif self._non_interactive():
+            reason = "this is a non-interactive `dgc -p` run"
+            how = ("tell the user the picker appears in the interactive `dgc` terminal and the "
+                   "editor panel")
+        elif self.depth:
+            reason = "you are a sub-agent"
+            how = "put them in your result so the parent agent can offer the picker"
+        else:
+            reason = "it is not offered in this context"
+            how = "ask the user to reply with their choice"
+        return ("# Options picker\nThe user asked to choose from options, but DGC's options picker "
+                f"(propose_options) is not available on this turn because {reason}. It does exist. "
+                f"List the options as a numbered list and {how}.")
 
     def _monitor_delivery(self) -> bool:
         """Does this agent's frontend deliver monitor events and wake on them?
@@ -2217,6 +2285,10 @@ class Agent(GoalLifecycle):
 
         if self._monitor_exposed():
             parts += ["", _MONITOR_GUIDANCE]
+
+        options_note = self._options_unavailable_note()
+        if options_note:
+            parts += ["", options_note]
 
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:
@@ -4659,6 +4731,10 @@ class Agent(GoalLifecycle):
                         break
                     answers[question["id"]] = choice
             if not valid_answers(questions, answers) or self.cancelled.is_set():
+                if self._non_interactive() and not self.cancelled.is_set():
+                    return ("No one can answer in this non-interactive `dgc -p` run, so no choice was "
+                            "made. Do not assume one: give the options as a numbered list in your "
+                            "final answer.")
                 return "No decision was submitted. Do not assume a choice or act on unanswered questions."
             if grouped:
                 return "The user submitted these decisions: " + json.dumps(answers, ensure_ascii=False)

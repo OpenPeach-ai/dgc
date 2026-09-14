@@ -1,0 +1,392 @@
+"""The options picker (propose_options): offered when the user asks to choose, explained when it is not.
+
+A user who asks "propose me options to select from" gets the picker for that turn, in full-auto too.
+Where the picker still cannot exist (a background wake turn, a non-interactive `dgc -p` run, a
+sub-agent, a subscription CLI) the model is told why and how the user can get it, so it lists the
+choices instead of claiming the tool does not exist. Nothing is added to a request that did not ask.
+"""
+from __future__ import annotations
+
+import copy
+import os
+import pwd
+import sys
+import tempfile
+import threading
+import time
+import types
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+_REAL_HOME = pwd.getpwuid(os.getuid()).pw_dir
+if "dgc.config" in sys.modules:                    # imported by another module first: verify, never assume
+    import dgc.config as _config
+    if Path(_config.USER_HOME) == Path(_REAL_HOME) or Path(_REAL_HOME) in Path(_config.USER_HOME).parents:
+        raise RuntimeError("tests/test_options_picker.py needs HOME redirected before dgc is imported — "
+                           "run it through tests/run_tests.py or with HOME=<tmp>")
+else:
+    _HOME = tempfile.TemporaryDirectory(prefix="dgc-options-home-")
+    for _var in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        os.environ[_var] = _HOME.name
+
+from dgc import sessions                                   # noqa: E402  (after the redirect above)
+from dgc.agent import Agent, _tool_intents                 # noqa: E402
+from dgc.config import Config, DEFAULTS                    # noqa: E402
+from dgc.editor_protocol import event_error                # noqa: E402
+from dgc.headless import Backend, HeadlessUI               # noqa: E402
+from dgc.llm import ChatResult, ToolCall                   # noqa: E402
+from dgc.protocol import PendingRequests                   # noqa: E402
+
+FOUNDER = ("I want to see how this DGC proposes options to user, can you do a test and propose me "
+           "options to select from ?")
+
+ASKS = [
+    FOUNDER,
+    "propose_options",
+    "Give me a few options to choose from.",
+    "can you give me a couple of choices so I can pick one",
+    "Offer me some alternatives and I'll decide",
+    "list the options for me to select",
+    "Let me choose.",
+    "Ask me to pick between Redis and Memcached",
+    "please let me decide which approach",
+    "propose me options",
+    "show me the options picker",
+    "can you ask me a multiple-choice question",
+]
+
+NOT_ASKS = [
+    "add a --verbose option",
+    "what are my options for caching",
+    "fix the compiler options in tsconfig",
+    "Don't add unrequested features, options, abstractions",
+    "build a multiple-choice quiz app",
+    "fix the option picker component",
+    "show me the options picker component code",
+    "Let me pick up where we left off",
+    "list the build options and choose the fastest one",
+    "add a dropdown with options to select from",
+    "the settings menu should let me choose a theme",
+    "choose the best option and implement it",
+    "Which option should I choose?",
+    "add an options menu to the navbar",
+    "suggest options for the retry policy",
+]
+
+
+class UI:
+    """An interactive frontend that answers every question with its second option."""
+
+    def __init__(self):
+        self.infos, self.errors, self.questions = [], [], []
+
+    def info(self, message):
+        self.infos.append(message)
+
+    def error(self, message):
+        self.errors.append(message)
+
+    def propose_options(self, question, options):
+        self.questions.append((question, list(options)))
+        return options[1] if len(options) > 1 else options[0]
+
+    def __getattr__(self, name):
+        return lambda *a, **k: None
+
+
+class OneShotUI(UI):
+    """Like `dgc -p`: nobody can answer."""
+    non_interactive = True
+
+    def propose_options(self, question, options):
+        self.questions.append((question, list(options)))
+        return ""
+
+
+class WakeUI(UI):
+    """Delivers monitor events, like the TUI and the editor backend."""
+
+    def __init__(self):
+        super().__init__()
+        self.monitor_wake_enabled = True
+
+
+def make_config(root: Path, **settings) -> Config:
+    cfg = Config()
+    cfg.project_root = root
+    cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "default",
+                     "notes": False, "suggest": False, "artifact_autostart": False})
+    cfg.data.update(settings)
+    return cfg
+
+
+def names(tools) -> set[str]:
+    return {tool["function"]["name"] for tool in tools or []}
+
+
+def scripted(agent, steps):
+    """Replace the model with `steps`; record each request's tools and system prompt."""
+    calls = []
+
+    def fake_chat(tools_schema, effort, *, cancel=None, read_timeout=None, defer_text=False,
+                  request_reason="other"):
+        index = len(calls)
+        calls.append({"tools": names(tools_schema), "system": agent.messages[0]["content"],
+                      "reason": request_reason})
+        step = steps[min(index, len(steps) - 1)]
+        return step(agent, calls[-1]) if callable(step) else step
+    agent._chat = fake_chat
+    return calls
+
+
+def call(name, **arguments):
+    return ChatResult(content="", tool_calls=[ToolCall(f"c-{name}-{time.monotonic_ns()}", name, arguments)],
+                      finish_reason="tool_calls")
+
+
+def options_if_offered(agent, request):
+    if "propose_options" in request["tools"]:
+        return call("propose_options", question="Which approach?", options=["Approach A", "Approach B"])
+    return ChatResult(content="1. Approach A\n2. Approach B")
+
+
+class OptionsIntentTests(unittest.TestCase):
+    def test_explicit_requests_to_choose_are_recognised(self):
+        for text in ASKS:
+            self.assertIn("options", _tool_intents(text), text)
+
+    def test_ordinary_coding_language_is_not_a_request_to_choose(self):
+        for text in NOT_ASKS:
+            self.assertNotIn("options", _tool_intents(text), text)
+
+    def test_untrusted_editor_context_cannot_ask(self):
+        text = ('<editor-context-json trust="untrusted-reference-data">\n'
+                f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
+        self.assertNotIn("options", _tool_intents(text))
+
+
+class AgentTests(unittest.TestCase):
+    def agent(self, ui=None, **settings):
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-options-agent-")
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        agent = Agent(make_config(root, **settings), ui or UI())
+        self.addCleanup(agent.mcp.stop_all)
+        self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+        agent.session_file = sessions.new_path(root)
+        return agent
+
+    def offered(self, agent, text):
+        agent._activate_tool_intents(text, replace=True)
+        agent._refresh_system()
+        return "propose_options" in names(agent._tool_schemas())
+
+
+class ToolListMatrixTests(AgentTests):
+    def test_interactive_modes_offer_the_picker_with_or_without_an_ask(self):
+        for profile in ("adaptive", "full"):
+            for mode in ("default", "acceptEdits", "plan"):
+                agent = self.agent(mode=mode, tool_profile=profile)
+                for text in ("fix the parser", FOUNDER):
+                    self.assertTrue(self.offered(agent, text), (profile, mode, text))
+                    self.assertNotIn("# Options picker", agent.system_prompt(), (profile, mode, text))
+
+    def test_full_auto_offers_the_picker_only_when_the_user_asks(self):
+        for profile in ("adaptive", "full"):
+            for ultra in (False, True):
+                agent = self.agent(mode="auto", tool_profile=profile, ultra_mode=ultra)
+                label = (profile, ultra)
+                self.assertFalse(self.offered(agent, "fix the parser"), label)
+                self.assertNotIn("# Options picker", agent.system_prompt(), label)
+                self.assertTrue(self.offered(agent, FOUNDER), label)
+                self.assertNotIn("# Options picker", agent.system_prompt(), label)
+                self.assertIn("propose_options", agent._text_protocol_section(), label)
+                self.assertFalse(self.offered(agent, "now add the tests"), f"{label}: per turn only")
+
+    def test_a_ui_whose_getattr_answers_everything_is_still_interactive(self):
+        class Permissive:
+            def __getattr__(self, name):
+                return lambda *a, **k: None
+        agent = self.agent(ui=Permissive(), mode="auto")
+        self.assertTrue(self.offered(agent, FOUNDER))
+
+    def test_a_sub_agent_in_full_auto_is_told_why_and_what_to_do(self):
+        agent = self.agent(mode="auto")
+        agent.depth = 1
+        self.assertFalse(self.offered(agent, FOUNDER))
+        prompt = agent.system_prompt()
+        self.assertIn("# Options picker", prompt)
+        self.assertIn("sub-agent", prompt)
+        self.assertIn("numbered list", prompt)
+        agent._activate_tool_intents("fix the parser", replace=True)
+        self.assertNotIn("# Options picker", agent.system_prompt())
+
+    def test_a_non_interactive_run_in_full_auto_is_told_why_and_what_to_do(self):
+        agent = self.agent(ui=OneShotUI(), mode="auto")
+        self.assertFalse(self.offered(agent, FOUNDER))
+        prompt = agent.system_prompt()
+        self.assertIn("# Options picker", prompt)
+        self.assertIn("non-interactive `dgc -p` run", prompt)
+        self.assertIn("editor panel", prompt)
+        # The text protocol carries the same reason: it lists the same filtered tools.
+        self.assertNotIn('"propose_options"', agent._text_protocol_section())
+
+    def test_the_note_never_reaches_a_request_that_did_not_ask(self):
+        for label, ui, depth, wake in (("-p", OneShotUI(), 0, False), ("sub-agent", UI(), 1, False),
+                                       ("wake", WakeUI(), 0, True)):
+            agent = self.agent(ui=ui, mode="auto")
+            agent.depth, agent._monitor_turn = depth, wake
+            agent._activate_tool_intents("run the tests and fix the failure", replace=True)
+            self.assertNotIn("propose_options", names(agent._tool_schemas()), label)
+            self.assertNotIn("# Options picker", agent.system_prompt(), label)
+
+
+class TurnTests(AgentTests):
+    def test_full_auto_turn_raises_the_picker_and_the_choice_reaches_the_model(self):
+        ui = UI()
+        agent = self.agent(ui=ui, mode="auto")
+        calls = scripted(agent, [options_if_offered, ChatResult(content="You picked B.")])
+        self.assertTrue(agent.run_turn(FOUNDER))
+        self.assertIn("propose_options", calls[0]["tools"])
+        self.assertEqual(ui.questions, [("Which approach?", ["Approach A", "Approach B"])])
+        result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
+        self.assertIn("The user chose: 'Approach B'", result)
+        self.assertNotIn("propose_options", names(agent._tool_schemas()), "cleared with the turn")
+        self.assertNotIn("# Options picker", agent.messages[0]["content"])
+
+        calls = scripted(agent, [ChatResult(content="done")])
+        self.assertTrue(agent.run_turn("now fix the parser"))
+        self.assertNotIn("propose_options", calls[0]["tools"], "full-auto keeps its rule otherwise")
+
+    def test_a_wake_turn_after_an_ask_explains_the_missing_picker(self):
+        agent = self.agent(ui=WakeUI(), mode="default")
+        calls = scripted(agent, [call("bash", command="sleep 0.2; echo BUILD-OK", background=True),
+                                 ChatResult(content="started")])
+        self.assertTrue(agent.run_turn("run the build in the background, then give me options to "
+                                       "choose from for the deploy target"))
+        self.assertIn("propose_options", calls[0]["tools"])
+        self.assertNotIn("# Options picker", calls[0]["system"])
+        deadline = time.monotonic() + 10
+        while not agent.monitors.pending_count() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        note = agent.monitors.take_pending()
+        self.assertIsNotNone(note)
+        calls = scripted(agent, [ChatResult(content="1. staging\n2. production")])
+        self.assertTrue(agent.run_monitor_turn(note))
+        self.assertNotIn("propose_options", calls[0]["tools"])
+        self.assertIn("# Options picker", calls[0]["system"])
+        self.assertIn("background event", calls[0]["system"])
+        self.assertNotIn("# Options picker", agent.messages[0]["content"], "gone after the wake turn")
+
+    def test_a_non_interactive_answer_says_nobody_can_answer(self):
+        ui = OneShotUI()
+        agent = self.agent(ui=ui, mode="default")
+        out = agent._handle_call(ToolCall("c1", "propose_options",
+                                          {"question": "Which?", "options": ["A", "B"]}))
+        self.assertEqual(ui.questions, [("Which?", ["A", "B"])])
+        self.assertIn("non-interactive `dgc -p` run", out)
+        self.assertIn("numbered list", out)
+        self.assertIn("Do not assume", out)
+
+    def test_an_interactive_unanswered_question_keeps_its_result(self):
+        class Closed(UI):
+            def propose_options(self, question, options):
+                return ""
+        agent = self.agent(ui=Closed(), mode="default")
+        out = agent._handle_call(ToolCall("c1", "propose_options",
+                                          {"question": "Which?", "options": ["A", "B"]}))
+        self.assertEqual(out, "No decision was submitted. Do not assume a choice or act on "
+                              "unanswered questions.")
+
+
+class SubscriptionTests(unittest.TestCase):
+    def test_a_delegated_turn_that_asks_is_told_the_picker_is_dgcs_own(self):
+        from dgc.ultra import delegated_prompt
+        cfg = make_config(Path(tempfile.gettempdir()))
+        wrapped = delegated_prompt(cfg, FOUNDER, "auto")
+        self.assertIn("<dgc-options-note>", wrapped)
+        self.assertIn("numbered list", wrapped)
+        self.assertTrue(wrapped.endswith(FOUNDER))
+        self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, "fix the parser", "auto"))
+        context = ('<editor-context-json trust="untrusted-reference-data">\n'
+                   f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
+        self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, context, "auto"))
+
+
+class EditorBackendTests(unittest.TestCase):
+    """`dgc serve` in full-auto: the ask raises options_request, the editor's answer reaches the model."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="dgc-options-serve-")
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        config = object.__new__(Config)
+        config.project_root, config.project_dir, config._persist = root, root / ".dgc", False
+        config.data = copy.deepcopy(DEFAULTS)
+        config.data.update(base_url="http://localhost.invalid/v1", model="fixture", mode="auto",
+                           hooks={}, mcp_servers={}, suggest=False, artifact_autostart=False,
+                           notes=False)
+        config._stored_secrets, config._env_secret_keys, config._explicit_keys = {}, set(), set()
+        config.credential_warnings = ()
+        config.permissions = {"allow": [], "ask": [], "deny": []}
+        self.events, self.condition = [], threading.Condition()
+
+        def emit(_event_type, /, **fields):
+            event = {"type": _event_type, **fields}
+            self.assertIsNone(event_error({"seq": 1, **event}), event)
+            with self.condition:
+                self.events.append(event)
+                self.condition.notify_all()
+        emitter = types.SimpleNamespace(emit=emit)
+        backend = object.__new__(Backend)
+        backend.config, backend.em, backend.pending = config, emitter, PendingRequests()
+        backend.ui = HeadlessUI(emitter, backend.pending, approval_timeout_s=3)
+        backend.agent = Agent(config, backend.ui)
+        backend.ui._steering_hook = backend._steering_applied
+        backend._queue, backend._steer_payloads = [], {}
+        backend._worker, backend._foreground_worker, backend._turn_n = None, None, 0
+        backend._turn_lock, backend.workspace_trusted = threading.RLock(), True
+        backend._emit_context = lambda: None
+        self.backend, self.agent = backend, backend.agent
+        self.addCleanup(self.agent.mcp.stop_all)
+
+        def stop():
+            backend.dispatch({"type": "cancel"})
+            worker = backend._worker
+            if worker and worker is not threading.current_thread():
+                worker.join(5)
+        self.addCleanup(stop)
+
+    def wait(self, kind, **fields):
+        with self.condition:
+            self.assertTrue(self.condition.wait_for(lambda: any(
+                event["type"] == kind and all(event.get(k) == v for k, v in fields.items())
+                for event in self.events), timeout=5), (kind, fields, self.events))
+            return next(event for event in self.events if event["type"] == kind
+                        and all(event.get(k) == v for k, v in fields.items()))
+
+    def test_the_founder_prompt_raises_the_card_and_the_choice_returns(self):
+        requests = []
+
+        def chat(messages, **kwargs):
+            requests.append({"tools": names(kwargs.get("tools")), "messages": copy.deepcopy(messages)})
+            if len(requests) == 1 and "propose_options" in requests[0]["tools"]:
+                return ChatResult(content="", finish_reason="tool_calls", tool_calls=[
+                    ToolCall("pick", "propose_options",
+                             {"question": "Which approach?", "options": ["Approach A", "Approach B"]})])
+            return ChatResult(content="Going with it.")
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.backend.dispatch({"type": "prompt", "text": FOUNDER, "request_id": "ask"})
+            request = self.wait("options_request")
+            self.assertEqual(request["question"], "Which approach?")
+            self.assertEqual(request["options"], ["Approach A", "Approach B"])
+            self.backend.dispatch({"type": "options_response", "id": request["id"], "choice": 2})
+            self.wait("turn_end", reason="completed")
+        self.assertIn("propose_options", requests[0]["tools"])
+        self.assertEqual(len(requests), 2)
+        self.assertIn("The user chose: 'Approach B'", str(requests[1]["messages"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

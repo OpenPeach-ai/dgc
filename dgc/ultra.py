@@ -41,8 +41,17 @@ def delegated_effort(config, engine_key: str, current: str, supports_effort: boo
 
 def delegated_prompt(config, prompt: str, mode: str) -> str:
     """Apply shared response guidance and optional Ultra policy on the vendor wire only."""
+    from .agent import _tool_intents
     from .presentation import delegated_presentation
+    asks_for_options = "options" in _tool_intents(prompt)
     prompt = delegated_presentation(prompt)
+    if asks_for_options:
+        # The vendor CLI runs headless, so DGC's picker (and the CLI's own question tool) cannot
+        # reach the user. Said only when the user asked to choose; otherwise nothing is added.
+        prompt = ("<dgc-options-note>\nThe user asked to choose from options. DGC's options picker "
+                  "is not available while a subscription CLI runs this turn, and no question tool "
+                  "can reach the user here. List the options as a numbered list and ask the user "
+                  "to reply with their choice.\n</dgc-options-note>\n\n" + prompt)
     if not enabled(config):
         return prompt
     workers = worker_limit(config)

@@ -278,7 +278,8 @@ TOOL_SCHEMAS = [
                       "description": "Concrete checks, artifacts, or observations supporting this status"}},
         ["status", "summary", "evidence"]),
     _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
-        "(two valid approaches, an ambiguous request). Waits for an explicit answer, with Other/free text. "
+        "(two valid approaches, an ambiguous request) or they ask to choose. "
+        "Waits for an explicit answer, with Other/free text. "
         "Use questions to group 1–6 separate decisions into tabs with one Submit. "
         "Use question/options for a single decision. Don't use it for things you can decide yourself.",
         {"question": {"type": "string", "description": "What you're asking them to decide"},

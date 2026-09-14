@@ -17,6 +17,13 @@ whose entries contain `id`, `header`, `question`, and `options`. It returns answ
 Older editor clients receive grouped questions sequentially. External subscription tools retain
 their own question interface; the native question-form protocol does not alter those processes.
 
+Full-auto mode does not stop to ask, so it leaves `propose_options` out, except on a turn where you
+explicitly ask to choose ("propose me options to select from", "let me choose", "ask me to pick").
+That turn gets the picker in every permission mode. Some turns still have nobody to answer: a turn
+DGC starts on a background event, a `dgc -p` run, a sub-agent in full-auto, and a subscription CLI
+turn. When you ask on one of these, the model is told why the picker is missing. It lists the
+choices as a numbered list instead of claiming the picker does not exist.
+
 | Action | Extension | Terminal |
 | --- | --- | --- |
 | Steer a native turn | Enter or Send with a draft | Enter |
