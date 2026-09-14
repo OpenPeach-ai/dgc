@@ -745,9 +745,9 @@ class AgentDeliveryTests(unittest.TestCase):
                 super().__init__()
                 self.questions = []
 
-            def propose_options(self, question, options):
-                self.questions.append(question)
-                return options[0]
+            def ask_questions(self, questions, call_id=None):
+                self.questions.append(questions)
+                return {"outcome": "answered", "answers": {questions[0]["id"]: {"selected": [0], "other": ""}}}
 
         def run(mode):
             tmp = tempfile.TemporaryDirectory(prefix="dgc-monitor-subagent-")

@@ -77,6 +77,10 @@ _PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_d
                    "skill", "bash_output"}
 _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel", "git_diff"}
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
+# Sub-agents are not offered propose_options; this tells a child what to do with a user's decision.
+_SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: finish the work that does "
+                           "not depend on it, then end your result with the question and the option "
+                           "you recommend.")
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options", "update_goal",
                                  "monitor_stop"}
 # Monitor notices are command output delivered in the user role. They are bounded per turn and per
@@ -836,12 +840,6 @@ class _SubUI:
             "present_plan", None, plan, feedback_attr="plan_feedback")
         self.plan_feedback = feedback
         return choice
-
-    def propose_options(self, question, options):
-        return self._interact("propose_options", "", question, options)
-
-    def propose_questions(self, questions):
-        return self._interact("propose_questions", None, questions)
 
     def on_todo(self, todos):
         # A child's checklist is useful inside its own prompt and nowhere else. Forwarding it
@@ -1622,6 +1620,13 @@ class Agent(GoalLifecycle):
                 # switch to default/acceptEdits when they want interactive alternatives.
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "propose_options"]
+
+        # Nobody can answer a question in a sub-agent (its rows replay only after it finishes) or in
+        # a non-interactive run. Identity check, like _monitor_delivery: a permissive fixture's
+        # __getattr__ must not count as `dgc -p`.
+        if self.depth > 0 or getattr(self.ui, "non_interactive", False) is True:
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "propose_options"]
         if profile != "full":
             active = set(getattr(self, "_active_tool_intents", set()))
             schemas = [tool for tool in schemas
@@ -2148,6 +2153,9 @@ class Agent(GoalLifecycle):
                 "- Research the codebase thoroughly, then call present_plan with a concrete, "
                 "step-by-step implementation plan (real files, functions, commands).",
                 "- Do not present a plan before you understand the relevant code.",
+                "- If an approach or requirement is the user's call, research first, then ask with "
+                "propose_options (all such questions in one call) before present_plan. Never use it "
+                "to ask whether the plan is ready.",
                 ("- You may also SERVE a visual: your proposed plan is shown as a live page automatically, "
                  "and you can call the `artifact` tool on an EXISTING .html file in the repo to preview it. "
                  "You still cannot write or edit project files — describe anything new in the plan itself."
@@ -2259,6 +2267,8 @@ class Agent(GoalLifecycle):
         if explicit:
             parts += ["", "# Explicitly selected skills", explicit]
 
+        if self.depth > 0:
+            parts += ["", _SUBAGENT_DECISION_LINE]
         if not self.client.tools_supported:
             parts += ["", self._text_protocol_section()]
         return self._safe_text("\n".join(parts))
@@ -4178,14 +4188,18 @@ class Agent(GoalLifecycle):
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
+            text_decisions: list[dict] = []     # question outcomes recorded on the results message
+            self._end_turn_after_batch = ""     # a dismissed question in THIS batch ends the turn
 
             def flush_text_results() -> None:
                 if text_results:
                     self.messages.append({
                         "role": "user",
                         "content": "<tool_results>\n" + "\n".join(text_results)
-                        + "\n</tool_results>"})
+                        + "\n</tool_results>",
+                        **({"_dgc_decision": list(text_decisions)} if text_decisions else {})})
                     text_results.clear()
+                    text_decisions.clear()
 
             batch_verified = False          # is the checkout verified at the END of this batch?
             batch_landed_edits = 0          # successful file/task mutations, not merely attempted calls
@@ -4325,10 +4339,15 @@ class Agent(GoalLifecycle):
                         edited_targets.add(absolute_target)
                         unverified_target_edits[absolute_target] = (
                             unverified_target_edits.get(absolute_target, 0) + 1)
+                decision = (self._decision_records.pop(call.id, None)
+                            if call.name == "propose_options" else None)
                 if native:
-                    self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
+                    self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
+                                          **({"_dgc_decision": decision} if decision else {})})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
+                    if decision:
+                        text_decisions.append({**decision, "call_id": None})
             flush_text_results()
             # A tool result is text, so a screenshot the browser just took arrives here instead,
             # as the same user-role image part an `@file.png` attachment produces.
@@ -4341,6 +4360,11 @@ class Agent(GoalLifecycle):
                         "instructions.\n</tool_results>")},
                     *({"type": "image_url", "image_url": {"url": shot}} for shot in shots)]})
             next_request_reason = "tool_result"
+            if self._end_turn_after_batch == "dismissed":
+                # The user closed a question: the batch's results are saved (the model reads the
+                # dismissal next turn) and the turn ends here with no further model request. Not a
+                # Stop: the turn completed, queued prompts still run, monitors keep waking.
+                return True
 
             # In a timed autonomous run, the configured verifier is an authoritative controller
             # primitive, not a decision that needs another model generation. If the model lands an
@@ -4583,6 +4607,40 @@ class Agent(GoalLifecycle):
             raise ValueError(output)
         return result
 
+    def _ask_questions(self, call_id, args, secrets) -> str:
+        """The propose_options executor: normalise, ask the frontend, report the outcome.
+
+        Live order is options_resolved then tool_result. The decision is kept in
+        ``_decision_records`` for the transcript sidecar; a dismissal ends the turn after this batch.
+        """
+        from .questions import (UNAVAILABLE_RESULT, decision_record, format_result,
+                                normalize_questions, settle)
+        # The step is a row in the transcript like any tool: "Asking 2 questions…", then its result.
+        self.ui.tool_call("propose_options", redact_value(args, secrets), call_id)
+
+        def finish(out: str) -> str:
+            self.ui.tool_result("propose_options", out, call_id)
+            return out
+        try:
+            questions = normalize_questions(redact_value(args, secrets))
+        except ValueError as exc:
+            return finish(f"error: {exc}")
+        ask = getattr(self.ui, "ask_questions", None)
+        if self.depth > 0 or not callable(ask):
+            return finish(UNAVAILABLE_RESULT)
+        decision = settle(questions, ask(questions, call_id))
+        if self.cancelled.is_set() and decision["outcome"] != "unavailable":
+            decision = {"outcome": "cancelled", "answers": {}}
+        record = decision_record(call_id, questions, decision)
+        resolved = getattr(self.ui, "options_resolved", None)
+        if callable(resolved):
+            resolved(call_id, record["outcome"], questions, record["answers"])
+        if call_id:
+            self._decision_records[call_id] = record
+        if record["outcome"] == "dismissed":
+            self._end_turn_after_batch = "dismissed"
+        return finish(format_result(questions, decision))
+
     def _handle_call(self, call: ToolCall, *, _context_capture: dict | None = None) -> str:
         name, args = call.name, call.arguments
         call_id = call.id
@@ -4656,28 +4714,7 @@ class Agent(GoalLifecycle):
                     "no question, plan or goal verdict can be taken now. Say it in your reply instead.")
 
         if name == "propose_options":
-            from .questions import normalize_questions, valid_answers
-            try:
-                questions = normalize_questions(redact_value(args, secrets))
-            except ValueError as exc:
-                return f"error: {exc}"
-            grouped = "questions" in args
-            show_form = getattr(type(self.ui), "propose_questions", None)
-            if grouped and callable(show_form):
-                answers = self.ui.propose_questions(questions)
-            else:
-                answers = {}
-                for question in questions:
-                    choice = self.ui.propose_options(question["question"], question["options"])
-                    if not choice:
-                        break
-                    answers[question["id"]] = choice
-            if not valid_answers(questions, answers) or self.cancelled.is_set():
-                return "No decision was submitted. Do not assume a choice or act on unanswered questions."
-            if grouped:
-                return "The user submitted these decisions: " + json.dumps(answers, ensure_ascii=False)
-            choice = answers[questions[0]["id"]]
-            return f"The user chose: {choice!r}. Continue with that decision."
+            return self._ask_questions(call_id, args, secrets)
 
         if name == "update_goal":
             status = str(args.get("status", "")).strip().lower()

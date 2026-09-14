@@ -456,6 +456,23 @@ def _history_args(raw) -> dict:
     return args
 
 
+def _options_resolved_item(record, call_id, *, allow_empty: bool = False) -> dict | None:
+    """One replayed ``options_resolved`` from a saved ``_dgc_decision`` record (None if unusable)."""
+    from .questions import OUTCOMES
+    if not isinstance(record, dict):
+        return None
+    outcome = record.get("outcome")
+    questions = record.get("questions")
+    if outcome not in OUTCOMES or not isinstance(questions, list) or (not questions and not allow_empty):
+        return None
+    item = {"type": "options_resolved", "id": None, "call_id": call_id,
+            "outcome": outcome, "questions": questions[:4]}
+    answers = record.get("answers")
+    if outcome == "answered" and isinstance(answers, dict):
+        item["answers"] = answers
+    return item
+
+
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
 
@@ -468,7 +485,6 @@ class HeadlessUI:
         self.em = emitter
         self.pending = pending
         self.approval_timeout_s = max(0.01, float(approval_timeout_s))
-        self.question_forms = False  # opted in by the editor handshake; strict older v6 clients remain valid
         self.cancelled = None
         self._rule_hook = None          # set by Backend to persist an allow rule
         self._rule_override: dict = {}   # tool -> explicit rule string the IDE dictated
@@ -744,38 +760,34 @@ class HeadlessUI:
             self.plan_feedback = ""
         return decision if decision in _PLAN_MODES else None
 
-    def propose_options(self, question: str, options: list) -> str:
-        def valid(payload):
-            choice = payload.get("choice") if isinstance(payload, dict) else None
-            return ((type(choice) is int and 1 <= choice <= len(options))
-                    or (isinstance(choice, str) and bool(choice.strip()) and len(choice) <= 4096))
-        rid, ev = self.pending.register(validator=valid)
-        self.em.emit("options_request", id=rid, question=question, options=options)
-        payload = self._await(rid, ev, human=True) or {}
-        choice = payload.get("choice")
-        if type(choice) is int and 1 <= choice <= len(options):
-            return options[choice - 1]
-        if isinstance(choice, str) and choice.strip() and len(choice) <= 4096:
-            return choice.strip()
-        return ""
+    def ask_questions(self, questions: list[dict], call_id=None) -> dict:
+        """One v14 ``options_request`` for the whole batch; blocks until an answer, a dismissal,
+        Stop or disconnection. An invalid response leaves the request open (the dispatcher answers
+        it with ``command_rejected``), so a client can correct it."""
+        from .questions import validate_response
+        open_questions = self.__dict__.setdefault("_open_questions", {})
+        rid, ev = self.pending.register(
+            validator=lambda payload: validate_response(questions, payload) is not None)
+        open_questions[rid] = questions
+        self.__dict__.setdefault("_question_rids", {})[call_id if isinstance(call_id, str) else None] = rid
+        try:
+            self.em.emit("options_request", id=rid, call_id=call_id if isinstance(call_id, str) else None,
+                         questions=questions)
+            self.turn_activity("waiting", "Waiting for your answer")
+            payload = self._await(rid, ev, human=True)
+        finally:
+            open_questions.pop(rid, None)
+        decision = validate_response(questions, payload)
+        return decision if decision is not None else {"outcome": "cancelled", "answers": {}}
 
-    def propose_questions(self, questions: list[dict]) -> dict | None:
-        from .questions import valid_answers
-        if not self.question_forms:
-            answers = {}
-            for q in questions:
-                answer = self.propose_options(q["question"], q["options"])
-                if not answer:
-                    return None
-                answers[q["id"]] = answer
-            return answers
-        rid, ev = self.pending.register(validator=lambda p: isinstance(p, dict)
-                                         and valid_answers(questions, p.get("answers")))
-        self.em.emit("options_request", id=rid, question=questions[0]["question"],
-                     options=questions[0]["options"], questions=questions)
-        payload = self._await(rid, ev, human=True) or {}
-        answers = payload.get("answers")
-        return answers if valid_answers(questions, answers) else None
+    def options_resolved(self, call_id, outcome, questions, answers) -> None:
+        """How the question batch of ``call_id`` ended, before its ``tool_result``."""
+        rid = self.__dict__.setdefault("_question_rids", {}).pop(
+            call_id if isinstance(call_id, str) else None, None)
+        self.em.emit("options_resolved", id=rid,
+                     call_id=call_id if isinstance(call_id, str) and call_id else None,
+                     outcome=outcome, questions=list(questions or []),
+                     **({"answers": answers} if outcome == "answered" and isinstance(answers, dict) else {}))
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -2638,8 +2650,8 @@ class Backend:
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
-            if "question_forms" in cmd:
-                self.ui.question_forms = cmd["question_forms"]
+            # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
+            # structured request per question batch.
             roots, visible = [], []
             for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
                 try:
@@ -2665,7 +2677,7 @@ class Backend:
         elif t == "plan_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "feedback": cmd.get("feedback")})
         elif t == "options_response":
-            self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice"), "answers": cmd.get("answers")})
+            self._resolve_options_response(cmd)
         elif t == "mcp_input_response":
             self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
                                                   "content": cmd.get("content")})
@@ -3374,18 +3386,83 @@ class Backend:
 
 
     # ---- 0.40 options -----------------------------------------------------------------------------
+    def _resolve_options_response(self, cmd: dict) -> None:
+        """Hand an ``options_response`` to the waiting question. A response the request cannot take
+        (a bad index, both or neither of answers/dismissed, text over 4096) leaves it open and says
+        so, instead of dropping it while the panel shows "Sending…"."""
+        rid = cmd.get("id")
+        payload = {"answers": cmd.get("answers"), "dismissed": cmd.get("dismissed")}
+        if self.pending.resolve(rid, payload):
+            return
+        ui = getattr(self, "ui", None)
+        open_questions = getattr(ui, "_open_questions", None) or {}
+        if not isinstance(rid, str) or rid not in open_questions:
+            return                      # late, duplicate or unknown: the request is already settled
+        pending = self.pending
+        lock, slots = getattr(pending, "_lock", None), getattr(pending, "_slots", None)
+        if lock is None or not isinstance(slots, dict):
+            return
+        with lock:
+            slot = slots.get(rid)
+            still_open = bool(slot) and not slot[0].is_set()
+        if still_open:
+            self.em.emit("command_rejected", command="options_response", reason="invalid_response",
+                         request_id=rid,
+                         message="DGC could not use that answer. Pick an option, write an answer, "
+                                 "skip, or dismiss the question.")
+
     def _history_decisions_for_text_results(self, message: dict, turn: dict) -> list:
         """``options_resolved`` items (``call_id: null``) for a text-protocol ``<tool_results>``
         message that recorded question outcomes in ``_dgc_decision``."""
-        return []
+        records = message.get("_dgc_decision")
+        if isinstance(records, dict):
+            records = [records]
+        items = []
+        for record in list(records or [])[:16] if isinstance(records, list) else []:
+            item = _options_resolved_item(record, None)
+            if item is not None:
+                items.append(item)
+                turn["options_dismissed"] = item["outcome"] == "dismissed"
+        return items
 
     def _history_before_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
         """The ``options_resolved`` item replayed just before a native tool result (may mark the
         turn, e.g. ``turn["options_dismissed"]``)."""
-        return []
+        record = message.get("_dgc_decision")
+        if isinstance(record, dict):
+            item = _options_resolved_item(record, call_id or None)
+        elif "tool result unavailable after session interruption" in str(message.get("content") or ""):
+            # A question the session stopped under: say it was never answered, rather than leaving
+            # the replayed step looking like an ordinary tool with a cryptic result.
+            name = None
+            for prior in reversed(self.agent.messages):
+                for tc in prior.get("tool_calls") or [] if prior.get("role") == "assistant" else []:
+                    if str(tc.get("id") or "") == call_id:
+                        name = (tc.get("function") or {}).get("name")
+                        args = _history_args((tc.get("function") or {}).get("arguments"))
+                        break
+                if name is not None:
+                    break
+            if name != "propose_options":
+                return []
+            from .questions import normalize_questions
+            try:
+                questions = normalize_questions(args)
+            except ValueError:
+                questions = []
+            item = _options_resolved_item({"outcome": "cancelled", "questions": questions}, call_id or None,
+                                          allow_empty=True)
+        else:
+            return []
+        if item is None:
+            return []
+        turn["options_dismissed"] = item["outcome"] == "dismissed"
+        return [item]
 
     def _history_turn_finished(self, turn: dict, finished: bool) -> bool:
         """Whether a replayed turn counts as finished; a dismissed question may end a turn."""
+        if turn.get("options_dismissed") and not turn.get("interrupted"):
+            return True
         return finished
     # ---- end 0.40 options -------------------------------------------------------------------------
 

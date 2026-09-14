@@ -201,6 +201,7 @@ AUTO_RESUME_MAX = 2          # consecutive automatic resumes before DGC stops an
 # `_history()` matches on these, so they live here, once.
 CYCLE_MARKER = "Continue the active goal from the current session state."
 AUTO_RESUME_MARKER = "The previous attempt at this goal stopped early:"
+QUESTION_DISMISSED_REASON = "You closed a question the goal needs answered"
 
 
 def auto_resume_prompt(reason: str, *, checklist_cleared: bool = False) -> str:
@@ -544,7 +545,11 @@ class GoalLifecycle:
                 self._goal_cycle_token_start = before_tokens
                 with self._steer_lock:
                     self._accepting_steer = not external
+                self._end_turn_after_batch = ""
                 result = step(prompt)
+                # The user closed a question this cycle needed: another cycle would only ask again.
+                dismissed = getattr(self, "_end_turn_after_batch", "") == "dismissed"
+                self._end_turn_after_batch = ""
                 ok = bool(result.get("ok")) if isinstance(result, dict) else result is not False
                 self._goal_details["cycles"] += 1
                 report = self._pending_goal_report
@@ -566,6 +571,8 @@ class GoalLifecycle:
                             return {**result, "ok": False} if isinstance(result, dict) else False
                         return result
                     return finish("paused", result, reason=reason)
+                if dismissed:
+                    return finish("paused", result, reason=QUESTION_DISMISSED_REASON)
                 if report and report["status"] == "completed":
                     report = self._gate_completion_report(report)
                 if report and report["status"] != "active":

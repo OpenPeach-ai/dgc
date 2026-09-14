@@ -54,8 +54,12 @@ def _numbered(title: str, labels: list[str]) -> int | None:
         return None
 
 
-def select(title: str, labels: list[str], hints: list[str] | None = None) -> int | None:
-    """Pick one of `labels` with the arrow keys. Returns its index, or None if cancelled."""
+def select(title: str, labels: list[str], hints: list[str] | None = None,
+           initial: int = 0) -> int | None:
+    """Pick one of `labels` with the arrow keys. Returns its index, or None if cancelled.
+
+    ``initial`` is the row the cursor starts on (a recommended option); out-of-range means row 0.
+    """
     if not labels:
         return None
     # The selected index maps back to the caller's original value; only the terminal-facing labels
@@ -73,7 +77,8 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
     hints = hints or [""] * len(labels)
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    i, n = 0, len(labels)
+    n = len(labels)
+    i = initial if isinstance(initial, int) and 0 <= initial < n else 0
     # Scrolling viewport: never print more lines than fit on screen. Otherwise, once
     # the list + surrounding output exceeds the terminal height the screen scrolls, the
     # title scrolls off the top, and the in-place redraw (\x1b[<block>A) can't reach it

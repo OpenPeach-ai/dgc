@@ -65,8 +65,6 @@ class AgentUI(Protocol):
     def add_permission_rule(self, name: str, args: dict) -> None: ...
     plan_feedback: str                                             # one-shot rejection steer
     def present_plan(self, plan: str): ...                          # mode str | None
-    def propose_options(self, question: str, options: list) -> str: ...
-    def propose_questions(self, questions: list[dict]) -> dict | None: ...
     # MCP server input is a separate, always-consent-gated channel. ``kind`` is one of
     # elicitation | sampling_request | sampling_response; implementations return an action dict.
     def mcp_capabilities(self) -> dict: ...
@@ -85,7 +83,8 @@ class AgentUI(Protocol):
     # One retry run of a model request: state retrying | recovered | gave_up | cancelled, with the
     # model_retry protocol fields as keywords (reconnecting).
     def model_retry(self, state: str, **fields) -> None: ...
-    # Ask the user 1-4 normalised questions and return the answers (options picker).
+    # Ask the user 1-4 normalised questions (dgc/questions.py shape) and return the decision
+    # {"outcome": answered | dismissed | cancelled | unavailable, "answers": {id: {selected, other}}}.
     def ask_questions(self, questions: list[dict], call_id=None) -> dict: ...
     # How a question request ended: answered | dismissed | cancelled | unavailable.
     def options_resolved(self, call_id, outcome, questions, answers) -> None: ...
@@ -103,6 +102,7 @@ _ACTIVITY_VERBS = {
     "code_intel": "Reading code structure", "web_search": "Searching the web",
     "web_fetch": "Fetching a page", "todo": "Updating the plan", "task": "Delegating a task",
     "skill": "Reading a skill", "present_plan": "Presenting the plan",
+    "propose_options": "Asking a question",
     "memory": "Updating memory", "artifact": "Building an artifact",
     "monitor": "Starting a monitor", "monitor_stop": "Stopping a monitor",
 }
@@ -120,6 +120,10 @@ def activity_verb(name: str) -> str:
 
 def arg_summary(name: str, args: dict) -> str:
     """A one-line human summary of a tool call's primary argument."""
+    if name == "propose_options" and isinstance(args, dict):
+        from .questions import args_summary
+        value = args_summary(args).replace("\n", " ")
+        return value[:120] + ("…" if len(value) > 120 else "")
     for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
         if key in args:
             value = str(args[key]).replace("\n", " ")

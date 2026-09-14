@@ -338,49 +338,93 @@ class UI:
             self.console.print(f"  [{DIM}]feedback noted — the agent will see your denial[/]")
         return None
 
-    def propose_options(self, question: str, options: list[str]) -> str:
-        """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
+    def ask_questions(self, questions: list[dict], call_id=None) -> dict:
+        """Model-driven questions: arrow menu per question, cursor on the recommended option.
+
+        One question is asked directly; several get a review screen whose Submit settles the batch
+        (an unanswered question counts as skipped). Esc closes the question without an answer.
+        """
         if getattr(self, "non_interactive", False):
-            self.console.print(f"  [{DIM}]question skipped in a -p run: {_markup_literal(question)}[/]",
+            first = questions[0]["question"] if questions else ""
+            self.console.print(f"  [{DIM}]question skipped in a -p run: {_markup_literal(first)}[/]",
                                highlight=False)
-            return ""
+            return {"outcome": "unavailable", "answers": {}}
         self._yield_stdin()
-        idx = menu_select(terminal_safe_text(question or "Choose one"),
-                          [terminal_safe_text(option) for option in options] + ["Other"],
-                          [""] * len(options) + ["type your own answer"])
+        self.stop_working()
+        answers: dict = {}
+        if len(questions) == 1:
+            entry = self._ask_one_question(questions[0])
+            if entry is None:
+                return {"outcome": "dismissed", "answers": {}}
+            return {"outcome": "answered", "answers": {questions[0]["id"]: entry}}
+        while True:
+            def shown(q):
+                entry = answers.get(q["id"])
+                if entry is None:
+                    return "not answered"
+                picks = [q["options"][i]["label"] for i in entry["selected"]]
+                text = ", ".join(picks + ([entry["other"]] if entry["other"] else []))
+                return terminal_safe_text(text or "skipped")
+            idx = menu_select("Questions — answer each, then Submit",
+                              [terminal_safe_text(q["header"]) for q in questions] + ["Submit"],
+                              [shown(q) for q in questions]
+                              + [f"{len(answers)}/{len(questions)} answered · the rest are skipped"])
+            if idx is None:
+                return {"outcome": "dismissed", "answers": {}}
+            if idx == len(questions):
+                return {"outcome": "answered", "answers": {
+                    q["id"]: answers.get(q["id"], {"selected": [], "other": ""}) for q in questions}}
+            entry = self._ask_one_question(questions[idx])
+            if entry is not None:
+                answers[questions[idx]["id"]] = entry
+
+    def _ask_one_question(self, q: dict) -> dict | None:
+        """One question's answer ``{selected, other}``; None when the user pressed Esc."""
+        from .questions import MAX_ANSWER
+        options = q["options"]
+        recommended = next((i for i, o in enumerate(options) if o["recommended"]), 0)
+        hints = [("recommended · " if o["recommended"] else "") + terminal_safe_text(o["description"])
+                 for o in options]
+        if q.get("multi_select"):
+            section(self.console, terminal_safe_text(q["question"]))
+            for i, (o, hint) in enumerate(zip(options, hints), 1):
+                self.console.print(f"  {i}) {_markup_literal(terminal_safe_text(o['label']))}"
+                                   + (f"  [{DIM}]{_markup_literal(hint)}[/]" if hint else ""),
+                                   highlight=False)
+            try:
+                raw = input("  comma-separated numbers (blank = skip) › ").strip()
+                selected = sorted({int(part) - 1 for part in raw.replace(" ", ",").split(",") if part.strip()})
+                note = input("  something else? (optional) › ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return None
+            except ValueError:
+                self.info("Use the option numbers, separated by commas.")
+                return self._ask_one_question(q)
+            if any(not 0 <= i < len(options) for i in selected):
+                self.info("Use the option numbers shown.")
+                return self._ask_one_question(q)
+            return {"selected": selected, "other": note[:MAX_ANSWER]}
+        idx = menu_select(terminal_safe_text(q["question"] or "Choose one"),
+                          [terminal_safe_text(o["label"]) for o in options] + ["Something else…", "Skip this question"],
+                          hints + ["type your own answer", ""], initial=recommended)
         if idx is None:
-            return ""
-        if idx == len(options):                          # the "something else…" row
+            return None
+        if idx == len(options):
             try:
                 raw = input("  › ").strip()
-            except EOFError:
-                return ""
-            return raw if len(raw) <= 4096 else ""
-        return options[idx]
-
-    def propose_questions(self, questions: list[dict]) -> dict | None:
-        """Review/edit separate decisions and explicitly submit the complete batch."""
-        from .questions import valid_answers
-        if getattr(self, "non_interactive", False):
-            return None
-        self._yield_stdin()
-        answers = {}
-        while True:
-            idx = menu_select("Questions — review each answer, then Submit",
-                              [terminal_safe_text(q["header"]) for q in questions] + ["Submit"],
-                              [terminal_safe_text(answers.get(q["id"], "Not answered")) for q in questions]
-                              + [f"{len(answers)}/{len(questions)} answered"])
-            if idx is None:
+            except (EOFError, KeyboardInterrupt):
                 return None
-            if idx == len(questions):
-                if valid_answers(questions, answers):
-                    return answers
-                self.info("Answer every question before submitting.")
-                continue
-            q = questions[idx]
-            answer = self.propose_options(q["question"], q["options"])
-            if answer:
-                answers[q["id"]] = answer
+            return {"selected": [], "other": raw[:MAX_ANSWER]}
+        if idx == len(options) + 1:
+            return {"selected": [], "other": ""}
+        return {"selected": [idx], "other": ""}
+
+    def options_resolved(self, call_id, outcome, questions, answers) -> None:
+        from .questions import asked_summary
+        lines = asked_summary(questions, answers, outcome)
+        self.console.print(f"  [{DIM}]▸ {_markup_literal(terminal_safe_text(lines[0]))}[/]", highlight=False)
+        for line in lines[1:]:
+            self.console.print(f"    [{DIM}]{_markup_literal(terminal_safe_text(line))}[/]", highlight=False)
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -2611,17 +2655,11 @@ def _json_oneshot_ui(config):
                                   "report it as your final answer")
             return None
 
-        def propose_options(self, question, options):
-            self.em.emit("options_request", id=None, question=question, options=list(options),
-                         decision=None, reason="non-interactive run")
-            return ""
-
-        def propose_questions(self, questions):
-            first = questions[0] if questions else {}
-            self.em.emit("options_request", id=None, question=str(first.get("question", "")),
-                         options=list(first.get("options", [])), questions=questions,
-                         decision=None, reason="non-interactive run")
-            return None
+        def ask_questions(self, questions, call_id=None):
+            # The v14 request, answered on the spot like its permission/plan siblings.
+            self.em.emit("options_request", id=None, call_id=call_id if isinstance(call_id, str) else None,
+                         questions=list(questions), decision=None, reason="non-interactive run")
+            return {"outcome": "unavailable", "answers": {}}
 
         def mcp_input(self, server, kind, payload, *, cancel=None):
             return {"action": "cancel"}
