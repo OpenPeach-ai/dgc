@@ -908,23 +908,29 @@ class Agent(GoalLifecycle):
         return getattr(self, "_todo_clear_turns", None) is not None
 
     def _advance_todo_clear(self) -> None:
-        """Called as each top-level turn starts: count the clear down and lift it when spent."""
-        turns = getattr(self, "_todo_clear_turns", None)
-        if turns is None:
-            return
-        turns += 1
-        if turns >= self._TODO_CLEAR_TURNS:
-            self._todo_clear_turns = None
-            self._todo_clear_note_pending = False
-        else:
-            self._todo_clear_turns = turns
+        """Called as each top-level turn starts: count the clear down and lift it when spent.
+
+        Under the checklist lock, like clear_todos: this is a read-modify-write, and a Clear from
+        the dispatcher thread landing between the read and the write would otherwise be counted
+        down (or lifted, note and all) as if it were the older clear."""
+        with _todo_lock(self.ctx):
+            turns = getattr(self, "_todo_clear_turns", None)
+            if turns is None:
+                return
+            turns += 1
+            if turns >= self._TODO_CLEAR_TURNS:
+                self._todo_clear_turns = None
+                self._todo_clear_note_pending = False
+            else:
+                self._todo_clear_turns = turns
 
     def _take_todo_clear_note(self) -> str:
         """The one-time note for the model, or "" once it has been delivered."""
-        if not (getattr(self, "_todo_clear_note_pending", False) and self.todo_clear_in_force()):
-            return ""
-        self._todo_clear_note_pending = False
-        return self.TODO_CLEARED_NOTE
+        with _todo_lock(self.ctx):
+            if not (getattr(self, "_todo_clear_note_pending", False) and self.todo_clear_in_force()):
+                return ""
+            self._todo_clear_note_pending = False
+            return self.TODO_CLEARED_NOTE
 
     def todo_clear_hint(self) -> str:
         """How this frontend's user drops a checklist, for text that tells them to."""
@@ -2933,8 +2939,9 @@ class Agent(GoalLifecycle):
             self._plan_approved_this_turn = False
             # A clear made while idle, or during an earlier goal cycle that ran out of tool
             # batches before the reminder could carry it, is told here, in this step's prompt.
-            if self._take_todo_clear_note():
-                self._todo_clear_note_in_prompt = True
+            # Only this step's: a goal runs every work cycle inside one run_turn, and a block set
+            # for cycle 1 was otherwise repeated in the system prompt of every later cycle.
+            self._todo_clear_note_in_prompt = bool(self._take_todo_clear_note())
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
             blocked, hout = self._run_lifecycle_hooks(

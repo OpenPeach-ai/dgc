@@ -284,6 +284,82 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertFalse(self.agent.todo_clear_unsaved, "a pending flush must not land in another session")
         self.assertNotIn("# Checklist cleared", self.agent.system_prompt())
 
+    def test_a_long_goal_turn_carries_the_cleared_note_in_one_cycle_not_every_cycle(self):
+        from dgc.goals import CYCLE_MARKER
+        self.update([{"content": "Inspect", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent.clear_todos())           # an idle clear, before the goal starts
+        self.assertTrue(self.agent.set_goal("Write the three files"))
+        seen = []                                           # (cycle, note in the system prompt?)
+
+        def chat(messages, **kwargs):
+            cycle = sum(1 for m in messages if m.get("role") == "user"
+                        and CYCLE_MARKER in str(m.get("content", "")))
+            seen.append((cycle, "# Checklist cleared" in messages[0]["content"]))
+            if messages[-1].get("role") == "tool":
+                return ChatResult(content=f"Cycle {cycle + 1} done.")
+            if cycle < 2:                                   # real, distinct progress each cycle
+                name = "abc"[cycle]
+                return ChatResult(tool_calls=[ToolCall(f"w{cycle}", "write_file",
+                                                       {"path": f"{name}.txt", "content": "x\n"})])
+            return ChatResult(tool_calls=[ToolCall("report", "update_goal", {
+                "status": "completed", "summary": "Both files written",
+                "evidence": ["a.txt and b.txt written"]})])
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Start the work"), (self.agent._last_turn_error, self.ui.errors))
+        self.assertEqual(self.agent.goal_status, "completed", self.agent.goal_snapshot())
+        cycles = sorted({cycle for cycle, _ in seen})
+        self.assertEqual(cycles, [0, 1, 2], seen)
+        self.assertTrue(all(noted for cycle, noted in seen if cycle == 0), seen)
+        self.assertFalse(any(noted for cycle, noted in seen if cycle > 0),
+                         f"told in the first cycle's prompt, not repeated in every later one: {seen}")
+        self.assertNotIn("# Checklist cleared", self.agent.messages[0]["content"])
+        self.assertTrue(self.agent.todo_clear_in_force(), "the nudge stays quiet through the next turn")
+
+    def test_a_clear_landing_while_a_turn_counts_the_previous_one_down_is_not_lost(self):
+        import threading
+        from dgc.agent import Agent as AgentClass
+        agent = self.agent
+        self.update([{"content": "Inspect", "status": "pending"}])
+        agent.clear_todos()                     # an earlier clear...
+        agent._advance_todo_clear()             # ...one turn from lifting...
+        self.assertEqual(agent._take_todo_clear_note(), AgentClass.TODO_CLEARED_NOTE)   # ...and told
+        self.update([{"content": "Rebuilt by the model", "status": "pending"}])
+        # The dispatcher's Clear lands exactly between the turn thread's read of the countdown and
+        # its write. The countdown attribute is swapped for a property that starts that Clear on the
+        # first read and gives it half a second to finish before the read returns.
+        racing = threading.Thread(target=agent.clear_todos, daemon=True)
+        state = {"turns": agent.__dict__.pop("_todo_clear_turns"), "raced": False}
+
+        class Racing(AgentClass):
+            @property
+            def _todo_clear_turns(self):
+                value = state["turns"]                  # the value the reader has already taken
+                if not state["raced"]:
+                    state["raced"] = True
+                    racing.start()
+                    racing.join(timeout=0.5)
+                return value
+
+            @_todo_clear_turns.setter
+            def _todo_clear_turns(self, value):
+                state["turns"] = value
+
+        agent.__class__ = Racing
+        try:
+            agent._advance_todo_clear()
+            racing.join(timeout=5)
+        finally:
+            agent.__class__ = AgentClass
+            agent._todo_clear_turns = state["turns"]
+        self.assertTrue(state["raced"])
+        self.assertFalse(racing.is_alive())
+        self.assertEqual(agent.todos, [])
+        self.assertTrue(agent.todo_clear_in_force(), "the new clear is in force, not lifted with the old one")
+        self.assertEqual(agent._todo_clear_turns, 0, "and it starts its own count")
+        self.assertEqual(agent._take_todo_clear_note(), AgentClass.TODO_CLEARED_NOTE,
+                         "its note is still owed to the model")
+
     # --- the tool: validation, normalisation, bounds ------------------------------------------
 
     def test_invalid_tool_payload_is_atomic_and_bounded(self):
