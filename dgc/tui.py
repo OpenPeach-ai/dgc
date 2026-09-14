@@ -1093,12 +1093,15 @@ class TUI:
             lines = lines[1:]
         else:
             summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · event {batch.event_index}'
-            if batch.omitted_lines:
-                lines.append(f"… {plural(batch.omitted_lines, 'more line')} — "
-                             f"/monitors show {batch.monitor_id}")
-        return {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
-                "call_id": None, "summary": summary[:200], "running": False, "error": False,
-                "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
+        block = {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
+                 "call_id": None, "summary": summary[:200], "running": False, "error": False,
+                 "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
+        if batch.kind == "output" and batch.omitted_lines:
+            # Kept apart from the body: counted as a body line it pushed a 40-line event past the
+            # preview budget, and the card showed two different "more lines" hints at once.
+            block["more"] = (f"{plural(batch.omitted_lines, 'more line')} — "
+                             f"/monitors show {safe(batch.monitor_id)}")
+        return block
 
     def _service_monitors(self) -> bool:
         """UI-loop tick: render queued monitor callbacks and start due wake-ups. O(sessions)."""
@@ -2100,7 +2103,8 @@ class TUI:
             if blk.get("running"):
                 return None
             return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
-                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "", theme_key)
+                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "",
+                    blk.get("more", ""), getattr(self, "_width", 0), theme_key)
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
             # width and height in the identity preserves the resize reflow exactly.
@@ -2297,6 +2301,16 @@ class TUI:
             frags.append(rail())
             frags.append((f"fg:{th.accent_dim}", label, toggle))
 
+        # The transcript window wraps long rows itself, and a wrapped continuation started at
+        # column 0 outside the card's rail. Wrap body rows here instead, each under its own rail.
+        room = max(20, int(getattr(self, "_width", 0) or 80) - 2)
+
+        def body_rows(style: str, text: str) -> None:
+            for piece in self._wrap_cells(text, room):
+                frags.append(("", "\n"))
+                frags.append(rail())
+                frags.append((style, piece))
+
         diff = self._tool_diff(b)
         if diff:                                        # rendered (coloured) diff — rail each line
             dlines = diff.split("\n")
@@ -2314,13 +2328,14 @@ class TUI:
             lines = [ln.expandtabs(4) for ln in (b.get("out") or "").splitlines()]
             budget = self._preview_budget(b)
             body = f"fg:{th.text}" if error else f"fg:{th.faint}"
+            more = str(b.get("more") or "")
             if exp or len(lines) <= budget:
                 for ln in lines:
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
                 if len(lines) > budget:
                     toggle_row("\u25be show less")
+                if more:
+                    body_rows(f"fg:{th.faint}", "\u2026 " + more)
             else:
                 # Tail-biased: a test runner prints its verdict at the END, which a head-only window
                 # hides. The elided middle is itself the expand toggle.
@@ -2328,17 +2343,38 @@ class TUI:
                 tail = budget - head
                 hidden = len(lines) - head - tail
                 for ln in lines[:head]:
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
                 lead = "\u2026 " if head else ""          # no backslash inside an f-string
-                more = "more " if head or tail else ""     # expression: Python 3.10/3.11 reject it
-                toggle_row(f"\u25b8 {lead}{hidden} {more}line{'s' if hidden != 1 else ''} \u2014 click / /expand")
+                word = "more " if head or tail else ""     # expression: Python 3.10/3.11 reject it
+                # One hint: lines the event did not carry are named in the same row as the ones
+                # this card folded away.
+                extra = f" \u00b7 {more}" if more else ""
+                toggle_row(f"\u25b8 {lead}{hidden} {word}line{'s' if hidden != 1 else ''} "
+                           f"\u2014 click / /expand{extra}")
                 for ln in (lines[-tail:] if tail else []):
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
         return frags
+
+    @staticmethod
+    def _wrap_cells(text: str, width: int) -> list[str]:
+        """Split one output row into pieces of at most `width` terminal cells (wide glyphs count
+        two). A row that fits is returned whole, which is nearly every row."""
+        width = max(1, int(width))
+        if len(text) * 2 <= width:
+            return [text]
+        from prompt_toolkit.utils import get_cwidth
+        if get_cwidth(text) <= width:
+            return [text]
+        pieces, current, used = [], [], 0
+        for char in text:
+            cells = get_cwidth(char)
+            if current and used + cells > width:
+                pieces.append("".join(current))
+                current, used = [], 0
+            current.append(char)
+            used += cells
+        pieces.append("".join(current))
+        return pieces
 
     def _cursor_ft(self, text: str):
         """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept

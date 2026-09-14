@@ -337,6 +337,33 @@ class TuiMonitorTests(unittest.TestCase):
         self.assertNotIn("for the rest of the session", usage)
         self.assertIn("until DGC restarts", usage)
 
+    def test_a_long_card_row_wraps_inside_the_rail_and_a_big_event_has_one_hint(self):
+        from dgc.monitors import Batch
+        from dgc import glyphs
+        ui = self.tui()
+        ui._width = 60
+        long_line = "); stop it with monitor_stop(id=\"mon1\") and read it with bash_output " * 2
+        block = {"kind": "tool", "name": "monitor", "route_name": "monitor", "call_id": None,
+                 "summary": "watch", "running": False, "error": False, "diff": None, "exp": False,
+                 "out": "started monitor mon1\n" + long_line, "lines": 2}
+        rows = self.plain(ui._tool_frags(block)).split("\n")
+        self.assertGreater(len(rows), 3, "the long row is wrapped into several rows")
+        for row in rows:
+            self.assertTrue(row.startswith(glyphs.RAIL), repr(row))
+            self.assertLessEqual(len(row), 60, repr(row))
+        batch = Batch("mon1", "burst", "output", lines=[f"line {i}" for i in range(40)],
+                      event_index=1, omitted_lines=20)
+        event = ui._monitor_event_block(batch)
+        self.assertEqual(event["lines"], 40, "the hint is not a body line")
+        text = self.plain(ui._tool_frags(event))
+        hint_rows = [row for row in text.split("\n") if "more line" in row]
+        self.assertEqual(len(hint_rows), 1, text)
+        self.assertIn("20 more lines — /monitors show mon1", hint_rows[0])
+        event["exp"] = True
+        expanded = self.plain(ui._tool_frags(event))
+        self.assertIn("line 39", expanded)
+        self.assertEqual(expanded.count("/monitors show mon1"), 1, expanded)
+
     def _blocked_wake(self, ui, sess):
         entered = threading.Event()
 
