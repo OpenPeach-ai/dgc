@@ -387,13 +387,16 @@ def retain(data_dir: Path, active: str, keep_others: int = KEEP_OTHER_VERSIONS,
         shutil.rmtree(Path(data_dir) / "locks" / name, ignore_errors=True)
         removed.append(name)
     for entry in entries:
-        if entry.name == active or entry.name in complete:
+        # Only a directory an installer could have started: versions/ may sit inside a directory
+        # the user chose (DGC_DATA_DIR, or an older install's DGC_DIR), and anything else there is
+        # theirs.
+        if not valid_version(entry.name) or entry.name == active or entry.name in complete:
             continue
         try:
             age = now - entry.stat().st_mtime
         except OSError:
             continue
-        if age < STALE_BUILD_SECONDS or (valid_version(entry.name) and live_pids(data_dir, entry.name)):
+        if age < STALE_BUILD_SECONDS or live_pids(data_dir, entry.name):
             continue
         shutil.rmtree(entry, ignore_errors=True)
         removed.append(entry.name)

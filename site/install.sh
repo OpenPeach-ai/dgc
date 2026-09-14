@@ -194,10 +194,20 @@ if [ -f "$VDIR/.complete" ]; then
   HAVE=$(sed -n 's/^sha256=//p' "$VDIR/.complete")
   if [ -n "$SHA" ] && [ "$HAVE" != "$SHA" ]; then
     if [ "$CURRENT_TARGET" = "$VDIR/.venv/bin/dgc" ] || in_use; then
-      die "DGC $VER is already installed from a different archive and is in use — refusing to rebuild it in place"
+      # The same version number was published again from a different archive. Rebuilding in
+      # place would pull the tree out from under the launcher or a running dgc, and refusing
+      # would fail every update until a higher version is out. The build we have is a complete,
+      # verified DGC $VER: keep it.
+      if [ "$CURRENT_TARGET" = "$VDIR/.venv/bin/dgc" ]; then
+        say "DGC $VER is already active — keeping it"
+      else
+        say "DGC $VER is already installed and in use — keeping it and switching to it"
+      fi
+      printf '  note: the published %s archive differs from the one this build came from (sha256 %s); the build already here is kept\n' "$VER" "$HAVE"
+    else
+      say "DGC $VER was installed from a different archive — rebuilding it"
+      rm -rf "$VDIR"
     fi
-    say "DGC $VER was installed from a different archive — rebuilding it"
-    rm -rf "$VDIR"
   else
     say "DGC $VER is already installed — switching to it"
   fi

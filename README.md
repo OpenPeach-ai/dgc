@@ -31,8 +31,8 @@ One line — nothing needs root:
 curl -fsSL https://vibedgc.com/install.sh | bash
 ```
 
-If `cursor`, `code`, or `codium` is on `PATH`, the installer also checksum-verifies
-and installs the DGC extension into the first one found. Prefix the command with
+The installer also checksum-verifies the DGC extension and installs it into each of
+`cursor`, `code` and `codium` it finds on `PATH`. Prefix the command with
 `DGC_SKIP_EXTENSION=1` to install only the CLI.
 
 Then point it at a model and go:

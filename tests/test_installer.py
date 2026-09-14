@@ -443,6 +443,44 @@ class VersionedInstallLifecycle(unittest.TestCase):
         self.assertEqual(self.target_version(), "0.90.4")
         self.assertIsNotNone(L.read_complete(self.data / "versions" / "0.90.4"))
 
+    def test_08_the_same_version_published_again_keeps_the_build_in_use(self):
+        # A version re-cut from a different commit without a version bump. Rebuilding it in place
+        # would pull the tree out from under the launcher; refusing failed every later update.
+        vdir = self.data / "versions" / "0.90.4"
+        built_from = L.read_complete(vdir)["sha256"]
+        before = link_target(self.launcher)
+        SITE.publish(release("0.90.4", extra={"dgc/recut_marker.py": "RECUT = True\n"}))
+        done = run_dgc(self.launcher, ["update"], self.env)
+        self.assertEqual(done.returncode, 0, output(done)[-3000:])
+        self.assertIn("DGC 0.90.4 is already active — keeping it", output(done))
+        self.assertIn("up to date", output(done))
+        self.assertEqual(link_target(self.launcher), before)
+        self.assertEqual(L.read_complete(vdir)["sha256"], built_from)
+        self.assertFalse(list(vdir.rglob("recut_marker.py")))
+        again = run_installer(self.env)
+        self.assertEqual(again.returncode, 0, output(again)[-3000:])
+
+        # Not active, but a process still runs it: keep that build too, and switch back to it.
+        rolled = run_dgc(self.launcher, ["update", "--rollback"], self.env)
+        self.assertEqual(rolled.returncode, 0, output(rolled)[-2000:])
+        self.assertEqual(self.target_version(), "0.90.3")
+        serve = subprocess.Popen([str(vdir / ".venv" / "bin" / "dgc"), "serve"], env=self.env,
+                                 cwd=str(self.home), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, text=True)
+        type(self).processes.append(serve)
+        try:
+            self.assertIn('"ready"', serve.stdout.readline())
+            self.assertEqual(L.live_pids(self.data, "0.90.4"), [serve.pid])
+            in_use = run_dgc(self.launcher, ["update"], self.env)
+            self.assertEqual(in_use.returncode, 0, output(in_use)[-3000:])
+            self.assertIn("already installed and in use — keeping it", output(in_use))
+            self.assertEqual(self.target_version(), "0.90.4")
+            self.assertEqual(L.read_complete(vdir)["sha256"], built_from)
+        finally:
+            serve.stdin.close()
+            serve.wait(timeout=30)
+            serve.stdout.close()
+
 
 # ------------------------------------------------------------ old installs ---
 
@@ -527,6 +565,155 @@ class LegacyInstallMigration(unittest.TestCase):
         self.assertIn(f"previous install left at {tree}", output(done))
         self.assertTrue((tree / ".venv" / "bin" / "dgc").exists())
         self.assertFalse((tree / "versions").exists())
+
+
+# ------------------------------------------------------------------- units ---
+
+class LayoutUnits(unittest.TestCase):
+
+    def test_retention_only_sweeps_what_an_installer_could_have_started(self):
+        data = new_home("retain") / "chosen"
+        versions = data / "versions"
+        for name in ("1.0.0", "1.0.1", "1.0.2", "1.0.3", "1.0.4"):
+            (versions / name).mkdir(parents=True)
+            (versions / name / ".complete").write_text(f"version={name}\nsha256=x\n")
+        old = time.time() - 2 * 3600
+        for name in ("my-notes", "0.9.9", "backup of 1.0.0"):
+            (versions / name).mkdir()
+            (versions / name / "keep.txt").write_text("mine\n")
+            os.utime(versions / name, (old, old))
+        (versions / "0.9.8").mkdir()                      # an unfinished build started just now
+        removed = L.retain(data, "1.0.4")
+        self.assertEqual(sorted(removed, key=L.version_key), ["0.9.9", "1.0.0", "1.0.1"])
+        self.assertEqual(sorted(p.name for p in versions.iterdir()),
+                         ["0.9.8", "1.0.2", "1.0.3", "1.0.4", "backup of 1.0.0", "my-notes"])
+        self.assertEqual((versions / "my-notes" / "keep.txt").read_text(), "mine\n")
+
+    def test_the_launcher_flip_is_never_seen_half_done(self):
+        home = new_home("flip")
+        a, b = home / "a" / "dgc", home / "b" / "dgc"
+        for target in (a, b):
+            target.parent.mkdir()
+            target.write_text("#!/bin/sh\n")
+        launcher = home / "bin" / "dgc"
+        L.flip_launcher(launcher, a)
+        bad: list[object] = []
+        reads = [0]
+        stop = threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    seen = os.readlink(launcher)
+                except OSError as exc:            # missing, even for an instant, is a failure
+                    bad.append(exc)
+                    continue
+                if seen not in (str(a), str(b)):
+                    bad.append(seen)
+                reads[0] += 1
+
+        threads = [threading.Thread(target=reader) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        try:
+            for index in range(4000):
+                L.flip_launcher(launcher, b if index % 2 == 0 else a)
+        finally:
+            stop.set()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(bad, [])
+        self.assertGreater(reads[0], 1000)
+        self.assertEqual(os.readlink(launcher), str(a))
+        self.assertEqual(sorted(p.name for p in launcher.parent.iterdir()), ["dgc"], "no temporary links left")
+
+
+# ---------------------------------------------------------- interrupted builds ---
+
+class InterruptedBuilds(unittest.TestCase):
+    """Ctrl-C and SIGKILL in the middle of a build, in directories whose names have spaces."""
+
+    def test_an_interrupted_build_is_never_switched_to_and_the_next_update_rebuilds_it(self):
+        home = new_home("interrupt")
+        data, bin_dir = home / "Data Dir" / "dgc data", home / "my bin"
+        launcher = bin_dir / "dgc"
+        env = clean_env(home, DGC_DATA_DIR=str(data), DGC_BIN=str(bin_dir))
+        SITE.publish(release("0.91.1"))
+        first = run_installer(env)
+        self.assertEqual(first.returncode, 0, output(first)[-3000:])
+        good = str(data / "versions" / "0.91.1" / ".venv" / "bin" / "dgc")
+        self.assertEqual(link_target(launcher), good)
+
+        # A python3 that parks before creating the new version's virtualenv — by then the release
+        # is unpacked into versions/<v> and the build is under way.
+        real_python = shutil.which("python3", path=env["PATH"])
+        slow_dir = home / "slow python"
+        slow_dir.mkdir()
+        (slow_dir / "python3").write_text(
+            "#!/usr/bin/env bash\n"
+            'if [ "${1:-}" = -m ] && [ "${2:-}" = venv ] && [ -n "${DGC_TEST_SLOW_VENV:-}" ]; then\n'
+            '  : > "$DGC_TEST_SLOW_VENV"; sleep 300\n'
+            "fi\n"
+            f'exec "{real_python}" "$@"\n')
+        (slow_dir / "python3").chmod(0o755)
+        marker = home / "venv-started"
+        SITE.publish(release("0.91.2"))
+        vdir = data / "versions" / "0.91.2"
+
+        def interrupted(sig: int) -> subprocess.CompletedProcess:
+            marker.unlink(missing_ok=True)
+            slow = dict(env, PATH=str(slow_dir) + os.pathsep + env["PATH"], DGC_TEST_SLOW_VENV=str(marker))
+            proc = subprocess.Popen(["bash", str(INSTALLER)], env=slow, cwd=str(home), text=True,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+            deadline = time.monotonic() + BUILD_TIMEOUT
+            while not marker.exists() and proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            try:
+                self.assertTrue(marker.exists(), "the build never reached the virtualenv step")
+                self.assertTrue(vdir.is_dir())
+                self.assertFalse((vdir / ".complete").exists())
+                os.killpg(proc.pid, sig)
+            finally:
+                if proc.poll() is None and not marker.exists():
+                    os.killpg(proc.pid, signal.SIGKILL)
+                text = proc.stdout.read()
+                proc.stdout.close()
+                code = proc.wait(timeout=60)
+            return subprocess.CompletedProcess(proc.args, code, text, "")
+
+        stopped = interrupted(signal.SIGINT)
+        self.assertEqual(stopped.returncode, 130, stopped.stdout[-2000:])
+        self.assertFalse(vdir.exists(), "Ctrl-C removes the unfinished build")
+        self.assertEqual(link_target(launcher), good)
+
+        killed = interrupted(signal.SIGKILL)
+        self.assertEqual(killed.returncode, -signal.SIGKILL)
+        self.assertTrue(vdir.is_dir(), "nothing runs after SIGKILL: the unfinished build stays behind")
+        self.assertEqual(link_target(launcher), good)
+        fd = L.acquire_update_lock(data)
+        self.assertIsNotNone(fd, "the kernel released the killed installer's lock")
+        L.release_update_lock(fd)
+        offline = dict(env, DGC_BASE_URL="http://127.0.0.1:9")
+        offline.pop("DGC_DATA_DIR")
+        offline.pop("DGC_BIN")
+        listed = run_dgc(launcher, ["update", "--list"], offline)
+        self.assertEqual(listed.returncode, 0, output(listed))
+        self.assertIn("0.91.1", listed.stdout)
+        self.assertNotIn("0.91.2", listed.stdout)
+        refused = run_dgc(launcher, ["update", "--version", "0.91.2"], offline)
+        self.assertEqual(refused.returncode, 1, output(refused)[-2000:])
+        self.assertEqual(link_target(launcher), good)
+
+        # The next update, self-located from the spaced paths, rebuilds and switches.
+        plain = {key: value for key, value in env.items() if key not in ("DGC_DATA_DIR", "DGC_BIN")}
+        done = run_dgc(launcher, ["update"], plain)
+        self.assertEqual(done.returncode, 0, output(done)[-3000:])
+        self.assertEqual(link_target(launcher), str(vdir / ".venv" / "bin" / "dgc"))
+        self.assertIsNotNone(L.read_complete(vdir))
+        self.assertEqual(run_dgc(launcher, ["--version"], plain).stdout.strip(), "dgc 0.91.2")
+        record = json.loads((home / ".dgc" / "install.json").read_text())
+        self.assertEqual((record["data_dir"], record["bin_dir"]), (str(data), str(bin_dir)))
 
 
 # ---------------------------------------------------------------- refusals ---
