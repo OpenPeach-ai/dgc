@@ -793,6 +793,12 @@ async function decodePng(page, png) {
 }
 
 const STAT_WIDTHS = [360, 390, 414, 640, 760, 761, 900, 1024, 1040, 1041, 1100, 1152, 1199, 1200, 1201, 1240, 1241, 1280, 1440, 1680];
+// Two columns on phones, three up to 1200px, five from 1201px. The geometry and paint tests below
+// assert this too: rows that are flush and correctly painted prove nothing if the media blocks were
+// lost and the band shows five columns on a phone.
+const statColumnsAt = width => (width <= 760 ? 2 : width <= 1200 ? 3 : 5);
+// Five cells: 2 columns wrap to 3 rows (the last cell spans both), 3 columns to 2, 5 columns to 1.
+const statRowsFor = columns => ({2: 3, 3: 2, 5: 1})[columns];
 
 test("hero stat rows are flush with the grid at both ends, at every width", async ({page}, testInfo) => {
   // The band wraps to 3 and then 2 columns. With per-cell padding, rows after the first began 18px
@@ -805,7 +811,8 @@ test("hero stat rows are flush with the grid at both ends, at every width", asyn
     await atWidth(page, width);
     const band = await page.locator(".stat-grid").evaluate(readStatBand);
     const rows = statRows(band);
-    expect(rows.length, `${width}px`).toBeGreaterThan(0);
+    expect(band.tracks.length, `${width}px columns`).toBe(statColumnsAt(width));
+    expect(rows.length, `${width}px rows`).toBe(statRowsFor(statColumnsAt(width)));
     for (const row of rows) {
       expect(Math.abs(row[0].contentLeft - band.contentLeft), `${width}px row start`).toBeLessThanOrEqual(0.5);
       expect(Math.abs(band.contentRight - row.at(-1).contentRight), `${width}px row end`).toBeLessThanOrEqual(0.5);
@@ -826,7 +833,7 @@ test("hero stat labels never wrap while the band has five columns", async ({page
   for (const width of widths) {
     await atWidth(page, width);
     const band = await page.locator(".stat-grid").evaluate(readStatBand);
-    expect(band.tracks.length, `${width}px columns`).toBe(width >= 1201 ? 5 : 3);
+    expect(band.tracks.length, `${width}px columns`).toBe(statColumnsAt(width));
     if (band.tracks.length !== 5) continue;
     fiveColumnWidths += 1;
     const wrapped = band.cells.map((cell, index) => [index + 1, cell.labelLines]).filter(([, lines]) => lines > 1.5);
@@ -906,6 +913,8 @@ test("stat band paints one rule per row, dividers in the gaps, nothing in the gu
     await page.locator(".stat-grid").evaluate(grid => scrollTo(0, grid.getBoundingClientRect().top + scrollY - 160));
     await nextFrames(page);
     const band = await page.locator(".stat-grid").evaluate(readStatBand);
+    expect(band.tracks.length, `${width}px columns`).toBe(statColumnsAt(width));
+    expect(statRows(band).length, `${width}px rows`).toBe(statRowsFor(statColumnsAt(width)));
     const clip = {
       x: Math.floor(band.left) - margin,
       y: Math.floor(band.top) - margin,
@@ -1142,16 +1151,23 @@ function readHeroMark() {
       if (w > 0 && h > 0 && w * h > 0.25) overlaps.push([name, Math.round(w * h)]);
     }
   }
-  const eyebrowText = [...heroCopy.querySelector(".eyebrow").childNodes].find(node => node.nodeType === Node.TEXT_NODE);
-  const lines = [];
-  for (const match of eyebrowText.data.matchAll(/\S+/g)) {
-    const range = document.createRange();
-    range.setStart(eyebrowText, match.index);
-    range.setEnd(eyebrowText, match.index + match[0].length);
-    const top = Math.round(range.getBoundingClientRect().top);
-    if (!lines.length || lines.at(-1).top !== top) lines.push({top, words: 0});
-    lines.at(-1).words += 1;
-  }
+  // Words per rendered line; \S+ also splits at a no-break space, so "you&nbsp;run" counts as two.
+  const textLines = element => {
+    const lines = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const match of node.data.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const top = Math.round(range.getBoundingClientRect().top);
+        if (!lines.length || Math.abs(lines.at(-1).top - top) > 2) lines.push({top, words: []});
+        lines.at(-1).words.push(match[0]);
+      }
+    }
+    return lines.map(line => line.words);
+  };
+  const eyebrowLines = textLines(heroCopy.querySelector(".eyebrow"));
   return {
     opacity,
     fill: getComputedStyle(art.querySelector(".slash-cut")).fill,
@@ -1163,7 +1179,8 @@ function readHeroMark() {
     hero: {top: hero.top, bottom: hero.bottom},
     viewport: innerWidth,
     overlaps,
-    eyebrowLastLineWords: lines.at(-1).words,
+    eyebrowLastLineWords: eyebrowLines.at(-1).length,
+    h1Lines: textLines(heroCopy.querySelector("h1")).map(words => words.join(" ")),
   };
 }
 
@@ -1207,6 +1224,30 @@ test("hero mark stays whole and clear of the copy from phone to wide desktop", a
   for (const width of [320, 360, 375, 390, 430, 463, 540, 600, 680, 760, 761, 800, 900, 1000, 1040, 1041, 1100, 1180, 1200, 1201, 1280, 1440, 1920]) {
     await atWidth(page, width);
     expectWholeMark(await page.evaluate(readHeroMark), `${width}px`);
+  }
+});
+
+test("hero mark and headline stay clear without text-wrap balance (older Safari)", async ({page}, testInfo) => {
+  // iOS Safari before 17.5 has no text-wrap:balance. A greedy line breaker used to set the headline
+  // as "Own your coding / agent.", and at 364-500px "coding" ran under the full-strength phone mark;
+  // the eyebrow also left "run" alone on its last line at 494-542px. The layout must not depend on it.
+  test.skip(testInfo.project.name !== "chromium-desktop-1440");
+  test.setTimeout(120_000);
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const widths = [320, 360, 364, 375, 390, 400, 414, 430, 440, 460, 480, 494, 500, 520, 540, 600, 700, 760, 761, 900, 1041, 1201, 1440];
+  const balanced = {};
+  for (const width of widths) {
+    await atWidth(page, width);
+    balanced[width] = await page.evaluate(readHeroMark);
+  }
+  await page.addStyleTag({content: "*{text-wrap:wrap!important}"});
+  for (const width of widths) {
+    await atWidth(page, width);
+    const mark = await page.evaluate(readHeroMark);
+    expectWholeMark(mark, `${width}px without balance`);
+    expect(mark.h1Lines, `${width}px headline lines without balance`).toEqual(["Own your", "coding agent."]);
+    expect(mark.h1Lines, `${width}px headline lines match the balanced layout`).toEqual(balanced[width].h1Lines);
   }
 });
 

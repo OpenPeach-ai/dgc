@@ -3,7 +3,11 @@
 .hero{position:relative;min-height:760px;display:flex;align-items:center;overflow:hidden;background:var(--bg)}
 .hero-atmosphere{position:absolute;inset:0;pointer-events:none;opacity:0}.hero-mesh{display:block;width:100%;height:100%}
 .hero .container{position:relative;z-index:1;padding:82px 0 42px}
-.hero-copy{max-width:650px}.hero-copy h1{max-width:12ch}
+/* The headline reads "Own your / coding agent." with or without text-wrap:balance (iOS Safari before
+   17.5 has none). 6.6em is narrower than "Own your coding" (7.36em in Geist, 7.2em in the Arial
+   fallback) and wider than "coding agent." (5.91em / 5.73em), so a greedy line breaker makes the same
+   two lines. Otherwise "coding" ends under the phone mark (375-500px). */
+.hero-copy{max-width:650px}.hero-copy h1{max-width:6.6em}
 .hero-copy>.lede{margin-top:24px;max-width:51ch;font-size:17px;color:var(--text-2)}
 .hero-art{position:absolute;right:max(12px,50vw - 720px);top:36px;width:600px;height:630px;pointer-events:none}
 .hero-art>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg)}
@@ -40,8 +44,9 @@
    0.285 x width down from its top. 761-1200: 4vw equals --gutter (clamp(20px,4vw,48px) is linear
    from 500 to 1200px), so right:calc(4vw - 92px) at 500px wide and right:-3.3vw at 40vw wide put
    the visible right edge on the gutter. Up to 760px the box is 50vw: its visible top sits 14px
-   below the hero top, its visible right edge on the 20px gutter, beside an eyebrow capped (and
-   balanced, so no one-word second line) to clear it. If --gutter changes, these offsets drift. */
+   below the hero top, its visible right edge on the 20px gutter, beside an eyebrow capped to clear it
+   (balanced, and "you&nbsp;run" in the markup, so no one-word last line without balance either).
+   The headline's 6.6em cap keeps "coding" off the mark's line. If --gutter changes, these offsets drift. */
 @media(max-width:1200px){.hero-art{right:calc(4vw - 92px);width:500px}.hero-copy{max-width:60%}.stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stat:last-child{grid-column:span 2}}
 @media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-3.3vw;width:40vw;height:450px}}
 @media(max-width:760px){.hero .container{padding:54px 0 24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw;height:50vw}.hero .eyebrow{max-width:calc(70% - 24px);text-wrap:balance}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:28px}.stat{min-height:92px}.stat:last-child{grid-column:1/-1}.stat-value{font-size:23px}}
