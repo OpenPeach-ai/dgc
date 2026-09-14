@@ -1295,3 +1295,40 @@ class ServeEmitsTheWaitingNotice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EtaDuringStallTests(unittest.TestCase):
+    """The editor's time-left estimate is withdrawn while the model is not answering."""
+
+    def test_the_estimate_is_cleared_while_a_stall_notice_is_up_and_returns_after(self):
+        # Before: the ticker kept publishing the prior-based range, so the activity row read
+        # "No response from the model … no reply for 45s+ (3s · 48s · ~5–30 s left · ↓ 0 tok)".
+        from dgc.headless import Backend, HeadlessUI, PendingRequests
+        events = []
+        emitter = SimpleNamespace(emit=lambda t, **d: events.append({"type": t, **d}))
+        ui = HeadlessUI(emitter, PendingRequests(), 300.0)
+        ui.turn_id = "t1"
+        backend = object.__new__(Backend)
+        backend.em, backend.ui = emitter, ui
+        snapshot = SimpleNamespace(visible=True, label="~5–30 s left", elapsed=21.0, low=5.0, high=30.0,
+                                   confidence=0.25, tasks_done=0, tasks_total=0)
+        backend.agent = SimpleNamespace(eta_snapshot=lambda: snapshot)
+        labels = lambda: [e["label"] for e in events if e["type"] == "turn_eta"]
+        stop = backend._start_eta_ticker("t1")
+        self.addCleanup(stop.set)
+        deadline = time.monotonic() + 5
+        while not labels() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(labels(), ["~5–30 s left"])
+        ui.model_wait("No response from the model", "fixture at 127.0.0.1:4911 · no reply for 45s+")
+        deadline = time.monotonic() + 5
+        while len(labels()) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(1.7)                                  # another tick while still stalled
+        self.assertEqual(labels(), ["~5–30 s left", ""], "cleared once, and nothing new while stalled")
+        ui.model_wait(None)
+        snapshot.label = "~5–25 s left"
+        deadline = time.monotonic() + 5
+        while len(labels()) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(labels()[-1], "~5–25 s left", "the estimate comes back once the model answers")

@@ -1845,33 +1845,52 @@ class Backend:
     def _start_eta_ticker(self, turn_id: str) -> threading.Event:
         """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
         stop = threading.Event()
-        agent = self.agent
+        state = {"label": "", "at": 0.0}
 
         def tick() -> None:
-            last_label, last_emit = "", 0.0
             while not stop.wait(1.5):
-                try:
-                    snapshot = agent.eta_snapshot()
-                except Exception:
-                    snapshot = None
-                if snapshot is None or not snapshot.visible:
-                    continue
-                now = time.monotonic()
-                if snapshot.label == last_label and now - last_emit < 15.0:
-                    continue
-                last_label, last_emit = snapshot.label, now
-                try:
-                    self.em.emit("turn_eta", turn_id=turn_id,
-                                 elapsed_seconds=round(float(snapshot.elapsed), 1),
-                                 remaining_low_seconds=round(float(snapshot.low), 1),
-                                 remaining_high_seconds=round(float(snapshot.high), 1),
-                                 confidence=round(float(snapshot.confidence), 3),
-                                 label=snapshot.label, tasks_done=int(snapshot.tasks_done),
-                                 tasks_total=int(snapshot.tasks_total))
-                except Exception:
+                if not self._publish_eta(turn_id, state):
                     return
         threading.Thread(target=tick, name="dgc-eta", daemon=True).start()
         return stop
+
+    def _publish_eta(self, turn_id: str, state: dict) -> bool:
+        """One tick of the ETA ticker; False once the event stream is gone.
+
+        While a model request is silent or being retried (a stall notice is up), the estimate is
+        withdrawn: its priors know nothing about a model that is not answering, and "~5–30 s left"
+        beside "no reply for 45s+" was a promise nothing supported. An empty label clears it; the
+        next real estimate after the model answers is published again.
+        """
+        try:
+            snapshot = self.agent.eta_snapshot()
+        except Exception:
+            snapshot = None
+        stalled = bool(getattr(getattr(self, "ui", None), "_model_waits", None))
+        if stalled:
+            if not state["label"]:
+                return True
+            label = ""
+        elif snapshot is None or not snapshot.visible:
+            return True
+        else:
+            label = snapshot.label
+        now = time.monotonic()
+        if label and label == state["label"] and now - state["at"] < 15.0:
+            return True
+        state["label"], state["at"] = label, now
+        number = lambda name, digits: round(float(getattr(snapshot, name, 0) or 0), digits)
+        try:
+            self.em.emit("turn_eta", turn_id=turn_id,
+                         elapsed_seconds=number("elapsed", 1),
+                         remaining_low_seconds=number("low", 1),
+                         remaining_high_seconds=number("high", 1),
+                         confidence=number("confidence", 3),
+                         label=label, tasks_done=int(getattr(snapshot, "tasks_done", 0) or 0),
+                         tasks_total=int(getattr(snapshot, "tasks_total", 0) or 0))
+        except Exception:
+            return False
+        return True
 
     def _emit_context(self, request_id: str | None = None) -> None:
         try:
