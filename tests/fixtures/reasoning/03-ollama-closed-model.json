@@ -1,0 +1,28 @@
+{
+ "row": "3",
+ "api_mode": "ollama",
+ "base_url": "http://127.0.0.1:11434",
+ "model": "claude-sonnet-5",
+ "private": true,
+ "requests": [
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Proxy thinking\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"Hi.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "unknown",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

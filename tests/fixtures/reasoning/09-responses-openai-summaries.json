@@ -1,0 +1,72 @@
+{
+ "row": "9",
+ "api_mode": "responses",
+ "base_url": "https://api.openai.com/v1",
+ "model": "gpt-5",
+ "private": false,
+ "config": {
+  "preserve_thinking": true
+ },
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_1\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": []}}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.reasoning_summary_part.added\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 0}",
+    "data: {\"type\": \"response.reasoning_summary_text.delta\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 0, \"delta\": \"Check the failing boundary test before editing the gate.\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.reasoning_summary_part.done\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 0}",
+    "data: {\"type\": \"response.reasoning_summary_part.added\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 1}",
+    "data: {\"type\": \"response.reasoning_summary_text.delta\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 1, \"delta\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.reasoning_summary_part.done\", \"item_id\": \"rs_1\", \"output_index\": 0, \"summary_index\": 1}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"Check the failing boundary test before editing the gate.\"}, {\"type\": \"summary_text\", \"text\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}]}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 1, \"item\": {\"type\": \"function_call\", \"id\": \"fc_call_1\", \"call_id\": \"call_1\", \"name\": \"glob\", \"arguments\": \"\"}}",
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_1\", \"output_index\": 1, \"delta\": \"{\\\"pattern\\\": \\\"*\\\"}\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"function_call\", \"id\": \"fc_call_1\", \"call_id\": \"call_1\", \"name\": \"glob\", \"arguments\": \"{\\\"pattern\\\": \\\"*\\\"}\", \"status\": \"completed\"}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_1\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"Check the failing boundary test before editing the gate.\"}, {\"type\": \"summary_text\", \"text\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}]}, {\"type\": \"function_call\", \"id\": \"fc_call_1\", \"call_id\": \"call_1\", \"name\": \"glob\", \"arguments\": \"{\\\"pattern\\\": \\\"*\\\"}\", \"status\": \"completed\"}]}}"
+   ]
+  },
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_2\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": []}}",
+    "data: {\"type\": \"response.output_text.delta\", \"item_id\": \"msg_resp_2\", \"output_index\": 0, \"content_index\": 0, \"delta\": \"The listing has two files.\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"The listing has two files.\"}]}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_2\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"message\", \"id\": \"msg_resp_2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"The listing has two files.\"}]}]}}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "summarized",
+    "openai",
+    "inline"
+   ],
+   [
+    "summarized",
+    "openai",
+    "collapsed"
+   ]
+  ],
+  "no_think_in_history": true,
+  "thinking_join": [
+   "Check the failing boundary test before editing the gate.",
+   "I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note."
+  ]
+ }
+}

@@ -1,0 +1,62 @@
+{
+ "row": "1",
+ "api_mode": "ollama",
+ "base_url": "http://127.0.0.1:11434",
+ "model": "qwen3.8:27b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Let me look\"}, \"done\": false}",
+    {
+     "advance": 2.0
+    },
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \" at the files first.\"}, \"done\": false}",
+    {
+     "advance": 1.0
+    },
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"Listing now.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"function\": {\"name\": \"glob\", \"arguments\": {\"pattern\": \"*\"}}}]}, \"done\": false}",
+    {
+     "advance": 3.0
+    },
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"The listing is short.\"}, \"done\": false}",
+    {
+     "advance": 1.0
+    },
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"Two files.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ],
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ],
+  "seconds": [
+   2.0,
+   0.0
+  ],
+  "end_before_first_text": true
+ }
+}

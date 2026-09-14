@@ -1,0 +1,38 @@
+{
+ "row": "11",
+ "api_mode": "responses",
+ "base_url": "http://127.0.0.1:11434/v1",
+ "model": "gpt-oss:20b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_1\"}}",
+    "data: {\"type\": \"response.reasoning_summary_text.delta\", \"item_id\": \"rs_local\", \"output_index\": 0, \"summary_index\": 0, \"delta\": \"The user wants a greeting\"}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.reasoning_summary_text.delta\", \"item_id\": \"rs_local\", \"output_index\": 0, \"summary_index\": 0, \"delta\": \" so keep it short.\"}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": []}}",
+    "data: {\"type\": \"response.output_text.delta\", \"item_id\": \"msg_resp_1\", \"output_index\": 1, \"content_index\": 0, \"delta\": \"Hello!\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Hello!\"}]}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_1\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Hello!\"}]}]}}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

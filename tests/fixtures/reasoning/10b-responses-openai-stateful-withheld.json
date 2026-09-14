@@ -1,0 +1,39 @@
+{
+ "row": "10b",
+ "api_mode": "responses",
+ "base_url": "https://api.openai.com/v1",
+ "model": "gpt-5",
+ "private": false,
+ "config": {
+  "provider_state": "server"
+ },
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_1\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_w\", \"summary\": []}}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_w\", \"summary\": []}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": []}}",
+    "data: {\"type\": \"response.output_text.delta\", \"item_id\": \"msg_resp_1\", \"output_index\": 1, \"content_index\": 0, \"delta\": \"Done.\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Done.\"}]}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_1\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"reasoning\", \"id\": \"rs_w\", \"summary\": []}, {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Done.\"}]}]}}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "withheld",
+    "openai",
+    "collapsed"
+   ]
+  ],
+  "withheld_before_text": true
+ }
+}

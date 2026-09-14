@@ -1,0 +1,50 @@
+{
+ "row": "11b",
+ "api_mode": "responses",
+ "base_url": "http://127.0.0.1:11434/v1",
+ "model": "gpt-oss:20b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "application/json",
+   "body": {
+    "id": "resp_j",
+    "status": "completed",
+    "usage": {},
+    "output": [
+     {
+      "type": "reasoning",
+      "id": "rs_j",
+      "summary": [
+       {
+        "type": "summary_text",
+        "text": "Short plan."
+       }
+      ]
+     },
+     {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "output_text",
+        "text": "Hello!"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

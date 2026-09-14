@@ -1,0 +1,32 @@
+{
+ "row": "2",
+ "api_mode": "ollama",
+ "base_url": "http://127.0.0.1:11434",
+ "model": "qwen3.8:27b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"<thi\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"nk>Plan the reply\"}, \"done\": false}",
+    {
+     "advance": 1.5
+    },
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \" briefly.</think>Hello there.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

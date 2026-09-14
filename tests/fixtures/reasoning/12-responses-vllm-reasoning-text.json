@@ -1,0 +1,40 @@
+{
+ "row": "12",
+ "api_mode": "responses",
+ "base_url": "http://127.0.0.1:8000/v1",
+ "model": "gpt-oss-120b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_1\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_t\", \"summary\": []}}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.reasoning_text.delta\", \"item_id\": \"rs_t\", \"output_index\": 0, \"content_index\": 0, \"delta\": \"Raw chain of thought.\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.reasoning_text.done\", \"item_id\": \"rs_t\", \"output_index\": 0, \"content_index\": 0}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_t\", \"summary\": [], \"content\": [{\"type\": \"reasoning_text\", \"text\": \"Raw chain of thought.\"}]}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": []}}",
+    "data: {\"type\": \"response.output_text.delta\", \"item_id\": \"msg_resp_1\", \"output_index\": 1, \"content_index\": 0, \"delta\": \"Answer.\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Answer.\"}]}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_1\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"reasoning\", \"id\": \"rs_t\", \"summary\": [], \"content\": [{\"type\": \"reasoning_text\", \"text\": \"Raw chain of thought.\"}]}, {\"type\": \"message\", \"id\": \"msg_resp_1\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Answer.\"}]}]}}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}
