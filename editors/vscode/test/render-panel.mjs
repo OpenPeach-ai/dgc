@@ -8,6 +8,8 @@
 //   npm run shot -- /tmp/tip.png --tip=#btn-add        a hover label
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
 //   npm run shot -- /tmp/tasks.png --tasks             the session checklist slot (+ -long.png)
+//   npm run shot -- /tmp/usage.png --usage --width=300 --theme=light --usage-report=reports.json
+//                                                     the Token Usage settings tab (--empty for none)
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -36,12 +38,109 @@ await page.addStyleTag({ content: `
   :root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; }
   body { background: var(--bg); color: var(--text); }` });
 await page.evaluate(([mjs, mdjs]) => {
-  window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+  window.acquireVsCodeApi = () => ({ postMessage(m) { if (window.__dgcOnPost) window.__dgcOnPost(m); },
+    getState: () => undefined, setState() {} });
   eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   eval(mjs);
 }, [mainJs, markdownJs]);
 const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: e } })), event);
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+if (process.argv.includes("--usage")) {
+  // The Token Usage tab, answered from a report the real CLI produced (`dgc usage --json`, or a
+  // map of range -> report). Checks the layout at the requested width: nothing may widen the
+  // panel, and the model table must scroll inside its own box rather than clip.
+  const out = process.argv[2] || "/tmp/usage.png";
+  const option = (name, fallback) => (process.argv.find(a => a.startsWith(`--${name}=`)) || `--${name}=${fallback}`).slice(name.length + 3);
+  const width = Number(option("width", "460"));
+  const theme = option("theme", "dark");
+  const range = option("range", "7d");
+  const empty = process.argv.includes("--empty");
+  const source = option("usage-report", "");
+  const loaded = source ? JSON.parse(readFileSync(source, "utf8")) : {};
+  const reports = loaded.totals ? { [loaded.range]: loaded } : loaded;
+  const blank = (r) => ({ range: r, generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+    timezone: "IST, UTC+05:30", by_model: [], by_day: [],
+    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 } });
+  if (theme === "light") {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF;
+      --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE;
+      --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F; --vscode-descriptionForeground:#616161;
+      --vscode-disabledForeground:#6E6E6E; --vscode-list-activeSelectionBackground:#E8E8E8; --vscode-focusBorder:#005FB8; }` });
+  }
+  if (theme === "hc") {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#000000; --vscode-editor-background:#000000; --vscode-input-background:#000000;
+      --vscode-panel-border:#6FC3DF; --vscode-widget-border:#6FC3DF; --vscode-input-border:#6FC3DF;
+      --vscode-foreground:#FFFFFF; --vscode-editor-foreground:#FFFFFF; --vscode-descriptionForeground:#FFFFFF;
+      --vscode-disabledForeground:#A5A5A5; --vscode-list-activeSelectionBackground:#000000; --vscode-focusBorder:#F38518;
+      --vscode-charts-green:#89D185; --vscode-charts-purple:#B180D7; }` });
+  }
+  await page.evaluate((t) => document.body.classList.add(
+    t === "light" ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
+  await page.evaluate(([all, isEmpty, fallbackRange]) => {
+    window.__dgcOnPost = (m) => {
+      if (m.type !== "getUsage") return;
+      const report = isEmpty ? null : (all[m.range] || all[fallbackRange] || null);
+      const event = report ? { ...report, range: m.range } : {
+        range: m.range, generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+        timezone: "IST, UTC+05:30", by_model: [], by_day: [],
+        totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 } };
+      setTimeout(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "event",
+        event: { type: "usage_report", seq: 1, request_id: m.requestId, ...event } } })), 30);
+    };
+  }, [reports, empty, Object.keys(reports)[0] || "7d"]);
+  void blank;
+  await page.setViewportSize({ width, height: 900 });
+  await page.evaluate((r) => { document.getElementById("usage-range").value = r; }, range);
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+    type: "settings_open", providers: [], models: [], section: "usage" } })));
+  await page.waitForTimeout(500);
+  // A picture of the whole tab, not of a scrollport: grow the window until the body fits.
+  for (let i = 0; i < 4; i++) {
+    const need = await page.evaluate(() => { const b = document.querySelector(".set-body"); return Math.ceil(b.scrollHeight - b.clientHeight); });
+    if (need <= 0) break;
+    const view = page.viewportSize();
+    await page.setViewportSize({ width, height: Math.min(3200, view.height + need + 4) });
+    await page.waitForTimeout(200);
+  }
+  const geometry = await page.evaluate(() => {
+    const columns = [...document.querySelectorAll(".usage-table thead th")].map((th) => Math.round(th.getBoundingClientRect().width));
+    const settings = document.getElementById("settings"), body = document.querySelector(".set-body");
+    const wrap = document.querySelector(".usage-table-wrap"), table = document.querySelector(".usage-table");
+    const figures = [...document.querySelectorAll(".usage-figure")].map((f) => {
+      const box = f.getBoundingClientRect(), value = f.querySelector(".usage-figure-value");
+      return { w: Math.round(box.width), clipped: value.scrollWidth > value.clientWidth + 1 };
+    });
+    const strip = document.getElementById("usage-days").getBoundingClientRect();
+    const rows = new Set([...document.querySelectorAll(".usage-figure")].map((f) => Math.round(f.getBoundingClientRect().top))).size;
+    return {
+      width: window.innerWidth,
+      pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      settingsOverflow: settings.scrollWidth - settings.clientWidth,
+      bodyOverflow: body.scrollWidth - body.clientWidth,
+      tableScrollsInside: wrap ? wrap.scrollWidth > wrap.clientWidth : null,
+      tableWiderThanWrap: wrap && table ? Math.round(table.getBoundingClientRect().width) - wrap.clientWidth : null,
+      figureRows: rows, figures,
+      stripInside: strip.right <= window.innerWidth && strip.left >= 0,
+      bars: document.querySelectorAll("#usage-days .usage-day").length,
+      emptyShown: !document.getElementById("usage-empty").hidden,
+      contentShown: !document.getElementById("usage-content").hidden,
+      status: document.getElementById("usage-status").textContent,
+      readout: document.getElementById("usage-day-readout").textContent,
+      numeric: getComputedStyle(document.querySelector(".usage-table")).fontVariantNumeric,
+      columns,
+    };
+  });
+  console.log(JSON.stringify(geometry, null, 1));
+  await page.screenshot({ path: out, fullPage: false });
+  const ok = geometry.pageOverflow <= 0 && geometry.settingsOverflow <= 0 && geometry.bodyOverflow <= 0
+    && geometry.stripInside && geometry.figures.every((f) => !f.clipped)
+    && (empty ? geometry.emptyShown && !geometry.contentShown
+              : geometry.contentShown && (width >= 700 ? !geometry.tableScrollsInside : geometry.tableScrollsInside));
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
+}
 // ---- the anatomy of a turn, live and after a reload -------------------------------------------
 //   npm run shot -- /tmp/live.png --turn        a turn: bare tool batches, prose, a burst, an answer
 //   npm run shot -- /tmp/reload.png --reload    the same conversation restored from the session file
