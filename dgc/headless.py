@@ -22,7 +22,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
-from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
+from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions, validate_image_data_uris
 from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
@@ -1842,6 +1842,22 @@ class Backend:
             manager.stop_all()
         return outcome
 
+    def _editor_image_mentions(self, context, images):
+        """The pixels of image files mentioned in an editor prompt's context, with a notice saying
+        what was attached or skipped; None when there is nothing to do (no file mention, or a
+        subscription CLI turn, which reads the path itself)."""
+        if not isinstance(context, list) or not any(
+                isinstance(item, dict) and item.get("type") == "file_mention" for item in context):
+            return None
+        config = getattr(self, "config", getattr(self.agent, "config", None))
+        config_get = getattr(config, "get", None)
+        if config is None or (callable(config_get) and config_get("subscription_engine", "")):
+            return None
+        mentioned = editor_image_mentions(context, config.project_root, images or ())
+        if mentioned.notices:
+            self.em.emit("info", message="; ".join(mentioned.notices))
+        return mentioned
+
     def _start_eta_ticker(self, turn_id: str) -> threading.Event:
         """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
         stop = threading.Event()
@@ -2235,6 +2251,11 @@ class Backend:
                     return
                 text = cmd["text"].strip()
                 inputs = {key: cmd[key] for key in ("skills", "templates", "images", "context") if key in cmd}
+                # A goal keeps its attached images, the ones attached by @-mention included.
+                pasted = inputs.get("images") if isinstance(inputs.get("images"), list) else []
+                mentioned = self._editor_image_mentions(inputs.get("context"), pasted)
+                if mentioned is not None and mentioned.images:
+                    inputs["images"] = [*pasted, *mentioned.images]
                 if not text or not self.agent.set_goal(text, replace=True, token_budget=cmd.get("token_budget"), inputs=inputs):
                     self.em.emit("command_rejected", command=t, reason="invalid_goal",
                                  message=self.agent._last_persist_error or "Enter a goal objective.",
@@ -2315,6 +2336,12 @@ class Backend:
                              **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
+            # An image attached by @-mention, drag or Add File to Chat arrives as a path, which a
+            # model cannot look at: attach its pixels, as the terminal's @file.png does. (A delegated
+            # CLI keeps the path, and reads the file itself.)
+            mentioned = self._editor_image_mentions(context, images)
+            if mentioned is not None:
+                images = (*images, *mentioned.images)
             if isinstance(context, list) and any(isinstance(item, dict) and item.get("type") == "mcp_context" for item in context):
                 safe = redact_value(context, secret_values(self.config))
                 formatted = _format_editor_context(safe)
