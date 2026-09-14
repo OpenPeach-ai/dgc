@@ -634,14 +634,30 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     diffs: dict[str, str] = {}
     shown = {"text": False}
     fresh = {"first": cont is False}
+    from .reasoning import ReasoningOrigin, ReasoningTracker, resolve_source
+
+    def next_reasoning_seq() -> int:
+        agent._reasoning_seq = int(getattr(agent, "_reasoning_seq", 0) or 0) + 1
+        return agent._reasoning_seq
+
+    # A subscription engine cannot report the endpoint it really talks to, so every block it
+    # streams is ``unknown``. run_turn already redacts its thinking stream; the tracker only owns
+    # block identity, timing and the one thinking_end per block (v14 requires both).
+    reasoning = ReasoningTracker(ui, seq=next_reasoning_seq, inline_enabled=False)
+    engine_origin = ReasoningOrigin(**{**resolve_source(
+        api_mode="", channel="subscription", base_url="", model=str(model or ""))._asdict(),
+        "part": f"subscription:{engine.key}"})
 
     def on_event(event: dict) -> None:
         kind = event.get("kind")
+        if kind in ("tool_call", "tool_result") or (
+                kind in ("text", "result") and str(event.get("text") or "").strip()):
+            reasoning.finish(round_called_tools=None)     # the open block ends at this boundary
         if kind == "text" and event.get("text"):
             shown["text"] = True
             ui.on_text(str(event["text"]))
         elif kind == "thinking" and event.get("text"):
-            ui.on_thinking(str(event["text"]))
+            reasoning.thinking(str(event["text"]), engine_origin)
         elif kind == "tool_call":
             name = str(event.get("name") or "tool")
             call_id = str(event.get("id") or "") or None
@@ -682,7 +698,10 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     try:
         return agent.run_external_turn(prompt, delegate, reset_cancel=False)
     finally:
-        ui.end_stream()
+        try:
+            reasoning.finish(round_called_tools=None)
+        finally:
+            ui.end_stream()
 
 
 def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,

@@ -25,6 +25,8 @@ from .memory import load_instruction_file, load_memories, project_memory_path
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
 from .mcp import MCPInputError, MCPManager
+from .reasoning import (ReasoningTracker, extend_persisted_reasoning, persisted_reasoning,
+                        splice_prefix_length, subagent_block)
 from .redaction import (StreamingRedactor, contains_secret, redact_messages,
                         provider_continuation_has_secret, redact_provider_value,
                         redact_text, redact_value, secret_values)
@@ -483,6 +485,13 @@ def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
         return "<think>\n" + result.thinking.strip() + "\n</think>\n" + content
     return content
 
+
+def _thinking_splice_marker(result, content: str) -> int:
+    """``_dgc_think_splice``: the length of the ``<think>`` prefix that
+    ``_assistant_content_with_thinking`` wrote into ``content`` (0 when it wrote none), so display
+    strips exactly that many characters and never another ``<think>`` the answer contains."""
+    return splice_prefix_length(content, getattr(result, "thinking", "") or "")
+
 # A blocked repeat is not a failed command -- it never ran. The editor keys off this exact prefix
 # to say so, instead of reporting "Ran · failed" for a call DGC declined to make. A test asserts
 # the panel still carries the same literal, so the two cannot drift apart silently.
@@ -753,8 +762,17 @@ class _SubUI:
         self._buf.append(chunk)
         self._emit("on_text", chunk)
 
-    def on_thinking(self, chunk):
-        self._emit("on_thinking", chunk)
+    def on_thinking(self, chunk, block=None):
+        # A copy per forward (subagent_block): a buffered child replays exactly what it saw, and
+        # ``agent`` stays the innermost child's id.
+        if block is None:
+            self._emit("on_thinking", chunk)
+        else:
+            self._emit("on_thinking", chunk, subagent_block(block, self._call_prefix))
+
+    def on_thinking_end(self, block):
+        if callable(getattr(self._parent, "on_thinking_end", None)):
+            self._emit("on_thinking_end", subagent_block(block, self._call_prefix, end=True))
 
     def end_stream(self, phase: str = ""):
         if self._buf:
@@ -1826,6 +1844,20 @@ class Agent(GoalLifecycle):
         notify(status, duration_ms=elapsed, message=output if blocked else "")
         return blocked, output
 
+    def _next_reasoning_seq(self) -> int:
+        """Reasoning block keys (``r{n}``) are unique for this Agent's lifetime; never reset."""
+        self._reasoning_seq = int(getattr(self, "_reasoning_seq", 0) or 0) + 1
+        return self._reasoning_seq
+
+    def _attach_reasoning(self, message: dict) -> dict:
+        """The next saved assistant message takes every reasoning block this turn produced since
+        the last one (bounded; placement is recomputed on replay, never stored)."""
+        pending = getattr(self, "_turn_reasoning_pending", None)
+        self._turn_reasoning_pending = []
+        if isinstance(pending, list) and pending:
+            message["_dgc_reasoning"] = persisted_reasoning(pending)
+        return message
+
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
               defer_text: bool = False, request_reason: str = "other"):
         if getattr(self, "_mode_prompt_dirty", False):
@@ -1848,18 +1880,28 @@ class Agent(GoalLifecycle):
                         "provider continuation contains a configured credential inside signed or "
                         "encrypted state; start a new session or remove that credential-bearing turn")
         text_stream = StreamingRedactor(self._secret_values)
-        thinking_stream = StreamingRedactor(self._secret_values)
         safe_messages = redact_messages(self.messages, secrets)
+        reasoning_config = getattr(self, "config", None)
+        reasoning_get = getattr(reasoning_config, "get", None)
+        reasoning = ReasoningTracker(
+            self.ui, seq=self._next_reasoning_seq,
+            # One redactor per reasoning block, flushed into that block before it closes.
+            redactor_factory=lambda: StreamingRedactor(self._secret_values),
+            inline_enabled=(reasoning_get("thinking_inline", True) is not False
+                            if callable(reasoning_get) else True),
+            max_chars=(reasoning_get("thinking_inline_max_chars", 280)
+                       if callable(reasoning_get) else 280),
+            from_subagent=int(getattr(self, "depth", 0) or 0) > 0)
 
         def emit_text(chunk) -> None:
+            if str(chunk or "").strip():
+                reasoning.text_boundary()       # the open reasoning block ends before the prose
             safe = text_stream.feed(chunk)
             if safe and not defer_text:
                 self.ui.on_text(safe)
 
-        def emit_thinking(chunk) -> None:
-            safe = thinking_stream.feed(chunk)
-            if safe:
-                self.ui.on_thinking(safe)
+        def emit_thinking(chunk, origin=None) -> None:
+            reasoning.thinking(chunk, origin)
 
         # The stall watcher reports "no response yet" from its own thread. Capture the UI route on
         # THIS thread so a background fleet session's notice lands on that session.
@@ -1879,12 +1921,30 @@ class Agent(GoalLifecycle):
                                           on_text=emit_text, on_thinking=emit_thinking,
                                           cancel=cancel or self.cancelled)
             finally:
-                final_thinking = thinking_stream.flush()
                 final_text = text_stream.flush()
-                if final_thinking:
-                    self.ui.on_thinking(final_thinking)
                 if final_text and not defer_text:
                     self.ui.on_text(final_text)
+                finished = (result is not None
+                            and getattr(result, "finish_reason", "") not in ("cancelled", "overthink"))
+                try:
+                    blocks = reasoning.finish(
+                        round_called_tools=bool(getattr(result, "tool_calls", None)) if finished else None)
+                except Exception:
+                    if result is not None:
+                        raise
+                    blocks = []                 # never mask the request's own exception
+                if blocks:
+                    # Abandoned attempts (a fallback, an overthink retry) keep their blocks: the
+                    # next saved assistant message of this turn carries them all, in order.
+                    pending = getattr(self, "_turn_reasoning_pending", None)
+                    if not isinstance(pending, list):
+                        pending = self._turn_reasoning_pending = []
+                    pending.extend(blocks)
+                if result is not None:
+                    try:
+                        result.reasoning = list(blocks)
+                    except (AttributeError, TypeError):
+                        pass
         finally:
             if old_timeout is not None:
                 self.client.read_timeout = old_timeout
@@ -3440,6 +3500,7 @@ class Agent(GoalLifecycle):
     def _run_turn(self, user_text: str, *, source: str = "prompt",
                   notification: Notification | None = None) -> bool:
         wake = source == "monitor"
+        self._turn_reasoning_pending = []           # reasoning never carries across turns
         if self.depth == 0:
             # A new top-level turn: the approval and its "Execute the plan now" tool result are
             # behind us, so the hand-back contract applies from here on.
@@ -3833,7 +3894,7 @@ class Agent(GoalLifecycle):
             if result.finish_reason == "cancelled" or self.cancelled.is_set():
                 partial = str(result.content or "")
                 if partial.strip():
-                    cancelled_message = {"role": "assistant", "content": partial}
+                    cancelled_message = self._attach_reasoning({"role": "assistant", "content": partial})
                     self.messages.append(cancelled_message)
                     if defer_completion:
                         hold_final(cancelled_message)
@@ -3869,6 +3930,10 @@ class Agent(GoalLifecycle):
             assistant: dict = {"role": "assistant",
                                "content": _assistant_content_with_thinking(
                                    result, bool(self.config.get("preserve_thinking", False)))}
+            splice = _thinking_splice_marker(result, assistant["content"])
+            if splice:
+                assistant["_dgc_think_splice"] = splice
+            self._attach_reasoning(assistant)
             if result.provider_items:
                 assistant["_responses_output"] = result.provider_items
             if result.provider_message:
@@ -3884,6 +3949,10 @@ class Agent(GoalLifecycle):
                     and self.messages[paused_assistant_index].get("role") == "assistant"):
                 # Anthropic's pause_turn contract replaces the paused assistant state on each
                 # continuation, keeping role alternation and opaque server-tool state exact.
+                replaced = self.messages[paused_assistant_index]
+                if replaced.get("_dgc_reasoning"):  # both requests' reasoning survives the swap
+                    assistant["_dgc_reasoning"] = extend_persisted_reasoning(
+                        replaced.get("_dgc_reasoning"), assistant.get("_dgc_reasoning"))
                 self.messages[paused_assistant_index] = assistant
             else:
                 self.messages.append(assistant)
@@ -5454,7 +5523,10 @@ class Agent(GoalLifecycle):
                      if bool(getattr(self.client, "tools_supported", False)) else None)
         if isinstance(self.client, LLMClient):
             return self.client.estimate_input_tokens(messages, tools)
-        chars = sum(len(json.dumps(m, default=str)) for m in messages)
+        chars = sum(len(json.dumps({k: v for k, v in m.items()
+                                    if k not in ("_dgc_reasoning", "_dgc_think_splice")}
+                                   if isinstance(m, dict) else m, default=str))
+                    for m in messages)
         if tools:
             chars += len(json.dumps(tools, default=str))
         return chars // 4
