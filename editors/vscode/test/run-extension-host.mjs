@@ -278,6 +278,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (cmd.type === "options_response" && cmd.id === "host-questions") {
     send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
   }
+  // ---- 0.40 agents (fixture command branches) ----
+  // ---- end 0.40 agents ----
+
+  // ---- 0.40 images (fixture command branches) ----
+  // ---- end 0.40 images ----
+
+  // ---- 0.40 options (fixture command branches) ----
+  // ---- end 0.40 options ----
   if (cmd.type === "shutdown") process.exit(0);
 });
 `);

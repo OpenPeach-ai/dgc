@@ -537,6 +537,8 @@
     "test": "node --test \"test/**/*.test.mjs\"",
     "test:host": "node test/run-extension-host.mjs",
     "test:host:stall": "node test/run-extension-host-stall.mjs",
+    "test:host:images": "node test/run-extension-host-images.mjs",
+    "test:host:reconnect": "node test/run-extension-host-reconnect.mjs",
     "shot": "node test/render-panel.mjs",
     "scroll-check": "node test/render-scroll.mjs"
   },

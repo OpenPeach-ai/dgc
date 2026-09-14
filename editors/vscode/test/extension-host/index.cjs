@@ -462,6 +462,15 @@ async function run() {
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "list_monitors" && /^monitors-list-/.test(String(command.request_id || ""))));
 
+  // ---- 0.40 agents (installed-host checks; run before the backend-exit paths below) ----
+  // ---- end 0.40 agents ----
+
+  // ---- 0.40 images (installed-host checks) ----
+  // ---- end 0.40 images ----
+
+  // ---- 0.40 options (installed-host checks) ----
+  // ---- end 0.40 options ----
+
   // ---- backend exits in the installed host: every path names its cause in backend.log ----------
   const control = process.env.DGC_EXTENSION_TEST_CONTROL;
   const altBackend = process.env.DGC_EXTENSION_TEST_BACKEND_ALT;
