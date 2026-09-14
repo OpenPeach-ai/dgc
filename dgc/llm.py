@@ -546,6 +546,18 @@ _OVERFLOW_RE = re.compile(
     r"|prompt too long|range of input length should be|context[_ ]length[_ ]exceeded|too many tokens"
     r"|context.{0,12}(?:window|size|length).{0,20}(?:exceed|too|limit)", re.I)
 
+# An endpoint that refuses ``stream_options`` names the field AND says what is wrong with it
+# ("Unrecognized request argument supplied: stream_options", pydantic's extra_forbidden with
+# loc [body, stream_options], "'stream_options' is not allowed"). A validation error about
+# something else can echo the whole request body, field included, so the field's name alone
+# is not a refusal.
+_STREAM_USAGE_REFUSAL_RE = re.compile(
+    r"(?:unrecogni[sz]ed|unsupported|unknown|unexpected|extra|not (?:permitted|allowed|supported)"
+    r"|forbidden|does not support|invalid)[^\n{}]{0,80}?\b(?:stream_options|include_usage)\b"
+    r"|\b(?:stream_options|include_usage)\b[^\n{}]{0,80}?(?:unrecogni[sz]ed|unsupported|unknown"
+    r"|unexpected|extra|not (?:permitted|allowed|supported)|forbidden|invalid)"
+    r"|\bloc[\"']?\s*[:=]\s*[\[(][^\])]*[\"'](?:stream_options|include_usage)[\"']", re.I)
+
 
 @dataclass
 class ToolCall:
@@ -585,12 +597,14 @@ def normalize_usage(usage: dict | None) -> dict[str, int]:
             return 0
         return parsed if 0 <= parsed <= 1_000_000_000 else 0
 
+    # Input counts every prompt token, cached ones included (OpenAI's prompt_tokens, DeepSeek's,
+    # Anthropic after _anthropic_usage); cached_input_tokens is the part served from a cache.
     return {
         "input_tokens": count(raw.get("input_tokens", raw.get("prompt_tokens", 0))),
         "output_tokens": count(raw.get("output_tokens", raw.get("completion_tokens", 0))),
         "cached_input_tokens": count(
             raw.get("cached_input_tokens", input_details.get("cached_tokens",
-                    raw.get("cache_read_input_tokens", 0)))),
+                    raw.get("cache_read_input_tokens", raw.get("prompt_cache_hit_tokens", 0))))),
         "reasoning_tokens": count(
             raw.get("reasoning_tokens", output_details.get("reasoning_tokens", 0))),
     }
@@ -1101,6 +1115,7 @@ class LLMClient:
         # that finished, which is where the local usage ledger records it. None means no ledger.
         self.usage_sink = None
         self.usage_source = "main"
+        self._usage_local = threading.local()
         if requested_mode == "auto" and not self._feature_supported("responses"):
             if self.api_mode == "responses":
                 self.api_mode = "chat_completions"
@@ -1477,21 +1492,42 @@ class LLMClient:
     ) -> ChatResult:
         # A request cancelled before it started never reached the provider; it is not a request.
         cancelled_before = cancel is not None and cancel.is_set()
-        if self.api_mode == "responses":
-            result = self._chat_responses(messages, tools, reasoning_effort,
-                                          on_text, on_thinking, cancel)
-        elif self.api_mode == "ollama":
-            result = self._chat_ollama(messages, tools, reasoning_effort,
-                                       on_text, on_thinking, cancel)
-        elif self.api_mode == "anthropic":
-            result = self._chat_anthropic(messages, tools, reasoning_effort,
-                                          on_text, on_thinking, cancel)
-        else:
-            result = self._chat_completions(messages, tools, reasoning_effort,
-                                            on_text, on_thinking, cancel)
+        state = self._usage_state()
+        state.open = 0
+        try:
+            if self.api_mode == "responses":
+                result = self._chat_responses(messages, tools, reasoning_effort,
+                                              on_text, on_thinking, cancel)
+            elif self.api_mode == "ollama":
+                result = self._chat_ollama(messages, tools, reasoning_effort,
+                                           on_text, on_thinking, cancel)
+            elif self.api_mode == "anthropic":
+                result = self._chat_anthropic(messages, tools, reasoning_effort,
+                                              on_text, on_thinking, cancel)
+            else:
+                result = self._chat_completions(messages, tools, reasoning_effort,
+                                                on_text, on_thinking, cancel)
+        except BaseException:
+            # The provider accepted the request and started answering, then the stream broke
+            # (a dropped connection, a malformed frame, an error event). It may have cost tokens
+            # nobody reported: count it as one unmetered request instead of hiding it.
+            if not cancelled_before and getattr(state, "open", 0) > 0:
+                self._report_usage(ChatResult(finish_reason="error"))
+            raise
         if not cancelled_before:
             self._report_usage(result)
         return result
+
+    def _usage_state(self):
+        local = self.__dict__.get("_usage_local")
+        if local is None:
+            local = self.__dict__.setdefault("_usage_local", threading.local())
+        return local
+
+    def _usage_opened(self) -> None:
+        """Mark that a provider accepted this request (HTTP 200) and began answering it."""
+        state = self._usage_state()
+        state.open = getattr(state, "open", 0) + 1
 
     def _report_usage(self, result: ChatResult) -> None:
         """The one usage hook: hand a finished request to the owner's sink, exactly once.
@@ -1500,6 +1536,8 @@ class LLMClient:
         totals re-record child usage on the parent, so a ledger fed from there would double it.
         A sink failure is the ledger's problem and never the turn's.
         """
+        state = self._usage_state()
+        state.open = max(0, getattr(state, "open", 0) - 1)
         sink = getattr(self, "usage_sink", None)
         if sink is None:
             return
@@ -2169,6 +2207,7 @@ class LLMClient:
                 body = _error_body(response, 400)
                 raise LLMError(f"HTTP {status} from Anthropic Messages: {body}")
             budget = self.think_budget_chars
+            self._usage_opened()
             try:
                 result = self._consume_anthropic(
                     response, on_text, on_thinking, cancel, think_budget=budget)
@@ -2665,6 +2704,7 @@ class LLMClient:
                 body = _error_body(r, 400)
                 raise LLMError(f"HTTP {status} from {self._ollama_url}: {body}")
             budget = self.think_budget_chars
+            self._usage_opened()
             try:
                 result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
             finally:
@@ -2719,6 +2759,7 @@ class LLMClient:
         repaired = False   # whether we've swapped in the endpoint-agnostic repaired shape
         overthink = 0      # F4: times the reasoning-watchdog fired this turn (bounded)
         level = reasoning_effort   # current thinking level; the watchdog steps it down on a runaway
+        usage_retry = False   # stream_options was just dropped after a refusal; 200 confirms it
         _LOWER = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             # A deadline may expire while requests.post is waiting for response headers. Never turn
@@ -2774,11 +2815,11 @@ class LLMClient:
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
                 if (r.status_code in (400, 422) and "stream_options" in payload
-                        and re.search(r"stream_options|include_usage", low)):
-                    # An endpoint that refuses the usage request still streams; retry once without
-                    # it and never ask this endpoint again in this process.
-                    LLMClient._stream_usage_rejections.add(self.base_url.lower())
+                        and _STREAM_USAGE_REFUSAL_RE.search(body)):
+                    # An endpoint that refuses the usage request still streams: retry once without
+                    # it. It is remembered only if that retry succeeds (see usage_retry above).
                     payload.pop("stream_options", None)
+                    usage_retry = True
                     continue
                 if r.status_code == 422:
                     raise LLMError(f"HTTP 422 from {self._url}: {body[:400]}")
@@ -2844,6 +2885,12 @@ class LLMClient:
                 body = _error_body(r, 400)
                 raise LLMError(f"HTTP {status} from {self._url}: {body}")
             budget = self.think_budget_chars
+            self._usage_opened()
+            if usage_retry:
+                # The same endpoint accepted the request once stream_options was gone: that is
+                # proof it refuses the field, so stop asking it for the rest of this process.
+                LLMClient._stream_usage_rejections.add(self.base_url.lower())
+                usage_retry = False
             try:
                 res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
             finally:
@@ -2988,6 +3035,7 @@ class LLMClient:
         if deadline is not None:
             remaining = max(1, min(remaining, int(max(1.0, deadline - now))))
         response = None
+        accepted = False    # the endpoint answered 200: a request that costs tokens either way
         stop_watch = threading.Event()
         try:
             response = requests.post(
@@ -3016,11 +3064,14 @@ class LLMClient:
                 if status in (400, 404, 405, 422):
                     self._mark_rejected("response_compaction")
                 return None
+            accepted = True
             value = _bounded_json_response(
                 response, _MAX_RESPONSES_COMPACTION_BYTES, "Responses compaction",
                 deadline=deadline)
             response = None  # bounded decoder owns and closes it
         except (LLMError, requests.RequestException, ValueError, TypeError):
+            if accepted:     # answered, then broke: an unmetered request, not a missing one
+                self._report_usage(ChatResult(finish_reason="compaction"))
             return None
         finally:
             stop_watch.set()
@@ -3238,6 +3289,7 @@ class LLMClient:
                 status = response.status_code
                 body = _error_body(response, 400)
                 raise LLMError(f"HTTP {status} from Responses API: {body}")
+            self._usage_opened()
             try:
                 result = self._consume_responses(response, on_text, on_thinking, cancel)
             finally:

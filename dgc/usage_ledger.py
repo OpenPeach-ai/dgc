@@ -46,7 +46,9 @@ _RANGE_ALIASES = {
 _MAX_TOKENS = 1_000_000_000
 _MAX_BY_MODEL = 100
 _MAX_TEXT = {"provider": 64, "host": 255, "model": 256}
-_BUSY_TIMEOUT_MS = 2_000
+_BUSY_TIMEOUT_MS = 2_000          # reads, and a first write that has to wait for another process
+_WRITE_BACKOFF_MS = 50            # writes while a lock recently timed out (see record)
+_WRITE_BACKOFF_S = 60.0
 _PRUNE_EVERY_S = 24 * 60 * 60
 _SCHEMA = """CREATE TABLE IF NOT EXISTS requests(
     id INTEGER PRIMARY KEY,
@@ -66,6 +68,8 @@ _db_key: tuple[str, int] | None = None      # (path, pid): a forked child must o
 _last_prune = 0.0
 _last_error = ""
 _warned = False
+_locked_until = 0.0               # monotonic time until which writes wait only _WRITE_BACKOFF_MS
+_CORRUPT_RE = re.compile(r"not a database|malformed|corrupt", re.I)
 
 
 def ledger_path() -> Path:
@@ -192,27 +196,81 @@ def _prune(db: sqlite3.Connection, now: float) -> None:
     if _last_prune and now - _last_prune < _PRUNE_EVERY_S:
         return
     _last_prune = now
-    db.execute("DELETE FROM requests WHERE ts < ?", (int(now) - RETENTION_DAYS * 86_400,))
+    # Never prune relative to a moment later than this machine's clock: a row stamped in the
+    # future must not delete a year of real history.
+    cutoff = int(min(now, time.time())) - RETENTION_DAYS * 86_400
+    db.execute("DELETE FROM requests WHERE ts < ?", (cutoff,))
+
+
+def _set_aside(path: Path, exc: BaseException) -> bool:
+    """Move a corrupt ledger (and its -wal/-shm) aside so counting can start again.
+
+    Nothing is deleted: the damaged file stays next to the new one for anyone who wants it.
+    Returns False when ``exc`` is not corruption or the file could not be moved.
+    """
+    global _db, _db_key
+    if not _CORRUPT_RE.search(str(exc)) or not path.is_file():
+        return False
+    if _db is not None:
+        try:
+            _db.close()
+        except sqlite3.Error:
+            pass
+    _db = _db_key = None
+    target = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
+    try:
+        for suffix in ("-wal", "-shm"):
+            companion = path.with_name(path.name + suffix)
+            if companion.exists():
+                os.replace(companion, target.with_name(target.name + suffix))
+        os.replace(path, target)
+    except OSError:
+        return False
+    try:
+        if not sys.stderr.isatty():
+            sys.stderr.write(f"[dgc] token usage ledger was corrupt ({exc}); moved it to {target} "
+                             "and started a new one\n")
+            sys.stderr.flush()
+    except Exception:
+        pass
+    return True
 
 
 def record(*, provider, base_url, model, source="main", input_tokens=0, output_tokens=0,
            cached_input_tokens=0, now: float | None = None, path: Path | None = None) -> bool:
     """Append one finished request. Returns False (and never raises) when it could not be kept."""
-    global _last_error
+    global _last_error, _locked_until
     stamp = time.time() if now is None else float(now)
     source = source if source in SOURCES else "other"
     row = (int(stamp), _text(provider, _MAX_TEXT["provider"]) or "unknown",
            endpoint_host(base_url), _text(model, _MAX_TEXT["model"]) or "unknown", source,
            _count(input_tokens), _count(output_tokens), _count(cached_input_tokens))
     metered = 1 if (row[5] or row[6]) else 0
+    target = Path(path) if path is not None else ledger_path()
     try:
         with _lock:
-            db = _open(Path(path) if path is not None else ledger_path(), create=True)
-            _prune(db, stamp)
-            db.execute(
-                "INSERT INTO requests(ts, provider, host, model, source, input_tokens, "
-                "output_tokens, cached_input_tokens, metered) VALUES (?,?,?,?,?,?,?,?,?)",
-                (*row, metered))
+            for attempt in range(2):
+                try:
+                    db = _open(target, create=True)
+                    # Writes run on the request's own thread. While another process has recently
+                    # held the ledger past the timeout, wait only briefly, so a stuck writer
+                    # elsewhere cannot add seconds to every model request here.
+                    waiting = time.monotonic() < _locked_until
+                    db.execute(f"PRAGMA busy_timeout={_WRITE_BACKOFF_MS if waiting else _BUSY_TIMEOUT_MS}")
+                    _prune(db, stamp)
+                    db.execute(
+                        "INSERT INTO requests(ts, provider, host, model, source, input_tokens, "
+                        "output_tokens, cached_input_tokens, metered) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (*row, metered))
+                    break
+                except sqlite3.DatabaseError as exc:
+                    if re.search(r"locked|busy", str(exc), re.I):
+                        _locked_until = time.monotonic() + _WRITE_BACKOFF_S
+                        raise
+                    if attempt == 0 and _set_aside(target, exc):
+                        continue
+                    raise
+        _locked_until = 0.0
         _last_error = ""
         return True
     except Exception as exc:                       # the ledger must never break a turn
@@ -264,12 +322,17 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     first_day = {"today": today, "7d": today - _dt.timedelta(days=6),
                  "30d": today - _dt.timedelta(days=29),
                  "month": today.replace(day=1), "all": None}[range_name]
-    where, args = ("WHERE ts >= ?", (_local_midnight(first_day),)) if first_day else ("", ())
+    # A bounded range ends at the next local midnight, so a row stamped in the future (a clock
+    # that was wrong for a while) is not counted as today.
+    where, args = (("WHERE ts >= ? AND ts < ?",
+                    (_local_midnight(first_day), _local_midnight(today + _dt.timedelta(days=1))))
+                   if first_day else ("", ()))
     days: dict[str, dict] = {}
     try:
         with _lock:
             db = _open(Path(path) if path is not None else ledger_path(), create=False)
             if db is not None:
+                db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")   # a write may have shortened it
                 total = db.execute(
                     "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
                     "COALESCE(SUM(cached_input_tokens),0), COUNT(*), "
@@ -335,12 +398,15 @@ def format_report(report: dict) -> str:
                  f"anywhere. Days follow local time ({report.get('timezone') or 'local time'}).")
     lines.append("")
     if not totals.get("requests"):
-        lines += ["No model requests counted in this range yet. Every request DGC finishes — "
-                  "chats, goals, sub-agents, fallbacks and compaction — adds its input, output and "
-                  "cached tokens here, by model and by day.", "",
+        lines += ["No model requests counted in this range yet. Each request DGC finishes (chats, "
+                  "goals, sub-agents, fallbacks, compaction) will appear here with the input, "
+                  "output and cached tokens its provider reported, totalled by model and by day.",
+                  "",
                   "Turns delegated to a subscription CLI (Claude Code, Codex, …) are counted by "
-                  "that CLI, not here.", "",
-                  "Other ranges: `/usage today|7d|30d|month|all`"]
+                  "that CLI, not here.", ""]
+        if range_name != "all":
+            lines += ["Try `/usage all` to see earlier requests.", ""]
+        lines.append("Other ranges: `/usage today|7d|30d|month|all`")
         return "\n".join(lines)
     lines += ["| | |", "| --- | ---: |",
               f"| Input tokens | {_n(totals.get('input_tokens', 0))} |",
@@ -350,10 +416,15 @@ def format_report(report: dict) -> str:
     if totals.get("unmetered_requests"):
         lines.append(f"| Unmetered requests | {_n(totals['unmetered_requests'])} |")
     lines.append("")
-    if totals.get("unmetered_requests"):
-        lines += [f"{_n(totals['unmetered_requests'])} request(s) ended without a usage report "
-                  "(cancelled, interrupted, or the provider sent none), so their tokens are not "
-                  "in these totals.", ""]
+    unmetered = int(totals.get("unmetered_requests") or 0)
+    if unmetered:
+        lines += [("1 request ended without a usage report (cancelled, interrupted, or the "
+                   "provider sent none), so its tokens are not in these totals.") if unmetered == 1
+                  else (f"{_n(unmetered)} requests ended without a usage report (cancelled, "
+                        "interrupted, or the provider sent none), so their tokens are not in "
+                        "these totals."), ""]
+    lines += ["Input counts every prompt token the provider reported, cached ones included; "
+              "cached input is the part it served from its cache.", ""]
     lines += ["### By model", "",
               "| Model | Provider · host | Requests | Input | Output | Cached |",
               "| --- | --- | ---: | ---: | ---: | ---: |"]
@@ -379,7 +450,7 @@ def format_report(report: dict) -> str:
 
 def _reset_for_tests() -> None:
     """Drop the cached connection (tests relocate the ledger between cases)."""
-    global _db, _db_key, _last_prune, _last_error, _warned
+    global _db, _db_key, _last_prune, _last_error, _warned, _locked_until
     with _lock:
         if _db is not None:
             try:
@@ -390,3 +461,4 @@ def _reset_for_tests() -> None:
         _last_prune = 0.0
         _last_error = ""
         _warned = False
+        _locked_until = 0.0

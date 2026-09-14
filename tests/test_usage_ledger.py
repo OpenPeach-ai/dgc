@@ -58,7 +58,8 @@ class _Endpoint(BaseHTTPRequestHandler):
     ``mode`` selects the behaviour for the whole server; requests are recorded for assertions.
     """
 
-    mode = "ollama"            # ollama | reject400 | reject422 | other422 | no_usage | slow | overthink_once
+    mode = "ollama"   # ollama | reject400 | reject422 | other422 | echo422_once | refuse_then_other
+                      # | no_usage | slow | overthink_once | error_frame
     requests: list[dict] = []
     task_prompt = "CHILD-TASK"
 
@@ -99,6 +100,28 @@ class _Endpoint(BaseHTTPRequestHandler):
         if mode == "other422":
             self._reply(422, json.dumps({"detail": "model field is invalid"}).encode(),
                         "application/json")
+            return
+        if mode == "echo422_once":
+            # FastAPI-style validation error about the messages that echoes the whole request,
+            # stream_options included. It is not a refusal of stream_options.
+            type(self).mode = "ollama"
+            self._reply(422, json.dumps({"detail": [{
+                "type": "value_error", "loc": ["body", "messages", 0], "msg": "bad message",
+                "input": request}]}).encode(), "application/json")
+            return
+        if mode == "refuse_then_other":
+            if "stream_options" in request:
+                self._reply(400, json.dumps({"error": {
+                    "message": "Unrecognized request argument supplied: stream_options"}}).encode(),
+                    "application/json")
+            else:
+                self._reply(422, json.dumps({"detail": "model field is invalid"}).encode(),
+                            "application/json")
+            return
+        if mode == "error_frame":
+            body = (_chunk({"role": "assistant", "content": "partial"})
+                    + "data: " + json.dumps({"error": {"message": "upstream fell over"}}) + "\n\n")
+            self._reply(200, body.encode(), "text/event-stream")
             return
         if mode in ("reject400", "reject422") and "stream_options" in request:
             status = 400 if mode == "reject400" else 422
@@ -239,6 +262,50 @@ class StreamUsageRequestTests(_LedgerCase):
         self.assertEqual(len(_Endpoint.requests), 1, "no blind retry")
         self.assertEqual(LLMClient._stream_usage_rejections, set())
 
+    def test_an_error_that_merely_echoes_the_request_does_not_switch_usage_off(self):
+        from dgc.llm import LLMError
+        _Endpoint.mode = "echo422_once"
+        with self.assertRaises(LLMError):
+            self.client().chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(len(_Endpoint.requests), 1, "an unrelated 422 is not retried")
+        self.assertEqual(LLMClient._stream_usage_rejections, set())
+        result = self.client().chat([{"role": "user", "content": "hi again"}])
+        self.assertEqual(_Endpoint.requests[-1].get("stream_options"), {"include_usage": True})
+        self.assertEqual(result.usage["input_tokens"], 50, "usage still counted after the error")
+
+    def test_a_refusal_is_remembered_only_when_the_retry_without_the_field_succeeds(self):
+        from dgc.llm import LLMError
+        _Endpoint.mode = "refuse_then_other"
+        with self.assertRaises(LLMError):
+            self.client().chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(len(_Endpoint.requests), 2)
+        self.assertEqual(LLMClient._stream_usage_rejections, set(),
+                         "a retry that failed for another reason proves nothing about the field")
+        _Endpoint.mode = "ollama"
+        self.client().chat([{"role": "user", "content": "hi"}])
+        self.assertIn("stream_options", _Endpoint.requests[-1])
+
+    def test_refusal_bodies_are_told_apart_from_echoes(self):
+        from dgc.llm import _STREAM_USAGE_REFUSAL_RE as refusal
+        request = {"model": "m", "stream": True, "stream_options": {"include_usage": True},
+                   "messages": [{"role": "user", "content": "an invalid unknown extra word"}]}
+        refusals = [
+            '{"error":{"message":"Unrecognized request argument supplied: stream_options"}}',
+            "{'type': 'extra_forbidden', 'loc': ('body', 'stream_options'), 'msg': 'Extra inputs "
+            "are not permitted', 'input': {'include_usage': True}}",
+            json.dumps({"detail": [{"type": "extra_forbidden", "loc": ["body", "stream_options"],
+                                    "msg": "Extra inputs are not permitted"}]}),
+            '{"error":"\\"stream_options\\" is not allowed"}',
+        ]
+        echoes = [
+            json.dumps({"detail": [{"loc": ["body", "messages", 0], "msg": "bad", "input": request}]}),
+            json.dumps({"error": {"message": "invalid tools", "request": request}}),
+        ]
+        for body in refusals:
+            self.assertTrue(refusal.search(body), body)
+        for body in echoes:
+            self.assertIsNone(refusal.search(body), body)
+
 
 class UsageChunkParsingTests(unittest.TestCase):
     """The stream consumer, fed recorded frames without a network."""
@@ -284,6 +351,17 @@ class UsageChunkParsingTests(unittest.TestCase):
         text = (_chunk({"content": "A"}, usage=None) + _chunk({}, "stop")
                 + "data: [DONE]\n\n")
         self.assertEqual(self.consume(text).usage, {})
+
+    def test_cached_input_fields_from_every_provider_shape(self):
+        from dgc.llm import normalize_usage
+        for raw in ({"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": 4}},
+                    {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 4}},
+                    {"prompt_tokens": 10, "prompt_cache_hit_tokens": 4, "prompt_cache_miss_tokens": 6},
+                    {"input_tokens": 10, "cache_read_input_tokens": 4},
+                    {"prompt_tokens": 10, "cached_input_tokens": 4}):
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_usage(raw)["cached_input_tokens"], 4)
+                self.assertEqual(normalize_usage(raw)["input_tokens"], 10)
 
     def test_native_ollama_reads_the_cached_prompt_count(self):
         frames = [{"message": {"role": "assistant", "content": "ok"}, "done": False},
@@ -396,6 +474,19 @@ class LedgerRecordingTests(_LedgerCase):
         totals = usage_ledger.report("today")["totals"]
         self.assertEqual((totals["requests"], totals["unmetered_requests"]), (2, 2))
 
+    def test_a_stream_that_breaks_after_the_provider_answered_is_one_unmetered_row(self):
+        from dgc.llm import LLMError
+        agent = self.agent()
+        _Endpoint.mode = "error_frame"
+        with self.assertRaises(LLMError):
+            agent.client.chat([{"role": "user", "content": "break mid-stream"}])
+        _Endpoint.mode = "other422"         # refused before any answer: not a request that ran
+        with self.assertRaises(LLMError):
+            agent.client.chat([{"role": "user", "content": "refused"}])
+        rows = self.rows()
+        self.assertEqual([(row[3], row[4], row[5], row[7]) for row in rows], [("main", 0, 0, 0)])
+        self.assertEqual(usage_ledger.report("today")["totals"]["unmetered_requests"], 1)
+
     def test_an_overthink_retry_counts_the_abandoned_attempt_once(self):
         agent = self.agent(think_budget_tokens=20)
         _Endpoint.mode = "overthink_once"
@@ -472,6 +563,51 @@ class LedgerAggregationTests(_LedgerCase):
             self.assertIsNone(event_error(event), event_error(event))
         self.assertRegex(week["generated_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
+    def test_a_future_stamp_neither_prunes_history_nor_counts_as_today(self):
+        now = time.time()
+        usage_ledger.record(provider="p", base_url="", model="real", input_tokens=7,
+                            now=now - 20 * 86_400)
+        usage_ledger._reset_for_tests()
+        usage_ledger.record(provider="p", base_url="", model="future", input_tokens=9,
+                            now=now + 3 * 365 * 86_400)
+        self.assertEqual(sorted(row[2] for row in self.rows()), ["future", "real"])
+        self.assertEqual(usage_ledger.report("today", now=now)["totals"]["requests"], 0)
+        self.assertEqual(usage_ledger.report("30d", now=now)["totals"]["input_tokens"], 7)
+
+    def test_a_locked_ledger_costs_later_requests_only_a_short_wait(self):
+        usage_ledger.record(provider="p", base_url="", model="m", input_tokens=1)
+        path = usage_ledger.ledger_path()
+        holder = sqlite3.connect(str(path), timeout=0, isolation_level=None)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN EXCLUSIVE")
+        with patch.object(sys, "stderr", new=open(os.devnull, "w")) as quiet:
+            self.addCleanup(quiet.close)
+            started = time.monotonic()
+            self.assertFalse(usage_ledger.record(provider="p", base_url="", model="m"))
+            first = time.monotonic() - started
+            started = time.monotonic()
+            for _ in range(5):
+                self.assertFalse(usage_ledger.record(provider="p", base_url="", model="m"))
+            later = (time.monotonic() - started) / 5
+        self.assertGreater(first, 1.0, "the first write waits the normal busy timeout")
+        self.assertLess(later, 0.5, f"later writes back off quickly, not {later:.2f}s each")
+        holder.execute("ROLLBACK")
+        self.assertTrue(usage_ledger.record(provider="p", base_url="", model="m", input_tokens=2))
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_a_corrupt_ledger_is_set_aside_and_counting_starts_again(self):
+        path = usage_ledger.ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"this is not a sqlite database at all" * 64)
+        with patch.object(sys, "stderr", new=open(os.devnull, "w")) as quiet:
+            self.addCleanup(quiet.close)
+            self.assertIn("error", usage_ledger.report("7d"))      # a read reports, never repairs
+            self.assertTrue(usage_ledger.record(provider="p", base_url="", model="m", input_tokens=3))
+        kept = list(path.parent.glob(usage_ledger.LEDGER_NAME + ".corrupt-*"))
+        self.assertEqual(len(kept), 1, "the damaged file is kept, never deleted")
+        self.assertTrue(kept[0].read_bytes().startswith(b"this is not"))
+        self.assertEqual(usage_ledger.report("7d")["totals"]["input_tokens"], 3)
+
     def test_retention_prunes_rows_older_than_400_days(self):
         now = time.time()
         usage_ledger.record(provider="p", base_url="", model="old", input_tokens=1,
@@ -528,6 +664,11 @@ class LedgerAggregationTests(_LedgerCase):
             self.assertIn(needle, text)
         self.assertIn("No model requests counted", usage_ledger.format_report(
             usage_ledger.empty_report("today")))
+        self.assertIn("Try `/usage all`", usage_ledger.format_report(usage_ledger.empty_report("7d")))
+        one = usage_ledger.empty_report("7d")
+        one["totals"].update(requests=2, input_tokens=5, unmetered_requests=1)
+        self.assertIn("1 request ended without a usage report", usage_ledger.format_report(one))
+        self.assertIn("so its tokens are not", usage_ledger.format_report(one))
         env = dict(os.environ, PYTHONPATH=str(PROJECT), HOME=str(self.home),
                    PYTHONDONTWRITEBYTECODE="1")
         done = subprocess.run([sys.executable, "-m", "dgc", "usage", "--range", "week", "--json"],
@@ -695,8 +836,8 @@ def _ollama_ps() -> dict | None:
 class RealOllamaV1Tests(_LedgerCase):
     """One tiny request to the local Ollama's /v1 route; skipped when it is not reachable.
 
-    It uses a model that is already loaded when there is one, otherwise qwen2.5:14b, and it never
-    stops or unloads anything. Ollama's /v1 route applies the server's default keep-alive to the
+    It uses a model that is already loaded when there is one (keeping its remaining residency),
+    otherwise qwen2.5:14b with a 60 s keep-alive, and it never stops or unloads anything. Ollama's /v1 route applies the server's default keep-alive to the
     model it serves (a keep_alive field is sent with the model's remaining time, but that route may
     ignore it), so a model that looks pinned -- more than two days of residency left -- is not
     touched at all: the test skips rather than risk shortening someone else's pin.
@@ -724,6 +865,9 @@ class RealOllamaV1Tests(_LedgerCase):
                 self.skipTest(f"{model} looks pinned in Ollama; a /v1 request could reset its keep-alive")
         else:
             model = "qwen2.5:14b"
+            # Nothing was loaded, so this test is what loads it: ask for a short residency instead
+            # of the server default, which can be a day, on a machine other services share.
+            keep_alive = "60s"
             try:
                 with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as response:
                     names = {str(m.get("name")) for m in json.loads(response.read()).get("models") or []}
