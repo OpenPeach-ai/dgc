@@ -10447,6 +10447,14 @@ def test_release_script_contract():
           and "VERSION=1.107.1" in pinned_host
           and "SHA256=a9a19e20dd09c61ec1af7d67d9dec2455004d0fbd35120fe1d24588c123f9474"
           in pinned_host)
+    extension_job = ci.split("\n  extension:", 1)[-1].split("\n  package:", 1)[0]
+    spacing_test = (PROJECT / "editors" / "vscode" / "test"
+                    / "transcript-spacing.test.mjs").read_text()
+    check("extension CI renders the panel layout tests in Chromium instead of skipping them",
+          "npx playwright install --with-deps chromium" in extension_job
+          and "npm ci" in extension_job
+          and 'DGC_REQUIRE_CHROMIUM: "1"' in extension_job
+          and 'process.env.DGC_REQUIRE_CHROMIUM === "1"' in spacing_test)
     promote = (PROJECT / "scripts" / "promote-release.sh").read_text()
     github_release = (PROJECT / "scripts" / "github-release.sh").read_text()
     check("promotion binds a local tag without mutating historical tags",
