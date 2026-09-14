@@ -331,7 +331,7 @@ DEFAULTS: dict = {
                                                 #   (partial output is continued, not discarded); 0 = off
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
-    "model_load_timeout_s": 900,                # Ollama only: how long a model may take to load into memory
+    "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load
     "approval_timeout_s": 300,                  # bounded MCP input; native human decisions wait for reply/Stop
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)

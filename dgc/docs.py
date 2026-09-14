@@ -1601,8 +1601,8 @@ when you want to override it.
 - `model_stall_retries` (default `2`) — how many times a stalled request is re-issued. After that
   DGC switches to `fallback_model` when one is set, or fails the turn with a message naming the
   model and endpoint. Esc / Stop works in every phase, including before any response headers.
-- `model_load_timeout_s` (default `900`, Ollama only) — while `/api/ps` shows the model still
-  loading, the first-token clock is paused ("Loading the model") for up to this long.
+- `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
+  model still loading, the first-token clock is paused ("Loading the model") for up to this long.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.

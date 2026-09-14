@@ -149,7 +149,7 @@
 <li><code>model_idle_timeout_s</code> (default <code>300</code>) — how long a stream may go silent after it started. A stall after partial output continues from what already streamed. <code>0</code> turns it off.</li>
 <li><code>model_stall_notice_s</code> (default <code>45</code>) — when to say &quot;No response from the model&quot; (with the model and host) in the status line and the editor. <code>0</code> never shows it.</li>
 <li><code>model_stall_retries</code> (default <code>2</code>) — how many times a stalled request is re-issued. After that DGC switches to <code>fallback_model</code> when one is set, or fails the turn with a message naming the model and endpoint. Esc / Stop works in every phase, including before any response headers.</li>
-<li><code>model_load_timeout_s</code> (default <code>900</code>, Ollama only) — while <code>/api/ps</code> shows the model still loading, the first-token clock is paused (&quot;Loading the model&quot;) for up to this long.</li>
+<li><code>model_load_timeout_s</code> (default <code>900</code>, self-hosted Ollama only) — while <code>/api/ps</code> shows the model still loading, the first-token clock is paused (&quot;Loading the model&quot;) for up to this long.</li>
 <li><code>bash_timeout</code> (default <code>120</code>) — per-command shell timeout.</li>
 <li><code>approval_timeout_s</code> (default <code>300</code>) — how long a permission prompt waits before giving up.</li>
 <li><code>ollama_keep_alive</code> (default <code>30m</code>) — how long Ollama keeps the model resident between turns.</li>
