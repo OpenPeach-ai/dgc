@@ -2139,7 +2139,7 @@ class TUI:
                     + reasoning_label_suffix(b.get("source", "unknown"), b.get("provider", ""),
                                              width=self._width))
         if b.get("withheld"):
-            return [(f"fg:{th.muted}", f"{glyphs.DIAMOND} {head}")]
+            return [(f"fg:{th.faint}", f"{glyphs.DIAMOND} {head}")]
         caret = "▾" if b.get("exp") else "▸"
 
         def toggle(mouse_event):
