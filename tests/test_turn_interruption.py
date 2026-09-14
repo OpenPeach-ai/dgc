@@ -142,7 +142,9 @@ class ServeShutdownLogTests(unittest.TestCase):
         proc.send_signal(signal.SIGTERM)
         status = proc.wait(timeout=60)
         log = (Path(home.name) / ".dgc" / "logs" / "serve.log").read_text(encoding="utf-8")
-        self.assertIn("SIGTERM — the parent asked us to stop", log)
+        # Nothing tells a signal handler who sent the signal: the cause must not claim the editor did.
+        self.assertIn("SIGTERM — a stop signal from another process, not a shutdown command from the editor", log)
+        self.assertNotIn("the parent asked us to stop", log)
         self.assertIn("backend closed cleanly", log)    # the finally ran: work is saved, not lost
         # The stack dump still runs first and now chains INTO our handler instead of the kernel.
         self.assertIn("Current thread", log)

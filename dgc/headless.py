@@ -3531,7 +3531,10 @@ def serve(config: Config) -> None:
         end_cause = type(interrupt).__name__
         _end_line(crash_log, f"serve loop ended: {end_cause}; pipe: {pipe_watch.describe()}")
     except _Terminated as terminated:
-        end_cause = f"{_signal_name(terminated.signum)} — the parent asked us to stop"
+        # A signal carries no sender here, so do not name one. The editor stops a backend with a
+        # `shutdown` command (reported separately above); a signal came from outside that path.
+        end_cause = (f"{_signal_name(terminated.signum)} — a stop signal from another process, "
+                     "not a shutdown command from the editor")
         _end_line(crash_log,
                   f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
                   f"{commands} commands, last {last_command or 'none'!r}, turn running: "
