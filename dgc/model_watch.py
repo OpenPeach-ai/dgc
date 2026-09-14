@@ -77,6 +77,15 @@ class WaitEvent:
     endpoint: str = ""
     attempt: int = 0            # retry: which retry this is (1-based)
     retries: int = 0            # retry: how many retries are allowed
+    # A transport retry (a refused/reset connection, DNS, TLS, HTTP 408/429/5xx) names its cause;
+    # a stall retry leaves ``cause`` empty. ``cause`` is a MODEL_FAILURE_KINDS value.
+    cause: str = ""
+    summary: str = ""           # one line DGC wrote ("connection refused by 127.0.0.1:11434")
+    detail: str = ""            # the transport's own words, URLs scrubbed
+    hint: str = ""
+    http_status: int = 0
+    delay_s: float = 0.0        # the backoff chosen before the next attempt
+    api_mode: str = ""
 
 
 class WaitChannel:
@@ -92,6 +101,15 @@ class WaitChannel:
         self._lock = threading.Lock()
         self._closed = False
         self.shown = False          # a notice/retry is on screen and no progress has cleared it
+        # A listener whose owner still shows a retry from before this call (a stream-cut
+        # continuation, a request retried in an earlier call) says so through ``_model_retry_pending()``,
+        # so the first progress of THIS call still reports "cleared" and closes that retry.
+        pending = getattr(getattr(listener, "__self__", None), "_model_retry_pending", None)
+        if self._listener is not None and callable(pending):
+            try:
+                self.shown = bool(pending())
+            except Exception:
+                self.shown = False
 
     @property
     def active(self) -> bool:
@@ -362,6 +380,7 @@ class RequestWatch:
         self.progressed = False
         self.noise_frames = 0
         self.stall: StallInfo | None = None
+        self.transport_error: BaseException | None = None   # what interrupted the stream, if anything
         self.aborted = ""               # "", "cancelled" or "stalled"
         self._state_lock = threading.Lock()
         self._stop = threading.Event()
@@ -437,7 +456,10 @@ class RequestWatch:
         self.noise_frames += 1
 
     def observe_error(self, exc: BaseException | None) -> None:
-        """A socket read timeout that fired before the watcher did is still a stall."""
+        """A socket read timeout that fired before the watcher did is still a stall. Any other
+        transport error is kept, so a cut stream can say what cut it."""
+        if exc is not None:
+            self.transport_error = exc
         if self.stall is None and not self.aborted and is_read_timeout(exc):
             now = self._clock()
             phase = self.phase
