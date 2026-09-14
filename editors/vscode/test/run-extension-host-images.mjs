@@ -9,21 +9,39 @@
 //              the chip still reaches the panel, and no later request carries an image.
 //
 // Needs an installed VS Code (DGC_VSCODE_EXECUTABLE or /usr/share/code/code), the extension built
-// (`node esbuild.js`), a Python that can import this checkout's dgc (DGC_TEST_PYTHON, default
-// python3) and a Chromium for the browser tool (DGC_TEST_BROWSER, else Playwright's cache).
+// (`node esbuild.js`), a Python that can import this checkout's dgc (DGC_TEST_PYTHON, else the one behind `dgc`
+// on PATH, else python3) and a Chromium for the browser tool (DGC_TEST_BROWSER, else Playwright's cache).
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = resolve(here, "..");
 const repoRoot = resolve(extensionRoot, "..", "..");
 const testsPath = join(here, "extension-host", "images.cjs");
-const python = process.env.DGC_TEST_PYTHON || "python3";
+// The same choice as the reconnect host test: DGC_TEST_PYTHON, the interpreter behind `dgc` on PATH,
+// then python3, taking the first that can import DGC's dependencies.
+function pickPython() {
+  const candidates = [process.env.DGC_TEST_PYTHON];
+  for (const dir of String(process.env.PATH || "").split(delimiter)) {
+    const launcher = join(dir, "dgc");
+    if (!dir || !existsSync(launcher)) continue;
+    const first = readFileSync(launcher, "utf8").split("\n", 1)[0];
+    if (first.startsWith("#!") && /python/.test(first)) candidates.push(first.slice(2).trim().split(/\s+/)[0]);
+    break;
+  }
+  candidates.push("python3");
+  for (const python of candidates.filter(Boolean)) {
+    const probe = spawnSync(python, ["-c", "import requests, prompt_toolkit, rich"], { stdio: "ignore" });
+    if (probe.status === 0) return python;
+  }
+  throw new Error("no Python with DGC's dependencies: set DGC_TEST_PYTHON");
+}
+const python = pickPython();
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 
 if (!existsSync(join(extensionRoot, "dist", "extension.js"))) {
