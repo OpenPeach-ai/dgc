@@ -46,7 +46,9 @@ jobs:
 
   site-acceptance:
     name: Website browser and Lighthouse acceptance
-    runs-on: ubuntu-24.04
+    # Visual baselines are generated on Linux arm64 (Ubuntu 24.04); compare them on the same
+    # architecture so the 10-pixel band budget measures regressions, not rasteriser differences.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

@@ -16,14 +16,19 @@ export default defineConfig({
   // shared runners instead of letting host CPU count distort timing and CLS.
   workers: 2,
   timeout: 30_000,
+  // CI never writes a baseline: a missing one fails. Locally a missing one is written for review.
+  updateSnapshots: process.env.CI ? "none" : "missing",
   expect: {
     timeout: 5_000,
     toHaveScreenshot: {
       animations: "disabled",
       caret: "hide",
-      maxDiffPixelRatio: 0.005,
+      // Absolute, per section band (visual.spec.mjs). Local run-to-run noise is 0 px; a 1px shift
+      // of one text box is 100+ px and the smallest real change measured (one version string) 43.
+      // A ratio budget scaled with page height and let whole-section regressions through.
+      maxDiffPixels: 10,
       scale: "css",
-      threshold: 0.2,
+      threshold: 0.05,
     },
   },
   reporter: [
