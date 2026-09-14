@@ -144,6 +144,12 @@ const server = createServer((request, response) => {
     return;
   }
 
+  if (pathname === "/vscode") {
+    // Cloudflare Pages serves a directory index only at its trailing-slash URL and answers the
+    // slashless form with a 308. Serving it directly here hid a redirecting sitemap URL.
+    response.writeHead(308, {"Cache-Control": "no-store", Location: `/vscode/${url.search}`}).end();
+    return;
+  }
   const file = resolve(SITE, routeFile(pathname));
   if (file !== SITE && !file.startsWith(`${SITE}${sep}`)) {
     response.writeHead(403).end("Forbidden");
