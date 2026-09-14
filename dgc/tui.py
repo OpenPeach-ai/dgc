@@ -2138,6 +2138,8 @@ class TUI:
 
     def _tool_collapsible(self, b: dict) -> bool:
         """Whether a tool block has output hidden behind its expand toggle."""
+        if b.get("images") or b.get("images_omitted"):
+            return True                           # images: its image rows open with /expand
         diff = self._tool_diff(b)
         if diff:
             return diff.count("\n") + 1 > self._DIFF_HEAD
@@ -2151,9 +2153,13 @@ class TUI:
         if stats:
             return f"+{stats[0]} \u2212{stats[1]}"
         n = int(b.get("lines") or 0)
+        count = len(b.get("images") or ())
+        images = f"{count} image{'s' if count != 1 else ''}" if count else ""    # images: its count
         if b.get("error"):
-            return "failed" + (f" \u00b7 {n} line{'s' if n != 1 else ''}" if n else "")
-        return f"{n} line{'s' if n != 1 else ''}" if n else ""
+            return "failed" + (f" \u00b7 {n} line{'s' if n != 1 else ''}" if n else "") + (
+                f" \u00b7 {images}" if images else "")
+        lines = f"{n} line{'s' if n != 1 else ''}" if n else ""
+        return " \u00b7 ".join(part for part in (lines, images) if part)
 
     def _tool_frags(self, b: dict):
         """One tool step: a rail-prefixed header (tense-aware verb + summary) then its output
@@ -2201,7 +2207,21 @@ class TUI:
             color = th.err if level in ("error", "critical", "alert", "emergency") else th.faint
             frags.append((f"fg:{color}", f"{str(progress.get('message') or '')[:500]}{amount}"))
 
+        # images: a step that produced images always has a toggle row, so a one-line result still
+        # has something to click; its image rows open with the output.
+        shots = list(b.get("images") or ())
+        shot_omitted = int(b.get("images_omitted") or 0)
+        shot_label = (f"{len(shots)} image{'s' if len(shots) != 1 else ''}" if shots
+                      else f"{shot_omitted} image{'s' if shot_omitted != 1 else ''} not kept"
+                      if shot_omitted else "")
+        toggled = [False]
+
         def toggle_row(label: str) -> None:
+            if shot_label and exp and label == "\u25be show less":
+                return                                  # images: one "show less", after the rows
+            if shot_label and not exp:
+                label = label.replace(" \u2014 click", f" \u00b7 {shot_label} \u2014 click", 1)
+            toggled[0] = True
             frags.append(("", "\n"))
             frags.append(rail())
             frags.append((f"fg:{th.accent_dim}", label, toggle))
@@ -2247,7 +2267,110 @@ class TUI:
                     frags.append(("", "\n"))
                     frags.append(rail())
                     frags.append((body, ln))
+        if shot_label:
+            self._image_rows(b, frags, rail, th, shots, shot_omitted, exp, toggle_row, toggled[0], toggle)
         return frags
+
+    def _image_rows(self, b: dict, frags: list, rail, th, shots: list, omitted: int, exp: bool,
+                    toggle_row, toggled: bool, toggle) -> None:
+        """images: one row per image the step produced (expanded), then the step's toggle."""
+        from prompt_toolkit.mouse_events import MouseEventType
+        from .image_views import human_size
+        if not exp:
+            if not toggled:
+                label = (f"{len(shots)} image{'s' if len(shots) != 1 else ''}" if shots
+                         else f"{omitted} image{'s' if omitted != 1 else ''} not kept")
+                frags.append(("", "\n"))
+                frags.append(rail())
+                frags.append((f"fg:{th.accent_dim}", f"\u25b8 {label} \u2014 click / /expand", toggle))
+            return
+        display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+                       or os.name == "nt" or __import__("sys").platform == "darwin")
+        for record in shots:
+            def open_row(mouse_event, record=record):
+                if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                    self._open_image(record)
+            name = style_mod.terminal_safe_text(str(record.get("name") or "image"))[:128]
+            width, height = int(record.get("width") or 0), int(record.get("height") or 0)
+            facts = " \u00b7 ".join(part for part in (
+                f"{width}\u00d7{height}" if width and height else "",
+                human_size(int(record.get("bytes") or 0)) if record.get("bytes") else "") if part)
+            frags.append(("", "\n"))
+            frags.append(rail())
+            frags.append((f"fg:{th.accent}", f"{glyphs.IMAGE} ", open_row))
+            frags.append((f"fg:{th.text}", name, open_row))
+            if facts:
+                frags.append((f"fg:{th.faint}", f"  {facts}", open_row))
+            if display:
+                frags.append((f"fg:{th.accent_dim}", "   open", open_row))
+            else:
+                path = style_mod.terminal_safe_text(str(record.get("path") or ""))
+                frags.append((f"fg:{th.faint}", f"   {path}" if path else "", open_row))
+        if omitted:
+            frags.append(("", "\n"))
+            frags.append(rail())
+            frags.append((f"fg:{th.faint}", f"+{omitted} more not kept"))
+        frags.append(("", "\n"))
+        frags.append(rail())
+        frags.append((f"fg:{th.accent_dim}", "\u25be show less", toggle))
+
+    def _open_image(self, record: dict) -> None:
+        """Hand one stored image to the operating system's image opener. Never a web browser: with
+        no display, a console browser would take over this terminal, so the path is shown instead."""
+        import hashlib
+        import shutil
+        import stat as stat_mod
+        import subprocess
+        import sys
+        from . import sessions as sessions_mod
+        name = style_mod.terminal_safe_text(str(record.get("name") or "image"))[:128]
+        path = str(record.get("path") or "")
+        shown = style_mod.terminal_safe_text(path)
+        try:
+            info = os.lstat(path) if path else None
+        except OSError:
+            info = None
+        if info is None:
+            self._flash(f"{name} is no longer stored")
+            return
+        real = os.path.realpath(path)
+        sessions_root = os.path.realpath(sessions_mod.SESSIONS_DIR)
+        shots_root = os.path.realpath(Path(self.config.project_root) / ".dgc" / "screenshots")
+        in_store = (os.path.dirname(real).endswith(".images")
+                    and real.startswith(sessions_root + os.sep))
+        in_shots = os.path.dirname(real) == shots_root
+        if not (in_store or in_shots) or stat_mod.S_ISLNK(info.st_mode) or not stat_mod.S_ISREG(info.st_mode):
+            self._flash(f"{name} is not an image DGC kept")
+            return
+        expected = str(record.get("sha256") or "")
+        if expected:
+            try:
+                with open(real, "rb") as handle:
+                    digest = hashlib.sha256(handle.read(8_388_609)).hexdigest()
+            except OSError:
+                self._flash(f"{name} is no longer stored")
+                return
+            if digest != expected:
+                self._flash(f"{name} was replaced on disk")
+                return
+        try:
+            if sys.platform == "darwin":
+                command = ["open", real]
+            elif os.name == "nt":
+                os.startfile(real)                # type: ignore[attr-defined]
+                self._flash(f"opened {name}")
+                return
+            elif (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("xdg-open"):
+                command = ["xdg-open", real]
+            else:
+                self._flash(f"no display to open images here \u00b7 {shown}", secs=6)
+                return
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except (OSError, ValueError):
+            self._flash(f"could not open {name} \u00b7 {shown}", secs=6)
+            return
+        self._flash(f"opened {name}")
 
     def _cursor_ft(self, text: str):
         """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept
@@ -3146,7 +3269,8 @@ class TUI:
                  "repo_map": "Mapping repo", "code_intel": "Inspecting code",
                  "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
-                 "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering"}
+                 "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering",
+                 "view_image": "Viewing image"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
                 "monitor_event": "Monitor event",
@@ -3154,7 +3278,8 @@ class TUI:
                 "code_intel": "Inspected code",
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
                 "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
-                "add_skill": "Installed skill", "save_memory": "Remembered"}
+                "add_skill": "Installed skill", "save_memory": "Remembered",
+                "view_image": "Viewed image"}
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
@@ -3227,6 +3352,33 @@ class TUI:
                 out = out.split("\n", 1)[1] if "\n" in out else ""
             blk["out"] = out                            # full output kept; collapses past the preview
         blk["lines"] = len((blk.get("out") or "").splitlines())
+        if self._follow:
+            self._scroll_off = 0
+        self._invalidate()
+
+    def _tool_block_by_call(self, call_id):
+        """The newest tool block for ``call_id`` in this session's transcript, running or done."""
+        if not call_id:
+            return None
+        for blk in reversed(self.blocks):
+            if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("call_id") == call_id:
+                return blk
+        return None
+
+    def tool_images(self, call_id, images, caption: str = "", *, items=None, omitted: int = 0,
+                    meta=None) -> None:
+        """images: the step's image rows. Metadata only; the terminal draws no pixels."""
+        rows = [dict(row) for row in (meta or []) if isinstance(row, dict)]
+        if not rows and not omitted:
+            return
+        blk = self._tool_block_by_call(call_id)
+        if blk is None:                            # no step on screen for it: a row of its own
+            blk = {"kind": "tool", "name": "view_image", "route_name": "view_image",
+                   "call_id": call_id, "summary": "", "running": False, "error": False,
+                   "out": "", "diff": None, "exp": False, "lines": 0}
+            self.blocks.append(blk)
+        blk.setdefault("images", []).extend(rows)
+        blk["images_omitted"] = int(blk.get("images_omitted") or 0) + max(0, int(omitted or 0))
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
