@@ -58,7 +58,7 @@ class _Endpoint(BaseHTTPRequestHandler):
     ``mode`` selects the behaviour for the whole server; requests are recorded for assertions.
     """
 
-    mode = "ollama"            # ollama | reject400 | reject422 | other422 | no_usage | slow
+    mode = "ollama"            # ollama | reject400 | reject422 | other422 | no_usage | slow | overthink_once
     requests: list[dict] = []
     task_prompt = "CHILD-TASK"
 
@@ -84,6 +84,18 @@ class _Endpoint(BaseHTTPRequestHandler):
         type(self).requests.append(request)
         wants_usage = bool((request.get("stream_options") or {}).get("include_usage"))
         mode = type(self).mode
+        if mode == "overthink_once":
+            type(self).mode = "ollama"          # only the first attempt runs away
+            body = "".join(_chunk({"reasoning_content": "thinking " * 8}) for _ in range(20))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                self.wfile.write(body.encode())
+                self.wfile.flush()
+            except OSError:
+                pass
+            return
         if mode == "other422":
             self._reply(422, json.dumps({"detail": "model field is invalid"}).encode(),
                         "application/json")
@@ -383,6 +395,17 @@ class LedgerRecordingTests(_LedgerCase):
         self.assertTrue(all(row[7] == 0 and row[4] == row[5] == 0 for row in rows))
         totals = usage_ledger.report("today")["totals"]
         self.assertEqual((totals["requests"], totals["unmetered_requests"]), (2, 2))
+
+    def test_an_overthink_retry_counts_the_abandoned_attempt_once(self):
+        agent = self.agent(think_budget_tokens=20)
+        _Endpoint.mode = "overthink_once"
+        result = agent.client.chat([{"role": "user", "content": "think less"}],
+                                   reasoning_effort="high")
+        self.assertEqual(result.content, "Done.")
+        self.assertEqual(len(_Endpoint.requests), 2)
+        rows = self.rows()
+        self.assertEqual([(row[4], row[7]) for row in rows], [(0, 0), (50, 1)],
+                         "the watchdog's abandoned request is an unmetered row, the retry a metered one")
 
     def test_a_broken_ledger_never_breaks_the_request(self):
         agent = self.agent()
@@ -697,6 +720,13 @@ class RealOllamaV1Tests(_LedgerCase):
                 keep_alive = ""
         else:
             model = "qwen2.5:14b"
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as response:
+                    names = {str(m.get("name")) for m in json.loads(response.read()).get("models") or []}
+            except Exception:
+                names = set()
+            if model not in names:
+                self.skipTest("no model is loaded and qwen2.5:14b is not installed; nothing is pulled")
         work = tempfile.TemporaryDirectory(prefix="dgc-usage-ollama-")
         self.addCleanup(work.cleanup)
         agent = Agent(_config(Path(work.name), base_url="http://127.0.0.1:11434/v1", model=model,

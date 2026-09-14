@@ -2182,6 +2182,7 @@ class LLMClient:
                 # the bounded outcome to the Agent instead of launching an unbounded final try.
                 if prior_level in ("none", "off"):
                     return result
+                self._report_usage(result)   # the abandoned attempt was a real request
                 continue
             return result
         raise LLMError(f"Anthropic Messages request failed repeatedly: {last_err}")
@@ -2676,6 +2677,7 @@ class LLMClient:
                     return result
                 if self.reasoning_supported:
                     payload["think"] = self._ollama_think(level)
+                self._report_usage(result)   # the abandoned attempt was a real request
                 continue
             return result
         raise LLMError(f"Ollama request failed repeatedly: {last_err}")
@@ -2856,6 +2858,7 @@ class LLMClient:
                     payload.pop(k, None)
                 if self.reasoning_supported:
                     payload.update(_reasoning_payload(self.family, self.model, level))
+                self._report_usage(res)   # the abandoned attempt was a real request
                 continue
             return res
         raise LLMError(f"request failed repeatedly: {last_err}")
