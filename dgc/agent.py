@@ -2772,6 +2772,7 @@ class Agent(GoalLifecycle):
         try:
             proc = subprocess.Popen(
                 ["/bin/bash", "-lc", cmd], cwd=str(self.ctx.project_root),
+                stdin=subprocess.DEVNULL,              # never the editor's command pipe
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", start_new_session=True)
         except OSError as exc:

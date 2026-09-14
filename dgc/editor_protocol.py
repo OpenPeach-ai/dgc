@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v8 contract and code generation.
+"""Authoritative DGC editor/headless protocol contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 12
+PROTOCOL_VERSION = 13
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -60,9 +60,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "session_name": _S(False),
     },
     # ``kind`` lets the panel show a resumed goal as what it is instead of replaying the
-    # objective as though the user had just typed it.
+    # objective as though the user had just typed it. v13: "continue" is the turn the editor's
+    # Continue card starts after DGC's backend stopped in the middle of an ordinary turn -- a DGC
+    # continuation marker, never words the user typed.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
-                   "kind": _f("string", required=False, enum=("prompt", "resume"))},
+                   "kind": _f("string", required=False, enum=("prompt", "resume", "continue"))},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
     # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose
@@ -392,6 +394,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "new_session": {"request_id": _S(False)},
     "fork_session": {"name": _S(False), "request_id": _S(False)},
     "resume_goal": {"request_id": _S(False)},
+    # v13: continue an ordinary turn DGC's backend stopped in the middle of. The backend queues its
+    # own continuation instruction (turn_start kind "continue"), answers a correlated request with
+    # prompt_accepted, and advertises the command as ready.capabilities.resume_turn.
+    "resume_turn": {"request_id": _S(False)},
     # Turns compaction folded away are archived beside the session. The panel pages back into
     # that archive so "Show earlier messages" keeps working past the summary marker, instead of
     # stopping at it with the rest of the conversation sitting unread on disk.

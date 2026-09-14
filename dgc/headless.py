@@ -8,6 +8,7 @@ substrate the ACP adapter will reframe (Phase 4).
 from __future__ import annotations
 
 import copy
+import io
 import json
 import math
 import re
@@ -68,9 +69,12 @@ _BUSY_MUTATIONS = {
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
+    # Continuing an interrupted turn is offered on an idle chat; while a turn runs there is
+    # nothing interrupted to continue.
+    "resume_turn",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
-    "prompt", "start_goal",
+    "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
@@ -212,6 +216,17 @@ def _prompt_thread_title(text: str) -> str:
     return clean[:57].rstrip(" ,.;:-") + "…"
 
 
+# The instruction behind the editor's Continue card, sent after DGC's backend stopped in the middle
+# of an ordinary turn. The user clicked a button, they did not type this, so it travels as
+# turn_start kind "continue" and history replays it as a marker, found by this first sentence.
+TURN_CONTINUE_MARKER = "DGC's backend stopped during the previous turn, before it finished."
+TURN_CONTINUE_PROMPT = (
+    f"{TURN_CONTINUE_MARKER} Continue that turn from the current session state. Look at the most "
+    "recent tool results (and the task list, if one is open) before acting; do not redo a step "
+    "that already completed, and re-check anything the stop may have left half-done -- a partial "
+    "install, an edit in progress, or a server or background command that is no longer running.")
+
+
 class _Shutdown(Exception):
     pass
 
@@ -225,9 +240,114 @@ class _Terminated(BaseException):
         self.signum = int(signum)
 
 
-def _command_lines(stream):
-    """Yield bounded UTF-8 command lines and recover after an oversized/malformed frame."""
+def _claim_command_pipe(stream=None):
+    """Take the editor's command pipe off fd 0 so no child process can touch it.
+
+    `dgc serve` reads its commands from the pipe on fd 0, and every child it starts -- the bash
+    tool's commands above all -- used to inherit that same pipe. A Node child (npm, npx, vite,
+    next) switches an inherited stdin to O_NONBLOCK the moment it looks at `process.stdin`, and
+    the flag lives on the pipe itself, so it changed OUR read too: `readline()` on a non-blocking
+    pipe with nothing in it returns b'', which read as end of input, and the backend exited 0 with
+    the editor still alive. A child that reads stdin (`head -n 1`) could also swallow the user's
+    Stop or an approval.
+
+    So: keep a private, non-inheritable duplicate of the pipe for ourselves, point fd 0 at
+    /dev/null for everyone else, and make sure our copy blocks (a flip that happened before we
+    started is undone here). Returns ``(reader, note)``; the reader is the original stream when
+    the pipe could not be claimed (no file descriptor, a platform that refuses), and the note says
+    which happened, for the crash log.
+    """
+    stream = sys.stdin if stream is None else stream
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return stream, "command pipe not claimed: stdin has no file descriptor"
+    try:
+        private = os.dup(fd)                   # PEP 446: not inherited by any child
+    except OSError as exc:
+        return stream, f"command pipe not claimed: {exc}"
+    try:
+        reader = os.fdopen(private, "rb")
+    except OSError as exc:
+        try:
+            os.close(private)
+        except OSError:
+            pass
+        return stream, f"command pipe not claimed: {exc}"
+    try:
+        os.set_blocking(private, True)
+    except (OSError, AttributeError):
+        pass                                   # Windows pipes before 3.12; the guard still reads
+    try:
+        null = os.open(os.devnull, os.O_RDONLY)
+        try:
+            os.dup2(null, fd)
+        finally:
+            os.close(null)
+    except OSError as exc:
+        # We still read our own duplicate, so a flip is caught by the guard in _command_lines;
+        # children simply keep sharing the pipe, as they did before.
+        return reader, f"command pipe read privately, but fd 0 is still shared: {exc}"
+    return reader, "command pipe claimed (fd 0 → /dev/null)"
+
+
+def _restore_blocking(binary) -> bool:
+    """True when the reader's descriptor was non-blocking and has just been made blocking again."""
+    try:
+        fd = binary.fileno()
+        if os.get_blocking(fd):
+            return False
+        os.set_blocking(fd, True)
+        return True
+    except (AttributeError, OSError, ValueError):
+        return False                           # no descriptor (BytesIO) or a platform without it
+
+
+class _PipeWatch:
+    """What the command pipe did while we read it, for the line that says why the loop ended."""
+
+    LIMIT_PER_SECOND = 50                      # restores in one second before we stop reading
+    NOTED = 10                                 # restores written to the log one by one
+
+    def __init__(self, note=None):
+        self.restores = 0
+        self.gave_up = False
+        self._note = note
+        self._recent: list[float] = []
+
+    def restored(self) -> bool:
+        """Count one restore; False once something is flipping the flag faster than we can read."""
+        now = time.monotonic()
+        self.restores += 1
+        self._recent = [at for at in self._recent if now - at < 1.0]
+        self._recent.append(now)
+        if self._note is not None and self.restores <= self.NOTED:
+            try:
+                self._note("command pipe was non-blocking (a process changed it); restored"
+                           + (f" (×{self.restores})" if self.restores > 1 else ""))
+            except Exception:
+                pass
+        if len(self._recent) > self.LIMIT_PER_SECOND:
+            self.gave_up = True
+            return False
+        return True
+
+    def describe(self) -> str:
+        if self.gave_up:
+            return f"non-blocking, gave up after {self.restores} restores"
+        return f"non-blocking-restored×{self.restores}" if self.restores else "blocking"
+
+
+def _command_lines(stream, watch: _PipeWatch | None = None):
+    """Yield bounded UTF-8 command lines and recover after an oversized/malformed frame.
+
+    An empty read ends the stream only when the pipe is blocking. On a non-blocking pipe b'' means
+    "nothing yet" and a line without its newline means "the rest has not arrived", so the reader
+    restores blocking mode and keeps reading instead of treating either as end of input.
+    """
     binary = getattr(stream, "buffer", None)
+    if binary is None and isinstance(stream, io.BufferedIOBase):
+        binary = stream                        # the private reader _claim_command_pipe returns
     if binary is None:  # StringIO and other test/embedded text streams
         for line in stream:
             if len(line.encode("utf-8")) > MAX_COMMAND_BYTES:
@@ -235,14 +355,26 @@ def _command_lines(stream):
             else:
                 yield line, None
         return
+    watch = watch if watch is not None else _PipeWatch()
+
+    def read_line(limit: int) -> bytes | None:
+        raw = binary.readline(limit)
+        while len(raw) < limit and not raw.endswith(b"\n") and _restore_blocking(binary):
+            if not watch.restored():
+                return None
+            raw += binary.readline(limit - len(raw))
+        return raw
+
     while True:
-        raw = binary.readline(MAX_COMMAND_BYTES + 1)
+        raw = read_line(MAX_COMMAND_BYTES + 1)
         if not raw:
             return
         if len(raw) > MAX_COMMAND_BYTES:
             while raw and not raw.endswith(b"\n"):
-                raw = binary.readline(MAX_COMMAND_BYTES + 1)
+                raw = read_line(MAX_COMMAND_BYTES + 1)
             yield None, f"command frame exceeded {MAX_COMMAND_BYTES} bytes"
+            if watch.gave_up:
+                return
             continue
         try:
             yield raw.decode("utf-8"), None
@@ -620,7 +752,8 @@ class Backend:
         self._foreground_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
-        # ordered (prompt, images, typed context[, kind]) -- steering splices 3-tuples in
+        # ordered (prompt, images, typed context[, kind[, request_id]]). The request id is kept so a
+        # prompt that never ran can be handed back to the editor that sent it (see close()).
         self._queue: list[tuple] = []
         self._goal_auto_resumes = 0   # consecutive automatic goal restarts after a failed turn
         self._steer_payloads: dict[str, tuple] = {}
@@ -648,6 +781,7 @@ class Backend:
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
+                          "resume_turn": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -726,7 +860,7 @@ class Backend:
     def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
                     request_id="", kind: str = "prompt") -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
-        if kind == "prompt":
+        if kind in ("prompt", "continue"):
             self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
         lock = self._turn_state_lock()
         with lock:
@@ -734,7 +868,8 @@ class Backend:
                 return "busy", 0
             if getattr(self, "_worker", None) is not None:
                 steers = getattr(self, "_steer_payloads", {})
-                pending_bytes = sum(_turn_payload_bytes(*item) for item in [*self._queue, *steers.values()])
+                pending_bytes = sum(_turn_payload_bytes(*item[:3])
+                                    for item in [*self._queue, *steers.values()])
                 if (len(self._queue) + len(steers) >= _MAX_QUEUED_TURNS
                         or pending_bytes + _turn_payload_bytes(text, images, context)
                         > _MAX_QUEUED_TURN_BYTES):
@@ -755,9 +890,9 @@ class Backend:
                         self.em.emit("prompt_accepted", request_id=identity, state="steered")
                         return "steered", len(self._queue)
                     steers.pop(identity, None)
-                self._queue.append((text, images, context, kind))
+                self._queue.append((text, images, context, kind, request_id or ""))
                 return "queued", len(self._queue)
-            self._queue.append((text, images, context, kind))
+            self._queue.append((text, images, context, kind, request_id or ""))
             worker = threading.Thread(target=self._run_turn_queue, daemon=True,
                                       name="dgc-headless-turns")
             self._worker = worker
@@ -784,7 +919,7 @@ class Backend:
                     self.em.emit("steering_update", request_id=identity, state="returned",
                                  message="This follow-up was not applied. Your message has been preserved.")
                 else:
-                    retained.append(payload)
+                    retained.append((*payload[:3], "prompt", identity))
                     self.em.emit("steering_update", request_id=identity, state="queued")
             self._queue[:0] = retained
             if retained:
@@ -817,7 +952,10 @@ class Backend:
             while True:
                 lock = self._turn_state_lock()
                 with lock:
-                    if not self._queue:
+                    # A backend on its way down starts nothing new: whatever is still queued stays
+                    # queued, so close() can hand it back to the editor instead of this worker
+                    # consuming it as an instant "stopped" turn nobody saw run.
+                    if not self._queue or getattr(self.agent, "stopping", False) is True:
                         self._worker = None
                         return
                     item = self._queue.pop(0)
@@ -838,7 +976,8 @@ class Backend:
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if not getattr(self.agent, "session_name", None) and callable(name_session):
+                if (turn_kind != "continue" and not getattr(self.agent, "session_name", None)
+                        and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
                     if title and name_session(title):
                         self.em.emit("session_named", name=title)
@@ -1315,6 +1454,19 @@ class Backend:
                 time.sleep(0.1)
         with self._turn_state_lock():
             self.agent.cancelled.set()
+            # A queued prompt was acknowledged as "queued", so the editor stopped holding it as a
+            # draft. Dropping it silently lost the user's words; hand each one back by its id so
+            # the editor can put it in the composer again. Best effort: the pipe may be gone.
+            for item in self._queue:
+                request_id = item[4] if len(item) > 4 else ""
+                if not request_id:
+                    continue
+                try:
+                    self.em.emit("steering_update", request_id=request_id, state="returned",
+                                 message="DGC's backend stopped before this queued message ran; "
+                                         "it is back in the composer.")
+                except Exception:
+                    break
             self._queue.clear()
             workers = [getattr(self, "_worker", None),
                        getattr(self, "_foreground_worker", None)]
@@ -1532,6 +1684,9 @@ class Backend:
             # via turn_start kind=resume; replaying history has to say the same thing, or
             # reopening a resumed session shows a prompt nobody sent. It is also a turn boundary:
             # without it an unattended goal's whole run collapses into one enormous turn.
+            if role == "user" and isinstance(content, str) and TURN_CONTINUE_MARKER in content:
+                open_turn("Continued the interrupted turn", "continue")
+                continue
             if role == "user" and isinstance(content, str) and _goal_scaffold(content):
                 open_turn(_goal_scaffold(content), "resume")
                 continue
@@ -1768,8 +1923,8 @@ class Backend:
                                  workspace_trusted=self.workspace_trusted)
                     state, count = self._start_turn(text, images, context)
             else:
-                state, count = self._start_turn(text, images, context,
-                    **({"delivery": cmd["delivery"], "request_id": request_id} if "delivery" in cmd else {}))
+                state, count = self._start_turn(text, images, context, request_id=request_id or "",
+                    **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
                 self.em.emit("prompt_accepted", request_id=request_id, state=state,
                              **({"message": "Queued for the next turn; this operation cannot accept live steering."}
@@ -2297,6 +2452,27 @@ class Backend:
             self.em.emit("saved_plan", plan=plan or "", exists=bool(plan),
                          **_request_fields(request_id))
 
+        elif t == "resume_turn":
+            # The editor's Continue card after a backend exit interrupted an ordinary turn.
+            if not any(isinstance(m, dict) and m.get("role") == "user"
+                       for m in (getattr(self.agent, "messages", None) or [])):
+                self.em.emit("command_rejected", command=t, reason="nothing_to_continue",
+                             message="this chat has no interrupted turn to continue",
+                             **_request_fields(request_id))
+                return
+            state, count = self._start_turn(TURN_CONTINUE_PROMPT, delivery="queue",
+                                            request_id=request_id or "", kind="continue")
+            if request_id and state in ("started", "queued"):
+                self.em.emit("prompt_accepted", request_id=request_id, state=state)
+            if state == "queued":
+                self.em.emit("queued", count=count, text="")
+            elif state == "full":
+                self.em.emit("command_rejected", command=t, reason="queue_full",
+                             message="the turn queue is full", **_request_fields(request_id))
+            elif state == "busy":
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="a foreground operation is running; wait for it to finish",
+                             **_request_fields(request_id))
         elif t == "resume_goal":
             if not self.agent.goal:
                 self.em.emit("command_rejected", command=t, reason="no_goal",
@@ -2804,9 +2980,29 @@ def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
 SHUTDOWN_GRACE_S = 20.0
 
 
+def _end_line(crash_log, line: str) -> None:
+    """The loop's last word goes to serve.log AND stderr.
+
+    The editor copies our stderr into its own backend.log, so the backend's account of why it
+    stopped lands on the line next to the extension's "[dgc serve exited …]" instead of in a file
+    nobody on that side reads.
+    """
+    _log_crash(crash_log, line)
+    try:
+        sys.stderr.write(f"[dgc serve] {line}\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
+    # FIRST, before the crash log and before Backend(): MCP servers and code intelligence start
+    # child processes during init, and none of them may inherit the command pipe.
+    command_stream, pipe_note = _claim_command_pipe()
     crash_log = _open_crash_log(config)
+    _log_crash(crash_log, pipe_note)
+    pipe_watch = _PipeWatch(note=lambda text: _log_crash(crash_log, text))
     # A worker thread that dies takes its traceback with it unless someone is listening. The
     # turn worker is exactly such a thread, and a silent death there strands the turn.
     if crash_log is not None:
@@ -2824,6 +3020,7 @@ def serve(config: Config) -> None:
     commands = 0
     last_command = ""
     shutdown_requested = False
+    end_cause = "the serve loop raised"
     # A SIGTERM taken at its default disposition kills us between two bytecodes: the `finally`
     # below never runs, Backend.close() never runs, and a goal that was running is left claiming
     # it is still active. Handle the signal instead — tell the agent to stop, unwind the stdin
@@ -2858,7 +3055,7 @@ def serve(config: Config) -> None:
         # Inside the try on purpose: start() is where the first model metadata and context
         # estimates happen, and a parent that gives up during it must still reach the finally.
         backend.start()
-        for line, frame_problem in _command_lines(sys.stdin):
+        for line, frame_problem in _command_lines(command_stream, pipe_watch):
             if frame_problem:
                 backend.em.emit("error", message=frame_problem)
                 continue
@@ -2888,19 +3085,23 @@ def serve(config: Config) -> None:
                 _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
         reading["stdin"] = False               # past this point a signal has nothing to interrupt
     except (KeyboardInterrupt, BrokenPipeError) as interrupt:
-        _log_crash(crash_log, f"serve loop ended: {type(interrupt).__name__}")
+        end_cause = type(interrupt).__name__
+        _end_line(crash_log, f"serve loop ended: {end_cause}; pipe: {pipe_watch.describe()}")
     except _Terminated as terminated:
-        _log_crash(crash_log,
-                   f"serve loop ended: {_signal_name(terminated.signum)} — the parent asked us "
-                   f"to stop; up {time.monotonic() - started_at:.0f}s, {commands} commands, "
-                   f"last {last_command or 'none'!r}, turn running: "
-                   + ("yes" if _safe_busy(backend) else "no"))
+        end_cause = f"{_signal_name(terminated.signum)} — the parent asked us to stop"
+        _end_line(crash_log,
+                  f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
+                  f"{commands} commands, last {last_command or 'none'!r}, turn running: "
+                  + ("yes" if _safe_busy(backend) else "no") + f", pipe: {pipe_watch.describe()}")
     except BaseException as fatal:             # never exit without saying why, in our own log
         _log_crash(crash_log, "serve loop raised", fatal)
         raise
     else:
         if shutdown_requested:
             cause = "the editor asked us to shut down"
+        elif pipe_watch.gave_up:
+            cause = (f"the command pipe kept turning non-blocking ({pipe_watch.restores} restores); "
+                     "stopped reading")
         else:
             status, now_parent = _parent_status(parent_pid)
             if status == "gone":
@@ -2915,12 +3116,22 @@ def serve(config: Config) -> None:
             busy = "yes" if backend._busy() else "no"
         except Exception:
             busy = "unknown"
-        _log_crash(crash_log, f"serve loop ended: {cause}; up {time.monotonic() - started_at:.0f}s, "
-                              f"{commands} commands, last {last_command or 'none'!r}, turn running: {busy}")
+        end_cause = cause
+        _end_line(crash_log, f"serve loop ended: {cause}; up {time.monotonic() - started_at:.0f}s, "
+                             f"{commands} commands, last {last_command or 'none'!r}, turn running: {busy}, "
+                             f"pipe: {pipe_watch.describe()}")
     finally:
         # An editor asking us to stop is waiting on us; a pipe that closed under a running turn is
         # not, and neither is a signal. Only those get the grace period.
         grace = 0.0 if shutdown_requested else SHUTDOWN_GRACE_S
+        if grace > 0 and _safe_busy(backend):
+            # If the editor is still there it should hear this from us, not infer it from silence.
+            try:
+                backend.em.emit("info", message=(
+                    f"DGC's backend is stopping ({end_cause}); it is finishing the current step "
+                    f"(up to {SHUTDOWN_GRACE_S:.0f}s) and saving the session."))
+            except Exception:
+                pass
         outcome = backend.close(grace_s=grace)
         # Only now: for the whole grace window the process must keep the handler that makes a
         # second SIGTERM land cleanly instead of killing the turn we are busy saving.

@@ -10,6 +10,7 @@ Docs: https://agentclientprotocol.com
 """
 from __future__ import annotations
 
+import io
 import itertools
 import json
 import sys
@@ -50,6 +51,8 @@ MAX_ACP_PROMPT_CHARS = 1_000_000
 def _json_rpc_lines(stream):
     """Yield bounded UTF-8 JSON-RPC records and drain one oversized record before recovery."""
     binary = getattr(stream, "buffer", None)
+    if binary is None and isinstance(stream, io.BufferedIOBase):
+        binary = stream                        # the private reader _claim_command_pipe returns
     if binary is None:
         for line in stream:
             if len(line.encode("utf-8")) > MAX_ACP_FRAME_BYTES:
@@ -57,13 +60,25 @@ def _json_rpc_lines(stream):
             else:
                 yield line, None
         return
+    from .headless import _PipeWatch, _restore_blocking
+    watch = _PipeWatch()
+
+    def read_line(limit: int) -> bytes:
+        # Same rule as `dgc serve`: on a non-blocking pipe b'' is "nothing yet", not end of input.
+        raw = binary.readline(limit)
+        while len(raw) < limit and not raw.endswith(b"\n") and _restore_blocking(binary):
+            if not watch.restored():
+                return b""
+            raw += binary.readline(limit - len(raw))
+        return raw
+
     while True:
-        raw = binary.readline(MAX_ACP_FRAME_BYTES + 1)
+        raw = read_line(MAX_ACP_FRAME_BYTES + 1)
         if not raw:
             return
         if len(raw) > MAX_ACP_FRAME_BYTES:
             while raw and not raw.endswith(b"\n"):
-                raw = binary.readline(65_536)
+                raw = read_line(65_536)
             yield None, f"JSON-RPC frame exceeded {MAX_ACP_FRAME_BYTES} bytes"
             continue
         try:
@@ -231,8 +246,8 @@ class ACPServer:
         return specs
 
     # -- main loop -------------------------------------------------------------
-    def serve(self) -> None:
-        for line, frame_error in _json_rpc_lines(sys.stdin):
+    def serve(self, stream=None) -> None:
+        for line, frame_error in _json_rpc_lines(sys.stdin if stream is None else stream):
             if frame_error:
                 self.respond(None, error={"code": -32600, "message": frame_error})
                 continue
@@ -849,4 +864,9 @@ class _ACPUi:
 
 
 def serve() -> None:
-    ACPServer().serve()
+    # Claim the command pipe before anything can start a child: an agent's bash command, an MCP
+    # server or a Node tool inheriting fd 0 could read JSON-RPC records meant for us or flip the
+    # pipe to non-blocking, which reads as end of input. See headless._claim_command_pipe.
+    from .headless import _claim_command_pipe
+    stream, _note = _claim_command_pipe()
+    ACPServer().serve(stream)

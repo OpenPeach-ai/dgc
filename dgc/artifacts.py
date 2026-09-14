@@ -115,7 +115,8 @@ def _tailscale_ip() -> str:
     _TS_IP_CACHE = ""
     import subprocess
     try:
-        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3).stdout
+        out = subprocess.run(["tailscale", "ip", "-4"], stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=3).stdout
         for ln in out.splitlines():
             ip = ln.strip()
             if ip.startswith("100."):       # CGNAT range Tailscale assigns

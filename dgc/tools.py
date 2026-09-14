@@ -1427,7 +1427,10 @@ def bash(args: dict, ctx) -> str:
     # Run in its OWN session/process group so a timeout kills the WHOLE tree — a build's grandchildren
     # (cargo / go test / gradlew / cmake) would otherwise orphan on the box and keep stealing CPU,
     # slowing every later command. (subprocess.run's timeout only kills the direct child.)
-    popen_kw = dict(cwd=str(ctx.project_root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    # stdin is /dev/null, never inherited: under `dgc serve` fd 0 was the editor's command pipe,
+    # and a child that reads it steals the user's Stop, while a Node child flips it non-blocking.
+    popen_kw = dict(cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
                     env=sandbox.process_env(ctx.config) if sandbox_requested else None)
     try:
@@ -1578,7 +1581,8 @@ def _bash_background(command: str, ctx) -> str:
         if sandbox_requested and argv is None:
             workspace_lock.release()
             return "error: sandbox policy cannot safely confine this workspace; background command was not run"
-        popen_kw = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        popen_kw = dict(stdin=subprocess.DEVNULL,       # never the editor's command pipe
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
                         env=sandbox.process_env(ctx.config) if sandbox_requested else None)
@@ -2360,7 +2364,7 @@ def _run_search_process(argv: list[str], on_stdout, ctx, *,
     try:
         proc = subprocess.Popen(
             argv, cwd=str(cwd or ctx.project_root),
-            stdin=(subprocess.PIPE if stdin_data is not None else None),
+            stdin=(subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             start_new_session=(os.name == "posix"), env=env)
     except OSError as exc:
