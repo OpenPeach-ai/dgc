@@ -975,22 +975,46 @@ class Agent(GoalLifecycle):
 
     # ------------------------------------------------------------ setup ---
     def _new_client(self, base_url: str, api_key: str, model: str,
-                    api_mode: str | None = None) -> LLMClient:
+                    api_mode: str | None = None, source: str = "main") -> LLMClient:
         """Create every primary/fallback/sub-agent client with identical reliability settings."""
-        return LLMClient(base_url, api_key, model,
-                         read_timeout=int(self.config.get("request_timeout", 1800)),
-                         think_budget_tokens=int(self.config.get("think_budget_tokens", 8000)),
-                         max_tokens=int(self.config.get("max_tokens", 16384)),
-                         ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")),
-                         sampling=_sampling(self.config),
-                         api_mode=str(self.config.get("api_mode", "auto")
-                                      if api_mode is None else api_mode),
-                         provider_capabilities=self.config.get("provider_capabilities", {}),
-                         capability_cache_ttl_s=int(self.config.get("capability_cache_ttl_s", 300)),
-                         provider_state=str(self.config.get("provider_state", "stateless")),
-                         prompt_cache=bool(self.config.get("prompt_cache", True)),
-                         prompt_cache_key=str(self.config.get("prompt_cache_key", "")),
-                         context_size=int(self.config.get("context_size", 0)))
+        client = LLMClient(base_url, api_key, model,
+                           read_timeout=int(self.config.get("request_timeout", 1800)),
+                           think_budget_tokens=int(self.config.get("think_budget_tokens", 8000)),
+                           max_tokens=int(self.config.get("max_tokens", 16384)),
+                           ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")),
+                           sampling=_sampling(self.config),
+                           api_mode=str(self.config.get("api_mode", "auto")
+                                        if api_mode is None else api_mode),
+                           provider_capabilities=self.config.get("provider_capabilities", {}),
+                           capability_cache_ttl_s=int(self.config.get("capability_cache_ttl_s", 300)),
+                           provider_state=str(self.config.get("provider_state", "stateless")),
+                           prompt_cache=bool(self.config.get("prompt_cache", True)),
+                           prompt_cache_key=str(self.config.get("prompt_cache_key", "")),
+                           context_size=int(self.config.get("context_size", 0)))
+        # Every client this agent builds reports each finished request to the local usage ledger,
+        # labelled with the route that sent it. See _ledger_usage.
+        client.usage_source = source
+        client.usage_sink = lambda finished_client, result, owner=self: Agent._ledger_usage(
+            owner, finished_client, result)
+        return client
+
+    def _ledger_usage(self, client, result) -> None:
+        """Write one finished request to ~/.dgc/usage.sqlite; never raises into the turn.
+
+        A sub-agent's own clients are recorded here, once, as "subagent" -- whatever route they
+        took inside the child. The parent's session totals still receive that usage through
+        _record_usage, which deliberately never writes the ledger.
+        """
+        from . import usage_ledger
+        usage = normalize_usage(getattr(result, "usage", None))
+        source = ("subagent" if int(getattr(self, "depth", 0) or 0) > 0
+                  else str(getattr(client, "usage_source", "") or "main"))
+        usage_ledger.record(
+            provider=getattr(client, "family", "") or "unknown",
+            base_url=getattr(client, "base_url", ""), model=getattr(client, "model", ""),
+            source=source, input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"])
 
     def refresh_client(self) -> None:
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
@@ -1025,16 +1049,17 @@ class Agent(GoalLifecycle):
         key = Agent._route_api_key(self, base, "fallback_api_key")
         return Agent._new_client(
             self, base, key, model,
-            api_mode=Agent._route_api_mode(self, base, "fallback_api_mode"))
+            api_mode=Agent._route_api_mode(self, base, "fallback_api_mode"), source="fallback")
 
     def _aux_client(self, *, max_tokens: int | None = None,
-                    read_timeout: int | None = None):
+                    read_timeout: int | None = None, source: str = "other"):
         """A one-shot client that cannot overwrite the main Responses continuation chain."""
         if not isinstance(self.client, LLMClient):  # lightweight injected clients in embedders/tests
             return self.client
         client = self._new_client(
             self.client.base_url, self.client.api_key, self.client.model,
-            api_mode=getattr(self.client, "requested_api_mode", self.client.api_mode))
+            api_mode=getattr(self.client, "requested_api_mode", self.client.api_mode),
+            source=source)
         client.provider_state = "stateless"         # auxiliary output is never useful as server state
         if max_tokens is not None:
             cap = max(1, int(max_tokens))
@@ -4401,7 +4426,7 @@ class Agent(GoalLifecycle):
         if ((base, key, model) == (cfg.base_url.rstrip("/"), cfg.api_key, cfg.model)
                 and api_mode == main_mode):
             return None
-        return Agent._new_client(self, base, key, model, api_mode=api_mode)
+        return Agent._new_client(self, base, key, model, api_mode=api_mode, source="subagent")
 
     def _execute_prepared_subagent(self, description: str, prompt: str, agent_name: str,
                                    workspace, sub_ui: _SubUI) -> tuple[str, str, str]:
@@ -5071,9 +5096,14 @@ class Agent(GoalLifecycle):
         native_compaction = None
         if (isinstance(self.client, LLMClient)
                 and not self.cancelled.is_set() and compact_deadline - now >= 1):
-            native_compaction = self.client.compact_responses(
-                self.messages[:split], cancel=_DeadlineCancel(self.cancelled, compact_deadline),
-                deadline=compact_deadline)
+            prior_source = getattr(self.client, "usage_source", "main")
+            self.client.usage_source = "compaction"   # the ledger labels this request by its job
+            try:
+                native_compaction = self.client.compact_responses(
+                    self.messages[:split], cancel=_DeadlineCancel(self.cancelled, compact_deadline),
+                    deadline=compact_deadline)
+            finally:
+                self.client.usage_source = prior_source
         if native_compaction is not None:
             provider_items, usage = native_compaction
             self._record_usage(usage, "compaction")
@@ -5105,7 +5135,8 @@ class Agent(GoalLifecycle):
             read_timeout = max(1, min(_COMPACT_TIMEOUT_S, int(compact_deadline - now)))
             try:
                 result = self._aux_client(
-                    max_tokens=_COMPACT_MAX_TOKENS, read_timeout=read_timeout).chat(
+                    max_tokens=_COMPACT_MAX_TOKENS, read_timeout=read_timeout,
+                    source="compaction").chat(
                         [{"role": "user", "content": prompt}], tools=None,
                         reasoning_effort="off", cancel=compact_cancel)
                 self._record_usage(getattr(result, "usage", None), "compaction")
