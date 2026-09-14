@@ -4195,6 +4195,38 @@ test("a background command's exit card is titled as a background command, not a 
   assert.deepEqual(errors, []);
 });
 
+test("the marker above a wake turn names a background command when one woke it", () => {
+  // Before: the card was titled "Background command" but the marker above it still read
+  // "Woke on monitor · sleep 20 && echo bg-finished-ok · exited".
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const note = () => [...doc.querySelectorAll(".resume-note.monitor-note")].at(-1);
+  event({ type: "turn_start", turn_id: "t1", prompt: "sleep 20 && echo bg-finished-ok · exited", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg1", description: "sleep 20 && echo bg-finished-ok", event_index: 0,
+          lines: ["exited 0 after 20.0s", "bg-finished-ok"], kind: "background_exit", delivery: "wake", turn_id: "t1" });
+  assert.equal(note().textContent, "Woke on background command · sleep 20 && echo bg-finished-ok · exited");
+  assert.ok(note().querySelector(".codicon-terminal"));
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  // Two background commands, then a wake that mixes a monitor's events with a background exit.
+  event({ type: "turn_start", turn_id: "t2", prompt: "2 background commands exited", kind: "monitor" });
+  for (const id of ["bg2", "bg3"]) {
+    event({ type: "monitor_event", id, description: id, event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "wake", turn_id: "t2" });
+  }
+  assert.equal(note().textContent, "Woke on background commands · 2 background commands exited");
+  event({ type: "turn_end", turn_id: "t2", reason: "completed", final_message_id: null });
+  event({ type: "turn_start", turn_id: "t3", prompt: "1 monitor · 1 event · 1 background command exited", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg4", description: "bg4", event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "wake", turn_id: "t3" });
+  event({ type: "monitor_event", id: "mon1", description: "api log", event_index: 1, lines: ["READY"], kind: "output", delivery: "wake", turn_id: "t3" });
+  assert.equal(note().textContent, "Woke on monitor · 1 monitor · 1 event · 1 background command exited");
+  assert.ok(note().querySelector(".codicon-pulse"));
+  // An inline event in a turn someone typed leaves that turn's prompt alone.
+  event({ type: "turn_end", turn_id: "t3", reason: "completed", final_message_id: null });
+  event({ type: "turn_start", turn_id: "t4", prompt: "watch it", kind: "prompt" });
+  event({ type: "monitor_event", id: "bg5", description: "bg5", event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "inline", turn_id: "t4" });
+  assert.equal(doc.querySelectorAll(".resume-note.monitor-note").length, 3);
+  assert.deepEqual(errors, []);
+});
+
 test("with wake-ups off, the monitors row says events are waiting for your next message", () => {
   // Before: the row showed only the chips; "N events waiting" was hidden whenever a chip was shown,
   // and the paused pill reflected only the ten-wake pause, not Wake on monitor events turned off.

@@ -223,7 +223,8 @@ class TuiMonitorTests(unittest.TestCase):
         worker.join(10)
         self.assertFalse(worker.is_alive())
         bands = [b for b in sess.blocks if isinstance(b, dict) and b.get("kind") == "user"]
-        self.assertEqual([b.get("tag") for b in bands], ["monitor · woke on an event"])
+        # A background command's exit woke this turn, and a background command is not a monitor.
+        self.assertEqual([b.get("tag") for b in bands], ["background command · woke on its exit"])
         self.assertEqual(ui._prompt_history, [], "a wake is not prompt history")
         self.assertTrue(ui._notify_armed, "the user's /notify stays armed for their own turn")
         self.assertEqual(paused, [])
@@ -272,6 +273,17 @@ class TuiMonitorTests(unittest.TestCase):
                          [("deploy it", None), ("deploy · 1 event", "monitor · woke on an event")])
         self.assertFalse(any("DEPLOYED" in str(b) for b in ui.blocks if not isinstance(b, dict)
                              or b.get("kind") == "user"))
+
+    def test_history_names_a_background_command_wake_as_one(self):
+        batch = Batch("bg1", "sleep 20 && echo done", "background_exit", lines=["exited 0 after 20.0s", "done"])
+        note = Notification([batch], render_notification([batch]), "sleep 20 && echo done · exited")
+        self.agent.messages += [{"role": "user", "content": "run it in the background"},
+                                {"role": "assistant", "content": "started"},
+                                self.agent._notice_message(note, "wake"),
+                                {"role": "assistant", "content": "it finished"}]
+        ui = self.tui()
+        tags = [b.get("tag") for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "user"]
+        self.assertEqual(tags, [None, "background command · woke on its exit"])
 
     def test_closing_a_session_stops_its_monitors(self):
         ui = self.tui()

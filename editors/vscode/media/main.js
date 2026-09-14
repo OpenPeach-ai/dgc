@@ -701,6 +701,7 @@
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
+    let wakeNote = null;
     // A resumed goal is not something the user just typed. Show it as what it is instead of
     // echoing the objective back into the chat as a fresh prompt. The same holds for a turn the
     // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
@@ -717,6 +718,7 @@
       note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
         + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
+      wakeNote = note;
     } else if (!replaying && promptNode?.isConnected && promptNode.parentNode === appendTarget) {
       const role = promptNode.querySelector(".role");
       if (role) role.textContent = "you";
@@ -746,11 +748,23 @@
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
+    if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set() };
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
       scroll();
     }
+  }
+  // The marker above a wake turn names what woke it. It is drawn from turn_start, which carries
+  // only the label, so it said "Woke on monitor" even when the only thing that woke the turn was a
+  // background command exiting, right above a card titled "Background command". The wake's own
+  // events arrive next and say which it was.
+  function paintWakeNote(wake, ev) {
+    wake.kinds.push(String(ev.kind || "output")); wake.ids.add(String(ev.id || ""));
+    const background = wake.kinds.every((k) => k === "background_exit");
+    const icon = wake.note.querySelector(".codicon"), text = wake.note.querySelector(".codicon + span");
+    if (icon) icon.className = `codicon codicon-${background ? "terminal" : "pulse"}`;
+    if (text) text.textContent = `Woke on ${background ? (wake.ids.size > 1 ? "background commands" : "background command") : "monitor"} · ${wake.label}`;
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
   // panel's own open request card, the handoff this panel asked for, or the backend's
@@ -2638,6 +2652,7 @@
       case "monitor_event": {
         ensureTurn();
         appendTurnContent(monitorEventCard(ev)); breakText();
+        if (ev.delivery === "wake" && turn.wake) paintWakeNote(turn.wake, ev);
         break;
       }
       case "monitor_started":

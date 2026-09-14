@@ -235,6 +235,18 @@ def notification_label(batches: list) -> str:
     return " · ".join(parts)[:160]
 
 
+def wake_tag(items) -> str:
+    """The terminal's marker for a wake turn, from its batches or saved notice items. A background
+    command is not a monitor, so a wake that only background commands' exits caused says so."""
+    rows = [(getattr(item, "kind", None) if not isinstance(item, dict) else item.get("kind"),
+             getattr(item, "monitor_id", None) if not isinstance(item, dict) else item.get("id"))
+            for item in items or ()]
+    if rows and all(kind == "background_exit" for kind, _ in rows):
+        several = len({monitor_id for _, monitor_id in rows}) > 1
+        return "background commands · woke on their exit" if several else "background command · woke on its exit"
+    return "monitor · woke on an event"
+
+
 def flood_message(limit: str) -> str:
     """Why a flooding monitor was stopped, naming the limit that tripped."""
     if limit == "partial":

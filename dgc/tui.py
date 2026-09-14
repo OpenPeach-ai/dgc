@@ -1213,8 +1213,10 @@ class TUI:
         sess._cancel.clear()
         sess._tool_count = 0
         sess._wake_turn, sess._wake_yield = True, False
+        from .monitors import wake_tag
+        tag = wake_tag(notification.batches)
         sess.blocks.append({"kind": "user", "text": style_mod.terminal_safe_text(notification.label),
-                            "tag": "monitor · woke on an event"})
+                            "tag": tag})
         for batch in notification.batches:
             sess.blocks.append(self._monitor_event_block(batch))
         if sess._follow:
@@ -1223,7 +1225,8 @@ class TUI:
         sess._backend_activity = None
         sess._turn_t0 = time.monotonic()
         if sess is not self.active:
-            self._flash(f"⧉ {sess.name or 'agent'} woke on a monitor event")
+            self._flash(f"⧉ {sess.name or 'agent'} woke on "
+                        + ("a monitor event" if tag.startswith("monitor") else "a background command's exit"))
 
         def work():
             self._tls.session = sess
@@ -5386,8 +5389,9 @@ class TUI:
             elif who == "monitor":
                 # Command output DGC delivered: a marker, never a band that reads as typed text.
                 if row.get("delivery") == "wake":
+                    from .monitors import wake_tag
                     blocks.append({"kind": "user", "text": body[:200],
-                                   "tag": "monitor · woke on an event"})
+                                   "tag": wake_tag(row.get("items"))})
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
             elif who == "assistant":
@@ -5427,7 +5431,8 @@ class TUI:
                 if notice_kind(m):
                     notice = m.get("_dgc_notice") or {}
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
-                                 "tools": "", "delivery": str(notice.get("delivery") or "")})
+                                 "tools": "", "delivery": str(notice.get("delivery") or ""),
+                                 "items": list(notice.get("items") or [])})
                     continue
                 body = display_prompt(_strip_editor_context(body))
                 if body.startswith(_COMPACT_PREFIX):
