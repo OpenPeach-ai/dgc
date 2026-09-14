@@ -691,7 +691,13 @@
     m.appendChild(el("div", "bubble", esc(body)));
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
   }
-  function startTurn(prompt = "", kind = "prompt", id = "") {
+  // `promptNode` is the "you · queued" bubble this panel drew when the message was queued, found by
+  // the request id the backend carries on turn_start. That bubble IS this turn's prompt: it moves
+  // down to sit above the answer and loses its queued label. Echoing a second bubble instead left
+  // every queued message on screen twice (echoPrompt only compares the last bubble, and with two
+  // or more queued the last one is a different message), and a templated message twice over in
+  // two different wordings.
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -711,6 +717,10 @@
       note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
         + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
+    } else if (!replaying && promptNode?.isConnected && promptNode.parentNode === appendTarget) {
+      const role = promptNode.querySelector(".role");
+      if (role) role.textContent = "you";
+      appendTarget.appendChild(promptNode);
     } else {
       echoPrompt(prompt);
     }
@@ -721,6 +731,15 @@
     // first byte to the last, through six gates and every tool call.
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
     block.appendChild(act); appendTarget.appendChild(block);
+    // Messages still waiting their turn stay below the one that is running, in the order they
+    // will run, as they were below the turn they were queued behind.
+    if (!replaying) {
+      for (const waiting of queuedPrompts.values()) {
+        if (waiting.node !== promptNode && waiting.node?.isConnected && waiting.node.parentNode === appendTarget) {
+          appendTarget.appendChild(waiting.node);
+        }
+      }
+    }
     // No clock for a replayed turn: the session file does not record when it started, and a
     // fabricated 0s is worse than no number at all.
     const t0 = replaying ? null : Date.now();
@@ -2288,7 +2307,12 @@
         break;
       case "turn_start":
         if (!replaying) removeRecoveryCards();
-        startTurn(ev.prompt, ev.kind, ev.turn_id);
+        {
+          const startedId = !replaying && typeof ev.request_id === "string" ? ev.request_id : "";
+          const started = startedId ? queuedPrompts.get(startedId) : null;
+          if (started) queuedPrompts.delete(startedId);
+          startTurn(ev.prompt, ev.kind, ev.turn_id, started?.node || null);
+        }
         if (!replaying) customCommandPending = "";
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.

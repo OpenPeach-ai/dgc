@@ -3405,6 +3405,63 @@ test("a queued prompt leaves the restore set once its own turn starts", () => {
   assert.deepEqual(h.errors, []);
 });
 
+test("each queued message is one bubble: its queued bubble becomes its turn's prompt", () => {
+  // Before: turn_start echoed a second "you" bubble for every queued message, because echoPrompt
+  // only compared the LAST user bubble and with two or more queued that was a different message.
+  // Four prompts left seven bubbles, and a templated one showed in two different wordings.
+  const h = queuedPromptDom();
+  const queueAnother = (text) => {
+    h.input.value = text;
+    h.input.dispatchEvent(new h.dom.window.Event("input"));
+    h.input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+    const sent = h.posted.findLast((m) => m.type === "prompt");
+    h.event({ type: "prompt_accepted", request_id: sent.requestId, state: "queued" });
+    return sent;
+  };
+  const second = queueAnother("Then update the changelog");
+  const third = queueAnother("Then tag the release");
+  const log = h.doc.getElementById("log");
+  const transcript = () => [...log.children]
+    .filter((n) => n.matches(".msg.user, .msg.dgc"))
+    .map((n) => n.matches(".msg.dgc") ? "DGC"
+      : `${n.querySelector(".role").textContent}: ${n.querySelector(".bubble").textContent}`);
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC",
+    "you · queued: Then run the tests", "you · queued: Then update the changelog", "you · queued: Then tag the release"]);
+
+  h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt",
+            request_id: h.queued.requestId });
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC", "you: Then run the tests", "DGC",
+    "you · queued: Then update the changelog", "you · queued: Then tag the release"],
+    "the first queued bubble moves above its answer; the rest keep waiting below it, in order");
+
+  h.event({ type: "turn_end", turn_id: "t2", reason: "completed" });
+  // The backend's prompt for a templated message is the expanded text, not what the bubble shows.
+  h.event({ type: "turn_start", turn_id: "t3", kind: "prompt", request_id: second.requestId,
+            prompt: "Then update the changelog\n\nPrompt template /shout:\nReply with the single word charlie" });
+  h.event({ type: "turn_end", turn_id: "t3", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t4", prompt: "Then tag the release", kind: "prompt",
+            request_id: third.requestId });
+  h.event({ type: "turn_end", turn_id: "t4", reason: "completed" });
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC", "you: Then run the tests", "DGC",
+    "you: Then update the changelog", "DGC", "you: Then tag the release", "DGC"],
+    "four prompts, four bubbles, each above its own answer");
+  assert.equal(h.doc.getElementById("queued").textContent, "");
+  assert.deepEqual(h.errors, []);
+});
+
+test("a turn with no request id still echoes its prompt above queued messages that keep waiting", () => {
+  const h = queuedPromptDom();
+  const log = h.doc.getElementById("log");
+  h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "/deploy", kind: "prompt" });   // a queued slash command
+  const users = [...log.querySelectorAll(".msg.user")].map((n) => n.querySelector(".bubble").textContent);
+  assert.deepEqual(users, ["Install the dependencies", "/deploy", "Then run the tests"]);
+  const last = [...log.children].filter((n) => n.matches(".msg.user, .msg.dgc")).at(-1);
+  assert.equal(last.querySelector(".role").textContent, "you · queued", "the waiting message stays last, still queued");
+  assert.deepEqual(h.errors, []);
+});
+
 test("a queued slash command that runs first does not consume the user's queued prompt", () => {
   // Before: turn_start popped the HEAD of the restore set for any kind "prompt" turn. A custom slash
   // command queued ahead of the message runs as kind "prompt" with no request id, so its turn_start
