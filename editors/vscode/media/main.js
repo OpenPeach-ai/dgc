@@ -400,7 +400,7 @@
     restoringDraft = true;
     input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
     input.selectionStart = draft.start; input.selectionEnd = draft.end;
-    renderAtts(); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    renderAtts(); autosizeComposer();
     hidePop(); restoringDraft = false; persistDraft();
   }
   function loadDraftState() {
@@ -430,7 +430,7 @@
         restoringDraft = true;
         input.value = draft.text; attachments.push(...draft.attachments);
         input.selectionStart = draft.start; input.selectionEnd = draft.end;
-        renderAtts(); input.style.height = Math.min(input.scrollHeight, 160) + "px";
+        renderAtts(); autosizeComposer();
         restoringDraft = false;
       }
     } catch { restoringDraft = false; }
@@ -1917,7 +1917,7 @@
     if (!attachInvocation("skill", name)) return;
     if (!input.value.trim() && skill?.default_prompt) {
       setComposerText(String(skill.default_prompt).slice(0, 4096));
-      input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+      autosizeComposer();
     }
     closeSurface(); input.focus();
   }
@@ -2896,8 +2896,7 @@
           attachments.splice(i, 1);
           renderAtts();
           input.focus();
-          input.style.height = "auto";
-          input.style.height = Math.min(input.scrollHeight, 160) + "px";
+          autosizeComposer();
         };
         chip.appendChild(show);
       }
@@ -2926,8 +2925,7 @@
   function replacePopToken(value = "") {
     editComposer(popStart, popEnd, value);
     input.selectionStart = input.selectionEnd = popStart + value.length;
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    autosizeComposer();
     scheduleDraftSave();
   }
   function choosePop(i) {
@@ -2980,9 +2978,31 @@
     const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
     editComposer(0, removed, prefix);
     input.selectionStart = input.selectionEnd = caret;
-    input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    autosizeComposer();
     persistDraft(); input.focus();
   }
+  // ---- composer height ----
+  // The box grows with its text up to 160px. That needs a real layout: measured while the panel is
+  // hidden (another view in front, the editor collapsing it to zero width), the text wraps one
+  // character per line and the box came back 160px tall; measured under display:none it came back
+  // 0px. A turn that stops while you are elsewhere restarts the backend and restores the draft, so
+  // this happened exactly when DGC was not on screen. Measure only when laid out, and measure again
+  // whenever the box's width really changes or the panel becomes visible.
+  var composerSizedWidth = -1;   // var: callers above this line run before it at startup
+  function autosizeComposer() {
+    const width = input.clientWidth;
+    if (!input.isConnected || width < 40 || document.hidden) { composerSizedWidth = -1; return; }
+    composerSizedWidth = width;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => { if (input.clientWidth !== composerSizedWidth) autosizeComposer(); })
+      .observe(input.parentElement || input);
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) autosizeComposer(); });
+  window.addEventListener("focus", autosizeComposer);
+
   // ---- composer edits that Cmd/Ctrl+Z can take back ----
   // A textarea keeps its own undo history, which is what makes Cmd+Z (and Edit → Undo) work in
   // Claude's and Codex's composers. Assigning .value wipes that history, so undo did nothing here
@@ -3011,13 +3031,13 @@
     input.selectionStart = input.selectionEnd = start + text.length;
   }
   function setComposerText(text) { editComposer(0, input.value.length, String(text ?? "")); }
-  function clearComposer() { setComposerText(""); input.style.height = "auto"; }
+  function clearComposer() { setComposerText(""); autosizeComposer(); }
 
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     scheduleDraftSave();
     renderComposerControls();
-    input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    autosizeComposer();
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
     const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
