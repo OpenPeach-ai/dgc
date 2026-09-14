@@ -1387,6 +1387,48 @@ multi-turn coherence but costs context tokens, and only affects the
 chat-completions path (the Anthropic/Ollama paths are untouched).
 """.strip()),
 
+    ("Token usage", "tokens and requests counted on this machine, by model and day", """
+# Token usage
+
+DGC keeps a small local record of what every model request cost in tokens, so you can see which
+models you lean on and how much, without trusting a dashboard somewhere else. It covers every
+provider DGC talks to: a local Ollama or llama.cpp server, an OpenAI-compatible host, Anthropic,
+and so on.
+
+## Where to see it
+
+- **In the editor:** Settings → **Token Usage**. Pick a range (Today, 7 days, 30 days, This month
+  or All time) to see input, output and cached-input totals, the request count, a table by model
+  with each one's share, and a day-by-day strip for input and output.
+- **In the terminal:** `/usage` inside DGC, or `dgc usage` from the shell. Both take a range:
+  `dgc usage --range 30d`. Add `--json` for a machine-readable report.
+
+Days follow this computer's local time, and the report says which time zone it used.
+
+## What is counted
+
+One row is recorded for each model request that finished, with the numbers the provider itself
+reported: input tokens, output tokens and cached input tokens. Each row notes which route sent it:
+your conversation, a sub-agent, the fallback model, or context compaction. A sub-agent's requests
+are counted once, as its own.
+
+- **Unmetered requests.** A request the provider accepted but that ended without a usage report
+  (you cancelled it, the stream broke, or a stalled attempt was retried) is still counted as a
+  request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in
+  the totals, and the report says so when there are any.
+- **OpenAI-compatible endpoints.** DGC asks these to include usage in the stream. An endpoint that
+  rejects the request is asked again without it and is not asked again for the rest of the session.
+  Its requests then show as unmetered rather than as zero tokens.
+- **Not counted:** turns delegated to a subscription CLI (Claude Code, Codex and the others) run in
+  the vendor's own tool, so DGC never sees their token counts.
+
+## Privacy
+
+Everything stays on this machine, in `~/.dgc/usage.sqlite` (readable only by you). No prompt or
+reply text is stored, and an endpoint is recorded by host and port only, never its full address,
+path or any credential. Rows older than 400 days are removed automatically. Delete the file at any
+time to start over; DGC creates a new one.
+""".strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions
 
