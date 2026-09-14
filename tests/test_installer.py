@@ -379,9 +379,10 @@ class VersionedInstallLifecycle(unittest.TestCase):
         serve.stdin.close()
         serve.stdout.close()
         self.assertTrue((self.data / "locks" / "0.90.1" / str(serve.pid)).exists())
-        again = run_installer(self.env)             # same release: switch + retention only
+        again = run_dgc(self.launcher, ["update"], self.env)   # same release: retention only
         self.assertEqual(again.returncode, 0, output(again)[-3000:])
         self.assertIn("already installed", output(again))
+        self.assertIn("up to date", output(again))
         self.assertEqual(L.installed_versions(self.data), ["0.90.4", "0.90.3", "0.90.2"])
         self.assertFalse((self.data / "versions" / "0.90.1").exists())
 

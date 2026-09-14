@@ -229,6 +229,8 @@ def run_update(args: list[str] | None = None) -> int:
     env.pop("DGC_DIR", None)
     if action == "version":
         env["DGC_INSTALL_VERSION"] = str(requested)
+    launcher = location.bin_dir / "dgc"
+    before = os.path.realpath(launcher) if os.path.lexists(launcher) else None
     with tempfile.TemporaryDirectory(prefix="dgc-update-") as scratch:
         script = os.path.join(scratch, "install.sh")
         try:
@@ -247,12 +249,21 @@ def run_update(args: list[str] | None = None) -> int:
         except OSError as exc:
             c.print(f"[bold red]update failed[/bold red] — could not run bash: {escape(str(exc))}", highlight=False)
             return EXIT_FAILED
+    after = os.path.realpath(launcher) if os.path.lexists(launcher) else None
     if code == 0:
-        c.print("\n[bold green]updated[/bold green] — start [bold]dgc[/bold] again.")
+        if after == before:
+            c.print("\n[bold green]DGC is up to date[/bold green] — nothing to restart.")
+        else:
+            c.print("\n[bold green]updated[/bold green] — start [bold]dgc[/bold] again.")
         return EXIT_OK
     if code == EXIT_LOCKED:
         c.print("\n[bold red]another DGC update is running[/bold red] — try again when it finishes.")
         return EXIT_LOCKED
-    c.print(f"\n[bold red]update failed[/bold red] (installer exit {code}). "
-            "The previous version is still active.")
+    if after != before:
+        # The switch happened and a later step (the editor extension) failed.
+        c.print(f"\n[bold red]update incomplete[/bold red] (installer exit {code}): the new DGC is "
+                "installed, but a step after the switch failed — see above.")
+    else:
+        c.print(f"\n[bold red]update failed[/bold red] (installer exit {code}). "
+                "The previous version is still active.")
     return EXIT_FAILED

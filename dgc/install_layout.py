@@ -286,7 +286,10 @@ def _lock_is_live(lock: Path, vdir: Path) -> bool:
     if command is None:
         return True              # cannot tell: keeping a version is the safe mistake
     # A recycled pid belongs to some other program; only a process started from this version's
-    # venv counts. Over-retention is the only cost of a wrong "live".
+    # venv, or at least one running dgc, counts. The looser `dgc` match is for platforms where the
+    # interpreter re-execs itself and the command line no longer shows the venv path (macOS
+    # framework builds); it still names the dgc script. Over-retention is the only cost of a
+    # wrong "live".
     try:
         recorded = json.loads(lock.read_text(encoding="utf-8")).get("prefix", "")
     except (OSError, ValueError, AttributeError):
@@ -294,7 +297,9 @@ def _lock_is_live(lock: Path, vdir: Path) -> bool:
     needles = {str(vdir), os.path.realpath(str(vdir))}
     if recorded:
         needles.add(str(Path(recorded).parent))
-    return any(needle and needle in command for needle in needles)
+    if any(needle and needle in command for needle in needles):
+        return True
+    return re.search(r"(^|[/\\\s])dgc(\s|$)", command) is not None
 
 
 def live_pids(data_dir: Path, version: str) -> list[int]:
