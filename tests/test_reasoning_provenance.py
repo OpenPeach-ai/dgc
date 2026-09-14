@@ -110,9 +110,12 @@ class NotFound:
 
 
 class FakeProvider:
-    """Routes POSTs to the fixture's scripted responses by URL substring, in order."""
+    """Routes POSTs to the fixture's scripted responses by URL substring, in order. Only the
+    fixture's own endpoints may consume a script: ``requests`` is patched process-wide, and a stray
+    request from another test's background thread must never take this fixture's response."""
 
-    def __init__(self, entries: list, clock: FakeClock):
+    def __init__(self, entries: list, clock: FakeClock, endpoints=()):
+        self.endpoints = tuple(str(endpoint).rstrip("/") for endpoint in endpoints if endpoint)
         self.entries = [dict(entry) for entry in entries]
         self.used = [False] * len(self.entries)
         self.clock = clock
@@ -120,6 +123,8 @@ class FakeProvider:
         self.lock = threading.Lock()
 
     def post(self, url, **kwargs):
+        if self.endpoints and not str(url).startswith(self.endpoints):
+            return NotFound()
         with self.lock:
             self.captured.append({"url": url, "json": copy.deepcopy(kwargs.get("json")),
                                   "headers": dict(kwargs.get("headers") or {})})
@@ -129,7 +134,9 @@ class FakeProvider:
                 if entry["match"] in url and (entry.get("repeat") or not self.used[index]):
                     self.used[index] = True
                     return FakeResponse(entry, self.clock)
-        raise AssertionError(f"no scripted response for {url}")
+        tail = [(m.get("role"), str(m.get("content"))[:160]) for m in
+                (self.captured[-1]["json"] or {}).get("messages", [])[-3:]] if self.captured else []
+        raise AssertionError(f"no scripted response for {url} (request {len(self.captured)}; last messages {tail})")
 
     def get(self, url, **kwargs):
         return NotFound()
@@ -180,7 +187,9 @@ class Harness:
         self.pending = PendingRequests()
         self.ui = HeadlessUI(self.emitter, self.pending, approval_timeout_s=5)
         self.clock = FakeClock()
-        self.provider = FakeProvider(list(fixture["requests"]) + list(extra_entries), self.clock)
+        endpoints = [fixture["base_url"]] + [fixture.get("config", {}).get(key, "")
+                                             for key in ("fallback_base_url", "subagent_base_url")]
+        self.provider = FakeProvider(list(fixture["requests"]) + list(extra_entries), self.clock, endpoints)
         self.patches = [patch("dgc.llm.requests.post", self.provider.post),
                         patch("dgc.llm.requests.get", self.provider.get),
                         patch("dgc.reasoning.now", self.clock)]
