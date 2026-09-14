@@ -695,6 +695,38 @@ test("a child that never launched reports launch_failed, not a backend death", a
 
 
 // ---- 0.40 thinking ---------------------------------------------------------------------------------
+// v14 thinking provenance: the generated validator every backend frame passes through requires a block
+// and a source on thinking_delta, closes the enums, and rejects undeclared fields.
+test("v14 thinking frames: block and source required, enums closed, undeclared fields rejected", async () => {
+  const protocolBundle = join(scratch, "protocol-thinking.cjs");
+  await build({ entryPoints: [join(here, "../src/protocol.generated.ts")], bundle: true, format: "cjs",
+    platform: "node", target: "node18", outfile: protocolBundle, logLevel: "silent" });
+  const { dgcEventError } = createRequire(import.meta.url)(protocolBundle);
+  const delta = { type: "thinking_delta", seq: 1, text: "The first run fails on the boundary", block: "t3:think1",
+    source: "summarized", provider: "anthropic" };
+  const examples = [
+    delta,
+    { type: "thinking_end", seq: 2, block: "t3:think1", source: "summarized", provider: "anthropic",
+      placement: "inline", seconds: 2.1 },
+    { type: "thinking_delta", seq: 3, text: "Okay, the user wants…", block: "t4:think1", source: "raw" },
+    { type: "thinking_end", seq: 4, block: "t4:think1", source: "raw", placement: "collapsed", seconds: 14.2 },
+    { type: "thinking_end", seq: 5, block: "t5:think2", source: "withheld", provider: "anthropic",
+      placement: "collapsed", seconds: 6.0 },
+    { type: "thinking_delta", seq: 6, text: "Look at gate.py…", block: "t6:think3", source: "raw",
+      agent: "sub-1a2b3c4d5e6f" },
+    { type: "thinking_end", seq: 7, block: "t6:think3", source: "raw", agent: "sub-1a2b3c4d5e6f",
+      placement: "collapsed", seconds: 8.4 },
+  ];
+  for (const frame of examples) assert.equal(dgcEventError(frame), undefined, JSON.stringify(frame));
+  const without = (key) => Object.fromEntries(Object.entries(delta).filter(([name]) => name !== key));
+  const rejected = [
+    without("block"), without("source"),
+    { ...delta, source: "summary" }, { ...delta, provider: "ollama" }, { ...delta, agent: 5 },
+    { ...delta, signature: "EqQBCkYIARgC" },
+    { type: "thinking_end", seq: 8, block: "t3:think1", source: "raw" },
+  ];
+  for (const frame of rejected) assert.equal(typeof dgcEventError(frame), "string", JSON.stringify(frame));
+});
 // ---- end 0.40 thinking -----------------------------------------------------------------------------
 
 

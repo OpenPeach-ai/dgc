@@ -1033,7 +1033,8 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.ok(doc.querySelector(".thinking"), "thinking indicator did not render");
 
   // reasoning stream → collapsible disclosure
-  send({ type: "event", event: { type: "thinking_delta", text: "Reading the token module first." } });
+  send({ type: "event", event: { type: "thinking_delta", text: "Reading the token module first.",
+    block: "t1:think1", source: "raw" } });
   assert.ok(doc.querySelector(".disclosure"), "thinking disclosure did not render");
   assert.match(doc.querySelector(".reasoning").textContent, /token module/);
 
@@ -2761,11 +2762,13 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
 
   send({ type: "event", event: { type: "turn_start" } });
   assert.equal(doc.getElementById("announcer").textContent, "DGC is working");
-  send({ type: "event", event: { type: "thinking_delta", text: "inspect" } });
+  send({ type: "event", event: { type: "thinking_delta", text: "inspect", block: "t1:think1",
+    source: "summarized", provider: "anthropic" } });
   const reasoning = doc.querySelector(".disclosure");
   assert.equal(reasoning.tagName, "BUTTON");
   reasoning.click();
   assert.equal(reasoning.getAttribute("aria-expanded"), "true");
+  assert.match(reasoning.textContent, /summarized by Anthropic/, "the disclosure names where the thinking came from");
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "a.ts", call_id: "a11y" } });
   const toolToggle = doc.querySelector(".tool-toggle");
   assert.equal(toolToggle.querySelector(".tool-status").textContent, "running");
