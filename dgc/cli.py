@@ -184,7 +184,8 @@ class UI:
     def turn_activity(self, state: str, label: str, detail: str = "") -> None:
         """The REPL's spinner already names its own phase; the loop's activity adds nothing here."""
 
-    def model_wait(self, label, detail: str = "", *, since=None) -> None:
+    def model_wait(self, label, detail: str = "", *, since=None, restore: bool = True,
+                   origin=None) -> None:
         """A silent model request renames a live spinner ("No response from the model…"). Tokens
         resuming stop the spinner themselves, so clearing needs nothing here."""
         if label and self._work_stop is not None and sys.stdout.isatty():

@@ -234,6 +234,7 @@ class AgentSession:
         self._cur_tool: str | None = None
         self._backend_activity: tuple[str, str, str] | None = None   # (state, label, detail)
         self._model_wait: tuple[str, str, float] | None = None       # (label, detail, silent since)
+        self._model_waits: dict = {}      # origin (None = main agent, else a sub-agent) -> notice
         self._think_t0: float | None = None
         self._tool_count = 0
         self._turn = threading.Event()     # set while this session's turn runs
@@ -330,6 +331,7 @@ class TUI:
     _cur_tool = _active_prop("_cur_tool")
     _backend_activity = _active_prop("_backend_activity")
     _model_wait = _active_prop("_model_wait")
+    _model_waits = _active_prop("_model_waits")
     _think_t0 = _active_prop("_think_t0")
     _tool_count = _active_prop("_tool_count")
     _turn = _active_prop("_turn")
@@ -2636,17 +2638,34 @@ class TUI:
         self._backend_activity = (str(state), str(label)[:80], str(detail or "")[:120])
         self._invalidate()
 
-    def model_wait(self, label, detail: str = "", *, since=None) -> None:
-        """The stall watcher: a model request has been silent (label) or is producing again (None)."""
+    def model_wait(self, label, detail: str = "", *, since=None, restore: bool = True,
+                   origin=None) -> None:
+        """The stall watcher: a model request has been silent (label) or is producing again (None).
+
+        Each ``origin`` (None = the main agent, else one sub-agent) holds its own notice, so when
+        one of several parallel children resumes, another child's outstanding notice stays on the
+        status line. Text, reasoning or a tool call hides the notice (they are the newer truth) and
+        a later clear does not bring it back. ``restore`` has no meaning here: the status line
+        always falls back to what the session is doing.
+        """
+        waits = self._model_waits
+        if waits is None:
+            waits = self._model_waits = {}
         if label:
             try:
                 started = float(since) if since is not None else time.monotonic()
             except (TypeError, ValueError):
                 started = time.monotonic()
-            self._model_wait = (style_mod.terminal_safe_text(str(label))[:80],
-                                style_mod.terminal_safe_text(str(detail or ""))[:120], started)
+            entry = (style_mod.terminal_safe_text(str(label))[:80],
+                     style_mod.terminal_safe_text(str(detail or ""))[:120], started)
+            waits.pop(origin, None)
+            waits[origin] = entry
+            self._model_wait = entry
         else:
-            self._model_wait = None
+            waits.pop(origin, None)
+            if self._model_wait is not None:
+                remaining = list(waits.values())
+                self._model_wait = remaining[-1] if remaining else None
         self._invalidate()
 
     def callback_route(self):
@@ -5159,7 +5178,7 @@ class TUI:
         self._cancel.clear()
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
-        self._model_wait = None
+        self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
         def work():
             self._tls.session = sess
@@ -5179,7 +5198,7 @@ class TUI:
                 self.error(redact_text(str(exc), secret_values(self.config)))
             finally:
                 self._settle_running_tools()
-                self._model_wait = None
+                self._model_wait, self._model_waits = None, {}
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 sess._worker_thread = None
@@ -6197,7 +6216,7 @@ class TUI:
         self._follow = True
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
-        self._model_wait = None
+        self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
 
         def work():
@@ -6236,7 +6255,7 @@ class TUI:
                                 break
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
-                self._model_wait = None
+                self._model_wait, self._model_waits = None, {}
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
@@ -6336,7 +6355,7 @@ class TUI:
         self._follow = True
         self._turn.set()
         self._backend_activity = None       # a new turn never inherits the last one's gate label
-        self._model_wait = None
+        self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
 
         def work() -> None:
@@ -6354,7 +6373,7 @@ class TUI:
             except Exception as exc:
                 self.error(f"{type(exc).__name__}: {exc}")
             finally:
-                self._model_wait = None
+                self._model_wait, self._model_waits = None, {}
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 elapsed = time.monotonic() - self._turn_t0

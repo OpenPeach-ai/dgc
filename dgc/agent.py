@@ -221,6 +221,23 @@ def _result_stall(result) -> dict | None:
     return stall if isinstance(stall, dict) and stall.get("progressed") else None
 
 
+def _call_model_wait(hook, label, detail="", **options):
+    """Call a UI's optional ``model_wait`` hook with only the keyword options it declares.
+
+    ``since`` is part of the original hook; ``restore`` and ``origin`` were added so parallel
+    sub-agents keep separate notices and a failed call does not bring back an old activity. A UI
+    written against the original signature keeps working.
+    """
+    import inspect
+    try:
+        params = inspect.signature(hook).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        options = {key: value for key, value in options.items() if key in params}
+    return hook(label, detail, **options)
+
+
 class _DeadlineCancel:
     """Cancellation view that adds a monotonic deadline without mutating the user's Stop event."""
     def __init__(self, parent: threading.Event, deadline: float):
@@ -654,6 +671,9 @@ class _SubUI:
         callback = getattr(self._parent, name, None)
         if not callback:
             return None
+        return self._routed(callback, *args, **kwargs)
+
+    def _routed(self, callback, *args, **kwargs):
         tls = getattr(self._parent, "_tls", None)
         sentinel = object()
         previous = getattr(tls, "session", sentinel) if tls is not None else sentinel
@@ -707,11 +727,15 @@ class _SubUI:
     def turn_activity(self, state, label, detail=""):
         self._emit("turn_activity", state, label, detail)
 
-    def model_wait(self, label, detail="", *, since=None):
+    def model_wait(self, label, detail="", *, since=None, restore=True, origin=None):
         # Transient and already late by definition: bypass the parallel-child buffer, routed to the
-        # parent's originating session exactly like every direct call.
-        if callable(getattr(self._parent, "model_wait", None)):
-            return self._direct("model_wait", label, detail, since=since)
+        # parent's originating session exactly like every direct call. Each child is its own origin
+        # (a nested child's origin passes through), so parallel children that stall together keep
+        # separate notices on the one parent UI: one child resuming never hides another's.
+        hook = getattr(self._parent, "model_wait", None)
+        if callable(hook):
+            return self._routed(_call_model_wait, hook, label, detail, since=since,
+                                restore=restore, origin=origin or self._call_prefix)
         if label:
             return self._direct("turn_activity", "waiting", label, detail)
         return None
@@ -1642,6 +1666,7 @@ class Agent(GoalLifecycle):
             watch_client.stall_listener = self._on_model_wait
             watch_client.stall_route = route_factory() if callable(route_factory) else None
         self._model_wait_shown = False
+        result = None
         try:
             try:
                 result = self.client.chat(safe_messages, tools=tools, reasoning_effort=effort,
@@ -1661,7 +1686,14 @@ class Agent(GoalLifecycle):
                 watch_client.stall_listener, watch_client.stall_route = old_listener, old_route
             if getattr(self, "_model_wait_shown", False):
                 self._model_wait_shown = False      # never leave a stale "no response" on screen
-                self._show_model_wait(None)
+                # Bring back the activity the notice replaced only when the call really produced a
+                # usable answer. After an error (a ModelStallError on its way to the fallback or
+                # _fail_turn), a cancel, or a mid-stream stall, restoring would announce a stale
+                # "Waiting for the model" just before the error / continuation says what happened.
+                ended_normally = (result is not None
+                                  and getattr(result, "finish_reason", "") != "cancelled"
+                                  and not getattr(result, "stall", None))
+                self._show_model_wait(None, restore=ended_normally)
         unsafe_provider_state = (
             (result.provider_items
              and provider_continuation_has_secret(result.provider_items, secrets))
@@ -2792,10 +2824,13 @@ class Agent(GoalLifecycle):
             announce(state, label, detail)
 
     # ---- model wait notices (the stall watcher) --------------------------------------------------
-    def _show_model_wait(self, label, detail: str = "", since=None) -> None:
+    def _show_model_wait(self, label, detail: str = "", since=None, *, restore: bool = True) -> None:
+        """Show (label) or clear (None) this agent's model-wait notice. ``restore=False`` clears it
+        without bringing back the activity it replaced: the call ended in an error, a cancel or a
+        stall, and whatever the loop says next is the truth."""
         hook = getattr(self.ui, "model_wait", None)
         if callable(hook):
-            hook(label, detail, since=since)
+            _call_model_wait(hook, label, detail, since=since, restore=restore)
         elif label:
             self._activity("waiting", label, detail)
 

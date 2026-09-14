@@ -8,12 +8,17 @@ documents that contract and holds the small formatters both implementations shar
 Two optional hooks sit outside the Protocol body (so every existing UI stays valid) and are looked
 up with ``getattr``:
 
-``model_wait(label, detail="", *, since=None)``
+``model_wait(label, detail="", *, since=None, restore=True, origin=None)``
     The stall watcher (dgc/model_watch.py) saw a model request go silent. ``label`` names it
     ("No response from the model", "Loading the model", "The model stopped streaming", "Retrying
     the model request"), ``since`` is the ``time.monotonic()`` when the silence began, and
-    ``label=None`` means output resumed. It is called from the watcher's own thread. Without the
-    hook the Agent falls back to ``turn_activity("waiting", label, detail)``.
+    ``label=None`` means output resumed or the call ended. ``restore=False`` on a clear means the
+    call ended in an error, a cancel or a stall, so the activity the notice replaced should not
+    come back. ``origin`` is None for the main agent and a per-child token for a sub-agent, so
+    parallel children keep separate notices. It is called from the watcher's own thread. The
+    Agent passes only the keyword options a hook declares, so the original three-argument form
+    still works. Without the hook the Agent falls back to
+    ``turn_activity("waiting", label, detail)``.
 
 ``callback_route()``
     Called on the agent's worker thread; returns ``run(fn)`` that invokes ``fn`` as if on that
