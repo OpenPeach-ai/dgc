@@ -19,7 +19,7 @@ from email.utils import parsedate_to_datetime
 import requests
 
 from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
-                          bounded_seconds, format_seconds, is_local_endpoint, ollama_model_listed,
+                          bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
                           resolve_first_token_timeout, safe_endpoint)
 
 
@@ -1425,10 +1425,10 @@ class LLMClient:
                 expiry = 0
         return not expiry
 
-    def _mark_rejected(self, feature: str) -> None:
+    def _mark_rejected(self, feature: str, ttl_s: float | None = None) -> None:
         with self._capability_lock:
             self._capability_rejections[self._capability_key(feature)] = (
-                time.monotonic() + self.capability_cache_ttl_s)
+                time.monotonic() + (self.capability_cache_ttl_s if ttl_s is None else ttl_s))
 
     def invalidate_capabilities(self) -> None:
         """Forget negotiated rejections for this endpoint+model (e.g. after a server upgrade)."""
@@ -1646,18 +1646,27 @@ class LLMClient:
 
     def _note_non_streaming(self, response) -> None:
         """An endpoint that answered stream:true with one JSON body sends nothing until it has
-        generated everything: later requests wait on read_timeout, not the first-token window."""
+        generated everything: later requests wait on read_timeout, not the first-token window.
+
+        Unlike a negotiated feature rejection this never ages out on capability_cache_ttl_s: an
+        endpoint does not start streaming on its own, and forgetting would put its next long
+        generation back under the first-token deadline -- exactly the false stall this prevents.
+        It lasts for the process, refreshed by every JSON body; invalidate_capabilities() clears it.
+        """
         ctype = str((getattr(response, "headers", {}) or {}).get("Content-Type", "")).lower()
         if "application/json" in ctype and "event-stream" not in ctype and "ndjson" not in ctype:
-            self._mark_rejected("streaming")
+            self._mark_rejected("streaming", ttl_s=math.inf)
 
     def _ollama_load_probe(self):
         """A read-only /api/ps probe: True when the model is loaded, False while it is not, None
         when this endpoint cannot say (never an error)."""
         if not (self.api_mode == "ollama" or self.family == "ollama") or not self.model:
             return None
-        if not is_local_endpoint(self.base_url, self.family):
-            return None                 # a hosted Ollama loads models out of sight; nothing to show
+        if is_hosted_ollama(self.base_url):
+            # Ollama's own cloud loads models out of sight; its /api/ps (if any) describes no
+            # hardware this request waits on, and an empty list would pause the clock for nothing.
+            # Every self-hosted Ollama -- local, LAN or on a public address -- is probed.
+            return None
         url = f"{self._ollama_root}/api/ps"
         headers = self._headers()
         model = self.model
@@ -2321,6 +2330,7 @@ class LLMClient:
                         f"{self.base_url}/messages", headers=self._anthropic_headers(),
                         json=payload, stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as exc:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 if watch.stall is not None:
@@ -2337,6 +2347,7 @@ class LLMClient:
                     continue
                 raise LLMError(f"cannot connect to Anthropic Messages: {exc}") from exc
             except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 stalls += 1
@@ -2811,6 +2822,7 @@ class LLMClient:
                     r = requests.post(self._ollama_url, headers=self._headers(), json=payload,
                                       stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as exc:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 if watch.stall is not None:
@@ -2829,6 +2841,7 @@ class LLMClient:
                     f"cannot connect to {self._ollama_root} — is Ollama running? "
                     f"(/connect <url> to change it)\n{exc}") from exc
             except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 stalls += 1
@@ -2980,6 +2993,7 @@ class LLMClient:
                     r = requests.post(self._url, headers=self._headers(), json=payload,
                                       stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as e:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 if watch.stall is not None:
@@ -3002,6 +3016,7 @@ class LLMClient:
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
                     f"(/connect <url> to change it)\n{e}") from e
             except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 # The socket read timeout is the watcher's backstop; silence is silence either way.
@@ -3416,6 +3431,7 @@ class LLMClient:
                                              json=payload, stream=True,
                                              timeout=self._post_timeout(watch))
             except requests.ConnectionError as e:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 if watch.stall is not None:
@@ -3431,6 +3447,7 @@ class LLMClient:
                     continue
                 raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
             except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 stalls += 1

@@ -176,9 +176,18 @@ def is_local_endpoint(base_url: str, family: str = "") -> bool:
                         or (address.version == 4 and address in _CGNAT))
         if host == "localhost" or host.endswith(_LOCAL_SUFFIXES) or "." not in host:
             return True
-        if host == "ollama.com" or host.endswith(".ollama.com"):
+        if is_hosted_ollama(base_url):
             return False            # Ollama's cloud shares the family, not the hardware
     return str(family or "").lower() in _LOCAL_FAMILIES
+
+
+def is_hosted_ollama(base_url: str) -> bool:
+    """Ollama's own cloud service (ollama.com), as opposed to an Ollama someone runs themselves."""
+    try:
+        host = (urlsplit(str(base_url or "")).hostname or "").strip().lower().rstrip(".")
+    except ValueError:
+        return False
+    return host == "ollama.com" or host.endswith(".ollama.com")
 
 
 def resolve_first_token_timeout(value, base_url: str, family: str = "") -> float:
