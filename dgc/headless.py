@@ -64,7 +64,9 @@ _BUSY_MUTATIONS = {
     # `set_config` is not here: a setting that only shapes the NEXT request is safe to change while
     # a turn runs, and refusing all of them meant a user could not raise the context window without
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
-    "set_model", "set_think", "clear_session", "resume_session", "clear_todos",
+    # `clear_todos` is not here either: Clear empties the list at once, even mid-turn, and the
+    # worker that owns the session saves it as it retires.
+    "set_model", "set_think", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
@@ -439,6 +441,10 @@ def _history_args(raw) -> dict:
 
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
+
+    # The editor routes a typed `/todo clear` to `clear_todos` (and has Clear on its Tasks row), so
+    # text that tells the user how to drop a checklist may name the command here too.
+    todo_clear_hint = "/todo clear"
 
     def __init__(self, emitter: Emitter, pending: PendingRequests,
                  approval_timeout_s: float = 300.0):
@@ -1036,6 +1042,9 @@ class Backend:
                     idle = not self._queue
                     if idle and self._worker is current:
                         self._worker = None
+                    # A Clear pressed while this turn ran emptied the list but could not save it
+                    # (this worker held the session). Save it before turn_end says the turn is over.
+                    self._flush_unsaved_todo_clear()
                     # Release an idle worker before publishing its terminal event. Goal pause,
                     # delete, model changes and workspace updates may arrive immediately on that
                     # acknowledgement. Serialize publication with enqueue so a newer turn_start
@@ -1058,6 +1067,7 @@ class Backend:
             with self._turn_state_lock():
                 if self._worker is current:
                     self._worker = None
+                    self._flush_unsaved_todo_clear()
 
     def _maybe_auto_resume_goal(self, failed: bool, cancelled: bool) -> bool:
         """Keep a standing goal running after a turn stops on its own.
@@ -1100,11 +1110,41 @@ class Backend:
             if self._queue:                # real work is already waiting; it supersedes a retry
                 return False
             self._goal_auto_resumes = used + 1
-            self._queue.append((auto_resume_prompt(reason), None, None, "resume"))
+            self._queue.append((auto_resume_prompt(reason, checklist_cleared=self._checklist_cleared()),
+                                None, None, "resume"))
         self.ui.info(
             f"the goal stopped — continuing it automatically "
             f"({used + 1} of {AUTO_RESUME_MAX})")
         return True
+
+    def _checklist_cleared(self) -> bool:
+        """Did the user clear the checklist recently enough that a resume must not cite it?"""
+        in_force = getattr(getattr(self, "agent", None), "todo_clear_in_force", None)
+        return bool(callable(in_force) and in_force() is True)
+
+    def _flush_unsaved_todo_clear(self) -> None:
+        """Save a checklist clear that landed while a worker owned the session.
+
+        Called with the turn-state lock held, as the worker retires: a clear that arrives after the
+        turn's own final save is still written, and no new turn can start between the two. Lock
+        order is the turn-state lock, then the agent's persist locks, the same order start_goal
+        uses (lock, then set_goal, which saves).
+        """
+        agent = getattr(self, "agent", None)
+        if getattr(agent, "todo_clear_unsaved", False) is not True:
+            return
+        persist = getattr(agent, "_persist", None)
+        if not callable(persist):
+            return
+        try:
+            saved = persist()
+        except Exception as exc:                  # never let a save take the worker down with it
+            saved, detail = False, f"{exc.__class__.__name__}: {exc}"
+        else:
+            detail = getattr(agent, "_last_persist_error", "") or ""
+        if not saved:
+            self.em.emit("error", message=detail
+                         or "todo list cleared, but the session could not be saved")
 
     def _start_foreground_worker(self, operation, *, label: str = "operation") -> bool:
         """Reserve a non-prompt foreground slot while stdin decisions/cancellation stay live."""
@@ -1124,6 +1164,7 @@ class Backend:
                     with self._turn_state_lock():
                         if self._foreground_worker is current:
                             self._foreground_worker = None
+                        self._flush_unsaved_todo_clear()
                 # A terminal event means the next foreground command is admissible. Emit it only
                 # after releasing the slot, otherwise a fast controller can receive completion and
                 # have its immediately following prompt rejected against a worker that is unwinding.
@@ -2493,9 +2534,9 @@ class Backend:
                              **_request_fields(request_id))
                 return
             self._emit_goal(request_id)
-            from .goals import RESUME_PROMPT
-            state, count = self._start_turn(RESUME_PROMPT, delivery="queue",
-                                            request_id=request_id, kind="resume")
+            from .goals import resume_prompt
+            state, count = self._start_turn(resume_prompt(checklist_cleared=self._checklist_cleared()),
+                                            delivery="queue", request_id=request_id, kind="resume")
             if state == "full":
                 self.em.emit("command_rejected", command=t, reason="queue_full",
                              message="the turn queue is full", **_request_fields(request_id))
@@ -2593,7 +2634,15 @@ class Backend:
             # empty list; the `todos` event is the acknowledgement. The clear is saved with the
             # session; when that save fails the list is still empty here, so say so rather than
             # reject a command that did take effect.
-            if not self.agent.clear_todos():
+            with self._turn_state_lock():
+                if self._busy():
+                    # A running turn or foreground operation owns the session lease, so the save
+                    # cannot happen here. Empty the list now (every frontend hears `todos []`) and
+                    # let that worker save it as it retires (_flush_unsaved_todo_clear).
+                    self.agent.clear_todos(persist=False)
+                    return
+                saved = self.agent.clear_todos()
+            if not saved:
                 self.em.emit("error", message=getattr(self.agent, "_last_persist_error", "")
                              or "todo list cleared, but the session could not be saved",
                              **_request_fields(request_id))

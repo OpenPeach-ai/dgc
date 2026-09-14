@@ -203,9 +203,21 @@ CYCLE_MARKER = "Continue the active goal from the current session state."
 AUTO_RESUME_MARKER = "The previous attempt at this goal stopped early:"
 
 
-def auto_resume_prompt(reason: str) -> str:
-    """The instruction that restarts a standing goal after a turn stopped on its own."""
+def auto_resume_prompt(reason: str, *, checklist_cleared: bool = False) -> str:
+    """The instruction that restarts a standing goal after a turn stopped on its own.
+
+    ``checklist_cleared``: the user cleared the checklist recently, so the prompt must not send the
+    model back to "the todos" (it would rebuild the list the user just dropped).
+    """
     detail = " ".join(str(reason or "").split())[:600] or "the turn stopped before finishing"
+    if checklist_cleared:
+        return (
+            f"{AUTO_RESUME_MARKER} {detail}\n\n"
+            "Do not repeat whatever stopped it. Check the most recent work, then take the first "
+            "unfinished step a DIFFERENT way -- a narrower step, a different tool, or read "
+            "something you have not read yet. If you cannot make progress, say what is blocking "
+            "you and move on, or mark the goal blocked and say why. Never reissue the call that "
+            "just failed with the same arguments.")
     return (
         f"{AUTO_RESUME_MARKER} {detail}\n\n"
         "Do not repeat whatever stopped it. Check the todos and the most recent work, then take "
@@ -219,6 +231,16 @@ RESUME_PROMPT = (
     "Continue the standing goal from where the previous session stopped. Check the todos and the "
     "most recent work before acting, and pick up the first unfinished step rather than starting "
     "the objective again.")
+# Same opening words as RESUME_PROMPT: the transcript recognises a resume by its first 60 characters.
+_RESUME_PROMPT_CLEARED = (
+    "Continue the standing goal from where the previous session stopped. Check the most recent "
+    "work before acting, and pick up the first unfinished step rather than starting the objective "
+    "again.")
+
+
+def resume_prompt(*, checklist_cleared: bool = False) -> str:
+    """The instruction a person's "resume the goal" sends; see auto_resume_prompt for the flag."""
+    return _RESUME_PROMPT_CLEARED if checklist_cleared else RESUME_PROMPT
 
 
 def review_markdown(snapshot: dict) -> str:
@@ -455,7 +477,7 @@ class GoalLifecycle:
         """Hold a "completed" report against the checklist it claims to have finished.
 
         Every open step blocked: the goal ends *blocked* naming those steps, so the user sees the
-        real cause and can resume or `/todo clear`. Some step still pending or in progress: the
+        real cause and can resume or clear the checklist. Some step still pending or in progress: the
         report is refused and the model is told which steps refused it — dropping it silently
         left the stall guard to end the goal with a reason about tool progress that was not the
         cause.
@@ -468,8 +490,12 @@ class GoalLifecycle:
             return "; ".join(str(item.get("content", ""))[:80] for item in items[:8])
 
         if all(item.get("status") == "blocked" for item in open_items):
+            # Name the way THIS frontend drops a checklist; a surface with no slash line and no
+            # Clear control (ACP, `dgc -p`) is told in plain words.
+            hint = self.todo_clear_hint() if callable(getattr(self, "todo_clear_hint", None)) else ""
             reason = ("The goal cannot finish: steps the model marked blocked: " + names(open_items)
-                      + ". Resolve them and resume the goal, or /todo clear to drop them.")
+                      + ". Resolve them and resume the goal, or "
+                      + (f"{hint} to drop them." if hint else "clear the checklist to drop them."))
             self.ui.info(reason)
             return {**report, "status": "blocked", "summary": reason}
         refusing = [item for item in open_items if item.get("status") != "blocked"]

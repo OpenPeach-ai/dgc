@@ -603,6 +603,16 @@ class AgentContext:
     # Process-local tool handles (background jobs and retained command output) must not be readable
     # by another headless/editor session merely because it guessed a short handle such as ``out1``.
     tool_owner: str = field(default_factory=lambda: uuid.uuid4().hex)
+    # The editor's Clear can land on the dispatcher thread while the turn thread's `todo` tool is
+    # replacing the list. Both hold this while they change the list and announce it, so the list,
+    # the pushed event and the tool's own result always describe the same state.
+    todo_lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+def _todo_lock(ctx):
+    """The checklist lock of a tool context; a bare fixture context without one gets no lock."""
+    from contextlib import nullcontext
+    return getattr(ctx, "todo_lock", None) or nullcontext()
 
 
 @dataclass(frozen=True)
@@ -847,18 +857,81 @@ class Agent(GoalLifecycle):
         (the model said why), so they neither draw reminders nor count as unfinished work."""
         return [t for t in self.ctx.todos if t.get("status") in ("pending", "in_progress")]
 
-    def clear_todos(self) -> bool:
+    # How many top-level turns a user's clear stays in force: the turn it landed in (or the next
+    # one, when it landed while idle) plus the one after that.
+    _TODO_CLEAR_TURNS = 2
+    TODO_CLEARED_NOTE = (
+        "The user cleared the session checklist. Do not recreate it with the `todo` tool unless "
+        "the user asks for a checklist again or genuinely new multi-step work starts.")
+
+    def clear_todos(self, *, persist: bool = True) -> bool:
         """Drop the session checklist on the user's request (/todo clear, the editor's Clear) and
         tell the frontend the list is empty. Clears in place: the context list is canonical.
 
         The clear is saved like a rename, so a resumed session cannot bring the dropped list
-        back. Returns the save result; True when there is nothing saved to update yet."""
-        self.ctx.todos.clear()
-        if callable(self.ctx.on_todo):
-            self.ctx.on_todo(self.ctx.todos)
+        back. Returns the save result; True when there is nothing saved to update yet.
+
+        ``persist=False`` is the editor's mid-turn clear: the running turn's thread owns the
+        session lease, so the list is emptied now and ``todo_clear_unsaved`` asks the backend to
+        save it when that worker retires. Emptying the list mid-turn also removes the "# Approved
+        plan" block on the next system-prompt refresh (it only exists while the checklist has open
+        items). That is the user's explicit action, so it is accepted rather than worked around.
+
+        The model is told once, softly, that the user cleared it; nothing refuses a later `todo`
+        call (a refused call can trip the loop guard and fail the turn). The dropped item text is
+        not kept anywhere."""
+        with _todo_lock(self.ctx):
+            dropped = bool(self.ctx.todos)
+            self.ctx.todos.clear()
+            if dropped:
+                self._todo_clear_turns = 0
+                self._todo_clear_note_pending = True
+            # Always announce, even an already-empty list: a frontend showing a stale list hides it.
+            if callable(self.ctx.on_todo):
+                self.ctx.on_todo(self.ctx.todos)
+        if not persist:
+            self.todo_clear_unsaved = True
+            return True
         if self.session_file and self.messages:
             return self._persist()
         return True
+
+    def _reset_todo_clear(self) -> None:
+        """A clear belongs to the session it was made in: a new or reopened session starts clean."""
+        self._todo_clear_turns: int | None = None
+        self._todo_clear_note_pending = False
+        self._todo_clear_note_in_prompt = False
+        self.todo_clear_unsaved = False
+
+    def todo_clear_in_force(self) -> bool:
+        """True from a user's clear through the end of the next top-level turn."""
+        return getattr(self, "_todo_clear_turns", None) is not None
+
+    def _advance_todo_clear(self) -> None:
+        """Called as each top-level turn starts: count the clear down and lift it when spent."""
+        turns = getattr(self, "_todo_clear_turns", None)
+        if turns is None:
+            return
+        turns += 1
+        if turns >= self._TODO_CLEAR_TURNS:
+            self._todo_clear_turns = None
+            self._todo_clear_note_pending = False
+        else:
+            self._todo_clear_turns = turns
+
+    def _take_todo_clear_note(self) -> str:
+        """The one-time note for the model, or "" once it has been delivered."""
+        if not (getattr(self, "_todo_clear_note_pending", False) and self.todo_clear_in_force()):
+            return ""
+        self._todo_clear_note_pending = False
+        return self.TODO_CLEARED_NOTE
+
+    def todo_clear_hint(self) -> str:
+        """How this frontend's user drops a checklist, for text that tells them to."""
+        hint = getattr(self.ui, "todo_clear_hint", None)
+        if isinstance(hint, str):
+            return hint
+        return "/todo clear" if self._slash_commands_available() else ""
 
     def _slash_commands_available(self) -> bool:
         """True for the interactive terminal frontends, which own the slash-command line."""
@@ -1695,6 +1768,7 @@ class Agent(GoalLifecycle):
         self._executing_plan = False        # …and approved, so later turns are its execution
         self._plan_approved_this_turn = False
         self._goal_progress = None
+        self._reset_todo_clear()
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._explicit_skill_instructions: dict[str, dict] = {}
@@ -1828,6 +1902,10 @@ class Agent(GoalLifecycle):
                 "and hand back: name what comes next and ask whether to continue or to review what "
                 "just landed first.",
             ]
+        if getattr(self, "_todo_clear_note_in_prompt", False):
+            # The one-time note for a clear made before this turn (or at a goal-cycle boundary). A
+            # clear that lands between tool batches reaches the model as a reminder instead.
+            parts += ["", "# Checklist cleared", self.TODO_CLEARED_NOTE]
 
         if goal and goal_status == "active":  # a standing /goal — keep it in view every turn until met
             parts += [
@@ -2164,6 +2242,7 @@ class Agent(GoalLifecycle):
             if self.depth == 0:
                 if reset_cancel:
                     self.cancelled.clear()
+                self._advance_todo_clear()
                 if not self._session_started:   # SessionStart hook fires once per session
                     self._session_started = True
                     self._run_lifecycle_hooks(
@@ -2204,6 +2283,8 @@ class Agent(GoalLifecycle):
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._eta_end(completed)
+                if self.depth == 0:             # the checklist note was this turn's to read
+                    self._todo_clear_note_in_prompt = False
                 self._active_tool_intents.clear()
                 self._active_skill_names.clear()
                 self._explicit_skill_instructions = {}
@@ -2262,6 +2343,9 @@ class Agent(GoalLifecycle):
             if self.depth == 0:
                 if reset_cancel:
                     self.cancelled.clear()
+                # A delegated CLI never saw DGC's checklist, so it gets no note, but its turn still
+                # counts: without this a clear made on a subscription route would never lift.
+                self._advance_todo_clear()
                 if not self._session_started:
                     self._session_started = True
                     self._run_lifecycle_hooks(
@@ -2342,18 +2426,30 @@ class Agent(GoalLifecycle):
                               for key, value in self.timing_totals.items()}
                 redact_secrets = (self._secret_values()
                                   if self.config.get("session_redaction", True) else None)
-                saved = sessions.save(
-                    self.session_file, self.messages, self.session_root,
-                    name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                    goal_elapsed_seconds=self.goal_elapsed_seconds(),
-                    goal_details=self._goal_details,
-                    todos=list(getattr(self.ctx, "todos", []) or []),
-                    usage=usage, activity=activity, timing=timing,
-                    checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
-                    subscription_sessions=self.subscription_sessions,
-                    expected_revision=self._session_revision,
-                    expected_exists=self._session_exists,
-                    redact_secrets=redact_secrets)
+                # Take the checklist and the "a clear still needs saving" flag together. A clear
+                # that lands after this snapshot sets the flag again, so this save cannot mark a
+                # clear it did not write as saved.
+                with _todo_lock(self.ctx):
+                    todos_snapshot = list(getattr(self.ctx, "todos", []) or [])
+                    clear_was_unsaved = getattr(self, "todo_clear_unsaved", False)
+                    self.todo_clear_unsaved = False
+                saved = False
+                try:
+                    saved = sessions.save(
+                        self.session_file, self.messages, self.session_root,
+                        name=self.session_name, goal=self.goal, goal_status=self.goal_status,
+                        goal_elapsed_seconds=self.goal_elapsed_seconds(),
+                        goal_details=self._goal_details,
+                        todos=todos_snapshot,
+                        usage=usage, activity=activity, timing=timing,
+                        checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
+                        subscription_sessions=self.subscription_sessions,
+                        expected_revision=self._session_revision,
+                        expected_exists=self._session_exists,
+                        redact_secrets=redact_secrets)
+                finally:
+                    if not saved and clear_was_unsaved:
+                        self.todo_clear_unsaved = True
                 if saved:
                     self._session_revision += 1
                     self._session_exists = True
@@ -2672,6 +2768,7 @@ class Agent(GoalLifecycle):
             self._plan_presented = False
             self._executing_plan = False
             self._plan_approved_this_turn = False
+            self._reset_todo_clear()
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
             checkpoint_state = record.get("checkpoints")
@@ -2834,6 +2931,10 @@ class Agent(GoalLifecycle):
             # A new top-level turn: the approval and its "Execute the plan now" tool result are
             # behind us, so the hand-back contract applies from here on.
             self._plan_approved_this_turn = False
+            # A clear made while idle, or during an earlier goal cycle that ran out of tool
+            # batches before the reminder could carry it, is told here, in this step's prompt.
+            if self._take_todo_clear_note():
+                self._todo_clear_note_in_prompt = True
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
             blocked, hout = self._run_lifecycle_hooks(
@@ -3812,8 +3913,14 @@ class Agent(GoalLifecycle):
                 # Only an explicitly selected verifier-only policy can replace model-authored
                 # completion. Normal timed tasks retain tools for remaining work after a green test.
                 summary_only = True
+            clear_note = self._take_todo_clear_note() if self.depth == 0 else ""
+            if clear_note:                      # the user cleared the checklist between batches
+                reminders.append(clear_note)
+            # The "make a list" nudge would contradict that note: a list the user just cleared
+            # leaves ctx.todos empty, which is exactly what used to fire it.
             if (edited_total >= 3 and len(edited_targets) >= 2
-                    and not self.ctx.todos and not todo_nudged):
+                    and not self.ctx.todos and not todo_nudged
+                    and not self.todo_clear_in_force()):
                 todo_nudged = True
                 reminders.append("You've landed several edits across multiple files without a plan. "
                                  "For this multi-step task, "

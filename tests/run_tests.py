@@ -1843,9 +1843,16 @@ def unit_tests(tmp: Path):
     _tui_src = (PROJECT / "dgc" / "tui.py").read_text(encoding="utf-8")
     _cli_src = (PROJECT / "dgc" / "cli.py").read_text(encoding="utf-8")
     # Setting a goal SHOULD echo the objective -- the user just typed it. Resuming should not.
+    import re as _re_resume
+    from dgc.goals import resume_prompt as _resume_prompt
+    # Through resume_prompt(): the same continuation, minus "check the todos" right after the user
+    # cleared the checklist.
     check("every terminal frontend resumes with the continuation prompt",
-          "self._submit(RESUME_PROMPT" in _tui_src
-          and "_run_turn_live(RESUME_PROMPT" in _cli_src)
+          "self._submit(resume_prompt(" in _tui_src
+          and _re_resume.search(r"_run_turn_live\(\s*resume_prompt\(", _cli_src) is not None
+          and _resume_prompt() == _RESUME
+          and "continue" in _resume_prompt(checklist_cleared=True).lower()
+          and "again" in _resume_prompt(checklist_cleared=True).lower())
     check("protocol v10 has a resume_goal command",
           "resume_goal" in _EPR.COMMAND_FIELDS)
     check("a resumed turn is labelled so the panel need not fake a user message",
@@ -19268,6 +19275,151 @@ def test_surfaced_feature_commands():
             _sessions.SESSIONS_DIR = saved_dir
 
 
+def test_serve_clear_todos_mid_turn_stdio():
+    """A real `dgc serve`: Clear pressed while a turn runs empties the list at once, the retiring
+    worker saves it, and the next turn tells the model once. The model is a local mock whose second
+    request is held open on an Event, so the clear provably lands mid-turn."""
+    print("editor Clear mid-turn (real dgc serve over stdio):")
+    import queue as _queue
+    from http.server import ThreadingHTTPServer
+
+    def sse(delta, finish=None):
+        return "data: " + json.dumps({"id": "m", "object": "chat.completion.chunk", "choices": [
+            {"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n"
+
+    hold, requests = threading.Event(), []
+
+    class Model(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _send(self, body, kind):
+            data = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self._send(json.dumps({"data": [{"id": "mock-model"}]}), "application/json")
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            requests.append(body)
+            messages = body.get("messages") or []
+            prompts = [m for m in messages if m.get("role") == "user"
+                       and "<system-reminder>" not in str(m.get("content", ""))]
+            last_prompt = str(prompts[-1].get("content", "")) if prompts else ""
+            answered = any(m.get("role") == "tool" for m in messages[messages.index(prompts[-1]) + 1:]) \
+                if prompts else False
+            if "first job" in last_prompt and not answered:
+                call = {"todos": [{"content": "Inspect the fixture", "status": "done"},
+                                  {"content": "Verify the fixture", "status": "in_progress"}]}
+                payload = (sse({"tool_calls": [{"index": 0, "id": "call_todo", "type": "function",
+                                                "function": {"name": "todo", "arguments": json.dumps(call)}}]})
+                           + sse({}, finish="tool_calls") + "data: [DONE]\n\n")
+            else:
+                if "first job" in last_prompt:
+                    hold.wait(60)            # the turn stays running until the test releases it
+                payload = sse({"content": "Done."}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+            self._send(payload, "text/event-stream")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    home = Path(tempfile.mkdtemp(prefix="dgc-clear-mid-home-"))
+    work = Path(tempfile.mkdtemp(prefix="dgc-clear-mid-work-"))
+    (home / ".dgc").mkdir()
+    (home / ".dgc" / "config.json").write_text(json.dumps({
+        "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "model": "mock-model",
+        "api_mode": "chat_completions", "suggest": False, "notes": False}))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT), PYTHONDONTWRITEBYTECODE="1")
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+        env[var] = str(home)
+    proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=str(work), env=env,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True)
+    events, arrived = [], _queue.Queue()
+
+    def read():
+        for line in proc.stdout:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            events.append(event)
+            arrived.put(event)
+    threading.Thread(target=read, daemon=True).start()
+
+    def send(command):
+        proc.stdin.write(json.dumps(command) + "\n")
+        proc.stdin.flush()
+
+    def wait(predicate, timeout=90):
+        for event in list(events):
+            if predicate(event):
+                return event
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                event = arrived.get(timeout=max(0.01, deadline - time.monotonic()))
+            except _queue.Empty:
+                break
+            if predicate(event):
+                return event
+        return None
+
+    try:
+        ready = wait(lambda e: e["type"] == "ready")
+        send({"type": "set_mode", "mode": "auto", "acknowledge_workspace_trust": True, "request_id": "m"})
+        wait(lambda e: e["type"] == "mode_changed")
+        send({"type": "prompt", "text": "first job", "request_id": "p1"})
+        listed = wait(lambda e: e["type"] == "todos" and len(e.get("todos") or []) == 2)
+        # The todo result is in, and the model's next request is being held: the turn is running.
+        deadline = time.monotonic() + 30
+        while len(requests) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        send({"type": "clear_todos", "request_id": "clear-mid"})
+        emptied = wait(lambda e: e["type"] == "todos" and e.get("todos") == [], 30)
+        ended_before_clear = any(e["type"] == "turn_end" for e in events[:events.index(emptied)]) \
+            if emptied else True
+        hold.set()
+        end = wait(lambda e: e["type"] == "turn_end", 60)
+        refused = [e for e in events if e["type"] == "command_rejected"]
+        send({"type": "get_history", "request_id": "h1"})
+        history = wait(lambda e: e["type"] == "history" and e.get("request_id") == "h1", 30)
+        saved = [json.loads(path.read_text()) for path in (home / ".dgc").rglob("*.json")
+                 if path.name != "config.json" and '"messages"' in path.read_text()]
+        check("mid-turn Clear: serve starts and lists the model's checklist",
+              bool(ready and listed), str([e["type"] for e in events][-20:]))
+        check("mid-turn Clear: `todos []` arrives while the turn is still running, never refused",
+              bool(emptied) and not ended_before_clear and not refused and bool(end),
+              str(refused or [e["type"] for e in events][-20:]))
+        check("mid-turn Clear: the saved session and the history snapshot stay empty after the turn",
+              bool(history) and history.get("todos") == [] and len(saved) == 1
+              and "todos" not in saved[0], str([sorted(r) for r in saved]))
+        before = len(requests)
+        send({"type": "prompt", "text": "second job", "request_id": "p2"})
+        wait(lambda e: e["type"] == "turn_end" and e is not end, 60)
+        later = requests[before:]
+        told = [r for r in later if "# Checklist cleared" in str((r.get("messages") or [{}])[0].get("content", ""))]
+        check("mid-turn Clear: the next turn's request tells the model the user cleared the checklist",
+              len(later) == 1 and len(told) == 1, str(len(later)))
+    finally:
+        hold.set()
+        try:
+            proc.stdin.close()
+            proc.wait(timeout=40)
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+            proc.wait(timeout=10)
+        server.shutdown()
+        server.server_close()
+        import shutil as _shutil
+        _shutil.rmtree(home, ignore_errors=True)
+        _shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -19338,6 +19490,7 @@ def main():
         test_python_code_action()
         test_training_export()
         test_surfaced_feature_commands()
+        test_serve_clear_todos_mid_turn_stdio()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

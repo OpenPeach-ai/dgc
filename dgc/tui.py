@@ -4219,8 +4219,9 @@ class TUI:
                 if self.agent.update_goal("active"):
                     # Not the objective: that is already in the system prompt, and replaying it
                     # reads to the model as a brand-new request.
-                    from .goals import RESUME_PROMPT
-                    self._submit(RESUME_PROMPT, expand_mentions=False)
+                    from .goals import resume_prompt
+                    self._submit(resume_prompt(checklist_cleared=self.agent.todo_clear_in_force()),
+                                 expand_mentions=False)
                 else:
                     self._flash(self.agent._last_persist_error or "no standing goal to resume")
             elif rest and rest.lower() not in ("review", "status"):

@@ -173,6 +173,117 @@ class TodoLifecycleTests(unittest.TestCase):
         persist.assert_not_called()
         self.assertEqual(self.agent.todos, [])
 
+    # --- the user's clear: told to the model once, softly ------------------------------------
+
+    def test_an_idle_clear_is_told_once_in_the_next_turn_and_lifts_after_it(self):
+        from dgc.agent import Agent as AgentClass
+        self.update([{"content": "Inspect", "status": "done"},
+                     {"content": "Rotate the fixture key", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent.clear_todos())
+        self.assertTrue(self.agent.todo_clear_in_force())
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("w", "write_file", {"path": "a.txt", "content": "x\n"})]),
+            ChatResult(content="Done."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Carry on"))
+        self.assertEqual(len(calls), 2)
+        for request in calls:                    # the system prompt carries it for this turn only
+            self.assertIn("# Checklist cleared", request[0]["content"])
+            self.assertIn(AgentClass.TODO_CLEARED_NOTE, request[0]["content"])
+        transcript = " ".join(str(m.get("content", "")) for m in calls[-1][1:])
+        self.assertNotIn(AgentClass.TODO_CLEARED_NOTE, transcript, "not repeated as a reminder")
+        self.assertNotIn("Rotate the fixture key", request[0]["content"], "the dropped item text is kept nowhere")
+        self.assertNotIn("# Checklist cleared", self.agent.messages[0]["content"],
+                         "gone from the prompt once that turn ends")
+        self.assertTrue(self.agent.todo_clear_in_force(), "still in force until the next turn starts")
+        chat, calls = self.script(ChatResult(content="Hello."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Anything else?"))
+        self.assertNotIn("# Checklist cleared", calls[0][0]["content"])
+        self.assertFalse(self.agent.todo_clear_in_force())
+
+    def test_a_mid_turn_clear_reaches_the_model_once_and_silences_the_make_a_list_nudge(self):
+        from dgc.agent import Agent as AgentClass
+        nudge = "use the `todo` tool to list the steps"
+        edits = ChatResult(tool_calls=[
+            ToolCall("a", "write_file", {"path": "a.txt", "content": "a\n"}),
+            ToolCall("b", "write_file", {"path": "b.txt", "content": "b\n"}),
+            ToolCall("c", "write_file", {"path": "c.txt", "content": "c\n"})])
+
+        def run(clear: bool):
+            self.agent.reset()
+            self.agent.session_file = sessions.new_path(self.root)
+            self.update([{"content": "Inspect", "status": "in_progress"}])
+            calls = []
+
+            def chat(messages, **kwargs):
+                calls.append(copy.deepcopy(messages))
+                if len(calls) == 1:
+                    if clear:                    # the editor's Clear lands while this batch runs
+                        self.agent.clear_todos(persist=False)
+                    else:
+                        self.update([])          # the model drops its own list: nothing to tell
+                    return edits
+                if len(calls) == 2:
+                    return ChatResult(tool_calls=[ToolCall("r", "read_file", {"path": "a.txt"})])
+                return ChatResult(content="Done.")
+            with patch.object(self.agent.client, "chat", side_effect=chat):
+                ok = self.agent.run_turn("Write the three files")
+            self.assertTrue(ok, (self.agent._last_turn_error, self.ui.errors))
+            return calls, " ".join(str(m.get("content", "")) for m in self.agent.messages)
+
+        calls, transcript = run(clear=False)
+        self.assertIn(nudge, transcript, "control: an empty list after multi-file edits draws the nudge")
+        self.assertNotIn(AgentClass.TODO_CLEARED_NOTE, transcript)
+        calls, transcript = run(clear=True)
+        self.assertEqual(transcript.count(AgentClass.TODO_CLEARED_NOTE), 1, "told exactly once")
+        self.assertIn(AgentClass.TODO_CLEARED_NOTE, " ".join(str(m.get("content", "")) for m in calls[1]))
+        self.assertNotIn(nudge, transcript, "and never told to rebuild it in the same breath")
+        self.assertTrue(all("# Checklist cleared" not in request[0]["content"] for request in calls))
+        # Soft, not a refusal: a later list is accepted (a refused call could trip the loop guard).
+        self.assertTrue(self.update([{"content": "Inspect", "status": "pending"}]).startswith("todo list updated:"))
+
+    def test_resume_wording_drops_the_todos_while_a_clear_is_in_force(self):
+        from dgc import goals
+        from dgc.headless import _goal_scaffold
+        plain, cleared = goals.resume_prompt(), goals.resume_prompt(checklist_cleared=True)
+        self.assertEqual(plain, goals.RESUME_PROMPT)
+        self.assertIn("Check the todos", plain)
+        self.assertNotIn("todo", cleared.lower())
+        self.assertEqual(_goal_scaffold(cleared), "Resumed the standing goal")
+        self.assertIn("todos", goals.auto_resume_prompt("loop guard"))
+        retry = goals.auto_resume_prompt("loop guard", checklist_cleared=True)
+        self.assertNotIn("todo", retry.lower())
+        self.assertEqual(_goal_scaffold(retry), "Retried the standing goal after the last attempt stopped")
+        # The backend's automatic retry asks the agent, at the moment it queues the retry.
+        self.assertTrue(self.agent.set_goal("Finish all required work"))
+        self.backend._queue, self.backend.ui = [], self.ui
+        self.update([{"content": "Inspect", "status": "pending"}])
+        self.agent.clear_todos()
+        self.assertTrue(self.backend._maybe_auto_resume_goal(True, False))
+        self.assertNotIn("todo", self.backend._queue[-1][0].lower())
+        self.agent._todo_clear_turns = None
+        self.backend._queue.clear()
+        self.backend._goal_auto_resumes = 0
+        self.assertTrue(self.backend._maybe_auto_resume_goal(True, False))
+        self.assertIn("Check the todos", self.backend._queue[-1][0])
+
+    def test_reset_and_resume_start_without_a_clear_in_force(self):
+        self.update([{"content": "Inspect", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent._persist())
+        saved = self.agent.session_file
+        self.agent.clear_todos(persist=False)
+        self.assertTrue(self.agent.todo_clear_in_force() and self.agent.todo_clear_unsaved)
+        self.agent.reset()
+        self.assertFalse(self.agent.todo_clear_in_force() or self.agent.todo_clear_unsaved)
+        self.agent.clear_todos(persist=False)
+        self.agent.load_session(saved)
+        self.assertFalse(self.agent.todo_clear_in_force())
+        self.assertFalse(self.agent.todo_clear_unsaved, "a pending flush must not land in another session")
+        self.assertNotIn("# Checklist cleared", self.agent.system_prompt())
+
     # --- the tool: validation, normalisation, bounds ------------------------------------------
 
     def test_invalid_tool_payload_is_atomic_and_bounded(self):
@@ -417,7 +528,10 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertEqual(snapshot["cycles"], 1)
         self.assertIn("steps the model marked blocked: Needs the upstream fix; Needs a credential",
                       snapshot["reason"])
-        self.assertIn("/todo clear", snapshot["reason"])
+        # This recorder carries no terminal marker and no editor hint (an ACP-like surface), so the
+        # reason says it in words instead of naming a command that surface cannot run.
+        self.assertIn("or clear the checklist to drop them.", snapshot["reason"])
+        self.assertNotIn("/todo clear", snapshot["reason"])
         self.assertEqual(snapshot["evidence"], ["a.txt"])
         self.assertTrue(any("steps the model marked blocked" in message for message in self.ui.infos))
         self.assertFalse(any("completion report for the goal was not accepted" in str(m.get("content", ""))
@@ -546,17 +660,98 @@ class ChecklistProtocolTests(unittest.TestCase):
         self.assertEqual(self.events, [{"type": "todos", "todos": []}])
         self.assertIsNone(event_error({"seq": 0, **self.events[0]}))
 
-    def test_clear_todos_is_refused_while_a_turn_runs(self):
+    def test_clear_todos_while_a_turn_runs_empties_the_list_now_and_the_worker_saves_it(self):
         from dgc.headless import _BUSY_MUTATIONS
-        self.assertIn("clear_todos", _BUSY_MUTATIONS)
+        self.assertNotIn("clear_todos", _BUSY_MUTATIONS)
         self.update([{"content": "Mid-turn", "status": "in_progress"}])
+        self.agent.messages.append({"role": "user", "content": "Work"})
+        self.assertTrue(self.agent._persist())
         self.events.clear()
         self.backend._busy = lambda: True
-        self.backend.dispatch({"type": "clear_todos", "request_id": "busy"})
-        self.assertEqual([event["type"] for event in self.events], ["command_rejected"])
-        self.assertEqual(self.events[0]["reason"], "turn_in_progress")
-        self.assertEqual(self.events[0]["request_id"], "busy")
-        self.assertEqual(self.agent.todos, [{"content": "Mid-turn", "status": "in_progress"}])
+        with patch.object(self.agent, "_persist", wraps=self.agent._persist) as persist:
+            self.backend.dispatch({"type": "clear_todos", "request_id": "mid"})
+            # The turn thread owns the session lease: nothing is saved from the dispatcher.
+            persist.assert_not_called()
+        self.assertEqual(self.events, [{"type": "todos", "todos": []}])
+        self.assertEqual(self.agent.todos, [])
+        self.assertIs(self.agent.todo_clear_unsaved, True)
+        self.assertIn("Mid-turn", self.agent.session_file.read_text(), "not yet on disk")
+        self.backend._flush_unsaved_todo_clear()
+        self.assertNotIn('"todos"', self.agent.session_file.read_text())
+        self.assertIs(self.agent.todo_clear_unsaved, False)
+        self.backend._flush_unsaved_todo_clear()          # nothing left: no second save, no event
+        self.assertEqual(self.events, [{"type": "todos", "todos": []}])
+
+    def test_a_clear_that_lands_after_the_turns_final_save_is_still_saved(self):
+        # The real queue worker and the real dispatcher: the turn saves its list, then Clear arrives
+        # while the worker is still registered. The retiring worker must write the empty list
+        # before turn_end, so a reload or resume cannot bring it back.
+        del self.backend.__dict__["_busy"]
+        backend = self.backend
+        backend._queue, backend._turn_n, backend._worker = [], 0, None
+        backend.ui = self.ui
+        backend._start_eta_ticker = lambda tid: __import__("threading").Event()
+        backend._finish_steering = lambda cancelled, failed: None
+        self.agent.session_name = "fixture"
+        order = []
+
+        def run_turn(text, reset_cancel=False):
+            self.update([{"content": "Inspect", "status": "done"}, {"content": "Verify", "status": "pending"}])
+            self.agent.messages += [{"role": "user", "content": text}, {"role": "assistant", "content": "ok"}]
+            self.assertTrue(self.agent._persist())
+            order.append("turn saved")
+            backend.dispatch({"type": "clear_todos", "request_id": "late"})
+            order.append("clear dispatched")
+            return True
+        self.agent.run_turn = run_turn
+        self.assertEqual(backend._start_turn("go")[0], "started")
+        worker = backend._worker
+        worker.join(30)
+        self.assertFalse(worker.is_alive())
+        types_seen = [event["type"] for event in self.events]
+        self.assertNotIn("command_rejected", types_seen)
+        self.assertLess(max(i for i, e in enumerate(self.events) if e["type"] == "todos" and e["todos"] == []),
+                        types_seen.index("turn_end"), "the list empties before the turn ends")
+        self.assertNotIn('"todos"', self.agent.session_file.read_text())
+        self.assertIs(self.agent.todo_clear_unsaved, False)
+        self.assertEqual(order, ["turn saved", "clear dispatched"])
+        backend.dispatch({"type": "get_history", "request_id": "after"})
+        self.assertEqual(self.events[-1].get("todos"), [])
+
+    def test_a_mid_turn_clear_whose_save_fails_says_so_when_the_worker_retires(self):
+        self.update([{"content": "Mid-turn", "status": "in_progress"}])
+        self.agent.messages.append({"role": "user", "content": "Work"})
+        self.backend._busy = lambda: True
+        self.backend.dispatch({"type": "clear_todos"})
+        self.events.clear()
+        with patch("dgc.sessions.save", return_value=False):
+            self.backend._flush_unsaved_todo_clear()
+        self.assertEqual([event["type"] for event in self.events], ["error"])
+        self.assertIs(self.agent.todo_clear_unsaved, True, "a failed save leaves the clear to save later")
+        self.assertEqual(self.agent.todos, [])
+
+    def test_the_editor_is_told_the_command_it_can_type_to_drop_a_blocked_checklist(self):
+        self.assertTrue(self.agent.set_goal("Finish all required work"))
+        self.update([{"content": "Needs a credential", "status": "blocked"}])
+        report = {"status": "completed", "summary": "done", "evidence": ["x"]}
+        reason = self.agent._gate_completion_report(report)["summary"]
+        self.assertIn("or /todo clear to drop them.", reason)
+
+    def test_tui_todo_clear_mid_turn_is_refused_visibly_and_the_list_is_kept(self):
+        # The terminal keeps its visible refusal while a turn runs; only the editor clears mid-turn.
+        ui = self.tui()
+        self.update([{"content": "Stale", "status": "pending"}])
+        ui._todos = list(self.agent.todos)
+        ui._turn.set()
+        try:
+            self.assertEqual(ui._dispatch_composer_text("/todo clear"), "local-command")
+            self.assertIn("/todo waits for this turn to finish", ui._flash_msg)
+            self.assertEqual(self.agent.todos, [{"content": "Stale", "status": "pending"}])
+        finally:
+            ui._turn.clear()
+        self.assertEqual(ui._dispatch_composer_text("/todo clear"), "command")
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual(ui.active._todos, [])
 
     def test_every_history_snapshot_carries_the_redacted_checklist(self):
         # The token becomes a known secret only AFTER the session was saved, so the file holds it

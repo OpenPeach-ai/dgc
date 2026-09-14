@@ -3263,14 +3263,19 @@ def todo(args: dict, ctx) -> str:
             return (f"error: todo row {index} ({preview!r}) has unknown status {raw_status!r}; "
                     f"use one of {', '.join(TODO_STATUSES)}")
         normalized.append({"content": content[:MAX_TODO_CHARS], "status": status})
-    ctx.todos = normalized
-    if ctx.on_todo:
-        ctx.on_todo(ctx.todos)
-    if not ctx.todos:
+    # The editor's Clear may land on another thread at any moment. Replace, announce and describe
+    # the list under the context's checklist lock so all three agree about the same list.
+    from contextlib import nullcontext
+    with getattr(ctx, "todo_lock", None) or nullcontext():
+        ctx.todos = normalized
+        if ctx.on_todo:
+            ctx.on_todo(ctx.todos)
+        current = list(ctx.todos)
+    if not current:
         return "todo list cleared"
     marks = {"done": "x", "in_progress": "~", "blocked": "!"}
     return "todo list updated:\n" + "\n".join(
-        f"[{marks.get(t['status'], ' ')}] {t['content']}" for t in ctx.todos)
+        f"[{marks.get(t['status'], ' ')}] {t['content']}" for t in current)
 
 
 def skill_tool(args: dict, ctx) -> str:
