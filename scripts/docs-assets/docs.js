@@ -20,13 +20,15 @@
   });
 
   // ----- sidebar search / filter -----
+  // One filter, two fields: the desktop sidebar is hidden on mobile, so the mobile field
+  // lives inside the Browse docs dialog beside the list it actually filters.
+  var inputs = Array.prototype.slice.call(document.querySelectorAll('[data-docsearch]'));
   var input = document.getElementById('docsearch');
-  // Both layouts use the same search: the desktop sidebar is hidden on mobile,
-  // where its matching links appear in the Browse docs dialog instead.
   var links = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar a[data-title], .docs-menu a[data-title]'));
   var groups = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar .grp, .docs-menu .grp'));
-  function filter(){
-    var q = (input.value || '').trim().toLowerCase();
+  function filter(query){
+    var q = (query || '').trim().toLowerCase();
+    inputs.forEach(function(el){ if (el.value !== query) el.value = query; });
     links.forEach(function(a){
       var hay = (a.getAttribute('data-title') + ' ' + (a.getAttribute('data-desc')||'')).toLowerCase();
       a.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
@@ -43,13 +45,31 @@
     for (var i=0;i<links.length;i++){ if (links[i].style.display !== 'none') return links[i]; }
     return null;
   }
-  if (input){
-    input.addEventListener('input', filter);
-    input.addEventListener('keydown', function(e){
+  inputs.forEach(function(el){
+    el.addEventListener('input', function(){ filter(el.value); });
+    el.addEventListener('keydown', function(e){
       if (e.key === 'Enter'){ var t = firstVisible(); if (t){ window.location.href = t.getAttribute('href'); } }
-      else if (e.key === 'Escape'){ input.value=''; filter(); input.blur(); }
+      else if (e.key === 'Escape'){ filter(''); el.blur(); }
     });
+  });
+  // Keep the page you are on visible in a sidebar that scrolls independently.
+  // This runs deferred, while the page is still hidden behind the style loader, so every box
+  // measures zero until the stylesheet lands. Wait for it, then measure.
+  function revealCurrent(){
+    var here = document.querySelector('.docs-sidebar a[aria-current=page]');
+    if (!here) return;
+    var sb = here.closest('.docs-sidebar');
+    if (!sb || here.offsetTop + here.offsetHeight <= sb.clientHeight) return;
+    // scrollTop, not scrollIntoView(): the latter would scroll the window too.
+    sb.scrollTop = here.offsetTop - (sb.clientHeight / 2) + (here.offsetHeight / 2);
   }
+  var root = document.documentElement;
+  if (root.dataset.stylesReady === 'true' || root.dataset.stylesFailOpen === 'true') revealCurrent();
+  else {
+    window.addEventListener('dgc:styles-ready', revealCurrent, {once:true});
+    window.addEventListener('dgc:styles-fail-open', revealCurrent, {once:true});
+  }
+
   // '/' focuses search (like the DGC composer)
   document.addEventListener('keydown', function(e){
     if (e.key === '/' && input && document.activeElement !== input &&

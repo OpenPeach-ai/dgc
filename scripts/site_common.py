@@ -64,6 +64,21 @@ def partial(name: str, context: dict[str, Any]) -> str:
     return substitute((SRC / "partials" / name).read_text(encoding="utf-8"), context)
 
 
+def _mark_current_nav(nav: str, path: str, context: dict[str, Any]) -> str:
+    """Tell the reader where they are. The nav links to three destinations that are also pages;
+    every other route has no nav entry, so nothing is marked there."""
+    if path.startswith("docs/"):
+        href = context["DOCS_URL"].rstrip("/") + "/"
+    elif path == "vscode/index.html":
+        href = f'{context["SITE_URL"]}/vscode'
+    elif path == "benchmark.html":
+        href = f'{context["SITE_URL"]}/benchmark'
+    else:
+        return nav
+    # Both the header pill and the mobile dialog link to it.
+    return nav.replace(f'href="{href}"', f'href="{href}" aria-current="page"')
+
+
 def json_script(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
@@ -298,7 +313,7 @@ def render_shell(*, title: str, description: str, path: str, body: str,
                  preload_image: str | None = None,
                  preload_mobile_image: str | None = None) -> str:
     ctx = site_context()
-    nav = partial("nav.html", ctx)
+    nav = _mark_current_nav(partial("nav.html", ctx), path, ctx)
     if not include_announcement:
         start = nav.find('<div class="announcement"')
         end = nav.find("</div>", start)

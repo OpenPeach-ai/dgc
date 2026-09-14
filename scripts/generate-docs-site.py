@@ -243,12 +243,12 @@ def shell(title: str, description: str, page: str, side: str, body: str, toc_htm
     inner = f'''<div class="docs-shell" data-doc-page="{html.escape(page, quote=True)}">
   <nav class="docs-sidebar" id="docs-sidebar" aria-label="Documentation navigation">{side}</nav>
   <article class="docs-article">
-    <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC {context["VERSION"]}</span><a href="{context["GITHUB_URL"]}/edit/main/{edit_path}">Edit on GitHub ↗</a></div>
+    <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" data-docsearch type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC {context["VERSION"]}</span><a href="{context["GITHUB_URL"]}/edit/main/{edit_path}">Edit on GitHub ↗</a></div>
 {body}
   </article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2>{toc_html}</aside>
 </div>
-<dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav>{side}</nav></dialog>
+<dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><label class="docs-search"><span class="sr-only">Search documentation</span><input data-docsearch type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><nav>{side}</nav></dialog>
 <script src="/docs/assets/docs.js?v={context['ASSET_REVISION']}" defer></script>'''
     canonical = context["DOCS_URL"] if page == "index" else f'{context["DOCS_URL"]}/{page}'
     return render_shell(title=f"{title} · DGC Docs", description=description,
@@ -291,7 +291,9 @@ def build() -> dict[str, str]:
                  + prev_link + ("\n" + next_link if next_link else "") + "\n</nav>")
 
         toc_html = "\n".join(
-            f'<a href="#{hid}" data-id="{hid}" class="lvl2">{html.escape(text)}</a>' for hid, text in toc
+            # The heading renders its backticks as <code>; the TOC entry must not print them.
+            f'<a href="#{hid}" data-id="{hid}" class="lvl2">{html.escape(re.sub(r"`([^`]+)`", r"\1", text))}</a>'
+            for hid, text in toc
         ) or '<a href="#content" data-id="content" class="lvl2">Top</a>'
 
         pages[f"{s}.html"] = shell(title, desc, s, sidebar(order, s),

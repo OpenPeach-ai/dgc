@@ -250,7 +250,7 @@ def _ext_note_rest(releases: dict) -> str:
     """Everything after the headline note, joined. Previously the page demanded exactly three and
     a shorter release died on an IndexError deep inside the template context."""
     rest = _ext_notes(releases)[1:]
-    return " · ".join(rest) + "." if rest else ""
+    return " ".join(rest)
 
 
 def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:

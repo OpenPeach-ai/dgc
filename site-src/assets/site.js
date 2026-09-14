@@ -416,6 +416,14 @@
     };
     card.addEventListener('pointerenter', type, {once:true});
     card.addEventListener('focus', type, {once:true});
+    // Hover is an accelerator, not the only way in: on touch, and for anyone who simply
+    // reads down the page, the command has to appear when the card does.
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(entries => entries.forEach(entry => {
+        if (entry.isIntersecting) { io.disconnect(); type(); }
+      }), {threshold:.35});
+      io.observe(card);
+    } else { output.textContent = command; }
   });
 
   document.querySelectorAll('[data-pipeline]').forEach(panel => {
