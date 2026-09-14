@@ -12,9 +12,10 @@ import time
 from . import style
 
 # The "///" mark — three tapered, staggered, forward-leaning bars (the DGC logo). Rendered from the
-# founder's slash-logo art (site/slash-logo.txt) at terminal scale, using HALF-BLOCK edges (▀▄) so the
-# diagonals stay sharp instead of stair-stepping. Middle bar tallest, right bar shortest — like the
-# logo. Leading spaces on each row create the diagonal, so these lines are NOT lstripped.
+# founder's slash-logo art (site/slash-logo.txt) at terminal scale, in braille cells. Middle bar
+# tallest, right bar shortest — like the logo. Leading spaces on each row create the diagonal, so these
+# lines are NOT lstripped, and the rows must be laid out as ONE block (see shimmer_lines): centring
+# rows one by one gives each a different offset and turns the /// into a zig-zag.
 LOGO = [
     '⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⠇',
     '⠀⠀⠀⢀⣠⡆⠀⠀⢰⣿⣿⣿⠀⠀⠀⠀⠀⣠⣴',
@@ -100,8 +101,13 @@ def shimmer_text(secs: float, indent: bool = False):
     return _frame(secs, indent=indent)
 
 
-def shimmer_lines(secs: float, pad: int = 0, small: bool = False):
-    """The mark as a list of rich Text rows (one per line), each padded to `pad`.
+def shimmer_lines(secs: float, pad: int | None = None, small: bool = False):
+    """The mark as a list of rich Text rows (one per line), all the same width.
+
+    Rows are padded to `pad`, or to the art's own width when no pad is given. The rows are
+    different lengths, and the leading spaces ARE the diagonal: a caller that centred each
+    row on its own gave every row a different offset and turned the /// into a zig-zag
+    (the trust screen did exactly that). Equal widths mean one offset for the whole block.
 
     `small=True` renders the compact build (LOGO_SMALL) for medium-height terminals.
     """
@@ -117,8 +123,9 @@ def shimmer_lines(secs: float, pad: int = 0, small: bool = False):
                 t.append(" ")
             else:
                 t.append(ch, style=_char_style(r, c, secs, hi, rows, cols))
-        if pad and len(line) < pad:
-            t.append(" " * (pad - len(line)))
+        width = cols if pad is None else max(pad, cols)
+        if len(line) < width:
+            t.append(" " * (width - len(line)))
         out.append(t)
     return out
 
