@@ -135,9 +135,19 @@ body {
    reply it asks for. Nothing sits above the first one. */
 .msg.user { align-items: flex-end; margin-top: var(--sp-2); }
 #log > .msg.user:first-child, .history-older[hidden] + .msg.user { margin-top: 0; }
+/* A resumed or cleared chat with nothing to restore still gets its (empty) history wrapper first,
+   so the first prompt typed there is not the log's first child -- but nothing is above it either. */
+#log > .history-pages:first-child:not(:has(> :not(.history-older[hidden]))) + .msg.user { margin-top: 0; }
 /* Steering applies a prompt inside the running turn, where blocks sit 4px apart. It is still the
-   user speaking, so it keeps the space between blocks on both sides: the turn's gap plus this. */
-.msg.dgc > .msg.user { margin-block: calc(var(--sp-4) - var(--sp-1)); }
+   user speaking, so it is spaced like any prompt: the turn's gap plus these make 24px above it and
+   16px to what follows. Applied as the turn's last word, nothing in the turn follows it, and the
+   space to the next block is the log's own. */
+.msg.dgc > .msg.user { margin: calc(var(--sp-4) + var(--sp-2) - var(--sp-1)) 0 calc(var(--sp-4) - var(--sp-1)); }
+.msg.dgc > .msg.user:last-child { margin-bottom: 0; }
+/* The same 24px where the block above brings a margin of its own: a tool group's 4px, or the 12px
+   below a steered prompt just before it. */
+.msg.dgc > .tool-group + .msg.user { margin-top: calc(var(--sp-4) + var(--sp-2) - var(--sp-1) - var(--sp-1)); }
+.msg.dgc > .msg.user + .msg.user { margin-top: var(--sp-2); }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
 .text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
@@ -1059,10 +1069,12 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 }
 #lightbox .lb-cap { font: var(--w-reg) var(--t-sm)/1.4 var(--sans); color: #ededf1; }
 
-/* A resumed goal reads as a quiet continuation marker, not a user message. */
+/* A resumed goal reads as a quiet continuation marker, not a user message. It sits in the log's
+   column, whose gap spaces it; padding of its own put 8px more on both sides, so "Stopped", the
+   marker and the continued turn read as three loose islands. */
 .resume-note {
   display: flex; align-items: center; gap: var(--sp-2);
-  padding: var(--sp-2) 0; color: var(--faint);
+  padding: 0; color: var(--faint);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
 }
 .resume-note .codicon { font-size: var(--t-base); }
@@ -1076,8 +1088,10 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .recovery-card .recovery-text { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
 .recovery-card .recovery-actions { display: flex; gap: var(--sp-2); }
 
-/* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request. */
-.compaction { margin: var(--sp-2) 0; color: var(--faint); }
+/* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request.
+   No margin of its own: it only ever sits in the log's column, whose gap spaces it like every other
+   block (8px more on top of that left a hole around it). */
+.compaction { margin: 0; color: var(--faint); }
 .compaction > summary {
   display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;
   padding: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--faint);

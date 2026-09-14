@@ -11,11 +11,25 @@ import { buildSync } from "esbuild";
 // that was an ordinary box, and the prompt bubble sat 0px from the answer above it and from the
 // turn below it. A prompt steered into a running turn got the turn's own 4px instead. These render
 // the real panel in Chromium and measure the visible gaps around every prompt and between blocks.
+// The same pages also hold the layout facts found next to that bug: the page under the reader must
+// not jump when the panel's width changes, a queued prompt is drawn once and in order, and markers
+// and steered prompts keep the one rhythm.
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
 let browser, html, mainJs, markdownJs;
-const skipReason = () => (!chromium ? "playwright is not installed" : !browser ? "Chromium could not start" : "");
+// @playwright/test is a devDependency of the repository root (package.json there), so an
+// editors/vscode checkout without the root's node_modules has no browser, and every test here
+// skips -- visibly in the summary, but it still exits 0. DGC_REQUIRE_CHROMIUM=1 makes that a
+// failure, for any run that must prove the layout rather than step around it.
+const skipReason = () => (!chromium ? "playwright is not installed (npm ci at the repository root)"
+  : !browser ? "Chromium could not start" : "");
+const skipOrFail = (t) => {
+  if (!skipReason()) return false;
+  if (process.env.DGC_REQUIRE_CHROMIUM === "1") assert.fail(`DGC_REQUIRE_CHROMIUM=1: ${skipReason()}`);
+  t.skip(skipReason());
+  return true;
+};
 const WIDTHS = [320, 988];
 const BETWEEN_BLOCKS = 16;          // --sp-4: #log's gap, the space between any two transcript blocks
 const ABOVE_PROMPT = 24;            // a prompt starts a new exchange: --sp-4 plus --sp-2
@@ -123,7 +137,8 @@ async function restartAndRepaint(panel) {
 function measureSpacing() {
   const log = document.getElementById("log");
   const box = (n) => n.getBoundingClientRect();
-  const drawn = (n) => { const r = box(n); return r.width > 0 && r.height > 0; };
+  // A closed <details> still lays its body out; checkVisibility() is what knows it is not drawn.
+  const drawn = (n) => { const r = box(n); return r.width > 0 && r.height > 0 && n.checkVisibility?.() !== false; };
   const ink = [...log.querySelectorAll("*")].filter((n) => !n.closest(".role") && drawn(n));
   const bubbles = [...log.querySelectorAll(".msg.user > .bubble")].filter(drawn).map((bubble) => {
     const b = box(bubble);
@@ -157,8 +172,8 @@ function assertSpacing(m, label) {
   }
   assert.ok(m.bubbles.length > 0, `${label}: a prompt bubble is on screen`);
   for (const b of m.bubbles) {
-    const wantAbove = b.steered ? BETWEEN_BLOCKS : ABOVE_PROMPT;
-    if (b.above !== null) assert.ok(b.above >= wantAbove, `${label}: "${b.text}" is ${b.above}px below what precedes it, want ${wantAbove}px`);
+    // A steered prompt too: it is the user speaking, inside the turn or not.
+    if (b.above !== null) assert.ok(b.above >= ABOVE_PROMPT, `${label}: "${b.text}" is ${b.above}px below what precedes it, want ${ABOVE_PROMPT}px`);
     if (b.below !== null) assert.ok(b.below >= BETWEEN_BLOCKS, `${label}: "${b.text}" is ${b.below}px above what follows it, want ${BETWEEN_BLOCKS}px`);
   }
 }
@@ -236,7 +251,7 @@ const scenarios = {
 for (const width of WIDTHS) {
   for (const [name, run] of Object.entries(scenarios)) {
     test(`prompts and turns keep their spacing when ${name} (${width}px)`, async (t) => {
-      if (skipReason()) return t.skip(skipReason());
+      if (skipOrFail(t)) return;
       const panel = await openPanel(width);
       try {
         await run(panel, width);
@@ -253,7 +268,7 @@ for (const width of WIDTHS) {
 
   // However the screen was built, the same conversation is spaced the same way.
   test(`a replayed conversation is spaced exactly like the live one (${width}px)`, async (t) => {
-    if (skipReason()) return t.skip(skipReason());
+    if (skipOrFail(t)) return;
     const live = await openPanel(width), replayed = await openPanel(width);
     try {
       await scenarios["streamed live"](live);
@@ -265,7 +280,7 @@ for (const width of WIDTHS) {
 
   // Steering applies a prompt inside the running turn, whose own blocks sit 4px apart.
   test(`a prompt steered into a running turn keeps the space between blocks (${width}px)`, async (t) => {
-    if (skipReason()) return t.skip(skipReason());
+    if (skipOrFail(t)) return;
     const panel = await openPanel(width, { steering: true });
     try {
       await panel.events(answeredTurn("t1").slice(0, 5));          // commentary and a finished command
@@ -284,3 +299,285 @@ for (const width of WIDTHS) {
     } finally { await panel.page.close(); }
   });
 }
+
+// ---- the page under the reader -------------------------------------------------------------------
+// Off-screen blocks are skipped at a pinned height. A pin is a height at one width, and a skipped
+// block is never laid out again, so after the panel's width changed and stayed changed, scrolling
+// back met blocks growing or shrinking as they came into view: the page jumped 100-200px, and a run
+// that went on while the panel was collapsed to nothing left 20,000px of phantom transcript.
+const LONG_ANSWER = (i) => `Answer ${i}. ` + "The bounds hold across every page of the transcript, and the parser reads them back. ".repeat(6);
+async function longChat(panel, turns = 12) {
+  for (let i = 0; i < turns; i += 1) await panel.events(answeredTurn(`p${i}`, `Earlier question ${i}: does the bound hold here?`, LONG_ANSWER(i)));
+}
+const wait = (panel, ms) => panel.page.evaluate((t) => new Promise((done) => setTimeout(done, t)), ms);
+// Scroll to points through the transcript and watch the block under the viewport for a few frames.
+function probeScrolling() {
+  return (async () => {
+    const log = document.getElementById("log");
+    const frames = (n) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+    const out = [];
+    for (const fraction of [0.75, 0.5, 0.25, 0.1]) {
+      const height = log.scrollHeight;
+      log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(height * fraction);
+      await frames(2);
+      const box = log.getBoundingClientRect();
+      const anchor = document.elementFromPoint(box.left + box.width / 2, box.top + box.height * 0.4)?.closest(".msg, .resume-note, .sys");
+      const top = anchor?.getBoundingClientRect().top;
+      await frames(6); await new Promise((done) => setTimeout(done, 60));
+      out.push({ fraction, moved: anchor ? Math.round(anchor.getBoundingClientRect().top - top) : 0,
+        heightChange: log.scrollHeight - height });
+    }
+    return out;
+  })();
+}
+const scrollHeightOf = (panel) => panel.page.evaluate(() => document.getElementById("log").scrollHeight);
+async function freshScrollHeight(width, build) {
+  const fresh = await openPanel(width);
+  try { await build(fresh); await fresh.settle(); await wait(fresh, 250); return await scrollHeightOf(fresh); }
+  finally { await fresh.page.close(); }
+}
+function assertStill(probe, label) {
+  for (const step of probe) {
+    assert.ok(Math.abs(step.moved) <= 1, `${label}: at ${step.fraction * 100}% of the transcript the block being read moved ${step.moved}px`);
+    assert.ok(Math.abs(step.heightChange) <= 1, `${label}: at ${step.fraction * 100}% the transcript's length changed by ${step.heightChange}px`);
+  }
+}
+const resizes = [["narrower", 988, 320], ["wider", 320, 988]];
+for (const [way, from, to] of resizes) {
+  test(`the page does not jump after the panel is made ${way} and stays that way (${from}px to ${to}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(from);
+    try {
+      await longChat(panel);
+      await panel.settle(); await toBottom(panel); await wait(panel, 250);
+      await panel.page.setViewportSize({ width: to, height: 900 });
+      await panel.settle(); await wait(panel, 400);
+      assertStill(await panel.page.evaluate(probeScrolling), `made ${way}`);
+      assert.ok(Math.abs(await scrollHeightOf(panel) - await freshScrollHeight(to, longChat)) <= 2,
+        `made ${way}: the transcript is as long as the same chat drawn at ${to}px`);
+    } finally { await panel.page.close(); }
+  });
+}
+for (const width of WIDTHS) {
+  test(`a run that went on while the panel was collapsed leaves no phantom length (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width);
+    try {
+      await panel.page.setViewportSize({ width: 1, height: 900 });
+      await longChat(panel);
+      await panel.settle(); await wait(panel, 250);
+      await panel.page.setViewportSize({ width, height: 900 });
+      await panel.settle(); await wait(panel, 400); await toBottom(panel); await panel.settle();
+      assert.ok(Math.abs(await scrollHeightOf(panel) - await freshScrollHeight(width, longChat)) <= 2,
+        "the transcript is as long as the same chat drawn at this width all along");
+      assertStill(await panel.page.evaluate(probeScrolling), "after being collapsed");
+    } finally { await panel.page.close(); }
+  });
+}
+test("re-measuring after a width change keeps the block being read where it was", async (t) => {
+  if (skipOrFail(t)) return;
+  const panel = await openPanel(988);
+  try {
+    await longChat(panel);
+    await panel.settle(); await wait(panel, 250);
+    await panel.page.evaluate(() => { const log = document.getElementById("log"); log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = log.scrollHeight * 0.4; });
+    await panel.settle();
+    await panel.page.setViewportSize({ width: 320, height: 900 });
+    await panel.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const before = await panel.page.evaluate(() => {
+      const log = document.getElementById("log"), top = log.getBoundingClientRect().top;
+      const blocks = [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg"));
+      const index = blocks.findIndex((n) => n.getBoundingClientRect().bottom > top);
+      return { index, top: blocks[index].getBoundingClientRect().top };
+    });
+    await wait(panel, 400);
+    const after = await panel.page.evaluate((index) => {
+      const log = document.getElementById("log");
+      return [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg"))[index].getBoundingClientRect().top;
+    }, before.index);
+    assert.ok(Math.abs(after - before.top) <= 1, `the block at the top of the view moved ${Math.round(after - before.top)}px when the heights were re-measured`);
+  } finally { await panel.page.close(); }
+});
+
+// "Show earlier messages" goes away when the archive runs out. It is above the reader, like the
+// rows that arrive with it, so its going must not move the page either.
+test("the archive running out while reading the top of history does not move the page", async (t) => {
+  if (skipOrFail(t)) return;
+  const panel = await openPanel(988);
+  try {
+    const items = [];
+    for (let i = 0; i < 30; i += 1) items.push(...answeredTurn(`h${i}`, `Question ${i}`, `Answer ${i}. ` + "Prose. ".repeat(20)));
+    await panel.events([{ type: "session", kind: "resumed", session_id: "s1" }, { type: "history", items, todos: [] }]);
+    await panel.settle();
+    for (let i = 0; i < 8; i += 1) {
+      const asked = await panel.page.evaluate(() => window.__posts.some((m) => m.type === "getRecall"));
+      if (asked) break;
+      await panel.page.evaluate(() => { const older = document.querySelector(".history-older"); if (!older.disabled) older.click(); });
+      await panel.settle();
+    }
+    const shift = await panel.page.evaluate(async () => {
+      const log = document.getElementById("log");
+      const raf = () => new Promise((done) => requestAnimationFrame(() => done()));
+      log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = 0; await raf();
+      const anchor = log.querySelector(".msg");
+      const top = anchor.getBoundingClientRect().top;
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: { type: "recall",
+        items: [{ role: "user", text: "An archived question" }, { role: "assistant", text: "An archived answer" }], before: 0, more: false } } }));
+      await raf(); await raf();
+      return { hidden: document.querySelector(".history-older").hidden, moved: Math.round(anchor.getBoundingClientRect().top - top) };
+    });
+    assert.equal(shift.hidden, true, "the archive said there is nothing more, so the button is gone");
+    assert.ok(Math.abs(shift.moved) <= 1, `the block being read moved ${shift.moved}px`);
+  } finally { await panel.page.close(); }
+});
+
+// ---- queued prompts ------------------------------------------------------------------------------
+// A prompt queued behind a running turn is drawn when it is sent. Its turn's start used to echo it
+// again, below the prompts still waiting: two queued prompts read P2, P3, P2, reply, P3.
+const QUEUED = ["Also check the rate limiter while you are there", "And then run the auth tests"];
+const topLevel = (panel) => panel.page.evaluate(() => [...document.getElementById("log").querySelectorAll(".msg")]
+  .filter((n) => !n.parentElement.closest(".msg"))
+  .map((n) => (n.classList.contains("user") ? `you: ${n.querySelector(".bubble").textContent}` : "dgc")));
+for (const width of WIDTHS) {
+  test(`prompts queued behind a running turn are drawn once, each above its own reply (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width), replayed = await openPanel(width);
+    try {
+      await panel.events(runningTurn("t1"));
+      const first = await panel.prompt(QUEUED[0]);
+      await panel.events([{ type: "prompt_accepted", request_id: first, state: "queued" }, { type: "queued", count: 1 }]);
+      const second = await panel.prompt(QUEUED[1]);
+      await panel.events([{ type: "prompt_accepted", request_id: second, state: "queued" }, { type: "queued", count: 2 },
+        { type: "tool_result", call_id: "t1c1", name: "bash", output: "ok" },
+        { type: "text_delta", text: ANSWER }, { type: "stream_end", message_id: "t1:2", phase: "answer" },
+        { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:2" },
+        ...answeredTurn("t2", QUEUED[0]).slice(0, 5).map((e, i) => (i === 0 ? { ...e, request_id: first } : e))]);
+      await panel.settle();
+      // The first queued prompt's turn is running; the second is still waiting at the bottom.
+      assert.deepEqual(await topLevel(panel), [`you: ${PROMPT2}`, "dgc", `you: ${QUEUED[0]}`, "dgc", `you: ${QUEUED[1]}`]);
+      await panel.events([...answeredTurn("t2", QUEUED[0]).slice(5),
+        { type: "turn_start", turn_id: "t3", prompt: QUEUED[1], kind: "prompt", request_id: second },
+        { type: "text_delta", text: "Running the auth tests." }, { type: "stream_end", message_id: "t3:1", phase: "commentary" }]);
+      await panel.settle(); await toBottom(panel); await panel.settle();
+      const order = [`you: ${PROMPT2}`, "dgc", `you: ${QUEUED[0]}`, "dgc", `you: ${QUEUED[1]}`, "dgc"];
+      assert.deepEqual(await topLevel(panel), order);
+      const live = await measure(panel);
+      assertSpacing(live, `queued at ${width}px`);
+      // The same chat drawn from its snapshot reads the same, spaced the same.
+      await replayed.events([{ type: "session", kind: "resumed", session_id: "s1" }, { type: "history", todos: [], items: [
+        ...runningTurn("h1"), { type: "tool_result", call_id: "h1c1", name: "bash", output: "ok" },
+        { type: "text_delta", text: ANSWER }, { type: "stream_end", message_id: "h1:2", phase: "answer" },
+        { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:2" },
+        ...answeredTurn("h2", QUEUED[0]),
+        { type: "turn_start", turn_id: "h3", prompt: QUEUED[1], kind: "prompt" },
+        { type: "text_delta", text: "Running the auth tests." }, { type: "stream_end", message_id: "h3:1", phase: "commentary" }] }]);
+      await replayed.settle(); await toBottom(replayed); await replayed.settle();
+      assert.deepEqual(await topLevel(replayed), order);
+      const restored = await measure(replayed);
+      for (const text of QUEUED) assert.deepEqual(around(restored, text), around(live, text), `"${text}" is spaced the same live and restored`);
+    } finally { await panel.page.close(); await replayed.page.close(); }
+  });
+}
+
+// ---- where the first prompt starts ---------------------------------------------------------------
+// A reloaded or cleared chat with nothing to restore still inserts its empty history wrapper first.
+test("the first prompt of an empty restored chat starts where a fresh chat's does", async (t) => {
+  if (skipOrFail(t)) return;
+  const fresh = await openPanel(988), restored = await openPanel(988);
+  try {
+    await restored.events([{ type: "session", kind: "resumed", session_id: "s1" }, { type: "history", items: [], todos: [] },
+      { type: "recall", items: [], before: 0, more: false }]);
+    for (const panel of [fresh, restored]) { await panel.prompt(PROMPT1); await panel.settle(); }
+    const offset = (panel) => panel.page.evaluate(() => {
+      const log = document.getElementById("log"), prompt = log.querySelector(".msg.user");
+      return Math.round(prompt.getBoundingClientRect().top - log.getBoundingClientRect().top - parseFloat(getComputedStyle(log).paddingTop));
+    });
+    assert.equal(await offset(fresh), 0, "a fresh chat's first prompt sits on the log's padding");
+    assert.equal(await offset(restored), 0, "so does the first prompt of an empty restored chat");
+  } finally { await fresh.page.close(); await restored.page.close(); }
+});
+
+// ---- markers -------------------------------------------------------------------------------------
+// A compaction marker and a notice in restored history, and the note a continued turn leaves, sit in
+// the log's column like every other block: its gap spaces them, with nothing of their own on top.
+test("markers in the transcript take the space between blocks and add none of their own", async (t) => {
+  if (skipOrFail(t)) return;
+  const panel = await openPanel(460), restarted = await openPanel(460);
+  try {
+    await panel.events([{ type: "session", kind: "resumed", session_id: "s1" }, { type: "history", todos: [], items: [
+      ...answeredTurn("h1"), { role: "compaction", text: "Summary of the earlier turns." },
+      { role: "notice", text: "Model switched to qwen3.8:27b" }, ...answeredTurn("h2", PROMPT2)] },
+      { type: "recall", items: [], before: 0, more: false }]);
+    await panel.settle(); await toBottom(panel); await panel.settle();
+    const m = await measure(panel);
+    assertSpacing(m, "compaction and notice");
+    // The answer, the marker, the notice, then the next prompt a step further as always.
+    const markers = m.pairs.filter((pair) => /compaction|sys/.test(pair.between))
+      .map((pair) => [pair.between.replace(/ hist| settled/g, ""), pair.gap]);
+    assert.deepEqual(markers, [["msg dgc -> compaction", BETWEEN_BLOCKS], ["compaction -> sys", BETWEEN_BLOCKS],
+      ["sys -> msg user", ABOVE_PROMPT]]);
+
+    await answeredThenPrompted(restarted); await restarted.settle(); await restartAndRepaint(restarted);
+    await restarted.settle(); await toBottom(restarted); await restarted.settle();
+    const note = await restarted.page.evaluate(() => {
+      const node = document.querySelector(".resume-note.continue-note");
+      const text = node.querySelector("span:last-child").getBoundingClientRect(), box = node.getBoundingClientRect();
+      return { above: Math.round(text.top - box.top), below: Math.round(box.bottom - text.bottom) };
+    });
+    assert.ok(note.above <= 1 && note.below <= 1, `the continue note carries ${note.above}px above and ${note.below}px below its text`);
+    assertSpacing(await measure(restarted), "after a continued turn");
+  } finally { await panel.page.close(); await restarted.page.close(); }
+});
+
+// ---- steering, in every position -----------------------------------------------------------------
+// A steered prompt stands 24px below whatever it follows inside the turn -- a tool group, prose, the
+// answer -- and when it is the turn's last word, the next prompt is 24px below it, not 36.
+for (const width of WIDTHS) {
+  test(`steered prompts are spaced like prompts wherever they land in the turn (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width, { steering: true });
+    const steer = async (text, events = []) => {
+      const id = await panel.prompt(text);
+      await panel.events([{ type: "prompt_accepted", request_id: id, state: "steered" },
+        { type: "steering_update", request_id: id, state: "applied" }, ...events]);
+    };
+    try {
+      await panel.events(answeredTurn("t1").slice(0, 5));                            // prose, then a finished command
+      await steer("S1 after a tool group", [{ type: "text_delta", text: "Some prose after the first steer that runs on for a line or two so it wraps." }]);
+      await steer("S2 after prose", [{ type: "tool_call", call_id: "t1c2", name: "bash", args: { command: "pwd" }, summary: "pwd" },
+        { type: "tool_result", call_id: "t1c2", name: "bash", output: "/x" },
+        { type: "text_delta", text: ANSWER }, { type: "stream_end", message_id: "t1:3", phase: "answer" }]);
+      await steer("S3 right before the turn ended", [{ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:3" }]);
+      await panel.settle();
+      const next = await panel.prompt("S4 an ordinary prompt after the steered turn");
+      await panel.events([{ type: "prompt_accepted", request_id: next, state: "started" },
+        ...answeredTurn("t2", "S4 an ordinary prompt after the steered turn").map((e, i) => (i === 0 ? { ...e, request_id: next } : e))]);
+      await panel.settle(); await toBottom(panel); await panel.settle();
+      const m = await measure(panel);
+      assertSpacing(m, `steered at ${width}px`);
+      const steered = m.bubbles.filter((b) => b.steered);
+      assert.equal(steered.length, 3, "three prompts were applied inside the turn");
+      for (const b of steered) assert.equal(b.above, ABOVE_PROMPT, `"${b.text}" is ${b.above}px below what precedes it`);
+      assert.equal(around(m, "S3 right before the turn ended").below, ABOVE_PROMPT, "the next prompt stands 24px below the last steered one");
+      assert.equal(around(m, "S1 after a tool group").below, BETWEEN_BLOCKS, "prose follows a steered prompt at 16px");
+    } finally { await panel.page.close(); }
+  });
+}
+// Steered, and the turn ends at once: spaced like a prompt above, and the turn's closing line
+// ("Worked for 2s") follows it at 16px, like any reply.
+test("a steer applied as the turn ends is spaced like a prompt, and the turn's closing line follows at 16px", async (t) => {
+  if (skipOrFail(t)) return;
+  const panel = await openPanel(460, { steering: true });
+  try {
+    await panel.events(answeredTurn("t1").slice(0, 3));
+    const id = await panel.prompt("steer this");
+    await panel.events([{ type: "prompt_accepted", request_id: id, state: "steered" }, { type: "steering_update", request_id: id, state: "applied" },
+      { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: null }]);
+    await panel.settle();
+    await panel.events(answeredTurn("t2", PROMPT2));
+    await panel.settle(); await toBottom(panel); await panel.settle();
+    const m = await measure(panel);
+    assertSpacing(m, "steered then ended");
+    assert.equal(around(m, "steer this").below, BETWEEN_BLOCKS);
+  } finally { await panel.page.close(); }
+});

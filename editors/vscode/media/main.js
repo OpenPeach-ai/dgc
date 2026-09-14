@@ -591,8 +591,63 @@
       requestAnimationFrame(() => settleBlock(node));
       return;
     }
+    node._pinnedWidth = log.clientWidth;  // a height is only true at the width it was measured at
     node.classList.add("settled");        // only now may the browser skip it
     blockSizes?.observe(node);
+  }
+  // A pin is a height at one width. When the panel's width changes the text re-wraps, but a block
+  // that is skipped is never laid out again, so it keeps the old height -- and so does the size the
+  // browser itself remembers for it. Scrolling back then met blocks that grew or shrank as they came
+  // into view, and the page under the reader jumped by the difference: 100-200px after dragging the
+  // sidebar narrower, 20,000px of phantom transcript after a run went on while the panel was
+  // collapsed to nothing. Once the width has held still, lay every block measured at another width
+  // out again, pin what it really is, and keep what is on screen where it was. A few dozen blocks a
+  // frame, nearest the view first: all at once was a quarter-second stall on a 200-turn chat, and
+  // the blocks near the view are the ones a scroll reaches first.
+  const REPIN_BATCH = 24;
+  let repinTimer = null;
+  function repinStaleBlocks() {
+    repinTimer = null;
+    const width = log.clientWidth;
+    const pad = getComputedStyle(log);
+    // Hidden, or too narrow to hold a word: whatever is measured now is not what anyone will read.
+    if (width - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight) < 48) return;
+    const candidates = [...log.querySelectorAll(".msg.settled")].filter((node) => node._pinnedWidth !== width);
+    if (!candidates.length) return;
+    const view = log.getBoundingClientRect();
+    const middle = view.top + view.height / 2;
+    const distance = (node) => { const r = node.getBoundingClientRect(); return r.bottom < middle ? middle - r.bottom : Math.max(0, r.top - middle); };
+    const stale = candidates.map((node) => [distance(node), node]).sort((a, b) => a[0] - b[0])
+      .slice(0, REPIN_BATCH).map(([, node]) => node);
+    if (candidates.length > REPIN_BATCH) repinTimer = setTimeout(repinStaleBlocks, 16);
+    const logTop = view.top;
+    const anchor = following ? null : [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
+      .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > logTop);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    for (const node of stale) node.classList.remove("settled");   // rendered again, so laid out at this width
+    // Every height read before any is written: one layout for the lot, not one per block.
+    const heights = stale.map((node) => Math.round(node.offsetHeight));
+    stale.forEach((node, i) => {
+      if (heights[i] >= 8) { node._pinnedHeight = heights[i]; node.style.containIntrinsicSize = `auto ${heights[i]}px`; }
+      node._pinnedWidth = width;
+    });
+    if (anchor?.isConnected) log.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+    else if (following) scroll();
+    // Skippable again only after a frame rendered them: that is when the browser records the size
+    // it will use for a skipped block, and it must record this one, not the old width's. (If the
+    // width moved again meanwhile, the pass that follows finds these by their width, not their class.)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      for (const node of stale) if (node.isConnected) node.classList.add("settled");
+      if (following) scroll();
+    }));
+  }
+  if (typeof ResizeObserver === "function") {
+    let lastWidth = -1;
+    new ResizeObserver(() => {
+      if (log.clientWidth === lastWidth) return;
+      lastWidth = log.clientWidth;
+      clearTimeout(repinTimer); repinTimer = setTimeout(repinStaleBlocks, 150);
+    }).observe(log);
   }
   // Is the view still tracking the end of the run? It stops only when you scroll away yourself.
   // Following "whenever we happen to be at the bottom" is not enough: anything that moves the
@@ -671,7 +726,24 @@
     m.appendChild(el("div", "bubble", esc(body)));
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
   }
-  function startTurn(prompt = "", kind = "prompt", id = "") {
+  // A prompt that was queued behind a running turn already has its bubble, drawn when it was sent,
+  // below that turn. When its own turn starts, that bubble IS the prompt: echoing the text again
+  // drew it twice, and a second queued prompt then sat between the first and its reply. The bubble
+  // moves up past any prompt still waiting (the backend may have reordered them), and its turn is
+  // placed straight beneath it, so the prompts still waiting stay at the bottom, as they did.
+  function claimQueuedPrompt(requestId) {
+    const node = typeof requestId === "string" && requestId ? queuedPrompts.get(requestId)?.node : null;
+    if (!node?.isConnected || node.parentElement !== log || !node.classList.contains("user")) return null;
+    const waiting = [...queuedPrompts].map(([id, entry]) => id !== requestId && entry.node)
+      .filter((other) => other && other.isConnected && other.parentElement === log
+        && (other.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const first = waiting.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))[0];
+    if (first) first.before(node);
+    const role = node.querySelector(".role");
+    if (role && role.textContent.startsWith("you")) role.textContent = "you";
+    return node;
+  }
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -691,7 +763,7 @@
       note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
         + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
-    } else {
+    } else if (!promptNode) {
       echoPrompt(prompt);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
@@ -700,7 +772,9 @@
     // turn is doing. A literal here is a claim the panel cannot keep: it was "working…" from the
     // first byte to the last, through six gates and every tool call.
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
-    block.appendChild(act); appendTarget.appendChild(block);
+    block.appendChild(act);
+    if (promptNode) promptNode.after(block);
+    else appendTarget.appendChild(block);
     // No clock for a replayed turn: the session file does not record when it started, and a
     // fabricated 0s is worse than no number at all.
     const t0 = replaying ? null : Date.now();
@@ -2221,7 +2295,8 @@
         break;
       case "turn_start":
         if (!replaying) removeRecoveryCards();
-        startTurn(ev.prompt, ev.kind, ev.turn_id);
+        startTurn(ev.prompt, ev.kind, ev.turn_id,
+          replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id));
         if (!replaying) customCommandPending = "";
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
@@ -3816,15 +3891,15 @@
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
       const landed = [...frag.children];
       older.after(frag); cursor = start;
-      landed.forEach(settleBlock);
-      log.scrollTop = oldTop + log.scrollHeight - oldHeight;
       // Past the live messages there is still the archive of everything compaction folded away.
       // DGC keeps it on disk beside the session, so "Show earlier messages" keeps working rather
       // than stopping at the summary with the rest of the conversation sitting unread.
-      if (cursor === 0) {
-        if (recallCursor === null || recallCursor > 0) askForRecall();
-        else older.hidden = true;
-      }
+      if (cursor === 0 && recallCursor === 0) older.hidden = true;
+      landed.forEach(settleBlock);
+      // After the button is gone too: it is above the reader as well, and leaving it out of the
+      // measurement moved the page by its height and the gap beneath it.
+      log.scrollTop = oldTop + log.scrollHeight - oldHeight;
+      if (cursor === 0 && recallCursor !== 0) askForRecall();
     }
 
     let recallCursor = null;         // null = not asked yet; 0 = the archive is exhausted
@@ -3859,14 +3934,14 @@
           frag.appendChild(m);
         }
       }
-      if (rows.length) {
-        const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
-        const landed = [...frag.children];
-        older.after(frag);
-        landed.forEach(settleBlock);
-        log.scrollTop = oldTop + log.scrollHeight - oldHeight;
-      }
+      // The rows and the button's going both happen above what is being read, so both are inside
+      // the one measurement that keeps the page still.
+      const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
+      const landed = [...frag.children];
+      older.after(frag);
       older.hidden = !ev.more;
+      landed.forEach(settleBlock);
+      log.scrollTop = oldTop + log.scrollHeight - oldHeight;
     };
     older.type = "button";
     older.onclick = () => { if (cursor > 0) page(); else askForRecall(); };
