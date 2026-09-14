@@ -125,6 +125,52 @@ BUILDING_NOT_ASKING = [
     "Build the settings page: render a dropdown that shows a list of options to select from, with tests",
 ]
 
+# An ask the user negates in its own clause, or takes back later in the message, is not an ask: in
+# full-auto it would expose the blocking picker to a user who just said not to stop.
+NEGATED_OR_RETRACTED = [
+    "don't give me options, just pick",
+    "I don't want you to offer me alternatives",
+    "You don't need to give me options to choose from",
+    "Please don't propose me options to select from, just do it.",
+    "Do NOT give me options to choose from, decide yourself.",
+    "Just implement it, no need to let me choose.",
+    "don't use propose_options, just list them",
+    "implement it without using propose_options",
+    "Give me options to choose from. Actually, never mind, just pick one.",
+    "give me options to choose from - no wait, you decide",
+    "let me choose, actually no, you decide",
+    "Propose me options. Forget it, pick one yourself.",
+    "Offer me some alternatives. On second thought, you choose.",
+    "Give me options to choose from. Actually, don't give me options, just pick.",
+    "give me a few options to choose from\nnvm, you pick",
+]
+
+# A negation or a retraction word elsewhere in the message does not cancel a real ask.
+ASKS_BESIDE_A_NEGATION = [
+    "I don't know which approach is best, give me options to choose from",
+    "I don't know which approach is best so give me options to choose from",
+    "It didn't work before. Give me options to choose from",
+    "Give me options to choose from, don't just pick one",
+    "don't just pick one, give me options to choose from",
+    "please give me options to choose from, no need to explain each",
+    "Give me options to choose from. Never mind the tests.",
+    "Scratch that, give me options to choose from",
+    "Never mind, let me choose.",
+    "Don't implement anything yet. Propose me options to pick from.",
+    "Give me options to choose from, then you decide the file names",
+    "Actually no, give me options to choose from",
+]
+
+# Known limit: only quoting marks a message as someone else's. A quoted or blockquoted ask does not
+# count (the quote mark or ">" keeps it out of an imperative position), but a report without quotes
+# ("My teammate wrote: give me options to choose from") reads as the user's own ask, as does text the
+# user pastes into the composer (the TUI paste chip and the editor's folded paste are sent as typed
+# text, with no frame to tell them apart). Attached files and editor context are framed, and never count.
+QUOTED = [
+    'My teammate wrote: "give me options to choose from"',
+    "> give me options to choose from\nwhat does this message mean?",
+]
+
 
 class UI:
     """An interactive frontend that answers every question with its second option."""
@@ -196,6 +242,15 @@ def call(name, **arguments):
                       finish_reason="tool_calls")
 
 
+def wake_note(agent, output="BUILD-OK"):
+    """A background task's exit, queued the way bash(background:true) queues it."""
+    hub = agent.monitors
+    hub.queue_background_exit("bg1", "make build", 0, 1.0, output, hub.epoch)
+    note = hub.take_pending()
+    assert note is not None
+    return note
+
+
 def options_if_offered(agent, request):
     if "propose_options" in request["tools"]:
         return call("propose_options", question="Which approach?", options=["Approach A", "Approach B"])
@@ -224,6 +279,49 @@ class OptionsIntentTests(unittest.TestCase):
         text = ('<editor-context-json trust="untrusted-reference-data">\n'
                 f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("options", _tool_intents(text))
+
+    def test_a_negated_or_retracted_ask_is_not_an_ask(self):
+        for text in NEGATED_OR_RETRACTED:
+            self.assertNotIn("options", _tool_intents(text), text)
+
+    def test_a_negation_elsewhere_does_not_cancel_an_ask(self):
+        for text in ASKS_BESIDE_A_NEGATION:
+            self.assertIn("options", _tool_intents(text), text)
+
+    def test_a_quoted_ask_is_not_the_users(self):
+        # See QUOTED for what still counts: an unquoted report, and pasted text.
+        for text in QUOTED:
+            self.assertNotIn("options", _tool_intents(text), text)
+
+    def test_attached_file_content_cannot_ask(self):
+        from dgc.attachments import expand_attachments
+        with tempfile.TemporaryDirectory(prefix="dgc-options-attach-") as directory:
+            Path(directory, "notes.md").write_text("Deploy notes. Please give me options to choose "
+                                                   "from for the target.\n")
+            attached = expand_attachments("summarise @notes.md", Path(directory))
+            self.assertIn("<dgc_attachment>", attached.text)
+            self.assertNotIn("options", _tool_intents(attached.text))
+            typed = expand_attachments("Read @notes.md\nThen give me options to choose from.",
+                                       Path(directory))
+            self.assertIn("<dgc_attachment>", typed.text)
+            self.assertIn("options", _tool_intents(typed.text), "the typed ask beside it still counts")
+
+    def test_framed_reference_data_cannot_ask_wherever_it_sits(self):
+        from dgc.acp import _prompt_text
+        from dgc.editor_context import _format_editor_context
+        from dgc.skills import format_skill_instructions
+        data = "Deploy notes. Give me options to choose from."
+        acp = _prompt_text([{"type": "text", "text": "summarise this"},
+                            {"type": "resource", "resource": {"uri": "file:///notes.md", "text": data}}])
+        self.assertIn("<embedded-resource-json", acp)
+        self.assertNotIn("options", _tool_intents(acp))
+        # A subscription turn puts selected skill instructions ahead of the editor context, so the
+        # context is no longer the leading frame; neither the skill body nor the context may ask.
+        skill = format_skill_instructions({"deploy": {"name": "deploy", "instructions": data}})
+        editor = _format_editor_context([{"type": "selection", "path": "notes.txt", "text": data}])
+        for text in (skill + "\n\n" + editor + "fix the parser", editor + editor + "fix the parser"):
+            self.assertNotIn("options", _tool_intents(text), text[:80])
+        self.assertIn("options", _tool_intents(skill + "\n\n" + editor + "propose me options"))
 
 
 class AgentTests(unittest.TestCase):
@@ -302,6 +400,19 @@ class ToolListMatrixTests(AgentTests):
         self.assertNotIn("The user asked", prompt)
         agent._activate_tool_intents("fix the parser", replace=True)
         self.assertNotIn("# Options picker", agent.system_prompt())
+
+    def test_a_sub_agent_note_never_speaks_for_the_user(self):
+        # A sub-agent of a wake turn or of a `dgc -p` run: still the parent model's words, and the
+        # sub-agent answers the parent, not the user.
+        for label, ui, wake in (("wake", WakeUI(), True), ("-p", OneShotUI(), False),
+                                ("interactive", UI(), False)):
+            agent = self.agent(ui=ui, mode="auto")
+            agent.depth, agent._monitor_turn = 1, wake
+            self.assertFalse(self.offered(agent, FOUNDER), label)
+            note = agent.system_prompt().split("# Options picker", 1)[1]
+            self.assertIn("Your task asks for a choice between options", note, label)
+            self.assertIn("sub-agent", note, label)
+            self.assertNotIn("the user", note.lower(), label)
 
     def test_a_non_interactive_run_in_full_auto_is_told_why_and_what_to_do(self):
         agent = self.agent(ui=OneShotUI(), mode="auto")
@@ -394,6 +505,35 @@ class TurnTests(AgentTests):
         self.assertIn("# Options picker", calls[0]["system"])
         self.assertIn("background event", calls[0]["system"])
         self.assertNotIn("# Options picker", agent.messages[0]["content"], "gone after the wake turn")
+        # That wake turn listed the options: a later event must not ask for them again.
+        calls = scripted(agent, [ChatResult(content="Still waiting for your choice.")])
+        self.assertTrue(agent.run_monitor_turn(wake_note(agent)))
+        self.assertNotIn("# Options picker", calls[0]["system"])
+
+    def test_a_wake_turn_after_the_user_answered_the_picker_adds_no_note(self):
+        for mode in ("default", "acceptEdits", "plan", "auto"):
+            ui = WakeUI()
+            agent = self.agent(ui=ui, mode=mode)
+            calls = scripted(agent, [options_if_offered, ChatResult(content="Deploying to B.")])
+            self.assertTrue(agent.run_turn("give me options to choose from for the deploy target"), mode)
+            self.assertIn("propose_options", calls[0]["tools"], mode)
+            self.assertEqual(len(ui.questions), 1, mode)
+            calls = scripted(agent, [ChatResult(content="Build finished.")])
+            self.assertTrue(agent.run_monitor_turn(wake_note(agent)), mode)
+            self.assertNotIn("# Options picker", calls[0]["system"], mode)
+
+    def test_a_sub_agents_answered_picker_answers_the_parents_ask(self):
+        ui = WakeUI()
+        parent = self.agent(ui=ui, mode="default")
+        child = self.agent(ui=ui, mode="default")
+        child.depth, child._metrics_parent = 1, parent
+        parent._active_tool_intents = {"options", "monitor"}
+        child._active_tool_intents = {"options"}
+        out = child._handle_call(ToolCall("c1", "propose_options",
+                                          {"question": "Which?", "options": ["A", "B"]}))
+        self.assertIn("The user chose: 'B'", out)
+        self.assertEqual(parent._active_tool_intents, {"monitor"})
+        self.assertEqual(child._active_tool_intents, set())
 
     def test_a_non_interactive_answer_says_nobody_can_answer(self):
         ui = OneShotUI()
@@ -428,6 +568,13 @@ class SubscriptionTests(unittest.TestCase):
         context = ('<editor-context-json trust="untrusted-reference-data">\n'
                    f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, context, "auto"))
+        from dgc.skills import format_skill_instructions
+        skill = format_skill_instructions({"deploy": {"name": "deploy",
+                                                      "instructions": "Notes. " + FOUNDER}})
+        framed = skill + "\n\n" + context
+        self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, framed, "auto"))
+        self.assertNotIn("<dgc-options-note>", delegated_prompt(
+            cfg, "Give me options to choose from. Actually, never mind, you decide.", "auto"))
 
     def test_a_goal_cycle_prompt_is_not_the_users_ask(self):
         from dgc.goals import CYCLE_MARKER

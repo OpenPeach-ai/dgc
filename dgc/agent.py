@@ -181,6 +181,12 @@ class _OptionsAsk:
     * nothing in the sentence that marks a spec or code (a dropdown, a page, a function, a file
       path, "should", "when the user ...", "in the TUI"); the picker-by-name forms also need a
       message that is not a bug report.
+
+    Only what the user typed is read: attached files, editor context, ACP resources and selected
+    skill bodies arrive in DGC's frames and are cut out first, wherever they sit in the message.
+    An ask the user negates ("don't give me options", "I don't want you to offer me alternatives",
+    "without using propose_options") or takes back later ("... Actually, never mind, you pick")
+    does not count; a later ask in the same message does.
     """
 
     _POS = (r"(?:^|(?<=[,:(])|\b(?:please|pls|kindly|just|now|then|and|so|also|first|"
@@ -250,19 +256,73 @@ class _OptionsAsk:
     _CUE = re.compile(r"option|choice|alternative|choose|pick|select|decide|popup|pop-up|dialog|card|"
                       r"ask\s+(?:me|us)\b", re.IGNORECASE)
 
+    # DGC's frames around data the user did not type. Their contents are escaped (the JSON frames
+    # escape every angle bracket, attachments rewrite their boundary tags), so the first closing tag
+    # really ends the frame; an unclosed one runs to the end of the text.
+    _FRAME = re.compile(
+        r"<(editor-context-json|embedded-resource-json|resource-link-json|dgc-skill-instructions-json)"
+        r"\b[^>\n]*>.*?(?:</\1>|\Z)|<dgc_attachment>.*?(?:</dgc_attachment>|\Z)",
+        re.DOTALL)
+    # A negation in the clause that holds the ask: "don't give me options", "I don't want you to offer
+    # me alternatives", "no need to let me choose", "without using propose_options". Up to four
+    # words may sit between the negation and the verb, never a conjunction or a clause break, so
+    # "I don't know which is best, give me options" and "... so give me options" still ask; nor
+    # "don't just pick one", "don't forget to" or "why don't you".
+    _NEG_ASK = re.compile(
+        r"(?<!why\s)\b(?:\w+n't|dont|doesnt|didnt|cant|wont|do\s+not|does\s+not|never|not|no|without|"
+        r"stop|quit|avoid|instead\s+of|rather\s+than)\b(?!\s+(?:just|only|forget|hesitate)\b)"
+        r"(?:\s+(?!(?:and|so|but|then|or|because)\b)[\w']+){0,4}?\s+"
+        r"(?:propos|offer|giv|gave|show|present|list|suggest|let|ask|us(?:e|ing)\b|call|invok|"
+        r"trigger|demo)\w*[^,;:.!?\n]{0,60}?\b(?:options?|choices?|alternatives?|choose|pick|select|"
+        r"decide|picker|propose_options|multiple[- ]choice)\b",
+        re.IGNORECASE)
+    # Taking an ask back, alone in its clause right after the ask or at the start of a later
+    # sentence: "never mind", "scratch that", "actually no, you decide", "forget it, pick one
+    # yourself". A clause that goes on ("you decide the file names", "never mind the tests") is
+    # about something else.
+    _RETRACT = re.compile(
+        r"[\s,;:!?.\-–—]*(?:(?:actually|ok(?:ay)?|no|nah|nope|wait|hm+|so|then|and|or|just|well|um+|"
+        r"oh|sorry)\b[\s,;:!?.\-–—]*)*"
+        r"(?:never\s*mind|nvm|scratch\s+that|forget\s+(?:about\s+)?(?:it|that|the\s+(?:options|choices|"
+        r"alternatives|picker))|on\s+second\s+thoughts?|just\s+kidding|jk|cancel\s+that|no\s+need|"
+        r"don'?t\s+bother|you\s+(?:can\s+)?(?:decide|choose|pick)|"
+        r"(?:decide|choose|pick)(?:\s+one)?\s+(?:for\s+me|yourself))"
+        r"(?:\s+(?:for\s+me|yourself|one|it|instead|then|please|after\s+all|for\s+now))*"
+        r"\s*(?=$|[,;:!?.)\-–—])",
+        re.IGNORECASE)
+
     def search(self, text: str) -> bool:
-        source = str(text or "")
+        source = _trusted_intent_text(self._FRAME.sub("\n", str(text or ""))).replace("’", "'")
         if not self._CUE.search(source):
             return False
         bug_report = bool(self._BUG.search(source))
-        for sentence in self._SENTENCE.split(source):
+        last_ask = -1            # where the latest ask that no negation covers starts
+        cancels = []             # where a negated ask or a retraction starts
+        start = 0
+        for boundary in [*self._SENTENCE.finditer(source), None]:
+            end = boundary.start() if boundary else len(source)
+            sentence, offset = source[start:end], start
+            start = boundary.end() if boundary else end
+            offset += len(sentence) - len(sentence.lstrip())
             sentence = sentence.strip()
-            if (not sentence or not self._CUE.search(sentence)
+            if not sentence:
+                continue
+            if self._RETRACT.match(sentence):
+                cancels.append(offset)
+            if (not self._CUE.search(sentence)
                     or self._SPEC.search(self._PICKER_NAME.sub(" ", sentence))):
                 continue
-            if self._ASK.search(sentence) or (not bug_report and self._BY_NAME.search(sentence)):
-                return True
-        return False
+            negated = [match.span() for match in self._NEG_ASK.finditer(sentence)]
+            cancels += [offset + negation for negation, _ in negated]
+            asks = [*self._ASK.finditer(sentence),
+                    *(() if bug_report else self._BY_NAME.finditer(sentence))]
+            for ask in asks:
+                if any(first < ask.end() and ask.start() < last for first, last in negated):
+                    continue
+                last_ask = max(last_ask, offset + ask.start())
+                if self._RETRACT.match(sentence, ask.end()):
+                    cancels.append(offset + ask.end())
+        return last_ask >= 0 and not any(cancel > last_ask for cancel in cancels)
 
 
 _TOOL_INTENT_PATTERNS = {
@@ -349,8 +409,10 @@ def _trusted_intent_text(text: str) -> str:
 
 def _tool_intents(text: str) -> set[str]:
     source = _trusted_intent_text(text)
+    # The options judge cuts DGC's reference frames out of the whole text itself (see _OptionsAsk):
+    # an ask to be offered choices must be typed by the user, not found in an attached file.
     return {intent for intent, pattern in _TOOL_INTENT_PATTERNS.items()
-            if pattern.search(source)}
+            if pattern.search(text if isinstance(pattern, _OptionsAsk) else source)}
 
 
 def _result_stall(result) -> dict | None:
@@ -1765,27 +1827,46 @@ class Agent(GoalLifecycle):
         return ("options" in getattr(self, "_active_tool_intents", set())
                 and self.depth == 0 and not self._non_interactive())
 
+    def _picker_offered(self) -> bool:
+        return any(tool.get("function", {}).get("name") == "propose_options"
+                   for tool in self._tool_schemas())
+
+    def _options_ask_served(self) -> None:
+        """A round of questions was put to the user's UI: the ask to be offered choices is answered.
+
+        "options" in the active intents stands for an ask still open. Once a round has been shown
+        (answered, dismissed, or refused by `dgc -p`), full-auto withdraws the picker for the rest of
+        the turn, and a later wake turn is not told to list the options again. A sub-agent's round
+        answers its parent's ask too; a parent's tool list only depends on the ask in full-auto,
+        where a sub-agent is never offered the picker, so the parents need no refresh.
+        """
+        offered = self._picker_offered()
+        agent = self
+        while agent is not None:
+            getattr(agent, "_active_tool_intents", set()).discard("options")
+            agent = getattr(agent, "_metrics_parent", None)
+        if self._picker_offered() != offered:
+            self._refresh_system()      # the text tool protocol lists the tools in the prompt
+
     def _options_unavailable_note(self) -> str:
-        """One system section, only when the user asked to choose and the picker is not offered.
+        """One system section, only when the user's ask to choose is open and the picker is not offered.
 
         Without it the model can only say the tool does not exist. Gated on the explicit ask, so a
         request that did not ask (the prompt-surface probe among them) carries nothing extra.
         """
-        if "options" not in getattr(self, "_active_tool_intents", set()):
+        if "options" not in getattr(self, "_active_tool_intents", set()) or self._picker_offered():
             return ""
-        if any(tool.get("function", {}).get("name") == "propose_options"
-               for tool in self._tool_schemas()):
-            return ""
-        if getattr(self, "_monitor_turn", False):
+        if self.depth:
+            # Whatever the parent's situation, a sub-agent answers the parent, never the user.
+            reason = "you are a sub-agent"
+            how = "put them in your result for the parent agent"
+        elif getattr(self, "_monitor_turn", False):
             reason = "this turn was started by a background event and nobody is at the keyboard"
             how = "ask the user to reply with their choice in a normal message"
         elif self._non_interactive():
             reason = "this is a non-interactive `dgc -p` run"
             how = ("tell the user the picker appears in the interactive `dgc` terminal and the "
                    "editor panel")
-        elif self.depth:
-            reason = "you are a sub-agent"
-            how = "put them in your result so the parent agent can offer the picker"
         else:
             reason = "it is not offered in this context"
             how = "ask the user to reply with their choice"
@@ -2737,6 +2818,10 @@ class Agent(GoalLifecycle):
                 self._refresh_system()
                 completed = self._run_turn(notification.text, source="monitor",
                                            notification=notification)
+                if completed is True and "options" in self._active_tool_intents:
+                    # This turn carried the options note (a wake turn never offers the picker) and
+                    # listed them: the next event must not have the model list them again.
+                    self._last_turn_tool_intents.discard("options")
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -4810,9 +4895,6 @@ class Agent(GoalLifecycle):
             except ValueError as exc:
                 return f"error: {exc}"
             grouped = "questions" in args
-            # Full-auto offers the picker only because the user asked on this turn. One round of
-            # questions answers that ask; the rest of the turn (a whole goal run) goes on unattended.
-            answers_the_ask = self.mode == "auto" and self._options_asked_interactively()
             show_form = getattr(type(self.ui), "propose_questions", None)
             if grouped and callable(show_form):
                 answers = self.ui.propose_questions(questions)
@@ -4823,9 +4905,10 @@ class Agent(GoalLifecycle):
                     if not choice:
                         break
                     answers[question["id"]] = choice
-            if answers_the_ask:
-                self._active_tool_intents.discard("options")
-                self._refresh_system()      # the text tool protocol lists the tools in the prompt
+            # One round of questions answers the ask. Full-auto offered the picker only for it, so the
+            # rest of the turn (a whole goal run) goes on unattended; and a wake turn after this one
+            # must not ask the model to list the options again.
+            self._options_ask_served()
             if not valid_answers(questions, answers) or self.cancelled.is_set():
                 if self._non_interactive() and not self.cancelled.is_set():
                     return ("No one can answer in this non-interactive `dgc -p` run, so no choice was "

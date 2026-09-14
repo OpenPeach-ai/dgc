@@ -21,14 +21,16 @@ Full-auto mode does not stop to ask, so it leaves `propose_options` out, except 
 explicitly ask to choose ("propose me options to select from", "let me choose", "ask me to pick").
 That turn gets the picker in every permission mode. In full-auto it is withdrawn again once one round
 of questions has been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text
-you type counts: a goal's objective never re-opens the picker on later cycles or turns, and a
-sentence that describes software ("the dropdown should let me choose a region", "write tests for
-propose_options") is not an ask.
+you type counts: attached files and editor context never ask, a goal's objective never re-opens the
+picker on later cycles or turns, and a sentence that describes software ("the dropdown should let me
+choose a region", "write tests for propose_options") is not an ask. Neither is an ask you negate or
+take back ("don't give me options, just pick", "... actually, never mind, you decide").
 
 Some turns still have nobody to answer: a turn DGC starts on a background event, a full-auto
 `dgc -p` run, a sub-agent in full-auto, and a subscription CLI turn. When you ask on one of these,
 the model is told why the picker is missing, so it lists the choices as a numbered list instead of
-claiming the picker does not exist. In other `dgc -p` modes the picker stays offered, so a script
+claiming the picker does not exist. Once you have answered a round of questions, or a background turn
+has listed the choices, later background turns are not told again. In other `dgc -p` modes the picker stays offered, so a script
 still receives the structured `options_request` event (with `decision: null`); the model is then
 told that nobody can answer and gives the options in its final answer.
 
