@@ -2411,7 +2411,8 @@ def main(argv: list[str] | None = None) -> int | None:
                     from . import artifacts
                     artifacts.autostart_if_pending(
                         int(config.get("artifact_port", 45000)),
-                        lan=(str(config.get("artifact_bind", "localhost")).lower() == "lan"))
+                        lan=(str(config.get("artifact_bind", "localhost")).lower() == "lan"),
+                        hostname=str(config.get("artifact_hostname", "") or ""))
                 except Exception:
                     pass
             if args.classic or not sys.stdout.isatty():

@@ -393,6 +393,16 @@ agent can also serve any page/app/chart it builds the same way.
 - **It persists.** The list is saved, so after you restart `dgc` the server
   tries to reuse the same port with your artifacts intact (set the preferred port with
   `artifact_port`, turn off relaunch with `artifact_autostart`).
+- **Only the page is published.** Dot-files and dot-folders (`.env`, `.git`,
+  `.dgc`), key files, and symlinks that point outside the artifact's folder are
+  never served. A page in its own folder is served as a whole site; a page that
+  sits in a project root (next to `.git`, `package.json`, `pyproject.toml`…) is
+  served with only the files it links to, never the rest of the project. Put a
+  multi-file site in its own folder, e.g. `artifacts/<name>/`.
+- **Only your own addresses.** The server answers to `localhost`, `127.0.0.1`,
+  this machine's LAN address and name in LAN mode, and `artifact_hostname` —
+  any other Host is refused, so a web page cannot read artifacts through DNS
+  rebinding. The Stop button only works from the artifact page itself.
 
 Artifacts are built with DGC's own design language (the `dgc-design` skill) so
 the frontend looks polished by default. They stay on this machine unless you
@@ -1755,7 +1765,8 @@ when you want to override it.
 - `artifact_bind` (default `localhost`) — the bind mode. Set it to `lan` to preview
   from another device on your own network.
 - `artifact_hostname` — the hostname used when building the printed URL, if it differs from the
-  bind address.
+  bind address. The server also accepts requests addressed to this name (a reverse proxy or
+  Tailscale MagicDNS name); requests for any other unknown host are refused.
 - `plan_artifact` (default `true`) — render proposed plans as an artifact page.
 - `artifact_in_plan` (default `false`) — also serve artifacts while in plan mode.
 

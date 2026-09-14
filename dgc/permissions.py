@@ -244,6 +244,11 @@ class PermissionEngine:
     def _rule_action(self, tool: str, args: dict, action: str) -> Rule | None:
         return next((r for r in self.rules if r.action == action and self._matches(r, tool, args)), None)
 
+    def deny_reason(self, tool: str, args: dict) -> str:
+        """The reason a deny rule blocks this call (including an ExternalDirectory deny), or ""."""
+        decision, reason = self.decide(tool, args)
+        return reason if decision == DENY and reason.startswith("blocked by deny rule") else ""
+
     def decide(self, tool: str, args: dict) -> tuple[str, str]:
         """Return (allow|ask|deny, reason)."""
         external = self.external_paths(tool, args)

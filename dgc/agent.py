@@ -4684,6 +4684,18 @@ class Agent(GoalLifecycle):
         if name == "artifact":
             if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
                 return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
+            # Serving a page publishes files, so a user's deny rule (`Artifact`, `Artifact(docs/**)`,
+            # or an ExternalDirectory deny) applies here too, even though no approval card is shown.
+            with self._mode_lock:
+                _artifact_rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                            *(getattr(self.config, "session_permissions", {})
+                                              .get(action, []) or [])]
+                                   for action in ("allow", "ask", "deny")}
+            _denied = PermissionEngine(self.mode, _artifact_rules, self.config.project_root).deny_reason(
+                name, args)
+            if _denied:
+                self.ui.tool_denied(name, display_args, redact_text(_denied, secrets), call_id)
+                return f"PERMISSION DENIED: {_denied}. Do not retry this exact action."
             from . import artifacts
             try:
                 artifact_path = str(args.get("path", ""))
@@ -4692,7 +4704,8 @@ class Agent(GoalLifecycle):
                 art = artifacts.add(artifact_path, self.config.project_root,
                                     artifact_name or "Artifact",
                                     preferred_port=int(self.config.get("artifact_port", 45000)),
-                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"))
+                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"),
+                                    hostname=str(self.config.get("artifact_hostname", "") or ""))
             except Exception as e:
                 return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
             notify = getattr(self.ui, "artifact_ready", None)
@@ -4701,7 +4714,7 @@ class Agent(GoalLifecycle):
             return (f"Artifact '{art.name}' is live at {art.url} — all artifacts share ONE local server "
                     f"({artifacts.base_url()}) with a dropdown to switch between them. Tell the user they "
                     f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
-                    f"another server yourself.")
+                    f"another server yourself." + (f" {artifacts.SCOPED_NOTE}" if art.scoped else ""))
 
         def current_permissions():
             with self._mode_lock:

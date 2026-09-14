@@ -22,6 +22,10 @@ its safety boundaries are:
   decision, while direct user `!cmd` commands do not prompt again;
 - deny rules take precedence in every native-loop mode, including `auto`;
 - private/link-local/loopback web fetches are blocked and redirects are revalidated;
+- the artifact preview server answers only to this machine's own host names (a DNS-rebinding page
+  is refused), never serves dot-files, key files, server-side source, or symlinks leaving the
+  artifact folder, serves only a page and the assets it links to when that page sits in a workspace
+  root, and stops a preview over HTTP only with the shell page's per-process token;
 - untrusted workspaces cannot start unattended one-shot automation without explicit `--trust`;
 - API credentials are separated from normal configuration and editor secrets use SecretStorage.
 

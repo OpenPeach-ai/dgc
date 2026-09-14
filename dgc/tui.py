@@ -3460,7 +3460,8 @@ class TUI:
     def _set_artifact_bind(self, lan: bool) -> None:
         from . import artifacts
         self.config.set("artifact_bind", "lan" if lan else "localhost")
-        artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
+        artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)),
+                           hostname=str(self.config.get("artifact_hostname", "") or ""))
         if lan:
             urls = artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
                                             str(self.config.get("artifact_hostname", "")))
