@@ -54,6 +54,15 @@ ASKS = [
     "propose me options",
     "show me the options picker",
     "can you ask me a multiple-choice question",
+    "Give me a few options, I'll pick one",
+    "use propose_options to let me pick",
+    "Propose two approaches and let me choose",
+    "Which database should we use? Propose me options to pick from.",
+    "Before you start, give me options to choose from for the cache layer",
+    "fix the failing test, then give me options so I can decide which refactor to do next",
+    "ask me which approach to take",
+    "can you call propose_options so I can see it",
+    "demo the options picker",
 ]
 
 NOT_ASKS = [
@@ -72,6 +81,48 @@ NOT_ASKS = [
     "Which option should I choose?",
     "add an options menu to the navbar",
     "suggest options for the retry policy",
+]
+
+# Descriptions of software being built, and work on DGC itself, that an earlier matcher took for an
+# ask (review findings, confirmed on captured requests): in full-auto each exposed the blocking picker.
+BUILDING_NOT_ASKING = [
+    "Show the options to select from in the dropdown component",
+    "The popup should list the options for me to select a region",
+    "Make the onboarding screen offer three choices so I can pick a plan",
+    "write tests for propose_options in dgc/tools.py",
+    "and let me select the files to upload in the form component",
+    "Let me decide on the database later; for now implement the SQLite store",
+    "In the settings page, show some options so we can pick the theme",
+    "The select element should present the options to choose from in alphabetical order",
+    "You let me choose the port in the old version, restore that",
+    "Give me the options dialog. It crashes when it opens",
+    "Build a quiz that will show multiple choices and I pick one",
+    "just ask me to choose later, implement a default now",
+    "Render a dropdown that shows a list of options to select from",
+    "add a select element listing the options to choose from",
+    "give the user options to select from in the settings modal",
+    "Build a CLI wizard: present the options to select from, then save config",
+    "the combobox should list options to select from as you type",
+    "suggest alternatives to choose from when the search has no results",
+    "write a function that returns a list of choices to select from",
+    "Add a file input and let me select a file to upload",
+    "Let me decide later, just implement A",
+    "In the settings page, show some options so we can pick",
+    "show me options to choose from in the dropdown",
+    "When I click the gear, show me options to pick from",
+    "Let me pick which columns to export in the CSV export",
+    "in the TUI, let me choose which session to resume",
+    "I can't pick a model; let me choose one in the model pill",
+    "offer me the option to export as PDF",
+    "The CLI should offer me choices so I can pick one",
+    "Implement a CLI prompt that gives the user options to choose from",
+    "I want the tool to propose me options to select from",
+    "grep for propose_options in agent.py",
+    "use propose_options in the test fixture",
+    "run the propose_options tests",
+    "the propose_options description is too long",
+    "show me the options picker, it doesn't open",
+    "Build the settings page: render a dropdown that shows a list of options to select from, with tests",
 ]
 
 
@@ -160,6 +211,15 @@ class OptionsIntentTests(unittest.TestCase):
         for text in NOT_ASKS:
             self.assertNotIn("options", _tool_intents(text), text)
 
+    def test_describing_a_ui_or_working_on_dgc_is_not_a_request_to_choose(self):
+        for text in BUILDING_NOT_ASKING:
+            self.assertNotIn("options", _tool_intents(text), text)
+
+    def test_an_ask_in_another_sentence_of_a_spec_still_counts(self):
+        # The spec sentence is skipped, not the whole message.
+        self.assertIn("options", _tool_intents(
+            "Add a dropdown for the region. Before you build it, propose me options to choose from."))
+
     def test_untrusted_editor_context_cannot_ask(self):
         text = ('<editor-context-json trust="untrusted-reference-data">\n'
                 f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
@@ -204,6 +264,24 @@ class ToolListMatrixTests(AgentTests):
                 self.assertIn("propose_options", agent._text_protocol_section(), label)
                 self.assertFalse(self.offered(agent, "now add the tests"), f"{label}: per turn only")
 
+    def test_full_auto_keeps_the_picker_out_of_a_turn_that_builds_a_ui(self):
+        agent = self.agent(mode="auto")
+        for text in BUILDING_NOT_ASKING:
+            self.assertFalse(self.offered(agent, text), text)
+            self.assertNotIn("# Options picker", agent.system_prompt(), text)
+
+    def test_an_active_goal_never_carries_the_ask_to_later_turns(self):
+        agent = self.agent(mode="auto")
+        self.assertTrue(agent.set_goal("Refactor the parser, then propose me options to choose from"))
+        for text in ("Continue the active goal.", "now fix the failing test"):
+            self.assertFalse(self.offered(agent, text), text)
+            self.assertNotIn("# Options picker", agent.system_prompt(), text)
+        self.assertTrue(self.offered(agent, FOUNDER), "the user's own ask still counts during a goal")
+        # A goal still activates its other intents (the monitor tool here).
+        agent.set_goal("watch the dev server log")
+        agent._activate_tool_intents("keep going", replace=True)
+        self.assertIn("monitor", agent._active_tool_intents)
+
     def test_a_ui_whose_getattr_answers_everything_is_still_interactive(self):
         class Permissive:
             def __getattr__(self, name):
@@ -219,6 +297,9 @@ class ToolListMatrixTests(AgentTests):
         self.assertIn("# Options picker", prompt)
         self.assertIn("sub-agent", prompt)
         self.assertIn("numbered list", prompt)
+        # The parent model wrote this prompt: the note must not claim the user asked.
+        self.assertIn("Your task asks for a choice between options", prompt)
+        self.assertNotIn("The user asked", prompt)
         agent._activate_tool_intents("fix the parser", replace=True)
         self.assertNotIn("# Options picker", agent.system_prompt())
 
@@ -246,9 +327,19 @@ class TurnTests(AgentTests):
     def test_full_auto_turn_raises_the_picker_and_the_choice_reaches_the_model(self):
         ui = UI()
         agent = self.agent(ui=ui, mode="auto")
-        calls = scripted(agent, [options_if_offered, ChatResult(content="You picked B.")])
+        text_protocol = []
+
+        def after_the_answer(agent, request):
+            text_protocol.append(agent._text_protocol_section())
+            return options_if_offered(agent, request)
+        calls = scripted(agent, [options_if_offered, after_the_answer, ChatResult(content="You picked B.")])
         self.assertTrue(agent.run_turn(FOUNDER))
         self.assertIn("propose_options", calls[0]["tools"])
+        # One round of questions answers the ask: the rest of the turn is full-auto again.
+        self.assertNotIn("propose_options", calls[1]["tools"])
+        self.assertNotIn('"propose_options"', text_protocol[0])
+        self.assertNotIn("# Options picker", calls[1]["system"])
+        self.assertEqual(len(ui.questions), 1)
         self.assertEqual(ui.questions, [("Which approach?", ["Approach A", "Approach B"])])
         result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
         self.assertIn("The user chose: 'Approach B'", result)
@@ -258,6 +349,31 @@ class TurnTests(AgentTests):
         calls = scripted(agent, [ChatResult(content="done")])
         self.assertTrue(agent.run_turn("now fix the parser"))
         self.assertNotIn("propose_options", calls[0]["tools"], "full-auto keeps its rule otherwise")
+
+    def test_a_full_auto_goal_run_asks_once_then_runs_unattended(self):
+        ui = UI()
+        agent = self.agent(ui=ui, mode="auto")
+        self.assertTrue(agent.set_goal("write both files"))
+
+        def cycle_one(agent, request):
+            return call("write_file", path="one.txt", content="1\n")
+
+        def cycle_two(agent, request):
+            return call("write_file", path="two.txt", content="2\n")
+
+        def complete(agent, request):
+            return call("update_goal", status="completed", summary="Both files written",
+                        evidence=["one.txt and two.txt exist"])
+        calls = scripted(agent, [options_if_offered, cycle_one, ChatResult(content="cycle one done"),
+                                 options_if_offered, cycle_two, complete,
+                                 ChatResult(content="Both files written.")])
+        self.assertTrue(agent.run_turn(FOUNDER))
+        self.assertEqual(agent.goal_status, "completed")
+        self.assertGreaterEqual(agent.goal_snapshot()["cycles"], 2)
+        self.assertIn("propose_options", calls[0]["tools"])
+        self.assertTrue(all("propose_options" not in request["tools"] for request in calls[1:]),
+                        [sorted(request["tools"]) for request in calls])
+        self.assertEqual(len(ui.questions), 1)
 
     def test_a_wake_turn_after_an_ask_explains_the_missing_picker(self):
         agent = self.agent(ui=WakeUI(), mode="default")
@@ -312,6 +428,14 @@ class SubscriptionTests(unittest.TestCase):
         context = ('<editor-context-json trust="untrusted-reference-data">\n'
                    f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, context, "auto"))
+
+    def test_a_goal_cycle_prompt_is_not_the_users_ask(self):
+        from dgc.goals import CYCLE_MARKER
+        from dgc.ultra import delegated_prompt
+        cfg = make_config(Path(tempfile.gettempdir()))
+        cycle = (CYCLE_MARKER + " Take the next concrete step.\n\nGoal: Refactor the parser, then "
+                 "propose me options to choose from")
+        self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, cycle, "auto"))
 
 
 class EditorBackendTests(unittest.TestCase):

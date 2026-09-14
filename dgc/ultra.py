@@ -42,8 +42,11 @@ def delegated_effort(config, engine_key: str, current: str, supports_effort: boo
 def delegated_prompt(config, prompt: str, mode: str) -> str:
     """Apply shared response guidance and optional Ultra policy on the vendor wire only."""
     from .agent import _tool_intents
+    from .goals import AUTO_RESUME_MARKER, CYCLE_MARKER
     from .presentation import delegated_presentation
-    asks_for_options = "options" in _tool_intents(prompt)
+    # A goal cycle's prompt is DGC's, carrying the whole objective, so it is never the user's ask.
+    asks_for_options = ("options" in _tool_intents(prompt) and CYCLE_MARKER not in prompt
+                        and AUTO_RESUME_MARKER not in prompt)
     prompt = delegated_presentation(prompt)
     if asks_for_options:
         # The vendor CLI runs headless, so DGC's picker (and the CLI's own question tool) cannot

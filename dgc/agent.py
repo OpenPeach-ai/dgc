@@ -158,6 +158,113 @@ _OPTIONAL_TOOL_INTENT = {
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "task": "delegate", "monitor": "monitor",
 }
+
+
+class _OptionsAsk:
+    """Does the user's own text ask DGC to offer them choices on this turn?
+
+    It lifts full-auto's picker removal and, where the picker cannot exist, adds the one note saying
+    why (see Agent._options_unavailable_note). So it has to hear an ask addressed to the agent, not
+    a description of software being built: "propose me options to select from" and "let me choose"
+    count; "the popup should list the options for me to select a region", "make the screen offer
+    three choices so I can pick a plan" and "write tests for propose_options" do not. A missed ask
+    costs what it cost before (no picker in full-auto); a false one exposes a blocking picker in a
+    mode that promised not to stop, so every doubt resolves to "not an ask".
+
+    Each sentence is judged alone and needs all of:
+    * the verb in an imperative position (sentence start, after a comma, "please", "and", "can
+      you", "you to"): "the combobox should list options" describes a UI;
+    * the user as the one choosing: "me"/"us" as the recipient ("give me options to choose from",
+      "offer me alternatives"), or a first-person chooser whose object is the choice itself ("so I
+      can pick one", "let me decide which approach"), not a thing in an app ("so I can pick a
+      plan", "let me select the files", "ask me to choose later");
+    * nothing in the sentence that marks a spec or code (a dropdown, a page, a function, a file
+      path, "should", "when the user ...", "in the TUI"); the picker-by-name forms also need a
+      message that is not a bug report.
+    """
+
+    _POS = (r"(?:^|(?<=[,:(])|\b(?:please|pls|kindly|just|now|then|and|so|also|first|"
+            r"(?:can|could|would|will)\s+you(?:\s+please)?|you\s+to)\b)\s*")
+    _DET = (r"a|an|the|some|few|several|couple(?:\s+of)?|more|other|different|your|top|best|possible|"
+            r"multiple|two|three|four|five|\d+")
+    _NOUN = r"(?:options|option|choices|choice|alternatives|alternative)\b"
+    _CHOOSE = r"(?:choose|pick|select|decide)"
+    # What the user chooses: the choice itself, never an object in an app ("which columns to export").
+    _WHICH = (r"(?:which|what)\s+(?:one|ones|option|options|choice|approach|approaches|way|path|plan|"
+              r"design|solution|fix|refactor|change|idea|step|task|next|library|framework|direction|strategy|"
+              r"alternative|of)\b")
+    _TAIL = (r"(?=\s*(?:$|[,:)(]|(?:and|then|before|first)\b|(?:between|among|from|myself|ourselves)\b|"
+             r"for\s+(?:myself|ourselves)\b|one\b(?:\s+of\s+(?:them|these|those))?\s*(?:$|[,:)(])|"
+             + _WHICH + "))")
+    _FIRST_PERSON = (r"(?:so\s+(?:that\s+)?(?:I|we)(?:\s+can|\s+could|'ll|\s+will)?|"
+                     r"(?:and|then)\s+(?:I|we)(?:'ll|\s+will|\s+can)?|(?:I|we)(?:'ll|\s+will|\s+can)|"
+                     r"(?:and|then)\s+let\s+(?:me|us)|for\s+(?:me|us)\s+to)\s+" + _CHOOSE + _TAIL)
+    _ASK = re.compile(
+        # "give me a few options to choose from", "show us some choices so we can pick one"
+        _POS + r"(?:propose|offer|give|show|present|list|suggest)\s+(?:me|us)"
+        r"(?:\s+(?:" + _DET + r"|list\s+of))*\s+" + _NOUN +
+        r".{0,40}?\b(?:to\s+" + _CHOOSE + r"\s+(?:from|between|among)\b|" + _FIRST_PERSON + ")"
+        # "propose me options", "offer us some alternatives"
+        # (not "offer me the option to export as PDF", which is a feature)
+        r"|" + _POS + r"(?:propose|offer|present)\s+(?:me|us)(?:\s+(?:" + _DET + r"))*\s+" + _NOUN +
+        r"(?!\s+to\s+(?!" + _CHOOSE + r"\b))" +
+        # "list the options for me to select", "suggest some alternatives and I'll decide"
+        r"|" + _POS + r"(?:propose|offer|give|show|present|list|suggest)(?:\s+(?:" + _DET + r"))*\s+" +
+        _NOUN + r".{0,40}?\b" + _FIRST_PERSON +
+        # "let me choose", "please ask me to pick between A and B", "ask me which approach"
+        r"|" + _POS + r"(?:let|ask)\s+(?:me|us)\s+(?:to\s+)?" + _CHOOSE + _TAIL +
+        r"|" + _POS + r"ask\s+(?:me|us)\s+(?:a\s+multiple[- ]choice\b|" + _WHICH + ")",
+        re.IGNORECASE)
+    # The picker by name: "show me the options picker", "use propose_options", or just the name.
+    _BY_NAME = re.compile(
+        _POS + r"(?:(?:show|give|bring\s+up|pop\s+up|display|open)\s+(?:me|us)|trigger|demo|try)\s+"
+        r"(?:(?:the|a|an|your|dgc'?s)\s+)?(?:options?|choices?|selection)\s+"
+        r"(?:picker|popup|pop-up|dialog|card|selector)\b"
+        r"|\b(?:use|call|invoke|try|trigger|run|demo|with|via|using|through)\s+(?:the\s+|your\s+)?"
+        r"`?propose_options\b`?(?!\s*(?:tests?|handler|schema|description|function|implementation|"
+        r"code|filter|result)\b)"
+        r"|^\s*`?propose_options`?(?:\s+tool)?\s*$",
+        re.IGNORECASE)
+    _PICKER_NAME = re.compile(r"\b(?:options?|choices?|selection)\s+(?:picker|popup|pop-up|dialog|card|"
+                              r"selector)\b|\bpropose_options\b", re.IGNORECASE)
+    # A spec or code being written, not a choice being asked for.
+    _SPEC = re.compile(
+        r"\b(?:drop-?downs?|combo\s?box(?:es)?|list\s?box(?:es)?|select\s+(?:elements?|box(?:es)?|"
+        r"menus?|tags?|inputs?|fields?)|components?|widgets?|modals?|pop-?ups?|dialogs?|menus?|"
+        r"screens?|pages?|(?<!in\sthe\s)forms?|buttons?|check\s?box(?:es)?|radio|wizards?|quiz(?:zes)?|"
+        r"surveys?|onboarding|toolbars?|sidebars?|nav\s?bars?|as\s+you\s+type|should|functions?|"
+        r"methods?|endpoints?|schemas?|handlers?|fixtures?|tests?\s+for|unit\s+tests?|css|html|jsx|tsx|"
+        r"click(?:s|ed|ing)?|taps?|hover(?:s|ed|ing)?|drag(?:s|ged|ging)?|"
+        r"when(?:ever)?\s+(?:I|we|the\s+user|users?|someone|they)|"
+        r"(?:in|on|from|inside)\s+the\s+(?:\w+\s+)?(?:tui|cli|gui|ui|pill|panel|webview|table|export|"
+        r"terminal|status\s?bar|header|footer|view|window|settings|tests?|specs?))\b"
+        r"|<select|<input|[\w./-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|json|md|css|html|go|rs|java|rb|ya?ml|"
+        r"toml)\b",
+        re.IGNORECASE)
+    _BUG = re.compile(
+        r"\b(?:crash(?:es|ed|ing)?|bugs?|broken|errors?|regression|exception|traceback|fix(?:es|ed)?|"
+        r"(?:does|did|is|was)n'?t|(?:does|did|is|was)\s+not|never\s+(?:shows?|opens?|appears?))\b",
+        re.IGNORECASE)
+    _SENTENCE = re.compile(r"[.!?;]+(?=\s|$)|\n+")
+    # Every form names the choosing or the picker; most sentences are dismissed on this alone.
+    _CUE = re.compile(r"option|choice|alternative|choose|pick|select|decide|popup|pop-up|dialog|card|"
+                      r"ask\s+(?:me|us)\b", re.IGNORECASE)
+
+    def search(self, text: str) -> bool:
+        source = str(text or "")
+        if not self._CUE.search(source):
+            return False
+        bug_report = bool(self._BUG.search(source))
+        for sentence in self._SENTENCE.split(source):
+            sentence = sentence.strip()
+            if (not sentence or not self._CUE.search(sentence)
+                    or self._SPEC.search(self._PICKER_NAME.sub(" ", sentence))):
+                continue
+            if self._ASK.search(sentence) or (not bug_report and self._BY_NAME.search(sentence)):
+                return True
+        return False
+
+
 _TOOL_INTENT_PATTERNS = {
     "git_review": re.compile(
         r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
@@ -225,31 +332,8 @@ _TOOL_INTENT_PATTERNS = {
         r"wait (?:for|until))\b|\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
         r"crash(?:es)?|appears?|prints?|logs?)\b",
         re.IGNORECASE | re.DOTALL),
-    # The user explicitly asks to be offered choices ("propose me options to select from", "let me
-    # choose"). Not an optional schema: it lifts full-auto's picker removal for the turn and, where
-    # the picker cannot exist, adds the one note saying why (see _options_unavailable_note).
-    # "What are my options for caching" or "a dropdown with options to select from" is ordinary
-    # coding language, so the choosing has to be the user's.
-    "options": re.compile(
-        r"\bpropose_options\b|"
-        # offer verb, then only determiners/pronouns, then the options and the user's choosing
-        r"\b(?:propos(?:e|es|ed|ing)|offer(?:s|ed|ing)?|give|giving|show|showing|present(?:s|ing)?|"
-        r"list|listing|suggest(?:s|ing)?)"
-        r"(?:\s+(?:me|us|the\s+user|a|an|the|some|few|several|couple|of|more|other|different|your|"
-        r"top|best|available|possible|multiple|two|three|four|five|\d+)){0,4}\s+"
-        r"(?:options?|choices?|alternatives?)\b"
-        r".{0,40}?\b(?:to\s+(?:select|choose|pick)\s+(?:from|between|among)|"
-        r"(?:so\s+(?:that\s+)?|and\s+|then\s+)?(?:I|we)(?:'ll|\s+will|\s+can|\s+could)?\s+"
-        r"(?:select|choose|pick|decide)|for\s+(?:me|us)\s+to\s+(?:select|choose|pick|decide))\b|"
-        r"\b(?:propose|offer|present)\s+(?:me|us)(?:\s+(?:a|an|the|some|few|several|couple|of|more|"
-        r"other|different|possible|two|three|\d+)){0,3}\s+(?:options|choices|alternatives)\b|"
-        # "Let me choose", "can you ask me to pick", but not "the menu should let me choose"
-        r"(?:\A|(?<=[.!?,;:\n])|\b(?:please|and|then|just|you|so|now)\b)\s*(?:let|ask)\s+(?:me|us)\s+"
-        r"(?:(?:to\s+)?(?:choose|pick|select|decide)\b(?!\s+(?:up|out)\b)|(?:a\s+)?multiple[- ]choice\b)|"
-        r"\b(?:show|give|offer|present|send)\s+(?:me|us)\s+(?:(?:a|an|the|your)\s+)?"
-        r"(?:options?|choices?|selection)\s+(?:picker|popup|pop-up|dialog|card|form)\b"
-        r"(?!\s+(?:code|component|implementation|source|files?|styles?|css)\b)",
-        re.IGNORECASE | re.DOTALL),
+    # The user asks to be offered choices on this turn. Not a single regex: see _OptionsAsk.
+    "options": _OptionsAsk(),
 }
 
 
@@ -1503,7 +1587,10 @@ class Agent(GoalLifecycle):
         """Activate optional tools from explicit turn/goal intent; return whether it changed."""
         detected = _tool_intents(text)
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
-            detected |= _tool_intents(self.goal)
+            # A goal describes the work, and it is re-read on every cycle and every later turn. An
+            # ask to be offered choices is the user's on the turn they type it, so a goal never
+            # carries one: an unattended full-auto goal run must not keep the picker open.
+            detected |= _tool_intents(self.goal) - {"options"}
         before = set(self._active_tool_intents)
         self._active_tool_intents = detected if replace else before | detected
         return self._active_tool_intents != before
@@ -1702,9 +1789,12 @@ class Agent(GoalLifecycle):
         else:
             reason = "it is not offered in this context"
             how = "ask the user to reply with their choice"
-        return ("# Options picker\nThe user asked to choose from options, but DGC's options picker "
-                f"(propose_options) is not available on this turn because {reason}. It does exist. "
-                f"List the options as a numbered list and {how}.")
+        # A sub-agent's prompt is written by the parent model, so it cannot say the user asked.
+        asked = "Your task asks for a choice between options" if self.depth else \
+            "The user asked to choose from options"
+        return (f"# Options picker\n{asked}, but DGC's options picker (propose_options) is not "
+                f"available on this turn because {reason}. It does exist. List the options as a "
+                f"numbered list and {how}.")
 
     def _monitor_delivery(self) -> bool:
         """Does this agent's frontend deliver monitor events and wake on them?
@@ -4720,6 +4810,9 @@ class Agent(GoalLifecycle):
             except ValueError as exc:
                 return f"error: {exc}"
             grouped = "questions" in args
+            # Full-auto offers the picker only because the user asked on this turn. One round of
+            # questions answers that ask; the rest of the turn (a whole goal run) goes on unattended.
+            answers_the_ask = self.mode == "auto" and self._options_asked_interactively()
             show_form = getattr(type(self.ui), "propose_questions", None)
             if grouped and callable(show_form):
                 answers = self.ui.propose_questions(questions)
@@ -4730,6 +4823,9 @@ class Agent(GoalLifecycle):
                     if not choice:
                         break
                     answers[question["id"]] = choice
+            if answers_the_ask:
+                self._active_tool_intents.discard("options")
+                self._refresh_system()      # the text tool protocol lists the tools in the prompt
             if not valid_answers(questions, answers) or self.cancelled.is_set():
                 if self._non_interactive() and not self.cancelled.is_set():
                     return ("No one can answer in this non-interactive `dgc -p` run, so no choice was "
