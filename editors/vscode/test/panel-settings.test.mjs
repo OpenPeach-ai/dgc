@@ -1316,6 +1316,21 @@ function recoveryProvider({ mark, goal } = {}) {
   return { provider, be, sent, stored };
 }
 
+test("a reloaded webview asks for the monitors list, so its rail and monitor ids come back", async () => {
+  for (const monitors of [true, false]) {
+    const h = recoveryProvider();
+    h.provider.sessionReady = true;
+    h.provider.scheduleWorkspaceChanges = () => {};
+    h.provider.lastReadyEvent = { type: "ready", capabilities: { monitors, history_snapshot: true } };
+    await h.provider.onMessage({ type: "webviewReady" });
+    const listed = h.sent.filter((c) => c.type === "list_monitors");
+    if (!monitors) { assert.deepEqual(listed, [], "a backend without monitors is not asked"); continue; }
+    assert.equal(listed.length, 1);
+    assert.match(listed[0].request_id, /^monitors-restore-/, "not the /monitors card's request id");
+    assert.ok(h.sent.some((c) => c.type === "get_history"));
+  }
+});
+
 test("a goal interrupted by a dead backend picks itself back up", async () => {
   // load_session demotes a restored active goal to paused, which is right when a person opens an
   // old chat and wrong when the runner was killed under it seconds ago. The marker tells the two

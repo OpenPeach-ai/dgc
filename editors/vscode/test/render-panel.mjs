@@ -406,9 +406,11 @@ if (process.argv.includes("--monitors")) {
   // Background monitors: a prompt that started one, a wake turn DGC started on its events (a note,
   // not a "you" bubble), event cards inside that turn, and the rail row of running monitors above
   // the changes, tasks and goal rows. Checks the rail order and that nothing covers the composer.
-  // Writes <out>.png; --light paints a light host theme.
+  // Writes <out>.png; --light paints a light host theme. --narrow renders a 300px panel with four
+  // running monitors (the per-chat limit) and checks that every chip and its Stop stay on screen.
   const out = process.argv[2] || "/tmp/monitors.png";
-  if (process.argv.includes("--narrow")) await page.setViewportSize({ width: 300, height: 900 });
+  const narrow = process.argv.includes("--narrow");
+  if (narrow) await page.setViewportSize({ width: 300, height: 900 });
   if (process.argv.includes("--light")) {
     await page.addStyleTag({ content: `:root {
       --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
@@ -437,7 +439,10 @@ if (process.argv.includes("--monitors")) {
     { type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 1300, final_message_id: "t2:1" },
     { type: "monitors", wake_paused: true, pending_events: 1, items: [
       { id: "mon1", description: "deploy log", command, state: "running", events: 3, pending_events: 1, persistent: true, timeout_ms: 300000, started_at: 1 },
-      { id: "mon2", description: "CI run 4812", command: "gh run watch 4812", state: "running", events: 0, pending_events: 0, persistent: false, timeout_ms: 600000, started_at: 1 }] },
+      { id: "mon2", description: "CI run 4812", command: "gh run watch 4812", state: "running", events: 0, pending_events: 0, persistent: false, timeout_ms: 600000, started_at: 1 },
+      ...(narrow ? [
+        { id: "mon3", description: "api access log", command: "tail -F access.log", state: "running", events: 7, pending_events: 0, persistent: true, timeout_ms: 300000, started_at: 1 },
+        { id: "mon4", description: "worker queue depth", command: "watch-queue", state: "running", events: 1, pending_events: 0, persistent: true, timeout_ms: 300000, started_at: 1 }] : [])] },
     { type: "todos", todos: [{ content: "Deploy to staging", status: "done" }, { content: "Fix the Redis connection", status: "in_progress" }] },
     { type: "goal_changed", goal: "Ship the release to staging with a green deploy", status: "active", elapsed_seconds: 734 },
   ]) await send(event);
@@ -458,7 +463,13 @@ if (process.argv.includes("--monitors")) {
              chipText: getComputedStyle(document.querySelector(".monitor-chip-label")).fontSize,
              stopsVisible: [...document.querySelectorAll(".monitor-stop")].every((b) => {
                const r = b.getBoundingClientRect(), c = document.getElementById("monitor-chips").getBoundingClientRect();
-               return r.width > 0 && r.right <= c.right + 1 && r.left >= c.left - 1; }),
+               return r.width > 0 && r.right <= c.right + 1 && r.left >= c.left - 1 && r.bottom <= c.bottom + 1
+                 && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest(".monitor-stop") === b; }),
+             stopSizes: [...document.querySelectorAll(".monitor-stop")].map((b) => {
+               const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }),
+             chipsInside: [...document.querySelectorAll(".monitor-chip")].every((chip) => {
+               const r = chip.getBoundingClientRect(), bar = document.getElementById("monitorsbar").getBoundingClientRect();
+               return r.left >= bar.left - 1 && r.right <= bar.right + 1 && r.top >= bar.top - 1 && r.bottom <= bar.bottom + 1; }),
              chips: document.querySelectorAll(".monitor-chip").length, paused: !document.getElementById("monitors-paused").hidden,
              cards: cards.length, cardsInTurn: cards.every((c) => c.closest(".msg.dgc")),
              userBubbles: [...document.querySelectorAll(".msg.user")].map((m) => m.textContent.trim().slice(0, 40)),
@@ -467,7 +478,9 @@ if (process.argv.includes("--monitors")) {
   console.log("MONITORS " + JSON.stringify(probe));
   await page.screenshot({ path: out, fullPage: false });
   const ok = probe.order.join(",") === "monitorsbar,changesbar,tasksbar,goalbar" && probe.composerVisible
-    && probe.railAboveComposer && !probe.barOverflows && !probe.linesOverflow && probe.barHeight <= 36 && probe.stopsVisible && probe.chips === 2 && probe.paused && probe.cards === 2 && probe.cardsInTurn
+    && probe.railAboveComposer && !probe.barOverflows && !probe.linesOverflow && (narrow || probe.barHeight <= 36)
+    && probe.stopsVisible && probe.chipsInside && probe.stopSizes.every(([w, h]) => w >= 22 && w <= 24 && h >= 22 && h <= 24)
+    && probe.chips === (narrow ? 4 : 2) && probe.paused && probe.cards === 2 && probe.cardsInTurn
     && !probe.userBubbles.some((text) => /deploy log/.test(text)) && /Woke on monitor/.test(probe.note || "");
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);

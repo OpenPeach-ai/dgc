@@ -425,16 +425,20 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 /* background monitors — a rail row of running monitors (above the others) with a Stop per chip,
    and one bounded card per event inside the turn it arrived in. */
 #monitorsbar .rail-row { flex: 1; flex-wrap: nowrap; }
+#monitorsbar .rail-row > .monitors-icon, #monitorsbar .rail-row > .monitors-paused { align-self: flex-start; margin-top: 8px; }
 #monitorsbar .monitors-icon { color: var(--accent-text); }
 #monitorsbar[data-paused="true"] .monitors-icon { color: var(--faint); }
 .monitors-count { flex: none; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
   font-variant-numeric: tabular-nums; }
-/* One line, like the goal row: chips shrink to an ellipsis rather than wrapping the rail taller. */
-.monitor-chips { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; gap: var(--sp-1); overflow: hidden; }
-.monitor-chip { display: inline-flex; flex: 0 1 auto; min-width: 56px; max-width: 100%; align-items: center; gap: var(--sp-1);
+/* One line while the chips fit; in a narrow panel they wrap onto more lines rather than clip, so every
+   chip and its Stop stays on screen (up to four per chat). A label shrinks to an ellipsis first. */
+.monitor-chips { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; gap: var(--sp-1); padding-block: 4px; }
+.monitor-chip { display: inline-flex; flex: 0 1 auto; min-width: 0; max-width: 100%; align-items: center; gap: 2px;
   padding: 0 0 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm);
   color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.monitor-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* The Stop target never shrinks below 22px, however narrow the chip gets. */
+.monitor-chip .monitor-stop { flex: none; width: 22px; height: 22px; }
+.monitor-chip-label { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-variant-numeric: tabular-nums; }
 .monitor-chip[data-state="stopping"] { color: var(--faint); }
 .monitors-paused { flex: none; padding: 0 var(--sp-2); border-radius: var(--r-sm); background: var(--bg);

@@ -3607,7 +3607,8 @@ test("a /monitors listing is a card with Stop on running monitors; a new chat cl
   assert.match(card.textContent, /Background monitors/);
   const rows = [...card.querySelectorAll(".monitor-list-row")];
   assert.equal(rows.length, 2);
-  assert.match(rows[1].textContent, /mon2 · build · ended \(exited\) · 1 events/);
+  assert.match(rows[1].querySelector(".monitor-list-text").textContent, /mon2 · build · ended \(exited\) · 1 event$/);
+  assert.match(rows[0].querySelector(".monitor-list-text").textContent, /mon1 · api log · running · 2 events$/);
   assert.equal(rows[1].querySelector("button"), null, "an ended monitor has nothing to stop");
   rows[0].querySelector("button").click();
   assert.deepEqual(posted.filter((m) => m.type === "stopMonitor").map((m) => JSON.stringify(m)),
@@ -3618,6 +3619,48 @@ test("a /monitors listing is a card with Stop on running monitors; a new chat cl
   event({ type: "monitors", request_id: "monitors-list-2-2", wake_paused: false, pending_events: 0, items: [] });
   assert.match([...doc.querySelectorAll(".sys")].at(-1).textContent, /No background monitors in this chat/);
   assert.deepEqual(errors, []);
+});
+
+test("the end of a monitor from the chat that was left is not shown in the new chat", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const sysLines = () => [...doc.querySelectorAll("#log .sys")].map((n) => n.textContent);
+  event({ type: "turn_start", turn_id: "t1", prompt: "watch it", kind: "prompt" });
+  event({ type: "monitor_started", id: "mon1", description: "api log", command: "tail -F api.log", persistent: true, timeout_ms: 300000 });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  // The order a real dgc serve could produce before the backend fix: the new chat's
+  // acknowledgement, then the old monitor's end.
+  event({ type: "session", kind: "new", message_count: 0, session_id: "s2" });
+  event({ type: "history", items: [] });
+  event({ type: "monitor_ended", id: "mon1", description: "api log", reason: "shutdown", exit_code: -15, events: 12, message: "stopped after 12 events" });
+  assert.deepEqual(sysLines(), [], "nothing from the old chat's monitor");
+  // A monitor of THIS chat still reports its end, whether the webview saw it start or only listed it.
+  event({ type: "monitor_started", id: "mon2", description: "build", command: "make", persistent: false, timeout_ms: 300000 });
+  event({ type: "monitor_ended", id: "mon2", description: "build", reason: "exited", exit_code: 0, events: 1, message: "ended: exit 0 after 1 event" });
+  event({ type: "monitors", request_id: "monitors-restore-1-1", wake_paused: false, pending_events: 0, items: [
+    { id: "mon3", description: "tail", command: "tail -F x", state: "running", events: 0 }] });
+  event({ type: "monitor_ended", id: "mon3", description: "tail", reason: "stopped", exit_code: -15, events: 0, message: "stopped after 0 events" });
+  assert.deepEqual(sysLines(), ["Monitor mon2 started · build", "Monitor mon2 · ended: exit 0 after 1 event", "Monitor mon3 · stopped after 0 events"]);
+  assert.equal([...doc.querySelectorAll(".card")].some((c) => /Background monitors/.test(c.textContent)), false,
+    "a restore listing is not the /monitors card");
+  event({ type: "session", kind: "cleared", message_count: 0, session_id: "s3" });
+  event({ type: "monitor_ended", id: "mon3", description: "tail", reason: "shutdown", exit_code: -15, events: 0, message: "stopped after 0 events" });
+  assert.deepEqual(sysLines(), []);
+  assert.deepEqual(errors, []);
+});
+
+test("the monitors rail wraps its chips in a narrow panel and keeps a full-size Stop on each", () => {
+  // Geometry is checked in a real browser by `npm run shot -- out.png --monitors --narrow` (four
+  // chips at 300px); jsdom has no layout, so this pins the rules that geometry depends on.
+  const rule = (selector) => { const at = mainCss.indexOf(`\n${selector} {`); return at < 0 ? "" : mainCss.slice(at, mainCss.indexOf("}", at)); };
+  assert.match(rule(".monitor-chips"), /flex-wrap:\s*wrap/, "chips wrap instead of clipping");
+  assert.doesNotMatch(rule(".monitor-chips"), /overflow:\s*hidden/, "nothing hides a chip");
+  const stop = rule(".monitor-chip .monitor-stop");
+  assert.match(stop, /flex:\s*none/, "a Stop never shrinks");
+  const width = Number(stop.match(/width:\s*(\d+)px/)?.[1]), height = Number(stop.match(/height:\s*(\d+)px/)?.[1]);
+  assert.ok(width >= 22 && width <= 24 && height >= 22 && height <= 24, `Stop target ${width}x${height}`);
+  const shot = readFileSync(dir + "render-panel.mjs", "utf8");
+  assert.match(shot, /narrow \? 4 : 2/, "the narrow render checks four chips");
 });
 
 test("the settings form carries the wake-on-monitor toggle both ways", () => {

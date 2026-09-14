@@ -1619,10 +1619,17 @@
     }
     return card;
   }
+  // The monitors of THIS chat: every id a monitors list or a monitor_started named since the chat
+  // began. A new chat, clear or resume empties it, so the end of a monitor from the chat that was
+  // left (it can reach the webview after the new chat's acknowledgement) is not shown in this one.
+  const eventCount = (value) => { const n = Math.max(0, Number(value) || 0); return `${n} event${n === 1 ? "" : "s"}`; };
   let monitorItems = [], monitorsPaused = false;
+  const knownMonitorIds = new Set();
   function renderMonitors(ev) {
     monitorItems = (Array.isArray(ev?.items) ? ev.items : [])
       .filter((item) => item && typeof item.id === "string").slice(0, 32);
+    if (ev?.reset) knownMonitorIds.clear();
+    monitorItems.forEach((item) => knownMonitorIds.add(item.id));
     monitorsPaused = ev?.wake_paused === true;
     const live = monitorItems.filter((item) => item.state === "running" || item.state === "stopping");
     const pending = Math.max(0, Number(ev?.pending_events) || 0);
@@ -1666,7 +1673,7 @@
         const row = el("div", "abtns monitor-list-row");
         const text = el("span", "monitor-list-text");
         text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
-          + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${Math.max(0, Number(item.events) || 0)} events`;
+          + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${eventCount(item.events)}`;
         row.appendChild(text);
         if (item.state === "running") {
           const stop = el("button", "abtn", "Stop"); stop.type = "button";
@@ -2197,7 +2204,7 @@
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
         // clear that was waiting belonged to the chat being left.
-        if (["cleared", "new", "resumed"].includes(ev.kind)) { settleTodoClear(); renderMonitors({ items: [] }); }
+        if (["cleared", "new", "resumed"].includes(ev.kind)) { settleTodoClear(); renderMonitors({ items: [], reset: true }); }
         if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
@@ -2539,9 +2546,11 @@
         break;
       }
       case "monitor_started":
+        knownMonitorIds.add(String(ev.id || ""));
         sysLine(`Monitor ${ev.id} started · ${String(ev.description || "")}`);
         break;
       case "monitor_ended":
+        if (!knownMonitorIds.has(String(ev.id || ""))) break;   // a monitor of a chat that was left
         sysLine(`Monitor ${ev.id} · ${String(ev.message || ev.reason || "ended")}`, ev.reason === "flood" || ev.reason === "error");
         break;
       case "monitors":

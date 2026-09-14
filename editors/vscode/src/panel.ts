@@ -1943,6 +1943,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (this.lastReadyEvent?.capabilities?.history_snapshot) {
             be.send({ type: "get_history", request_id: this.nextRequestId("restore-history") });
           }
+          // A reloaded webview starts with an empty monitors rail and knows no monitor ids, so
+          // it would drop the end of one that is still running. The backend's list restores both.
+          if (this.lastReadyEvent?.capabilities?.monitors) {
+            be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
+          }
         }
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
