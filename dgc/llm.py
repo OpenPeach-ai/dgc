@@ -1046,6 +1046,10 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
 
 class LLMClient:
     _capability_rejections: dict[tuple[str, str, str], float] = {}
+    # Endpoints that refused `stream_options` (400/422 naming it). Remembered for the life of the
+    # process, per endpoint rather than per model: the field is a server feature, and re-probing
+    # it every capability TTL would cost a failed request each time.
+    _stream_usage_rejections: set[str] = set()
     _capability_lock = threading.Lock()
     _model_metadata_cache: dict[tuple[str, str], tuple[float, dict]] = {}
     _model_metadata_lock = threading.Lock()
@@ -1093,6 +1097,10 @@ class LLMClient:
         self._response_cursor = 0
         self._response_prefix_hash = ""
         self._native_call_seq = 0
+        # Set by the owner (Agent._new_client): called once with (client, result) for every request
+        # that finished, which is where the local usage ledger records it. None means no ledger.
+        self.usage_sink = None
+        self.usage_source = "main"
         if requested_mode == "auto" and not self._feature_supported("responses"):
             if self.api_mode == "responses":
                 self.api_mode = "chat_completions"
@@ -1467,17 +1475,38 @@ class LLMClient:
         on_thinking=None,
         cancel=None,
     ) -> ChatResult:
+        # A request cancelled before it started never reached the provider; it is not a request.
+        cancelled_before = cancel is not None and cancel.is_set()
         if self.api_mode == "responses":
-            return self._chat_responses(messages, tools, reasoning_effort,
-                                        on_text, on_thinking, cancel)
-        if self.api_mode == "ollama":
-            return self._chat_ollama(messages, tools, reasoning_effort,
-                                     on_text, on_thinking, cancel)
-        if self.api_mode == "anthropic":
-            return self._chat_anthropic(messages, tools, reasoning_effort,
-                                        on_text, on_thinking, cancel)
-        return self._chat_completions(messages, tools, reasoning_effort,
-                                      on_text, on_thinking, cancel)
+            result = self._chat_responses(messages, tools, reasoning_effort,
+                                          on_text, on_thinking, cancel)
+        elif self.api_mode == "ollama":
+            result = self._chat_ollama(messages, tools, reasoning_effort,
+                                       on_text, on_thinking, cancel)
+        elif self.api_mode == "anthropic":
+            result = self._chat_anthropic(messages, tools, reasoning_effort,
+                                          on_text, on_thinking, cancel)
+        else:
+            result = self._chat_completions(messages, tools, reasoning_effort,
+                                            on_text, on_thinking, cancel)
+        if not cancelled_before:
+            self._report_usage(result)
+        return result
+
+    def _report_usage(self, result: ChatResult) -> None:
+        """The one usage hook: hand a finished request to the owner's sink, exactly once.
+
+        Recording here, at the leaf, is what counts a sub-agent's request once: the Agent's session
+        totals re-record child usage on the parent, so a ledger fed from there would double it.
+        A sink failure is the ledger's problem and never the turn's.
+        """
+        sink = getattr(self, "usage_sink", None)
+        if sink is None:
+            return
+        try:
+            sink(self, result)
+        except Exception:
+            pass
 
     @staticmethod
     def _anthropic_content(content) -> list[dict]:
@@ -2332,6 +2361,7 @@ class LLMClient:
                 result.usage = normalize_usage({
                     "prompt_tokens": obj.get("prompt_eval_count", 0),
                     "completion_tokens": obj.get("eval_count", 0),
+                    "cached_input_tokens": obj.get("prompt_eval_cached_count", 0),
                 })
 
         stop_watch = threading.Event()
@@ -2676,6 +2706,11 @@ class LLMClient:
             payload.update(self.sampling)
         if self.family == "ollama" and self.keep_alive:   # D2: model residency (Ollama honours it on /v1)
             payload["keep_alive"] = self.keep_alive
+        # Ollama, vLLM, LM Studio and others stream token usage only when asked. Without this a
+        # whole session on a /v1 route recorded zero tokens and goal token budgets never advanced.
+        if (self._feature_supported("usage")
+                and self.base_url.lower() not in LLMClient._stream_usage_rejections):
+            payload["stream_options"] = {"include_usage": True}
 
         last_err = ""
         transient = 0      # count of retried timeouts / 5xx (bounded, with backoff)
@@ -2728,7 +2763,7 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
-            if r.status_code in (400, 413):
+            if r.status_code in (400, 413, 422):
                 body = _error_body(r)
                 last_err = body
                 low = body.lower()
@@ -2736,6 +2771,15 @@ class LLMClient:
                 # otherwise be misread as a sampling/tool rejection and permanently strip a capability.
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if (r.status_code in (400, 422) and "stream_options" in payload
+                        and re.search(r"stream_options|include_usage", low)):
+                    # An endpoint that refuses the usage request still streams; retry once without
+                    # it and never ask this endpoint again in this process.
+                    LLMClient._stream_usage_rejections.add(self.base_url.lower())
+                    payload.pop("stream_options", None)
+                    continue
+                if r.status_code == 422:
+                    raise LLMError(f"HTTP 422 from {self._url}: {body[:400]}")
                 # only disable a capability when the server actually blames THAT capability —
                 # a 400 about something else must not permanently strip tools/reasoning.
                 if (r.status_code == 400 and "parallel_tool_calls" in payload
@@ -2979,6 +3023,10 @@ class LLMClient:
             stop_watch.set()
             if response is not None:
                 _close_response(response)
+        self._report_usage(ChatResult(
+            finish_reason="compaction",
+            usage=(value.get("usage") if isinstance(value, dict)
+                   and isinstance(value.get("usage"), dict) else {})))
         if cancel is not None and cancel.is_set():
             return None
         if (deadline is not None and time.monotonic() >= deadline) or not isinstance(value, dict):
@@ -3576,6 +3624,8 @@ class LLMClient:
                         raise LLMError("Chat Completions emitted malformed usage")
                     result.usage = normalize_usage(obj.get("usage"))
                 choices = obj.get("choices")
+                if choices is None and isinstance(obj.get("usage"), dict):
+                    choices = []        # a usage-only chunk from a gateway that omits the array
                 if not isinstance(choices, list):
                     raise LLMError("Chat Completions emitted a malformed choices array")
                 # OpenAI documents an empty final choices array when include_usage is enabled.
