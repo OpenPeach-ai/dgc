@@ -49,6 +49,9 @@ from .commands import (canonical_command_name, command_pairs, command_pairs_with
                        resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
 from .monitors import plural
+from .reasoning import (display_text as reasoning_display_text, label_suffix as reasoning_label_suffix,
+                        placement as reasoning_placement, saved_reasoning,
+                        wire_identity as reasoning_wire_identity)
 from .redaction import redact_text, redact_value, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -505,7 +508,9 @@ class TUI:
 
     # commands that take a fixed set of options → the palette opens a SUB-MENU to pick one
     _SUBMENUS = {
-        "thoughts": ([("Show thinking", "show"), ("Hide thinking", "hide")],
+        "thoughts": ([("Show thinking", "show"), ("Hide thinking", "hide"),
+                      ("Provider summaries inline when short", "inline"),
+                      ("Provider summaries collapsed", "collapsed")],
                      lambda s: "show" if s.config.get("show_reasoning", True) else "hide"),
         "preserve-thinking": ([("On — keep prior reasoning in context", "on"), ("Off", "off")],
                               lambda s: "on" if s.config.get("preserve_thinking", False) else "off"),
@@ -615,6 +620,7 @@ class TUI:
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
             ("background", "Background", "enum", ["auto", "dark", "light", "inherit"]),
             ("show_reasoning", "Show reasoning", "bool"),
+            ("thinking_inline", "Provider summaries inline", "bool"),
             ("preserve_thinking", "Preserve thinking in context", "bool"),
             ("logo_animation", "Animate logo", "bool"),
         ],
@@ -1927,6 +1933,9 @@ class TUI:
             if isinstance(blk, dict) and blk.get("kind") == "think":
                 frags, nl = reuse(blk, lambda b=blk: self._think_frags(b))
                 add(frags, "think", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "narration":
+                frags, nl = reuse(blk, lambda b=blk: self._narration_frags(b))
+                add(frags, "think", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "recall":
                 frags, nl = reuse(blk, lambda b=blk: self._recall_frags(b))
                 add(frags, "text", nl)
@@ -1945,9 +1954,22 @@ class TUI:
                 frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(ANSI(b))))
                 add(frags, "text", nl)
         self._ft_cache = fresh
-        if self._think:                     # in-flight reasoning: a header + a rolling last-N tail,
+        live_reasoning = self._reasoning_state() if self._think else {}
+        if self._think and live_reasoning.get("inline_note"):
+            # A provider progress note streams as muted prose, never behind a disclosure.
+            frags = []
+            for i, ln in enumerate(self._wrap_tail(self._think, max(1, self._width - 2), 8)):
+                if i:
+                    frags.append(("", "\n"))
+                frags.append((f"fg:{th.muted}", ln))
+            add(frags, "think")
+        elif self._think:                   # in-flight reasoning: a header + a rolling last-N tail,
             m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
-            frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
+            frags = [(f"bold fg:{th.accent}", m + " "),
+                     (f"fg:{th.muted}", self._reasoning_prefix(live_reasoning) + "Thinking…"
+                      + reasoning_label_suffix(live_reasoning.get("source", "unknown"),
+                                               live_reasoning.get("provider", ""),
+                                               width=self._width))]
             for i, ln in enumerate(self._wrap_tail(self._think, max(1, self._width - 4), 5)):
                 frags.append(("", "\n"))
                 frags.append(self._rail_frag(True, i))
@@ -1997,7 +2019,10 @@ class TUI:
         kind = blk.get("kind")
         if kind == "think":
             return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""),
-                    blk.get("head"), theme_key)
+                    blk.get("head"), blk.get("source"), blk.get("provider"), blk.get("agent"),
+                    bool(blk.get("withheld")), self._width < 60, theme_key)
+        if kind == "narration":
+            return ("narration", blk.get("text", ""), self._width, theme_key)
         if kind == "recall":
             # uid first: two markers in one transcript must never share fragments, because
             # each carries a handler bound to its own block.
@@ -2099,13 +2124,22 @@ class TUI:
         self._ft_cache = {}
 
     def _think_frags(self, b: dict):
-        """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
-        (▾) to the full reasoning on click  collapse/expand."""
+        """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs · raw` header that
+        expands (▾) to the full reasoning on click. The suffix says where the thinking came from
+        (`· summarized by Anthropic`, nothing for unknown; the provider name is dropped below 60
+        columns). A withheld block is a static `◆ Thought for Xs · hidden by Anthropic` row: no
+        caret, no handler, nothing to expand."""
         from prompt_toolkit.mouse_events import MouseEventType
         th = style_mod.theme()
-        secs = b.get("secs", 0)
+        secs = b.get("secs", 0) or 0
         tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
         head = b.get("head") or (f"Thought for {tstr}" if secs else "Thought")
+        if not b.get("head"):
+            head = (self._reasoning_prefix(b) + head
+                    + reasoning_label_suffix(b.get("source", "unknown"), b.get("provider", ""),
+                                             width=self._width))
+        if b.get("withheld"):
+            return [(f"fg:{th.muted}", f"{glyphs.DIAMOND} {head}")]
         caret = "▾" if b.get("exp") else "▸"
 
         def toggle(mouse_event):
@@ -2117,6 +2151,48 @@ class TUI:
             for ln in b.get("text", "").strip().split("\n"):
                 frags.append(("", "\n"))
                 frags.append((f"fg:{th.faint} italic", f"  {glyphs.RAIL} {ln}"))
+        return frags
+
+    @staticmethod
+    def _reasoning_prefix(b: dict) -> str:
+        return "sub-agent · " if b.get("agent") else ""
+
+    def _narration_lines(self, text: str, width: int) -> list[tuple[str, bool]]:
+        """A provider progress note as display lines (``(text, is_hint_line)``): wrapped prose with
+        the ` · summarized` hint on the last prose line, or on its own line after a list or code."""
+        width = max(8, int(width))
+        hint = " · summarized"
+        console = self._console()
+        source_lines = str(text or "").strip().split("\n")
+        out: list[tuple[str, bool]] = []
+        for para in source_lines:
+            wrapped = Text(para).wrap(console, width, overflow="fold") if para.strip() else []
+            out.extend((row.plain, False) for row in (wrapped or [Text("")]))
+        last_source = next((line for line in reversed(source_lines) if line.strip()), "")
+        structured = bool(re.match(r"\s*(?:[-*+]\s|\d+[.)]\s|```|    |\|)", last_source))
+        if not out:
+            return [(hint.strip(), True)]
+        last, _ = out[-1]
+        if structured or _cell_len(last) + len(hint) > width:
+            out.append((hint.strip(), True))
+        else:
+            out[-1] = (last, True)
+        return out
+
+    def _narration_frags(self, b: dict):
+        """A short provider summary shown inline: muted prose plus a faint ` · summarized` hint."""
+        th = style_mod.theme()
+        frags = []
+        lines = self._narration_lines(b.get("text", ""), max(8, self._width - 2))
+        for i, (line, hinted) in enumerate(lines):
+            if i:
+                frags.append(("", "\n"))
+            if hinted and line == "· summarized":
+                frags.append((f"fg:{th.faint}", line))
+                continue
+            frags.append((f"fg:{th.muted}", line))
+            if hinted:
+                frags.append((f"fg:{th.faint}", " · summarized"))
         return frags
 
     _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
@@ -2469,6 +2545,8 @@ class TUI:
             return 1                       # expanded rows are their own blocks
         if isinstance(blk, dict) and blk.get("kind") == "think":
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
+        if isinstance(blk, dict) and blk.get("kind") == "narration":
+            return len(self._narration_lines(blk.get("text", ""), max(8, self._width - 2)))
         if isinstance(blk, dict) and blk.get("kind") == "user":
             _, compact, _, rows = self._user_band_layout(
                 blk.get("text", ""), blk.get("tag", ""))
@@ -3094,26 +3172,103 @@ class TUI:
         self._streaming = True
         self._invalidate()
 
-    def on_thinking(self, chunk: str) -> None:
+    def _reasoning_state(self) -> dict:
+        """Provenance of the block streaming on THIS thread's session (a background agent keeps its
+        own), plus the recent transcript blocks by key so an end can relabel them."""
+        sessions = getattr(self, "_sessions", None)
+        if not sessions:
+            return self.__dict__.setdefault("_fb_reasoning_state", {})
+        tls = getattr(self, "_tls", None)
+        target = getattr(tls, "session", None) if tls else None
+        target = target or sessions[self._active_idx]
+        state = getattr(target, "_reasoning_state", None)
+        if not isinstance(state, dict):
+            state = {}
+            try:
+                setattr(target, "_reasoning_state", state)
+            except AttributeError:
+                pass
+        return state
+
+    def on_thinking(self, chunk: str, block=None) -> None:
         self._thinking = True
         self._model_wait = None
         self._backend_activity = None
+        if not self.config.get("show_reasoning", True):
+            self._invalidate()                   # hidden: dropped at ingest, only the latch shows
+            return
+        state = self._reasoning_state()
+        key = getattr(block, "key", None)
+        if block is not None and state.get("key") not in (None, key):
+            self._flush_think()                  # a new block: the previous one becomes its own row
+        if block is not None and state.get("key") != key:
+            source, provider = reasoning_wire_identity(getattr(block, "source", ""),
+                                                       getattr(block, "provider", ""))
+            agent = str(getattr(block, "agent", "") or "")
+            state.update(key=key, source=source, provider=provider, agent=agent,
+                         inline_note=(source == "narration" and not agent
+                                      and self.config.get("thinking_inline", True) is not False))
         if self._think_t0 is None:
             self._think_t0 = time.monotonic()   # start timing this reasoning block
-        if self.config.get("show_reasoning", True):
-            self._think += style_mod.terminal_safe_text(chunk)  # shown live + muted in transcript
+        self._think += style_mod.terminal_safe_text(chunk)  # shown live + muted in transcript
         self._invalidate()
 
-    def _flush_think(self) -> None:
+    def on_thinking_end(self, block) -> None:
+        """A block closed: relabel it with the backend's seconds, and show it inline, collapsed or
+        (withheld) as a static row."""
+        if not self.config.get("show_reasoning", True):
+            return
+        state = self._reasoning_state()
+        key = getattr(block, "key", None)
+        source, provider = reasoning_wire_identity(getattr(block, "source", ""),
+                                                   getattr(block, "provider", ""))
+        agent = str(getattr(block, "agent", "") or "")
+        seconds = getattr(block, "seconds", None)
+        if source == "withheld":
+            self._flush_think()
+            previous = self.blocks[-1] if self.blocks else None
+            if isinstance(previous, dict) and previous.get("withheld") and previous.get("agent", "") == agent:
+                previous["secs"] = (previous.get("secs") or 0) + (seconds or 0)
+            else:
+                self.blocks.append({"kind": "think", "withheld": True, "secs": seconds or 0,
+                                    "text": "", "source": source, "provider": provider,
+                                    "agent": agent, "key": key, "exp": False})
+            self._invalidate()
+            return
+        if state.get("key") == key and self._think.strip():
+            self._flush_think(seconds=seconds)
+        blk = (state.get("blocks") or {}).get(key)
+        if blk is None:
+            return
+        if isinstance(seconds, (int, float)):
+            blk["secs"] = seconds
+        inline = (getattr(block, "placement", "") == "inline"
+                  and source in ("summarized", "narration") and not agent)
+        blk["kind"] = "narration" if inline else "think"
+        self._invalidate()
+
+    def _flush_think(self, seconds=None) -> None:
         """Collapse the streamed reasoning to a single dim `◆ Thought for Xs` line once the answer
         starts  auto-collapse (the live reasoning still streams during the turn;
         it just folds away after, instead of leaving a wall of grey text in the transcript)."""
+        state = self._reasoning_state()
         if self._think.strip():
-            secs = (time.monotonic() - self._think_t0) if self._think_t0 else 0
-            self.blocks.append({"kind": "think", "secs": secs,        # keep the text so it can re-expand
-                                "text": self._think.strip(), "exp": False})
+            secs = (seconds if isinstance(seconds, (int, float)) else
+                    (time.monotonic() - self._think_t0) if self._think_t0 else 0)
+            blk = {"kind": "narration" if state.get("inline_note") else "think",
+                   "secs": secs, "text": self._think.strip(), "exp": False,   # keep the text so it can re-expand
+                   "key": state.get("key"), "source": state.get("source", "unknown"),
+                   "provider": state.get("provider", ""), "agent": state.get("agent", "")}
+            self.blocks.append(blk)
+            if state.get("key") is not None:
+                recent = state.setdefault("blocks", {})
+                recent[state["key"]] = blk
+                while len(recent) > 64:
+                    recent.pop(next(iter(recent)))
             self._scroll_off = 0
             self._invalidate()
+        for field in ("key", "source", "provider", "agent", "inline_note"):
+            state.pop(field, None)
         self._think = ""
         self._think_t0 = None
         self._thinking = False        # reasoning is done → clear the "Thinking…" latch (a reasoning-only
@@ -4829,8 +4984,15 @@ class TUI:
                 cfg.set("show_reasoning", True); self._flash("thoughts shown in the transcript")
             elif val in ("hide", "off", "false", "0"):
                 cfg.set("show_reasoning", False); self._flash("thoughts hidden")
+            elif val == "inline":
+                cfg.set("thinking_inline", True)
+                self._flash("short provider summaries shown inline; raw thinking stays collapsed")
+            elif val == "collapsed":
+                cfg.set("thinking_inline", False); self._flash("all thinking collapsed")
             else:
-                self._flash(f"thoughts: {'shown' if cfg.get('show_reasoning', True) else 'hidden'} — /thoughts show|hide")
+                self._flash(f"thoughts: {'shown' if cfg.get('show_reasoning', True) else 'hidden'}"
+                            f"{', summaries inline' if cfg.get('thinking_inline', True) is not False else ', collapsed'}"
+                            " — /thoughts show|hide|inline|collapsed")
         elif cmd in ("preserve-thinking", "preserve-reasoning"):
             val = rest.strip().lower()
             if val in ("on", "true", "1", "show", "yes"):
@@ -5243,12 +5405,42 @@ class TUI:
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
             elif who == "assistant":
+                reasoning_rows = row.get("reasoning") or []
+                blocks.extend(self._reasoning_rows(reasoning_rows, after_text=False))
                 if body:
                     blocks.append({"kind": "md", "text": body})  # rendered at whatever width shows it
+                blocks.extend(self._reasoning_rows(reasoning_rows, after_text=True))
                 names = row.get("tools") or ""
                 if names:
                     blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
         return blocks, made
+
+    def _reasoning_rows(self, entries, *, after_text: bool) -> list:
+        """Restored reasoning blocks (sanitized ``_dgc_reasoning``) with placement recomputed from
+        the current settings, exactly as the editor replays them."""
+        if not entries or not self.config.get("show_reasoning", True):
+            return []
+        inline_enabled = self.config.get("thinking_inline", True) is not False
+        max_chars = self.config.get("thinking_inline_max_chars", 280)
+        blocks = []
+        for entry in entries:
+            if bool(entry.get("after_text")) != after_text:
+                continue
+            source, provider = reasoning_wire_identity(entry.get("source"), entry.get("provider"))
+            text = style_mod.terminal_safe_text(str(entry.get("text") or "")).strip()
+            secs = entry.get("seconds") or 0
+            if source == "withheld":
+                blocks.append({"kind": "think", "withheld": True, "secs": secs, "text": "",
+                               "source": source, "provider": provider, "agent": "", "exp": False})
+                continue
+            if not text:
+                continue
+            inline = reasoning_placement(source, text, round_called_tools=entry.get("tools") is True,
+                                         inline_enabled=inline_enabled, max_chars=max_chars,
+                                         from_subagent=False) == "inline"
+            blocks.append({"kind": "narration" if inline else "think", "secs": secs, "text": text,
+                           "exp": False, "source": source, "provider": provider, "agent": ""})
+        return blocks
 
     def _message_rows(self, messages):
         """Project the live transcript to display rows, splitting at each compaction marker.
@@ -5295,8 +5487,15 @@ class TUI:
             elif role == "assistant":
                 names = ", ".join(tc.get("function", {}).get("name", "?")
                                   for tc in (m.get("tool_calls") or []))
-                if body or names:
-                    rows.append({"who": "assistant", "body": body, "tools": names})
+                if isinstance(m.get("content"), str):
+                    body = reasoning_display_text(m, m.get("content")).strip()
+                try:
+                    reasoning_entries = saved_reasoning(m)
+                except Exception:
+                    reasoning_entries = []
+                if body or names or reasoning_entries:
+                    rows.append({"who": "assistant", "body": body, "tools": names,
+                                 "reasoning": reasoning_entries})
             # role == "tool" (results) and "system" are omitted — too verbose for the recap
         segments.append((rows, None))
         return segments
