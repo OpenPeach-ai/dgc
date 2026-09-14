@@ -2090,7 +2090,7 @@ def run_usage(argv: list[str]) -> int:
     if args.json:
         print(json.dumps(report, indent=2))
     else:
-        Console().print(render.render_markdown(usage_ledger.format_report(report)))
+        Console().print(render.render_markdown(usage_ledger.format_report(report, shell=True)))
     return 1 if report.get("error") else 0
 
 

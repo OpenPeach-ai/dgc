@@ -1185,8 +1185,14 @@ class Agent(GoalLifecycle):
         usage = normalize_usage(getattr(result, "usage", None))
         source = ("subagent" if int(getattr(self, "depth", 0) or 0) > 0
                   else str(getattr(client, "usage_source", "") or "main"))
+        # The transport DGC actually spoke names the provider when it is a native one: an Ollama
+        # behind a proxy or on a custom port has a URL the family heuristic reads as "compat",
+        # which is exactly the case `api_mode: ollama` exists for.
+        transport = str(getattr(client, "api_mode", "") or "")
+        provider = ({"ollama": "ollama", "anthropic": "anthropic"}.get(transport)
+                    or getattr(client, "family", "") or "unknown")
         usage_ledger.record(
-            provider=getattr(client, "family", "") or "unknown",
+            provider=provider,
             base_url=getattr(client, "base_url", ""), model=getattr(client, "model", ""),
             source=source, input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],

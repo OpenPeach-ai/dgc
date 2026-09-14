@@ -387,8 +387,12 @@ def _n(value: int) -> str:
     return f"{int(value):,}"
 
 
-def format_report(report: dict) -> str:
-    """Markdown for the terminal: the same aggregates the editor's Token Usage tab shows."""
+def format_report(report: dict, *, shell: bool = False) -> str:
+    """Markdown for the terminal: the same aggregates the editor's Token Usage tab shows.
+
+    ``shell`` is `dgc usage` run from a shell, where a hint must name that command's own flag
+    rather than the `/usage` slash command only the interactive UIs understand.
+    """
     range_name = str(report.get("range") or "7d")
     totals = report.get("totals") or {}
     lines = [f"## Token usage · {RANGE_LABELS.get(range_name, range_name)}", ""]
@@ -404,11 +408,12 @@ def format_report(report: dict) -> str:
                   "",
                   "Turns delegated to a subscription CLI (Claude Code, Codex, …) are counted by "
                   "that CLI, not here.", ""]
+        command = "dgc usage --range" if shell else "/usage"
         if range_name != "all":
-            lines += ["Try `/usage all` to see earlier requests.", ""]
-        lines.append("Other ranges: `/usage today|7d|30d|month|all`")
+            lines += [f"Try `{command} all` to see earlier requests.", ""]
+        lines.append(f"Other ranges: `{command} today|7d|30d|month|all`")
         return "\n".join(lines)
-    lines += ["| | |", "| --- | ---: |",
+    lines += ["| Total | Count |", "| --- | ---: |",
               f"| Input tokens | {_n(totals.get('input_tokens', 0))} |",
               f"| Output tokens | {_n(totals.get('output_tokens', 0))} |",
               f"| Cached input tokens | {_n(totals.get('cached_input_tokens', 0))} |",
@@ -441,10 +446,12 @@ def format_report(report: dict) -> str:
         lines.append(f"| {day['date']} | {_n(day['input_tokens'])} | {_n(day['output_tokens'])} | "
                      f"{_n(day['cached_input_tokens'])} | {_n(day['requests'])} |")
     if len(active) > 62:
-        lines.append(f"\n{len(active) - 62} earlier active day(s) are in `dgc usage --json`.")
+        earlier = len(active) - 62
+        lines.append(f"\n{earlier} earlier active day{'' if earlier == 1 else 's'} "
+                     f"{'is' if earlier == 1 else 'are'} in `dgc usage --json`.")
     quiet = len(report.get("by_day") or []) - len(active)
     if quiet > 0:
-        lines.append(f"\n{quiet} day(s) in this range had no requests.")
+        lines.append(f"\n{quiet} day{'' if quiet == 1 else 's'} in this range had no requests.")
     return "\n".join(lines)
 
 
