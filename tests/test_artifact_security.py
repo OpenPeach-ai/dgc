@@ -14,6 +14,7 @@ import re
 import socket
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -24,7 +25,7 @@ if "dgc.config" not in sys.modules and "dgc-tests-home-" not in os.environ.get("
 
 import dgc.artifacts as A  # noqa: E402
 
-MAIN_PORT, PLAN_PORT, LAN_PORT, AGENT_PORT = 5031, 5033, 5035, 5037
+MAIN_PORT, PLAN_PORT, LAN_PORT, AGENT_PORT, REVIEW_PORT = 5031, 5033, 5035, 5037, 5039
 ENV_SECRET = b"sk-artifact-test-secret"
 
 
@@ -327,6 +328,9 @@ class ArtifactServerSecurity(unittest.TestCase):
         self.assertIn(b"<select", body)
         self.assertIn(f'src="/a/{self.site_art.id}/"'.encode(), body)
         self.assertIn(self.root_art.id.encode(), body)
+        _, _, retired = self.get("/?a=a1")                   # an id retired on upgrade frames the newest
+        newest = self.srv.list()[0]
+        self.assertIn(f'src="{newest.path}"'.encode(), retired)
         status, _, listing = self.get("/_list")
         ids = {item["id"] for item in json.loads(listing)["artifacts"]}
         self.assertEqual(status, 200)
@@ -364,6 +368,204 @@ class ArtifactServerSecurity(unittest.TestCase):
             self.assertEqual(request(port, "GET", f"/a/{art.id}/", host="other.tailnet.ts.net")[0], 421)
         finally:
             srv.shutdown()
+
+
+class ArtifactScopeEdges(unittest.TestCase):
+    """Nested projects, dot folders, document-relative script names, server-side files in a dedicated
+    folder, prose mentions, quoted entry names, stalled connections, and the link cache."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory(prefix="dgc-artscope-")
+        tmp = Path(os.path.realpath(cls._tmp.name))
+        cls._saved_state = A.STATE_FILE
+        A.STATE_FILE = tmp / "artifacts.json"
+        proj = cls.proj = tmp / "proj"
+        _write(proj / ".git" / "HEAD", "ref: refs/heads/main\n")
+        # A page in a folder without markers that holds a whole project one level down.
+        pk = proj / "packages"
+        _write(pk / "index.html", '<link rel="stylesheet" href="css/site.css"><img src="api/logo.png">')
+        _write(pk / "css" / "site.css", "h1{color:#7C5CFF}")
+        _write(pk / "notes.txt", "public notes")
+        _write(pk / "api_keys.json", '{"key": "SECRET"}')
+        _write(pk / "api" / "package.json", '{"name": "api"}')
+        _write(pk / "api" / "logo.png", b"\x89PNG logo")
+        _write(pk / "api" / "config" / "secrets.yaml", "db_password: SECRET")
+        _write(pk / "api" / "firebase-adminsdk.json", '{"private_key": "SECRET"}')
+        _write(pk / "api" / "client_secret.json", '{"client_secret": "SECRET"}')
+        _write(pk / "api" / "index.ts", "const KEY = 'SECRET'")
+        _write(pk / "api" / "public.css", "unlinked but a web file")
+        # A page at the project root whose script names files relative to the page.
+        _write(proj / "index.html",
+               '<script src="js/app.js"></script><img data-src="img/lazy.png">'
+               "<p>Setup: save your key as 'google-services.json' and 'notes.json'</p>"
+               "<script>fetch('token.json'); const f = ['appsettings.json', 'local.settings.json', "
+               "'firebase-adminsdk-abc.json', 'keyfile.json', 'env.js', 'auth.json']</script>")
+        _write(proj / "js" / "app.js", "fetch('data/sales.json'); new Worker('js/worker.js'); "
+                                       "import('./chart.mjs')")
+        _write(proj / "js" / "worker.js", "fetch('rows.json')")
+        _write(proj / "js" / "chart.mjs", "export default 1")
+        _write(proj / "js" / "rows.json", "[4]")
+        _write(proj / "data" / "sales.json", '[{"region": "north", "total": 3}]')
+        _write(proj / "img" / "lazy.png", b"\x89PNG lazy")
+        for name in ("google-services.json", "notes.json", "token.json", "appsettings.json",
+                     "local.settings.json", "firebase-adminsdk-abc.json", "keyfile.json", "env.js",
+                     "auth.json"):
+            _write(proj / name, '{"secret": "SECRET"}')
+        # A dedicated in-browser app that loads Python, a database and JSX, next to unlinked data.
+        app = cls.app = proj / "artifacts" / "pyapp"
+        _write(app / "index.html", '<script type="py" src="main.py" config="pyscript.toml"></script>'
+                                   '<script type="text/babel" src="app.jsx"></script>'
+                                   "<script>fetch('db/app.sqlite')</script>")
+        _write(app / "main.py", "print('hello from pyscript')")
+        _write(app / "pyscript.toml", 'packages = ["numpy"]')
+        _write(app / "app.jsx", "const App = () => <h1/>")
+        _write(app / "db" / "app.sqlite", b"SQLite format 3 linked")
+        for name, body in (("db.sqlite-wal", "WAL SECRET"), ("config.yaml", "password: SECRET"),
+                           ("app.ts", "const KEY='SECRET'"), ("terraform.tfstate.backup", "SECRET"),
+                           ("site.bak", "SECRET"), ("data.db-journal", "SECRET"), ("vpn.ovpn", "SECRET"),
+                           ("server.py", "SECRET")):
+            _write(app / name, body)
+        cls.srv = A._Server(persistent=False)
+        cls.nested = cls.srv.add("packages/index.html", proj, "nested", preferred_port=REVIEW_PORT)
+        cls.root = cls.srv.add("index.html", proj, "root", preferred_port=REVIEW_PORT)
+        cls.pyapp = cls.srv.add("artifacts/pyapp", proj, "pyapp", preferred_port=REVIEW_PORT)
+        cls.port = cls.srv.port
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        A.STATE_FILE = cls._saved_state
+        cls._tmp.cleanup()
+
+    def status(self, art, rel, **kw):
+        status, _, body = request(self.port, "GET", f"/a/{art.id}/{rel}", **kw)
+        if status == 200:
+            self.assertNotIn(b"SECRET", body, rel)
+        return status
+
+    def test_a_project_nested_in_a_dedicated_folder_is_scoped(self):
+        self.assertFalse(self.nested.scoped)
+        for rel in ("api/config/secrets.yaml", "api/firebase-adminsdk.json", "api/client_secret.json",
+                    "api/index.ts", "api/package.json", "api/public.css", "api_keys.json"):
+            self.assertEqual(self.status(self.nested, rel), 404, rel)
+        for rel in ("", "css/site.css", "notes.txt", "api/logo.png"):
+            self.assertEqual(self.status(self.nested, rel), 200, rel)
+        lan = A._Server(persistent=False)
+        try:
+            art = lan.add("packages", self.proj, "nested lan", preferred_port=LAN_PORT, lan=True)
+            if lan.host != "127.0.0.1":                      # the same answers over the LAN interface
+                for rel, expect in (("api/config/secrets.yaml", 404), ("css/site.css", 200)):
+                    status, _, _ = request(lan.port, "GET", f"/a/{art.id}/{rel}",
+                                           host=f"{lan.host}:{lan.port}", address=lan.host)
+                    self.assertEqual(status, expect, rel)
+        finally:
+            lan.shutdown()
+
+    def test_personal_folders_under_home_are_workspace_roots(self):
+        home = Path.home()
+        for name in ("Downloads", "Documents", "Desktop"):
+            self.assertTrue(A.is_workspace_root(home / name), name)
+        self.assertFalse(A.is_workspace_root(home / "Downloads" / "report"))
+
+    def test_the_tool_refuses_a_page_inside_any_dot_folder(self):
+        before = set(self.srv.artifacts)
+        for folder in (".github", ".storybook", ".next", ".secrets", ".terraform", "web/.private"):
+            _write(self.proj / folder / "index.html", "<h1>hidden</h1>")
+            _write(self.proj / folder / "deploy.yml", "token: SECRET")
+            for path in (f"{folder}/index.html", folder):
+                with self.assertRaises(PermissionError, msg=path):
+                    self.srv.add(path, self.proj, preferred_port=REVIEW_PORT)
+        self.assertEqual(set(self.srv.artifacts), before)
+
+    def test_script_file_names_resolve_against_the_page_as_well(self):
+        self.assertTrue(self.root.scoped)
+        for rel, expect in (("data/sales.json", b"north"), ("js/worker.js", b"rows.json"),
+                            ("js/chart.mjs", b"export"), ("js/rows.json", b"[4]"),
+                            ("img/lazy.png", b"PNG lazy")):
+            status, _, body = request(self.port, "GET", f"/a/{self.root.id}/{rel}")
+            self.assertEqual(status, 200, rel)
+            self.assertIn(expect, body)
+
+    def test_a_scoped_page_does_not_publish_prose_mentions_or_secret_stores(self):
+        for rel in ("notes.json", "google-services.json", "token.json", "appsettings.json",
+                    "local.settings.json", "firebase-adminsdk-abc.json", "keyfile.json", "env.js",
+                    "auth.json"):
+            self.assertEqual(self.status(self.root, rel), 404, rel)
+
+    def test_a_dedicated_folder_serves_server_side_files_only_when_a_page_links_them(self):
+        self.assertFalse(self.pyapp.scoped)
+        for rel in ("main.py", "pyscript.toml", "app.jsx", "db/app.sqlite"):
+            self.assertEqual(self.status(self.pyapp, rel), 200, rel)
+        for rel in ("db.sqlite-wal", "config.yaml", "app.ts", "terraform.tfstate.backup", "site.bak",
+                    "data.db-journal", "vpn.ovpn", "server.py"):
+            self.assertEqual(self.status(self.pyapp, rel), 404, rel)
+
+    def test_quoted_entry_names_are_refused_and_the_frame_path_is_escaped(self):
+        hostile = 'x" srcdoc="<img src=q onerror=alert(1)>" data-a=".html'
+        try:
+            _write(self.app / hostile, "<h1>x</h1>")
+        except OSError:
+            self.skipTest("file system refuses the name")
+        with self.assertRaises(ValueError):
+            self.srv.add(f"artifacts/pyapp/{hostile}", self.proj, preferred_port=REVIEW_PORT)
+        shell = A._Server(persistent=False)
+        legacy = A.Artifact(id="a" + "0" * 16, name="legacy", directory=str(self.app), entry=hostile)
+        legacy._owner = shell
+        shell.artifacts[legacy.id] = legacy
+        page = A._shell_html(shell, legacy.id, "n")
+        frame = re.search(r'<iframe id="frame" src="([^"]*)" title="artifact">', page)
+        self.assertIsNotNone(frame, "the iframe keeps exactly its own attributes")
+        self.assertNotIn('srcdoc="', page)
+
+    def test_a_stalled_request_is_dropped(self):
+        srv = A._Server(persistent=False)
+        srv.request_timeout = 0.5
+        try:
+            art = srv.add("artifacts/pyapp", self.proj, "slow", preferred_port=REVIEW_PORT)
+            with socket.create_connection(("127.0.0.1", srv.port), timeout=6) as sock:
+                sock.sendall(f"GET /a/{art.id}/ HTTP/1.1\r\n".encode())
+                started = time.monotonic()
+                try:
+                    data = sock.recv(1024)
+                except socket.timeout:
+                    data = None
+                self.assertEqual(data, b"", "the server closes a request that never ends")
+                self.assertLess(time.monotonic() - started, 4)
+        finally:
+            srv.shutdown()
+
+    def test_linked_files_are_walked_once_and_follow_page_changes(self):
+        site = self.proj / "gallery"
+        _write(site / "package.json", "{}")             # a workspace root: scoped
+        images = "".join(f'<img src="img/i{n}.png">' for n in range(300))
+        _write(site / "index.html", images + '<img src="img/later.png">')
+        for n in range(300):
+            _write(site / "img" / f"i{n}.png", b"\x89PNG")
+        art = self.srv.add("gallery/index.html", self.proj, "gallery", preferred_port=REVIEW_PORT)
+        self.assertTrue(art.scoped)
+        calls = []
+        real_walk = A._walk_links
+
+        def counting(*args, **kwargs):
+            calls.append(args)
+            return real_walk(*args, **kwargs)
+
+        A._walk_links = counting
+        try:
+            for n in range(0, 300, 5):
+                self.assertEqual(self.status(art, f"img/i{n}.png"), 200)
+            self.assertEqual(len(calls), 1, "one walk serves every request while the page is unchanged")
+            self.assertEqual(self.status(art, "img/later.png"), 404)
+            _write(site / "img" / "later.png", b"\x89PNG later")      # written after its page
+            self.assertEqual(self.status(art, "img/later.png"), 200)
+            self.assertEqual(self.status(art, "img/new.png"), 404)
+            _write(site / "img" / "new.png", b"\x89PNG new")
+            _write(site / "index.html", images + '<img src="img/later.png"><img src="img/new.png">')
+            self.assertEqual(self.status(art, "img/new.png"), 200)
+            self.assertEqual(len(calls), 2)
+        finally:
+            A._walk_links = real_walk
 
 
 if __name__ == "__main__":

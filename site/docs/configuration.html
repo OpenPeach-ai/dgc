@@ -174,7 +174,7 @@
 <li><code>artifact_autostart</code> (default <code>true</code>) — serve artifacts automatically as they are produced.</li>
 <li><code>artifact_port</code> (default <code>45000</code>) — the shared port for project artifacts. Plan previews use a separate transient loopback server and port.</li>
 <li><code>artifact_bind</code> (default <code>localhost</code>) — the bind mode. Set it to <code>lan</code> to preview from another device on your own network.</li>
-<li><code>artifact_hostname</code> — the hostname used when building the printed URL, if it differs from the bind address.</li>
+<li><code>artifact_hostname</code> — the hostname used when building the printed URL, if it differs from the bind address. The server also accepts requests addressed to this name (a reverse proxy, a Codespaces or other forwarded URL, or a Tailscale MagicDNS name); requests for any other unknown host are refused. A running server picks up a changed value the next time an artifact is served, the bind mode is switched, or <code>dgc</code> starts.</li>
 <li><code>plan_artifact</code> (default <code>true</code>) — render proposed plans as an artifact page.</li>
 <li><code>artifact_in_plan</code> (default <code>false</code>) — also serve artifacts while in plan mode.</li>
 </ul>

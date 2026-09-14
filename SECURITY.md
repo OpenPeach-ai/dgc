@@ -23,9 +23,11 @@ its safety boundaries are:
 - deny rules take precedence in every native-loop mode, including `auto`;
 - private/link-local/loopback web fetches are blocked and redirects are revalidated;
 - the artifact preview server answers only to this machine's own host names (a DNS-rebinding page
-  is refused), never serves dot-files, key files, server-side source, or symlinks leaving the
-  artifact folder, serves only a page and the assets it links to when that page sits in a workspace
-  root, and stops a preview over HTTP only with the shell page's per-process token;
+  is refused), never serves dot-files, key or credential files, or symlinks leaving the artifact
+  folder, serves server-side source and config only when a page links it, serves only a page and the
+  web assets it links to when that page sits in a workspace root or a nested project, and stops a
+  preview over HTTP only with the shell page's per-process token (all previews share one origin, so
+  a previewed page is trusted with the others);
 - untrusted workspaces cannot start unattended one-shot automation without explicit `--trust`;
 - API credentials are separated from normal configuration and editor secrets use SecretStorage.
 

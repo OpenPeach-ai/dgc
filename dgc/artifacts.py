@@ -15,20 +15,28 @@ Security model (what a page on the network or in the browser can and cannot reac
   host name. A DNS-rebinding page (evil.example resolving to 127.0.0.1) sends its own name in Host and
   gets 421. The port is not pinned: the hostname is what a rebinding page cannot forge, and SSH or
   editor port forwarding legitimately reaches the server on another local port.
-- No dot paths at any depth (`.env`, `.git/`, `.dgc/`, `.ssh/`), no private-key-like files, no
-  symlink that resolves outside the artifact directory, and no directory listings.
+- No dot paths at any depth (`.env`, `.git/`, `.dgc/`, `.ssh/`), no private-key, credential or
+  secret-named file, no symlink that resolves outside the artifact directory, and no directory
+  listings. The tool refuses a page inside any dot folder.
 - Workspace roots are never served whole. An artifact whose directory is the project root, the home
-  directory, or any folder that looks like a project (`.git`, `package.json`, `pyproject.toml`, …) is
-  *scoped*: only its page and the web assets that page references (transitively, through HTML, CSS
-  and JS) are reachable, and manifests, config and source files never are. A page in its own folder
-  keeps working as a whole site. Scoping, rather than refusing, keeps the common single page written
-  at a project root working without a retry, while the rest of the project stays unreachable.
+  directory, a personal folder under it (Downloads, Documents, …), or any folder that looks like a
+  project (`.git`, `package.json`, `pyproject.toml`, …) is *scoped*: only its page and the web assets
+  that page references (transitively, through HTML, CSS and JS) are reachable, and manifests, config
+  and source files never are. A project nested inside a dedicated folder is scoped the same way.
+  A page in its own folder keeps working as a whole site, except that server-side source, config and
+  data (`.py`, `.yaml`, `.sqlite`, …) load only when a page links them. Scoping, rather than refusing,
+  keeps the common single page written at a project root working without a retry, while the rest of
+  the project stays unreachable. The links a page reaches are cached until a parsed file changes.
 - `POST /_stop/` needs the per-process token embedded in the shell page (a cross-origin page cannot
   read it, and the custom header forces a CORS preflight that is never granted) and, when present, a
   same-origin `Origin`/`Sec-Fetch-Site`.
 - Artifact ids carry 64 random bits, so an id cannot be guessed from a counter.
 - Responses carry nosniff, no-referrer, same-origin framing/resource policy, and a nonce CSP on the
   shell; plan pages get a CSP that forbids scripts and every network load.
+- A connection that stalls mid-request is closed after `request_timeout` seconds.
+
+Not covered: every artifact shares one origin with the shell, so script in one artifact can read the
+shell (and its stop token) and other artifacts; LAN mode has no authentication.
 """
 from __future__ import annotations
 
@@ -62,6 +70,7 @@ TOKEN_HEADER = "X-DGC-Artifact-Token"
 
 # Directories that are never a site: refusing them as an artifact's own location (or any of its
 # ancestors inside the project) keeps a model from serving VCS metadata, DGC state or credentials.
+# Every other dot directory is refused as well; this list names the ones worth calling out.
 _SENSITIVE_DIRS = frozenset({
     ".git", ".hg", ".svn", ".dgc", ".ssh", ".gnupg", ".aws", ".azure", ".gcloud", ".kube", ".docker",
     ".config", ".claude", ".codex", ".cursor", ".vscode", ".idea", ".venv", ".env"})
@@ -71,38 +80,61 @@ _WORKSPACE_MARKERS = (
     "requirements.txt", "Pipfile", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
     "build.gradle.kts", "Gemfile", "composer.json", "deno.json", "Makefile", "CMakeLists.txt",
     "AGENTS.md", "CLAUDE.md")
+# Personal folders directly under the home directory hold everything a user downloads or saves, so
+# they are never published whole either.
+_PERSONAL_DIRS = frozenset({
+    "downloads", "documents", "desktop", "pictures", "photos", "movies", "music", "videos", "public",
+    "library", "dropbox", "onedrive", "google drive", "icloud drive", "icloud", "appdata", "snap"})
 # Private-key and credential stores, refused in every artifact.
-_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".ppk")
+_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".ppk", ".gpg",
+                    ".asc", ".ovpn", ".env", ".tfstate", ".tfvars")
 _SECRET_NAMES = frozenset({"credentials", "credentials.json", "htpasswd", "_netrc", "authorized_keys",
-                           "known_hosts"})
+                           "known_hosts", "auth.json", "token.json", "google-services.json",
+                           "googleservice-info.plist", "local.settings.json"})
 _SECRET_PREFIXES = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
-# What a scoped (workspace-root) artifact may serve: browser-loadable web assets only.
+# Words that mark a data or config file as a secret store. Pages, styles and media are exempt (a
+# "secret-santa.html" is a page), and a script counts only when its whole name is one of these.
+_SECRET_WORDS = ("secret", "credential", "service-account", "service_account", "serviceaccount",
+                 "password", "passwd", "apikey", "api_key", "api-key", "private-key", "private_key",
+                 "privatekey", "adminsdk", "keyfile")
+_SECRET_SCRIPT_STEMS = frozenset({
+    "secret", "secrets", "credential", "credentials", "env", "keys", "apikey", "apikeys", "api-keys",
+    "api_keys", "password", "passwords"})
+# Browser-loadable web assets: all a scoped (workspace-root) artifact may serve.
 _WEB_EXT = frozenset({
     ".html", ".htm", ".css", ".js", ".mjs", ".json", ".geojson", ".csv", ".tsv", ".svg", ".png",
     ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp", ".woff", ".woff2", ".ttf", ".otf",
     ".mp3", ".mp4", ".webm", ".ogg", ".oga", ".ogv", ".wav", ".m4a", ".flac", ".glb", ".gltf",
-    ".wasm", ".pdf"})
+    ".bin", ".ktx2", ".hdr", ".wasm", ".pdf", ".webmanifest", ".vtt"})
+# A name with one of these is a page, style or media file, never read as a secret store by its name.
+_NAMED_FREELY_EXT = frozenset({
+    ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp",
+    ".woff", ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".webm", ".ogg", ".oga", ".ogv", ".wav", ".m4a",
+    ".flac", ".glb", ".pdf"})
 _ENTRY_EXT = frozenset({".html", ".htm", ".svg", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"})
-# Never a browser asset, so never served even from a dedicated folder: server-side source, shell
-# scripts, databases, logs and machine config.
-_SOURCE_EXT = frozenset({
+# Server-side source, shell scripts, databases (and their side files), logs, backups and machine config.
+# A scoped artifact never serves them; a page in its own folder serves one only when a page links it
+# (PyScript's main.py and pyscript.toml, a sql.js database, a Babel .jsx), so nothing unlinked leaks.
+_SERVER_EXT = frozenset({
     ".py", ".pyc", ".pyo", ".pyd", ".ipynb", ".rb", ".php", ".pl", ".go", ".rs", ".java", ".class",
     ".jar", ".kt", ".kts", ".scala", ".cs", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".m", ".mm",
     ".swift", ".dart", ".lua", ".ex", ".exs", ".erl", ".hs", ".sh", ".bash", ".zsh", ".fish", ".ps1",
-    ".bat", ".cmd", ".sql", ".sqlite", ".sqlite3", ".db", ".ini", ".toml", ".cfg", ".conf",
-    ".properties", ".lock", ".log", ".env", ".tfstate", ".tfvars"})
-_PARSED_EXT = frozenset({".html", ".htm", ".css", ".js", ".mjs", ".svg"})
+    ".bat", ".cmd", ".ts", ".tsx", ".jsx", ".cjs", ".vue", ".svelte", ".astro", ".sql", ".sqlite",
+    ".sqlite3", ".db", ".mdb", ".accdb", ".rdb", ".dump", ".dat", ".pickle", ".pkl", ".ini", ".toml",
+    ".cfg", ".conf", ".yaml", ".yml", ".properties", ".plist", ".lock", ".log", ".bak", ".backup",
+    ".old", ".orig", ".swp", ".swo", ".tmp"})
+_SERVER_SUFFIXES = ("-wal", "-shm", "-journal", "~")
+_PARSED_EXT = frozenset({".html", ".htm", ".css", ".js", ".mjs", ".svg", ".gltf"})
+_DOCUMENT_EXT = frozenset({".html", ".htm", ".svg"})
+_SCRIPT_EXT = frozenset({".js", ".mjs"})
 _SCOPED_DENY_NAMES = frozenset({
     "package.json", "package-lock.json", "composer.json", "composer.lock", "tsconfig.json",
     "jsconfig.json", "deno.json", "deno.jsonc", "bower.json", "manifest.webapp", "firebase.json",
     "vercel.json", "netlify.json", "now.json", "app.json", "angular.json", "nx.json", "lerna.json",
     "turbo.json", "renovate.json", "biome.json", "wrangler.json"})
-_SCOPED_DENY_WORDS = ("secret", "credential", "service-account", "service_account", "serviceaccount",
-                      "password", "passwd", "apikey", "api_key", "api-key", "private-key",
-                      "private_key")
-_MAX_CLOSURE = 2000
+_MAX_CLOSURE = 20000
 _MAX_PARSE_BYTES = 4 * 1024 * 1024
-SCOPED_NOTE = ("This page sits in a workspace root, so only the page and the files it links to are "
+SCOPED_NOTE = ("This page sits in a workspace root, so only the page and the web files it links to are "
                "served; put a multi-file site in its own folder to serve all of it.")
 _SHELL_CSP = ("default-src 'none'; script-src 'nonce-{n}'; style-src 'nonce-{n}'; img-src 'self' data:; "
               "connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; "
@@ -111,6 +143,7 @@ _PLAN_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; base
              "form-action 'none'; frame-ancestors 'self'")
 _FILE_CSP = "frame-ancestors 'self'"
 _PLAIN_CSP = "default-src 'none'; frame-ancestors 'self'"
+_UNSAFE_ENTRY_CHARS = frozenset('"\'<>`')
 
 
 def _new_id(prefix: str, taken) -> str:
@@ -156,38 +189,86 @@ def _hostname_of(configured) -> str | None:
     return split_host(raw)
 
 
+def _secret_named(name: str) -> bool:
+    """True for a file name that marks a private key, credential or secret store."""
+    name = name.lower()
+    stem, ext = posixpath.splitext(name)
+    if (name in _SECRET_NAMES or name.endswith(_SECRET_SUFFIXES) or name.startswith(_SECRET_PREFIXES)
+            or ".tfstate" in name or (name.startswith("appsettings") and ext == ".json")):
+        return True
+    if ext in _NAMED_FREELY_EXT:
+        return False
+    if ext in _SCRIPT_EXT:
+        return (stem[:-4] if stem.endswith(".min") else stem) in _SECRET_SCRIPT_STEMS
+    return any(word in name for word in _SECRET_WORDS)
+
+
 def _private_rel(rel: str) -> bool:
-    """True for a path that must never leave the machine: a dot segment anywhere, a private key or
-    credential store, or (Windows) an alternate data stream."""
+    """True for a path that must never leave the machine: a dot segment anywhere, a private key,
+    credential or secret store, or (Windows) an alternate data stream."""
     parts = [p for p in rel.replace("\\", "/").split("/") if p]
     if not parts:
         return False
     for part in parts:
         if part.startswith(".") or "\x00" in part or (os.name == "nt" and ":" in part):
             return True
-    name = parts[-1].lower()
-    return name in _SECRET_NAMES or name.endswith(_SECRET_SUFFIXES) or name.startswith(_SECRET_PREFIXES)
+    return _secret_named(parts[-1])
+
+
+def _server_side(rel: str) -> bool:
+    """True for server-side source, config, data, logs and backups (see `_SERVER_EXT`)."""
+    name = rel.rsplit("/", 1)[-1].lower()
+    return posixpath.splitext(name)[1] in _SERVER_EXT or name.endswith(_SERVER_SUFFIXES)
 
 
 def _forbidden_rel(rel: str) -> bool:
-    """True for a path no artifact serves: a private path, or server-side source/config/data."""
-    return _private_rel(rel) or posixpath.splitext(rel.rsplit("/", 1)[-1].lower())[1] in _SOURCE_EXT
+    """True for a path that can never be an artifact's entry: private, or server-side."""
+    return _private_rel(rel) or _server_side(rel)
 
 
 def _scoped_asset_ok(rel: str) -> bool:
-    """A file a scoped artifact may serve: a web asset that is not a manifest, a build/tool config,
-    or named like a secret."""
+    """A file a scoped artifact may serve: a web asset that is not private, a manifest, a build/tool
+    config, or named like a secret."""
+    if _private_rel(rel):
+        return False
     name = rel.rsplit("/", 1)[-1].lower()
     ext = posixpath.splitext(name)[1]
     if ext not in _WEB_EXT or name in _SCOPED_DENY_NAMES:
         return False
-    if re.search(r"\.config\.[a-z]+$", name) or re.search(r"(^|[._-])(eslintrc|babelrc|prettierrc)", name):
-        return False
-    return not any(word in name for word in _SCOPED_DENY_WORDS)
+    return not (re.search(r"\.config\.[a-z]+$", name)
+                or re.search(r"(^|[._-])(eslintrc|babelrc|prettierrc)", name))
+
+
+_MARKER_CACHE: dict[str, tuple[float, bool]] = {}
+_MARKER_TTL = 2.0
+
+
+def _has_marker(d, cached: bool = False) -> bool:
+    """Whether folder `d` holds a workspace marker. `cached` reuses an answer from the last couple of
+    seconds, so a page with many assets does not re-probe the same subfolders on every request."""
+    key = os.fspath(d)
+    now = time.monotonic()
+    hit = _MARKER_CACHE.get(key) if cached else None
+    if hit is not None and now - hit[0] < _MARKER_TTL:
+        return hit[1]
+    found = False
+    for marker in _WORKSPACE_MARKERS:
+        try:
+            if os.path.lexists(os.path.join(key, marker)):
+                found = True
+                break
+        except (OSError, ValueError):
+            continue
+    if len(_MARKER_CACHE) > 4096:
+        _MARKER_CACHE.clear()
+    _MARKER_CACHE[key] = (now, found)
+    return found
 
 
 def is_workspace_root(directory, project_root=None) -> bool:
-    """True when `directory` is a project/workspace root rather than a dedicated page folder."""
+    """True when `directory` is a project/workspace root rather than a dedicated page folder: the
+    project root, the filesystem root, home or a parent of it, a personal folder directly under home
+    (Downloads, Documents, …), or a folder holding a project marker."""
     try:
         d = Path(directory).resolve(strict=False)
     except (OSError, RuntimeError, ValueError):
@@ -202,33 +283,46 @@ def is_workspace_root(directory, project_root=None) -> bool:
         home = Path.home().resolve(strict=False)
     except (OSError, RuntimeError, KeyError):
         home = None
-    if d == Path(d.anchor) or (home is not None and (d == home or d in home.parents)):
+    if d == Path(d.anchor):
         return True
-    for marker in _WORKSPACE_MARKERS:
-        try:
-            if (d / marker).exists():
-                return True
-        except OSError:
-            continue
+    if home is not None and (d == home or d in home.parents
+                             or (d.parent == home and d.name.lower() in _PERSONAL_DIRS)):
+        return True
+    return _has_marker(d)
+
+
+def _nested_workspace(base: Path, rel: str) -> bool:
+    """True when a folder between `base` and the file `rel` is itself a project (holds a marker), so
+    that part of a dedicated folder is treated like a workspace root."""
+    d = os.fspath(base)
+    for part in rel.split("/")[:-1]:
+        d = os.path.join(d, part)
+        if _has_marker(d, cached=True):
+            return True
     return False
 
 
-_REF_ATTR = re.compile(
-    r"""(?:^|[\s"'/])(?:src|href|poster|data|srcset|imagesrcset|content|xlink:href)\s*=\s*"""
-    r"""(?:"([^"]*)"|'([^']*)'|([^\s>"']+))""", re.I)
+_URL_ATTR = re.compile(
+    r"""(?:^|[\s"'/])(src|href|poster|data|srcset|imagesrcset|content|xlink:href|background|manifest|"""
+    r"""action|formaction|icon)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))""", re.I)
+_TAG = re.compile(r"<[a-zA-Z][^<>]{0,16384}>")
+_SCRIPT_BODY = re.compile(r"<script\b[^<>]{0,16384}>(.*?)</script\s*>", re.I | re.S)
 _REF_CSS = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)|@import\s+(?:"([^"]*)"|'([^']*)')""",
                       re.I)
 _REF_LITERAL = re.compile(
-    r"""["'`]([^"'`\s<>(){}|^]+?\.(?:html?|css|m?js|json|geojson|csv|tsv|svg|png|jpe?g|gif|webp|avif|ico|"""
-    r"""bmp|woff2?|ttf|otf|mp3|mp4|webm|og[gav]|wav|m4a|flac|glb|gltf|wasm))(?:[?#][^"'`\s]*)?["'`]""", re.I)
+    r"""["'`]([^"'`\s<>(){}|^]+?\.(?:html?|css|m?js|cjs|json|geojson|csv|tsv|svg|png|jpe?g|gif|webp|avif|"""
+    r"""ico|bmp|woff2?|ttf|otf|mp3|mp4|webm|og[gav]|wav|m4a|flac|glb|gltf|bin|ktx2|hdr|wasm|pdf|"""
+    r"""webmanifest|vtt|py|toml|sqlite3?|db|sql|ya?ml|jsx|tsx|ts|vue|svelte|md|txt|xml|map|dat|ipynb))"""
+    r"""(?:[?#][^"'`\s]*)?["'`]""", re.I)
 _SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*:", re.I)
 _REF_CACHE: dict[str, tuple[int, int, tuple[str, ...]]] = {}
 _REF_CACHE_LOCK = threading.Lock()
 
 
 def _extract_refs(path: Path) -> tuple[str, ...]:
-    """Every relative reference a web text file makes (HTML attributes, CSS url()/@import, and quoted
-    asset-like literals in scripts), cached by mtime and size."""
+    """Every relative reference a web text file makes, cached by mtime and size: in HTML and SVG, URL
+    attributes, quoted file names inside tags and scripts, and CSS url()/@import (prose between tags
+    is not a reference); in CSS, url()/@import; in scripts and glTF, quoted file names."""
     try:
         st = path.stat()
     except OSError:
@@ -244,16 +338,25 @@ def _extract_refs(path: Path) -> tuple[str, ...]:
         text = path.read_bytes().decode("utf-8", "replace")
     except OSError:
         return ()
+    ext = path.suffix.lower()
     refs: list[str] = []
-    for m in _REF_ATTR.finditer(text):
-        value = next((g for g in m.groups() if g is not None), "")
-        if "srcset" in m.group(0)[:20].lower():
-            refs.extend(c.strip().split(" ")[0] for c in value.split(",") if c.strip())
-        else:
-            refs.append(value)
-    for m in _REF_CSS.finditer(text):
-        refs.append(next((g for g in m.groups() if g is not None), ""))
-    refs.extend(m.group(1) for m in _REF_LITERAL.finditer(text))
+    if ext in _DOCUMENT_EXT:
+        for tag in _TAG.finditer(text):
+            chunk = tag.group(0)
+            for m in _URL_ATTR.finditer(chunk):
+                value = next((g for g in m.groups()[1:] if g is not None), "")
+                if m.group(1).lower() in ("srcset", "imagesrcset"):
+                    refs.extend(c.strip().split(" ")[0] for c in value.split(",") if c.strip())
+                else:
+                    refs.append(value)
+            refs.extend(m.group(1) for m in _REF_LITERAL.finditer(chunk))
+        for body in _SCRIPT_BODY.finditer(text):
+            refs.extend(m.group(1) for m in _REF_LITERAL.finditer(body.group(1)))
+    if ext in _DOCUMENT_EXT or ext == ".css":
+        for m in _REF_CSS.finditer(text):
+            refs.append(next((g for g in m.groups() if g is not None), ""))
+    if ext in _SCRIPT_EXT or ext == ".gltf":
+        refs.extend(m.group(1) for m in _REF_LITERAL.finditer(text))
     out = tuple(dict.fromkeys(r for r in refs if r))
     with _REF_CACHE_LOCK:
         if len(_REF_CACHE) > 4096:
@@ -279,47 +382,105 @@ def _normalize_ref(ref: str, from_dir: str) -> str | None:
 
 def _inside(base: Path, rel: str) -> Path | None:
     """The real path of `rel` under `base`, or None when it (or a symlink on the way) leaves `base`
-    or lands on a forbidden path."""
-    if _forbidden_rel(rel):
+    or lands on a private path."""
+    if _private_rel(rel):
         return None
     try:
         target = base.joinpath(*rel.split("/")).resolve(strict=False)
         real_rel = target.relative_to(base).as_posix()
     except (OSError, RuntimeError, ValueError):
         return None
-    if real_rel != "." and _forbidden_rel(real_rel):
+    if real_rel != "." and _private_rel(real_rel):
         return None
     return target
 
 
-def scoped_files(base: Path, entry: str) -> set[str]:
-    """The files a scoped artifact serves: its entry page plus the web assets reachable from it."""
+def _walk_links(base: Path, entry: str, scoped: bool):
+    """The names reachable from `entry` by following references, and the parsed files (with their
+    mtime and size, or None when missing) the answer depends on.
+
+    A name is kept when it passes the mode's name check, whether or not the file exists yet, so an
+    asset written after its page still loads; the request re-checks the real file. A script's quoted
+    names resolve against its own folder (module imports, workers) and against the page that loaded
+    it (fetch, Worker, img.src resolve against the document)."""
+    accept = _scoped_asset_ok if scoped else (lambda rel: not _private_rel(rel))
     allowed: set[str] = set()
-    seen: set[str] = set()
-    queue = collections.deque([entry])
+    deps: list[tuple[str, int | None, int | None]] = []
+    seen: set[tuple[str, str]] = set()
+    queue = collections.deque([(entry, posixpath.dirname(entry))])
     while queue and len(seen) < _MAX_CLOSURE:
-        rel = queue.popleft()
-        if rel in seen:
+        rel, doc = queue.popleft()
+        if (rel, doc) in seen:
             continue
-        seen.add(rel)
-        if not _scoped_asset_ok(rel):
+        seen.add((rel, doc))
+        if not accept(rel):
+            continue
+        allowed.add(rel)
+        ext = posixpath.splitext(rel)[1].lower()
+        if ext not in _PARSED_EXT:
+            continue
+        joined = base.joinpath(*rel.split("/"))
+        try:
+            st = joined.stat()
+            deps.append((str(joined), st.st_mtime_ns, st.st_size))
+        except (OSError, ValueError):
+            deps.append((str(joined), None, None))
             continue
         target = _inside(base, rel)
         try:
-            if target is None or not target.is_file():
+            if target is None or not target.is_file() or not accept(target.relative_to(base).as_posix()):
                 continue
-            real_rel = target.relative_to(base).as_posix()
         except (OSError, ValueError):
             continue
-        if not _scoped_asset_ok(real_rel):
+        own = posixpath.dirname(rel)
+        if ext in _DOCUMENT_EXT:
+            doc = own
+        dirs = (own, doc) if ext in _SCRIPT_EXT and doc != own else (own,)
+        for ref in _extract_refs(target):
+            for from_dir in dirs:
+                nxt = _normalize_ref(ref, from_dir)
+                if nxt and (nxt, doc) not in seen:
+                    queue.append((nxt, doc))
+    return frozenset(allowed), tuple(deps)
+
+
+_LINK_CACHE: dict[tuple[str, str, bool], tuple[tuple, frozenset[str]]] = {}
+_LINK_CACHE_LOCK = threading.Lock()
+
+
+def _deps_fresh(deps) -> bool:
+    for path, mtime, size in deps:
+        try:
+            st = os.stat(path)
+        except (OSError, ValueError):
+            if mtime is not None:
+                return False
             continue
-        allowed.add(rel)
-        if posixpath.splitext(rel)[1].lower() in _PARSED_EXT:
-            for ref in _extract_refs(target):
-                nxt = _normalize_ref(ref, posixpath.dirname(rel))
-                if nxt and nxt not in seen:
-                    queue.append(nxt)
+        if mtime is None or st.st_mtime_ns != mtime or st.st_size != size:
+            return False
+    return True
+
+
+def linked_files(base: Path, entry: str, scoped: bool = True) -> frozenset[str]:
+    """The names an artifact's entry page reaches (see `_walk_links`), cached until one of the pages,
+    stylesheets or scripts it parsed changes, appears or disappears — so a page with hundreds of
+    assets is walked once, not on every request."""
+    key = (str(base), entry, scoped)
+    with _LINK_CACHE_LOCK:
+        hit = _LINK_CACHE.get(key)
+    if hit is not None and _deps_fresh(hit[0]):
+        return hit[1]
+    allowed, deps = _walk_links(base, entry, scoped)
+    with _LINK_CACHE_LOCK:
+        if len(_LINK_CACHE) > 256:
+            _LINK_CACHE.clear()
+        _LINK_CACHE[key] = (deps, allowed)
     return allowed
+
+
+def scoped_files(base: Path, entry: str) -> set[str]:
+    """The files a scoped artifact serves: its entry page plus the web assets reachable from it."""
+    return set(linked_files(base, entry, True))
 
 
 def _clean_name(s) -> str:
@@ -483,6 +644,7 @@ class _Server:
         self.lan_hosts: frozenset[str] = frozenset()   # this machine's names/IPs accepted in LAN mode
         self.public_host: str | None = None            # a configured artifact_hostname
         self.token = secrets.token_urlsafe(24)         # authorizes POST /_stop from the shell page
+        self.request_timeout = 30.0                    # seconds a connection may idle mid-request
         self.httpd = None
         self.thread = None
         self.counter = 0
@@ -585,11 +747,14 @@ class _Server:
             inner = target.relative_to(canonical_root(root)).parts
         except ValueError:
             inner = ()
-        if any(part in _SENSITIVE_DIRS for part in inner) or (
+        # Any dot folder on the way (not just the well-known ones): `.github/`, `.next/`, `.secrets/`
+        # hold config, build output and tokens, and a dot path is never served below the folder either.
+        if any(part.startswith(".") or part in _SENSITIVE_DIRS for part in inner) or (
                 target.is_file() and _private_rel(target.name)):
             raise PermissionError(
-                f"{path} is private (a dot-file, VCS/credential directory or key file) and is never "
-                "served; write the page into its own folder, e.g. artifacts/<name>/index.html")
+                f"{path} is private (a dot-file or dot-folder, a VCS/credential directory or a key file) "
+                "and is never served; write the page into its own folder, e.g. "
+                "artifacts/<name>/index.html")
         if target.is_dir():
             directory, entry = target, ""
             if not (target / "index.html").is_file():
@@ -605,6 +770,10 @@ class _Server:
                 raise ValueError(
                     f"{path} is not a page. Pass an .html file (or a folder holding index.html); "
                     "put a multi-file site in its own folder, e.g. artifacts/<name>/")
+        if any(c in _UNSAFE_ENTRY_CHARS or not c.isprintable() for c in entry):
+            raise ValueError(
+                f"{path} has quotes, angle brackets or control characters in its file name; rename the "
+                "page (e.g. index.html) and pass it again")
         scoped = is_workspace_root(directory, root)
         if scoped:
             entry = entry or "index.html"
@@ -860,7 +1029,11 @@ def host_allowed(server: "_Server", host_header, local_ip: str = "") -> bool:
 
 
 def resolve_request(art: Artifact, sub: str) -> tuple[Path | None, int, bytes]:
-    """Map `/a/<id>/<sub>` to a file this artifact may serve: (path, 200, b"") or (None, status, why)."""
+    """Map `/a/<id>/<sub>` to a file this artifact may serve: (path, 200, b"") or (None, status, why).
+
+    A scoped artifact (and any project nested inside a dedicated folder) serves only the web files its
+    entry page links to. A dedicated folder serves everything else that is not private, except
+    server-side source, config and data, which it serves only when a page links to them."""
     not_found = (None, 404, b"not found")
     try:
         base = Path(art.directory).resolve(strict=True)
@@ -886,16 +1059,23 @@ def resolve_request(art: Artifact, sub: str) -> tuple[Path | None, int, bytes]:
                 return not_found
         if not target.is_file():
             return not_found
-    except OSError:
+        real_rel = target.relative_to(base).as_posix()
+    except (OSError, ValueError):
         return not_found
-    if art.scoped or is_workspace_root(base):
-        if rel not in scoped_files(base, art.entry or "index.html"):
+    entry = art.entry or "index.html"
+    if (art.scoped or is_workspace_root(base) or _nested_workspace(base, rel)
+            or (real_rel != rel and _nested_workspace(base, real_rel))):
+        if rel not in linked_files(base, entry, True) or not _scoped_asset_ok(real_rel):
             return None, 404, ("not found. " + SCOPED_NOTE).encode()
+    elif (_server_side(rel) or _server_side(real_rel)) and rel not in linked_files(base, entry, False):
+        return not_found
     return target, 200, b""
 
 
 def _make_handler(server: "_Server"):
     class Handler(BaseHTTPRequestHandler):
+        timeout = server.request_timeout     # a client that never finishes its request is dropped
+
         def log_message(self, *a):
             pass
 
@@ -1018,12 +1198,12 @@ def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
     inline style and script the response's CSP allows; the stop token rides in the script."""
     na = f' nonce="{_esc(nonce)}"' if nonce else ""
     arts = server.list()
-    if not selected and arts:
-        selected = arts[0].id
+    if arts and not any(a.id == selected for a in arts):
+        selected = arts[0].id                      # none, stopped, or a retired id: the newest one
     opts = "".join(
         f'<option value="{a.id}"{" selected" if a.id == selected else ""}>{_esc(a.name)}</option>'
         for a in arts)
-    initial = next((a.path for a in arts if a.id == selected), "")
+    initial = _esc(next((a.path for a in arts if a.id == selected), ""))
     empty = "" if arts else '<div class="empty">No artifacts yet — the agent serves one with the <code>artifact</code> tool.</div>'
     reach = (f'<span class="reach" title="reachable by other devices on your network">◈ LAN · {server.host}</span>'
              if server.lan else '')
@@ -1112,7 +1292,8 @@ def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
 
 
 def _esc(s: str) -> str:
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape text for HTML content and quoted attribute values."""
+    return _html_mod.escape(s or "", quote=True)
 
 
 def _script_json(value) -> str:

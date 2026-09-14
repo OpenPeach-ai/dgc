@@ -389,20 +389,46 @@ agent can also serve any page/app/chart it builds the same way.
   machine). Switch it to your **local network** (`artifact_bind: lan`, or press
   `b` in `/artifact`) and it binds `0.0.0.0` with a shareable LAN URL —
   open your artifact on your phone or another device. (LAN means anyone on the
-  network can view it — there's no auth.)
+  network can view it — there's no auth.) Every preview shares one browser
+  origin, so a page you preview can read and stop your other previews: preview
+  pages you trust.
 - **It persists.** The list is saved, so after you restart `dgc` the server
   tries to reuse the same port with your artifacts intact (set the preferred port with
-  `artifact_port`, turn off relaunch with `artifact_autostart`).
-- **Only the page is published.** Dot-files and dot-folders (`.env`, `.git`,
-  `.dgc`), key files, and symlinks that point outside the artifact's folder are
-  never served. A page in its own folder is served as a whole site; a page that
-  sits in a project root (next to `.git`, `package.json`, `pyproject.toml`…) is
-  served with only the files it links to, never the rest of the project. Put a
-  multi-file site in its own folder, e.g. `artifacts/<name>/`.
+  `artifact_port`, turn off relaunch with `artifact_autostart`). Artifacts saved by
+  an older DGC get new, unguessable ids the first time this version starts, so an
+  old `?a=a1` link opens the newest preview, and they are served in the
+  project-root way described below.
+- **What gets served.** The agent serves a page: an `.html`/`.htm` file, an
+  image, an `.svg` or a `.pdf`, or a folder holding one — not a `.md`, `.json`
+  or `.txt` file on its own, and never a page inside a dot-folder. Dot-files and
+  dot-folders (`.env`, `.git`, `.dgc`), key and credential files (`*.pem`,
+  `id_rsa`, `credentials.json`, `token.json`, data files named like `secret` or
+  `password`), and symlinks that point outside the artifact's folder are never
+  served, and there are no folder listings.
+- **A page in its own folder** (e.g. `artifacts/<name>/`) is served as a whole
+  site, except server-side source, config, databases, logs and backups (`.py`,
+  `.ts`, `.jsx`, `.yaml`, `.toml`, `.sqlite`, `.log`, `.bak`…): those load only
+  when one of its pages links to them, so a PyScript `main.py` or a sql.js
+  database works and an unlinked file does not.
+- **A page in a project root** is served with only the web files it links to
+  (HTML, CSS, JS, JSON, images, fonts, media), found through its HTML attributes,
+  its CSS, and the quoted file names in its scripts — resolved from the script and
+  from the page, as the browser does. A project root is the project folder, your
+  home folder or a personal folder in it (Downloads, Documents…), or any folder
+  holding a project file (`.git`, `package.json`, `pyproject.toml`, `Makefile`,
+  `requirements.txt`, `AGENTS.md`…); a project nested inside a site folder is
+  treated the same way. Manifests like `package.json`, build config like
+  `vite.config.js`, other file types and the rest of the project never load, and
+  neither do files whose names a script builds at runtime — put a multi-file site
+  in its own folder.
 - **Only your own addresses.** The server answers to `localhost`, `127.0.0.1`,
   this machine's LAN address and name in LAN mode, and `artifact_hostname` —
   any other Host is refused, so a web page cannot read artifacts through DNS
-  rebinding. The Stop button only works from the artifact page itself.
+  rebinding. If you open previews through a forwarded or proxied name (a
+  Codespaces `*.app.github.dev` URL, a reverse proxy, a MagicDNS name), set
+  `artifact_hostname` to it. Stopping a preview from the browser needs a token
+  that only the DGC artifacts page (the bar with the dropdown) carries, so another
+  website cannot stop your previews.
 
 Artifacts are built with DGC's own design language (the `dgc-design` skill) so
 the frontend looks polished by default. They stay on this machine unless you
@@ -1765,8 +1791,10 @@ when you want to override it.
 - `artifact_bind` (default `localhost`) — the bind mode. Set it to `lan` to preview
   from another device on your own network.
 - `artifact_hostname` — the hostname used when building the printed URL, if it differs from the
-  bind address. The server also accepts requests addressed to this name (a reverse proxy or
-  Tailscale MagicDNS name); requests for any other unknown host are refused.
+  bind address. The server also accepts requests addressed to this name (a reverse proxy, a
+  Codespaces or other forwarded URL, or a Tailscale MagicDNS name); requests for any other unknown
+  host are refused. A running server picks up a changed value the next time an artifact is served,
+  the bind mode is switched, or `dgc` starts.
 - `plan_artifact` (default `true`) — render proposed plans as an artifact page.
 - `artifact_in_plan` (default `false`) — also serve artifacts while in plan mode.
 
