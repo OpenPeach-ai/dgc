@@ -7,7 +7,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
-  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, runCliUpdate, updateTerminalOptions,
+  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, openUpdateTerminal, runCliUpdate,
 } from "./cliupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
@@ -1773,13 +1773,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // The exact executable with `update`, not `curl | bash` typed into a shell: an old CLI then
         // still updates the install it belongs to (DGC_DIR/DGC_BIN), and DGC_SKIP_EXTENSION keeps
         // the installer from replacing this running extension with the published .vsix.
-        const term = vscode.window.createTerminal(
-          updateTerminalOptions(resolveDgcExecutable().command, "Update DGC"));
-        term.show();
-        void vscode.window.showInformationMessage(
-          "Updating the DGC CLI in the terminal. When it finishes, run “DGC: Restart Backend”.",
-          "Restart Backend",
-        ).then((next) => { if (next === "Restart Backend") { this.restart("manual CLI update"); } });
+        void openUpdateTerminal(resolveDgcExecutable().command, "Update DGC", () => this.restart("manual CLI update"));
       } else if (choice === SETPATH) {
         void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }

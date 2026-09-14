@@ -13,6 +13,7 @@ const bundle = join(scratch, "extension.cjs");
 const registered = new Map();
 const terminals = [];
 const warnings = [];
+const closeListeners = [];
 let inspectedCommand;
 
 globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
@@ -25,7 +26,14 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       terminals.push(terminal);
       return terminal;
     },
+    // The update terminal reports its progress and outcome (openUpdateTerminal).
+    withProgress: () => Promise.resolve(),
+    onDidCloseTerminal: (listener) => {
+      closeListeners.push(listener);
+      return { dispose() { closeListeners.splice(closeListeners.indexOf(listener), 1); } };
+    },
   },
+  ProgressLocation: { Notification: 15 },
   commands: {
     registerCommand: (name, callback) => {
       registered.set(name, callback);
@@ -131,6 +139,8 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
   registered.get("dgc.updateCli")();
   assert.equal(terminals.at(-1).options.shellArgs.at(-2), "dgc",
     "a workspace-only executable override must fall back to the extension default");
+  // Close the update terminals so their status watchers stop.
+  for (const terminal of terminals) for (const listener of [...closeListeners]) listener(terminal);
 });
 
 test("activation does not construct an agent provider in an untrusted workspace", () => {
@@ -266,7 +276,7 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
   // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
   assert.match(panel, /runCliUpdate\(executable, token\)/, "the offer runs the CLI's update");
-  assert.match(panel, /createTerminal\(\s*updateTerminalOptions\(/, "or opens it in a terminal");
+  assert.match(panel, /openUpdateTerminal\(/, "or opens it in a terminal");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
 });
 

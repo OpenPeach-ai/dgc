@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, realpathSync, statSync } from "fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, readFileSync, realpathSync, statSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve as resolvePath, sep } from "path";
 
 /** How long the installer may run before we stop waiting. It creates a virtualenv and installs
@@ -88,9 +89,11 @@ export function cliUpdateEnvironment(command: string, env: NodeJS.ProcessEnv = p
  *  whose own process is the CLI is disposed by VS Code the moment that process exits, which took the
  *  installer's output, and any refusal in it, off the screen within seconds. */
 const HELD_TERMINAL_SCRIPT = [
-  'finished=$1; failed=$2; shift 2',
+  'finished=$1; failed=$2; statusfile=$3; shift 3',
   '"$@"',
   "status=$?",
+  // Tell the extension how it ended as soon as it has, not when the terminal is closed.
+  'if [ -n "$statusfile" ]; then printf "%s\\n" "$status" > "$statusfile" 2>/dev/null || true; fi',
   "echo",
   'if [ "$status" -eq 0 ]; then printf "%s\\n" "$finished";',
   'else printf "%s (exit %s). The output above says why.\\n" "$failed" "$status"; fi',
@@ -104,18 +107,73 @@ const HELD_TERMINAL_SCRIPT = [
  *  executable and its arguments are positional parameters. On Windows the executable stays the
  *  terminal's own process. */
 export function heldCliTerminalOptions(executable: string, args: string[], name: string,
-                                       done: string, failed: string): vscode.TerminalOptions {
+                                       done: string, failed: string, statusFile = ""): vscode.TerminalOptions {
   if (process.platform === "win32") { return { name, shellPath: executable, shellArgs: args }; }
-  return { name, shellPath: "/bin/sh", shellArgs: ["-c", HELD_TERMINAL_SCRIPT, name, done, failed, executable, ...args] };
+  return { name, shellPath: "/bin/sh", shellArgs: ["-c", HELD_TERMINAL_SCRIPT, name, done, failed, statusFile, executable, ...args] };
+}
+
+/** How a held terminal's command ended: its exit status once the script has written it, or the
+ *  terminal's own exit status if it is closed first (or on Windows, where there is no script).
+ *  Undefined when neither says. */
+export function heldTerminalEnded(terminal: vscode.Terminal, statusFile: string,
+                                  pollMs = 400): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const finish = (code: number | undefined): void => {
+      if (settled) { return; }
+      settled = true;
+      if (timer) { clearInterval(timer); }
+      closed.dispose();
+      if (statusFile) { try { unlinkSync(statusFile); } catch { /* never written */ } }
+      resolve(code);
+    };
+    const closed = vscode.window.onDidCloseTerminal((t) => {
+      if (t === terminal) { finish(t.exitStatus?.code); }
+    });
+    if (statusFile && !settled) {
+      timer = setInterval(() => {
+        try {
+          const text = readFileSync(statusFile, "utf8").trim();
+          if (/^\d+$/.test(text)) { finish(Number(text)); }
+        } catch { /* still running */ }
+      }, pollMs);
+    }
+  });
+}
+
+/** Open the update terminal and keep the notifications in step with it. The command used to show
+ *  "Updating the DGC CLI — run DGC: Restart Backend when it finishes." up front, and that toast
+ *  stayed beside a terminal saying the update had failed. Now a progress notification lasts exactly
+ *  as long as `dgc update` runs; then success offers the restart, and a failure says so. */
+export function openUpdateTerminal(executable: string, name: string, restart: () => void,
+                                   pollMs?: number): Promise<number | undefined> {
+  const statusFile = process.platform === "win32" ? ""
+    : join(tmpdir(), `dgc-update-status-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+  const terminal = vscode.window.createTerminal(updateTerminalOptions(executable, name, statusFile));
+  terminal.show();
+  const ended = heldTerminalEnded(terminal, statusFile, pollMs);
+  void vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+    title: "Updating the DGC CLI in the terminal…" }, () => ended);
+  return ended.then((code) => {
+    const RESTART = "Restart Backend";
+    if (code === 0) {
+      void vscode.window.showInformationMessage("The DGC CLI is updated. Restart the backend to use it.", RESTART)
+        .then((choice) => { if (choice === RESTART) { restart(); } });
+    } else if (code !== undefined) {
+      void vscode.window.showWarningMessage(`DGC CLI update failed (exit ${code}) — the terminal says why.`);
+    }
+    return code;
+  });
 }
 
 /** The terminal behind every manual "update the CLI" action: the exact executable with a fixed
  *  `update` argument (never `curl | bash` typed into a shell), the install's own location, and
  *  DGC_SKIP_EXTENSION so the installer cannot replace the running extension with the published one. */
-export function updateTerminalOptions(executable: string, name = "DGC update"): vscode.TerminalOptions {
+export function updateTerminalOptions(executable: string, name = "DGC update", statusFile = ""): vscode.TerminalOptions {
   return {
     ...heldCliTerminalOptions(executable, ["update"], name,
-      "DGC CLI update finished. Run DGC: Restart Backend to use it.", "DGC CLI update failed"),
+      "DGC CLI update finished. Run DGC: Restart Backend to use it.", "DGC CLI update failed", statusFile),
     env: { DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) },
   };
 }
