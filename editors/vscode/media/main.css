@@ -144,10 +144,17 @@ body {
    space to the next block is the log's own. */
 .msg.dgc > .msg.user { margin: calc(var(--sp-4) + var(--sp-2) - var(--sp-1)) 0 calc(var(--sp-4) - var(--sp-1)); }
 .msg.dgc > .msg.user:last-child { margin-bottom: 0; }
-/* The same 24px where the block above brings a margin of its own: a tool group's 4px, or the 12px
-   below a steered prompt just before it. */
-.msg.dgc > .tool-group + .msg.user { margin-top: calc(var(--sp-4) + var(--sp-2) - var(--sp-1) - var(--sp-1)); }
-.msg.dgc > .msg.user + .msg.user { margin-top: var(--sp-2); }
+/* Only the prompt's own margins decide that space. Whatever sits beside it in the turn brings no
+   margin to that side -- a tool group's 4px, a screenshot strip's 12px, a monitor card's 8px, the
+   answer box's 12px, another steered prompt -- or each neighbour would add its own amount on top. */
+.msg.dgc > :not(.role):has(+ .msg.user) { margin-bottom: 0; }
+.msg.dgc > .msg.user + :not(.msg.user) { margin-top: 0; }
+/* Applied before the turn has drawn anything, the prompt sits straight under the block above the
+   turn -- usually the turn's own prompt -- with the log's 16px gap, so it adds 8px: 24px, as two
+   prompts in a row always are. (The role label is positioned out of the flow, and hidden
+   reasoning draws nothing.) */
+.msg.dgc > .role + .msg.user,
+body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
 .text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
@@ -1035,6 +1042,13 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
    moved the viewport — scrolling up mid-turn threw you to the top. `settled` is set by the script
    at the same moment it writes the measured `contain-intrinsic-size`. */
 .msg.settled { content-visibility: auto; }
+/* Two lines in the transcript's fonts, never seen: when the host changes those fonts their size
+   changes, and the script re-measures the pinned heights that were measured in the old ones. */
+.font-probe { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none;
+  white-space: nowrap; contain: layout style; transform: translateX(-200vw); }
+.font-probe > span { display: block; width: max-content; }
+.font-probe-sans { font: var(--w-reg) var(--t-base)/1.62 var(--sans); }
+.font-probe-mono { font: var(--w-reg) var(--t-xs)/1.6 var(--mono); }
 
 /* Tool-produced images: a compact strip under the step that made them, expanding in place, and a
    full-size viewer over the panel. Same three states Codex gives a screenshot. */

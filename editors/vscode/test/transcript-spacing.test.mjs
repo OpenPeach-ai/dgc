@@ -12,8 +12,10 @@ import { buildSync } from "esbuild";
 // turn below it. A prompt steered into a running turn got the turn's own 4px instead. These render
 // the real panel in Chromium and measure the visible gaps around every prompt and between blocks.
 // The same pages also hold the layout facts found next to that bug: the page under the reader must
-// not jump when the panel's width changes, a queued prompt is drawn once and in order, and markers
-// and steered prompts keep the one rhythm.
+// not jump when the panel's width or fonts change, when screenshots arrived while it was hidden, or
+// after it collapsed; a queued prompt is drawn once and after whatever the log said before its turn;
+// a turn nobody just asked for does not pull a reader back to the end; and markers and steered
+// prompts keep the one rhythm beside anything a turn draws.
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -581,3 +583,277 @@ test("a steer applied as the turn ends is spaced like a prompt, and the turn's c
     assert.equal(around(m, "steer this").below, BETWEEN_BLOCKS);
   } finally { await panel.page.close(); }
 });
+
+// ---- the page under the reader, part two ---------------------------------------------------------
+// Walk up from the end of the transcript a step at a time, the way a reader scrolls back, and report
+// every step where the thing under the middle of the view moved by more than the scroll itself.
+function walkUp(step) {
+  return (async () => {
+    const log = document.getElementById("log");
+    const frames = (n) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+    log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = log.scrollHeight; await frames(3);
+    const jumps = [];
+    let steps = 0;
+    for (let i = 0; i < 400 && log.scrollTop > 0; i += 1) {
+      const view = log.getBoundingClientRect();
+      const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)
+        ?.closest("p, li, pre, h2, .bubble, .tool, .shots, .text, .thinking, .sys, .resume-note, .msg");
+      if (!anchor || !log.contains(anchor)) { log.scrollTop -= 40; await frames(2); continue; }
+      const top = anchor.getBoundingClientRect().top, from = log.scrollTop;
+      log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = from - (step === "half" ? Math.round(log.clientHeight / 2) : step);
+      const applied = log.scrollTop - from;
+      await frames(2); await new Promise((done) => setTimeout(done, 40)); await frames(2);
+      steps += 1;
+      const moved = Math.round(anchor.getBoundingClientRect().top - (top - applied));
+      if (Math.abs(moved) > 1) jumps.push({ at: Math.round(from), moved, under: String(anchor.className || anchor.tagName).slice(0, 30) });
+    }
+    return { steps, jumps };
+  })();
+}
+async function assertWalkIsSteady(panel, label, step = 120) {
+  const walk = await panel.page.evaluate(walkUp, step);
+  assert.ok(walk.steps >= 5, `${label}: the walk covered the transcript (${walk.steps} steps)`);
+  assert.deepEqual(walk.jumps, [], `${label}: scrolling back moved the page under the reader`);
+}
+
+// A 200x100 screenshot, as a tool sends it.
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAABkCAIAAABM5OhcAAAA0klEQVR42u3SMQ0AAAjAMOZf9DDBwUcrYVlTwIJfYGAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLbw1wAa3mAWHtHrAAAAAASUVORK5CYII=";
+const screenshotTurn = (id, prompt = "Show me the login page") => [
+  { type: "turn_start", turn_id: id, prompt, kind: "prompt" },
+  { type: "tool_call", call_id: `${id}c1`, name: "screenshot", args: { url: "http://localhost:3000/login" }, summary: "localhost:3000/login" },
+  { type: "tool_result", call_id: `${id}c1`, name: "screenshot", output: "captured" },
+  { type: "tool_images", call_id: `${id}c1`, images: [PNG, PNG], caption: "Login page" },
+  { type: "text_delta", text: "That is the login page with the Turnstile widget." }, { type: "stream_end", message_id: `${id}:1`, phase: "answer" },
+  { type: "turn_end", turn_id: id, reason: "completed", token_estimate: 0, final_message_id: `${id}:1` },
+];
+// Screenshots that arrive while the panel is on another view: a lazily loaded image has no height,
+// so its block was pinned (and skipped) without it and grew by the strip's height when a scroll
+// finally reached it -- 74px at 460 and 988, 148px at 300.
+for (const width of WIDTHS) {
+  for (const [way, [hide, show]] of Object.entries(hideWays)) {
+    test(`screenshots that arrived while the panel was hidden (${way}) do not move the page when scrolled back to (${width}px)`, async (t) => {
+      if (skipOrFail(t)) return;
+      const panel = await openPanel(width);
+      try {
+        await hide(panel, width);
+        await longChat(panel, 3);
+        await panel.events(screenshotTurn("s1"));
+        await longChat(panel, 8);
+        await wait(panel, 300);
+        await show(panel, width);
+        await panel.settle(); await wait(panel, 600);
+        const strip = await panel.page.evaluate(() => {
+          const block = document.querySelector(".shots").closest(".msg");
+          block.classList.remove("settled"); const real = block.offsetHeight; block.classList.add("settled");
+          return { pinned: block._pinnedHeight, real };
+        });
+        assert.ok(Math.abs(strip.pinned - strip.real) <= 1, `the screenshot turn is pinned at ${strip.pinned}px but is ${strip.real}px tall`);
+        await assertWalkIsSteady(panel, `screenshots while ${way}`);
+      } finally { await panel.page.close(); }
+    });
+  }
+}
+// Scrolling straight after dragging the sidebar: the re-measure waits for the width to hold still,
+// and a scroll inside that wait met blocks at their old width's height -- one jump of ~200px.
+for (const [way, from, to] of resizes) {
+  test(`scrolling straight after the panel is made ${way} does not jump (${from}px to ${to}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(from);
+    try {
+      await longChat(panel, 16);
+      await panel.settle(); await wait(panel, 300);
+      await panel.page.evaluate(() => { const log = document.getElementById("log"); log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(log.scrollHeight * 0.6); });
+      await panel.settle();
+      for (let k = 1; k <= 12; k += 1) {                      // a drag: a dozen widths ~20ms apart
+        await panel.page.setViewportSize({ width: Math.round(from + (to - from) * k / 12), height: 900 });
+        await wait(panel, 20);
+      }
+      const moved = await panel.page.evaluate(async () => {
+        const log = document.getElementById("log");
+        const frames = (n) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+        const out = [];
+        for (let s = 0; s < 8; s += 1) {
+          const view = log.getBoundingClientRect();
+          const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)?.closest("p, li, .bubble, .text, .thinking, .msg");
+          if (!anchor) { log.scrollTop -= 40; await frames(1); continue; }
+          const top = anchor.getBoundingClientRect().top, start = log.scrollTop;
+          log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = start - 100;
+          const applied = log.scrollTop - start;
+          await frames(3);
+          out.push(Math.round(anchor.getBoundingClientRect().top - (top - applied)));
+        }
+        return out;
+      });
+      assert.ok(moved.length >= 6, "the scroll steps found something to read");
+      assert.ok(moved.every((m) => Math.abs(m) <= 1), `made ${way}, the steps straight after moved the page ${JSON.stringify(moved)}`);
+    } finally { await panel.page.close(); }
+  });
+}
+
+// The host changes the transcript's fonts (VS Code rewrites its --vscode-* variables on the root
+// element) without changing the width: every pin measured in the old fonts is wrong.
+test("the page does not jump after the fonts change at the same width", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const settleFirst of [true, false]) {
+    const panel = await openPanel(320);
+    try {
+      await longChat(panel, 16);
+      await panel.settle(); await wait(panel, 300);
+      const before = await scrollHeightOf(panel);
+      await panel.page.evaluate(() => {
+        const root = document.documentElement.style;
+        root.setProperty("--vscode-font-family", "'DejaVu Serif', 'Liberation Serif', serif");
+        root.setProperty("--vscode-editor-font-family", "'DejaVu Sans Mono', 'Liberation Mono', monospace");
+      });
+      if (settleFirst) await wait(panel, 600);
+      await assertWalkIsSteady(panel, `fonts changed${settleFirst ? "" : ", walked at once"}`, "half");
+      assert.ok(Math.abs(await scrollHeightOf(panel) - before) > 50, "the new fonts really re-wrapped the transcript");
+    } finally { await panel.page.close(); }
+  }
+});
+
+// Blocks that were on screen when the panel collapsed to a sliver were measured there by the
+// size observer, thousands of px tall, while still claiming the width they had been pinned at.
+// Back at that same width nothing re-measured them: 12,000px of phantom transcript and a
+// 10,800px jump on the first scroll up.
+for (const width of WIDTHS) {
+  test(`blocks on screen when the panel collapsed are measured again when it comes back at the same width (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width);
+    const build = async (p) => { await p.events(answeredTurn("t0")); await longChat(p, 5); };
+    try {
+      await panel.events(answeredTurn("t0"));
+      await panel.settle(); await wait(panel, 300);
+      await panel.page.setViewportSize({ width: 1, height: 900 });
+      await wait(panel, 300);
+      await longChat(panel, 5);
+      await wait(panel, 300);
+      await panel.page.setViewportSize({ width, height: 900 });
+      await panel.settle(); await wait(panel, 600);
+      assert.ok(Math.abs(await scrollHeightOf(panel) - await freshScrollHeight(width, build)) <= 2,
+        "the transcript is as long as the same chat drawn at this width all along");
+      await assertWalkIsSteady(panel, "after collapsing with blocks on screen", 250);
+    } finally { await panel.page.close(); }
+  });
+}
+
+// ---- turns nobody just asked for -----------------------------------------------------------------
+// A monitor waking DGC, or a prompt queued minutes ago starting, is news for a reader who scrolled
+// back: the "New" pill, not a jump to the bottom. A prompt typed now still goes to the bottom.
+test("a turn nobody just asked for leaves a reader who scrolled back where they are", async (t) => {
+  if (skipOrFail(t)) return;
+  const readBack = (panel) => panel.page.evaluate(async () => {
+    const log = document.getElementById("log");
+    log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(log.scrollHeight * 0.3);
+    await new Promise((done) => setTimeout(done, 50));
+    return log.scrollTop;
+  });
+  const view = (panel) => panel.page.evaluate(() => {
+    const log = document.getElementById("log");
+    return { top: log.scrollTop, atEnd: log.scrollHeight - log.scrollTop - log.clientHeight < 60, pill: !document.getElementById("to-latest").hidden };
+  });
+  const monitor = await openPanel(460), queued = await openPanel(460), typed = await openPanel(460);
+  try {
+    await longChat(monitor, 8); await monitor.settle();
+    const top = await readBack(monitor); await wait(monitor, 800);
+    await monitor.events([{ type: "turn_start", turn_id: "w1", prompt: "npm run dev printed 2 lines", kind: "monitor" },
+      { type: "monitor_event", id: "m1", description: "npm run dev", event_index: 3, lines: ["ready on :3000"], omitted_lines: 0, kind: "output", delivery: "wake", turn_id: "w1" },
+      { type: "text_delta", text: "The dev server recompiled cleanly." }]);
+    await monitor.settle();
+    const afterWake = await view(monitor);
+    assert.ok(Math.abs(afterWake.top - top) <= 1 && afterWake.pill, `a monitor wake moved the reader from ${top} to ${afterWake.top}`);
+
+    await longChat(queued, 8);
+    await queued.events(runningTurn("r1"));
+    const id = await queued.prompt(QUEUED[0]);
+    await queued.events([{ type: "prompt_accepted", request_id: id, state: "queued" }, { type: "queued", count: 1 }]);
+    await queued.settle();
+    const queuedTop = await readBack(queued); await wait(queued, 800);
+    await queued.events([{ type: "turn_end", turn_id: "r1", reason: "completed", token_estimate: 0, final_message_id: null },
+      { type: "turn_start", turn_id: "q1", prompt: QUEUED[0], kind: "prompt", request_id: id }, { type: "text_delta", text: "Checking the limiter." }]);
+    await queued.settle();
+    const afterQueued = await view(queued);
+    assert.ok(Math.abs(afterQueued.top - queuedTop) <= 1 && afterQueued.pill, `a queued prompt's turn moved the reader from ${queuedTop} to ${afterQueued.top}`);
+
+    await longChat(typed, 8); await typed.settle();
+    await readBack(typed); await wait(typed, 800);
+    const typedId = await typed.prompt(PROMPT2);
+    await typed.events([{ type: "prompt_accepted", request_id: typedId, state: "started" }, ...runningTurn("t9", typedId)]);
+    await typed.settle();
+    assert.equal((await view(typed)).atEnd, true, "a prompt typed now still shows its turn");
+  } finally { await monitor.page.close(); await queued.page.close(); await typed.page.close(); }
+});
+
+// ---- what happened between a queued prompt and its turn ------------------------------------------
+// A line the log wrote after the previous turn ended and before the queued prompt's turn began (a
+// manual compaction, a notice, a non-fatal error) happened before that turn, so it stays above it.
+const orderOf = (panel) => panel.page.evaluate(() => [...document.getElementById("log").querySelectorAll(".msg, .sys, .compaction")]
+  .filter((n) => !n.parentElement.closest(".msg"))
+  .map((n) => (n.classList.contains("user") ? `you: ${n.querySelector(".bubble").textContent}` : n.classList.contains("dgc") ? "dgc" : "line")));
+for (const [what, between] of [
+  ["a compaction", { type: "compacted", before_tokens: 60000, after_tokens: 20000, context_size: 65536, strategy: "summary" }],
+  ["a non-fatal error", { type: "error", message: "Provider hiccup, retrying" }],
+]) {
+  test(`${what} logged between a turn's end and a queued prompt's turn stays above that turn`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(460);
+    try {
+      await panel.events(runningTurn("t1"));
+      const first = await panel.prompt(QUEUED[0]);
+      await panel.events([{ type: "prompt_accepted", request_id: first, state: "queued" }, { type: "queued", count: 1 }]);
+      const second = await panel.prompt(QUEUED[1]);
+      await panel.events([{ type: "prompt_accepted", request_id: second, state: "queued" }, { type: "queued", count: 2 },
+        { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: null },
+        between,
+        { type: "turn_start", turn_id: "t2", prompt: QUEUED[0], kind: "prompt", request_id: first },
+        { type: "text_delta", text: "Checking the rate limiter." }]);
+      await panel.settle();
+      assert.deepEqual(await orderOf(panel), [`you: ${PROMPT2}`, "dgc", `you: ${QUEUED[0]}`, "line", "dgc", `you: ${QUEUED[1]}`]);
+      assertSpacing(await measure(panel), `${what} before a queued turn`);
+    } finally { await panel.page.close(); }
+  });
+}
+
+// ---- steering, beside everything a turn can draw ---------------------------------------------------
+// Only the steered prompt's own margins may decide its space: a screenshot strip's 12px, a monitor
+// card's 8px, a tool group's 4px, or the turn's own prompt just above used to add to it (36px above,
+// 20-24px below).
+for (const width of WIDTHS) {
+  test(`a steered prompt is 24px below and 16px above whatever it sits beside in the turn (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width, { steering: true });
+    const steer = async (text, events = []) => {
+      const id = await panel.prompt(text);
+      await panel.events([{ type: "prompt_accepted", request_id: id, state: "steered" },
+        { type: "steering_update", request_id: id, state: "applied" }, ...events]);
+    };
+    try {
+      const base = await panel.prompt("S0 the turn's own prompt");
+      await panel.events([{ type: "prompt_accepted", request_id: base, state: "started" },
+        { type: "turn_start", turn_id: "t1", prompt: "S0 the turn's own prompt", kind: "prompt", request_id: base }]);
+      await steer("S1 before the turn drew anything", [{ type: "text_delta", text: "Prose after the first steer." }, { type: "stream_end", message_id: "t1:1", phase: "commentary" }]);
+      await steer("S2 after prose", [{ type: "tool_call", call_id: "c1", name: "bash", args: { command: "ls" }, summary: "ls" }, { type: "tool_result", call_id: "c1", name: "bash", output: "a\nb" }]);
+      await steer("S3 after a tool group", [{ type: "permission_request", id: "p1", name: "bash", command: "rm -rf x", args: {}, summary: "rm -rf x" }]);
+      await steer("S4 after a permission card", [{ type: "permission_resolved", id: "p1", decision: "yes", message: "Allowed once" },
+        { type: "tool_call", call_id: "c2", name: "screenshot", args: {}, summary: "shot" }, { type: "tool_result", call_id: "c2", name: "screenshot", output: "ok" },
+        { type: "tool_images", call_id: "c2", images: [PNG], caption: "Shot" }]);
+      await steer("S5 after a screenshot strip", [{ type: "monitor_event", id: "m1", description: "npm run dev", event_index: 1, lines: ["ready"], omitted_lines: 0, kind: "output", delivery: "inline", turn_id: "t1" }]);
+      await steer("S6 after a monitor card", [{ type: "error", message: "transient: rate limited, retrying" }]);
+      await steer("S7 after an error line");
+      await steer("S8 straight after S7", [{ type: "text_delta", text: ANSWER }, { type: "stream_end", message_id: "t1:9", phase: "answer" },
+        { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:9" }]);
+      const next = await panel.prompt("S9 the next prompt");
+      await panel.events([{ type: "prompt_accepted", request_id: next, state: "started" },
+        ...answeredTurn("t2", "S9 the next prompt").map((e, i) => (i === 0 ? { ...e, request_id: next } : e))]);
+      await panel.settle(); await wait(panel, 200); await toBottom(panel); await panel.settle();
+      const m = await measure(panel);
+      assertSpacing(m, `steered beside everything at ${width}px`);
+      const got = Object.fromEntries(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"].map((key) => {
+        const hit = m.bubbles.find((b) => b.text.startsWith(key));
+        return [key, hit ? [hit.above, hit.below] : null];
+      }));
+      assert.deepEqual(got, { S1: [24, 16], S2: [24, 16], S3: [24, 16], S4: [24, 16], S5: [24, 16], S6: [24, 16],
+        S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "above/below each steered prompt (S7 is followed by a prompt, so 24)");
+    } finally { await panel.page.close(); }
+  });
+}

@@ -576,13 +576,27 @@
   const blockSizes = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
     for (const entry of entries) pinBlockHeight(entry.target);
   }) : null;
+  // A height is only true at the width and in the fonts it was measured with, so every pin records
+  // both. `fontEpoch` moves whenever the transcript's fonts change (see fontProbe below).
+  let fontEpoch = 0;
+  // `width` is passed in by a caller writing many pins: reading it after each write forced a layout
+  // per block.
+  function recordPin(node, height, width = log.clientWidth) {
+    node._pinnedWidth = width;
+    node._pinnedFont = fontEpoch;
+    node._pinnedHeight = height;
+    node.style.containIntrinsicSize = `auto ${height}px`;
+  }
   function pinBlockHeight(node) {
     const height = Math.round(node.offsetHeight);
     // A skipped block reports no size — to itself and to the observer. Writing that back would
     // replace the measurement with zero, which is the guessed placeholder all over again.
     if (height < 8 || Math.abs((node._pinnedHeight || 0) - height) < 2) return false;
-    node._pinnedHeight = height;
-    node.style.containIntrinsicSize = `auto ${height}px`;
+    // Whatever width this was measured at is the width the pin now belongs to. The observer also
+    // measures a rendered block while the panel is collapsed to a sliver; recording that width is
+    // what lets the re-measure find the block once the panel is back, instead of leaving an
+    // 11,000px pin that claims to belong to the old, restored width.
+    recordPin(node, height);
     return true;
   }
   function settleBlock(node) {
@@ -591,7 +605,6 @@
       requestAnimationFrame(() => settleBlock(node));
       return;
     }
-    node._pinnedWidth = log.clientWidth;  // a height is only true at the width it was measured at
     node.classList.add("settled");        // only now may the browser skip it
     blockSizes?.observe(node);
   }
@@ -606,20 +619,30 @@
   // the blocks near the view are the ones a scroll reaches first.
   const REPIN_BATCH = 24;
   let repinTimer = null;
-  function repinStaleBlocks() {
-    repinTimer = null;
+  function scheduleRepin(delay) {
+    clearTimeout(repinTimer); repinTimer = setTimeout(() => repinStaleBlocks(), delay);
+  }
+  // `nearView`: only the blocks a scroll is about to reach, leaving the rest to the timer. Chromium
+  // renders skippable blocks up to 150% of the view's height beyond either edge, so that is where a
+  // block starts drawing at its real height: within three view heights of the middle covers that
+  // margin and a screen of scrolling on top.
+  function repinStaleBlocks(nearView = false) {
+    if (!nearView) { clearTimeout(repinTimer); repinTimer = null; }
     const width = log.clientWidth;
     const pad = getComputedStyle(log);
     // Hidden, or too narrow to hold a word: whatever is measured now is not what anyone will read.
     if (width - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight) < 48) return;
-    const candidates = [...log.querySelectorAll(".msg.settled")].filter((node) => node._pinnedWidth !== width);
+    const candidates = [...log.querySelectorAll(".msg.settled")]
+      .filter((node) => node._pinnedWidth !== width || node._pinnedFont !== fontEpoch);
     if (!candidates.length) return;
     const view = log.getBoundingClientRect();
     const middle = view.top + view.height / 2;
     const distance = (node) => { const r = node.getBoundingClientRect(); return r.bottom < middle ? middle - r.bottom : Math.max(0, r.top - middle); };
-    const stale = candidates.map((node) => [distance(node), node]).sort((a, b) => a[0] - b[0])
+    const stale = candidates.map((node) => [distance(node), node])
+      .filter(([far]) => !nearView || far < view.height * 3).sort((a, b) => a[0] - b[0])
       .slice(0, REPIN_BATCH).map(([, node]) => node);
-    if (candidates.length > REPIN_BATCH) repinTimer = setTimeout(repinStaleBlocks, 16);
+    if (!stale.length) return;
+    if (!nearView && candidates.length > REPIN_BATCH) repinTimer = setTimeout(() => repinStaleBlocks(), 16);
     const logTop = view.top;
     const anchor = following ? null : [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
       .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > logTop);
@@ -628,8 +651,8 @@
     // Every height read before any is written: one layout for the lot, not one per block.
     const heights = stale.map((node) => Math.round(node.offsetHeight));
     stale.forEach((node, i) => {
-      if (heights[i] >= 8) { node._pinnedHeight = heights[i]; node.style.containIntrinsicSize = `auto ${heights[i]}px`; }
-      node._pinnedWidth = width;
+      if (heights[i] >= 8) recordPin(node, heights[i], width);
+      else { node._pinnedWidth = width; node._pinnedFont = fontEpoch; }
     });
     if (anchor?.isConnected) log.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
     else if (following) scroll();
@@ -646,8 +669,24 @@
     new ResizeObserver(() => {
       if (log.clientWidth === lastWidth) return;
       lastWidth = log.clientWidth;
-      clearTimeout(repinTimer); repinTimer = setTimeout(repinStaleBlocks, 150);
+      scheduleRepin(150);
     }).observe(log);
+    // The fonts are the host's (VS Code rewrites its --vscode-* variables when the setting changes),
+    // and new fonts re-wrap every block exactly as a new width does. Two lines of text that nothing
+    // but the fonts can resize tell us when that happened, however the host did it.
+    const fontProbe = el("div", "font-probe", '<span class="font-probe-sans">Mg The quick brown fox 0123</span><span class="font-probe-mono">Mg {x} =&gt; 0123</span>');
+    fontProbe.setAttribute("aria-hidden", "true");
+    document.body.appendChild(fontProbe);
+    let lastFonts = "";
+    const fontsObserver = new ResizeObserver(() => {
+      const boxes = [...fontProbe.children].map((n) => n.getBoundingClientRect());
+      if (boxes.some((r) => !r.width || !r.height)) return;   // hidden: nothing was measured
+      const fonts = boxes.map((r) => `${r.width.toFixed(2)}x${r.height.toFixed(2)}`).join("|");
+      if (fonts === lastFonts) return;
+      if (lastFonts) { fontEpoch += 1; scheduleRepin(150); }
+      lastFonts = fonts;
+    });
+    for (const line of fontProbe.children) fontsObserver.observe(line);
   }
   // Is the view still tracking the end of the run? It stops only when you scroll away yourself.
   // Following "whenever we happen to be at the bottom" is not enough: anything that moves the
@@ -693,6 +732,12 @@
   }, { passive: true });
   log.addEventListener("scroll", () => {
     if (Date.now() - userScrolledAt < 700) following = atBottom();
+    // Pins still waiting for the width (or the fonts) to hold still are exactly what a scroll is
+    // about to reach: re-measure the blocks nearest the view now, before they come into view at
+    // their old height, rather than after the debounce -- a scroll inside that window jumped ~200px.
+    // After `following` is updated: a reader scrolling up from the end is no longer following, and
+    // the re-measure must hold their place instead of taking them back to the end.
+    if (repinTimer !== null) repinStaleBlocks(true);
     renderToLatest();
   }, { passive: true });
   toLatest.onclick = () => { scroll(); unread = false; renderToLatest(); input.focus(); };
@@ -773,8 +818,18 @@
     // first byte to the last, through six gates and every tool call.
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb"></span> <span class="meta"></span>`);
     block.appendChild(act);
-    if (promptNode) promptNode.after(block);
-    else appendTarget.appendChild(block);
+    appendTarget.appendChild(block);
+    // A claimed queued prompt: the turn goes at the end like any other, so whatever the log said
+    // between that prompt being sent and its turn starting (a compaction, a notice, an error) stays
+    // above the turn, where it happened. The prompts still waiting are the ones that move: back
+    // below the running turn, in their order.
+    if (promptNode) {
+      const waiting = [...queuedPrompts.values(), ...pendingPrompts.values()].map((entry) => entry?.node)
+        .filter((node) => node && node !== promptNode && node.isConnected && node.parentElement === log
+          && (promptNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
+      waiting.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+      for (const node of new Set(waiting)) log.appendChild(node);
+    }
     // No clock for a replayed turn: the session file does not record when it started, and a
     // fabricated 0s is worse than no number at all.
     const t0 = replaying ? null : Date.now();
@@ -784,7 +839,11 @@
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
-      scroll();
+      // A prompt just asked for is worth taking the reader to. A turn nobody asked for just now --
+      // a monitor waking DGC, a goal resuming, a continuation, a prompt queued minutes ago -- is
+      // news: it follows a reader at the end and leaves one who scrolled back where they are, with
+      // the "New" pill, like every other event.
+      if (following || (kind === "prompt" && !promptNode)) scroll(); else noteNewContent();
     }
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
@@ -1503,9 +1562,14 @@
       shot.type = "button";
       shot.title = "Click to enlarge · click again for full size";
       const img = el("img");
+      // Not `loading="lazy"`: the image is already here as a data URI, so there is nothing to save
+      // by waiting, and a lazy image inside a skippable block has no height until a scroll reaches
+      // it -- a strip that arrived while the panel was hidden was pinned without its images, and the
+      // page jumped by the strip's height (74-148px) when a scroll finally loaded them. Loaded
+      // eagerly, a data URI has its size before the turn's block is pinned a frame later (checked in
+      // Chromium with a 17MB screenshot).
       img.src = src;
       img.alt = caption || "Screenshot";
-      img.loading = "lazy";
       shot.appendChild(img);
       const label = el("span", "shot-cap");
       label.textContent = caption || "Screenshot";
