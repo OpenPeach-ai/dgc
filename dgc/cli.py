@@ -230,6 +230,25 @@ class UI:
                                markup=False, highlight=False)
         self.start_working()                                 # spin again until the next step
 
+    def tool_images(self, call_id, images, caption: str = "", *, items=None, omitted: int = 0,
+                    meta=None) -> None:
+        """images: one dim line per image the step produced; the pixels stay in the chat panels."""
+        for row in (meta or []):
+            if not isinstance(row, dict):
+                continue
+            width, height = int(row.get("width") or 0), int(row.get("height") or 0)
+            shape = f"{width}×{height}" if width and height else ""
+            path = terminal_safe_text(str(row.get("path") or ""))
+            if path:
+                line = f"  ↳ image: {path}" + (f" ({shape})" if shape else "")
+            else:
+                name = terminal_safe_text(str(row.get("name") or "image"))
+                line = f"  ↳ image: {name} (" + (f"{shape}, " if shape else "") + "not saved)"
+            self.console.print(line, style=DIM, markup=False, highlight=False, soft_wrap=True)
+        if omitted:
+            self.console.print(f"  ↳ {int(omitted)} more image{'s' if int(omitted) != 1 else ''} not kept",
+                               style=DIM, markup=False, highlight=False)
+
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         self.stop_working()

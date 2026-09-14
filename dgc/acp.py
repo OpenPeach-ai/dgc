@@ -34,7 +34,7 @@ from .redaction import redact_text, redact_value, secret_values, sensitive_name
 from .ui import arg_summary, split_diff, tool_output_is_error
 
 _KIND = {  # DGC tool -> ACP tool-call kind
-    "read_file": "read", "repo_map": "read", "code_intel": "read", "glob": "read", "grep": "read",
+    "read_file": "read", "view_image": "read", "repo_map": "read", "code_intel": "read", "glob": "read", "grep": "read",
     "write_file": "edit", "edit_file": "edit", "multi_edit": "edit", "apply_patch": "edit",
     "bash": "execute", "bash_output": "execute", "bash_kill": "execute",
     "monitor": "execute", "monitor_stop": "execute",

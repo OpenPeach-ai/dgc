@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import binascii
 import itertools
 import json
 import math
@@ -1430,6 +1432,42 @@ class MCPServer:
 
     # tools --------------------------------------------------------------------
     @staticmethod
+    def _render_image(block: dict, on_image, name: str) -> str:
+        """An MCP image block handed to ``on_image`` (strict base64, bytes that really are the image
+        type the block claims) and the one line the model reads in its place."""
+        from .image_views import MAX_VIEW_BYTES, dimensions, human_size, sniff
+        mime = str(block.get("mimeType") or "unknown")[:64]
+        raw = block.get("data")
+        data = None
+        reason = ""
+        if not isinstance(raw, str) or not raw:
+            reason = "no image data"
+        else:
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (binascii.Error, ValueError):
+                reason = "not valid base64"
+        if data is not None and len(data) > MAX_VIEW_BYTES:
+            data, reason = None, "over 8 MB"
+        if data is not None and sniff(data) != mime:
+            data, reason = None, f"the data is not {mime}"
+        if data is None:
+            on_image(mime, None, name=name)
+            return f"[MCP image: {mime} · not shown: {reason}]"
+        width, height = dimensions(data)
+        shape = f"{width}×{height} · " if width and height else ""
+        seen = on_image(mime, data, name=name)      # True: the model sees it; words: why it does not
+        if isinstance(seen, str) and seen:
+            return f"[MCP image: {mime} · {shape}{human_size(len(data))} — {seen[:160]}]"
+        if seen is None:
+            return (f"[MCP image: {mime} · {shape}{human_size(len(data))} — not kept: DGC keeps up to "
+                    "8 images per step]")
+        if not seen:
+            return (f"[MCP image: {mime} · {shape}{human_size(len(data))} — this model cannot read "
+                    "images; the user can see it in the chat]")
+        return f"[MCP image: {mime} · {shape}{human_size(len(data))} — attached after this batch]"
+
+    @staticmethod
     def _render_content(block: dict) -> str:
         kind = block.get("type")
         if kind == "text":
@@ -1450,7 +1488,7 @@ class MCPServer:
 
     def call_tool(self, tool: str, arguments: dict, timeout: float = 120.0,
                   cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
-                  input_handler=None) -> str:
+                  input_handler=None, on_image=None) -> str:
         from .mcp_context import request_complete
         try:
             res = request_complete(self, "tools/call", {"name": tool, "arguments": arguments},
@@ -1458,7 +1496,19 @@ class MCPServer:
                                    on_log=on_log, input_handler=input_handler)
         except MCPInputError as exc:
             return f"ERROR: MCP tool '{tool}' failed: {exc}"
-        parts = [self._render_content(c) for c in (res.get("content") or []) if isinstance(c, dict)]
+        parts = []
+        image_count = 0
+        for block in (res.get("content") or []):
+            if not isinstance(block, dict):
+                continue
+            if on_image is not None and block.get("type") == "image":
+                # images: shown in the chat, and to a vision model after the batch.
+                image_count += 1
+                extension = str(block.get("mimeType") or "").rsplit("/", 1)[-1][:8] or "png"
+                parts.append(self._render_image(
+                    block, on_image, f"{self.name}-{tool}-{image_count}.{extension}"))
+                continue
+            parts.append(self._render_content(block))
         if res.get("structuredContent") is not None:
             parts.append("[structured content]\n" + json.dumps(res["structuredContent"], ensure_ascii=False))
         out = "\n".join(p for p in parts if p) or "(MCP tool returned no content)"
@@ -1799,7 +1849,7 @@ class MCPManager:
 
     def call(self, full_name: str, arguments: dict,
              cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
-             input_handler=None) -> str:
+             input_handler=None, on_image=None) -> str:
         with self._catalog_state_lock:
             route = self._routes.get(full_name)
             server = self.servers.get(route[0]) if route else None
@@ -1824,9 +1874,10 @@ class MCPManager:
                 return json.dumps(result, ensure_ascii=False)
             except MCPInputError as exc:
                 return f"ERROR: MCP resource operation failed: {exc}"
+        image_kwargs = {"on_image": on_image} if on_image is not None else {}
         return server.call_tool(tool, arguments, cancel=cancel,
                                 on_progress=on_progress, on_log=on_log,
-                                input_handler=input_handler)
+                                input_handler=input_handler, **image_kwargs)
 
     def context_route(self, server_name: str, kind: str) -> str:
         operation = {"resources": "read_resource", "prompts": "get_prompt"}.get(kind)

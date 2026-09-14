@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { createHash, randomBytes } from "crypto";
 import { realpath } from "fs/promises";
 import * as fs from "fs";
+import { homedir } from "os";
 import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
@@ -240,6 +241,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, McpBrowserRequest>();
+  // ---- 0.40 images: refs this panel was shown, the stored path an `image` answer named for each,
+  // and Open file requests waiting on a fresh answer. Never a path the webview supplies.
+  private imageRefs = new Map<string, { path?: string }>();
+  private imageOpenWaiters = new Map<string, (path: string | undefined) => void>();
   private slashAliases = new Map<string, string>();
   private composerSelections = false;
   private skillManagement = false;
@@ -1415,6 +1420,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
         || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"].includes(ev.command))) return;
+    const openImageAnswer = this.noteImageEvent(ev);
     switch (ev.type) {
       case "ready":
         this.sessionReady = false;
@@ -1645,6 +1651,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
       this.scheduleWorkspaceChanges(ev.type === "tool_result" ? 120 : 0);
     }
+    if (ev.type === "image") {
+      // The stored copy's path is for this host's Open file only; the webview asks by ref.
+      // An answer to Open file's own get_image went to its waiter: the bytes never cross the bridge.
+      if (openImageAnswer) { return; }
+      const { path: _stored, ...answer } = ev as any;
+      this.post({ type: "event", event: answer });
+      return;
+    }
     this.post({ type: "event", event: ev });
   }
 
@@ -1774,6 +1788,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }),
+          ...(event.type === "image" ? { id: String(event.request_id || "") } : {}),
           // What the status row says (e.g. a silent model request), for the installed-host stall test.
           ...(event.type === "turn_activity" ? { state: String(event.state || ""),
             label: String(event.label || "").slice(0, 80),
@@ -2221,6 +2236,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "openFile":
         await this.openFile(msg.path, msg.line);
         break;
+      case "getImage": {
+        const requestId = String(msg.requestId || "");
+        const ref = typeof msg.ref === "string" ? msg.ref : "";
+        if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) { break; }
+        if (this.lastReadyEvent?.capabilities?.image_views !== true || !DgcViewProvider.IMAGE_REF.test(ref)) {
+          // A backend without image views (or a ref this panel never saw) cannot answer: answer for it.
+          this.post({ type: "event", event: { type: "image", request_id: requestId, ref, image: "",
+            reason: DgcViewProvider.IMAGE_REF.test(ref) ? "unreadable" : "invalid_ref" } });
+          break;
+        }
+        be.send({ type: "get_image", request_id: requestId, ref });
+        break;
+      }
+      case "openImage":
+        await this.openImage(msg.ref);
+        break;
       case "openExternal":
         if (msg.url) { void this.openSafeExternal(String(msg.url)); }
         break;
@@ -2322,6 +2353,97 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }).sort((a, b) => a.label.localeCompare(b.label));
     this.post({ type: "files", files });
   }
+
+  // ---- 0.40 images -------------------------------------------------------------------------------
+  private static readonly IMAGE_REF = /^img_[0-9a-f]{32}$/;
+
+  private rememberImageRef(ref: unknown): void {
+    if (typeof ref !== "string" || !DgcViewProvider.IMAGE_REF.test(ref) || this.imageRefs.has(ref)) { return; }
+    if (this.imageRefs.size >= 1024) { this.imageRefs.delete(this.imageRefs.keys().next().value as string); }
+    this.imageRefs.set(ref, {});
+  }
+
+  /** Tracks refs and stored paths; true when ``ev`` answered an Open file request (consumed here). */
+  private noteImageEvent(ev: DgcEvent): boolean {
+    const itemsOf = (event: any) => (event?.type === "tool_images" && Array.isArray(event.items) ? event.items : []);
+    if (ev.type === "tool_images") {
+      for (const item of itemsOf(ev)) { this.rememberImageRef(item?.ref); }
+    } else if (ev.type === "history" && Array.isArray(ev.items)) {
+      for (const event of ev.items) { for (const item of itemsOf(event)) { this.rememberImageRef(item?.ref); } }
+    } else if (ev.type === "session" && ["new", "cleared", "resumed"].includes(String(ev.kind))) {
+      this.imageRefs.clear();
+    } else if (ev.type === "image") {
+      const ref = String(ev.ref || "");
+      const stored = typeof ev.path === "string" && isAbsolute(ev.path) ? ev.path : undefined;
+      const known = this.imageRefs.get(ref);
+      if (known && stored) { known.path = stored; }
+      const waiter = this.imageOpenWaiters.get(String(ev.request_id));
+      if (waiter) {
+        this.imageOpenWaiters.delete(String(ev.request_id));
+        waiter(known ? stored : undefined);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The stored file behind a ref, only if it is a regular image file inside DGC's own image
+   * stores: a session's `.images` sidecar under ~/.dgc/sessions, or a workspace's `.dgc/screenshots`. */
+  private async allowedImageFile(candidate: string | undefined): Promise<string | undefined> {
+    if (!candidate || !isAbsolute(candidate)) { return undefined; }
+    try {
+      const info = await fs.promises.lstat(candidate);
+      if (!info.isFile() || info.isSymbolicLink()) { return undefined; }
+      const real = await realpath(candidate);
+      const folder = path.dirname(real);
+      const inside = async (root: string) => {
+        try {
+          const base = await realpath(root);
+          return folder === base || folder.startsWith(base + sep);
+        } catch { return false; }
+      };
+      const sessions = join(homedir(), ".dgc", "sessions");
+      const inSessionStore = folder.endsWith(".images") && await inside(sessions);
+      let inScreenshots = false;
+      for (const root of this.workspaceRoots()) {
+        try { if (folder === await realpath(join(root, ".dgc", "screenshots"))) { inScreenshots = true; break; } } catch { /* absent */ }
+      }
+      if (!inSessionStore && !inScreenshots) { return undefined; }
+      const handle = await fs.promises.open(real, "r");
+      try {
+        const head = Buffer.alloc(16);
+        const { bytesRead } = await handle.read(head, 0, 16, 0);
+        const bytes = head.subarray(0, bytesRead);
+        const magic = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+          || (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+          || bytes.subarray(0, 6).toString("latin1") === "GIF87a" || bytes.subarray(0, 6).toString("latin1") === "GIF89a"
+          || (bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP")
+          || bytes.subarray(0, 2).toString("latin1") === "BM";
+        return magic ? real : undefined;
+      } finally { await handle.close(); }
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async openImage(ref: unknown): Promise<void> {
+    const unavailable = () => void vscode.window.showInformationMessage("That image is no longer available.");
+    if (typeof ref !== "string" || !DgcViewProvider.IMAGE_REF.test(ref) || !this.imageRefs.has(ref)) { unavailable(); return; }
+    let stored = this.imageRefs.get(ref)?.path;
+    const be = this.backend;
+    if (!stored && be && this.lastReadyEvent?.capabilities?.image_views === true) {
+      const requestId = this.nextRequestId("open-image");
+      stored = await new Promise<string | undefined>((done) => {
+        const timer = setTimeout(() => { this.imageOpenWaiters.delete(requestId); done(undefined); }, 30_000);
+        this.imageOpenWaiters.set(requestId, (value) => { clearTimeout(timer); done(value); });
+        be.send({ type: "get_image", request_id: requestId, ref });
+      });
+    }
+    const target = await this.allowedImageFile(stored);
+    if (!target) { unavailable(); return; }
+    await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target), { preview: true });
+  }
+  // ---- end 0.40 images ---------------------------------------------------------------------------
 
   private async openFile(path: string, line?: number): Promise<void> {
     const target = await workspaceFile(path, this.workspaceRoots());

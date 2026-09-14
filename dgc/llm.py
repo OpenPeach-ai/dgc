@@ -18,6 +18,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
+from .image_views import parse_dimensions as _image_dimensions   # one header parser, shared
 from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
                           bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
                           resolve_first_token_timeout, safe_endpoint)
@@ -82,56 +83,6 @@ def _image_prefix(payload: str) -> bytes:
         return base64.b64decode(encoded, validate=True) if encoded else b""
     except (binascii.Error, ValueError):
         return b""
-
-
-def _image_dimensions(data: bytes) -> tuple[int, int] | None:
-    width = height = 0
-    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
-        width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
-    elif len(data) >= 10 and data.startswith((b"GIF87a", b"GIF89a")):
-        width, height = int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little")
-    elif len(data) >= 26 and data.startswith(b"BM"):
-        width = abs(int.from_bytes(data[18:22], "little", signed=True))
-        height = abs(int.from_bytes(data[22:26], "little", signed=True))
-    elif len(data) >= 30 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        if data[12:16] == b"VP8X" and len(data) >= 30:
-            width = 1 + int.from_bytes(data[24:27], "little")
-            height = 1 + int.from_bytes(data[27:30], "little")
-        elif data[12:16] == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
-            bits = int.from_bytes(data[21:25], "little")
-            width, height = 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)
-        elif data[12:16] == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
-            width = int.from_bytes(data[26:28], "little") & 0x3FFF
-            height = int.from_bytes(data[28:30], "little") & 0x3FFF
-    elif len(data) >= 12 and data.startswith(b"\xff\xd8\xff"):
-        offset = 2
-        sof = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB,
-               0xCD, 0xCE, 0xCF}
-        while offset + 9 <= len(data):
-            if data[offset] != 0xFF:
-                offset += 1
-                continue
-            while offset < len(data) and data[offset] == 0xFF:
-                offset += 1
-            if offset >= len(data):
-                break
-            marker = data[offset]
-            offset += 1
-            if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
-                continue
-            if offset + 2 > len(data):
-                break
-            length = int.from_bytes(data[offset:offset + 2], "big")
-            if length < 2 or offset + length > len(data):
-                break
-            if marker in sof and length >= 7:
-                height = int.from_bytes(data[offset + 3:offset + 5], "big")
-                width = int.from_bytes(data[offset + 5:offset + 7], "big")
-                break
-            offset += length
-    if 0 < width <= 1_000_000 and 0 < height <= 1_000_000:
-        return width, height
-    return None
 
 
 def _estimate_base64_image_tokens(payload: str) -> int:
@@ -208,6 +159,63 @@ def _scrub_ollama_images(messages: list[dict]) -> tuple[list[dict], int]:
                 clean["images"].append("[image]" if image_tokens else str(payload or ""))
         output.append(clean)
     return output, tokens
+
+
+# ---- images a text-only endpoint refuses ------------------------------------------------------------
+# A generic OpenAI-compatible endpoint is assumed to accept images until it says otherwise. Its
+# refusal ("does not support image input", "image_url is not supported", a pydantic error naming the
+# image part) used to be read as a refusal of native TOOLS: tools were switched off, the text
+# protocol failed the same way, and the image stayed in the transcript so every later request failed
+# too. Matched only when the request really carried an image part.
+_IMAGE_REFUSAL_RE = re.compile(
+    r"image_url|input_image|image input|images? (?:are|is) not supported|does not support images?|"
+    r"multimodal|multi-modal|vision|unknown variant .?image|content type .?image", re.IGNORECASE)
+_VISION_REJECTION_MIN_TTL_S = 3600.0
+
+
+def _is_image_part(part) -> bool:
+    if not isinstance(part, dict):
+        return False
+    kind = part.get("type")
+    return kind in ("image_url", "input_image") or (kind == "image" and isinstance(part.get("source"), dict))
+
+
+def _image_parts_in(messages) -> int:
+    """Image parts in canonical, Responses or Anthropic messages (and Ollama ``images`` arrays)."""
+    count = 0
+    for message in messages or ():
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            count += sum(1 for part in content if _is_image_part(part))
+        images = message.get("images")
+        if isinstance(images, list):
+            count += len(images)
+    return count
+
+
+def _strip_images_with_note(messages: list, model: str) -> tuple[list, int]:
+    """A copy of ``messages`` with every image part replaced by a note the model can act on. The
+    transcript itself is never changed: this is applied to the outgoing request only."""
+    out: list = []
+    dropped = 0
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list) or not any(_is_image_part(part) for part in content):
+            out.append(message)
+            continue
+        kept = [part for part in content if not _is_image_part(part)]
+        count = len(content) - len(kept)
+        dropped += count
+        note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but {model} cannot "
+                "read images. Say so and ask for a description, or suggest switching to a "
+                "vision-capable model. Do not pretend to have seen "
+                f"{'them' if count > 1 else 'it'}.]")
+        clean = dict(message)
+        clean["content"] = [*kept, {"type": "text", "text": note}]
+        out.append(clean)
+    return out, dropped
 
 
 def _raw_socket(resp):
@@ -1422,6 +1430,18 @@ class LLMClient:
         """Record that images were withheld, so a frontend can tell the user once."""
         self.dropped_images = getattr(self, "dropped_images", 0) + count
 
+    def _without_images(self, messages: list, *, refused: bool = False) -> list:
+        """The outgoing copy of ``messages`` for a model that cannot read images. ``refused`` records
+        the endpoint's refusal first: a text-only endpoint does not grow vision within a session, so
+        the rejection is remembered for at least an hour and later requests skip the failed try."""
+        if refused:
+            self._mark_rejected("vision", ttl_s=max(float(self.capability_cache_ttl_s or 0),
+                                                    _VISION_REJECTION_MIN_TTL_S))
+        stripped, dropped = _strip_images_with_note(messages, self.model)
+        if dropped:
+            self._note_dropped_images(dropped)
+        return stripped
+
     def effective_context_size(self, configured: int | None = None) -> int:
         """Clamp a requested operating window to a discovered model maximum without expanding it."""
         requested = _bounded_model_tokens(
@@ -1839,8 +1859,10 @@ class LLMClient:
                 value = value.get("url") or ""
             match = _ANTHROPIC_IMAGE_RE.fullmatch(str(value))
             if not match:
-                raise LLMError(
-                    "Anthropic Messages image input must be a validated base64 JPEG, PNG, GIF, or WebP")
+                # Raising here failed every later request too: the image stays in the transcript.
+                blocks.append({"type": "text", "text": "[An image was left out here: only JPEG, PNG, "
+                               "GIF and WebP images can be sent to this model.]"})
+                continue
             blocks.append({
                 "type": "image",
                 "source": {"type": "base64", "media_type": match.group(1).lower(),
@@ -2384,6 +2406,8 @@ class LLMClient:
 
     def _chat_anthropic(self, messages, tools, reasoning_effort, on_text, on_thinking,
                         cancel) -> ChatResult:
+        if _image_parts_in(messages) and not self.vision_supported:
+            messages = self._without_images(messages)      # images: known text-only, skip the try
         transient = 0
         disabled: set[str] = set()
         overthink = 0
@@ -2446,6 +2470,9 @@ class LLMClient:
                 status = response.status_code
                 headers = response.headers
                 body = _error_body(response, 400)
+                if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    continue
                 last_err = f"HTTP {status}: {body}"
                 transient += 1
                 if transient < 4:
@@ -2462,6 +2489,10 @@ class LLMClient:
                 last_err = body
                 if status == 413 or _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    # images: the endpoint refused the image part, not tools. Retry once without it.
+                    messages = self._without_images(messages, refused=True)
+                    continue
                 if "tool_choice" in payload and re.search(r"tool.choice|tool_choice", low):
                     payload.pop("tool_choice", None)
                     disabled.add("tool_choice")
@@ -2486,6 +2517,9 @@ class LLMClient:
             if response.status_code != 200:
                 status = response.status_code
                 body = _error_body(response, 400)
+                if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    continue
                 raise LLMError(f"HTTP {status} from Anthropic Messages: {body}")
             budget = self.think_budget_chars
             self._usage_opened()
@@ -2842,28 +2876,13 @@ class LLMClient:
         if tools and not self.tools_supported:
             raise ToolsUnsupportedError(
                 "Ollama model metadata reports no native tool-calling capability")
-        ollama_messages = self._ollama_messages(messages)
-        if (any(message.get("images") for message in ollama_messages)
-                and not self.vision_supported):
+        if _image_parts_in(messages) and not self.vision_supported:
             # Refusing the turn stranded the run: the image stays in the conversation, so every
             # later turn -- and every attempt to resume a standing goal -- re-sent it and failed
             # the same way. An attachment this model cannot read is a fact to tell it about, not a
             # reason to stop working. Drop the pixels from the request and say so in their place.
-            dropped = 0
-            for message in ollama_messages:
-                count = len(message.get("images") or ())
-                if not count:
-                    continue
-                dropped += count
-                message.pop("images", None)
-                note = (f"[{count} image{'s' if count > 1 else ''} were attached here, but "
-                        f"{self.model} cannot read images. Say so and ask for a description, or "
-                        "suggest switching to a vision-capable model. Do not pretend to have seen "
-                        "them.]")
-                existing = message.get("content")
-                message["content"] = f"{existing}\n\n{note}" if existing else note
-            if dropped:
-                self._note_dropped_images(dropped)
+            messages = self._without_images(messages)
+        ollama_messages = self._ollama_messages(messages)
         payload: dict = {"model": self.model, "messages": ollama_messages,
                          "stream": True}
         if tools and self.tools_supported:
@@ -2956,6 +2975,13 @@ class LLMClient:
                 last_err = body
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    # images: /api/show can be silent about capabilities, so a text-only model's
+                    # "Multimodal data provided, but model does not support multimodal requests"
+                    # is the first word. It refuses the image, not tools: retry once without it.
+                    messages = self._without_images(messages, refused=True)
+                    payload["messages"] = self._ollama_messages(messages)
+                    continue
                 if (r.status_code == 400 and self.tools_supported and "tools" in payload
                         and re.search(r"tool|function", low)):
                     self._mark_rejected("tools")
@@ -2982,9 +3008,14 @@ class LLMClient:
                     continue
                 raise LLMError(f"{r.status_code} from Ollama: {body}")
             if r.status_code >= 500:
-                transient += 1
                 status = r.status_code
                 body = _error_body(r)
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    payload["messages"] = self._ollama_messages(
+                        _repair_for_retry(messages) if repaired else messages)
+                    continue
+                transient += 1
                 last_err = f"HTTP {status}: {body[:300]}"
                 if transient < 4:
                     if transient >= 2 and not repaired:
@@ -3036,6 +3067,8 @@ class LLMClient:
         on_thinking=None,
         cancel=None,
     ) -> ChatResult:
+        if _image_parts_in(messages) and not self.vision_supported:
+            messages = self._without_images(messages)      # images: known text-only, skip the try
         # Provider-private continuation metadata belongs only to Responses input items.
         chat_messages = [{k: v for k, v in message.items() if not str(k).startswith("_")}
                          for message in messages]
@@ -3136,6 +3169,14 @@ class LLMClient:
                 # otherwise be misread as a sampling/tool rejection and permanently strip a capability.
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if (r.status_code in (400, 422) and _image_parts_in(payload["messages"])
+                        and _IMAGE_REFUSAL_RE.search(body)):
+                    # images: the endpoint refused the image part, not tools. Retry once without it.
+                    messages = self._without_images(messages, refused=True)
+                    payload["messages"] = (_repair_for_retry(messages) if repaired else
+                                           [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                                            for message in messages])
+                    continue
                 if (r.status_code in (400, 422) and "stream_options" in payload
                         and _STREAM_USAGE_REFUSAL_RE.search(body)):
                     # An endpoint that refuses the usage request still streams: retry once without
@@ -3187,6 +3228,14 @@ class LLMClient:
                 # "no user query found in messages" on long tool-loops.
                 status = r.status_code
                 body = _error_body(r)
+                if _image_parts_in(payload["messages"]) and _IMAGE_REFUSAL_RE.search(body):
+                    # images: a server without an image encoder (llama.cpp without mmproj) says so
+                    # with a 500. That is a refusal, not a transient failure: retry without it.
+                    messages = self._without_images(messages, refused=True)
+                    payload["messages"] = (_repair_for_retry(messages) if repaired else
+                                           [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                                            for message in messages])
+                    continue
                 last_err = f"HTTP {status}: {body[:300]}"
                 transient += 1
                 if transient < 4:
@@ -3527,6 +3576,8 @@ class LLMClient:
 
     def _chat_responses(self, messages, tools, reasoning_effort, on_text, on_thinking,
                         cancel) -> ChatResult:
+        if _image_parts_in(messages) and not self.vision_supported:
+            messages = self._without_images(messages)      # images: known text-only, skip the try
         transient = 0
         disabled: set[str] = set()
         stalls = 0
@@ -3583,6 +3634,9 @@ class LLMClient:
                 status = response.status_code
                 headers = response.headers
                 body = _error_body(response, 400)
+                if status >= 500 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    continue
                 transient += 1
                 if transient < 4:
                     delay = _retry_delay(headers, 0.5 * transient)
@@ -3596,6 +3650,10 @@ class LLMClient:
                 low = body.lower()
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    # images: the endpoint refused the image part, not tools. Retry once without it.
+                    messages = self._without_images(messages, refused=True)
+                    continue
                 if ("parallel_tool_calls" in payload and re.search(r"parallel", low)):
                     self._mark_rejected("parallel_tools")
                     disabled.add("parallel_tools")
@@ -3635,6 +3693,9 @@ class LLMClient:
             if response.status_code != 200:
                 status = response.status_code
                 body = _error_body(response, 400)
+                if status == 422 and _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
+                    messages = self._without_images(messages, refused=True)   # images: a refusal
+                    continue
                 raise LLMError(f"HTTP {status} from Responses API: {body}")
             self._usage_opened()
             try:

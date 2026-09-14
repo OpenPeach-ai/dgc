@@ -625,26 +625,62 @@ class HeadlessUI:
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
                      is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
 
-    def tool_images(self, call_id: str | None, images: list, caption: str = "") -> None:
-        """Images a tool produced, for the panel to render beside its step.
+    def tool_images(self, call_id: str | None, images: list, caption: str = "", *, items=None,
+                    omitted: int = 0, meta=None) -> None:
+        """Images a tool produced, for the panel to render inside the step that produced them.
 
-        Sent in groups that fit one protocol frame. A screenshot is capped at 4MB of PNG, which is
-        about 5.6MB once base64 and JSON-escaped, and a tool batch can queue several -- so the
-        whole batch in one event could exceed the frame ceiling and be dropped. The panel appends
-        a strip per event, so splitting costs nothing and keeps every screenshot.
+        Sent in groups that fit one protocol frame, counting the metadata ``items`` too. A
+        screenshot is capped at 4MB of PNG, which is about 5.6MB once base64 and JSON-escaped, and a
+        step can return several -- so one event could exceed the frame ceiling. An image that alone
+        does not fit becomes an empty slot: with its item (a stored image the panel can fetch by
+        ref) it is ``""`` beside that item; without one it is its own ``images: []`` frame, which the
+        panel shows as "Too large" instead of the event vanishing. ``meta`` is for Python front ends
+        and never reaches the wire.
         """
         budget = int(MAX_EVENT_BYTES * 0.9)          # leave room for the envelope and escaping
+        images = [str(image) for image in (images or [])]
+        items = ([item if isinstance(item, dict) else {} for item in items]
+                 if isinstance(items, list) and len(items) == len(images) else None)
+        omitted = max(0, int(omitted or 0)) if isinstance(omitted, int) and not isinstance(omitted, bool) else 0
+        overhead = len(json.dumps({"call_id": call_id, "caption": caption, "omitted": omitted,
+                                   "items": [], "images": []}, ensure_ascii=False).encode("utf-8")) + 64
+        frames: list = []
         batch: list = []
-        used = 0
-        for image in images:
-            cost = len(str(image).encode("utf-8")) + 8      # the quotes, comma and escaping slack
+        batch_items: list = []
+        used = overhead
+
+        def flush() -> None:
+            nonlocal batch, batch_items, used
+            if batch:
+                frames.append((batch, batch_items))
+            batch, batch_items, used = [], [], overhead
+
+        for index, image in enumerate(images):
+            item = items[index] if items is not None else None
+            item_cost = (len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 2
+                         if item is not None else 0)
+            cost = len(image.encode("utf-8")) + 8 + item_cost  # the quotes, comma and escaping slack
+            if overhead + cost > budget:
+                if item is None:
+                    flush()
+                    frames.append(([], []))                     # "Too large", never a vanished event
+                    continue
+                image, cost = "", item_cost + 8                 # fetched later through get_image
             if batch and used + cost > budget:
-                self.em.emit("tool_images", call_id=call_id, images=batch, caption=caption)
-                batch, used = [], 0
+                flush()
             batch.append(image)
+            batch_items.append(item)
             used += cost
-        if batch:
-            self.em.emit("tool_images", call_id=call_id, images=batch, caption=caption)
+        flush()
+        if not frames and omitted:
+            frames.append(([], []))
+        for position, (frame_images, frame_items) in enumerate(frames):
+            fields = {"call_id": call_id, "images": frame_images, "caption": caption}
+            if items is not None:
+                fields["items"] = frame_items
+            if omitted and position == len(frames) - 1:
+                fields["omitted"] = omitted
+            self.em.emit("tool_images", **fields)
 
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
@@ -2517,6 +2553,14 @@ class Backend:
         elif t == "get_doc":
             self._emit_doc(str(cmd.get("request_id") or ""), str(cmd.get("id") or ""))
 
+        elif t == "get_image":
+            image_request = cmd.get("request_id")
+            if not isinstance(image_request, str) or not 1 <= len(image_request) <= 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                self._request_image(image_request, cmd.get("ref"))
+
         elif t == "get_usage":
             usage_request = str(cmd.get("request_id") or "")
             if not usage_request or len(usage_request) > 128:
@@ -3412,21 +3456,206 @@ class Backend:
 
 
     # ---- 0.40 images ------------------------------------------------------------------------------
+    _IMAGE_WORKERS = 2          # get_image answers read, hash and base64 up to 8 MB off the reader
+    _IMAGE_QUEUE = 16           # requests in flight or waiting; beyond this the answer is `busy`
+
+    def _request_image(self, request_id: str, ref) -> None:
+        """Answer one get_image with exactly one `image` event, served by a small pool so the command
+        reader stays free for a Stop while bytes are read."""
+        from .image_views import REF_RE
+        if not isinstance(ref, str) or not REF_RE.match(ref):
+            self.em.emit("image", request_id=request_id, ref=str(ref or "")[:64], image="",
+                         reason="invalid_ref")
+            return
+        lock = self.__dict__.setdefault("_image_lock", threading.Lock())
+        with lock:
+            if self.__dict__.get("_image_requests", 0) >= self._IMAGE_QUEUE:
+                busy = True
+            else:
+                busy = False
+                self._image_requests = self.__dict__.get("_image_requests", 0) + 1
+                pool = self.__dict__.get("_image_pool")
+                if pool is None:
+                    from concurrent.futures import ThreadPoolExecutor
+                    pool = self._image_pool = ThreadPoolExecutor(
+                        max_workers=self._IMAGE_WORKERS, thread_name_prefix="dgc-image")
+        if busy:
+            self.em.emit("image", request_id=request_id, ref=ref, image="", reason="busy")
+            return
+        try:
+            pool.submit(self._serve_image, request_id, ref)
+        except RuntimeError:                  # the pool is shutting down with the backend
+            with lock:
+                self._image_requests -= 1
+            self.em.emit("image", request_id=request_id, ref=ref, image="", reason="busy")
+
+    def _current_image_record(self, ref: str):
+        return next((record for record in reversed(list(getattr(self.agent, "image_views", []) or []))
+                     if getattr(record, "ref", None) == ref), None)
+
+    def _serve_image(self, request_id: str, ref: str) -> None:
+        from .image_views import resolve
+        try:
+            record = self._current_image_record(ref)
+            session_file = getattr(self.agent, "session_file", None)
+            if record is None or not session_file:
+                self.em.emit("image", request_id=request_id, ref=ref, image="", reason="not_found")
+                return
+            data, reason, path = resolve(session_file, record)
+            # The session may have changed while the file was read: never answer with bytes the
+            # conversation now on screen did not view.
+            if self._current_image_record(ref) is None or getattr(self.agent, "session_file", None) != session_file:
+                self.em.emit("image", request_id=request_id, ref=ref, image="", reason="not_found")
+                return
+            shape = {"mime": record.mime, "width": record.width, "height": record.height}
+            if data is None:
+                extra = {**shape, "path": path} if reason == "too_large" and path else {}
+                self.em.emit("image", request_id=request_id, ref=ref, image="", reason=reason, **extra)
+                return
+            import base64
+            uri = f"data:{record.mime};base64,{base64.b64encode(data).decode('ascii')}"
+            if len(uri) + 512 > int(MAX_EVENT_BYTES * 0.9):
+                self.em.emit("image", request_id=request_id, ref=ref, image="", reason="too_large",
+                             path=path, **shape)
+                return
+            self.em.emit("image", request_id=request_id, ref=ref, image=uri, path=path, **shape)
+        except Exception:
+            # Never exception text: it can carry a path or a provider's words. One reason, no detail.
+            try:
+                self.em.emit("image", request_id=request_id, ref=ref, image="", reason="unreadable")
+            except Exception:
+                pass
+        finally:
+            with self.__dict__.setdefault("_image_lock", threading.Lock()):
+                self._image_requests = max(0, self.__dict__.get("_image_requests", 1) - 1)
+
+    @staticmethod
+    def _history_image_item(call_id, records: list) -> dict:
+        return {"type": "tool_images", "call_id": call_id, "images": [""] * len(records),
+                "caption": "", "items": [record.to_item() for record in records]}
+
     def _history_begin_images(self) -> None:
-        """Reset per-call image replay state at the start of one `_history` projection."""
+        """Reset per-call image replay state at the start of one `_history` projection. Everything a
+        message loop needs is indexed once here, so replay stays linear in messages plus records."""
+        from .agent import _COMPACT_PREFIX
+        records = [record for record in list(getattr(getattr(self, "agent", None), "image_views", None) or [])
+                   if hasattr(record, "to_item")]
+        messages = list(getattr(getattr(self, "agent", None), "messages", None) or [])
+        tool_calls: set = set()
+        summary = None
+        for position, message in enumerate(messages):
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") == "tool":
+                tool_calls.add(str(message.get("tool_call_id") or ""))
+            elif (summary is None and message.get("role") == "user"
+                  and isinstance(message.get("content"), str)
+                  and message["content"].startswith(_COMPACT_PREFIX)):
+                summary = position
+        folded, orphans, by_call = [], [], {}
+        for position, record in enumerate(records):
+            if getattr(record, "compacted", False):
+                folded.append(position)
+            elif str(record.call_id or "") in tool_calls:
+                by_call.setdefault(str(record.call_id or ""), []).append(position)
+            else:
+                orphans.append(position)
+        anchor = lambda position: records[position].anchor
+        orphans.sort(key=anchor)                       # stable: equal anchors keep record order
+        for positions in by_call.values():
+            positions.sort(key=anchor)
+        self._history_images = {
+            "records": records, "done": set(), "index": -1, "summary": summary,
+            "folded": folded, "orphans": orphans, "orphan_next": 0,
+            "by_call": by_call, "call_next": {},
+        }
+
+    def _history_image_state(self) -> dict:
+        state = getattr(self, "_history_images", None)
+        if not isinstance(state, dict):
+            self._history_begin_images()
+            state = self._history_images
+        return state
 
     def _history_before_message(self, index: int, turn: dict | None) -> list:
         """Image records anchored at or before message ``index`` whose call has no native tool
         message, as ``tool_images`` items with ``call_id: null``. ``turn`` is None when no turn is
-        open; the records then wait for a later call or `_history_finish_images`."""
-        return []
+        open; the records then wait for a later call or `_history_finish_images`. Images whose
+        steps a compaction folded into its summary come back as one row just after the summary."""
+        state = self._history_image_state()
+        state["index"] = index
+        items: list = []
+        if state["folded"] and (state["summary"] is None or index > state["summary"]):
+            folded, state["folded"] = state["folded"], []
+            rows = self._history_orphans(state, folded)
+            if turn is None:
+                # The summary opens no turn: the row gets a quiet one of its own ("h0" never
+                # collides, history turns count from h1).
+                items.append({"type": "turn_start", "turn_id": "h0", "prompt": "", "kind": "prompt"})
+                items.extend(rows)
+                items.append({"type": "turn_end", "turn_id": "h0", "reason": "completed",
+                              "token_estimate": 0, "final_message_id": None})
+            else:
+                items.extend(rows)
+        if turn is None:
+            return items
+        orphans, start = state["orphans"], state["orphan_next"]
+        end = start
+        while end < len(orphans) and state["records"][orphans[end]].anchor <= index:
+            end += 1
+        state["orphan_next"] = end
+        items.extend(self._history_orphans(state, orphans[start:end]))
+        return items
+
+    def _history_orphans(self, state: dict, positions: list) -> list:
+        items = []
+        positions = [position for position in positions if position not in state["done"]]
+        for start in range(0, len(positions), 64):
+            chunk = positions[start:start + 64]
+            state["done"].update(chunk)
+            items.append(self._history_image_item(None, [state["records"][p] for p in chunk]))
+        return items
 
     def _history_after_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
-        """``tool_images`` items for the call whose ``tool_result`` was just replayed."""
-        return []
+        """``tool_images`` items for the call whose ``tool_result`` was just replayed. A call id can
+        repeat across turns: an image belongs to the first result at or after where it was recorded
+        (compaction keeps anchors on the live numbering, so no leftover is guessed onto a result)."""
+        state = self._history_image_state()
+        call = str(call_id or "")
+        positions = state["by_call"].get(call) if call else None
+        if not positions:
+            return []
+        index = state["index"]
+        start = state["call_next"].get(call, 0)
+        end = start
+        while end < len(positions) and state["records"][positions[end]].anchor <= index:
+            end += 1
+        state["call_next"][call] = end
+        items = []
+        due = [position for position in positions[start:end] if position not in state["done"]]
+        for offset in range(0, len(due), 64):
+            chunk = due[offset:offset + 64]
+            state["done"].update(chunk)
+            items.append(self._history_image_item(call, [state["records"][p] for p in chunk]))
+        return items
 
     def _history_finish_images(self, items: list) -> None:
         """Place anchored image records still pending after the last turn closed."""
+        state = self._history_image_state()
+        left = [position for position in range(len(state["records"])) if position not in state["done"]]
+        if not left:
+            return
+        orphans = self._history_orphans(state, left)
+        last_end = next((i for i in range(len(items) - 1, -1, -1)
+                         if isinstance(items[i], dict) and items[i].get("type") == "turn_end"), None)
+        if last_end is not None:
+            items[last_end:last_end] = orphans
+            return
+        turn_id = f"h{sum(1 for item in items if isinstance(item, dict) and item.get('type') == 'turn_start') + 1}"
+        items.append({"type": "turn_start", "turn_id": turn_id, "prompt": "", "kind": "prompt"})
+        items.extend(orphans)
+        items.append({"type": "turn_end", "turn_id": turn_id, "reason": "completed",
+                      "token_estimate": 0, "final_message_id": None})
     # ---- end 0.40 images --------------------------------------------------------------------------
 
 

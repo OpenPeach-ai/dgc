@@ -540,6 +540,55 @@ async function run() {
   // ---- end 0.40 agents ----
 
   // ---- 0.40 images (installed-host checks) ----
+  {
+    const hostImages = JSON.parse(process.env.DGC_EXTENSION_TEST_IMAGES || "{}");
+    const [good, outside, symlink, notImage] = Object.keys(hostImages);
+    assert.ok(good && outside && symlink && notImage, "the host runner must prepare the stored images");
+    const { realpathSync } = require("node:fs");
+    const shown = [];
+    const showInformationMessage = vscode.window.showInformationMessage;
+    vscode.window.showInformationMessage = (message, ...rest) => {
+      shown.push(String(message));
+      return showInformationMessage.call(vscode.window, message, ...rest);
+    };
+    const tabPaths = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      .map((tab) => tab.input && tab.input.uri && tab.input.uri.fsPath).filter(Boolean);
+    try {
+      await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host images probe" });
+      await waitFor(() => posted().some((item) => item.type === "event" && item.eventType === "tool_images"));
+      await testApi.testOnlyWebviewMessage(testToken, { type: "getImage", requestId: "host-image-1", ref: good });
+      await waitFor(() => backendCommands(backendLogPath).some((command) =>
+        command.type === "get_image" && command.request_id === "host-image-1" && command.ref === good));
+      await waitFor(() => posted().some((item) => item.type === "event" && item.eventType === "image"));
+
+      await testApi.testOnlyWebviewMessage(testToken, { type: "openImage", ref: good });
+      await waitFor(() => tabPaths().includes(realpathSync(hostImages[good])));
+      for (const ref of [outside, symlink, notImage]) {
+        const before = shown.length;
+        const tabsBefore = tabPaths().length;
+        await testApi.testOnlyWebviewMessage(testToken, { type: "openImage", ref });
+        await waitFor(() => shown.length > before);
+        assert.equal(shown.at(-1), "That image is no longer available.", `${hostImages[ref]} is refused`);
+        assert.ok(!shown.at(-1).includes(hostImages[ref]), "the path is never echoed");
+        assert.equal(tabPaths().length, tabsBefore, "and nothing opens");
+      }
+      // Open file asked the backend itself for the refs the panel had no path for yet: those answers
+      // (full data URIs from a real backend) stay in the host.
+      await waitFor(() => backendCommands(backendLogPath).filter((command) =>
+        command.type === "get_image" && /^open-image-/.test(String(command.request_id || ""))).length >= 3);
+      const relayed = posted().filter((item) => item.eventType === "image").map((item) => item.id);
+      assert.ok(relayed.includes("host-image-1"), "the webview's own get_image answer reaches the webview");
+      assert.deepEqual(relayed.filter((id) => /^open-image-/.test(id)), [],
+        "Open file's answers stay in the host");
+      const refused = shown.length;
+      await testApi.testOnlyWebviewMessage(testToken, { type: "openImage", ref: "img_" + "9".repeat(32) });
+      await waitFor(() => shown.length > refused);
+      assert.equal(shown.at(-1), "That image is no longer available.", "a ref the panel was never shown");
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    } finally {
+      vscode.window.showInformationMessage = showInformationMessage;
+    }
+  }
   // ---- end 0.40 images ----
 
   // ---- 0.40 options (installed-host checks) ----

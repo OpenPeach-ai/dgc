@@ -28,6 +28,8 @@ WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 RECALL_SCHEMA_VERSION = 1
 _RECALL_SUFFIX = ".recall"
+_IMAGES_SUFFIX = ".images"                  # images: <session>.images/, the viewed-image store
+_MAX_SAVED_IMAGES = 512
 _DEFAULT_RECALL_BYTES = 512 * 1024          # config `recall_max_bytes`
 _MIN_RECALL_BYTES, _MAX_RECALL_BYTES = 64 * 1024, 4 * 1024 * 1024
 _MAX_RECALL_ROWS = 800
@@ -60,6 +62,10 @@ _SUBSCRIPTION_MODES = frozenset({"default", "acceptEdits", "plan", "auto"})
 def _session_family(path: Path) -> Path:
     """Map transcript sidecars to one lock/CAS family rooted at the `.json` session path."""
     path = Path(path).resolve(strict=False)
+    if path.parent.suffix == _IMAGES_SUFFIX and not path.name.endswith(".json"):
+        path = path.parent                        # a file inside a session's image store
+    if path.suffix == _IMAGES_SUFFIX:
+        return path.with_suffix(".json")
     if path.name.endswith(".plan.md"):
         return path.with_name(path.name[:-len(".plan.md")] + ".json")
     if path.suffix in (".metrics", ".workspace", _RECALL_SUFFIX):
@@ -393,6 +399,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          todos: list | None = None,
          subscription_sessions: dict | None = None,
          chat_changes: dict | None = None,
+         images: list | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -460,6 +467,20 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_subscription_sessions = _clean_subscription_sessions(subscription_sessions)
         if clean_subscription_sessions:
             data["subscription_sessions"] = clean_subscription_sessions
+        if images:
+            # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
+            # A name is display text a page or tool chose, so it is redacted like any other.
+            saved_images = []
+            for record in list(images)[-_MAX_SAVED_IMAGES:]:
+                if not isinstance(record, dict):
+                    continue
+                record = dict(record)
+                if redact_secrets is not None and isinstance(record.get("name"), str):
+                    from .redaction import redact_text as _redact_name
+                    record["name"] = _redact_name(record["name"], redact_secrets)
+                saved_images.append(record)
+            if saved_images:
+                data["images"] = saved_images
         with _lock_for(path):
             exists, current_revision = _generation(path, project_root)
             matches = _expected_generation_matches(
@@ -1055,6 +1076,8 @@ def delete(path, project_root, *, expected_revision: int | None = None,
                     sidecar.unlink()
                 except OSError:
                     pass
+            from .image_views import remove_store
+            remove_store(p)                       # images: the session's viewed-image store
         return True
     except (OSError, ValueError):
         return False

@@ -263,6 +263,7 @@
     write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
+    view_image: ["Viewing image", "Viewed image"], browser: ["Using browser", "Used browser"],
     present_plan: ["Preparing plan", "Prepared plan"], task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
   };
   function toolCopy(name) {
@@ -1372,7 +1373,15 @@
     code_intel: "mapped", write_file: "created", create_file: "created",
     edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
     bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
+    view_image: "viewed",
   };
+  // "viewed 2 images" counts the images the viewing steps returned, not the steps. Finished, it also
+  // counts the images other steps in the group produced (a screenshot), so the count is said once.
+  function viewedPhrase(cards, past) {
+    const n = cards.reduce((total, card) => total + (TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed"
+      ? Math.max(1, card._images?.length || 0) : past ? card._images?.length || 0 : 0), 0);
+    return past ? `viewed ${n} ${n === 1 ? "image" : "images"}` : n === 1 ? "viewing an image" : `viewing ${n} images`;
+  }
   function toolSentence(cards, tense) {
     const counts = Object.create(null);
     for (const card of cards) {
@@ -1398,6 +1407,7 @@
       counts.searched && (past ? "searched code" : "searching code"),
       counts.mapped && (past ? "mapped the project" : "mapping the project"),
       counts.looked && `${past ? "looked at" : "looking at"} ${some(counts.looked, "page", "pages")}`,
+      counts.viewed && viewedPhrase(cards, past),
       counts.web && (past ? "searched the web" : "searching the web"),
       counts.other && (past ? `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
     ].filter(Boolean);
@@ -1417,6 +1427,10 @@
     // "Editing 2 files and running a command") and never repeats a card's argument: the card
     // below holds the command or path, and the header used to print it a second time.
     let sentence = running.length ? toolSentence(running, "present") : toolSentence(cards, "past");
+    // Images a step produced, where the sentence did not already count them ("viewed 2 images").
+    const viewing = cards.some((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed");
+    const images = viewing ? 0 : cards.reduce((n, card) => n + (card._images?.length || 0), 0);
+    if (!running.length && images) sentence += ` · ${images} ${images === 1 ? "image" : "images"}`;
     if (!running.length && failures.length) {
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
@@ -1487,6 +1501,7 @@
       if (c.classList.contains("no-body")) return;
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
+      if (open) imagesOnCardOpen(c);          // images: the chip row is drawn on first open
     };
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
@@ -1548,60 +1563,8 @@
     return wrap;
   }
   //: Tools that change files on disk. Their diffs are what the end-of-turn summary counts.
-  // A screenshot is evidence, so it belongs in the transcript rather than behind a file path.
-  // Three states, the way Codex shows one: a thumbnail in the step, expanded in place, and a
-  // full-size viewer over the panel.
+  // The only image URIs the panel ever renders: an inline base64 image of an allowed type.
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/;
-
-  function openLightbox(src, caption) {
-    document.getElementById("lightbox")?.remove();
-    const box = el("div"); box.id = "lightbox";
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", caption || "Screenshot");
-    const img = el("img"); img.src = src; img.alt = caption || "Screenshot";
-    box.appendChild(img);
-    if (caption) { const cap = el("div", "lb-cap"); cap.textContent = caption; box.appendChild(cap); }
-    const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
-    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
-    box.addEventListener("click", close);
-    document.addEventListener("keydown", onKey);
-    document.body.appendChild(box);
-    box.focus?.();
-  }
-
-  function shotStrip(images, caption) {
-    const strip = el("div", "shots");
-    let added = 0;
-    for (const src of images) {
-      if (typeof src !== "string" || !IMAGE_DATA.test(src)) continue;   // never inject an unvetted URI
-      const shot = el("button", "shot");
-      shot.type = "button";
-      shot.title = "Click to enlarge · click again for full size";
-      const img = el("img");
-      // Not `loading="lazy"`: the image is already here as a data URI, so there is nothing to save
-      // by waiting, and a lazy image inside a skippable block has no height until a scroll reaches
-      // it -- a strip that arrived while the panel was hidden was pinned without its images, and the
-      // page jumped by the strip's height (74-148px) when a scroll finally loaded them. Loaded
-      // eagerly, a data URI has its size before the turn's block is pinned a frame later (checked in
-      // Chromium with a 17MB screenshot).
-      img.src = src;
-      img.alt = caption || "Screenshot";
-      shot.appendChild(img);
-      const label = el("span", "shot-cap");
-      label.textContent = caption || "Screenshot";
-      shot.appendChild(label);
-      shot.addEventListener("click", () => {
-        if (shot.classList.contains("wide")) { openLightbox(src, caption); return; }
-        shot.classList.add("wide");
-        shot.title = "Click for full size";
-        if (following && atBottom()) scroll();      // growing in place must not yank a reader back
-      });
-      strip.appendChild(shot);
-      added++;
-    }
-    return added ? strip : null;
-  }
 
   const EDIT_TOOLS = new Set(["edit_file", "write_file", "multi_edit", "apply_patch", "create_file"]);
   function recordEdit(path, additions = 0, deletions = 0) {
@@ -2506,18 +2469,9 @@
           : (numeric ? String(ev.progress) : "");
         break;
       }
-      case "tool_images": {
-        ensureTurn();
-        const strip = shotStrip(Array.isArray(ev.images) ? ev.images : [], String(ev.caption || ""));
-        if (strip) {
-          // A screenshot is evidence for the answer, not a detail of the step, so it goes in the
-          // conversation flow. Inside the tool group it would sit behind a collapsed disclosure
-          // and the reader would never know it existed.
-          appendTurnContent(strip);
-          if (stick || following) scroll(); else noteNewContent();
-        }
-        break;
-      }
+      // Images a step produced go inside that step's card (see the 0.40 images section).
+      case "tool_images": imagesOnToolImages(ev); break;
+      case "image": imagesOnAnswer(ev); break;     // a getImage answer (the host answers for a backend without one)
       case "tool_result": {
         ensureTurn();
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
@@ -4731,11 +4685,499 @@
 
 
   // ---- 0.40 images --------------------------------------------------------------------------------
-  function imagesOnSessionReset(kind) {}
-  function imagesOnBackendExit(msg) {}
-  function imagesOnReady(ev) {}
-  // A request card or recovery offer arrived: `kind` is its message type.
-  function imageViewerAttention(kind) {}
+  // Model-viewed images live inside the tool card that produced them: a count pill on the head, a
+  // chip row as the first thing in the card's body once it is opened, and one click opens a viewer
+  // over the panel. A card keeps its images as records (`card._images`); chips render from those, so
+  // a collapsed card never decodes pixels. Inline data URIs are pinned on their record; bytes fetched
+  // by ref (history, or an image too large for a live frame) sit in a bounded cache and come back
+  // through getImage when they are needed again.
+  const IMAGE_REF = /^img_[0-9a-f]{32}$/;
+  const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+  const IMAGE_HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+  const IMAGE_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+  const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", mcp: "MCP image" };
+  const IMAGE_FAILURES = {
+    not_found: ["warning", "Unavailable", "DGC no longer has this image."],
+    changed: ["warning", "Unavailable", "The stored copy changed after the model viewed it."],
+    too_large: ["file-media", "Too large", "Too large to show in the panel. Open the file instead."],
+    frame: ["file-media", "Too large", "This screenshot was too large to send to the panel. It is saved in .dgc/screenshots."],
+    unreadable: ["warning", "Unavailable", "The panel could not load this image."],
+  };
+  const IMAGE_CACHE_CHARS = 48_000_000;
+  const IMAGE_RETRY_MS = [500, 1000, 2000];
+  const imageCache = new Map();          // ref -> data URI (least recently used first)
+  let imageCacheChars = 0;
+  const imageRefs = new Map();           // ref -> Set of records waiting on or showing those bytes
+  const imageQueue = [];                 // records to fetch, in order
+  const imageInFlight = new Map();       // request id -> { record, timer }
+  let imageRequestSeq = 0, imageGeneration = 0, imageViewsSupported = false;
+  let imageViewer = null;
+
+  const countOf = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  function imageSize(bytes) {
+    const n = Number(bytes) || 0;
+    if (!n) return "";
+    return n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  }
+  function imageDims(record) { return record.width && record.height ? `${record.width}×${record.height}` : ""; }
+  function validImageItem(item) {
+    if (!item || typeof item !== "object") return null;
+    const { ref, name, mime, width, height, bytes, source, host } = item;
+    const int = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max;
+    if (typeof ref !== "string" || !IMAGE_REF.test(ref) || !IMAGE_MIMES.has(mime)) return null;
+    if (typeof name !== "string" || !name || name.length > 128 || IMAGE_CONTROL.test(name) || name.includes("://")) return null;
+    if (!int(width, 1000000) || !int(height, 1000000) || !int(bytes, 8388608)) return null;
+    if (!Object.prototype.hasOwnProperty.call(IMAGE_SOURCES, source)) return null;
+    if (typeof host !== "string" || (host && (source !== "browser" || !IMAGE_HOST.test(host)))) return null;
+    return { ref, name, mime, width, height, bytes, source, host };
+  }
+  function imageRecordsFor(ev) {
+    const images = Array.isArray(ev.images) ? ev.images : [];
+    const items = Array.isArray(ev.items) && ev.items.length === images.length ? ev.items : null;
+    const caption = String(ev.caption || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    const fallbackName = caption && !caption.includes("://") && !IMAGE_CONTROL.test(caption) ? caption : "Screenshot";
+    // An empty `images` on a step (no items, nothing omitted) is a frame the backend had to shrink.
+    if (!images.length && !items && !(Number(ev.omitted) > 0)) {
+      return [{ src: "", ref: "", name: fallbackName, mime: "", width: 0, height: 0, bytes: 0,
+                source: "browser", host: "", state: "failed", reason: "frame" }];
+    }
+    const out = [];
+    images.forEach((src, index) => {
+      const item = items ? validImageItem(items[index]) : null;
+      if (items && !item) return;                                   // an invalid item takes its slot
+      if (typeof src !== "string") return;
+      if (src && !IMAGE_DATA.test(src)) return;                     // never inject an unvetted URI
+      if (!src && !item) return;
+      const record = item ? { ...item } : { ref: "", name: fallbackName, mime: "", width: 0, height: 0,
+                                              bytes: 0, source: "browser", host: "" };
+      record.src = src; record.pinned = !!src; record.state = src ? "ready" : "pending"; record.reason = "";
+      if (!src && imageCache.has(record.ref)) { record.src = imageCacheGet(record.ref); record.state = "ready"; }
+      if (record.ref) trackImageRef(record);
+      out.push(record);
+    });
+    return out;
+  }
+  function trackImageRef(record) {
+    if (!imageRefs.has(record.ref)) imageRefs.set(record.ref, new Set());
+    imageRefs.get(record.ref).add(record);
+  }
+  function imageCacheGet(ref) {
+    const value = imageCache.get(ref);
+    if (value !== undefined) { imageCache.delete(ref); imageCache.set(ref, value); }
+    return value;
+  }
+  function imageCachePut(ref, uri) {
+    if (imageCache.has(ref)) { imageCacheChars -= imageCache.get(ref).length; imageCache.delete(ref); }
+    imageCache.set(ref, uri); imageCacheChars += uri.length;
+    for (const [oldRef, oldUri] of imageCache) {
+      if (imageCacheChars <= IMAGE_CACHE_CHARS || oldRef === ref) break;
+      imageCache.delete(oldRef); imageCacheChars -= oldUri.length;
+      for (const record of imageRefs.get(oldRef) || []) {
+        if (record.pinned || record.state !== "ready" || record === imageViewer?.records[imageViewer.index]) continue;
+        record.src = ""; record.state = "pending"; refreshImageChip(record);
+      }
+    }
+  }
+
+  function imageOwnerFor(ev) {
+    const card = ev.call_id != null && turn._tools ? turn._tools[ev.call_id] : null;
+    if (card) return card;
+    // A step with no card here (text protocol history, a compacted call, an editor-initiated MCP call)
+    // is its own row at this point in the turn. Consecutive ones share the row.
+    const last = turn.act?.previousElementSibling;
+    if (last && last.classList.contains("image-orphan")) return last;
+    const row = el("div", "tool image-orphan");
+    const bodyId = `tool-output-${++disclosureId}`;
+    row.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">›</span><span class="glyph codicon codicon-file-media" aria-hidden="true"></span><span class="verb">Viewed an image</span></button></div><div class="body" id="${bodyId}"></div>`;
+    const toggle = row.querySelector(".tool-toggle");
+    toggle.onclick = () => {
+      const open = row.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+      if (open) imagesOnCardOpen(row);
+    };
+    endToolGroup(); breakText(); appendTurnContent(row);
+    return row;
+  }
+  function imagesOnToolImages(ev) {
+    ensureTurn();
+    const records = imageRecordsFor(ev);
+    const omitted = Number.isSafeInteger(ev.omitted) && ev.omitted > 0 ? Math.min(ev.omitted, 10000) : 0;
+    if (!records.length && !omitted) return;
+    const stick = atBottom();
+    const owner = imageOwnerFor(ev);
+    owner._images = [...(owner._images || []), ...records];
+    owner._imagesOmitted = (owner._imagesOmitted || 0) + omitted;
+    records.forEach((record) => { record.owner = owner; });
+    const count = owner._images.length;
+    if (owner.classList.contains("image-orphan")) {
+      owner.querySelector(".verb").textContent = count === 1 ? "Viewed an image" : `Viewed ${count} images`;
+    } else {
+      owner.classList.remove("no-body");         // a card with images keeps its body reachable
+      owner.classList.add("has-images");
+      updateImagePill(owner);
+      refreshToolGroup(owner.closest(".tool-group"));
+    }
+    if (owner.classList.contains("open")) renderImageRow(owner);
+    if (records.length) speak(records.length === 1 ? "Viewed 1 image" : `Viewed ${records.length} images`);
+    if (imageViewer) refreshViewerSequence();
+    if (owner.classList.contains("image-orphan")) { if (stick || following) scroll(); else noteNewContent(); }
+  }
+  function updateImagePill(card) {
+    const count = (card._images || []).length;
+    const toggle = card.querySelector(".tool-toggle");
+    if (!toggle) return;
+    // Every image refused (bad data, over the cap): the pill says how many were not shown, never "0".
+    const omitted = count ? 0 : card._imagesOmitted || 0;
+    const words = omitted ? `${countOf(omitted, "image")} not shown` : countOf(count, "image");
+    let pill = toggle.querySelector(".tool-image-count");
+    if (!pill) {
+      pill = el("span", "tool-image-count", '<span class="codicon codicon-file-media" aria-hidden="true"></span><span class="n" aria-hidden="true"></span><span class="sr-only"></span>');
+      const arg = toggle.querySelector(".arg");
+      if (arg) arg.after(pill); else toggle.appendChild(pill);
+    }
+    pill.querySelector(".n").textContent = omitted ? `+${omitted}` : String(count);
+    pill.querySelector(".sr-only").textContent = words;
+    toggle.title = `${card.dataset.toolName || "tool"} · ${words}`;
+  }
+  // The toggle opened the card: its chips are drawn now, and anything not loaded is fetched.
+  function imagesOnCardOpen(card) {
+    if (!card._images?.length && !card._imagesOmitted) return;
+    renderImageRow(card);
+  }
+  function renderImageRow(card) {
+    const body = card.querySelector(":scope > .body");
+    if (!body) return;
+    let row = body.querySelector(":scope > .tool-images");
+    if (!row) {
+      row = el("ul", "tool-images");
+      row.setAttribute("role", "list"); row.setAttribute("aria-label", "Images from this step");
+      body.prepend(row);
+    }
+    row.textContent = "";
+    const records = card._images || [];
+    records.forEach((record, index) => {
+      const item = el("li");
+      item.appendChild(imageChip(record, index, records.length));
+      row.appendChild(item);
+    });
+    if (card._imagesOmitted) {
+      const more = el("li", "image-omitted");
+      more.textContent = `+${card._imagesOmitted} not shown`;
+      more.title = "DGC keeps up to 8 images per step, and only PNG, JPEG, GIF, WebP or BMP.";
+      row.appendChild(more);
+    }
+    requestImages(records);
+  }
+  function imageChip(record, index, count) {
+    const chip = el("button", "image-chip");
+    chip.type = "button";
+    chip.dataset.state = record.state;
+    const dims = imageDims(record);
+    const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
+    chip.setAttribute("aria-label", `Open image ${index + 1} of ${count}: ${record.name}${dims ? `, ${record.width} by ${record.height}` : ""}`);
+    chip.title = failure ? failure[2] : [record.name, dims, imageSize(record.bytes)].filter(Boolean).join(" · ");
+    const tile = el("span", "image-tile");
+    if (record.state === "ready") {
+      const img = el("img"); img.alt = ""; img.decoding = "async";
+      img.addEventListener("load", () => {
+        if (!record.width && img.naturalWidth) { record.width = img.naturalWidth; record.height = img.naturalHeight; }
+      });
+      img.src = record.src; tile.appendChild(img);
+    } else if (failure) {
+      tile.appendChild(el("span", `codicon codicon-${failure[0]}`)); tile.lastChild.setAttribute("aria-hidden", "true");
+    } else {
+      tile.classList.add("skeleton"); tile.appendChild(el("span", "sr-only", "Loading image"));
+    }
+    chip.appendChild(tile);
+    const ext = (record.name.match(/\.([a-z0-9]{1,5})$/i) || [])[1];
+    chip.appendChild(el("span", "image-caption", esc(failure ? failure[1] : dims || (ext ? ext.toUpperCase() : "Image"))));
+    chip.onclick = () => openImageViewer(record, chip);
+    record.chip = chip;
+    return chip;
+  }
+  function refreshImageChip(record) {
+    const old = record.chip;
+    if (old && old.isConnected) {
+      const records = record.owner?._images || [record];
+      const replacement = imageChip(record, Math.max(0, records.indexOf(record)), records.length);
+      const hadFocus = document.activeElement === old;
+      old.replaceWith(replacement);
+      if (hadFocus) replacement.focus();
+    }
+    if (imageViewer && imageViewer.records[imageViewer.index] === record) renderViewerImage(false);
+  }
+
+  // ---- fetching by ref ----
+  function requestImages(records) {
+    for (const record of records) {
+      if (record.state !== "pending" || !record.ref || imageQueue.includes(record)) continue;
+      const cached = imageCacheGet(record.ref);
+      if (cached) { record.src = cached; record.state = "ready"; refreshImageChip(record); continue; }
+      imageQueue.push(record);
+    }
+    pumpImages();
+  }
+  function pumpImages() {
+    if (!imageViewsSupported) {
+      while (imageQueue.length) failImage(imageQueue.shift(), "unreadable");
+      return;
+    }
+    while (imageInFlight.size < 2 && imageQueue.length) {
+      const record = imageQueue.shift();
+      if (record.state !== "pending") continue;
+      const cached = imageCacheGet(record.ref);
+      if (cached) { record.src = cached; record.state = "ready"; refreshImageChip(record); continue; }
+      const requestId = `img-${imageGeneration}-${++imageRequestSeq}`;
+      record.state = "loading"; refreshImageChip(record);
+      const timer = setTimeout(() => {
+        if (!imageInFlight.has(requestId)) return;
+        imageInFlight.delete(requestId); failImage(record, "unreadable"); pumpImages();
+      }, 30000);
+      imageInFlight.set(requestId, { record, timer });
+      vscode.postMessage({ type: "getImage", requestId, ref: record.ref });
+    }
+  }
+  function failImage(record, reason) {
+    record.state = "failed"; record.reason = IMAGE_FAILURES[reason] ? reason : "unreadable"; refreshImageChip(record);
+  }
+  function imagesOnAnswer(ev) {
+    const entry = imageInFlight.get(ev.request_id);
+    if (!entry) return;                                             // stale: a session ago, or timed out
+    clearTimeout(entry.timer); imageInFlight.delete(ev.request_id);
+    const record = entry.record;
+    if (ev.ref !== record.ref) failImage(record, "unreadable");
+    else if (typeof ev.image === "string" && ev.image && IMAGE_DATA.test(ev.image)) {
+      imageCachePut(record.ref, ev.image);
+      for (const twin of imageRefs.get(record.ref) || [record]) {
+        if (twin.state === "ready" && twin.src) continue;
+        twin.src = ev.image; twin.state = "ready"; twin.reason = "";
+        if (Number.isSafeInteger(ev.width) && ev.width > 0 && !twin.width) { twin.width = ev.width; twin.height = ev.height; }
+        refreshImageChip(twin);
+      }
+    } else if (ev.reason === "busy" && (record.attempts || 0) < IMAGE_RETRY_MS.length) {
+      const delay = IMAGE_RETRY_MS[record.attempts || 0];
+      record.attempts = (record.attempts || 0) + 1;
+      record.state = "pending"; refreshImageChip(record);
+      const generation = imageGeneration;
+      setTimeout(() => { if (generation === imageGeneration) requestImages([record]); }, delay);
+    } else failImage(record, ev.reason === "invalid_ref" || ev.reason === "busy" ? "unreadable" : ev.reason);
+    pumpImages();
+  }
+  function imagesOnSessionReset(kind) {
+    imageGeneration++;
+    for (const entry of imageInFlight.values()) clearTimeout(entry.timer);
+    imageInFlight.clear(); imageQueue.length = 0; imageRefs.clear(); imageCache.clear(); imageCacheChars = 0;
+    closeImageViewer(false);
+  }
+  function imagesOnBackendExit(msg) {
+    // Requests the stopped backend will never answer go back in line; the next `ready` asks again.
+    for (const entry of imageInFlight.values()) {
+      clearTimeout(entry.timer);
+      if (entry.record.state === "loading") { entry.record.state = "pending"; refreshImageChip(entry.record); }
+    }
+    imageInFlight.clear();
+    if (imageViewer && !msg?.recovering) imageViewerAttention("backend_exit");
+  }
+  function imagesOnReady(ev) {
+    imageViewsSupported = ev?.capabilities?.image_views === true;
+    const wanted = new Set();
+    for (const records of imageRefs.values()) {
+      for (const record of records) {
+        const shown = record.owner?.classList.contains("open") && record.owner.isConnected;
+        const viewing = imageViewer && imageViewer.records[imageViewer.index] === record;
+        if (record.state === "pending" && (shown || viewing)) wanted.add(record);
+      }
+    }
+    requestImages([...wanted]);
+  }
+
+  // ---- the viewer ----
+  function imageSequenceFor(record) {
+    const group = record.owner?.closest(".tool-group");
+    if (!group) return record.owner?._images?.length ? [...record.owner._images] : [record];
+    return [...group.querySelectorAll(".tool")].flatMap((card) => card._images || []);
+  }
+  function viewerButton(icon, label, title, cls) {
+    return `<button type="button" class="iv-btn ${cls}" aria-label="${label}" title="${title}"><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
+  }
+  function openImageViewer(record, opener) {
+    if (imageViewer) closeImageViewer(false);
+    const viewer = el("div");
+    viewer.id = "image-viewer";
+    viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-labelledby", "iv-title");
+    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
+    const inert = [...document.body.children]
+      .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
+      .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
+    for (const saved of inert) { saved.node.setAttribute("inert", ""); try { saved.node.inert = true; } catch {} }
+    const records = imageSequenceFor(record);
+    imageViewer = { el: viewer, records, index: Math.max(0, records.indexOf(record)), opener, inert,
+                    actual: false, observer: null };
+    const q = (selector) => viewer.querySelector(selector);
+    q(".iv-zoom").setAttribute("aria-pressed", "false");
+    q(".iv-prev").onclick = () => moveViewer(-1);
+    q(".iv-next").onclick = () => moveViewer(1);
+    q(".iv-zoom").onclick = () => toggleViewerZoom();
+    q(".iv-close").onclick = () => closeImageViewer(true);
+    q(".iv-open").onclick = () => {
+      const current = imageViewer?.records[imageViewer.index];
+      if (current?.ref) vscode.postMessage({ type: "openImage", ref: current.ref });
+    };
+    q(".iv-show").onclick = () => showWaitingRequest();
+    viewer.addEventListener("click", (event) => {
+      if (event.target === viewer || event.target === q(".iv-stage")) closeImageViewer(true);
+    });
+    viewer.addEventListener("keydown", onViewerKey);
+    document.body.appendChild(viewer);
+    if (typeof MutationObserver === "function") {
+      imageViewer.observer = new MutationObserver(() => renderViewerNav());
+      imageViewer.observer.observe(log, { childList: true, subtree: true });
+    }
+    renderViewerImage(false);
+    q(".iv-close").focus();
+    hoverTip.hide();             // focus placed for the reader: no "Close (Esc)" label over the dialog
+  }
+  function onViewerKey(event) {
+    if (!imageViewer) return;
+    const key = event.key;
+    if (key === "Escape") { event.preventDefault(); event.stopPropagation(); closeImageViewer(true); return; }
+    if (key === "Tab") {
+      const focusable = [...imageViewer.el.querySelectorAll("button")]
+        .filter((node) => !node.disabled && !node.hidden && !node.closest("[hidden]"));
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      const inside = imageViewer.el.contains(document.activeElement);
+      if (event.shiftKey && (document.activeElement === first || !inside)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !inside)) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    const stage = imageViewer.el.querySelector(".iv-stage");
+    if (event.shiftKey && key.startsWith("Arrow")) {
+      if (!imageViewer.actual) return;
+      event.preventDefault();
+      stage.scrollLeft += key === "ArrowLeft" ? -48 : key === "ArrowRight" ? 48 : 0;
+      stage.scrollTop += key === "ArrowUp" ? -48 : key === "ArrowDown" ? 48 : 0;
+      return;
+    }
+    if (key === "ArrowLeft") { event.preventDefault(); moveViewer(-1); }
+    else if (key === "ArrowRight") { event.preventDefault(); moveViewer(1); }
+    else if (key === "Home") { event.preventDefault(); moveViewer(-Infinity); }
+    else if (key === "End") { event.preventDefault(); moveViewer(Infinity); }
+    else if ((key === "z" || key === "Z") && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault(); toggleViewerZoom();
+    }
+  }
+  // A history snapshot re-rendered under the viewer: the image stays, the sequence it came from does not.
+  function viewerLive() {
+    return !!imageViewer && imageViewer.records.every((record) => record.owner?.isConnected);
+  }
+  function moveViewer(step) {
+    if (!imageViewer || !viewerLive()) return;
+    const last = imageViewer.records.length - 1;
+    const next = Math.max(0, Math.min(last, step === Infinity ? last : step === -Infinity ? 0 : imageViewer.index + step));
+    if (next === imageViewer.index) return;
+    imageViewer.index = next;
+    renderViewerImage(true);
+  }
+  function toggleViewerZoom() {
+    if (!imageViewer) return;
+    imageViewer.actual = !imageViewer.actual;
+    imageViewer.el.classList.toggle("actual", imageViewer.actual);
+    const zoom = imageViewer.el.querySelector(".iv-zoom");
+    zoom.setAttribute("aria-pressed", String(imageViewer.actual));
+    zoom.setAttribute("aria-label", imageViewer.actual ? "Fit to panel" : "Actual size");
+    zoom.title = imageViewer.actual ? "Fit to panel (Z)" : "Actual size (Z)";
+    zoom.querySelector(".codicon").className = `codicon codicon-${imageViewer.actual ? "screen-normal" : "screen-full"}`;
+  }
+  function refreshViewerSequence() {
+    if (!imageViewer) return;
+    const current = imageViewer.records[imageViewer.index];
+    if (!current.owner?.isConnected) { renderViewerNav(); return; }
+    imageViewer.records = imageSequenceFor(current);
+    imageViewer.index = Math.max(0, imageViewer.records.indexOf(current));
+    renderViewerNav();
+  }
+  function renderViewerNav() {
+    if (!imageViewer) return;
+    const live = viewerLive();
+    const { records, index } = imageViewer;
+    const q = (selector) => imageViewer.el.querySelector(selector);
+    q(".iv-pos").textContent = `${index + 1} of ${records.length}`;
+    const focusLost = document.activeElement === q(".iv-prev") || document.activeElement === q(".iv-next");
+    q(".iv-prev").disabled = !live || index === 0;
+    q(".iv-next").disabled = !live || index >= records.length - 1;
+    if (focusLost && document.activeElement?.disabled) q(".iv-close").focus();
+  }
+  function renderViewerImage(announce) {
+    if (!imageViewer) return;
+    const record = imageViewer.records[imageViewer.index];
+    const q = (selector) => imageViewer.el.querySelector(selector);
+    const label = IMAGE_SOURCES[record.source] || "Image";
+    q("#iv-title").textContent = record.name || label;
+    q("#iv-meta").textContent = [imageDims(record), imageSize(record.bytes), record.host || label].filter(Boolean).join(" · ");
+    q(".iv-open").hidden = !record.ref;
+    q(".iv-open").title = `Open ${record.name} in the editor`;
+    const stage = q(".iv-stage");
+    stage.textContent = "";
+    if (record.state === "ready" && record.src) {
+      const img = el("img");
+      img.alt = `${record.name}, ${label}`;
+      img.src = record.src;
+      img.addEventListener("click", (event) => { event.stopPropagation(); toggleViewerZoom(); });
+      stage.appendChild(img);
+    } else {
+      const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
+      stage.appendChild(el("div", "iv-message", esc(failure ? failure[2] : "Loading image…")));
+      if (record.state === "pending") requestImages([record]);
+    }
+    renderViewerNav();
+    if (announce) speak(`Image ${imageViewer.index + 1} of ${imageViewer.records.length}: ${record.name}`);
+  }
+  function closeImageViewer(restoreFocus) {
+    if (!imageViewer) return;
+    const { el: viewer, inert, records, index, opener, observer } = imageViewer;
+    imageViewer = null;
+    observer?.disconnect();
+    viewer.remove();
+    for (const saved of inert) {
+      if (!saved.attr) saved.node.removeAttribute("inert");
+      try { saved.node.inert = saved.prop; } catch {}
+    }
+    if (!restoreFocus) return;
+    const shown = records[index];
+    const target = shown?.chip?.isConnected && shown.owner?.classList.contains("open") ? shown.chip
+      : opener?.isConnected ? opener : input;
+    target.focus();
+    target.scrollIntoView?.({ block: "nearest" });
+  }
+  // A request card or recovery offer arrived (or the backend stopped) while the viewer covers the panel.
+  function imageViewerAttention(kind) {
+    if (!imageViewer) return;
+    const text = kind === "backend_exit" ? "DGC's backend stopped." : "DGC is waiting for your answer.";
+    const notice = imageViewer.el.querySelector(".iv-notice");
+    notice.querySelector(".iv-notice-text").textContent = text;
+    notice.hidden = false;
+    hoverTip.hide();             // a label left over from the bar must not cover Show
+    // The request's own handler announces itself right after this call; speak only when nothing
+    // else did in the same tick, so a screen reader hears one line, not two.
+    const before = announcer.textContent;
+    Promise.resolve().then(() => { if (imageViewer && announcer.textContent === before) speak(text); });
+  }
+  function showWaitingRequest() {
+    closeImageViewer(false);
+    const focusFirst = (node) => {
+      if (!node) return false;
+      const control = [...node.querySelectorAll("button, input, select, textarea, [tabindex]")]
+        .find((candidate) => !candidate.disabled && !candidate.closest("[hidden]"));
+      (control || node).focus?.();
+      node.scrollIntoView?.({ block: "nearest" });
+      return true;
+    };
+    if (askCardDocked() && focusFirst($("cbox").querySelector(".ask") || $("cbox"))) return;
+    const cards = [...log.querySelectorAll(".card[data-request-id]:not(.resolved), .recovery-card")];
+    if (focusFirst(cards.at(-1))) return;
+    input.focus();
+  }
   // ---- end 0.40 images ----------------------------------------------------------------------------
 
 
