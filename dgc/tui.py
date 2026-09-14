@@ -511,7 +511,10 @@ class TUI:
         "thoughts": ([("Show thinking", "show"), ("Hide thinking", "hide"),
                       ("Provider summaries inline when short", "inline"),
                       ("Provider summaries collapsed", "collapsed")],
-                     lambda s: "show" if s.config.get("show_reasoning", True) else "hide"),
+                     # Three states, like the editor's select: hidden, or shown inline or collapsed.
+                     lambda s: ("hide" if not s.config.get("show_reasoning", True)
+                                else "inline" if s.config.get("thinking_inline", True) is not False
+                                else "collapsed")),
         "preserve-thinking": ([("On — keep prior reasoning in context", "on"), ("Off", "off")],
                               lambda s: "on" if s.config.get("preserve_thinking", False) else "off"),
         "code-action": ([("On — persistent `python` power tool", "on"), ("Off", "off")],
@@ -2020,7 +2023,7 @@ class TUI:
         if kind == "think":
             return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""),
                     blk.get("head"), blk.get("source"), blk.get("provider"), blk.get("agent"),
-                    bool(blk.get("withheld")), self._width < 60, theme_key)
+                    bool(blk.get("withheld")), bool(blk.get("truncated")), self._width < 60, theme_key)
         if kind == "narration":
             return ("narration", blk.get("text", ""), self._width, theme_key)
         if kind == "recall":
@@ -2133,13 +2136,15 @@ class TUI:
         th = style_mod.theme()
         secs = b.get("secs", 0) or 0
         tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
-        head = b.get("head") or (f"Thought for {tstr}" if secs else "Thought")
+        # Under 0.05s would read "Thought for 0.0s": say "Thought".
+        head = b.get("head") or (f"Thought for {tstr}" if secs >= 0.05 else "Thought")
         if not b.get("head"):
             head = (self._reasoning_prefix(b) + head
                     + reasoning_label_suffix(b.get("source", "unknown"), b.get("provider", ""),
                                              width=self._width))
         if b.get("withheld"):
-            return [(f"fg:{th.faint}", f"{glyphs.DIAMOND} {head}")]
+            # Two blank cells where the caret would be, so the label lines up with the headers.
+            return [(f"fg:{th.faint}", f"{glyphs.DIAMOND}   {head}")]
         caret = "▾" if b.get("exp") else "▸"
 
         def toggle(mouse_event):
@@ -2148,7 +2153,13 @@ class TUI:
                 self._invalidate()
         frags = [(f"fg:{th.faint}", f"{glyphs.DIAMOND} {caret} {head}", toggle)]
         if b.get("exp"):
-            for ln in b.get("text", "").strip().split("\n"):
+            body = b.get("text", "").strip()
+            lines = body.split("\n") if body else []
+            if b.get("truncated") or not body:
+                # Say so, rather than expand to a silently cut (or empty) body.
+                lines.append("… the rest of this reasoning was not kept." if body
+                             else "The text of this reasoning was not kept.")
+            for ln in lines:
                 frags.append(("", "\n"))
                 frags.append((f"fg:{th.faint} italic", f"  {glyphs.RAIL} {ln}"))
         return frags
@@ -4985,10 +4996,11 @@ class TUI:
             elif val in ("hide", "off", "false", "0"):
                 cfg.set("show_reasoning", False); self._flash("thoughts hidden")
             elif val == "inline":
-                cfg.set("thinking_inline", True)
+                cfg.set("show_reasoning", True); cfg.set("thinking_inline", True)
                 self._flash("short provider summaries shown inline; raw thinking stays collapsed")
             elif val == "collapsed":
-                cfg.set("thinking_inline", False); self._flash("all thinking collapsed")
+                cfg.set("show_reasoning", True); cfg.set("thinking_inline", False)
+                self._flash("all thinking collapsed")
             else:
                 self._flash(f"thoughts: {'shown' if cfg.get('show_reasoning', True) else 'hidden'}"
                             f"{', summaries inline' if cfg.get('thinking_inline', True) is not False else ', collapsed'}"
@@ -5433,13 +5445,15 @@ class TUI:
                 blocks.append({"kind": "think", "withheld": True, "secs": secs, "text": "",
                                "source": source, "provider": provider, "agent": "", "exp": False})
                 continue
-            if not text:
+            truncated = entry.get("truncated") is True
+            if not text and not truncated:
                 continue
-            inline = reasoning_placement(source, text, round_called_tools=entry.get("tools") is True,
-                                         inline_enabled=inline_enabled, max_chars=max_chars,
-                                         from_subagent=False) == "inline"
+            inline = not truncated and reasoning_placement(
+                source, text, round_called_tools=entry.get("tools") is True,
+                inline_enabled=inline_enabled, max_chars=max_chars, from_subagent=False) == "inline"
             blocks.append({"kind": "narration" if inline else "think", "secs": secs, "text": text,
-                           "exp": False, "source": source, "provider": provider, "agent": ""})
+                           "exp": False, "source": source, "provider": provider, "agent": "",
+                           "truncated": truncated})
         return blocks
 
     def _message_rows(self, messages):

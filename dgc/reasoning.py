@@ -718,7 +718,22 @@ def display_text(message: dict, text: str) -> str:
     if isinstance(marker, int) and not isinstance(marker, bool):
         if 0 < marker <= len(text) and text[:marker].endswith(_SPLICE_CLOSE):
             return text[marker:]
-        return text
+        if marker <= 0:
+            return text
+        # The marker proves a splice exists, but a later save re-redacted the content with a
+        # different secret set and its length moved: strip through the closing tag nearest to it.
+        best = None
+        start = len(_SPLICE_OPEN) - 1
+        while True:
+            found = text.find(_SPLICE_CLOSE, start)
+            if found < 0:
+                break
+            end = found + len(_SPLICE_CLOSE)
+            if best is not None and abs(end - marker) >= abs(best - marker):
+                break                        # ends only move further from the marker from here
+            best = end
+            start = found + 1
+        return text if best is None else text[best:]
     legacy = _legacy_splice(message, text)
     return text if legacy is None else legacy[1]
 

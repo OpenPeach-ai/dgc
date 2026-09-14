@@ -1893,12 +1893,24 @@ class Agent(GoalLifecycle):
                        if callable(reasoning_get) else 280),
             from_subagent=int(getattr(self, "depth", 0) or 0) > 0)
 
+        # Whitespace released while a reasoning block is still open is not prose: sent on its own it
+        # would end the block in a frontend while the block goes on here (and in the saved record).
+        # It is held and joins the next prose, after that block's thinking_end.
+        held_space: list[str] = []
+
         def emit_text(chunk) -> None:
             if str(chunk or "").strip():
                 reasoning.text_boundary()       # the open reasoning block ends before the prose
             safe = text_stream.feed(chunk)
-            if safe and not defer_text:
-                self.ui.on_text(safe)
+            if not safe or defer_text:
+                return
+            if not safe.strip() and reasoning.open:
+                held_space.append(safe)
+                return
+            if held_space:
+                safe = "".join(held_space) + safe
+                held_space.clear()
+            self.ui.on_text(safe)
 
         def emit_thinking(chunk, origin=None) -> None:
             reasoning.thinking(chunk, origin)
@@ -1923,7 +1935,13 @@ class Agent(GoalLifecycle):
             finally:
                 final_text = text_stream.flush()
                 if final_text and not defer_text:
-                    self.ui.on_text(final_text)
+                    if final_text.strip():
+                        reasoning.text_boundary()
+                    if final_text.strip() or not reasoning.open:
+                        self.ui.on_text("".join(held_space) + final_text)
+                        held_space.clear()
+                    else:
+                        held_space.append(final_text)
                 finished = (result is not None
                             and getattr(result, "finish_reason", "") not in ("cancelled", "overthink"))
                 try:
@@ -1945,6 +1963,9 @@ class Agent(GoalLifecycle):
                         result.reasoning = list(blocks)
                     except (AttributeError, TypeError):
                         pass
+                if held_space and not defer_text:
+                    self.ui.on_text("".join(held_space))    # trailing whitespace, after the ends
+                    held_space.clear()
         finally:
             if old_timeout is not None:
                 self.client.read_timeout = old_timeout

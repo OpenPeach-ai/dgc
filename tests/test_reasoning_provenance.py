@@ -595,6 +595,43 @@ class FixtureTests(unittest.TestCase):
         ids = [frame["block"] for frame in frames if frame["type"] == "thinking_end"]
         self.assertEqual(ids, ["t1:think1", "t1:think2"])
 
+    def test_row_2b_whitespace_between_thinking_keeps_one_block_live_and_in_history(self):
+        fixture, harness, frames = self.run_fixture("02b-ollama-whitespace-between-thinking")
+        blocks = self.check_common(harness, fixture, frames)
+        self.assertEqual(blocks[0]["text"], "first half second half")
+        kinds = [frame["type"] for frame in frames if frame["type"] in ("thinking_delta", "thinking_end",
+                                                                        "text_delta")]
+        kinds = [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
+        # No prose frame inside the block: a frontend would close it there and draw the rest after
+        # the answer.
+        self.assertEqual(kinds, ["thinking_delta", "thinking_end", "text_delta"])
+        texts = [frame["text"] for frame in frames if frame["type"] == "text_delta"]
+        self.assertEqual(texts, ["\n\nAnswer."], "the whitespace joins the answer")
+        history = [item for item in harness.history() if item.get("type") in
+                   ("thinking_delta", "thinking_end", "text_delta")]
+        self.assertEqual([item["type"] for item in history], ["thinking_delta", "thinking_end", "text_delta"])
+
+    def test_whitespace_alone_while_a_block_is_open_is_delivered_after_its_end(self):
+        fixture = copy.deepcopy(load_fixture("02b-ollama-whitespace-between-thinking"))
+        fixture["requests"] = [{**fixture["requests"][0], "lines": [
+            json.dumps({"model": "m", "message": {"role": "assistant", "thinking": "only thinking"}, "done": False}),
+            json.dumps({"model": "m", "message": {"role": "assistant", "content": "\n"}, "done": False}),
+            json.dumps({"model": "m", "message": {"role": "assistant", "content": ""}, "done": True,
+                        "done_reason": "stop"})]}]
+        # The reasoning-only reply earns a nudge; the second request answers.
+        answer = [json.dumps({"model": "m", "message": {"role": "assistant", "content": "Answer."}, "done": False}),
+                  json.dumps({"model": "m", "message": {"role": "assistant", "content": ""}, "done": True,
+                              "done_reason": "stop"})]
+        fixture["requests"].append({**fixture["requests"][0], "lines": answer})
+        harness = Harness(self, fixture)
+        self.addCleanup(harness.close)
+        harness.run()
+        frames = harness.frames()
+        kinds = [frame["type"] for frame in frames if frame["type"] in ("thinking_delta", "thinking_end",
+                                                                        "text_delta")]
+        self.assertLess(kinds.index("thinking_end"), kinds.index("text_delta"),
+                        "trailing whitespace is sent after the block's end")
+
     def test_row_4_chat_raw_with_preserve_thinking(self):
         fixture, harness, frames = self.run_fixture("04-chat-ollama-reasoning")
         self.check_common(harness, fixture, frames)
@@ -736,6 +773,7 @@ class FixtureTests(unittest.TestCase):
         claude_lines = [
             {"type": "system", "session_id": "sess-1"},
             {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Reading the repo."}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "\n\n"}]}},
             {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": " Found it."}]}},
             {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
                                                            "input": {"command": "ls"}}]}},
@@ -788,6 +826,11 @@ class FixtureTests(unittest.TestCase):
                 ends = [frame for frame in frames if frame["type"] == "thinking_end"]
                 self.assertEqual(len(ends), len(blocks), "one thinking_end per block")
                 self.assertEqual(ui.reasoning_fallback_fired, 0)
+                first_block = blocks[0]["block"]
+                first_end = next(i for i, f in enumerate(frames)
+                                 if f["type"] == "thinking_end" and f["block"] == first_block)
+                self.assertNotIn("text_delta", [f["type"] for f in frames[:first_end]],
+                                 "whitespace inside an open block is not sent as prose")
 
 
 # ---- persistence and history ---------------------------------------------------------------------------
@@ -844,6 +887,35 @@ class HistoryTests(unittest.TestCase):
         items = history_backend([{"role": "user", "content": "q"}, message])._history()
         text = next(item["text"] for item in items if item.get("type") == "text_delta")
         self.assertEqual(text, "answer with <think>\nliteral\n</think>\n tags")
+
+    def test_splice_marker_survives_a_later_save_with_a_new_secret(self):
+        from dgc import sessions
+        secret = "correct-horse-battery-staple-42"
+        thinking = f"The deploy password is {secret}; do not print it."
+        answer = "Answer without the password, and a literal <think>\nx\n</think>\n tag."
+        content = "<think>\n" + thinking + "\n</think>\n" + answer
+        message = {"role": "assistant", "content": content,
+                   "_dgc_think_splice": R.splice_prefix_length(content, thinking),
+                   "_dgc_reasoning": [{"v": 1, "source": "raw", "private": True, "text": thinking}]}
+        with tempfile.TemporaryDirectory(prefix="dgc-splice-") as directory:
+            root = Path(directory)
+            path = sessions.new_path(root)
+            # The secret was configured after the message was first saved: this save re-redacts it.
+            self.assertTrue(sessions.save(path, [{"role": "user", "content": "q"}, message], root,
+                                          redact_secrets=[secret]))
+            loaded = sessions.load(path, root)
+        saved = loaded[-1]
+        self.assertNotIn(secret, json.dumps(loaded))
+        marker = saved["_dgc_think_splice"]
+        self.assertFalse(saved["content"][:marker].endswith("\n</think>\n"), "the marker no longer matches")
+        self.assertEqual(R.display_text(saved, saved["content"]), answer)
+        items = typed(history_backend(loaded)._history())
+        self.assertEqual([item["text"] for item in items if item["type"] == "text_delta"], [answer])
+        self.assert_valid(items)
+        rows = bare_tui()._message_rows(loaded)[0][0]
+        self.assertEqual([row["body"] for row in rows if row["who"] == "assistant"], [answer.strip()])
+        # A marker with no closing tag anywhere leaves the text alone.
+        self.assertEqual(R.display_text({"_dgc_think_splice": 12}, "<think>\nno close"), "<think>\nno close")
 
     def test_session_fuzz_never_raises_and_every_item_validates(self):
         huge = "y" * (2 * 1024 * 1024)
@@ -1067,9 +1139,46 @@ class TUITests(unittest.TestCase):
         tui = bare_tui()
         frags = tui._think_frags({"kind": "think", "withheld": True, "secs": 6, "source": "withheld",
                                   "provider": "anthropic", "text": ""})
-        self.assertEqual(plain(frags), "◆ Thought for 6.0s · hidden by Anthropic".replace("◆", frags[0][1][0]))
+        self.assertEqual(plain(frags), "◆   Thought for 6.0s · hidden by Anthropic".replace("◆", frags[0][1][0]))
+        header = plain(tui._think_frags({"kind": "think", "secs": 6, "source": "raw", "text": "t"}))
+        self.assertEqual(plain(frags).index("Thought"), header.index("Thought"), "labels line up")
         self.assertFalse(any(len(f) > 2 for f in frags))
         self.assertNotIn("▸", plain(frags))
+
+    def test_sub_tenth_second_reads_thought_and_truncated_blocks_say_so(self):
+        tui = bare_tui()
+        self.assertTrue(plain(tui._think_frags({"kind": "think", "secs": 0.02, "text": "t", "source": "raw"}))
+                        .endswith("▸ Thought · raw"))
+        cut = plain(tui._think_frags({"kind": "think", "secs": 3, "text": "a first slice", "source": "raw",
+                                      "truncated": True, "exp": True}))
+        self.assertIn("a first slice", cut)
+        self.assertTrue(cut.endswith("… the rest of this reasoning was not kept."), cut)
+        whole = plain(tui._think_frags({"kind": "think", "secs": 3, "text": "all of it", "source": "raw",
+                                        "exp": True}))
+        self.assertNotIn("not kept", whole)
+        messages = [{"role": "user", "content": "q"},
+                    {"role": "assistant", "content": "answer",
+                     "_dgc_reasoning": [{"source": "raw", "text": "", "truncated": True, "seconds": 12},
+                                        {"source": "raw", "text": "", "seconds": 1}]}]
+        from dgc.tui import TUI
+        tui._rich = lambda value: str(value)
+        blocks, _ = TUI._history_blocks(tui, tui._message_rows(messages)[0][0])
+        thinks = [b for b in blocks if isinstance(b, dict) and b.get("kind") == "think"]
+        self.assertEqual(len(thinks), 1, "a header-only block is kept only when it was cut")
+        thinks[0]["exp"] = True
+        self.assertTrue(plain(tui._think_frags(thinks[0])).endswith("The text of this reasoning was not kept."))
+
+    def test_thoughts_submenu_marks_the_current_of_three_states(self):
+        from dgc.tui import TUI
+        options, current = TUI._SUBMENUS["thoughts"]
+        values = {value for _, value in options}
+        for config, expected in (({"show_reasoning": False}, "hide"),
+                                 ({"show_reasoning": True, "thinking_inline": True}, "inline"),
+                                 ({"show_reasoning": True, "thinking_inline": False}, "collapsed"),
+                                 ({}, "inline")):
+            tui = types.SimpleNamespace(config=dict(config))
+            self.assertEqual(current(tui), expected, config)
+            self.assertIn(expected, values)
 
     def test_note_hint_on_last_line_or_after_a_list(self):
         tui = bare_tui(60)

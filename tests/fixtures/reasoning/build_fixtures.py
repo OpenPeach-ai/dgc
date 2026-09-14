@@ -63,9 +63,10 @@ def anthropic_message(blocks, stop_reason, msg_id="msg_1"):
             if not block.get("unterminated"):
                 events.append({"type": "content_block_stop", "index": index})
         elif kind == "redacted_thinking":
+            # The block arrives whole: the time is spent before its start, and its stop follows at once.
+            events.append({"advance": block.get("delay", 6.0)})
             events.append({"type": "content_block_start", "index": index,
                            "content_block": {"type": "redacted_thinking", "data": "opaque"}})
-            events.append({"advance": block.get("delay", 6.0)})
             events.append({"type": "content_block_stop", "index": index})
         elif kind == "text":
             events.append({"type": "content_block_start", "index": index,
@@ -195,6 +196,17 @@ fixtures["02-ollama-split-tags"] = {
                                           {"advance": 1.5}, ollama_msg(content=" briefly.</think>Hello there."),
                                           ollama_msg(content="", done=True)]), ctype="application/x-ndjson")],
     "expect": {"blocks": [["raw", "", "collapsed"]]},
+}
+fixtures["02b-ollama-whitespace-between-thinking"] = {
+    # A whitespace-only content chunk between two thinking chunks of one block is not prose: live and
+    # replay both show one block, ended before the answer (the whitespace joins the answer).
+    "row": "2b", "api_mode": "ollama", "base_url": OLLAMA, "model": "qwen3.8:27b", "private": True,
+    "requests": [req("/api/chat", ndjson([ollama_msg(thinking="first half "), {"advance": 1.0},
+                                          ollama_msg(content="\n\n"), {"advance": 1.0},
+                                          ollama_msg(thinking="second half"), {"advance": 1.0},
+                                          ollama_msg(content="Answer."),
+                                          ollama_msg(content="", done=True)]), ctype="application/x-ndjson")],
+    "expect": {"blocks": [["raw", "", "collapsed"]], "seconds": [2.0]},
 }
 fixtures["03-ollama-closed-model"] = {
     "row": "3", "api_mode": "ollama", "base_url": OLLAMA, "model": "claude-sonnet-5", "private": True,

@@ -28,12 +28,12 @@
     "event: content_block_stop",
     "data: {\"type\": \"content_block_stop\", \"index\": 0}",
     "",
-    "event: content_block_start",
-    "data: {\"type\": \"content_block_start\", \"index\": 1, \"content_block\": {\"type\": \"redacted_thinking\", \"data\": \"opaque\"}}",
-    "",
     {
      "advance": 6.0
     },
+    "event: content_block_start",
+    "data: {\"type\": \"content_block_start\", \"index\": 1, \"content_block\": {\"type\": \"redacted_thinking\", \"data\": \"opaque\"}}",
+    "",
     "event: content_block_stop",
     "data: {\"type\": \"content_block_stop\", \"index\": 1}",
     "",

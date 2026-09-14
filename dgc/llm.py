@@ -2222,6 +2222,9 @@ class LLMClient:
         blocks: dict[int, dict] = {}
         thinking_parts = _ThinkingParts()
         block_started: dict[int, float] = {}    # reasoning block index -> content_block_start stamp
+        # message_start, then each content_block_stop: a redacted_thinking block arrives whole at its
+        # start, so the time it took is the gap since the previous boundary, not start -> stop.
+        last_boundary: float | None = None
 
         def think(index: int, chunk: str) -> None:
             thinking_parts.add(result, f"a{index}", chunk)
@@ -2280,6 +2283,7 @@ class LLMClient:
                         raise LLMError("Anthropic message_start omitted its message object")
                     result.response_id = str(message.get("id") or "")[:512]
                     message_started = True
+                    last_boundary = _reasoning.now()
                     if isinstance(message.get("usage"), dict):
                         result.usage.update(message["usage"])
                 elif typ == "content_block_start":
@@ -2298,8 +2302,11 @@ class LLMClient:
                         raise LLMError("Anthropic content block start is invalid")
                     blocks[index] = copy.deepcopy(block)
                     active_blocks.add(index)
-                    if kind in ("thinking", "redacted_thinking"):
+                    if kind == "thinking":
                         block_started[index] = _reasoning.now()
+                    elif kind == "redacted_thinking":
+                        block_started[index] = (last_boundary if last_boundary is not None
+                                                else _reasoning.now())
                     if kind in ("tool_use", "server_tool_use"):
                         blocks[index]["_input_json"] = ""
                         produced = True
@@ -2388,6 +2395,7 @@ class LLMClient:
                     if index not in active_blocks:
                         raise LLMError("Anthropic content stop has no active block")
                     active_blocks.remove(index)
+                    last_boundary = _reasoning.now()
                     stopped_kind = str(blocks[index].get("type") or "")
                     if on_thinking and stopped_kind == "thinking" and blocks[index].get("thinking"):
                         on_thinking("", self._reasoning_origin(
