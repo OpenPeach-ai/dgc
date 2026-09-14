@@ -444,7 +444,7 @@ test("a backend that reports no version is refused by the schema, before any ver
     (event) => event.type === "error" && event.protocol_error === true);
   backend.start();
   const message = (await failure).message;
-  assert.match(message, /violated protocol v13: ready\.protocol_version has the wrong type/);
+  assert.match(message, new RegExp(`violated protocol v${DGC_PROTOCOL_VERSION}: ready\\.protocol_version has the wrong type`));
   assert.doesNotMatch(message, /speaks vnull|speaks vundefined|speaks vNaN/);
   backend.dispose();
 });
@@ -497,7 +497,7 @@ setInterval(() => {}, 1000);`);
   sequenced.dispose();
 });
 
-test("monitor frames pass the v13 contract, and a stray field or a reused seq still fails closed", async () => {
+test("monitor frames pass the v14 contract, and a stray field or a reused seq still fails closed", async () => {
   const valid = executable("monitor-backend", `
 ${protocolFixture()}
 send(ready);
@@ -528,7 +528,8 @@ setInterval(() => {}, 1000);`);
   const strayFailure = waitFor(strayBackend, "event",
     (event) => event.type === "error" && event.protocol_error === true);
   strayBackend.start();
-  assert.match((await strayFailure).message, /violated protocol v13: monitor_event has undeclared field "pid"/);
+  assert.match((await strayFailure).message,
+    new RegExp(`violated protocol v${DGC_PROTOCOL_VERSION}: monitor_event has undeclared field "pid"`));
   strayBackend.dispose();
 
   // The bug the event_index name exists to prevent: a per-monitor counter written into the frame's

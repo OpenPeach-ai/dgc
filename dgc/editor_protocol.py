@@ -10,12 +10,26 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 13
+PROTOCOL_VERSION = 14
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
 MAX_PENDING_COMMANDS = 256
 MAX_SAFE_INTEGER = (1 << 53) - 1
+
+# v14: one list names every model_retry run kind and every error.cause.kind. dgc/model_errors.py
+# imports it from here, never the reverse: this module imports only json, math and pathlib.
+MODEL_FAILURE_KINDS = ("connect", "dns", "tls", "proxy", "reset", "connect_timeout", "http",
+                       "rate_limited", "overloaded", "stream_cut", "stall", "loading", "auth",
+                       "model_not_found", "engine", "other")
+# v14: thinking provenance. "raw" is the model's own reasoning text, "summarized" a provider's
+# summary of it, "narration" short provider progress text, "withheld" a block the provider did not
+# return, "unknown" when DGC cannot tell. A private or loopback host is never summarized,
+# narration or withheld.
+REASONING_SOURCES = ("raw", "summarized", "narration", "withheld", "unknown")
+REASONING_PROVIDERS = ("anthropic", "openai")
+# v14: why get_image answered with no bytes.
+IMAGE_UNAVAILABLE_REASONS = ("invalid_ref", "not_found", "changed", "too_large", "unreadable", "busy")
 
 
 def _f(*kinds: str, required: bool = True, enum: tuple | None = None) -> dict:
@@ -99,7 +113,21 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "detail": _S(False),
     },
     "text_delta": {"text": _S()},
-    "thinking_delta": {"text": _S()},
+    # v14: a reasoning chunk names its block ("{turn_id}:think{n}" live, "h{N}:think{k}" on replay),
+    # where the text came from, and -- for a sub-agent -- the innermost child's id (sub-<12 hex>).
+    # TRANSITIONAL: ``block`` and ``source`` are optional until thinking-provenance emits them.
+    "thinking_delta": {"text": _S(), "block": _S(False),
+                       "source": _f("string", required=False, enum=REASONING_SOURCES),
+                       "provider": _f("string", required=False, enum=REASONING_PROVIDERS),
+                       "agent": _S(False)},
+    # v14: a reasoning block closed. ``placement`` "inline" is only ever a summarized or narration
+    # block of the main agent; ``seconds`` is finite 0..86400 with one decimal; ``truncated`` means
+    # a persistence or replay bound cut the text.
+    "thinking_end": {"block": _S(), "source": _f("string", enum=REASONING_SOURCES),
+                     "provider": _f("string", required=False, enum=REASONING_PROVIDERS),
+                     "agent": _S(False),
+                     "placement": _f("string", enum=("collapsed", "inline")),
+                     "seconds": _N(False), "truncated": _B(False)},
     # A prose block's identity and what the backend knows about it the moment it closes.
     # ``phase`` absent means "undetermined": the front-end must keep its legacy behaviour, exactly
     # as a null MessagePhase instructs. "commentary" is stated when the model round that produced
@@ -124,8 +152,20 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     # A tool result is text. A browser screenshot is not, so it rides its own event, correlated by
     # call_id, and the panel renders it under the step that produced it.
+    # v14: images the model viewed. ``items[i]`` = {ref "img_"+32 hex, name, mime, width, height,
+    # bytes, source browser|view_image|mcp, host} (never a path) describes ``images[i]``; an entry
+    # over the frame budget is "" with its item kept and fetched later with get_image. ``omitted``
+    # counts images past the per-step cap of 8.
     "tool_images": {
         "call_id": _NS(False), "images": _A(), "caption": _S(False),
+        "items": _A(False), "omitted": _I(False),
+    },
+    # v14: the answer to get_image -- exactly one per request. ``image`` is a data URI, or "" with
+    # ``reason`` when no bytes are available.
+    "image": {
+        "request_id": _S(), "ref": _S(), "image": _S(), "mime": _S(False),
+        "width": _I(False), "height": _I(False), "path": _S(False),
+        "reason": _f("string", required=False, enum=IMAGE_UNAVAILABLE_REASONS),
     },
     "tool_denied": {
         "call_id": _NS(False), "name": _S(), "args": _O(), "reason": _S(),
@@ -140,7 +180,25 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
     },
     "info": {"message": _S()},
-    "error": {"message": _S(), "request_id": _S(False)},
+    # v14: ``cause`` says what failed when a model request gave up: {kind (MODEL_FAILURE_KINDS),
+    # summary, endpoint?, model?, api_mode?, http_status?, attempts?, retry_id?, detail?, hint?}.
+    # No credentials and no secret-bearing URLs: endpoint is scheme://host[:port]/path only.
+    "error": {"message": _S(), "request_id": _S(False), "cause": _O(False)},
+    # v14: one retry run of a model request, from the first lost attempt to its outcome. Frames of a
+    # run share ``retry_id`` ("{turn_id}:retry{n}", a sub-agent's "{turn_id}:{agent}:retry{n}",
+    # outside a turn "{backend_epoch}:retry{n}", on replay "h{N}:retry{k}"); terminal states repeat
+    # attempt, kind, summary and endpoint. ``agent`` is the innermost sub-agent id.
+    "model_retry": {
+        "retry_id": _S(),
+        "state": _f("string", enum=("retrying", "recovered", "gave_up", "cancelled")),
+        "kind": _f("string", enum=MODEL_FAILURE_KINDS),
+        "layer": _f("string", enum=("request", "continuation")),
+        "attempt": _I(), "max_attempts": _I(False), "summary": _S(),
+        "endpoint": _S(False), "turn_id": _S(False), "model": _S(False), "api_mode": _S(False),
+        "detail": _S(False), "hint": _S(False), "http_status": _I(False), "delay_ms": _I(False),
+        "origin": _f("string", required=False, enum=("agent", "subagent", "engine")),
+        "agent": _S(False), "engine": _S(False),
+    },
     "request_expired": {"id": _S()},
     "permission_request": {
         "id": _S(), "call_id": _NS(False), "name": _S(), "args": _O(),
@@ -151,7 +209,19 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
-    "options_request": {"id": _S(), "question": _S(), "options": _A(), "questions": _A(False)},
+    # v14: ``questions`` = [{id, header, question, multi_select, options: [{label, description,
+    # recommended}]}], 1-4 questions of 2-6 options; ``call_id`` is the propose_options step.
+    # TRANSITIONAL: ``question``/``options`` stay and ``questions`` is optional until options-picker
+    # emits only the v14 shape.
+    "options_request": {"id": _S(), "call_id": _NS(False), "questions": _A(False),
+                        "question": _S(False), "options": _A(False)},
+    # v14: how a question request ended. ``id`` is null on replay; ``answers`` =
+    # {question_id: {selected: [0-based index...], other: string}} when answered.
+    "options_resolved": {
+        "id": _NS(), "call_id": _NS(False),
+        "outcome": _f("string", enum=("answered", "dismissed", "cancelled", "unavailable")),
+        "questions": _A(), "answers": _O(False),
+    },
     "mcp_input_request": {
         "id": _S(), "server": _S(),
         "kind": _f("string", enum=("elicitation", "sampling_request", "sampling_response")),
@@ -197,6 +267,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "subscription_engine": _S(False), "subscription_engines": _A(False),
         "subscription_model": _S(False), "subscription_effort": _S(False),
         "monitor_wake": _B(False),
+        # v14: short summarized/narration thinking shown inline, and its length cap (0..1000).
+        "thinking_inline": _B(False), "thinking_inline_max_chars": _I(False),
     },
     "status": {
         "request_id": _S(False),
@@ -340,6 +412,29 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "error": _S(False),
     },
     # ---- end v13 token usage -------------------------------------------------------------------
+    # ---- v14: sub-agents (the agents indicator) -----------------------------------------------
+    # Every task sub-agent started in this chat, at any depth. ``id`` is sub-<12 hex>, the same id
+    # every ``agent`` field carries; ``parent_id`` is null for a child of the main agent;
+    # ``call_id`` is the task step that started it (null for a restored record). Never replayed.
+    "agent_started": {
+        "id": _S(), "parent_id": _NS(), "call_id": _NS(), "description": _S(), "depth": _I(),
+        "state": _f("string", enum=("queued", "running")), "started_at": _N(),
+        "isolated": _B(), "parallel": _B(),
+        "agent_type": _S(False), "model": _S(False), "turn_id": _S(False),
+    },
+    "agent_updated": {
+        "id": _S(), "state": _f("string", enum=("queued", "running", "waiting")),
+        "waiting_for": _f("string", required=False, enum=("permission", "answer")),
+        "activity": _S(False), "model": _S(False), "tool_calls": _I(False), "tokens": _I(False),
+    },
+    "agent_ended": {
+        "id": _S(), "state": _f("string", enum=("finished", "failed", "stopped")),
+        "duration_ms": _I(), "tool_calls": _I(), "tokens": _I(False), "message": _S(False),
+    },
+    # The answer to list_agents, and the snapshot after a chat changes. ``items`` <= 64 (active
+    # first, then the most recent ended); ``total`` and ``active`` are always exact.
+    "agents": {"items": _A(), "total": _I(), "active": _I(), "request_id": _S(False)},
+    # ---- end v14 sub-agents --------------------------------------------------------------------
 }
 
 
@@ -353,6 +448,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
+    # v14: ``question_forms`` is still accepted and ignored (every v14 client takes question
+    # forms); it is removed in v15.
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
@@ -363,7 +460,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "decision": _f("string", enum=("auto", "acceptEdits", "default", "reject")),
         "feedback": _S(False),
     },
-    "options_response": {"id": _S(), "choice": _f("string", "integer", required=False), "answers": _O(False)},
+    # v14: exactly one of a non-empty ``answers`` ({question_id: {selected: [0-based index...],
+    # other: string}}) or ``dismissed: true``. An invalid response leaves the request pending and is
+    # answered by command_rejected. TRANSITIONAL: ``choice`` stays until options-picker removes it.
+    "options_response": {"id": _S(), "answers": _O(False), "dismissed": _B(False),
+                         "choice": _f("string", "integer", required=False)},
     "mcp_input_response": {
         "id": _S(), "action": _f("string", enum=("accept", "decline", "cancel")),
         "content": _O(False),
@@ -468,6 +569,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "compact": {"request_id": _S(False)},
     "list_artifacts": {"request_id": _S(False)},
     "stop_artifact": {"id": _S(), "request_id": _S(False)},
+    # v14: ``values`` may carry thinking_inline (bool) and thinking_inline_max_chars (int 0..1000).
     "set_config": {"values": _O(), "request_id": _S(False)},
     "get_config": {"request_id": _S(False)},
     "status": {"request_id": _S(False)},
@@ -484,6 +586,12 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
     },
     # ---- end v13 token usage -------------------------------------------------------------------
+    # ---- v14 --------------------------------------------------------------------------------------
+    # Read-only and allowed while a turn runs. list_agents is answered by `agents`; get_image by
+    # exactly one `image` event carrying this request_id (``ref`` is "img_" + 32 hex).
+    "list_agents": {"request_id": _S(False)},
+    "get_image": {"request_id": _S(), "ref": _S()},
+    # ---- end v14 ----------------------------------------------------------------------------------
 }
 
 # Names the envelope owns. A payload field with either name would overwrite it on the wire

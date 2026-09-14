@@ -165,9 +165,9 @@ test("keybindings do not collide with the host or with Claude Code", () => {
   }
 });
 
-test("protocol v13: the approval card gets a summary and a diff, and a denial can carry a note", () => {
+test("protocol v14: the approval card gets a summary and a diff, and a denial can carry a note", () => {
   const generated = readFileSync(join(here, "../src/protocol.generated.ts"), "utf8");
-  assert.match(generated, /DGC_PROTOCOL_VERSION = 13 as const/);
+  assert.match(generated, /DGC_PROTOCOL_VERSION = 14 as const/);
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   assert.match(panel, /type: "permission_response", id: msg\.id, decision: msg\.decision, rule: msg\.rule,\s*\.\.\.\(typeof msg\.reason === "string"/,
     "the panel forwards the denial note to the backend");

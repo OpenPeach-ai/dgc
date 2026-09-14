@@ -396,7 +396,7 @@
           "type": "string",
           "default": "dgc",
           "scope": "machine",
-          "description": "Path to the current DGC CLI executable (editor protocol v13 required)."
+          "description": "Path to the current DGC CLI executable (editor protocol v14 required)."
         },
         "dgc.autoUpdateCli": {
           "type": "boolean",
@@ -501,7 +501,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.39.0 or newer; editor protocol v13 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.40.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }

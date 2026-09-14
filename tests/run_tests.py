@@ -14108,13 +14108,13 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v13 carries tool images, and only as an array",
+    check("protocol v14 carries tool images, and only as an array",
           _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                            "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
           and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                                "images": "data:image/png;base64,AAAA"}) is not None)
-    check("protocol v13 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 13
+    check("protocol v14 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 14
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None
