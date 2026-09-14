@@ -246,6 +246,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private goalInputs = false;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
+  // The running turn was started by the backend on a background monitor event. It yields to any
+  // user action (the backend stops it and runs the action), so panel-side "wait for the turn"
+  // guards let actions through, and it never raises a walk-away notification.
+  private monitorTurnActive = false;
   private confirmedTurnActive = false;
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
@@ -407,7 +411,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Continue the interrupted turn: the backend writes the instruction, the user clicked a button. */
   private continueInterruptedTurn(): void {
-    if (this.turnActive) {
+    if (this.turnActive && !this.monitorTurnActive) {
       this.post({ type: "event", event: { type: "error",
         message: "Finish or stop the current turn before continuing the interrupted one." } });
       return;
@@ -520,7 +524,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async compactContext(): Promise<void> {
-    if (this.turnActive) {
+    if (this.turnActive && !this.monitorTurnActive) {
       this.post({ type: "compact_state", state: "idle",
                   error: "Context compaction waits until the current turn is complete." });
       return;
@@ -533,6 +537,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch (err: any) {
       this.post({ type: "compact_state", state: "idle",
                   error: err?.message || "Context compaction did not complete." });
+    }
+  }
+
+  /** Stop one monitor (or "all"). The backend signals it at once and reaps it in the background;
+   * the `monitors` answer and the later monitor_ended event reach the webview as ordinary events. */
+  private async stopMonitor(id: string): Promise<void> {
+    const monitorId = String(id || "").slice(0, 64);
+    if (!monitorId) { return; }
+    try {
+      await this.requestState(this.ensureBackend(), "monitor-stop",
+                              { type: "stop_monitor", id: monitorId }, "monitors", 5000);
+    } catch (err: any) {
+      this.post({ type: "event", event: { type: "error",
+        message: err?.message || "DGC could not stop the monitor." } });
     }
   }
 
@@ -658,7 +676,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async resumeGoal(known?: string): Promise<void> {
     const objective = String(known ?? this.state.goal.text ?? "").trim();
     if (!objective) { return; }
-    if (this.turnActive) {
+    if (this.turnActive && !this.monitorTurnActive) {
       this.post({ type: "goal_control_state", state: "error",
                   error: "Finish or stop the current turn before resuming the goal." });
       return;
@@ -729,7 +747,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // own event handler also clears these, but it and the listener above observe the same event in
     // an order we do not control -- and a caller that stops a turn in order to do something next
     // must not find a stale "a turn is running" flag when it gets here.
-    this.turnActive = this.confirmedTurnActive = false;
+    this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
   }
 
   private activeSubscription(): any | undefined {
@@ -777,7 +795,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private syncWorkspaceRoots(be = this.backend, setup = false): void {
-    if (!be || be !== this.backend || this.turnActive || this.workspaceRootsInFlight !== undefined
+    if (!be || be !== this.backend || (this.turnActive && !this.monitorTurnActive)
+        || this.workspaceRootsInFlight !== undefined
         || !this.workspaceRootsDirty || (!setup && !be.ready)) {
       return;
     }
@@ -1186,7 +1205,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (this.backend !== be) { return; }
       if (be.childPid !== undefined) {
         // A command already started a new child on this instance; that child is the recovery.
-        this.turnActive = this.confirmedTurnActive = false;
+        this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.post({ type: "backend_exit", code, signal, recovering: true, cause, resumes });
         return;
       }
@@ -1205,7 +1224,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshRevision++;
     this.workspaceChanges = [];
     this.sessionReady = false;
-    this.turnActive = this.confirmedTurnActive = false;
+    this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
     this.correlatedStateRequests = false;
     this.workspaceRootsInFlight = undefined;
     this.workspaceRootsDirty = true;
@@ -1369,7 +1388,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backend = undefined;
     this.intentionalShutdown = false;
     this.mcpUrls.clear();
-    this.turnActive = this.confirmedTurnActive = false;
+    this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
     this.correlatedStateRequests = false;
     this.workspaceRootsInFlight = undefined;
     this.workspaceRootsDirty = true;
@@ -1404,7 +1423,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.lastReadyEvent = ev;
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
-        this.turnActive = this.confirmedTurnActive = false;
+        this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
@@ -1554,10 +1573,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "turn_start":
         this.turnActive = this.confirmedTurnActive = true;
+        this.monitorTurnActive = ev.kind === "monitor";
         this.turnStartedAt = Date.now();
         // Goal cycles ("resume") are the goal's to pick back up; only an ordinary turn, or a
-        // continuation of one, is offered a Continue after a backend death.
-        if (ev.kind !== "resume" && this.currentSessionId) {
+        // continuation of one, is offered a Continue after a backend death. A monitor turn is
+        // DGC's own and simply wakes again on the next event.
+        if (ev.kind !== "resume" && ev.kind !== "monitor" && this.currentSessionId) {
           this.noteInterruptedTurn({ scope: this.draftScope(), id: this.currentSessionId,
                                      turnId: String(ev.turn_id || ""), at: Date.now() });
         }
@@ -1566,7 +1587,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.turnActive = this.confirmedTurnActive = true;
         break;
       case "handoff":
-        this.turnActive = this.confirmedTurnActive = false;
+        this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.syncWorkspaceRoots();
         this.runPendingCommandRestart();
         break;
@@ -1591,17 +1612,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "request_expired":
         this.mcpUrls.delete(String(ev.id));
         break;
-      case "turn_end":
+      case "turn_end": {
         this.mcpUrls.clear();
-        this.turnActive = this.confirmedTurnActive = false;
+        const monitorTurn = this.monitorTurnActive;
+        this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         // An error end is kept for thirty seconds: when the backend is shutting down under a turn
         // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
         if (ev.reason === "error") { this.noteInterruptedTurn({ endedAt: Date.now() }); }
         else { this.noteInterruptedTurn(undefined); }
         this.syncWorkspaceRoots();
-        this.notifyTurnEnd(String(ev.reason || "completed"));
+        // Nobody asked for a monitor turn, so nobody is waiting to hear that it finished.
+        if (monitorTurn) { this.turnStartedAt = 0; }
+        else { this.notifyTurnEnd(String(ev.reason || "completed")); }
         this.runPendingCommandRestart();
         break;
+      }
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
       this.promptInstallCli();
@@ -2208,6 +2233,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "stopArtifact":
         void this.stopArtifact(String(msg.id || ""));
         break;
+      case "stopMonitor":
+        void this.stopMonitor(String(msg.id || ""));
+        break;
       case "copy":
         vscode.env.clipboard.writeText(String(msg.text || ""));
         break;
@@ -2707,6 +2735,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.stateCommand("plan", { type: "get_plan" })); break;
       case "artifacts": this.ensureBackend().send(
         this.stateCommand("artifacts", { type: "list_artifacts" })); break;
+      case "monitors": this.ensureBackend().send(
+        { type: "list_monitors", request_id: this.nextRequestId("monitors-list") }); break;
       case "status": this.ensureBackend().send(
         this.stateCommand("status", { type: "status" })); break;
       case "goal": this.ensureBackend().send(
@@ -2750,6 +2780,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be = this.ensureBackend();
     if (name === "plan" && !rest) {
       await this.requestMode("plan"); return;
+    }
+    const monitorStop = /^stop\s+(\S+)$/i.exec(rest);
+    if (name === "monitors" && monitorStop) {
+      await this.stopMonitor(monitorStop[1]); return;
     }
     if (["plan", "review", "init"].includes(name)) {
       await this.onMessage({ type: "prompt", text, requestId: this.nextRequestId("workflow") });
@@ -2899,7 +2933,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
     }
     const direct: Record<string, string> = {
-      "view-plan": "viewPlan", artifact: "artifacts", status: "status", compact: "compact",
+      "view-plan": "viewPlan", artifact: "artifacts", monitors: "monitors", status: "status",
+      compact: "compact",
       clear: "clear", new: "new", resume: "resume", rewind: "rewind", connect: "connect",
       subagent: "subagent", tasks: "retainedTasks", settings: "settings", bug: "bug",
       skills: "skills", hooks: "hooks", handoff: "handoff", docs: "docs", mcp: "mcp",
@@ -3493,6 +3528,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         prompt_cache: v.prompt_cache !== false,
         sandbox: v.sandbox === true, sandbox_network: v.sandbox_network === true,
         show_reasoning: v.show_reasoning !== false, suggest: v.suggest !== false,
+        monitor_wake: v.monitor_wake !== false,
         ultra_mode: v.ultra_mode === true,
         plan_artifact: v.plan_artifact !== false,
         artifact_autostart: v.artifact_autostart !== false,
@@ -4157,6 +4193,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <select id="s-show_reasoning"><option value="true">shown in a collapsed block</option><option value="false">hidden</option></select></label>
     <label>Prompt suggestions
       <select id="s-suggest"><option value="true">enabled</option><option value="false">disabled</option></select></label>
+    <label>Wake on monitor events <span class="set-hint">When a background monitor prints while the chat is idle, DGC starts a short turn to read it. Off: events wait for your next message.</span>
+      <select id="s-monitor_wake"><option value="true">enabled</option><option value="false">disabled</option></select></label>
     <label>Tool profile
       <select id="s-tool_profile"><option value="adaptive">adaptive</option><option value="full">full catalog every turn</option></select></label>
     <label>Parallel sub-agent tasks
@@ -4201,6 +4239,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <footer>
   <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
   <div id="composer-rail" aria-label="Current work" hidden>
+    <section id="monitorsbar" class="rail-item" aria-label="Background monitors" hidden>
+      <div class="rail-row">
+        <span class="monitors-icon codicon codicon-pulse rail-icon" aria-hidden="true"></span>
+        <span id="monitors-count" class="monitors-count">Monitors</span>
+        <div id="monitor-chips" class="monitor-chips" role="list" aria-label="Running monitors"></div>
+        <span id="monitors-paused" class="monitors-paused" title="Wake-ups are paused: new events wait for your next message" hidden>paused</span>
+      </div>
+    </section>
     <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
       <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this chat has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
       <button type="button" id="changes-review-button" class="rail-text-action" title="Open the list of changed files">Review</button>

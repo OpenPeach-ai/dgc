@@ -422,6 +422,42 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 #tasks-list .t.block { color: var(--text); } #tasks-list .t.block .ti { color: var(--err-text); }
 #tasks-list .t.cancel { color: var(--faint); text-decoration: line-through; } #tasks-list .t.cancel .ti { color: #DC5A64; }
 
+/* background monitors — a rail row of running monitors (above the others) with a Stop per chip,
+   and one bounded card per event inside the turn it arrived in. */
+#monitorsbar .rail-row { flex: 1; flex-wrap: nowrap; }
+#monitorsbar .monitors-icon { color: var(--accent-text); }
+#monitorsbar[data-paused="true"] .monitors-icon { color: var(--faint); }
+.monitors-count { flex: none; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+  font-variant-numeric: tabular-nums; }
+/* One line, like the goal row: chips shrink to an ellipsis rather than wrapping the rail taller. */
+.monitor-chips { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; gap: var(--sp-1); overflow: hidden; }
+.monitor-chip { display: inline-flex; flex: 0 1 auto; min-width: 56px; max-width: 100%; align-items: center; gap: var(--sp-1);
+  padding: 0 0 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.monitor-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.monitor-chip[data-state="stopping"] { color: var(--faint); }
+.monitors-paused { flex: none; padding: 0 var(--sp-2); border-radius: var(--r-sm); background: var(--bg);
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.6 var(--sans); }
+.monitor-event { margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 3px 0 0 var(--accent-text); }
+.monitor-event[data-kind="ended"], .monitor-event[data-kind="background_exit"] { box-shadow: inset 3px 0 0 var(--faint); }
+.monitor-event-head { display: flex; min-width: 0; align-items: center; gap: var(--sp-2);
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.monitor-event-head .codicon { flex: none; color: var(--accent-text); font-size: var(--t-sm); }
+.monitor-event-head .me-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); }
+.monitor-event-head .me-meta { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.monitor-event-summary { margin-top: var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans);
+  overflow-wrap: anywhere; }
+.monitor-lines { max-height: 12em; margin: var(--sp-1) 0 0; overflow: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; color: var(--text); font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
+.monitor-more { margin-top: var(--sp-1); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.monitor-list-row { align-items: center; }
+.monitor-list-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.monitor-note .codicon { color: var(--accent-text); }
+
 /* system lines */
 .sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
 .sys.err { color: var(--err-text); }

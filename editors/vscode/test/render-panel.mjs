@@ -9,6 +9,7 @@
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
 //   npm run shot -- /tmp/tasks.png --tasks [--light]   the Tasks rail row (+ -expanded.png, -long.png)
 //   npm run shot -- /tmp/cmd.png --command [--light]   a command mid-run, shown once (+ -waiting.png)
+//   npm run shot -- /tmp/mon.png --monitors [--light] [--narrow]  a monitor wake turn, event cards, the monitors rail
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -398,6 +399,76 @@ if (process.argv.includes("--command")) {
     && /^\(\d+s(?: · \d+s)? · ↓ \d+ tok\)$/.test(running.meta)
     && waiting.verb === "Waiting for the model · qwen3.8:27b at 127.0.0.1 · no reply for 45s+"
     && /^Read 1 file, edited 1 file, created 1 file and ran 1 command$/.test(waiting.header);
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
+}
+if (process.argv.includes("--monitors")) {
+  // Background monitors: a prompt that started one, a wake turn DGC started on its events (a note,
+  // not a "you" bubble), event cards inside that turn, and the rail row of running monitors above
+  // the changes, tasks and goal rows. Checks the rail order and that nothing covers the composer.
+  // Writes <out>.png; --light paints a light host theme.
+  const out = process.argv[2] || "/tmp/monitors.png";
+  if (process.argv.includes("--narrow")) await page.setViewportSize({ width: 300, height: 900 });
+  if (process.argv.includes("--light")) {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
+      --vscode-input-background:#FFFFFF; --vscode-dropdown-background:#FFFFFF;
+      --vscode-textCodeBlock-background:#F3F3F3; --vscode-panel-border:#E5E5E5;
+      --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE;
+      --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
+      --vscode-descriptionForeground:#616161; --vscode-disabledForeground:#7A7A7A; }` });
+  }
+  const command = "tail -F logs/deploy.log | grep --line-buffered -E 'READY|ERROR|Traceback'";
+  for (const event of [
+    { type: "turn_start", turn_id: "t1", prompt: "Deploy to staging and tell me when it is up", kind: "prompt" },
+    { type: "tool_call", call_id: "m1", name: "monitor", args: { command, description: "deploy log" }, summary: command },
+    { type: "monitor_started", id: "mon1", description: "deploy log", command, persistent: true, timeout_ms: 300000, turn_id: "t1" },
+    { type: "tool_result", call_id: "m1", name: "monitor", output: `started monitor mon1 ("deploy log"): ${command}` },
+    { type: "text_delta", text: "The deploy is running. I am watching its log and will say when it is ready or fails.\n" },
+    { type: "stream_end", message_id: "t1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 900, final_message_id: "t1:1" },
+    { type: "turn_start", turn_id: "t2", prompt: "deploy log · 2 events", kind: "monitor" },
+    { type: "monitor_event", id: "mon1", description: "deploy log", event_index: 1, kind: "output", delivery: "wake", turn_id: "t2",
+      lines: ["12:04:31 migrate: 14 migrations applied", "12:04:33 READY api listening on :8080"], omitted_lines: 0 },
+    { type: "monitor_event", id: "mon1", description: "deploy log", event_index: 2, kind: "output", delivery: "wake", turn_id: "t2",
+      lines: ["12:04:35 ERROR worker-2: redis connection refused"], omitted_lines: 38 },
+    { type: "text_delta", text: "Staging is up (`api listening on :8080`), but a worker cannot reach Redis. The API serves requests; background jobs will queue until Redis is reachable.\n" },
+    { type: "stream_end", message_id: "t2:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 1300, final_message_id: "t2:1" },
+    { type: "monitors", wake_paused: true, pending_events: 1, items: [
+      { id: "mon1", description: "deploy log", command, state: "running", events: 3, pending_events: 1, persistent: true, timeout_ms: 300000, started_at: 1 },
+      { id: "mon2", description: "CI run 4812", command: "gh run watch 4812", state: "running", events: 0, pending_events: 0, persistent: false, timeout_ms: 600000, started_at: 1 }] },
+    { type: "todos", todos: [{ content: "Deploy to staging", status: "done" }, { content: "Fix the Redis connection", status: "in_progress" }] },
+    { type: "goal_changed", goal: "Ship the release to staging with a green deploy", status: "active", elapsed_seconds: 734 },
+  ]) await send(event);
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+    type: "chat_changes", total: 1, additions: 3, deletions: 1, files: [{ path: "deploy/staging.yaml", additions: 3, deletions: 1 }] } })));
+  await page.waitForTimeout(400);
+  const probe = await page.evaluate(() => {
+    const rail = document.getElementById("composer-rail");
+    const order = [...rail.children].filter((n) => !n.hidden).map((n) => n.id);
+    const box = document.getElementById("cbox").getBoundingClientRect();
+    const bar = document.getElementById("monitorsbar").getBoundingClientRect();
+    const cards = [...document.querySelectorAll(".monitor-event")];
+    const row = document.getElementById("monitorsbar");
+    const lines = document.querySelector(".monitor-lines");
+    return { order, composerVisible: box.bottom <= window.innerHeight, railAboveComposer: bar.bottom <= box.top + 1,
+             barHeight: Math.round(bar.height), barOverflows: row.scrollWidth > row.clientWidth + 1,
+             linesOverflow: lines.scrollWidth > lines.clientWidth + 1,
+             chipText: getComputedStyle(document.querySelector(".monitor-chip-label")).fontSize,
+             stopsVisible: [...document.querySelectorAll(".monitor-stop")].every((b) => {
+               const r = b.getBoundingClientRect(), c = document.getElementById("monitor-chips").getBoundingClientRect();
+               return r.width > 0 && r.right <= c.right + 1 && r.left >= c.left - 1; }),
+             chips: document.querySelectorAll(".monitor-chip").length, paused: !document.getElementById("monitors-paused").hidden,
+             cards: cards.length, cardsInTurn: cards.every((c) => c.closest(".msg.dgc")),
+             userBubbles: [...document.querySelectorAll(".msg.user")].map((m) => m.textContent.trim().slice(0, 40)),
+             note: document.querySelector(".monitor-note")?.textContent };
+  });
+  console.log("MONITORS " + JSON.stringify(probe));
+  await page.screenshot({ path: out, fullPage: false });
+  const ok = probe.order.join(",") === "monitorsbar,changesbar,tasksbar,goalbar" && probe.composerVisible
+    && probe.railAboveComposer && !probe.barOverflows && !probe.linesOverflow && probe.barHeight <= 36 && probe.stopsVisible && probe.chips === 2 && probe.paused && probe.cards === 2 && probe.cardsInTurn
+    && !probe.userBubbles.some((text) => /deploy log/.test(text)) && /Woke on monitor/.test(probe.note || "");
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);
 }

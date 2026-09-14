@@ -497,6 +497,58 @@ setInterval(() => {}, 1000);`);
   sequenced.dispose();
 });
 
+test("monitor frames pass the v13 contract, and a stray field or a reused seq still fails closed", async () => {
+  const valid = executable("monitor-backend", `
+${protocolFixture()}
+send(ready);
+send({ type: "turn_start", turn_id: "t2", prompt: "deploy log · 2 events", kind: "monitor" });
+send({ type: "monitor_event", id: "mon1", description: "deploy log", event_index: 1, lines: ["READY"],
+       omitted_lines: 0, kind: "output", delivery: "wake", turn_id: "t2" });
+send({ type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 0, final_message_id: null });
+send({ type: "monitors", items: [{ id: "mon1", state: "running" }], wake_paused: false, pending_events: 0 });
+setInterval(() => {}, 1000);`);
+  const accepted = new DgcBackend(scratch, valid);
+  const seen = [];
+  accepted.on("event", (event) => seen.push(event.type));
+  const listed = waitFor(accepted, "event", (event) => event.type === "monitors");
+  accepted.start();
+  await listed;
+  assert.deepEqual(seen.filter((type) => type !== "ready"), ["turn_start", "monitor_event", "turn_end", "monitors"]);
+  assert.equal(accepted.ready, true);
+  accepted.dispose();
+
+  // Undeclared fields fail closed: the webview must never receive data the contract does not name.
+  const stray = executable("monitor-stray-backend", `
+${protocolFixture()}
+send(ready);
+send({ type: "monitor_event", id: "mon1", description: "d", event_index: 1, lines: [], kind: "output",
+       delivery: "inline", pid: 4242 });
+setInterval(() => {}, 1000);`);
+  const strayBackend = new DgcBackend(scratch, stray);
+  const strayFailure = waitFor(strayBackend, "event",
+    (event) => event.type === "error" && event.protocol_error === true);
+  strayBackend.start();
+  assert.match((await strayFailure).message, /violated protocol v13: monitor_event has undeclared field "pid"/);
+  strayBackend.dispose();
+
+  // The bug the event_index name exists to prevent: a per-monitor counter written into the frame's
+  // own seq (it restarts at 1) reads as a duplicate frame, and the backend is shut down for it.
+  const clash = executable("monitor-seq-clash-backend", `
+${protocolFixture()}
+send(ready);
+send({ type: "info", message: "one" });
+send({ type: "info", message: "two" });
+process.stdout.write(JSON.stringify({ type: "monitor_event", seq: 1, id: "mon1", description: "d",
+  event_index: 1, lines: [], kind: "output", delivery: "inline" }) + "\\n");
+setInterval(() => {}, 1000);`);
+  const clashBackend = new DgcBackend(scratch, clash);
+  const clashFailure = waitFor(clashBackend, "event",
+    (event) => event.type === "error" && event.protocol_error === true);
+  clashBackend.start();
+  assert.match((await clashFailure).message, /out-of-order event sequence/);
+  clashBackend.dispose();
+});
+
 // ---- per-child lifecycle: every exit is reported once, with who asked for it and why ----------
 
 function collectExits(backend) {

@@ -151,8 +151,8 @@ test("the session checklist is a composer-rail row above the goal and updates in
   const event = data => send({ type: "event", event: data });
   assert.equal(doc.getElementById("tasks"), null, "the old standalone slot is gone");
   assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "exactly one task surface");
-  assert.deepEqual([...rail.children].map(node => node.id), ["changesbar", "tasksbar", "goalbar"],
-    "rail order: changes, tasks, goal — the whole rail sits on the prompt box");
+  assert.deepEqual([...rail.children].map(node => node.id), ["monitorsbar", "changesbar", "tasksbar", "goalbar"],
+    "rail order: monitors, changes, tasks, goal — the whole rail sits on the prompt box");
   assert.equal(rail.nextElementSibling.id, "cbox");
   assert.equal(bar.classList.contains("rail-item"), true);
   assert.equal(bar.hidden, true, "an empty checklist takes no room");
@@ -3494,5 +3494,142 @@ test("a goal held by the repeat-cause breaker shows the cause and a Resume goal 
   assert.match(card.textContent, /backend\.log/);
   card.querySelector("button").click();
   assert.deepEqual(posted.filter((m) => m.type === "resumeGoal").map((m) => JSON.stringify(m)), ['{"type":"resumeGoal"}']);
+  assert.deepEqual(errors, []);
+});
+
+// ---- background monitors (protocol v13) ---------------------------------------------------------
+test("a monitor wake turn renders as a monitor note, not a user bubble, and leaves the queued count alone", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const queued = () => doc.getElementById("queued").textContent;
+  event({ type: "queued", count: 1, text: "Then run the tests" });
+  assert.equal(queued(), "1 queued");
+  event({ type: "turn_start", turn_id: "t2", prompt: "deploy log · 2 events", kind: "monitor" });
+  assert.equal(doc.querySelectorAll(".msg.user").length, 0, "DGC started this turn; nobody typed it");
+  const note = doc.querySelector(".resume-note.monitor-note");
+  assert.ok(note);
+  assert.match(note.textContent, /Woke on monitor · deploy log · 2 events/);
+  assert.equal(queued(), "1 queued", "a monitor turn takes nothing off the queue");
+  event({ type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 0, final_message_id: null });
+  // A resumed goal still consumes the queued entry the backend counted for it.
+  event({ type: "turn_start", turn_id: "t3", prompt: "", kind: "resume" });
+  assert.equal(queued(), "");
+  assert.deepEqual(errors, []);
+});
+
+test("monitor_event renders a bounded card inside the current turn; the rail's chips post stopMonitor", () => {
+  const { doc, send, posted, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "turn_start", turn_id: "t1", prompt: "watch the deploy", kind: "prompt" });
+  event({ type: "monitor_started", id: "mon1", description: "deploy log", command: "tail -F deploy.log",
+          persistent: true, timeout_ms: 300000, sandboxed: false, turn_id: "t1" });
+  event({ type: "monitor_event", id: "mon1", description: "deploy log", event_index: 3,
+          lines: ["READY <img src=x onerror=alert(1)>", "second line"], omitted_lines: 5,
+          kind: "output", delivery: "inline", turn_id: "t1" });
+  const turn = [...doc.querySelectorAll(".msg.dgc")].at(-1);
+  const card = turn.querySelector(".monitor-event");
+  assert.ok(card, "the card lands inside the running turn");
+  assert.match(card.querySelector(".monitor-event-head").textContent, /Monitor · deploy log/);
+  assert.match(card.querySelector(".me-meta").textContent, /event 3/);
+  assert.equal(card.querySelector(".monitor-lines").textContent,
+    "READY <img src=x onerror=alert(1)>\nsecond line");
+  assert.equal(card.querySelector("img"), null, "command output is text, never markup");
+  assert.match(card.querySelector(".monitor-more").textContent, /^5 more lines/);
+  assert.ok(turn.querySelector(".thinking").previousElementSibling, "the activity row stays last");
+  event({ type: "monitor_event", id: "mon1", description: "deploy log", event_index: 0,
+          lines: ["ended: exit 1 after 3 events", "Error: boom"], kind: "ended", delivery: "inline", turn_id: "t1" });
+  const ended = [...turn.querySelectorAll(".monitor-event")].at(-1);
+  assert.equal(ended.dataset.kind, "ended");
+  assert.equal(ended.querySelector(".monitor-event-summary").textContent, "ended: exit 1 after 3 events");
+
+  const rail = doc.getElementById("composer-rail"), bar = doc.getElementById("monitorsbar");
+  assert.equal(bar.hidden, true);
+  event({ type: "monitors", wake_paused: false, pending_events: 0, items: [
+    { id: "mon1", description: "deploy log", command: "tail -F deploy.log", state: "running", events: 3,
+      pending_events: 0, persistent: true, timeout_ms: 300000, started_at: 1 },
+    { id: "mon2", description: "old", command: "true", state: "ended", events: 0, pending_events: 0,
+      persistent: false, timeout_ms: 1000, started_at: 1, end_reason: "exited", exit_code: 0 }] });
+  assert.equal(bar.hidden, false);
+  assert.equal(rail.hidden, false);
+  assert.equal(rail.classList.contains("has-monitors"), true);
+  const chips = [...doc.querySelectorAll(".monitor-chip")];
+  assert.deepEqual(chips.map((chip) => chip.dataset.monitorId), ["mon1"], "only live monitors get a chip");
+  assert.equal(doc.getElementById("monitors-count").textContent, "1 monitor");
+  assert.equal(doc.getElementById("monitors-count").hidden, true, "the chips are the count");
+  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 1 monitor");
+  assert.equal(doc.getElementById("monitors-paused").hidden, true);
+  const stop = chips[0].querySelector("button.monitor-stop");
+  assert.equal(stop.getAttribute("aria-label"), "Stop monitor deploy log");
+  stop.click();
+  assert.deepEqual(posted.filter((m) => m.type === "stopMonitor").map((m) => JSON.stringify(m)),
+    ['{"type":"stopMonitor","id":"mon1"}']);
+  assert.equal(stop.disabled, true);
+  event({ type: "monitors", wake_paused: true, pending_events: 2, items: [] });
+  assert.equal(bar.hidden, false, "paused wake-ups with events waiting stay visible");
+  assert.equal(doc.getElementById("monitors-paused").hidden, false);
+  assert.equal(doc.getElementById("monitors-count").textContent, "2 events waiting");
+  assert.equal(doc.getElementById("monitors-count").hidden, false);
+  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 2 events waiting, wake-ups paused");
+  event({ type: "monitors", wake_paused: false, pending_events: 0, items: [] });
+  assert.equal(bar.hidden, true);
+  assert.equal(rail.hidden, true);
+  assert.deepEqual(errors, []);
+});
+
+test("restored history replays monitor turns and inline events the way they rendered live", () => {
+  const items = [
+    { type: "turn_start", turn_id: "h1", prompt: "deploy log · 1 event", kind: "monitor" },
+    { type: "monitor_event", id: "mon1", description: "deploy log", event_index: 1, lines: ["DEPLOYED"],
+      omitted_lines: 0, kind: "output", delivery: "wake", turn_id: "h1" },
+    { type: "text_delta", text: "The deploy finished." },
+    { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+  ];
+  const live = makeDom();
+  for (const item of items) live.send({ type: "event", event: item });
+  const restored = makeDom();
+  restored.send({ type: "event", event: { type: "history", items } });
+  const shape = (doc) => [...doc.querySelectorAll(".monitor-note, .monitor-event, .msg.user")]
+    .map((node) => `${node.className.replace(/\s*hist\b/g, "")}|${node.textContent}`);
+  assert.deepEqual(shape(restored.doc), shape(live.doc));
+  assert.equal(shape(restored.doc).length, 2);
+  assert.deepEqual(live.errors, []);
+  assert.deepEqual(restored.errors, []);
+});
+
+test("a /monitors listing is a card with Stop on running monitors; a new chat clears the rail", () => {
+  const { doc, send, posted, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "monitors", request_id: "monitors-list-1-1", wake_paused: false, pending_events: 0, items: [
+    { id: "mon1", description: "api log", command: "tail -F api.log", state: "running", events: 2 },
+    { id: "mon2", description: "build", command: "make", state: "ended", events: 1, end_reason: "exited" }] });
+  const card = [...doc.querySelectorAll(".card")].at(-1);
+  assert.match(card.textContent, /Background monitors/);
+  const rows = [...card.querySelectorAll(".monitor-list-row")];
+  assert.equal(rows.length, 2);
+  assert.match(rows[1].textContent, /mon2 · build · ended \(exited\) · 1 events/);
+  assert.equal(rows[1].querySelector("button"), null, "an ended monitor has nothing to stop");
+  rows[0].querySelector("button").click();
+  assert.deepEqual(posted.filter((m) => m.type === "stopMonitor").map((m) => JSON.stringify(m)),
+    ['{"type":"stopMonitor","id":"mon1"}']);
+  assert.equal(doc.getElementById("monitorsbar").hidden, false);
+  event({ type: "session", kind: "new", message_count: 0, session_id: "s2" });
+  assert.equal(doc.getElementById("monitorsbar").hidden, true);
+  event({ type: "monitors", request_id: "monitors-list-2-2", wake_paused: false, pending_events: 0, items: [] });
+  assert.match([...doc.querySelectorAll(".sys")].at(-1).textContent, /No background monitors in this chat/);
+  assert.deepEqual(errors, []);
+});
+
+test("the settings form carries the wake-on-monitor toggle both ways", () => {
+  const { doc, send, posted, errors } = makeDom();
+  assert.ok(doc.getElementById("s-monitor_wake"));
+  send({ type: "event", event: { type: "config", model: "m", mode: "default", think: "off", base_url: "x",
+         project_root: "/p", goal: {}, monitor_wake: false } });
+  send({ type: "settings_open", providers: [], models: [] });
+  assert.equal(doc.getElementById("s-monitor_wake").value, "false");
+  doc.getElementById("s-monitor_wake").value = "true";
+  doc.getElementById("set-save").click();
+  const saved = posted.filter((m) => m.type === "saveSettings").pop();
+  assert.equal(saved.values.monitor_wake, true, "saved as a boolean");
   assert.deepEqual(errors, []);
 });

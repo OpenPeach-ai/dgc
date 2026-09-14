@@ -63,6 +63,7 @@ let standingGoalStatus = "none";
 let activeGoalTurn = false;
 let goalPromptCount = 0;
 let currentSession = "host-" + process.pid;
+let monitorTurnOpen = false;
 let workspaceFolders = [process.cwd()];
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
 const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
@@ -208,6 +209,39 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     activeGoalTurn = false;
     send({ type: "turn_end", turn_id: "goal-turn", reason: "cancelled", token_estimate: 2 });
   }
+  // Background monitors (v13): a prompt starts a monitor, then the fixture starts a turn nobody
+  // asked for, the way dgc serve wakes on an event. That turn stays open until a user action
+  // arrives, which it yields to -- the panel must send the action rather than refuse it.
+  if (cmd.type === "prompt" && cmd.text === "host monitor probe") {
+    send({ type: "turn_start", turn_id: "monitor-prompt", prompt: cmd.text, kind: "prompt" });
+    send({ type: "monitor_started", id: "mon1", description: "deploy log", command: "tail -F deploy.log",
+      persistent: true, timeout_ms: 300000, sandboxed: false, turn_id: "monitor-prompt" });
+    send({ type: "turn_end", turn_id: "monitor-prompt", reason: "completed", token_estimate: 1 });
+    setTimeout(() => {
+      monitorTurnOpen = true;
+      send({ type: "turn_start", turn_id: "monitor-wake", prompt: "deploy log · 1 event", kind: "monitor" });
+      send({ type: "monitor_event", id: "mon1", description: "deploy log", event_index: 1,
+        lines: ["DEPLOYED"], omitted_lines: 0, kind: "output", delivery: "wake", turn_id: "monitor-wake" });
+      send({ type: "monitors", items: [{ id: "mon1", description: "deploy log", command: "tail -F deploy.log",
+        state: "running", events: 1, pending_events: 0, persistent: true, timeout_ms: 300000, started_at: 1 }],
+        wake_paused: false, pending_events: 0 });
+    }, 300);
+    return;
+  }
+  if (monitorTurnOpen && ["compact", "set_workspace_roots", "resume_goal"].includes(cmd.type)) {
+    monitorTurnOpen = false;
+    send({ type: "turn_end", turn_id: "monitor-wake", reason: "cancelled", token_estimate: 1 });
+  }
+  if (cmd.type === "compact") {
+    send({ type: "compacted", request_id: cmd.request_id, status: "unchanged", strategy: "none",
+      trigger: "manual", before_tokens: 1, after_tokens: 1, context_size: 32768, freed_tokens: 0 });
+  }
+  if (cmd.type === "stop_monitor") {
+    send({ type: "monitors", request_id: cmd.request_id, items: [], wake_paused: false, pending_events: 0 });
+    send({ type: "monitor_ended", id: String(cmd.id), description: "deploy log", reason: "stopped",
+      exit_code: null, events: 1, message: "stopped after 1 events" });
+    return;
+  }
   if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
     plan: "1. Inspect\\n2. Verify", exists: true });
   if (cmd.type === "status") send({ type: "status", request_id: cmd.request_id,
@@ -329,6 +363,7 @@ try {
       || evidence.secretStorageLifecycle !== true
       || evidence.decisionLifecycle !== true
       || evidence.backendExitLifecycle !== true
+      || evidence.monitorLifecycle !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1
       || typeof evidence.vscodeVersion !== "string"
       || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
@@ -339,7 +374,7 @@ try {
   if (expectedVersion && evidence.vscodeVersion !== expectedVersion) {
     throw new Error(`expected VS Code ${expectedVersion}, host reported ${evidence.vscodeVersion}`);
   }
-  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + backend exit paths)\n`);
+  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + monitor turns + backend exit paths)\n`);
 } finally {
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);

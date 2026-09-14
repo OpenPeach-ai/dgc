@@ -432,6 +432,36 @@ async function run() {
     typeof command.request_id === "string" && command.request_id.length > 0),
   "delegated editor controls must retain correlated state acknowledgements");
 
+  // ---- background monitors: an unsolicited monitor turn, a user action racing it, and Stop ----
+  // Evidence is a bounded window, so order is read relative to the newest monitor_event.
+  const afterMonitorEvent = () => {
+    const items = posted();
+    const at = items.map((item) => item.eventType).lastIndexOf("monitor_event");
+    return at === -1 ? [] : items.slice(at + 1).map((item) => item.eventType);
+  };
+  const compactsBefore = backendCommands(backendLogPath).filter((command) => command.type === "compact").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host monitor probe" });
+  await waitFor(() => afterMonitorEvent().includes("monitors"));
+  assert.ok(posted().some((item) => item.type === "event" && item.eventType === "monitor_started"),
+    "monitor_started reaches the webview");
+  assert.equal(afterMonitorEvent().includes("turn_end"), false, "the wake turn is still running");
+  // Compact while only a monitor turn runs: the panel sends it (the backend yields) instead of
+  // answering "waits until the current turn is complete".
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slash", action: "compact" });
+  await waitFor(() => backendCommands(backendLogPath).filter((command) => command.type === "compact").length > compactsBefore);
+  await waitFor(() => afterMonitorEvent().includes("turn_end"));
+  await waitFor(() => posted().some((item) => item.type === "event" && item.eventType === "compacted"));
+  await testApi.testOnlyWebviewMessage(testToken, { type: "stopMonitor", id: "mon1" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "stop_monitor" && command.id === "mon1"));
+  const stopCommand = backendCommands(backendLogPath).find((command) => command.type === "stop_monitor");
+  assert.match(String(stopCommand.request_id || ""), /^monitor-stop-/,
+    "Stop on a monitor chip is a correlated stop_monitor command");
+  await waitFor(() => posted().some((item) => item.type === "event" && item.eventType === "monitor_ended"));
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/monitors" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "list_monitors" && /^monitors-list-/.test(String(command.request_id || ""))));
+
   // ---- backend exits in the installed host: every path names its cause in backend.log ----------
   const control = process.env.DGC_EXTENSION_TEST_CONTROL;
   const altBackend = process.env.DGC_EXTENSION_TEST_BACKEND_ALT;
@@ -516,7 +546,7 @@ async function run() {
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true, backendExitLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
+    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };

@@ -3,6 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
+  const monitorsBar = $("monitorsbar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -682,6 +683,13 @@
       note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
         + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
+      appendTarget.appendChild(note);
+    } else if (kind === "monitor") {
+      // DGC started this turn because a background monitor printed something. The label is
+      // command-derived text the backend wrote, so it is a marker, never a "you" bubble.
+      const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
+      note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
+        + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
     } else {
       echoPrompt(prompt);
@@ -1575,13 +1583,108 @@
     if (!replaying) { speak(text); scroll(); }
     return card;
   }
+  // ---- background monitors ----
+  // One card per event, inside the turn it arrived in. Lines are command output: they go in as
+  // textContent, never as markup.
+  function monitorEventCard(ev) {
+    const card = el("div", "monitor-event");
+    card.dataset.monitorId = String(ev.id || "");
+    card.dataset.kind = String(ev.kind || "output");
+    card.setAttribute("role", "group");
+    const ended = ev.kind === "ended" || ev.kind === "background_exit";
+    const lines = (Array.isArray(ev.lines) ? ev.lines : []).map((line) => String(line)).slice(0, 40);
+    const head = el("div", "monitor-event-head");
+    head.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
+      + `<span class="me-title">Monitor · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
+      + `<span class="me-meta">${ended ? esc(ev.kind === "background_exit" ? "exited" : "ended")
+        : `event ${Math.max(0, Number(ev.event_index) || 0)}`}</span>`;
+    card.setAttribute("aria-label", `Monitor ${String(ev.description || ev.id || "")}, ${ended ? "ended" : `event ${Number(ev.event_index) || 0}`}`);
+    card.appendChild(head);
+    const body = ended ? lines.slice(1) : lines;
+    if (ended && lines[0]) {
+      const summary = el("div", "monitor-event-summary");
+      summary.textContent = lines[0];
+      card.appendChild(summary);
+    }
+    if (body.length) {
+      const pre = el("pre", "monitor-lines");
+      pre.textContent = body.join("\n");
+      card.appendChild(pre);
+    }
+    const omitted = Math.max(0, Number(ev.omitted_lines) || 0);
+    if (omitted) {
+      const more = el("div", "monitor-more");
+      more.textContent = `${omitted} more line${omitted === 1 ? "" : "s"} · ask DGC to read ${String(ev.id || "the monitor")}`;
+      card.appendChild(more);
+    }
+    return card;
+  }
+  let monitorItems = [], monitorsPaused = false;
+  function renderMonitors(ev) {
+    monitorItems = (Array.isArray(ev?.items) ? ev.items : [])
+      .filter((item) => item && typeof item.id === "string").slice(0, 32);
+    monitorsPaused = ev?.wake_paused === true;
+    const live = monitorItems.filter((item) => item.state === "running" || item.state === "stopping");
+    const pending = Math.max(0, Number(ev?.pending_events) || 0);
+    const chips = $("monitor-chips");
+    chips.innerHTML = "";
+    live.forEach((item) => {
+      const chip = el("span", "monitor-chip");
+      chip.setAttribute("role", "listitem");
+      chip.dataset.monitorId = item.id;
+      chip.dataset.state = item.state;
+      const label = el("span", "monitor-chip-label");
+      label.textContent = `${String(item.description || item.id).slice(0, 60)} · ${Math.max(0, Number(item.events) || 0)}`;
+      label.title = `${item.id} · ${String(item.command || "")}`;
+      chip.appendChild(label);
+      const stop = el("button", "rail-icon-button monitor-stop");
+      stop.type = "button";
+      stop.innerHTML = '<span class="codicon codicon-debug-stop" aria-hidden="true"></span>';
+      stop.title = item.state === "stopping" ? "Stopping…" : `Stop ${item.id}`;
+      stop.setAttribute("aria-label", `Stop monitor ${String(item.description || item.id)}`);
+      stop.disabled = item.state === "stopping";
+      stop.onclick = () => { stop.disabled = true; chip.dataset.state = "stopping"; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
+      chip.appendChild(stop);
+      chips.appendChild(chip);
+    });
+    const summary = live.length
+      ? `${live.length} monitor${live.length === 1 ? "" : "s"}`
+      : `${pending} event${pending === 1 ? "" : "s"} waiting`;
+    // With chips on the row they are the count; the words only fill a row that has none.
+    $("monitors-count").textContent = summary;
+    $("monitors-count").hidden = live.length > 0;
+    monitorsBar.setAttribute("aria-label", `Background monitors: ${summary}${monitorsPaused ? ", wake-ups paused" : ""}`);
+    $("monitors-paused").hidden = !monitorsPaused;
+    monitorsBar.dataset.paused = String(monitorsPaused);
+    monitorsBar.hidden = !live.length && !(monitorsPaused && pending);
+    syncComposerRail();
+    if (String(ev?.request_id || "").startsWith("monitors-list")) {
+      if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
+      const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
+      const list = c.querySelector(".monitor-list");
+      monitorItems.forEach((item) => {
+        const row = el("div", "abtns monitor-list-row");
+        const text = el("span", "monitor-list-text");
+        text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
+          + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${Math.max(0, Number(item.events) || 0)} events`;
+        row.appendChild(text);
+        if (item.state === "running") {
+          const stop = el("button", "abtn", "Stop"); stop.type = "button";
+          stop.onclick = () => { stop.disabled = true; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
+          row.appendChild(stop);
+        }
+        list.appendChild(row);
+      });
+    }
+  }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   function syncComposerRail() {
-    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden;
+    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden;
+    composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
@@ -2094,7 +2197,7 @@
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
         // clear that was waiting belonged to the chat being left.
-        if (["cleared", "new", "resumed"].includes(ev.kind)) settleTodoClear();
+        if (["cleared", "new", "resumed"].includes(ev.kind)) { settleTodoClear(); renderMonitors({ items: [] }); }
         if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
@@ -2121,7 +2224,8 @@
         startTurn(ev.prompt, ev.kind, ev.turn_id);
         if (!replaying) customCommandPending = "";
         if (!replaying) {
-          setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); }
+          // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
+          setSending(true); if (queuedCount > 0 && ev.kind !== "monitor") { queuedCount--; renderQueued(); }
           // A queued prompt leaves the queue when its own turn starts, matched by the request id the
           // backend carries on turn_start. Never by position: a queued custom slash command, a goal
           // cycle or a continuation has no id of the user's, and popping the head for one of those
@@ -2429,6 +2533,20 @@
       case "todos":
         renderTodos(ev.todos);
         return;   // the transcript did not change: no follow scroll, no "New" on the pill
+      case "monitor_event": {
+        ensureTurn();
+        appendTurnContent(monitorEventCard(ev)); breakText();
+        break;
+      }
+      case "monitor_started":
+        sysLine(`Monitor ${ev.id} started · ${String(ev.description || "")}`);
+        break;
+      case "monitor_ended":
+        sysLine(`Monitor ${ev.id} · ${String(ev.message || ev.reason || "ended")}`, ev.reason === "flood" || ev.reason === "error");
+        break;
+      case "monitors":
+        renderMonitors(ev);
+        break;
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
@@ -3096,10 +3214,11 @@
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
     "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
     "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
-    "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+    "artifact_in_plan", "tool_profile", "max_parallel_tasks", "monitor_wake",
     "subscription_engine", "subscription_model", "subscription_effort"];
   const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
-    "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
+    "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
+    "monitor_wake"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
@@ -3114,6 +3233,7 @@
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
       sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
       show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      monitor_wake: String(cfg.monitor_wake !== false),
       ultra_mode: String(cfg.ultra_mode === true),
       plan_artifact: String(cfg.plan_artifact !== false),
       artifact_autostart: String(cfg.artifact_autostart !== false),
@@ -3275,7 +3395,7 @@
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "stream_end",
-                              "tool_call", "tool_result", "tool_denied", "turn_end"]);
+                              "tool_call", "tool_result", "tool_denied", "monitor_event", "turn_end"]);
   // One whole turn, or one standalone marker. Paging cuts between units, never inside one.
   function historyUnits(items) {
     const units = [];
