@@ -2674,17 +2674,22 @@ class Agent(GoalLifecycle):
         return (text.startswith("<system-reminder>") and len(self.messages) > 1
                 and self.messages[-2].get("role") == "tool")
 
-    def _drain_monitors(self) -> bool:
+    def _drain_monitors(self, *, with_prompt: bool = False) -> bool:
         """Fold pending monitor events into the running turn, between tool rounds.
 
         Called only at the loop top right after a tool round (_after_tool_round: native tool
         results, a text-protocol <tool_results> message, or a screenshot round), so a notice never
         lands inside a final answer or ahead of the user's own prompt: events that arrive while the
         model writes its answer wait and wake the session afterwards.
+
+        ``with_prompt`` is the other delivery point: events still waiting when the user sends a
+        prompt (wake-ups off, plan mode, or an event that arrived as they typed) follow that
+        prompt, as the docs promise ("events wait for your next message"). Without it they reached
+        the model only if that turn happened to make a tool call.
         """
         hub = getattr(self, "monitors", None)
         if (hub is None or self.depth != 0 or self.cancelled.is_set() or self.stopping
-                or not hub.pending_count() or not self._after_tool_round()):
+                or not hub.pending_count() or not (with_prompt or self._after_tool_round())):
             return False
         room = _MAX_TURN_NOTICE_CHARS - self._monitor_turn_notice_chars
         if room < 1_000:
@@ -2696,7 +2701,8 @@ class Agent(GoalLifecycle):
         self._trim_session_notices(len(notification.text))
         self.messages.append(self._notice_message(notification, "inline"))
         self._monitor_turn_notice_chars += len(notification.text)
-        self._activity("continuing", "Reading monitor events")
+        if not with_prompt:
+            self._activity("continuing", "Reading monitor events")
         hub._notify("delivered", {"notification": notification, "delivery": "inline"})
         return True
 
@@ -3502,6 +3508,7 @@ class Agent(GoalLifecycle):
             else:
                 content = user_text
             self.messages.append({"role": "user", "content": content})
+            self._drain_monitors(with_prompt=True)
             thinking = self._effective_thinking(user_text)
         # Pass the raw level; the client maps it to the right per-provider reasoning
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on

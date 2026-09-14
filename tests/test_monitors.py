@@ -693,6 +693,24 @@ class AgentDeliveryTests(unittest.TestCase):
         self.assertFalse(any("withheld" in str(m.get("content")) for m in agent.messages))
         self.assertTrue(wait_for(lambda: agent.monitors.pending_count() >= 1, 3))
 
+    def test_events_waiting_for_the_next_message_reach_the_model_with_it_without_a_tool_call(self):
+        # Wake-ups off (or plan mode): "events wait for your next message". A reply that makes no
+        # tool call used to leave them queued, and the status line kept saying they were waiting.
+        from dgc.workflows import notice_kind
+        agent = self.agent(mode="auto")
+        hub = agent.monitors
+        hub.queue_background_exit("bg7", "make build", 0, 2.0, "built ok", hub.epoch)
+        self.assertEqual(hub.pending_count(), 1)
+        calls = scripted(agent, [ChatResult(content="Hello.")])
+        self.assertTrue(agent.run_turn("hello after the burst"))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["reason"], "user_turn")
+        self.assertTrue(notice_kind(calls[0]["last"]), "the waiting events follow the prompt")
+        index = next(i for i, m in enumerate(agent.messages) if notice_kind(m))
+        self.assertEqual(agent.messages[index - 1]["content"], "hello after the burst")
+        self.assertEqual(agent.messages[index]["_dgc_notice"]["delivery"], "inline")
+        self.assertEqual(hub.pending_count(), 0)
+
     def test_a_wake_turn_skips_every_user_intent_side_effect(self):
         seen = Path(tempfile.mkdtemp(prefix="dgc-monitor-hook-")) / "hook.json"
         agent = self.agent(mode="auto", hooks={"UserPromptSubmit": [{"command": f"cat > {seen}"}]})
