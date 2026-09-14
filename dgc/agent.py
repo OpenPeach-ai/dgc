@@ -1040,7 +1040,6 @@ class Agent(GoalLifecycle):
         self.ui = ui
         self._turn_images: list = []     # tool-produced images awaiting the model, per batch
         self.client = self._new_client(config.base_url, config.api_key, config.model)
-        self._sync_vision()
         self.skills = discover_skills(config.project_root, disabled_names=config.get("disabled_skills", []))
         if mcp is not None:                       # subagents share the parent's MCP servers
             self.mcp = mcp
@@ -1075,6 +1074,7 @@ class Agent(GoalLifecycle):
                                 on_todo=safe_todo_callback, cancelled=self.cancelled,
                                 on_tool_timing=self._record_tool_timing,
                                 notes=lambda: self.notes())
+        self._sync_vision()
         self.monitors = MonitorHub(self.ctx.tool_owner, config, config.project_root)
         self.ctx.monitors = self.monitors
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
