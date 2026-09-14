@@ -696,8 +696,10 @@ class RealOllamaV1Tests(_LedgerCase):
     """One tiny request to the local Ollama's /v1 route; skipped when it is not reachable.
 
     It uses a model that is already loaded when there is one, otherwise qwen2.5:14b, and it never
-    changes how long a loaded model stays resident: the request carries the model's remaining
-    keep-alive (or none when this test loaded it).
+    stops or unloads anything. Ollama's /v1 route applies the server's default keep-alive to the
+    model it serves (a keep_alive field is sent with the model's remaining time, but that route may
+    ignore it), so a model that looks pinned -- more than two days of residency left -- is not
+    touched at all: the test skips rather than risk shortening someone else's pin.
     """
 
     def test_local_ollama_v1_request_records_nonzero_tokens(self):
@@ -715,9 +717,11 @@ class RealOllamaV1Tests(_LedgerCase):
             try:
                 remaining = (dt.datetime.fromisoformat(expires.replace("Z", "+00:00"))
                              - dt.datetime.now(dt.timezone.utc)).total_seconds()
-                keep_alive = "-1s" if remaining > 10 * 365 * 86_400 else f"{max(60, int(remaining))}s"
+                keep_alive = f"{max(60, int(remaining))}s"
             except ValueError:
-                keep_alive = ""
+                remaining, keep_alive = 0.0, ""
+            if remaining > 2 * 86_400:
+                self.skipTest(f"{model} looks pinned in Ollama; a /v1 request could reset its keep-alive")
         else:
             model = "qwen2.5:14b"
             try:
