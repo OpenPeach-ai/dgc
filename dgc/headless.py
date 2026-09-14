@@ -596,6 +596,110 @@ class HeadlessUI:
         if restore and showing and saved:
             self.turn_activity(*saved)
 
+    # ---- reconnecting: model_retry ----------------------------------------------------------------
+    # A random id per backend process: a retry run outside any turn (`dgc -p --output-format json`)
+    # is "<epoch>:retry<n>", so a restarted backend's first run can never update an old line.
+    backend_epoch = __import__("secrets").token_hex(4)
+    _RETRY_STATES = ("retrying", "recovered", "gave_up", "cancelled")
+
+    @staticmethod
+    def _bounded_text(value, maximum: int) -> str:
+        from .model_errors import scrub_urls
+        from .redaction import bounded_redacted_view
+        text = scrub_urls(str(value or ""))
+        if maximum >= 128:
+            return bounded_redacted_view(text, maximum)
+        return text[:maximum]
+
+    @staticmethod
+    def _bounded_int(value, low: int, high: int):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+            return None
+        return int(min(max(int(value), low), high))
+
+    def _retry_id(self, run_n, agent: str = "") -> str:
+        scope = str(self.turn_id or "") or self.backend_epoch
+        number = self._bounded_int(run_n, 0, 10**9) or 0
+        middle = f":{str(agent)[:64]}" if agent else ""
+        return f"{scope[:48]}{middle}:retry{number}"[:128]
+
+    def model_retry(self, state: str, *, run_n, kind, layer, attempt, summary, endpoint="",
+                    max_attempts=None, model="", api_mode="", detail="", hint="", http_status=0,
+                    delay_ms=None, origin="agent", agent="", engine="") -> None:
+        """One retry run's frame. Every bound is clamped here; only declared fields are sent.
+
+        No ``turn_activity`` de-duplication: each attempt is a new fact. ``run_n`` is the agent's run
+        number, never the envelope ``seq`` (a payload ``seq`` would overwrite it and kill the panel).
+        """
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        from .model_watch import safe_endpoint
+        if state not in self._RETRY_STATES:
+            return
+        fields: dict = {
+            "retry_id": self._retry_id(run_n, agent),
+            "state": state,
+            "kind": kind if kind in MODEL_FAILURE_KINDS else "other",
+            "layer": layer if layer in ("request", "continuation") else "request",
+            "attempt": self._bounded_int(attempt, 1, 100) or 1,
+            "summary": self._bounded_text(summary, 200) or "the model request failed",
+        }
+        maximum = self._bounded_int(max_attempts, 0, 100)
+        if maximum:                     # absent (or nonsense) means no fixed count
+            fields["max_attempts"] = maximum
+        where = str(endpoint or "")
+        if "://" in where:
+            where = safe_endpoint(where)
+        for key, value, bound in (("endpoint", where, 300), ("model", model, 200),
+                                  ("api_mode", api_mode, 40), ("detail", detail, 4000),
+                                  ("hint", hint, 300)):
+            text = self._bounded_text(value, bound)
+            if text:
+                fields[key] = text
+        if self.turn_id:
+            fields["turn_id"] = str(self.turn_id)
+        status = self._bounded_int(http_status, 0, 10**6)
+        if status is not None and 100 <= status <= 599:
+            fields["http_status"] = status
+        delay = self._bounded_int(delay_ms, 0, 600_000)
+        if delay is not None:
+            fields["delay_ms"] = delay
+        fields["origin"] = origin if origin in ("agent", "subagent", "engine") else "agent"
+        if agent:
+            fields["agent"] = str(agent)[:64]
+        if engine:
+            fields["engine"] = str(engine)[:40]
+        self.em.emit("model_retry", **fields)
+
+    def _error_cause(self, cause) -> dict | None:
+        """``error.cause`` with every bound clamped (the nested object is not schema-checked)."""
+        from .editor_protocol import MAX_SAFE_INTEGER, MODEL_FAILURE_KINDS
+        from .model_watch import safe_endpoint
+        if not isinstance(cause, dict):
+            return None
+        out: dict = {"kind": cause.get("kind") if cause.get("kind") in MODEL_FAILURE_KINDS else "other",
+                     "summary": self._bounded_text(cause.get("summary"), 200) or "the model request failed"}
+        where = str(cause.get("endpoint") or "")
+        if "://" in where:
+            where = safe_endpoint(where)
+        for key, value, bound in (("endpoint", where, 300), ("model", cause.get("model"), 200),
+                                  ("api_mode", cause.get("api_mode"), 40),
+                                  ("detail", cause.get("detail"), 4000), ("hint", cause.get("hint"), 300)):
+            text = self._bounded_text(value, bound)
+            if text:
+                out[key] = text
+        status = self._bounded_int(cause.get("http_status"), 0, 10**6)
+        if status is not None and 100 <= status <= 599:
+            out["http_status"] = status
+        attempts = self._bounded_int(cause.get("attempts"), 0, MAX_SAFE_INTEGER)
+        if attempts:
+            out["attempts"] = attempts
+        if cause.get("run_n") is not None and self._bounded_int(cause.get("run_n"), 1, 10**9):
+            out["retry_id"] = self._retry_id(cause["run_n"], str(cause.get("agent") or ""))
+        elif isinstance(cause.get("retry_id"), str) and cause["retry_id"]:
+            out["retry_id"] = cause["retry_id"][:128]
+        return out
+    # ---- end reconnecting: model_retry ------------------------------------------------------------
+
     def steering_applied(self, request_id: str) -> None:
         hook = getattr(self, "_steering_hook", None)
         if hook:
@@ -680,8 +784,12 @@ class HeadlessUI:
         """Carry the exact post-save compaction outcome instead of parsing a status sentence."""
         self.em.emit("compacted", **result)
 
-    def error(self, message: str) -> None:
-        self.em.emit("error", message=message)
+    def error(self, message: str, cause=None) -> None:
+        payload = self._error_cause(cause)
+        if payload is None:
+            self.em.emit("error", message=message)
+        else:
+            self.em.emit("error", message=message, cause=payload)
 
     # blocking decisions -------------------------------------------------------
     def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
@@ -3368,8 +3476,82 @@ class Backend:
     def _history_notice_items(self, message: dict, turn: dict | None):
         """None when ``message`` is not a model-stream recovery notice; otherwise the
         ``model_retry`` items it replays as (possibly empty). A notice never opens a turn: the
-        caller opens one only when none is open, then appends these items and moves on."""
-        return None
+        caller opens one only when none is open, then appends these items and moves on.
+
+        Each notice is its own run (one line per seam). Its state is what the file supports: the
+        continuation connected and streamed when a later assistant message in the same turn has
+        content or tool calls (``recovered``); otherwise ``retrying``, which the panel settles as
+        "Reconnect did not finish" when the replayed turn ends. A replay never says "Gave up".
+        """
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        from .workflows import stream_recovery_notice
+        notice = stream_recovery_notice(message)
+        if notice is None:
+            return None
+        messages = list(getattr(getattr(self, "agent", None), "messages", None) or [])
+        index = next((i for i, m in enumerate(messages) if m is message), -1)
+        recovered = False
+        for later in (messages[index + 1:] if index >= 0 else ()):
+            if not isinstance(later, dict):
+                continue
+            role = later.get("role")
+            if role == "assistant":
+                if str(later.get("content") or "").strip() or later.get("tool_calls"):
+                    recovered = True
+                    break
+            elif role == "user" and self._history_opens_turn(later):
+                break
+        # A turn is open for any notice DGC wrote after a prompt; only a transcript that starts with
+        # one has none, and the caller then opens the first turn, "h1".
+        turn_id = str(turn["id"]) if isinstance(turn, dict) else "h1"
+        if isinstance(turn, dict):
+            turn["retry_n"] = int(turn.get("retry_n") or 0) + 1
+            number = turn["retry_n"]
+        else:
+            number = 1
+
+        def bounded(value, low, high):
+            return (int(value) if isinstance(value, int) and not isinstance(value, bool)
+                    and low <= value <= high else None)
+
+        kind = notice.get("cause") if notice.get("cause") in MODEL_FAILURE_KINDS else "other"
+        item = {"type": "model_retry", "retry_id": f"{turn_id}:retry{number}",
+                "state": "recovered" if recovered else "retrying", "kind": kind,
+                "layer": "continuation",
+                "attempt": bounded(notice.get("attempt"), 1, 100) or min(number, 100),
+                "summary": str(notice.get("summary") or "the stream ended before its terminal event")[:200],
+                "turn_id": turn_id}
+        maximum = bounded(notice.get("max"), 1, 100)
+        if maximum is not None:
+            item["max_attempts"] = maximum
+        endpoint = str(notice.get("endpoint") or "")[:300]
+        if endpoint:
+            item["endpoint"] = endpoint
+        return [item]
+
+    @staticmethod
+    def _history_opens_turn(message: dict) -> bool:
+        """Would ``_history`` open a new turn at this user message? (notices and scaffolding do not)"""
+        from .agent import _COMPACT_PREFIX
+        from .workflows import display_prompt, notice_kind
+        kind = notice_kind(message)
+        if kind == "stream_recovery":
+            return False
+        if kind == "monitor":
+            return (message.get("_dgc_notice") or {}).get("delivery") == "wake"
+        content = message.get("content")
+        if isinstance(content, list):
+            text = " ".join(str(p.get("text", "")) for p in content
+                            if isinstance(p, dict) and p.get("type") == "text")
+        else:
+            text = str(content or "")
+        if isinstance(content, str) and (TURN_CONTINUE_MARKER in content or _goal_scaffold(content)):
+            return True
+        if isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
+            return False
+        shown = display_prompt(_strip_editor_context(text))
+        return not (shown.startswith("<tool_results>") or shown.startswith("<system-reminder>")
+                    or text.lstrip().startswith("<system-reminder>"))
     # ---- end 0.40 reconnecting --------------------------------------------------------------------
 
 
