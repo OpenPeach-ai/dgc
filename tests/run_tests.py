@@ -5727,7 +5727,7 @@ def unit_tests(tmp: Path):
     #     so a resumed session re-renders instead of showing blank)
     class _FakeAgent:
         def __init__(self, msgs): self.messages = msgs
-    class _FakeBackend:
+    class _FakeBackend(Backend):   # a Backend without its process state: _history's lane hooks resolve
         def __init__(self, msgs): self.agent = _FakeAgent(msgs)
     msgs = [
         {"role": "system", "content": "you are dgc"},

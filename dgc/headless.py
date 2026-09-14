@@ -66,6 +66,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
+    "list_agents", "get_image",
 })
 _WAKE_YIELD_TIMEOUT = 10.0
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
@@ -98,7 +99,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory", "list_monitors", "stop_monitor",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_BOOLEAN_KEYS = frozenset({
@@ -402,8 +403,9 @@ def _command_lines(stream, watch: _PipeWatch | None = None):
 # A restored turn must be built by the same code that builds a live one, so history is not a
 # second projection with its own rules -- it is the live event vocabulary, replayed. Anything in
 # this set is a turn fragment: it is meaningless without the ``turn_start`` above it.
-_MID_TURN_ITEMS = ("text_delta", "thinking_delta", "stream_end",
-                   "tool_call", "tool_result", "tool_denied", "monitor_event", "turn_end")
+_MID_TURN_ITEMS = ("text_delta", "thinking_delta", "thinking_end", "stream_end",
+                   "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
+                   "model_retry", "monitor_event", "turn_end")
 
 
 def _safe_busy(backend) -> bool:
@@ -855,6 +857,7 @@ class Backend:
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
+                          "agents": True, "image_views": True, "model_retry": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -1987,6 +1990,10 @@ class Backend:
         the user actually sent and at every resume marker, which is exactly what the scaffolding
         filter below already identifies, so no session file has to change.
         """
+        # 0.40 lanes keep their per-call replay state behind these hooks (see the marked sections at
+        # the end of this class); each one is a no-op until its lane lands.
+        self._history_begin_images()
+        self._history_begin_reasoning()
         items: list = []
         calls: dict = {}                # saved tool_call id -> the name its result belongs to
         turn_n = 0
@@ -2012,6 +2019,7 @@ class Backend:
             # however confident the prose above it sounded. Reporting "Worked" over either is the
             # same class of lie as calling a shutdown the user's own stop.
             finished = bool(turn["final"]) and not turn["interrupted"]
+            finished = self._history_turn_finished(turn, finished)
             items.append({"type": "turn_end", "turn_id": turn["id"],
                           "reason": "completed" if finished else "cancelled",
                           "token_estimate": 0,
@@ -2022,7 +2030,7 @@ class Backend:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
-            turn = {"id": f"h{turn_n}", "n": 0, "final": None, "interrupted": False}
+            turn = {"id": f"h{turn_n}", "n": 0, "r": 0, "final": None, "interrupted": False}
             items.append({"type": "turn_start", "turn_id": turn["id"],
                           "prompt": prompt, "kind": kind})
 
@@ -2033,7 +2041,9 @@ class Backend:
 
         from .workflows import notice_kind
         skip_next_ack = False
-        for m in self.agent.messages:
+        for index, m in enumerate(self.agent.messages):
+            # Before any `continue`: images anchored at or before this message join the open turn.
+            items.extend(self._history_before_message(index, turn))
             role = m.get("role")
             content = m.get("content")
             if role == "system":
@@ -2061,6 +2071,12 @@ class Backend:
                         "kind": kind,
                         "delivery": "wake" if notice.get("delivery") == "wake" else "inline",
                         "turn_id": current["id"]})
+                continue
+            # A model-stream recovery notice continues the turn it interrupted: it opens no turn.
+            notice_items = self._history_notice_items(m, turn)
+            if notice_items is not None:
+                ensure_turn()
+                items.extend(notice_items)
                 continue
             # The resume instruction is written to the transcript as a user turn so the model
             # receives it, but the user did not type it. Live turns already render it as a marker
@@ -2094,6 +2110,10 @@ class Backend:
                 # restored session as chat bubbles pasted their entire goal spec back at them as
                 # though they had just sent it. It is also not a turn boundary: every one of these
                 # is a gate continuing the SAME turn.
+                # The text tool protocol's results message carries the question outcomes of that
+                # round. Only a message that recorded one can open a turn for them.
+                if text.startswith("<tool_results>") and m.get("_dgc_decision"):
+                    items.extend(self._history_decisions_for_text_results(m, ensure_turn()))
                 if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
@@ -2102,7 +2122,9 @@ class Backend:
             elif role == "assistant":
                 current = ensure_turn()
                 text = str(content or "")
+                text = self._history_display_text(m, text)
                 tool_calls = list(m.get("tool_calls") or [])[:16]
+                items.extend(self._history_reasoning_items(m, current, after_text=False))
                 if text.strip():
                     # One delta per saved message: the panel's text path is the same, and a saved
                     # message has no chunk boundaries left to reproduce.
@@ -2113,6 +2135,7 @@ class Backend:
                     items.append({"type": "stream_end", "message_id": message_id, "phase": phase})
                     if phase == "answer":
                         current["final"] = message_id
+                items.extend(self._history_reasoning_items(m, current, after_text=True))
                 for tc in tool_calls:
                     function = tc.get("function") or {}
                     name = str(function.get("name") or "tool")[:128]
@@ -2135,10 +2158,14 @@ class Backend:
                 is_diff, diff = split_diff(output)
                 if "tool result unavailable after session interruption" in output:
                     turn["interrupted"] = True
+                items.extend(self._history_before_tool_result(m, call_id, turn))
                 items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
                               "output": output, "is_error": tool_output_is_error(output),
                               "is_diff": is_diff, "diff": diff})
+                items.extend(self._history_after_tool_result(m, call_id, turn))
         close_turn()
+        self._history_finish_reasoning(items)
+        self._history_finish_images(items)
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
         # history remains intact; this limit applies only to the restored webview payload.
         retained, size = [], 0
@@ -3306,6 +3333,79 @@ class Backend:
             raise _Shutdown()
         else:
             self.em.emit("error", message=f"unknown command: {t!r}")
+
+    # ================================================================================================
+    # 0.40.0 lane sections. Each lane owns exactly one section below and fills in its own methods;
+    # the foundation only placed the hooks `_history` calls, as no-ops that mutate nothing. Keep at
+    # least one untouched line between sections so parallel lanes merge cleanly.
+    # ================================================================================================
+
+    # ---- 0.40 agents ------------------------------------------------------------------------------
+    # (sub-agent registry listener, `agents` emission and the list_agents branch live here)
+    # ---- end 0.40 agents --------------------------------------------------------------------------
+
+
+    # ---- 0.40 images ------------------------------------------------------------------------------
+    def _history_begin_images(self) -> None:
+        """Reset per-call image replay state at the start of one `_history` projection."""
+
+    def _history_before_message(self, index: int, turn: dict | None) -> list:
+        """Image records anchored at or before message ``index`` whose call has no native tool
+        message, as ``tool_images`` items with ``call_id: null``. ``turn`` is None when no turn is
+        open; the records then wait for a later call or `_history_finish_images`."""
+        return []
+
+    def _history_after_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
+        """``tool_images`` items for the call whose ``tool_result`` was just replayed."""
+        return []
+
+    def _history_finish_images(self, items: list) -> None:
+        """Place anchored image records still pending after the last turn closed."""
+    # ---- end 0.40 images --------------------------------------------------------------------------
+
+
+    # ---- 0.40 reconnecting ------------------------------------------------------------------------
+    def _history_notice_items(self, message: dict, turn: dict | None):
+        """None when ``message`` is not a model-stream recovery notice; otherwise the
+        ``model_retry`` items it replays as (possibly empty). A notice never opens a turn: the
+        caller opens one only when none is open, then appends these items and moves on."""
+        return None
+    # ---- end 0.40 reconnecting --------------------------------------------------------------------
+
+
+    # ---- 0.40 options -----------------------------------------------------------------------------
+    def _history_decisions_for_text_results(self, message: dict, turn: dict) -> list:
+        """``options_resolved`` items (``call_id: null``) for a text-protocol ``<tool_results>``
+        message that recorded question outcomes in ``_dgc_decision``."""
+        return []
+
+    def _history_before_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
+        """The ``options_resolved`` item replayed just before a native tool result (may mark the
+        turn, e.g. ``turn["options_dismissed"]``)."""
+        return []
+
+    def _history_turn_finished(self, turn: dict, finished: bool) -> bool:
+        """Whether a replayed turn counts as finished; a dismissed question may end a turn."""
+        return finished
+    # ---- end 0.40 options -------------------------------------------------------------------------
+
+
+    # ---- 0.40 thinking ----------------------------------------------------------------------------
+    def _history_begin_reasoning(self) -> None:
+        """Reset per-call reasoning replay state (budget, block counters)."""
+
+    def _history_display_text(self, message: dict, text: str) -> str:
+        """The assistant text as displayed (a thinking splice marker stripped)."""
+        return text
+
+    def _history_reasoning_items(self, message: dict, turn: dict, *, after_text: bool) -> list:
+        """``thinking_delta``/``thinking_end`` items for the reasoning blocks saved on an assistant
+        message, before (``after_text`` False) or after its text. Block ids use ``turn["r"]``."""
+        return []
+
+    def _history_finish_reasoning(self, items: list) -> None:
+        """Apply the history reasoning budget across the whole payload, newest first."""
+    # ---- end 0.40 thinking ------------------------------------------------------------------------
 
 
 def _open_crash_log(config: Config):

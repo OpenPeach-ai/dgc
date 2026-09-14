@@ -1,0 +1,463 @@
+{
+ "source": "Backend._history at 65cd0251 (before the 0.40 hooks)",
+ "rich": [
+  {
+   "type": "turn_start",
+   "turn_id": "h1",
+   "prompt": "",
+   "kind": "prompt"
+  },
+  {
+   "type": "text_delta",
+   "text": "orphan preface"
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h1:1",
+   "phase": "answer"
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h1",
+   "reason": "completed",
+   "token_estimate": 0,
+   "final_message_id": "h1:1"
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h2",
+   "prompt": "Fix the failing test",
+   "kind": "prompt"
+  },
+  {
+   "type": "text_delta",
+   "text": "Looking at the test first."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h2:1",
+   "phase": "commentary"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_0",
+   "name": "read_file",
+   "args": {
+    "path": "tests/test_x.py"
+   },
+   "summary": "tests/test_x.py"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_1",
+   "name": "bash",
+   "args": {
+    "command": "pytest -q"
+   },
+   "summary": "pytest -q"
+  },
+  {
+   "type": "tool_result",
+   "call_id": "call_0",
+   "name": "read_file",
+   "output": "def test_x():\n    assert add(1, 2) == 3\n",
+   "is_error": false,
+   "is_diff": false,
+   "diff": ""
+  },
+  {
+   "type": "tool_result",
+   "call_id": "call_1",
+   "name": "bash",
+   "output": "exit code: 1\nFAILED tests/test_x.py::test_x",
+   "is_error": true,
+   "is_diff": false,
+   "diff": ""
+  },
+  {
+   "type": "text_delta",
+   "text": "<tool name=\"edit_file\">…</tool>"
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h2:2",
+   "phase": "answer"
+  },
+  {
+   "type": "text_delta",
+   "text": "Fixed: `add` returned a - b."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h2:3",
+   "phase": "answer"
+  },
+  {
+   "type": "monitor_event",
+   "id": "mon1",
+   "description": "deploy log",
+   "event_index": 1,
+   "lines": [
+    "READY 1"
+   ],
+   "omitted_lines": 0,
+   "kind": "output",
+   "delivery": "inline",
+   "turn_id": "h2"
+  },
+  {
+   "type": "monitor_event",
+   "id": "mon1",
+   "description": "deploy log",
+   "event_index": 0,
+   "lines": [
+    "gone"
+   ],
+   "omitted_lines": 0,
+   "kind": "output",
+   "delivery": "inline",
+   "turn_id": "h2"
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h2",
+   "reason": "completed",
+   "token_estimate": 0,
+   "final_message_id": "h2:3"
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h3",
+   "prompt": "deploy log · 1 event",
+   "kind": "monitor"
+  },
+  {
+   "type": "monitor_event",
+   "id": "mon1",
+   "description": "deploy log",
+   "event_index": 2,
+   "lines": [
+    "DEPLOYED"
+   ],
+   "omitted_lines": 0,
+   "kind": "ended",
+   "delivery": "wake",
+   "turn_id": "h3"
+  },
+  {
+   "type": "text_delta",
+   "text": "The deploy finished."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h3:1",
+   "phase": "answer"
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h3",
+   "reason": "completed",
+   "token_estimate": 0,
+   "final_message_id": "h3:1"
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h4",
+   "prompt": "What is on this screen? 📷",
+   "kind": "prompt"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_2",
+   "name": "bash",
+   "args": {
+    "command": "sleep 100"
+   },
+   "summary": "sleep 100"
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h4",
+   "reason": "cancelled",
+   "token_estimate": 0,
+   "final_message_id": null
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h5",
+   "prompt": "stop that and summarise",
+   "kind": "prompt"
+  },
+  {
+   "type": "text_delta",
+   "text": "Summary so far."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h5:1",
+   "phase": "commentary"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_3",
+   "name": "grep",
+   "args": {
+    "pattern": "TODO",
+    "path": "."
+   },
+   "summary": "."
+  },
+  {
+   "role": "compaction",
+   "text": "Earlier we fixed add()."
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h5",
+   "reason": "cancelled",
+   "token_estimate": 0,
+   "final_message_id": null
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h6",
+   "prompt": "Continued the interrupted turn",
+   "kind": "continue"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_4",
+   "name": "bash",
+   "args": {
+    "command": "make"
+   },
+   "summary": "make"
+  },
+  {
+   "type": "tool_result",
+   "call_id": "call_4",
+   "name": "bash",
+   "output": "error: tool result unavailable after session interruption",
+   "is_error": true,
+   "is_diff": false,
+   "diff": ""
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h6",
+   "reason": "cancelled",
+   "token_estimate": 0,
+   "final_message_id": null
+  },
+  {
+   "type": "turn_start",
+   "turn_id": "h7",
+   "prompt": "Continued the standing goal",
+   "kind": "resume"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "call_5",
+   "name": "edit_file",
+   "args": {
+    "path": "app.py",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "summary": "app.py"
+  },
+  {
+   "type": "tool_result",
+   "call_id": "call_5",
+   "name": "edit_file",
+   "output": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-a\n+b\n",
+   "is_error": false,
+   "is_diff": true,
+   "diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-a\n+b\n"
+  },
+  {
+   "type": "text_delta",
+   "text": "Goal step done."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h7:1",
+   "phase": "commentary"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_0",
+   "name": "ls",
+   "args": {
+    "path": "0"
+   },
+   "summary": "0"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_1",
+   "name": "ls",
+   "args": {
+    "path": "1"
+   },
+   "summary": "1"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_2",
+   "name": "ls",
+   "args": {
+    "path": "2"
+   },
+   "summary": "2"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_3",
+   "name": "ls",
+   "args": {
+    "path": "3"
+   },
+   "summary": "3"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_4",
+   "name": "ls",
+   "args": {
+    "path": "4"
+   },
+   "summary": "4"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_5",
+   "name": "ls",
+   "args": {
+    "path": "5"
+   },
+   "summary": "5"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_6",
+   "name": "ls",
+   "args": {
+    "path": "6"
+   },
+   "summary": "6"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_7",
+   "name": "ls",
+   "args": {
+    "path": "7"
+   },
+   "summary": "7"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_8",
+   "name": "ls",
+   "args": {
+    "path": "8"
+   },
+   "summary": "8"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_9",
+   "name": "ls",
+   "args": {
+    "path": "9"
+   },
+   "summary": "9"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_10",
+   "name": "ls",
+   "args": {
+    "path": "10"
+   },
+   "summary": "10"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_11",
+   "name": "ls",
+   "args": {
+    "path": "11"
+   },
+   "summary": "11"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_12",
+   "name": "ls",
+   "args": {
+    "path": "12"
+   },
+   "summary": "12"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_13",
+   "name": "ls",
+   "args": {
+    "path": "13"
+   },
+   "summary": "13"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_14",
+   "name": "ls",
+   "args": {
+    "path": "14"
+   },
+   "summary": "14"
+  },
+  {
+   "type": "tool_call",
+   "call_id": "many_15",
+   "name": "ls",
+   "args": {
+    "path": "15"
+   },
+   "summary": "15"
+  },
+  {
+   "type": "text_delta",
+   "text": "All done."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h7:2",
+   "phase": "answer"
+  },
+  {
+   "role": "compaction",
+   "text": "second summary"
+  },
+  {
+   "type": "text_delta",
+   "text": "A different reply."
+  },
+  {
+   "type": "stream_end",
+   "message_id": "h7:3",
+   "phase": "answer"
+  },
+  {
+   "type": "turn_end",
+   "turn_id": "h7",
+   "reason": "cancelled",
+   "token_estimate": 0,
+   "final_message_id": null
+  }
+ ],
+ "long_sha256": "3868cf46442655ae58a1fa59e1b2bb12ca609dadec6de2e15346e0cc7565bdfd",
+ "long_chars": 943101
+}

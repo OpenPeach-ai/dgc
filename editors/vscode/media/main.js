@@ -3877,8 +3877,9 @@
   // Everything a saved turn is made of. Anything else in a history payload is not dispatched:
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
-  const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "stream_end",
-                              "tool_call", "tool_result", "tool_denied", "monitor_event", "turn_end"]);
+  const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "thinking_end", "stream_end",
+                              "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
+                              "model_retry", "monitor_event", "turn_end"]);
   // One whole turn, or one standalone marker. Paging cuts between units, never inside one.
   function historyUnits(items) {
     const units = [];
