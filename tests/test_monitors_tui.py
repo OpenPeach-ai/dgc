@@ -323,6 +323,18 @@ class TuiMonitorTests(unittest.TestCase):
         self.addCleanup(created.agent.mcp.stop_all)
         self.addCleanup(lambda: created.agent.monitors.shutdown(wait=3.0))
         self.assertIn("the previous agent still runs 1 monitor", ui._flash_msg)
+        # The status row is a single line: at 130 columns the flash was cut before it said how to
+        # stop the monitor. The instruction now comes before the branch name, and stays up to read.
+        self.assertIn("/monitors stop", ui._flash_msg[:120], ui._flash_msg)
+        self.assertLess(ui._flash_msg.index("/monitors stop"), ui._flash_msg.index(created.workspace_branch or "shared"))
+        self.assertIn("Ctrl+\\ back to it", ui._flash_msg)
+        self.assertGreater(ui._flash_until - time.monotonic(), 4.0)
+        # Wider than the terminal, it stays on the status row's one line and ends in an ellipsis.
+        import re
+        ui._width = 90
+        shown = re.sub(r"\x1b\[[0-9;]*m", "", ui._status().value).rstrip("\n")
+        self.assertNotIn("\n", shown)
+        self.assertTrue(shown.rstrip().endswith("…"), shown)
         self.assertEqual(len(self.agent.monitors.running()), 1)
 
     def test_the_monitor_docs_match_the_terminal_and_the_gating(self):

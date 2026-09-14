@@ -3029,7 +3029,10 @@ class TUI:
             return ANSI(self._rich(f"[bold {th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]name this session[/] "
                                    f"[{th.faint}]· type a name then Enter (blank = unnamed) · Esc to cancel[/]"))
         if self._flash_msg and time.monotonic() < self._flash_until:
-            return ANSI(self._rich(f"[{th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]{_esc(self._flash_msg)}[/]"))
+            # One row: a flash wider than the terminal ends in an ellipsis on that row, rather than
+            # word-wrapping onto a second line the status window never shows.
+            return ANSI(self._rich(f"[{th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]{_esc(self._flash_msg)}[/]",
+                                   no_wrap=True, overflow="ellipsis"))
         if self._input is not None:             # a free-text prompt is waiting (host URL, MCP field, …)
             return ANSI(self._rich(f"[bold {th.accent_bright}]{glyphs.DIAMOND}[/] "
                                    f"[{th.text}]{_esc(self._input.get('prompt', ''))}[/] "
@@ -4410,13 +4413,17 @@ class TUI:
         note = f" · prior workspace unavailable: {attach_error}" if attach_error else ""
         hub = getattr(getattr(previous, "agent", None), "monitors", None)
         running = len(hub.running()) if hub is not None else 0
+        warning = ""
         if running:
             # The earlier agent stays alive beside this one, and so do its monitors: they can still
-            # wake it. Say so, rather than let a hidden chat keep spending turns on them.
-            note += (f" · the previous agent still runs {running} monitor"
-                     f"{'' if running == 1 else 's'} (switch back and /monitors stop)")
+            # wake it. Say so, rather than let a hidden chat keep spending turns on them. The status
+            # row is one line, so what to do about it comes before the branch name, which is what
+            # a narrower terminal may cut, and the line stays up long enough to read.
+            warning = (f" · the previous agent still runs {running} monitor"
+                       f"{'' if running == 1 else 's'}: Ctrl+\\ back to it, then /monitors stop")
         self._flash(f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
-                    f" · {len(self._sessions)} agents · {place}{note}")
+                    f" · {len(self._sessions)} agents{warning} · {place}{note}",
+                    secs=6.0 if warning else 2.2)
         return sess
 
     def _open_saved_session(self, path) -> None:
