@@ -3357,6 +3357,14 @@ def todo(args: dict, ctx) -> str:
     # the list under the context's checklist lock so all three agree about the same list.
     from contextlib import nullcontext
     with getattr(ctx, "todo_lock", None) or nullcontext():
+        issued = getattr(ctx, "todo_request_epoch", None)
+        if issued is not None and issued != int(getattr(ctx, "todo_clear_epoch", 0) or 0):
+            # The model wrote this call before the user's clear reached it (the same response can
+            # carry a dozen todo updates). Applying it would bring the dropped list straight back.
+            # Soft, not an error: a refused call can trip the loop guard and fail the turn.
+            return ("todo not applied: the user cleared the checklist while this call was queued. "
+                    "Do not recreate it unless the user asks for a checklist again or genuinely "
+                    "new multi-step work starts.")
         ctx.todos = normalized
         if ctx.on_todo:
             ctx.on_todo(ctx.todos)

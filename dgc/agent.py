@@ -659,6 +659,11 @@ class AgentContext:
     # replacing the list. Both hold this while they change the list and announce it, so the list,
     # the pushed event and the tool's own result always describe the same state.
     todo_lock: threading.RLock = field(default_factory=threading.RLock)
+    # Counts the user's clears. The agent copies it into todo_request_epoch as it sends each model
+    # request, so a `todo` call the model wrote before a clear landed can be told apart from one
+    # written after the model was told about it (tools.todo skips the former).
+    todo_clear_epoch: int = 0
+    todo_request_epoch: int | None = None
     # The agent's background monitors (dgc.monitors.MonitorHub); tools reach it through the context.
     monitors: object = None
 
@@ -956,6 +961,9 @@ class Agent(GoalLifecycle):
             if dropped:
                 self._todo_clear_turns = 0
                 self._todo_clear_note_pending = True
+                # Any `todo` call already in the model's current response was written before the
+                # clear; it must not repaint (and save) the list the user just dropped.
+                self.ctx.todo_clear_epoch = int(getattr(self.ctx, "todo_clear_epoch", 0) or 0) + 1
             # Always announce, even an already-empty list: a frontend showing a stale list hides it.
             if callable(self.ctx.on_todo):
                 self.ctx.on_todo(self.ctx.todos)
@@ -1817,6 +1825,13 @@ class Agent(GoalLifecycle):
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
               defer_text: bool = False, request_reason: str = "other"):
+        ctx = getattr(self, "ctx", None)
+        if ctx is not None:
+            with _todo_lock(ctx):
+                # The tool calls this request returns were written against the checklist as it
+                # stands now; a clear that lands while the model generates or the batch runs
+                # makes them stale.
+                ctx.todo_request_epoch = int(getattr(ctx, "todo_clear_epoch", 0) or 0)
         if getattr(self, "_mode_prompt_dirty", False):
             self._refresh_system()
         repaired, changed = _repair_tool_transcript(self.messages)

@@ -244,6 +244,46 @@ class TodoLifecycleTests(unittest.TestCase):
         # Soft, not a refusal: a later list is accepted (a refused call could trip the loop guard).
         self.assertTrue(self.update([{"content": "Inspect", "status": "pending"}]).startswith("todo list updated:"))
 
+    def test_todo_calls_queued_before_a_mid_turn_clear_do_not_bring_the_list_back(self):
+        from dgc import tools as tools_module
+        steps = ["Prepare", "Check", "Review"]
+
+        def rows(done: int, active: int | None):
+            return [{"content": name, "status": "done" if i < done else
+                     "in_progress" if i == active else "pending"} for i, name in enumerate(steps)]
+        real_bash = tools_module.EXECUTORS["bash"]
+        cleared = []
+
+        def bash(args, ctx):
+            if "step-2" in args.get("command", "") and not cleared:
+                cleared.append(self.agent.clear_todos(persist=False))   # the editor's Clear lands
+            return real_bash(args, ctx)
+        batch = []
+        for index in range(3):                  # one response carrying every step's calls
+            batch += [ToolCall(f"a{index}", "todo", {"todos": rows(index, index)}),
+                      ToolCall(f"b{index}", "bash", {"command": f"echo step-{index + 1}-done"}),
+                      ToolCall(f"c{index}", "todo", {"todos": rows(index + 1, None)})]
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("t0", "todo", {"todos": rows(0, None)})]),
+            ChatResult(tool_calls=batch),
+            ChatResult(tool_calls=[ToolCall("t9", "todo", {"todos": [
+                {"content": "Genuinely new work", "status": "pending"}]})]),
+            ChatResult(content="Done."))
+        with patch.dict(tools_module.EXECUTORS, {"bash": bash}), \
+                patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Work through the steps"),
+                            (self.agent._last_turn_error, self.ui.errors))
+        self.assertEqual(cleared, [True])
+        results = {m.get("tool_call_id"): m.get("content") for m in self.agent.messages
+                   if m.get("role") == "tool"}
+        self.assertTrue(results["a1"].startswith("todo list updated:"), "before the clear it applies")
+        for stale in ("c1", "a2", "c2"):
+            self.assertTrue(results[stale].startswith("todo not applied:"), (stale, results[stale]))
+        painted_after_clear = self.ui.todo_lists[self.ui.todo_lists.index([]) + 1:]
+        self.assertEqual(painted_after_clear, [[{"content": "Genuinely new work", "status": "pending"}]],
+                         "only the call written after the model was told repaints the list")
+        self.assertTrue(results["t9"].startswith("todo list updated:"), "soft: a later list is accepted")
+
     def test_resume_wording_drops_the_todos_while_a_clear_is_in_force(self):
         from dgc import goals
         from dgc.headless import _goal_scaffold
