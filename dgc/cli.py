@@ -1033,6 +1033,14 @@ class CLI:
                 self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "status":
             self.banner()
+        elif cmd == "usage":
+            from . import usage_ledger
+            try:
+                report = usage_ledger.report(usage_ledger.normalize_range(rest))
+            except ValueError as exc:
+                self.ui.error(str(exc))
+            else:
+                self.console.print(render.render_markdown(usage_ledger.format_report(report)))
         elif cmd == "eta":
             from .eta import format_stats
             snapshot_fn = getattr(self.agent, "eta_snapshot", None)
@@ -2023,6 +2031,7 @@ def run_help() -> None:
     c.print("  dgc export [ID] [FILE]  save a session as Markdown")
     c.print("  dgc trust               list the folders the trust gate skips  (dgc trust revoke N|PATH|here)")
     c.print("  dgc notes [QUERY]       what this project already learned, across sessions")
+    c.print("  dgc usage               tokens counted on this machine, by model and day  (--range R, --json)")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
@@ -2034,6 +2043,34 @@ def run_help() -> None:
     render_help(c)
 
 
+def run_usage(argv: list[str]) -> int:
+    """`dgc usage [--range R] [--json]`: the local token ledger, read-only.
+
+    It never builds a Config or an Agent: reading the ledger needs no endpoint, key or project.
+    """
+    from . import usage_ledger
+    parser = argparse.ArgumentParser(
+        prog="dgc usage", allow_abbrev=False,
+        description="Tokens and requests DGC counted on this machine, by model and by day.")
+    parser.add_argument("--range", dest="range_name", default="7d",
+                        help="today, 7d, 30d, month or all (default 7d)")
+    parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    try:
+        args = parser.parse_args(argv)
+        range_name = usage_ledger.normalize_range(args.range_name)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    except ValueError as exc:
+        print(f"dgc usage: {exc}", file=sys.stderr)
+        return 2
+    report = usage_ledger.report(range_name)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        Console().print(render.render_markdown(usage_ledger.format_report(report)))
+    return 1 if report.get("error") else 0
+
+
 SUBCOMMAND_USAGE: dict[str, str] = {
     "setup": "dgc setup                          configure provider, model and context interactively",
     "doctor": "dgc doctor                         check that the endpoint and model are reachable",
@@ -2042,6 +2079,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
     "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
     "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
+    "usage": "dgc usage [--range today|7d|30d|month|all] [--json]   tokens counted on this machine, by model and day",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
@@ -2116,6 +2154,8 @@ def main(argv: list[str] | None = None) -> int | None:
             agent = Agent(cfg, UI())
             Console().print(render.render_markdown(handle_command(agent, " ".join(raw_argv[1:]))))
             return 0
+        if raw_argv[0] == "usage":
+            return run_usage(raw_argv[1:])
         if raw_argv[0] == "trust":
             from .trust import handle_trust_command
             cfg = Config()
@@ -2147,7 +2187,7 @@ def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
-        epilog="commands: setup · doctor · help · update · export · export-training · protocol · skills · mcp · "
+        epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · mcp · "
                "serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")

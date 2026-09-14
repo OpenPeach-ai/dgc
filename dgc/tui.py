@@ -992,6 +992,17 @@ class TUI:
         self._flash(f"{snapshot.label} · {basis} · confidence {snapshot.confidence:.0%}"
                     if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
 
+    def _show_usage(self, rest: str = "") -> None:
+        """`/usage [range]`: the local token ledger, the same aggregates as `dgc usage`."""
+        from . import usage_ledger
+        try:
+            range_name = usage_ledger.normalize_range(rest)
+        except ValueError as exc:
+            self._flash(str(exc))
+            return
+        self._open_reader(usage_ledger.format_report(usage_ledger.report(range_name)),
+                          footer="token usage · /usage today|7d|30d|month|all · Esc close")
+
     def _set_notify(self, rest: str = "") -> None:
         choice = rest.strip().lower()
         if choice in ("on", "always", "true"):
@@ -4101,6 +4112,8 @@ class TUI:
             self._open_diff(rest)
         elif cmd == "eta":
             self._show_eta(rest)
+        elif cmd == "usage":
+            self._show_usage(rest)
         elif cmd == "notify":
             self._set_notify(rest)
         elif cmd in ("history", "hist"):

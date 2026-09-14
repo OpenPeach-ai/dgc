@@ -241,6 +241,10 @@ API-key environment reference is process-only:
 - `dgc doctor` — check that the endpoint and model are reachable.
 - `dgc update` — update DGC to the latest version.
 - `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
+- `dgc usage [--range today|7d|30d|month|all] [--json]` — tokens and requests counted on this
+  machine (`~/.dgc/usage.sqlite`), by model and by day, from what each provider reported. The
+  same report is `/usage` inside DGC and Settings → Token Usage in the editor; nothing in it is
+  sent anywhere.
 - `dgc protocol describe` — print the installed headless/editor contract as JSON.
 - `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
   protocol-only.
