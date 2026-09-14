@@ -429,7 +429,8 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 /* background monitors — a rail row of running monitors (above the others) with a Stop per chip,
    and one bounded card per event inside the turn it arrived in. */
 #monitorsbar .rail-row { flex: 1; flex-wrap: nowrap; }
-#monitorsbar .rail-row > .monitors-icon, #monitorsbar .rail-row > .monitors-paused { align-self: flex-start; margin-top: 8px; }
+#monitorsbar .rail-row > .monitors-icon, #monitorsbar .rail-row > .monitors-paused,
+#monitorsbar .rail-row > .monitors-count { align-self: flex-start; margin-top: 8px; }
 #monitorsbar .monitors-icon { color: var(--accent-text); }
 #monitorsbar[data-paused="true"] .monitors-icon { color: var(--faint); }
 .monitors-count { flex: none; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
@@ -461,7 +462,7 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 .monitor-lines { max-height: 12em; margin: var(--sp-1) 0 0; overflow: auto; white-space: pre-wrap;
   overflow-wrap: anywhere; color: var(--text); font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
 .monitor-more { margin-top: var(--sp-1); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.monitor-list-row { align-items: center; }
+.monitor-list-row { align-items: center; padding-block: 2px; }
 .monitor-list-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .monitor-note .codicon { color: var(--accent-text); }
@@ -944,12 +945,14 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .artifact .alabel { font: var(--w-reg) var(--t-sm)/1 var(--sans); color: var(--muted); }
 .artifact .aurl { display: block; width: 100%; margin: var(--sp-2) 0 var(--sp-2); padding: 0; border: 0; background: transparent; text-align: left; font: var(--w-med) var(--t-sm)/1.45 var(--mono); color: var(--accent-text); cursor: pointer; word-break: break-all; }
 .artifact .aurl:hover { color: var(--lav); text-decoration: underline; }
-.artifact .abtns { display: flex; gap: var(--sp-2); }
-.artifact .abtn { cursor: pointer; font: var(--w-semi) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
-.artifact .abtn:hover { border-color: var(--accent); }
-.artifact .abtn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
-.artifact .abtn.primary:hover { background: var(--accent-hover); }
-.artifact .abtn:disabled, .artifact-list-row .abtn:disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
+/* The same buttons serve the artifact card and the /artifact and /monitors listing cards (plain
+   .card rows); scoped to .artifact alone, the listing Stop buttons fell back to the browser's own. */
+:is(.artifact, .card) .abtns { display: flex; gap: var(--sp-2); }
+:is(.artifact, .card) .abtn { cursor: pointer; font: var(--w-semi) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+:is(.artifact, .card) .abtn:hover { border-color: var(--accent); }
+:is(.artifact, .card) .abtn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+:is(.artifact, .card) .abtn.primary:hover { background: var(--accent-hover); }
+:is(.artifact, .card) .abtn:disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
 .artifact-list-row.stopping { opacity: .72; }
 
 /* Windows High Contrast / VS Code forced-colors mode. System colors preserve the user's chosen
@@ -971,11 +974,11 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   }
   .tool, .diff, .card, .tasks-panel, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
   #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
-  #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
+  #settings input, #settings select, button.act, button.opt, button.link, :is(.artifact, .card) .abtn {
     border-color: CanvasText;
   }
   button.act.primary, button.opt.rec, .cmenu .mrow.sel, .pop .pi.sel,
-  .csend, .csend[data-mode="auto"], .artifact .abtn.primary {
+  .csend, .csend[data-mode="auto"], :is(.artifact, .card) .abtn.primary {
     forced-color-adjust: none; background: Highlight; color: HighlightText;
     border-color: Highlight; box-shadow: none;
   }

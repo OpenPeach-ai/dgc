@@ -3598,9 +3598,9 @@ test("monitor_event renders a bounded card inside the current turn; the rail's c
   event({ type: "monitors", wake_paused: true, pending_events: 2, items: [] });
   assert.equal(bar.hidden, false, "paused wake-ups with events waiting stay visible");
   assert.equal(doc.getElementById("monitors-paused").hidden, false);
-  assert.equal(doc.getElementById("monitors-count").textContent, "2 events waiting");
+  assert.equal(doc.getElementById("monitors-count").textContent, "2 events waiting for your next message");
   assert.equal(doc.getElementById("monitors-count").hidden, false);
-  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 2 events waiting, wake-ups paused");
+  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 2 events waiting for your next message, wake-ups paused");
   event({ type: "monitors", wake_paused: false, pending_events: 0, items: [] });
   assert.equal(bar.hidden, true);
   assert.equal(rail.hidden, true);
@@ -4092,4 +4092,53 @@ test("Stop with messages queued gives them back as not sent instead of leaving t
   assert.equal(h.doc.getElementById("queued").textContent, "");
   assert.match(h.doc.getElementById("log").textContent, /Stopped before 2 queued messages ran; they were not sent\./);
   assert.deepEqual(h.errors, []);
+});
+
+test("a background command's exit card is titled as a background command, not a monitor", () => {
+  // Before: every monitor_event card read "Monitor · …", including kind background_exit, although
+  // a background command is not a monitor.
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "turn_start", turn_id: "t1", prompt: "", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg1", description: "sleep 20 && echo bg-finished-ok", event_index: 0,
+          lines: ["exited 0 after 20.0s", "bg-finished-ok"], kind: "background_exit", delivery: "wake", turn_id: "t1" });
+  const card = doc.querySelector('.monitor-event[data-kind="background_exit"]');
+  assert.equal(card.querySelector(".me-title").textContent, "Background command · sleep 20 && echo bg-finished-ok");
+  assert.equal(card.getAttribute("aria-label"), "Background command sleep 20 && echo bg-finished-ok, exited");
+  event({ type: "monitor_event", id: "mon1", description: "api log", event_index: 2, lines: ["READY"], kind: "output", delivery: "wake", turn_id: "t1" });
+  assert.match([...doc.querySelectorAll(".monitor-event")].at(-1).querySelector(".me-title").textContent, /^Monitor · api log$/);
+  assert.deepEqual(errors, []);
+});
+
+test("with wake-ups off, the monitors row says events are waiting for your next message", () => {
+  // Before: the row showed only the chips; "N events waiting" was hidden whenever a chip was shown,
+  // and the paused pill reflected only the ten-wake pause, not Wake on monitor events turned off.
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const items = [{ id: "mon1", description: "ticker", command: "./tick.sh 4", state: "running", events: 75, pending_events: 40 },
+                 { id: "mon2", description: "alpha-watch", command: "./tick.sh 5", state: "running", events: 21, pending_events: 9 }];
+  const count = doc.getElementById("monitors-count"), bar = doc.getElementById("monitorsbar");
+  event({ type: "config", monitor_wake: true });
+  event({ type: "monitors", wake_paused: false, pending_events: 2, items });
+  assert.equal(count.hidden, true, "with wake-ups on, events about to wake DGC are not 'waiting'");
+  event({ type: "config", monitor_wake: false });
+  assert.equal(count.hidden, false, "turning wake-ups off repaints the row");
+  assert.equal(count.textContent, "2 waiting", "short beside the chips");
+  assert.equal(count.title, "2 events waiting for your next message");
+  event({ type: "monitors", wake_paused: false, pending_events: 49, items });
+  assert.equal(count.textContent, "49 waiting");
+  assert.equal(count.title, "49 events waiting for your next message");
+  assert.equal(doc.querySelectorAll(".monitor-chip").length, 2, "the chips stay");
+  assert.equal(doc.getElementById("monitors-paused").hidden, false);
+  assert.equal(doc.getElementById("monitors-paused").textContent, "wake off");
+  assert.match(bar.getAttribute("aria-label"), /49 events waiting for your next message/);
+  // Nothing running any more: the waiting events keep the row.
+  event({ type: "monitors", wake_paused: false, pending_events: 49, items: [] });
+  assert.equal(bar.hidden, false);
+  assert.equal(count.textContent, "49 events waiting for your next message");
+  event({ type: "config", monitor_wake: true });
+  event({ type: "monitors", wake_paused: true, pending_events: 3, items });
+  assert.equal(doc.getElementById("monitors-paused").textContent, "paused");
+  assert.equal(count.textContent, "3 waiting");
+  assert.deepEqual(errors, []);
 });

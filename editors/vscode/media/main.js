@@ -60,6 +60,7 @@
     $("modeicon").className = "codicon codicon-" + MODES[m].icon; $("modelabel").textContent = m;
     $("btn-mode").title = MODES[m].desc + " — Shift+Tab to cycle";
     $("btn-mode").setAttribute("aria-label", `Permission mode: ${m}. ${MODES[m].desc}`);
+    paintMonitorsRow();                  // plan mode holds monitor events for the next message
   }
   // The extension host owns the auto-mode confirmation. Update only when the backend
   // echoes mode_changed/state so cancelling the modal cannot leave a false "auto" badge.
@@ -1610,14 +1611,17 @@
     card.dataset.monitorId = String(ev.id || "");
     card.dataset.kind = String(ev.kind || "output");
     card.setAttribute("role", "group");
-    const ended = ev.kind === "ended" || ev.kind === "background_exit";
+    const background = ev.kind === "background_exit";
+    const ended = ev.kind === "ended" || background;
     const lines = (Array.isArray(ev.lines) ? ev.lines : []).map((line) => String(line)).slice(0, 40);
     const head = el("div", "monitor-event-head");
-    head.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
-      + `<span class="me-title">Monitor · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
-      + `<span class="me-meta">${ended ? esc(ev.kind === "background_exit" ? "exited" : "ended")
-        : `event ${Math.max(0, Number(ev.event_index) || 0)}`}</span>`;
-    card.setAttribute("aria-label", `Monitor ${String(ev.description || ev.id || "")}, ${ended ? "ended" : `event ${Number(ev.event_index) || 0}`}`);
+    // A command run with `bash` in background mode is not a monitor; its card says what it is.
+    const kind = background ? "Background command" : "Monitor";
+    const state = background ? "exited" : ended ? "ended" : `event ${Math.max(0, Number(ev.event_index) || 0)}`;
+    head.innerHTML = `<span class="codicon codicon-${background ? "terminal" : "pulse"}" aria-hidden="true"></span>`
+      + `<span class="me-title">${kind} · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
+      + `<span class="me-meta">${esc(state)}</span>`;
+    card.setAttribute("aria-label", `${kind} ${String(ev.description || ev.id || "")}, ${state}`);
     card.appendChild(head);
     const body = ended ? lines.slice(1) : lines;
     if (ended && lines[0]) {
@@ -1642,7 +1646,7 @@
   // began. A new chat, clear or resume empties it, so the end of a monitor from the chat that was
   // left (it can reach the webview after the new chat's acknowledgement) is not shown in this one.
   const eventCount = (value) => { const n = Math.max(0, Number(value) || 0); return `${n} event${n === 1 ? "" : "s"}`; };
-  let monitorItems = [], monitorsPaused = false;
+  let monitorItems = [], monitorsPaused = false, monitorsPending = 0;
   const knownMonitorIds = new Set();
   function renderMonitors(ev) {
     monitorItems = (Array.isArray(ev?.items) ? ev.items : [])
@@ -1650,8 +1654,18 @@
     if (ev?.reset) knownMonitorIds.clear();
     monitorItems.forEach((item) => knownMonitorIds.add(item.id));
     monitorsPaused = ev?.wake_paused === true;
+    monitorsPending = Math.max(0, Number(ev?.pending_events) || 0);
+    paintMonitorsRow();
+    if (String(ev?.request_id || "").startsWith("monitors-list")) renderMonitorsList();
+  }
+  // The row above the prompt: a chip per running monitor, and, whenever events are held back for
+  // the person rather than about to wake DGC (wake-ups paused, Wake on monitor events off, plan
+  // mode), how many are waiting for their next message. Repainted when the config or mode changes.
+  function paintMonitorsRow() {
     const live = monitorItems.filter((item) => item.state === "running" || item.state === "stopping");
-    const pending = Math.max(0, Number(ev?.pending_events) || 0);
+    const pending = monitorsPending;
+    const wakeOff = lastConfig?.monitor_wake === false;
+    const held = monitorsPaused || wakeOff || curMode === "plan";
     const chips = $("monitor-chips");
     chips.innerHTML = "";
     live.forEach((item) => {
@@ -1673,35 +1687,44 @@
       chip.appendChild(stop);
       chips.appendChild(chip);
     });
-    const summary = live.length
+    const waiting = held && pending ? `${eventCount(pending)} waiting for your next message` : "";
+    const summary = waiting || (live.length
       ? `${live.length} monitor${live.length === 1 ? "" : "s"}`
-      : `${pending} event${pending === 1 ? "" : "s"} waiting`;
-    // With chips on the row they are the count; the words only fill a row that has none.
-    $("monitors-count").textContent = summary;
-    $("monitors-count").hidden = live.length > 0;
-    monitorsBar.setAttribute("aria-label", `Background monitors: ${summary}${monitorsPaused ? ", wake-ups paused" : ""}`);
-    $("monitors-paused").hidden = !monitorsPaused;
-    monitorsBar.dataset.paused = String(monitorsPaused);
-    monitorsBar.hidden = !live.length && !(monitorsPaused && pending);
+      : `${eventCount(pending)} waiting`);
+    // With chips on the row they are the count; the words fill a row that has none. Events held for
+    // you are counted even beside the chips, in two words there so the chips keep their room.
+    $("monitors-count").textContent = live.length && waiting ? `${pending} waiting` : summary;
+    $("monitors-count").title = waiting;
+    $("monitors-count").hidden = live.length > 0 && !waiting;
+    const pausedLabel = monitorsPaused ? "paused" : wakeOff ? "wake off" : "";
+    monitorsBar.setAttribute("aria-label", `Background monitors: ${summary}`
+      + (monitorsPaused ? ", wake-ups paused" : wakeOff ? ", wake-ups off" : ""));
+    $("monitors-paused").hidden = !pausedLabel;
+    $("monitors-paused").textContent = pausedLabel || "paused";
+    $("monitors-paused").title = wakeOff && !monitorsPaused
+      ? "Wake on monitor events is off: new events wait for your next message"
+      : "Wake-ups are paused: new events wait for your next message";
+    monitorsBar.dataset.paused = String(Boolean(pausedLabel));
+    monitorsBar.hidden = !live.length && !(held && pending);
     syncComposerRail();
-    if (String(ev?.request_id || "").startsWith("monitors-list")) {
-      if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
-      const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
-      const list = c.querySelector(".monitor-list");
-      monitorItems.forEach((item) => {
-        const row = el("div", "abtns monitor-list-row");
-        const text = el("span", "monitor-list-text");
-        text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
-          + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${eventCount(item.events)}`;
-        row.appendChild(text);
-        if (item.state === "running") {
-          const stop = el("button", "abtn", "Stop"); stop.type = "button";
-          stop.onclick = () => { stop.disabled = true; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
-          row.appendChild(stop);
-        }
-        list.appendChild(row);
-      });
-    }
+  }
+  function renderMonitorsList() {
+    if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
+    const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
+    const list = c.querySelector(".monitor-list");
+    monitorItems.forEach((item) => {
+      const row = el("div", "abtns monitor-list-row");
+      const text = el("span", "monitor-list-text");
+      text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
+        + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${eventCount(item.events)}`;
+      row.appendChild(text);
+      if (item.state === "running") {
+        const stop = el("button", "abtn", "Stop"); stop.type = "button";
+        stop.onclick = () => { stop.disabled = true; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
+        row.appendChild(stop);
+      }
+      list.appendChild(row);
+    });
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
@@ -2245,6 +2268,7 @@
         lastConfig = ev;
         nativeSteering = liveSteering && !ev.subscription_engine;
         renderComposerControls();
+        paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"
         curUltra = ev.ultra_mode === true;
         curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
         updateModelControl();

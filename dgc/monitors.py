@@ -224,7 +224,15 @@ def notification_label(batches: list) -> str:
         if ended:
             parts.append("exited" if ended[-1].kind == "background_exit" else "ended")
         return " · ".join(parts)[:160]
-    return f"{len(ids)} monitors · {plural(events, 'event')}"
+    # A background command is not a monitor: count the two apart.
+    background = list(dict.fromkeys(batch.monitor_id for batch in batches if batch.kind == "background_exit"))
+    watched = [monitor_id for monitor_id in ids if monitor_id not in background]
+    parts = []
+    if watched:
+        parts.extend([plural(len(watched), "monitor"), plural(events, "event")])
+    if background:
+        parts.append(f"{plural(len(background), 'background command')} exited")
+    return " · ".join(parts)[:160]
 
 
 def flood_message(limit: str) -> str:

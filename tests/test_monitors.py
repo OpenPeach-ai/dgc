@@ -1801,3 +1801,25 @@ class ServeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotificationLabelTests(unittest.TestCase):
+    """A background command is not a monitor, so a wake that names several does not call them that."""
+
+    def batch(self, monitor_id, kind, description="job"):
+        return monitors_mod.Batch(monitor_id=monitor_id, description=description, kind=kind, lines=["x"])
+
+    def test_several_background_exits_are_named_as_background_commands(self):
+        # Before: "2 monitors · 0 events" for two background commands that exited.
+        label = monitors_mod.notification_label([self.batch("bg1", "background_exit"),
+                                                 self.batch("bg2", "background_exit")])
+        self.assertEqual(label, "2 background commands exited")
+
+    def test_a_mix_counts_monitors_and_background_commands_apart(self):
+        label = monitors_mod.notification_label([self.batch("mon1", "output"), self.batch("mon1", "output"),
+                                                 self.batch("bg1", "background_exit")])
+        self.assertEqual(label, "1 monitor · 2 events · 1 background command exited")
+
+    def test_several_monitors_keep_their_label(self):
+        label = monitors_mod.notification_label([self.batch("mon1", "output"), self.batch("mon2", "output")])
+        self.assertEqual(label, "2 monitors · 2 events")
