@@ -7533,6 +7533,29 @@ def test_mcp_protocol():
           "requested commands fail closed" in doctor_output
           and "sandbox is enabled but this platform has no supported backend" in doctor_output
           and "not ready" in doctor_output and "[bold green]ready" not in doctor_output)
+    check("doctor has an installation section naming the install method and update target",
+          "installation[/bold] — what runs and what `dgc update` changes" in doctor_output
+          and "    method" in doctor_output and "    update target" in doctor_output
+          and "    update lock" in doctor_output)
+
+    from dgc import install_layout as _doctor_layout
+    broken_console = _DoctorConsole()
+    real_report = _doctor_layout.installation_report
+    try:
+        sandbox._backend = lambda: None
+        _doctor_cli.Console = lambda: broken_console
+        _doctor_llm.LLMClient = _DoctorClient
+        _doctor_layout.installation_report = lambda: (_ for _ in ()).throw(PermissionError("fixture"))
+        _doctor_cli.run_doctor(_DoctorConfig())
+    finally:
+        sandbox._backend = real_backend
+        _doctor_cli.Console = real_console
+        _doctor_llm.LLMClient = real_client
+        _doctor_layout.installation_report = real_report
+    broken_output = "\n".join(broken_console.lines)
+    check("an installation report that raises is a doctor warning, not a crash",
+          "could not inspect the installation: PermissionError: fixture" in broken_output
+          and "endpoint reachable" in broken_output)
 
     try:
         sandbox._backend = lambda: None

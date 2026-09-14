@@ -82,7 +82,8 @@ you had running, and `dgc` exits non-zero. The active version and the two newest
 others are kept: `dgc update --rollback` switches back, `dgc update --version X`
 switches to a kept version, and `dgc update --list` shows them. An install made
 by an older installer (under `~/dgc`) moves to the new layout on its next update;
-the old directory is left in place for you to delete.
+the old directory is left in place for you to delete. `dgc doctor` shows which
+install is running, where the launcher points and what `dgc update` would change.
 
 If `cursor`, `code`, or `codium` is on `PATH`, the installer also verifies and
 installs the self-hosted editor extension into each of them. Set
@@ -247,7 +248,7 @@ API-key environment reference is process-only:
 ## Subcommands
 
 - `dgc setup` — configure provider / model / context.
-- `dgc doctor` — check that the endpoint and model are reachable.
+- `dgc doctor` — check that the endpoint and model are reachable, and show the installation.
 - `dgc update` — install the latest DGC beside the current version; `--rollback`,
   `--version X` and `--list` switch between the versions kept on disk.
 - `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.

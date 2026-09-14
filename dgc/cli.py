@@ -1729,6 +1729,20 @@ def run_doctor(config: Config) -> None:
     if sandbox_requested and not sandbox_report.available:
         c.print("  [bold red]✗[/bold red] sandbox is enabled but this platform has no supported backend")
         c.print("    → install bubblewrap on Linux, use sandbox-exec on macOS, or run [bold]/sandbox off[/bold]")
+    # installation — which install runs, and which one `dgc update` would change
+    try:
+        from . import install_layout as _layout
+        install_rows, install_notes = _layout.installation_report()
+    except Exception as exc:  # a diagnostic must not stop the endpoint check below
+        install_rows, install_notes = [], [f"could not inspect the installation: {type(exc).__name__}: {exc}"]
+    c.print("  [bold]installation[/bold] — what runs and what `dgc update` changes")
+    # soft_wrap: these are mostly paths, and a path folded at the console width cannot be copied.
+    for label, value in install_rows:
+        c.print(f"    {label:15}{terminal_safe_text(value)}", markup=False, highlight=False,
+                soft_wrap=True)
+    for note in install_notes:
+        c.print(f"  [yellow]![/yellow] {_markup_literal(note)}", highlight=False, soft_wrap=True)
+    c.print("")
     # subscription engines — run your own plan through the official first-party CLI
     from . import subscriptions as _subs
     active = str(config.get("subscription_engine", "")).strip().lower()

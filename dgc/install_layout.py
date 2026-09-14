@@ -419,6 +419,8 @@ def write_record(data_dir: Path, bin_dir: Path, version: str, previous: str | No
     body = {
         "layout": LAYOUT,
         "method": "release",
+        # The only channel there is: the site publishes one release, the latest.
+        "channel": "latest",
         "data_dir": str(data_dir),
         "bin_dir": str(bin_dir),
         "launcher": str(Path(bin_dir) / "dgc"),
@@ -533,6 +535,110 @@ def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Loc
                        and _real(record.get("data_dir", "")) == data_dir else None)
                    or default_bin_dir())
     return Location(kind, data_dir, bin_dir, tree, version)
+
+
+# ----------------------------------------------------------------- doctor ---
+
+def _update_lock_state(data_dir: Path) -> str:
+    """'free', 'held by pid N' or 'held', without creating anything."""
+    path = Path(data_dir) / "update.lock"
+    if not path.is_file():
+        return "free"
+    try:
+        import fcntl
+        fd = os.open(str(path), os.O_RDONLY)
+    except (ImportError, OSError):
+        return "unknown"
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError:
+        holder = update_lock_holder(data_dir)
+        return f"held by pid {holder}" if holder else "held"
+    finally:
+        os.close(fd)             # closing drops the probe's own shared lock
+    return "free"
+
+
+def installation_report(env=None, prefix: str | None = None,
+                        argv0: str | None = None) -> tuple[list[tuple[str, str]], list[str]]:
+    """`dgc doctor`'s Installation section: rows to print and problems worth a warning.
+
+    Like `codex doctor`, it says which install is running and which one `dgc update` would change,
+    and flags when those differ; unlike it, nothing here decides the update — locate() does."""
+    env = os.environ if env is None else env
+    real_prefix = _real(sys.prefix if prefix is None else prefix)
+    location = locate(env=env, prefix=str(real_prefix), argv0=argv0)
+    launcher = inspect_launcher(location.bin_dir / "dgc")
+    rows: list[tuple[str, str]] = []
+    notes: list[str] = []
+
+    method = {
+        "versions": f"versioned install, DGC {location.version}",
+        "legacy": "single-tree install (the layout before 0.39)",
+        "checkout": "git checkout",
+        "other": "not an installer-made install (pip or a custom environment)",
+    }[location.kind]
+    rows.append(("method", method))
+    rows.append(("running from", str(real_prefix)))
+    if launcher.kind == "missing":
+        rows.append(("launcher", f"{launcher.path} (missing)"))
+    else:
+        shown = str(launcher.target) if launcher.target is not None else "not a symlink"
+        rows.append(("launcher", f"{launcher.path} → {shown} ({launcher.kind})"))
+    if location.kind == "checkout":
+        rows.append(("update target", "none — `dgc update` does not repoint a checkout"))
+    else:
+        rows.append(("update target", f"{versions_dir(location.data_dir)}, launcher {location.bin_dir / 'dgc'}"))
+
+    versions = installed_versions(location.data_dir)
+    active = (launcher.tree.name if launcher.kind == "managed" and launcher.tree is not None
+              and _real(launcher.tree.parent) == _real(versions_dir(location.data_dir)) else None)
+    described = []
+    for name in versions:
+        marks = []
+        if name == active:
+            marks.append("active")
+        others = [pid for pid in live_pids(location.data_dir, name) if pid != os.getpid()]
+        if others:
+            marks.append("running: pid " + ", ".join(map(str, others)))
+        described.append(name + (f" ({'; '.join(marks)})" if marks else ""))
+    rows.append(("versions", ", ".join(described) if described else "none"))
+    rows.append(("update lock", _update_lock_state(location.data_dir)))
+    path_dirs = [os.path.abspath(os.path.expanduser(part))
+                 for part in str(env.get("PATH", "")).split(os.pathsep) if part]
+    on_path = str(location.bin_dir) in path_dirs
+    rows.append(("on PATH", "yes" if on_path else f"no — add {location.bin_dir} to PATH"))
+
+    if location.kind == "checkout":
+        notes.append(f"this dgc runs from a git checkout ({location.tree}); `dgc update` will not "
+                     "repoint it — update it with git")
+    elif location.kind == "legacy":
+        notes.append(f"this is a single-tree install ({location.tree}); `dgc update` moves it to "
+                     f"{versions_dir(location.data_dir)} and leaves the old tree in place")
+    if launcher.kind in ("foreign", "directory"):
+        notes.append(f"{launcher.path} was not made by the DGC installer; `dgc update` will refuse "
+                     "to replace it")
+    elif launcher.kind == "dangling":
+        notes.append(f"{launcher.path} points at {launcher.target}, which no longer exists")
+    elif launcher.kind == "missing" and location.kind in ("versions", "legacy"):
+        notes.append(f"there is no launcher at {launcher.path}; `dgc update` will create one")
+    if (location.kind in ("versions", "legacy") and launcher.target is not None
+            and launcher.kind in ("managed", "legacy")
+            and _real(launcher.target.parent.parent) != real_prefix):
+        # Codex's doctor warns when "update would target a different npm install"; here the
+        # usual cause is a dgc started before an update or a rollback.
+        notes.append(f"{launcher.path} runs {launcher.target.parent.parent.parent}, not this dgc "
+                     f"({real_prefix.parent}) — restart dgc to use it")
+    if not on_path and (location.kind in ("versions", "legacy") or launcher.kind != "missing"):
+        notes.append(f"{location.bin_dir} is not on PATH, so `dgc` will not find the launcher")
+    elif on_path:
+        for folder in path_dirs:
+            candidate = Path(folder) / "dgc"
+            if os.path.isfile(candidate) and os.access(str(candidate), os.X_OK):
+                if Path(folder) != location.bin_dir:
+                    notes.append(f"`dgc` on PATH is {candidate}, ahead of {location.bin_dir / 'dgc'}")
+                break
+    return rows, notes
 
 
 # --------------------------------------------------------------------- cli ---

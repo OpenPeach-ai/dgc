@@ -481,6 +481,34 @@ class VersionedInstallLifecycle(unittest.TestCase):
             serve.wait(timeout=30)
             serve.stdout.close()
 
+    def test_09_doctor_reports_the_install_it_runs_and_the_one_update_changes(self):
+        (self.home / ".dgc").mkdir(exist_ok=True)
+        config = self.home / ".dgc" / "config.json"
+        if not config.exists():
+            config.write_text(json.dumps({"base_url": "http://127.0.0.1:9/v1"}))
+        env = dict(self.env, PATH=str(self.bin) + os.pathsep + self.env["PATH"])
+        done = run_dgc(self.launcher, ["doctor"], env, timeout=120)
+        text = output(done)
+        self.assertIn("installation", text)
+        self.assertIn("versioned install, DGC 0.90.4", text)
+        self.assertIn(f"{self.launcher} → {self.data / 'versions' / '0.90.4' / '.venv' / 'bin' / 'dgc'} (managed)", text)
+        self.assertIn(f"update target  {self.data / 'versions'}, launcher {self.launcher}", text)
+        self.assertRegex(text, r"versions\s+0\.90\.4 \(active\), 0\.90\.3, 0\.90\.2")
+        self.assertRegex(text, r"update lock\s+free")
+        self.assertRegex(text, r"on PATH\s+yes")
+        self.assertNotIn("not this dgc", text)
+        # An older version started directly: doctor names the mismatch rather than hiding it.
+        older = self.data / "versions" / "0.90.3" / ".venv" / "bin" / "dgc"
+        stale = run_dgc(older, ["doctor"], env, timeout=120)
+        self.assertIn("versioned install, DGC 0.90.3", output(stale))
+        self.assertIn(f"{self.launcher} runs {self.data / 'versions' / '0.90.4'}, not this dgc", output(stale))
+        fd = L.acquire_update_lock(self.data)
+        try:
+            held = run_dgc(self.launcher, ["doctor"], env, timeout=120)
+            self.assertRegex(output(held), rf"update lock\s+held by pid {os.getpid()}")
+        finally:
+            L.release_update_lock(fd)
+
 
 # ------------------------------------------------------------ old installs ---
 
@@ -713,7 +741,8 @@ class InterruptedBuilds(unittest.TestCase):
         self.assertIsNotNone(L.read_complete(vdir))
         self.assertEqual(run_dgc(launcher, ["--version"], plain).stdout.strip(), "dgc 0.91.2")
         record = json.loads((home / ".dgc" / "install.json").read_text())
-        self.assertEqual((record["data_dir"], record["bin_dir"]), (str(data), str(bin_dir)))
+        self.assertEqual((record["data_dir"], record["bin_dir"], record["channel"]),
+                         (str(data), str(bin_dir), "latest"))
 
 
 # ---------------------------------------------------------------- refusals ---
