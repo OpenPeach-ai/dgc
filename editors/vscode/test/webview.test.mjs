@@ -1198,6 +1198,37 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   dom.window.close();
 });
 
+// The stall watcher needs no editor change: a silent model request arrives as the ordinary v12
+// `turn_activity` (state "waiting") with a label and a detail naming the model and host. These are
+// the exact strings `dgc serve` emits (tests/test_model_stall.py drives the real backend).
+test("a silent model request shows its waiting notice, then the stream takes the verb back", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const verb = () => doc.querySelector(".thinking .verb")?.textContent;
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting for the model" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "No response from the model",
+    detail: "qwen3.8:27b at 127.0.0.1:11434 · no reply for 45s+" });
+  assert.equal(verb(), "No response from the model · qwen3.8:27b at 127.0.0.1:11434 · no reply for 45s+");
+  assert.match(doc.querySelector(".thinking .meta").textContent, /^\(\d+s/);
+  event({ type: "info", message: "↻ no response from qwen3.8:27b at 127.0.0.1:11434 for 900s — retrying (1/2)" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Retrying the model request",
+    detail: "attempt 2 of 3 · qwen3.8:27b at 127.0.0.1:11434" });
+  assert.equal(verb(), "Retrying the model request · attempt 2 of 3 · qwen3.8:27b at 127.0.0.1:11434");
+  event({ type: "turn_activity", turn_id: "t1", state: "responding", label: "Responding" });
+  event({ type: "text_delta", text: "Back on track." });
+  assert.equal(verb(), "Responding", "tokens flowing again replace the notice");
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "The model stopped streaming",
+    detail: "qwen3.8:27b at 127.0.0.1:11434 · no tokens for 45s+" });
+  assert.equal(verb(), "The model stopped streaming · qwen3.8:27b at 127.0.0.1:11434 · no tokens for 45s+");
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "error", message: "stopped — model 'qwen3.8:27b' at http://127.0.0.1:11434/v1/chat/completions stopped streaming: no tokens for 300s after partial output (2 recoveries)" });
+  event({ type: "turn_end", turn_id: "t1", reason: "error", final_message_id: "t1:1" });
+  assert.equal(verb(), undefined, "the notice does not outlive the turn");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("a backend restart that is recovering does not relabel an answered turn as failed", () => {
   const { dom, errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
