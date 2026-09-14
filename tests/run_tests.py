@@ -11054,10 +11054,13 @@ def test_site_sitemap_and_robots():
     routes = json.loads((PROJECT / "site" / "routes.json").read_text(encoding="utf-8"))["html"]
     check("site: the sitemap is exactly the canonical URL of every indexable page",
           set(locs) == expected and len(locs) == len(expected), detail=repr(sorted(set(locs) ^ expected)))
+    # Counted from routes.json rather than pinned: a new docs page must add exactly one sitemap URL,
+    # on the docs host, and nothing else.
+    docs_routes = [route for route in routes if route == "/docs" or route.startswith("/docs/")]
+    docs_locs = [loc for loc in locs if loc.startswith("https://docs.vibedgc.com")]
     check("site: the sitemap has one URL per routed page (docs pages on docs.vibedgc.com)",
-          len(locs) == len(routes) == 37
-          and sum(loc.startswith("https://docs.vibedgc.com") for loc in locs) == 27,
-          detail=f"{len(locs)} locs, {len(routes)} routes")
+          len(locs) == len(routes) and len(docs_locs) == len(docs_routes) and docs_routes,
+          detail=f"{len(locs)} locs, {len(routes)} routes, {len(docs_locs)} docs locs, {len(docs_routes)} docs routes")
     check("site: the sitemap invents no lastmod, changefreq or priority",
           not _re.search(r"<(?:lastmod|changefreq|priority)", sitemap))
     check("site: the committed sitemap and robots.txt match the build",
