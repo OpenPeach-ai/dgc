@@ -230,6 +230,102 @@ def check_pages(errors: list[str]) -> dict[Path, PageParser]:
     return parsed
 
 
+# The home document from its first byte through the end of the hero (up to the proof strip), gzip -6.
+# A 10-segment initial congestion window carries 14,600 bytes, less ~1.3 KB of response headers, so
+# 12,000 keeps the first viewport in the first flight with room to spare (about 7.2 KB when this check was added).
+HOME_FIRST_FLIGHT_MARKER = b'<section class="proof-strip"'
+HOME_FIRST_FLIGHT_BUDGET = 12_000
+
+
+def check_home_first_flight(errors: list[str]) -> None:
+    source = (SITE / "index.html").read_bytes()
+    end = source.find(HOME_FIRST_FLIGHT_MARKER)
+    if end < 0:
+        errors.append("index.html: proof strip not found, so the hero's first flight cannot be measured")
+        return
+    size = len(gzip.compress(source[:end], compresslevel=6, mtime=0))
+    if size > HOME_FIRST_FLIGHT_BUDGET:
+        errors.append(
+            f"index.html: document through the hero is {size} bytes gzip -6, over the "
+            f"{HOME_FIRST_FLIGHT_BUDGET}-byte first-flight budget"
+        )
+
+
+class StackedTableParser(HTMLParser):
+    """Collect header text and per-cell data-label attributes for one table class."""
+
+    def __init__(self, table_class: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.table_class = table_class
+        self.depth = 0
+        self.headers: list[str] = []
+        self.rows: list[list[str | None]] = []
+        self._in_head = False
+        self._th: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = {name: value for name, value in attrs}
+        if tag == "table":
+            if self.depth or self.table_class in (data.get("class") or "").split():
+                self.depth += 1
+            return
+        if not self.depth:
+            return
+        if tag == "thead":
+            self._in_head = True
+        elif tag == "th" and self._in_head:
+            self._th = []
+        elif tag == "tr" and not self._in_head:
+            self.rows.append([])
+        elif tag == "td" and self.rows:
+            self.rows[-1].append(data.get("data-label"))
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.depth:
+            return
+        if tag == "table":
+            self.depth -= 1
+        elif tag == "thead":
+            self._in_head = False
+        elif tag == "th" and self._th is not None:
+            self.headers.append(" ".join("".join(self._th).split()))
+            self._th = None
+
+    def handle_data(self, data: str) -> None:
+        if self._th is not None:
+            self._th.append(data)
+
+
+def check_stacked_table_labels(errors: list[str]) -> None:
+    """On phones these tables stack and label each cell from data-label; the labels must be the headers."""
+    # (page, table class, labelled columns, whether a label must equal its header or only start it)
+    for page, table_class, columns, exact in (
+        ("vscode/index.html", "install-matrix", range(1, 4), True),
+        ("index.html", "permission-table", range(1, 4), False),
+    ):
+        parser = StackedTableParser(table_class)
+        parser.feed((SITE / page).read_text(encoding="utf-8"))
+        label = f"{page} .{table_class}"
+        if not parser.headers or not parser.rows:
+            errors.append(f"{label}: table with headers and rows not found")
+            continue
+        for row_index, row in enumerate(parser.rows, 1):
+            if len(row) != len(parser.headers):
+                errors.append(f"{label} row {row_index}: {len(row)} cells for {len(parser.headers)} headers")
+                continue
+            for column, (cell_label, header) in enumerate(zip(row, parser.headers)):
+                if column not in columns:
+                    if cell_label is not None:
+                        errors.append(f"{label} row {row_index}: unexpected data-label on column {column + 1}")
+                    continue
+                folded, folded_header = (cell_label or "").casefold(), header.casefold()
+                if not folded or not (folded == folded_header if exact else folded_header.startswith(folded)):
+                    errors.append(
+                        f"{label} row {row_index} column {column + 1}: data-label {cell_label!r} "
+                        f"does not match header {header!r}"
+                    )
+
+
 def check_css(errors: list[str]) -> None:
     for name in ("assets/tokens.css", "assets/site.css"):
         path = SITE / name
@@ -1371,6 +1467,8 @@ def main(argv: list[str] | None = None) -> int:
     check_asset_revision_contract(errors)
     check_leak_pattern_contract(errors)
     check_css(errors)
+    check_home_first_flight(errors)
+    check_stacked_table_labels(errors)
     check_routes(parsed, errors)
     check_asset_revisions(parsed, errors)
     check_media(parsed, errors)

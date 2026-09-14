@@ -10728,6 +10728,241 @@ def test_extension_vsix_guard():
               rejected(secret, "GitHub token"))
 
 
+def _load_site_scripts(label):
+    """Load scripts/site_common.py and scripts/check-site.py from this checkout under private names."""
+    import importlib.util as _importlib_util
+    scripts_dir = PROJECT / "scripts"
+    modules = []
+    sys.path.insert(0, str(scripts_dir))
+    try:
+        for name, filename in (("site_common", "site_common.py"), ("check_site", "check-site.py")):
+            spec = _importlib_util.spec_from_file_location(f"dgc_{label}_{name}", scripts_dir / filename)
+            assert spec is not None and spec.loader is not None
+            module = _importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules.append(module)
+    finally:
+        sys.path.remove(str(scripts_dir))
+    return modules
+
+
+def test_site_critical_css_budget():
+    """The inline critical-CSS ceiling is one 12 KiB constant, enforced at build time and by the site gate."""
+    import base64 as _base64
+    import tempfile as _tf
+    print("site critical CSS budget:")
+    site_common, gate = _load_site_scripts("css_budget")
+    budget = site_common.CRITICAL_CSS_BUDGET
+    check("site: the critical-CSS ceiling is 12 KiB", budget == 12 * 1024, detail=repr(budget))
+    gate_source = (PROJECT / "scripts" / "check-site.py").read_text(encoding="utf-8")
+    check("site: the gate uses the shared ceiling, not its own literal",
+          gate.CRITICAL_CSS_BUDGET == budget and "10 * 1024" not in gate_source
+          and "10240" not in gate_source and "> CRITICAL_CSS_BUDGET" in gate_source)
+    sizes = {path: len(site_common.critical_css_for(path).encode("utf-8"))
+             for path in ("/", "/docs/getting-started", "/pricing")}
+    check("site: every route's inline critical CSS fits the ceiling",
+          all(0 < size <= budget for size in sizes.values()), detail=repr(sizes))
+    try:
+        site_common.CRITICAL_CSS_BUDGET = 1024
+        try:
+            site_common.critical_css_for("/")
+            raised = ""
+        except ValueError as error:
+            raised = str(error)
+    finally:
+        site_common.CRITICAL_CSS_BUDGET = budget
+    check("site: the build refuses critical CSS over the ceiling",
+          raised == "inline critical CSS exceeds 1 KiB for /", detail=raised)
+
+    real_site = gate.SITE
+    with _tf.TemporaryDirectory(prefix="dgc-site-budget-") as tmp:
+        fake = Path(tmp)
+        gate.SITE = fake
+        try:
+            def page_errors(css_bytes):
+                (fake / "index.html").write_text(
+                    '<style data-critical-revision="0123456789ab">' + "a" * css_bytes + "</style>",
+                    encoding="utf-8")
+                errors = []
+                gate.check_pages(errors)
+                return [error for error in errors if "inline critical CSS" in error]
+            at_budget, over_budget = page_errors(budget), page_errors(budget + 1)
+            check("site gate: inline critical CSS at the ceiling passes, one byte over fails",
+                  at_budget == [] and over_budget == ["index.html: inline critical CSS exceeds 12 KiB"],
+                  detail=repr((at_budget, over_budget)))
+
+            source = (real_site / "index.html").read_bytes()
+            marker = gate.HOME_FIRST_FLIGHT_MARKER
+            filler = _base64.b64encode(os.urandom(18_000))
+            (fake / "index.html").write_bytes(source.replace(marker, filler + marker, 1))
+            heavy = []
+            gate.check_home_first_flight(heavy)
+            (fake / "index.html").write_bytes(source.replace(marker, b"<section>", 1))
+            unmarked = []
+            gate.check_home_first_flight(unmarked)
+            gate.SITE = real_site
+            real = []
+            gate.check_home_first_flight(real)
+            check("site gate: the home hero must arrive in the first flight (gzip -6 budget)",
+                  real == [] and len(heavy) == 1 and "first-flight budget" in heavy[0]
+                  and len(unmarked) == 1 and "proof strip not found" in unmarked[0],
+                  detail=repr((real, heavy, unmarked)))
+
+            gate.SITE = fake
+            (fake / "vscode").mkdir()
+            vscode = (real_site / "vscode" / "index.html").read_text(encoding="utf-8")
+            home = (real_site / "index.html").read_text(encoding="utf-8")
+            (fake / "vscode" / "index.html").write_text(
+                vscode.replace('data-label="Registry"', 'data-label="Store"', 1), encoding="utf-8")
+            (fake / "index.html").write_text(
+                home.replace('data-label="Edit"', "", 1), encoding="utf-8")
+            mislabeled = []
+            gate.check_stacked_table_labels(mislabeled)
+            gate.SITE = real_site
+            labeled = []
+            gate.check_stacked_table_labels(labeled)
+            check("site gate: stacked table labels come from data-label and match their headers",
+                  labeled == [] and len(mislabeled) == 2
+                  and "'Store' does not match header 'Registry'" in mislabeled[0]
+                  and "None does not match header 'Edit files'" in mislabeled[1],
+                  detail=repr((labeled, mislabeled)))
+        finally:
+            gate.SITE = real_site
+
+
+def _css_rules(site_common, css):
+    """Ordered (media, selector, {property: value}) rules of a stylesheet, one @media level deep."""
+    css = site_common.minify_css(css)
+    rules = []
+
+    def blocks(text):
+        cursor = 0
+        while cursor < len(text):
+            opening = text.find("{", cursor)
+            if opening < 0:
+                return
+            depth, at = 1, opening + 1
+            while depth and at < len(text):
+                depth += {"{": 1, "}": -1}.get(text[at], 0)
+                at += 1
+            yield text[cursor:opening].strip().lstrip("}; "), text[opening + 1:at - 1]
+            cursor = at
+
+    def declarations(body):
+        parts, depth, quote, start = [], 0, "", 0
+        for index, char in enumerate(body):
+            if quote:
+                quote = "" if char == quote else quote
+            elif char in "\"'":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == ";" and depth == 0:
+                parts.append(body[start:index])
+                start = index + 1
+        parts.append(body[start:])
+        result = {}
+        for part in parts:
+            name, _, value = part.partition(":")
+            if name.strip():
+                result[name.strip()] = value.strip()
+        return result
+
+    for prelude, body in blocks(css):
+        if prelude.startswith("@media"):
+            media = "".join(prelude.split())
+            rules.extend((media, selector, declarations(inner)) for selector, inner in blocks(body))
+        elif not prelude.startswith("@"):
+            rules.append(("", prelude, declarations(body)))
+    return rules
+
+
+def _css_applies(media, width):
+    import re as _re
+    if media == "":
+        return True
+    match = _re.fullmatch(r"@media\(max-width:(\d+)px\)", media)
+    return bool(match) and width <= int(match.group(1))
+
+
+def _hero_mark_problems(site_common, critical_css, site_css):
+    """Differences between the critical and full hero mark placement, and any dimming."""
+    critical, full = _css_rules(site_common, critical_css), _css_rules(site_common, site_css)
+    problems = []
+    for name, rules in (("critical-home.css", critical), ("site.css", full)):
+        for media, selector, props in rules:
+            if selector in (".hero-art", ".kinetic-mark") and "opacity" in props:
+                problems.append(f"{name}: {media or 'base'} {selector} sets opacity {props['opacity']}")
+    for width in (1920, 1440, 1201, 1200, 1041, 1040, 761, 760, 390, 320):
+        effective = []
+        for rules, selectors in ((critical, (".hero-art",)), (full, (".hero-art", ".kinetic-mark"))):
+            placed = {}
+            for media, selector, props in rules:
+                if selector in selectors and _css_applies(media, width):
+                    placed.update({key: props[key] for key in ("right", "top", "width", "height") if key in props})
+            effective.append(placed)
+        if effective[0] != effective[1]:
+            problems.append(f"{width}px: critical {effective[0]} != full {effective[1]}")
+    return problems
+
+
+# critical-home.css rules that deliberately differ from site.css: the reveal/defer states exist only
+# before the full stylesheet, and the atmosphere fades in once it loads.
+_CRITICAL_ONLY_RULES = {(".reveal-ready .hero .reveal", None), (".defer-styles .hero~*", None),
+                        (".hero-atmosphere", "opacity")}
+
+
+def _hero_mirror_problems(site_common, critical_css, site_css):
+    """Every critical-home.css declaration must have the same effective value in site.css at every width."""
+    critical, full = _css_rules(site_common, critical_css), _css_rules(site_common, site_css)
+    selectors = list(dict.fromkeys(selector for _media, selector, _props in critical
+                                   if (selector, None) not in _CRITICAL_ONLY_RULES))
+    problems = {}
+    for selector in selectors:
+        aliases = {selector, selector.replace(".hero-art", ".kinetic-mark")}
+        if not any(full_selector in aliases for _media, full_selector, _props in full):
+            problems[f"{selector}: missing from site.css"] = None
+            continue
+        for width in (1920, 1440, 1241, 1201, 1200, 1100, 1041, 1040, 900, 761, 760, 540, 481, 480, 390, 320):
+            expected, actual = {}, {}
+            for media, rule_selector, props in critical:
+                if rule_selector == selector and _css_applies(media, width):
+                    expected.update(props)
+            for media, rule_selector, props in full:
+                if rule_selector in aliases and _css_applies(media, width):
+                    actual.update(props)
+            for key, value in expected.items():
+                if (selector, key) not in _CRITICAL_ONLY_RULES and actual.get(key) != value:
+                    problems[f"{width}px {selector} {key}: critical {value!r}, site.css {actual.get(key)!r}"] = None
+    return list(problems)
+
+
+def test_site_hero_mark_lockstep_and_undimmed():
+    """The hero is styled twice (inline critical CSS, then site.css): both must place it identically."""
+    print("site hero lockstep:")
+    site_common, _gate = _load_site_scripts("hero_lockstep")
+    assets = PROJECT / "site-src" / "assets"
+    critical_css = (assets / "critical-home.css").read_text(encoding="utf-8")
+    site_css = (assets / "site.css").read_text(encoding="utf-8")
+    mark = _hero_mark_problems(site_common, critical_css, site_css)
+    check("site: the hero mark is never dimmed and site.css places it where the critical CSS does",
+          mark == [], detail="; ".join(mark))
+    mirror = _hero_mirror_problems(site_common, critical_css, site_css)
+    check("site: every critical hero rule (stats, mark, copy) has the same value in site.css",
+          mirror == [], detail="; ".join(mirror))
+    dimmed = critical_css.replace("width:50vw;height:50vw}", "width:50vw;height:50vw;opacity:.22}", 1)
+    moved = site_css.replace(".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw",
+                             ".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:54vw", 1)
+    drifted = site_css.replace("gap:11px 36px", "gap:12px 36px", 1)
+    check("site: the hero lockstep checks catch dimming, a moved mark and a drifted stat band",
+          dimmed != critical_css and moved != site_css and drifted != site_css
+          and any("opacity .22" in problem for problem in _hero_mark_problems(site_common, dimmed, site_css))
+          and any("54vw" in problem for problem in _hero_mark_problems(site_common, critical_css, moved))
+          and any(".stat-grid gap" in problem for problem in _hero_mirror_problems(site_common, critical_css, drifted)))
+
+
 def test_benchmark_integrity():
     """Benchmark outputs are engine-scoped and grading cannot be weakened by fixture edits."""
     import importlib.util as _importlib_util
@@ -19301,6 +19536,8 @@ def main():
         test_release_promotion_contract()
         test_extension_vsix_guard()
         test_benchmark_integrity()
+        test_site_critical_css_budget()
+        test_site_hero_mark_lockstep_and_undimmed()
         test_protocol_client()
         test_acp_protocol()
         test_bored_mode()
