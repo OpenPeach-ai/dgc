@@ -18,9 +18,11 @@ import struct
 import subprocess
 import sys
 import tarfile
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
+from typing import Callable
 from urllib.parse import unquote, urljoin, urlparse
 
 from benchmark_site import BenchmarkDataError, benchmark_context, subject_harness, validate_benchmark
@@ -125,6 +127,7 @@ class PageParser(HTMLParser):
         self.canonical: list[str] = []
         self.descriptions = 0
         self.og_images: list[str] = []
+        self.robots: list[str] = []
         self.videos: list[dict[str, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -142,6 +145,8 @@ class PageParser(HTMLParser):
             self.canonical.append(data.get("href", ""))
         if tag == "meta" and data.get("name") == "description" and data.get("content"):
             self.descriptions += 1
+        if tag == "meta" and (data.get("name") or "").lower() == "robots":
+            self.robots.append(data.get("content", ""))
         if tag == "meta" and data.get("property") == "og:image":
             self.og_images.append(data.get("content", ""))
         if tag == "video":
@@ -577,6 +582,168 @@ def check_routes(parsed: dict[Path, PageParser], errors: list[str]) -> None:
         errors.append(f"routes.json: missing HTML routes {missing}")
     if extra:
         errors.append(f"routes.json: unknown HTML routes {extra}")
+
+
+SITE_URL = "https://vibedgc.com"
+DOCS_HOST = "docs.vibedgc.com"
+SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+
+
+def _is_noindex(label: str, robots: list[str]) -> bool:
+    tokens = {token.strip().lower() for content in robots for token in content.split(",")}
+    return label.endswith("404.html") or bool(tokens & {"noindex", "none"})
+
+
+def _served_label(url: str) -> str | None:
+    """Map a public https URL on either host to the built page label that serves it."""
+    parsed = urlparse(url)
+    if (parsed.scheme != "https" or parsed.query or parsed.fragment or parsed.params
+            or parsed.port is not None or parsed.hostname not in {"vibedgc.com", DOCS_HOST}):
+        return None
+    path = parsed.path or "/"
+    if parsed.hostname == DOCS_HOST:
+        path = "/docs" + ("" if path == "/" else path)
+    target = served_page(path)
+    if target is None or not target.is_file() or target.suffix != ".html":
+        return None
+    return target.relative_to(SITE).as_posix()
+
+
+def _sitemap_errors(
+    xml_text: str,
+    pages: dict[str, tuple[str | None, bool]],
+    resolve: Callable[[str], str | None],
+) -> list[str]:
+    """Check a sitemap against the built pages: ``pages`` maps label -> (canonical, indexable)."""
+    try:
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError as exc:
+        return [f"sitemap.xml: not well-formed XML ({exc})"]
+    if root.tag != SITEMAP_NS + "urlset":
+        return ["sitemap.xml: root element must be a sitemaps.org 0.9 urlset"]
+    errors: list[str] = []
+    locs: list[str] = []
+    for url in root:
+        children = list(url)
+        if url.tag != SITEMAP_NS + "url" or [child.tag for child in children] != [SITEMAP_NS + "loc"]:
+            errors.append(
+                "sitemap.xml: every <url> must hold exactly one <loc> and nothing else "
+                "(no lastmod, changefreq or priority without a truthful source)"
+            )
+            continue
+        locs.append((children[0].text or "").strip())
+    duplicates = sorted({loc for loc in locs if locs.count(loc) > 1})
+    if duplicates:
+        errors.append(f"sitemap.xml: duplicate <loc> {duplicates}")
+    for loc in dict.fromkeys(locs):
+        label = resolve(loc)
+        if label is None or label not in pages:
+            errors.append(f"sitemap.xml: {loc} does not resolve to a built HTML page")
+            continue
+        canonical, indexable = pages[label]
+        if not indexable:
+            errors.append(f"sitemap.xml: {loc} is a 404 or noindex page ({label})")
+        elif canonical != loc:
+            errors.append(f"sitemap.xml: {loc} is not the canonical URL of {label} ({canonical})")
+    expected = {canonical for canonical, indexable in pages.values() if indexable and canonical}
+    missing = sorted(expected - set(locs))
+    if missing:
+        errors.append(f"sitemap.xml: indexable pages missing {missing}")
+    return errors
+
+
+def _robots_errors(text: str, sitemap_url: str, locs: list[str]) -> list[str]:
+    """A deliberately small RFC 9309 reader that fails closed on anything it does not model."""
+    errors: list[str] = []
+    groups: list[dict[str, list]] = []
+    group: dict[str, list] | None = None
+    sitemaps: list[str] = []
+    previous_was_agent = False
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if ":" not in line:
+            errors.append(f"robots.txt: malformed line {raw!r}")
+            continue
+        field, value = (part.strip() for part in line.split(":", 1))
+        field = field.lower()
+        if field == "sitemap":
+            sitemaps.append(value)
+            continue
+        if field == "user-agent":
+            if not previous_was_agent:
+                group = {"agents": [], "rules": []}
+                groups.append(group)
+            assert group is not None
+            group["agents"].append(value.lower())
+            previous_was_agent = True
+            continue
+        previous_was_agent = False
+        if field in {"allow", "disallow"}:
+            if group is None:
+                errors.append(f"robots.txt: {field} rule outside a user-agent group")
+                continue
+            if "*" in value or "$" in value:
+                errors.append(f"robots.txt: wildcard rule {raw.strip()!r} is not supported by this gate")
+            group["rules"].append((field, value))
+            continue
+        errors.append(f"robots.txt: unsupported field {raw.strip()!r}")
+    if sitemaps != [sitemap_url]:
+        errors.append(f"robots.txt: expected exactly one 'Sitemap: {sitemap_url}', found {sitemaps}")
+    star_groups = [item for item in groups if "*" in item["agents"]]
+    if not star_groups:
+        errors.append("robots.txt: no 'User-agent: *' group")
+    rules = [rule for item in star_groups for rule in item["rules"]]
+    for loc in locs:
+        path = urlparse(loc).path or "/"
+        matches = [(len(value), field == "allow") for field, value in rules if value and path.startswith(value)]
+        if matches and not max(matches)[1]:
+            errors.append(f"robots.txt: blocks sitemap URL {loc}")
+    return errors
+
+
+def sitemap_page_facts(parsed: dict[Path, PageParser]) -> dict[str, tuple[str | None, bool]]:
+    """Label -> (its single canonical URL or None, whether it may be indexed)."""
+    return {
+        page.relative_to(SITE).as_posix(): (
+            parser.canonical[0] if len(parser.canonical) == 1 else None,
+            not _is_noindex(page.relative_to(SITE).as_posix(), parser.robots),
+        )
+        for page, parser in parsed.items()
+    }
+
+
+def check_sitemap_and_robots(parsed: dict[Path, PageParser], errors: list[str]) -> None:
+    pages = sitemap_page_facts(parsed)
+    sitemap_text = (SITE / "sitemap.xml").read_text(encoding="utf-8")
+    sitemap_problems = _sitemap_errors(sitemap_text, pages, _served_label)
+    errors.extend(sitemap_problems)
+    try:
+        locs = [
+            (element.text or "").strip()
+            for element in ElementTree.fromstring(sitemap_text).iter(SITEMAP_NS + "loc")
+        ]
+    except ElementTree.ParseError:
+        locs = []
+    listed = set(locs)
+    routes = json.loads((SITE / "routes.json").read_text(encoding="utf-8"))["html"]
+    for route in routes:
+        target = served_page(route)
+        label = target.relative_to(SITE).as_posix() if target is not None and target.is_file() else None
+        if label not in pages:
+            errors.append(f"routes.json: {route} does not resolve to a built page")
+            continue
+        canonical, indexable = pages[label]
+        if indexable and canonical not in listed:
+            errors.append(f"sitemap.xml: routed page {route} ({canonical}) is neither listed nor noindex")
+    robots = SITE / "robots.txt"
+    if robots.is_symlink() or not robots.is_file():
+        errors.append("robots.txt: missing")
+    else:
+        errors.extend(_robots_errors(robots.read_text(encoding="utf-8"), f"{SITE_URL}/sitemap.xml", locs))
+    if re.search(r"^\s*x-robots-tag\s*:", (SITE / "_headers").read_text(encoding="utf-8"), re.I | re.M):
+        errors.append("_headers: X-Robots-Tag would apply to production; previews get it from the Worker")
 
 
 def check_asset_revisions(parsed: dict[Path, PageParser], errors: list[str]) -> None:
@@ -1378,7 +1545,8 @@ def check_public_tree(errors: list[str]) -> set[str]:
         page = (SITE / name).read_text(encoding="utf-8")
         if not re.search(r'<meta\s+name="robots"\s+content="noindex(?:,(?:no)?follow)?"', page):
             errors.append(f"{name}: expected a noindex robots directive")
-    if "/subscription" in sitemap:
+    # Exact path segment: the public docs page /subscriptions must not trip the retired route.
+    if re.search(r"/subscription(?:[\"'/<.?#]|$)", sitemap):
         errors.append("sitemap.xml: private subscription-management route must be absent")
     return expected
 
@@ -1470,6 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
     check_home_first_flight(errors)
     check_stacked_table_labels(errors)
     check_routes(parsed, errors)
+    check_sitemap_and_robots(parsed, errors)
     check_asset_revisions(parsed, errors)
     check_media(parsed, errors)
     check_capture_manifest(errors)

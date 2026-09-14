@@ -76,6 +76,8 @@ class AssetsMock {
       ["/assets/font.woff2", "FONT"],
       ["/assets/capture.mp4", "VIDEO"],
       ["/evidence/run.json", "EVIDENCE"],
+      ["/robots.txt", "ROBOTS"],
+      ["/sitemap.xml", "SITEMAP"],
     ]);
     if (assets.has(url.pathname)) {
       return new Response(request.method === "HEAD" ? null : assets.get(url.pathname), {
@@ -171,6 +173,8 @@ register("static responses enforce explicit cache and installer content-type pol
     ["/assets/private.js", "no-store", "text/javascript"],
     ["/evidence/run.json", "public, max-age=86400, immutable", "application/octet-stream"],
     ["/vscode/dgc-0.25.2.vsix", "public, max-age=31536000, immutable", "application/octet-stream"],
+    ["/robots.txt", "no-cache", "text/plain; charset=utf-8"],
+    ["/sitemap.xml", "no-cache", "application/octet-stream"],
   ];
   for (const [path, cacheControl, contentType] of cases) {
     const response = await worker.fetch(request(path), env);
@@ -237,6 +241,41 @@ register("canonical redirects clear attacker-supplied ports and preview is noind
   const preview = await worker.fetch(request("/", {base: "https://build.pages.dev"}), env);
   assert.equal(preview.status, 200);
   assertSecurity(preview, {preview: true});
+});
+
+register("robots.txt and sitemap.xml are served verbatim on every public host", async () => {
+  // The sitemap lists docs.vibedgc.com URLs from vibedgc.com; that cross-host listing is valid only
+  // while docs.vibedgc.com/robots.txt is the same file naming the sitemap, so no rewrite to /docs/*.
+  for (const [path, body, contentType] of [
+    ["/robots.txt", "ROBOTS", "text/plain; charset=utf-8"],
+    ["/sitemap.xml", "SITEMAP", null],
+  ]) {
+    for (const base of ["https://vibedgc.com", "https://docs.vibedgc.com"]) {
+      const assets = new AssetsMock();
+      const response = await worker.fetch(request(path, {base}), environment({ASSETS: assets}));
+      assert.equal(response.status, 200, base + path);
+      assert.equal(await response.text(), body, base + path);
+      if (contentType) assert.equal(response.headers.get("content-type"), contentType, base + path);
+      assert.equal(response.headers.get("cache-control"), "no-cache", base + path);
+      assertSecurity(response);
+      assert.equal(new URL(assets.calls.at(-1).url).pathname, path, base + path);
+      assert.equal(assets.calls.some(call => new URL(call.url).pathname.startsWith("/docs")), false, base + path);
+    }
+    const preview = await worker.fetch(request(path, {base: "https://build.pages.dev"}),
+      environment({ASSETS: new AssetsMock()}));
+    assert.equal(preview.status, 200, "preview " + path);
+    assert.equal(await preview.text(), body, "preview " + path);
+    assertSecurity(preview, {preview: true});
+    const www = await worker.fetch(request(path, {base: "https://www.vibedgc.com"}),
+      environment({ASSETS: new AssetsMock()}));
+    assert.equal(www.status, 301, "www " + path);
+    assert.equal(www.headers.get("location"), "https://vibedgc.com" + path);
+  }
+  const missing = await worker.fetch(request("/robots.txt"), environment({ASSETS: {
+    async fetch() { return new Response("ASSET_404", {status: 404, headers: {"content-type": "text/html"}}); },
+  }}));
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("content-type"), "text/html", "a missing robots.txt is not relabelled");
 });
 
 register("retired dynamic and publishing paths are stateless 404s", async () => {

@@ -10963,6 +10963,110 @@ def test_site_hero_mark_lockstep_and_undimmed():
           and any(".stat-grid gap" in problem for problem in _hero_mirror_problems(site_common, critical_css, drifted)))
 
 
+def test_site_sitemap_and_robots():
+    """sitemap.xml lists every indexable page's own canonical URL; robots.txt allows them and names it."""
+    import importlib.util as _importlib_util
+    import re as _re
+    import xml.etree.ElementTree as _ET
+    print("site sitemap and robots:")
+    scripts_dir = PROJECT / "scripts"
+    site_common, gate = _load_site_scripts("sitemap")
+    before = list(sys.path)
+    try:
+        sys.path.insert(0, str(scripts_dir))
+        loaded = {}
+        for name, filename in (("builder", "build-site.py"), ("docs", "generate-docs-site.py")):
+            spec = _importlib_util.spec_from_file_location(f"dgc_sitemap_{name}", scripts_dir / filename)
+            assert spec is not None and spec.loader is not None
+            module = _importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            loaded[name] = module
+        outputs = loaded["builder"].build_outputs()
+        docs_pages = loaded["docs"].build()
+    finally:
+        sys.path[:] = before
+    site_url = "https://vibedgc.com"
+    ns = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+
+    robots = outputs.get("robots.txt", "")
+    robots_lines = [line.strip() for line in robots.splitlines()]
+    check("site: build_outputs emits robots.txt with a User-agent: * group and the sitemap line",
+          "User-agent: *" in robots_lines and f"Sitemap: {site_url}/sitemap.xml" in robots_lines,
+          detail=repr(robots))
+    check("site: robots.txt disallows nothing site-wide",
+          "Disallow: /" not in robots_lines and not any(line.lower().startswith("content-signal") for line in robots_lines),
+          detail=repr(robots))
+
+    rendered = [(path, value) for path, value in outputs.items() if path.endswith(".html")]
+    rendered += [(f"docs/{name}", value) for name, value in docs_pages.items()]
+    expected = set()
+    for label, source in rendered:
+        if label.endswith("404.html") or _re.search(r'<meta\s+name="robots"\s+content="[^"]*\bnoindex', source):
+            continue
+        expected.update(_re.findall(r'<link rel="canonical" href="([^"]+)">', source))
+    sitemap = outputs.get("sitemap.xml", "")
+    locs = [(element.text or "") for element in _ET.fromstring(sitemap).iter(ns + "loc")]
+    routes = json.loads((PROJECT / "site" / "routes.json").read_text(encoding="utf-8"))["html"]
+    check("site: the sitemap is exactly the canonical URL of every indexable page",
+          set(locs) == expected and len(locs) == len(expected), detail=repr(sorted(set(locs) ^ expected)))
+    check("site: the sitemap has one URL per routed page (docs pages on docs.vibedgc.com)",
+          len(locs) == len(routes) == 37
+          and sum(loc.startswith("https://docs.vibedgc.com") for loc in locs) == 27,
+          detail=f"{len(locs)} locs, {len(routes)} routes")
+    check("site: the sitemap invents no lastmod, changefreq or priority",
+          not _re.search(r"<(?:lastmod|changefreq|priority)", sitemap))
+    check("site: the committed sitemap and robots.txt match the build",
+          (PROJECT / "site" / "sitemap.xml").read_text(encoding="utf-8") == sitemap
+          and (PROJECT / "site" / "robots.txt").is_file()
+          and (PROJECT / "site" / "robots.txt").read_text(encoding="utf-8") == robots)
+
+    errors = []
+    parsed = gate.check_pages(errors)
+    page_errors = list(errors)
+    gate.check_sitemap_and_robots(parsed, errors)
+    check("site: the gate passes the committed sitemap and robots.txt",
+          errors == page_errors, detail=repr(errors[len(page_errors):]))
+
+    pages = gate.sitemap_page_facts(parsed)
+    resolve = gate._served_label
+    def sitemap_problems(text):
+        return gate._sitemap_errors(text, pages, resolve)
+    skills = "<url><loc>https://docs.vibedgc.com/skills</loc></url>"
+    about = "<url><loc>https://vibedgc.com/about</loc></url>"
+    end = "</urlset>"
+    check("site: sitemap tampering precondition", skills in sitemap and about in sitemap and not sitemap_problems(sitemap))
+    tampered = {
+        "a dropped docs page": (sitemap.replace(skills, ""), "indexable pages missing ['https://docs.vibedgc.com/skills']"),
+        "the 404 page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/404</loc></url>" + end), "https://vibedgc.com/404 is a 404 or noindex page (404.html)"),
+        "the docs 404 page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/docs/404</loc></url>" + end), "https://vibedgc.com/docs/404 is a 404 or noindex page (docs/404.html)"),
+        "a main-host docs duplicate": (sitemap.replace("https://docs.vibedgc.com/skills<", "https://vibedgc.com/docs/skills<"), "https://vibedgc.com/docs/skills is not the canonical URL of docs/skills.html"),
+        "a nonexistent page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/nope</loc></url>" + end), "https://vibedgc.com/nope does not resolve to a built HTML page"),
+        "an invented lastmod": (sitemap.replace(about, "<url><loc>https://vibedgc.com/about</loc><lastmod>2026-09-14</lastmod></url>"), "exactly one <loc> and nothing else"),
+        "a duplicate URL": (sitemap.replace(end, about + end), "duplicate <loc> ['https://vibedgc.com/about']"),
+        "an .html suffix": (sitemap.replace("https://vibedgc.com/about<", "https://vibedgc.com/about.html<"), "https://vibedgc.com/about.html is not the canonical URL of about.html"),
+        "truncated XML": (sitemap[:-20], "not well-formed XML"),
+    }
+    for name, (text, needle) in tampered.items():
+        problems = sitemap_problems(text)
+        check(f"site: the sitemap gate rejects {name}", any(needle in problem for problem in problems), detail=repr(problems))
+
+    sitemap_url = f"{site_url}/sitemap.xml"
+    check("site: robots gate accepts the build and a Cloudflare-prepended comment preamble",
+          not gate._robots_errors(robots, sitemap_url, locs)
+          and not gate._robots_errors("# Content signals\n# managed by Cloudflare\n\n" + robots, sitemap_url, locs))
+    bad_robots = {
+        "no Sitemap line": ("User-agent: *\nAllow: /\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
+        "a docs-host Sitemap": ("User-agent: *\nAllow: /\nSitemap: https://docs.vibedgc.com/sitemap.xml\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
+        "Disallow: /": ("User-agent: *\nDisallow: /\nSitemap: https://vibedgc.com/sitemap.xml\n", "blocks sitemap URL https://vibedgc.com/"),
+        "Disallow: /skills": ("User-agent: *\nDisallow: /skills\nSitemap: https://vibedgc.com/sitemap.xml\n", "blocks sitemap URL https://docs.vibedgc.com/skills"),
+        "a wildcard rule": ("User-agent: *\nDisallow: /*.html$\nSitemap: https://vibedgc.com/sitemap.xml\n", "wildcard rule"),
+        "no User-agent: * group": ("User-agent: examplebot\nDisallow:\nSitemap: https://vibedgc.com/sitemap.xml\n", "no 'User-agent: *' group"),
+    }
+    for name, (text, needle) in bad_robots.items():
+        problems = gate._robots_errors(text, sitemap_url, locs)
+        check(f"site: the robots gate rejects {name}", any(needle in problem for problem in problems), detail=repr(problems))
+
+
 def test_benchmark_integrity():
     """Benchmark outputs are engine-scoped and grading cannot be weakened by fixture edits."""
     import importlib.util as _importlib_util
@@ -19538,6 +19642,7 @@ def main():
         test_benchmark_integrity()
         test_site_critical_css_budget()
         test_site_hero_mark_lockstep_and_undimmed()
+        test_site_sitemap_and_robots()
         test_protocol_client()
         test_acp_protocol()
         test_bored_mode()

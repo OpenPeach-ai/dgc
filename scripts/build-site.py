@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import hashlib
 import html
 import importlib.util
@@ -20,6 +21,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -468,8 +470,13 @@ def build_outputs() -> dict[str, str | bytes]:
         for _, titles in _docs_groups()
         for title in titles
     ]
-    sitemap_paths = public_paths
-    outputs["sitemap.xml"] = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f'<url><loc>{ctx["SITE_URL"]}{path or "/"}</loc></url>' for path in sitemap_paths) + "</urlset>\n"
+    # The sitemap lists what the pages themselves declare canonical, so docs pages appear under
+    # docs.vibedgc.com (their canonical host), never as vibedgc.com/docs/* duplicates.
+    docs_pages = _docs_module().build()
+    rendered = [(path, value) for path, value in outputs.items() if path.endswith(".html")]
+    rendered += [(f"docs/{name}", value) for name, value in docs_pages.items()]
+    outputs["sitemap.xml"] = sitemap_xml(rendered, ctx["SITE_URL"])
+    outputs["robots.txt"] = robots_txt(ctx["SITE_URL"])
     outputs["llms.txt"] = "\n".join(["# DGC", "", ctx["TAGLINE"] + ".", "", "## Start", f'- Docs: {ctx["DOCS_URL"]}/', f'- Benchmark: {ctx["SITE_URL"]}/benchmark', f'- Source: {ctx["GITHUB_URL"]}', "", "## Product", "DGC is a coding-agent harness for a local model, compatible API, or supported coding subscription. For native local/API routes, DGC owns context, permissions, tools, execution, verification, sessions, plans, goals, MCP, skills, hooks, and terminal/editor presentation. Subscription routes delegate model and tool execution to the supported vendor CLI while DGC retains its session, SessionStart/Stop hooks, mode mapping, and presentation.", "", "## Documentation"] + [f'- {title}: {ctx["DOCS_URL"]}/{slug(title)}' for _, titles in _docs_groups() for title in titles] + [""])
     outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
     outputs["routes.json"] = json.dumps({"html": sorted(set(public_paths + docs_paths)), "generated": "build-site.py"}, separators=(",", ":")) + "\n"
@@ -486,10 +493,50 @@ def build_outputs() -> dict[str, str | bytes]:
     return outputs
 
 
-def _docs_groups() -> list[tuple[str, list[str]]]:
+@functools.lru_cache(maxsize=None)
+def _docs_module():
     spec = importlib.util.spec_from_file_location("dgc_docs_generator", ROOT / "scripts" / "generate-docs-site.py")
-    module = importlib.util.module_from_spec(spec); assert spec.loader; spec.loader.exec_module(module)
-    return module.GROUPS
+    module = importlib.util.module_from_spec(spec); assert spec and spec.loader; spec.loader.exec_module(module)
+    return module
+
+
+def _docs_groups() -> list[tuple[str, list[str]]]:
+    return _docs_module().GROUPS
+
+
+_NOINDEX_META = re.compile(r'<meta\s+name="robots"\s+content="[^"]*\b(?:noindex|none)\b', re.IGNORECASE)
+_CANONICAL_LINK = re.compile(r'<link rel="canonical" href="([^"]+)">')
+
+
+def sitemap_xml(pages: list[tuple[str, str]], site_url: str) -> str:
+    """Return a sitemaps.org urlset of every indexable page's own canonical URL.
+
+    No lastmod, changefreq or priority: no page has a truthful modification date (every shell
+    embeds the release version), and a git-derived date would break ``--check`` determinism.
+    """
+    seen: dict[str, str] = {}
+    for label, source in pages:
+        if label.endswith("404.html") or _NOINDEX_META.search(source):
+            continue
+        canonicals = _CANONICAL_LINK.findall(source)
+        if len(canonicals) != 1:
+            raise ValueError(f"{label}: expected exactly one canonical link, found {len(canonicals)}")
+        url = html.unescape(canonicals[0])
+        if url in seen:
+            raise ValueError(f"{label} and {seen[url]} share the canonical {url}")
+        seen[url] = label
+    main_host = urlparse(site_url).hostname
+    urls = sorted(seen, key=lambda url: (urlparse(url).hostname != main_host, url))
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + "".join(f"<url><loc>{html.escape(url)}</loc></url>" for url in urls) + "</urlset>\n")
+
+
+def robots_txt(site_url: str) -> str:
+    # Allow everything: 404 and noindex pages must stay fetchable so crawlers see their noindex.
+    # Previews (*.pages.dev) are kept out of indexes by the Worker's X-Robots-Tag, not a Disallow.
+    return ("# vibedgc.com and docs.vibedgc.com serve this same file; the sitemap lists both hosts.\n"
+            "User-agent: *\nAllow: /\n\n"
+            f"Sitemap: {site_url}/sitemap.xml\n")
 
 
 def run_docs(check: bool) -> int:
