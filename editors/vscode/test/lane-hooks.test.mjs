@@ -18,14 +18,17 @@ const STUBS = {
 function instrumented() {
   let script = mainJs;
   for (const [name, params] of Object.entries(STUBS)) {
-    const stub = `function ${name}(${params}) {}`;
-    assert.equal(script.split(stub).length, 2, `exactly one stub ${stub}`);
+    // A lane replaces its stub body with the real thing, so match the declaration, not an empty body:
+    // the recording wrapper takes the name and calls the lane's own function under a private name.
+    const declaration = `function ${name}(${params}) {`;
+    assert.equal(script.split(declaration).length, 2, `exactly one declaration ${declaration}`);
     const first = params.split(",")[0].trim();
     const detail = name === "agentsOnToolCard" ? "{ inGroup: !!card.closest('.tool-group'), callId: card.dataset.callId, name: ev.name }"
       : name === "settleRetryLines" ? "{ turn: !!t, reason }"
         : name === "hideAgentsMenu" ? "event ? event.type : null"
           : name.endsWith("OnBackendExit") ? "msg.code" : name.endsWith("OnReady") ? "ev.type" : first;
-    script = script.replace(stub, `function ${name}(${params}) { (window.__hooks ||= []).push([${JSON.stringify(name)}, ${detail}]); }`);
+    script = script.replace(declaration, `function ${name}(${params}) { (window.__hooks ||= []).push([${JSON.stringify(name)}, ${detail}]); `
+      + `return __lane_${name}(${params}); }\n  function __lane_${name}(${params}) {`);
   }
   const docked = "function askCardDocked() { return false; }";
   assert.equal(script.split(docked).length, 2);

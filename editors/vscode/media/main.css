@@ -498,7 +498,7 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 .monitor-note .codicon { color: var(--accent-text); }
 
 /* system lines */
-.sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
+.sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sys.err { color: var(--err-text); }
 
 /* composer */
@@ -1142,6 +1142,51 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 
 
 /* ---- 0.40 reconnecting ------------------------------------------------------------------------ */
+/* A retried model request: one muted line in its turn. State is carried by the words and the icon's
+   shape; the icon alone may take --err or --good. Nothing here truncates the label: at 300 px it
+   wraps, and only the cause (repeated in the open details) ellipsises or hides. */
+.model-retry { min-width: 0; margin: var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.model-retry-toggle, .model-error-toggle { display: flex; width: 100%; min-width: 0; min-height: 22px; align-items: center;
+  flex-wrap: nowrap; gap: var(--sp-2); padding: 0; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+.model-retry-toggle:focus-visible, .model-error-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.model-retry-icon, .model-retry-chev, .model-error-icon { flex: none; font-size: 14px; line-height: 1; }
+.model-retry-label { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.model-retry-count { font-variant-numeric: tabular-nums; }
+.model-retry-cause { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-retry-chev { margin-left: auto; color: var(--muted); transition: transform .12s ease; }
+.model-retry-toggle[aria-expanded="true"] .model-retry-chev, .model-error-toggle[aria-expanded="true"] .model-retry-chev { transform: rotate(180deg); }
+.model-retry[data-state="gave_up"] .model-retry-icon { color: var(--err-text); }
+.model-retry[data-state="recovered"] .model-retry-icon { color: var(--good); }
+.model-retry-detail { min-width: 0; margin: 2px 0 var(--sp-1) 6px; padding: 2px 0 2px var(--sp-3); border-left: 1px solid var(--border); }
+.model-retry-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px var(--sp-3); margin: 0; }
+.model-retry-facts dt { color: var(--muted); }
+.model-retry-facts dd { min-width: 0; margin: 0; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.model-retry-attempts { margin: var(--sp-1) 0 0; padding: 0; list-style: none; color: var(--text); overflow-wrap: anywhere; }
+.model-retry-attempts .n { display: inline-block; min-width: 1.4em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.model-retry-raw, .model-error-message { max-height: 16em; margin: var(--sp-1) 0 0; padding: var(--sp-1) var(--sp-2); overflow: auto;
+  border-radius: var(--r-sm); background: var(--code); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
+.model-retry-hint { margin: var(--sp-1) 0 0; color: var(--text); overflow-wrap: anywhere; }
+button.link.model-retry-copy { display: inline-flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-2); }
+/* The final model error keeps its headline in the error colour every error row uses, and its hint
+   one glance away: the actionable line never moves behind a click. */
+.model-error { margin: var(--sp-1) 0; }
+.model-error-toggle { color: inherit; }
+.model-error-headline { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.model-error-hint { margin: 2px 0 0 22px; color: var(--text); overflow-wrap: anywhere; }
+.model-error-label { margin-top: var(--sp-1); color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .model-retry-chev { transition: none; } }
+@media (max-width: 360px) {
+  .model-retry-cause { display: none; }
+  .model-retry-facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .model-retry-facts dd { margin-bottom: 2px; }
+  .model-retry-raw, .model-error-message { padding: 2px var(--sp-1); }
+}
+@media (forced-colors: active) {
+  .model-retry-toggle:focus-visible, .model-error-toggle:focus-visible { outline: 2px solid Highlight; }
+  .model-retry-detail { border-left-color: CanvasText; }
+}
 /* ---- end 0.40 reconnecting -------------------------------------------------------------------- */
 
 

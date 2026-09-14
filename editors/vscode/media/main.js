@@ -2849,11 +2849,12 @@
         break;
       }
       case "error":
-        speak(`DGC error: ${ev.message}`); sysLine(ev.message, true);
+        if (!modelErrorRow(ev)) { speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); }
         if (ev.fatal) { endTurn("error"); setSending(false); }
         // "unknown command: /foo" / "custom command /foo is empty": no turn is coming for it.
         else if (answersCustomCommand(ev.message)) settleCustomCommand();
         break;
+      case "model_retry": onModelRetry(ev); break;
       case "turn_end":
         speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
@@ -4176,7 +4177,7 @@
       // within thirty seconds, it really did fail.
       if (msg.recovering && turn) {
         const stale = turn;
-        turn.activity = { state: "waiting", label: "Reconnecting", detail: "" };
+        turn.activity = { state: "waiting", label: "Restarting the DGC backend", detail: "" };
         turn.phaseT0 = Date.now();
         renderTurnMeta();
         clearTimeout(turn.recoverTimer);
@@ -4251,11 +4252,296 @@
 
 
   // ---- 0.40 reconnecting --------------------------------------------------------------------------
-  function retryOnSessionReset(kind) {}
-  function retryOnBackendExit(msg) {}
-  function retryOnReady(ev) {}
-  // `t` is the turn being ended (never null here); `reason` is endTurn's reason.
-  function settleRetryLines(t, reason) {}
+  // A model request DGC retries is one muted line inside its turn, found again by `retry_id` (never
+  // by adjacency), updated in place and closed in past tense. Frames reach here live and from history
+  // replay, where nothing was schema-checked, so every field is coerced before it is used and every
+  // string is inserted as text.
+  const RETRY_KINDS = new Set(["connect", "dns", "tls", "proxy", "reset", "connect_timeout", "http",
+    "rate_limited", "overloaded", "stream_cut", "stall", "loading", "auth", "model_not_found", "engine", "other"]);
+  const RETRY_STATES = new Set(["retrying", "recovered", "gave_up", "cancelled"]);
+  const retryTurnless = new Map();          // lines drawn for frames outside any turn (`dgc -p`-style)
+  const retryTurnlessSpeech = { lost: false, recovered: false };
+  let retrySeq = 0;
+  // A narrow panel shortens "Sub-agent · " to "Sub · " so the counter stays on the first line.
+  const retryNarrow = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 360px)") : null;
+  function retryPrefixText(span) { span.textContent = (retryNarrow?.matches ? span.dataset.short : span.dataset.long) || ""; }
+  retryNarrow?.addEventListener?.("change", () => document.querySelectorAll(".model-retry-prefix").forEach(retryPrefixText));
+  function forgetTurnlessRetries() { retryTurnless.clear(); retryTurnlessSpeech.lost = retryTurnlessSpeech.recovered = false; }
+  function retryOnSessionReset(kind) { forgetTurnlessRetries(); }
+  function retryOnBackendExit(msg) {
+    // The process that owned these runs is gone: a restarted backend's ids must never update them.
+    for (const line of retryTurnless.values()) if (line.state === "retrying") paintRetryLine(line, "unfinished");
+    forgetTurnlessRetries();
+  }
+  function retryOnReady(ev) { forgetTurnlessRetries(); }
+  // `t` is the turn being ended (never null here); `reason` is endTurn's reason. Only the backend
+  // knows whether retries were exhausted, so a line it never closed says it did not finish. A live
+  // Stop says so; a replayed turn's reason is only what the session file supports, so replay never
+  // claims more than "did not finish".
+  function settleRetryLines(t, reason) {
+    for (const line of t.retryLines?.values() || []) {
+      if (line.state === "retrying") paintRetryLine(line, reason === "cancelled" && !replaying ? "cancelled" : "unfinished");
+    }
+  }
+  function retryText(value, max) {
+    if (typeof value === "string") return value.slice(0, max);
+    return typeof value === "number" && Number.isFinite(value) ? String(value).slice(0, max) : "";
+  }
+  function retryInt(value, low, high) {
+    const n = typeof value === "number" ? value : (typeof value === "string" && /^\d{1,9}$/.test(value) ? Number(value) : NaN);
+    return Number.isInteger(n) && n >= low && n <= high ? n : null;
+  }
+  function coerceRetry(ev) {
+    const id = retryText(ev.retry_id, 128);
+    if (!id) return null;
+    return {
+      id, state: RETRY_STATES.has(ev.state) ? ev.state : "retrying",
+      kind: RETRY_KINDS.has(ev.kind) ? ev.kind : "other",
+      layer: ev.layer === "continuation" ? "continuation" : "request",
+      attempt: retryInt(ev.attempt, 1, 100) || 1, max: retryInt(ev.max_attempts, 1, 100),
+      summary: retryText(ev.summary, 200), endpoint: retryText(ev.endpoint, 300),
+      model: retryText(ev.model, 200), apiMode: retryText(ev.api_mode, 40),
+      detail: retryText(ev.detail, 4000), hint: retryText(ev.hint, 300),
+      httpStatus: retryInt(ev.http_status, 100, 599), delayMs: retryInt(ev.delay_ms, 0, 600000),
+      origin: ["agent", "subagent", "engine"].includes(ev.origin) ? ev.origin : "agent",
+      agent: retryText(ev.agent, 64), engine: retryText(ev.engine, 40), turnId: retryText(ev.turn_id, 128),
+    };
+  }
+  function retryHost(endpoint) {
+    const text = String(endpoint || "");
+    const match = text.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i);
+    return match ? match[1] : text;
+  }
+  function retrySeconds(ms) {
+    const s = ms / 1000;
+    return s < 10 && Math.abs(s - Math.round(s)) > 0.05 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+  }
+  // [words, counter] for a line; the counter is drawn in its own span.
+  function retryWords(line, state) {
+    const busy = line.kind === "rate_limited" || line.kind === "overloaded";
+    const plain = ["stall", "loading", "auth", "model_not_found"].includes(line.kind);
+    const reconnect = !busy && line.kind !== "http" && !plain;
+    const count = line.max ? `${line.attempt}/${line.max}` : `${line.attempt}`;
+    const tries = `${line.attempt} ${line.attempt === 1 ? "retry" : "retries"}`;
+    if (state === "retrying") {
+      if (busy) return ["Server is busy, retrying", count];
+      if (line.kind === "http") return ["Server error, retrying", count];
+      if (!reconnect) return ["Retrying", count];
+      if (!line.max) return [line.origin === "engine" ? "Reconnecting · waiting for network"
+        : `Reconnecting · waiting for ${retryHost(line.endpoint) || "the server"}`, ""];
+      return ["Reconnecting", count];
+    }
+    if (state === "recovered") {
+      if (line.layer === "continuation") {
+        return [(reconnect ? "Reconnected" : "Recovered") + (line.partial ? " · continued from the partial answer" : ""), ""];
+      }
+      return [`${reconnect ? "Reconnected" : "Recovered"} after ${tries}`, ""];
+    }
+    if (state === "gave_up") {
+      return [line.layer === "continuation" ? `Gave up after ${line.attempt} reconnect${line.attempt === 1 ? "" : "s"}`
+        : `Gave up after ${tries}`, ""];
+    }
+    if (state === "cancelled") return [reconnect ? "Stopped while reconnecting" : "Stopped while retrying", ""];
+    return ["Reconnect did not finish", ""];
+  }
+  function buildRetryLine(frame) {
+    const n = ++retrySeq;
+    const node = el("div", "model-retry");
+    node.innerHTML = `<button type="button" class="model-retry-toggle" aria-expanded="false" aria-controls="model-retry-detail-${n}">`
+      + '<span class="codicon codicon-debug-disconnect model-retry-icon" aria-hidden="true"></span>'
+      + '<span class="model-retry-label"><span class="model-retry-prefix"></span>'
+      + '<span class="model-retry-words"></span><span class="model-retry-count"></span></span>'
+      + '<span class="model-retry-cause"></span>'
+      + '<span class="codicon codicon-chevron-down model-retry-chev" aria-hidden="true"></span></button>'
+      + `<div class="model-retry-detail" id="model-retry-detail-${n}" hidden>`
+      + '<dl class="model-retry-facts"></dl><ol class="model-retry-attempts" aria-label="Attempts"></ol>'
+      + '<pre class="model-retry-raw" hidden></pre><p class="model-retry-hint" hidden></p>'
+      + '<button type="button" class="link model-retry-copy"><span class="codicon codicon-copy" aria-hidden="true"></span> Copy details</button></div>';
+    const toggle = node.querySelector(".model-retry-toggle"), detail = node.querySelector(".model-retry-detail");
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", String(open));
+      detail.hidden = !open;
+    });
+    const line = { node, id: frame.id, state: "retrying", attempts: [], dropped: 0, partial: false, ...frame };
+    node.querySelector(".model-retry-copy").addEventListener("click", (event) => {
+      vscode.postMessage({ type: "copy", text: retryCopyText(line) });
+      flashAction(event.currentTarget, "check");
+    });
+    return line;
+  }
+  function retryFacts(dl, rows) {
+    dl.textContent = "";
+    for (const [name, value] of rows) {
+      if (!value) continue;
+      dl.appendChild(el("dt", "", "")).textContent = name;
+      dl.appendChild(el("dd", "", "")).textContent = value;
+    }
+  }
+  function retryFactRows(line) {
+    return [["Cause", line.summary], ["Model", [line.model, line.apiMode].filter(Boolean).join(" · ")],
+      ["Endpoint", line.endpoint], ["Engine", line.origin === "engine" ? line.engine : ""],
+      ["HTTP status", line.httpStatus ? String(line.httpStatus) : ""]];
+  }
+  function paintRetryLine(line, state) {
+    line.state = state;
+    const node = line.node;
+    const [words, count] = retryWords(line, state);
+    node.dataset.retryId = line.id;
+    node.dataset.state = state;
+    node.dataset.kind = line.kind;
+    const prefix = line.origin === "subagent" ? "Sub-agent · " : line.origin === "engine" && line.engine ? `${line.engine} · ` : "";
+    const prefixEl = node.querySelector(".model-retry-prefix");
+    prefixEl.dataset.long = prefix;
+    prefixEl.dataset.short = line.origin === "subagent" ? "Sub · " : prefix;
+    retryPrefixText(prefixEl);
+    node.querySelector(".model-retry-words").textContent = words;
+    node.querySelector(".model-retry-count").textContent = count ? ` ${count}` : "";
+    const cause = state === "recovered" ? (retryHost(line.endpoint) || line.summary) : line.summary;
+    node.querySelector(".model-retry-cause").textContent = cause;
+    const icon = node.querySelector(".model-retry-icon");
+    icon.className = "codicon model-retry-icon codicon-" + (state === "recovered" ? "plug"
+      : state === "cancelled" || state === "unfinished" ? "circle-slash" : "debug-disconnect");
+    retryFacts(node.querySelector(".model-retry-facts"), retryFactRows(line));
+    const list = node.querySelector(".model-retry-attempts");
+    list.textContent = "";
+    if (line.dropped) list.appendChild(el("li", "model-retry-earlier")).textContent = `… ${line.dropped} earlier attempts`;
+    for (const attempt of line.attempts) {
+      const li = el("li");
+      li.appendChild(el("span", "n")).textContent = String(attempt.n);
+      li.appendChild(document.createTextNode(" " + attempt.summary
+        + (attempt.delayMs != null ? ` · retried after ${retrySeconds(attempt.delayMs)}` : "")));
+      list.appendChild(li);
+    }
+    list.hidden = !line.attempts.length && !line.dropped;
+    const raw = node.querySelector(".model-retry-raw"), hint = node.querySelector(".model-retry-hint");
+    raw.textContent = line.detail; raw.hidden = !line.detail;
+    hint.textContent = line.hint; hint.hidden = !line.hint;
+  }
+  function retryCopyText(line) {
+    const [words, count] = retryWords(line, line.state);
+    const out = [`${words}${count ? " " + count : ""}${line.summary ? " · " + line.summary : ""}`];
+    for (const [name, value] of retryFactRows(line)) if (value) out.push(`${name}: ${value}`);
+    if (line.dropped) out.push(`… ${line.dropped} earlier attempts`);
+    for (const a of line.attempts) {
+      out.push(`Attempt ${a.n}: ${a.summary}${a.delayMs != null ? ` · retried after ${retrySeconds(a.delayMs)}` : ""}`);
+    }
+    if (line.detail) out.push("Details:", line.detail);
+    if (line.hint) out.push(`Hint: ${line.hint}`);
+    return out.join("\n");
+  }
+  function onModelRetry(ev) {
+    const frame = coerceRetry(ev);
+    if (!frame) return;
+    let map, speech, owner = null;
+    if (frame.turnId) {
+      // A frame names its turn: draw it only in that turn. A turn discarded by a new, cleared or
+      // resumed chat (or one already ended) is gone, and its late frames must not reach the new chat.
+      if (!turn || (turn.id && turn.id !== frame.turnId)) return;
+      owner = turn;
+      map = turn.retryLines || (turn.retryLines = new Map());
+      speech = turn.retrySpeech || (turn.retrySpeech = { lost: false, recovered: false });
+    } else {
+      map = retryTurnless; speech = retryTurnlessSpeech;
+    }
+    let line = map.get(frame.id);
+    if (!line) {
+      line = buildRetryLine(frame);
+      map.set(frame.id, line);
+      const before = owner ? owner.act : null;
+      const previous = before ? before.previousElementSibling : null;
+      line.partial = !!(previous && previous.classList.contains("text"));
+      if (owner) appendTurnContent(line.node); else appendConversationContent(line.node);
+      endToolGroup();
+    } else {
+      Object.assign(line, { kind: frame.kind, layer: frame.layer, attempt: frame.attempt, max: frame.max ?? line.max,
+        origin: frame.origin, engine: frame.engine || line.engine, agent: frame.agent || line.agent });
+      for (const key of ["summary", "endpoint", "model", "apiMode", "detail", "hint"]) if (frame[key]) line[key] = frame[key];
+      if (frame.httpStatus) line.httpStatus = frame.httpStatus;
+    }
+    if (frame.state === "retrying") {
+      line.attempts.push({ n: frame.attempt, summary: frame.summary, delayMs: frame.delayMs });
+      if (line.attempts.length > 20) { line.dropped += line.attempts.length - 20; line.attempts.splice(0, line.attempts.length - 20); }
+    }
+    paintRetryLine(line, frame.state);
+    // One announcement for the first loss in a turn and one for the first recovery after it. Nothing
+    // for later attempts, parallel runs, Stop, a give-up (the error row speaks), replay, or a hidden panel.
+    if (replaying || document.visibilityState === "hidden") return;
+    if (frame.state === "retrying" && frame.attempt === 1 && !speech.lost) {
+      speech.lost = true;
+      speak(frame.kind === "rate_limited" || frame.kind === "overloaded"
+        ? "The model server is busy, retrying" : "Connection to the model lost, reconnecting");
+    } else if (frame.state === "recovered" && speech.lost && !speech.recovered) {
+      speech.recovered = true;
+      speak("Reconnected to the model");
+    }
+  }
+  const MODEL_ERROR_HEADLINES = {
+    connect: "Could not reach the model", dns: "Could not reach the model", tls: "Could not reach the model",
+    proxy: "Could not reach the model", reset: "Could not reach the model", connect_timeout: "Could not reach the model",
+    http: "The model server failed", overloaded: "The model server failed", rate_limited: "The model server failed",
+    stream_cut: "The model stream kept breaking", stall: "The model stopped responding", loading: "The model stopped responding",
+    auth: "The model endpoint rejected the key", engine: "The engine failed", other: "Model request failed",
+  };
+  // The final model error, when the backend said why. False when there is no usable cause, so the
+  // caller keeps today's plain line: a cause that fails coercion never becomes an empty row.
+  function modelErrorRow(ev) {
+    const cause = ev.cause;
+    if (!cause || typeof cause !== "object" || Array.isArray(cause)) return false;
+    if (typeof cause.kind !== "string" || typeof cause.summary !== "string" || !cause.summary.trim()) return false;
+    for (const key of ["endpoint", "model", "api_mode", "retry_id", "detail", "hint"]) {
+      if (cause[key] != null && typeof cause[key] !== "string") return false;
+    }
+    for (const key of ["http_status", "attempts"]) {
+      if (cause[key] != null && !Number.isInteger(cause[key])) return false;
+    }
+    const kind = RETRY_KINDS.has(cause.kind) ? cause.kind : "other";
+    const summary = cause.summary.slice(0, 200), model = retryText(cause.model, 200);
+    const message = String(ev.message || "");
+    const lead = kind === "model_not_found" ? (model ? `The server has no model named ${model}` : "The server has no such model")
+      : MODEL_ERROR_HEADLINES[kind];
+    const headline = `${lead} · ${summary}`;
+    const split = message.indexOf("\n  → ");
+    const hint = split >= 0 ? message.slice(split + 5).trim() : retryText(cause.hint, 300);
+    const n = ++retrySeq;
+    const row = el("div", "sys err model-error");
+    row.setAttribute("role", "alert");
+    row.dataset.kind = kind;
+    row.innerHTML = `<button type="button" class="model-error-toggle" aria-expanded="false" aria-controls="model-error-detail-${n}">`
+      + '<span class="codicon codicon-error model-error-icon" aria-hidden="true"></span><span class="model-error-headline"></span>'
+      + '<span class="codicon codicon-chevron-down model-retry-chev" aria-hidden="true"></span></button>'
+      + '<p class="model-error-hint" hidden></p>'
+      + `<div class="model-retry-detail model-error-detail" id="model-error-detail-${n}" hidden>`
+      + '<dl class="model-retry-facts"></dl><div class="model-error-label">Message</div><pre class="model-error-message"></pre>'
+      + '<button type="button" class="link model-retry-copy"><span class="codicon codicon-copy" aria-hidden="true"></span> Copy details</button></div>';
+    row.querySelector(".model-error-headline").textContent = headline;
+    const hintEl = row.querySelector(".model-error-hint");
+    hintEl.textContent = hint ? `→ ${hint}` : ""; hintEl.hidden = !hint;
+    const facts = [["Cause", summary], ["Model", [model, retryText(cause.api_mode, 40)].filter(Boolean).join(" · ")],
+      ["Endpoint", retryText(cause.endpoint, 300)],
+      ["HTTP status", retryInt(cause.http_status, 100, 599) ? String(cause.http_status) : ""],
+      ["Attempts", retryInt(cause.attempts, 1, 1000000) ? String(cause.attempts) : ""],
+      ["Details", retryText(cause.detail, 4000)]];
+    retryFacts(row.querySelector(".model-retry-facts"), facts);
+    row.querySelector(".model-error-message").textContent = message;
+    const toggle = row.querySelector(".model-error-toggle"), detail = row.querySelector(".model-error-detail");
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", String(open)); detail.hidden = !open;
+    });
+    row.querySelector(".model-retry-copy").addEventListener("click", (event) => {
+      const text = [headline, ...facts.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`), "Message:", message].join("\n");
+      vscode.postMessage({ type: "copy", text });
+      flashAction(event.currentTarget, "check");
+    });
+    speak(`DGC error: ${headline}`);
+    appendConversationContent(row);
+    endToolGroup();
+    const retryId = retryText(cause.retry_id, 128);
+    const line = retryId ? (turn?.retryLines?.get(retryId) || retryTurnless.get(retryId)) : null;
+    if (line && line.state !== "gave_up") paintRetryLine(line, "gave_up");
+    return true;
+  }
   // ---- end 0.40 reconnecting ----------------------------------------------------------------------
 
 
