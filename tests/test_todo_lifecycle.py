@@ -736,6 +736,11 @@ class ChecklistProtocolTests(unittest.TestCase):
         report = {"status": "completed", "summary": "done", "evidence": ["x"]}
         reason = self.agent._gate_completion_report(report)["summary"]
         self.assertIn("or /todo clear to drop them.", reason)
+        # `dgc -p --output-format json` streams the same events but nobody can type a command.
+        from dgc.cli import _json_oneshot_ui
+        self.agent.ui = _json_oneshot_ui(self.config)
+        reason = self.agent._gate_completion_report(report)["summary"]
+        self.assertIn("or clear the checklist to drop them.", reason)
 
     def test_tui_todo_clear_mid_turn_is_refused_visibly_and_the_list_is_kept(self):
         # The terminal keeps its visible refusal while a turn runs; only the editor clears mid-turn.

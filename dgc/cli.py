@@ -2514,6 +2514,7 @@ def _json_oneshot_ui(config):
 
     class _OneShotJsonUI(HeadlessUI):
         non_interactive = True
+        todo_clear_hint = ""        # a script has no slash line to type `/todo clear` into
 
         def __init__(self, emitter, pending):
             super().__init__(emitter, pending)
