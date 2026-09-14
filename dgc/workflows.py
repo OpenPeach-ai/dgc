@@ -112,18 +112,49 @@ STEERING_SUFFIX = "\n</user-interjection>"
 def notice_kind(message) -> str:
     """What kind of DGC-written notice a transcript message is, or "" for anything else.
 
-    Read from the private ``_dgc_notice`` key only, never from content: a user who literally types
-    ``<monitor-events`` still sent a prompt. Every transcript projection (editor history, the TUI,
-    session rows, recall, training export, ACP replay) asks here, so a notice can never come back
-    as something the user typed. Private keys never reach a provider.
+    Read from the private ``_dgc_notice`` key, never from content: a user who literally types
+    ``<monitor-events`` still sent a prompt. The single exception is DGC's own stream-cut
+    continuation in a session saved before it was tagged, matched only as the whole exact sentence
+    (``"stream_recovery"``). Every transcript projection (editor history, the TUI, session rows,
+    recall, training export, ACP replay) asks here, so a notice can never come back as something
+    the user typed. Private keys never reach a provider.
     """
     if not isinstance(message, dict) or message.get("role") != "user":
         return ""
     notice = message.get("_dgc_notice")
     if not isinstance(notice, dict):
-        return ""
+        # The one content match: sessions saved before 0.40 carry DGC's stream-cut continuation as
+        # bare text, and only the whole exact sentence counts (see stream_recovery_notice).
+        return "stream_recovery" if message.get("content") == STREAM_RECOVERY_TEXT else ""
     kind = notice.get("kind")
-    return kind if kind in ("monitor",) else ""
+    return kind if kind in ("monitor", "stream_recovery") else ""
+
+
+# What DGC asks a model whose stream was cut before its terminal event. Written as a user message
+# (the model must read it) tagged ``_dgc_notice {kind: "stream_recovery", ...}``, so every
+# projection shows it as a reconnect, never as something the user typed.
+STREAM_RECOVERY_TEXT = ("Your previous response was interrupted before its terminal provider "
+                        "event. Continue exactly where you left off — do not repeat what you "
+                        "already wrote.")
+
+
+def stream_recovery_notice(message) -> dict | None:
+    """The stream-recovery notice a transcript message carries, or None.
+
+    A tagged message returns its ``_dgc_notice``. A legacy message (saved before the tag existed)
+    whose whole content is exactly the interrupted-continuation sentence returns a notice with
+    ``legacy: True``, kind ``stream_cut`` and no endpoint. The length-limit continuation is not a
+    connection event and is never matched; neither is the sentence with anything else around it.
+    """
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return None
+    notice = message.get("_dgc_notice")
+    if isinstance(notice, dict):
+        return notice if notice.get("kind") == "stream_recovery" else None
+    if message.get("content") == STREAM_RECOVERY_TEXT:
+        return {"kind": "stream_recovery", "layer": "continuation", "attempt": 1, "cause": "stream_cut",
+                "summary": "the stream ended before its terminal event", "legacy": True}
+    return None
 
 
 def display_prompt(text: str) -> str:
