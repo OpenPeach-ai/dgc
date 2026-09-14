@@ -299,6 +299,28 @@ class AgentSession:
         return "idle"
 
 
+def _asked_rows(message: dict) -> list[dict]:
+    """Recap rows for the question outcomes a saved message recorded (``_dgc_decision``): a native
+    tool result carries one record, a text-protocol ``<tool_results>`` message a list."""
+    records = message.get("_dgc_decision") if isinstance(message, dict) else None
+    if isinstance(records, dict):
+        records = [records]
+    if not isinstance(records, list):
+        return []
+    from .questions import asked_summary
+    rows = []
+    for record in records[:16]:
+        questions = record.get("questions") if isinstance(record, dict) else None
+        if not isinstance(questions, list) or not questions:
+            continue
+        try:
+            lines = asked_summary(questions, record.get("answers") or {}, str(record.get("outcome") or ""))
+        except (KeyError, TypeError, AttributeError, IndexError):
+            continue                        # a hand-edited record: the recap simply omits it
+        rows.append({"who": "asked", "body": "", "tools": "", "lines": lines})
+    return rows
+
+
 def one_line_text(text) -> str:
     return " ".join(str(text or "").split())
 
@@ -2367,6 +2389,9 @@ class TUI:
             chips = [("Ctrl+C", "press again to quit")]
         elif not self._mouse_on:
             chips = [("select mode", "drag to select"), ("PgUp/PgDn", "scroll"), ("/select", "back")]
+        elif (self._req is not None and self._req.get("kind") == "questions" and self._input is None):
+            # A question card: Esc closes it without answering, and Ctrl+C is still the Stop.
+            chips = [("Esc", "dismiss"), ("Ctrl+C", "stop")]
         elif self._req is not None or self._input is not None or self._naming:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
@@ -5393,6 +5418,14 @@ class TUI:
                 names = row.get("tools") or ""
                 if names:
                     blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
+            elif who == "asked":
+                # A settled question batch: what was asked and answered, as the live step shows it.
+                lines = [style_mod.terminal_safe_text(line) for line in row.get("lines") or ()]
+                if lines:
+                    text = f"[{th.accent}]{glyphs.TOOL_ICON.get('propose_options', '>')}[/] [bold]{_esc(lines[0])}[/]"
+                    for line in lines[1:]:
+                        text += f"\n  [{th.muted}]{_esc(line)}[/]"
+                    blocks.append(self._rich(text))
         return blocks, made
 
     def _message_rows(self, messages):
@@ -5418,6 +5451,11 @@ class TUI:
                 skip_ack = False
                 continue                        # the model's canned "understood" is not a turn
             skip_ack = False
+            asked = _asked_rows(m)
+            if asked:
+                rows.extend(asked)
+                if role == "tool":
+                    continue
             if role == "user":
                 from .editor_context import _strip_editor_context
                 from .workflows import display_prompt, notice_kind

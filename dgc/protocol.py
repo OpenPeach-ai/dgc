@@ -119,6 +119,12 @@ class PendingRequests:
             self._slots[rid] = [ev, None, validator]
         return rid, ev
 
+    def is_open(self, rid) -> bool:
+        """Whether ``rid`` names a registered request that has no terminal result yet."""
+        with self._lock:
+            slot = self._slots.get(rid) if isinstance(rid, str) else None
+            return bool(slot) and not slot[0].is_set()
+
     def value(self, rid: str):
         with self._lock:
             slot = self._slots.pop(rid, None)

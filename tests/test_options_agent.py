@@ -234,6 +234,29 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("_dgc_decision", tools[1])
         self.assertFalse(agent.cancelled.is_set())
 
+    def test_dismissal_stops_the_rest_of_the_batch(self):
+        # acceptEdits: a write that depends on the unanswered decision would otherwise land, and a
+        # second question would dock right after the user closed the first.
+        ui = StubUI({"outcome": "dismissed"})
+        agent = self.agent(ui, mode="acceptEdits")
+        requests = []
+
+        def chat(messages, **kwargs):
+            requests.append(1)
+            return ChatResult(content="", tool_calls=[
+                ToolCall("c1", "propose_options", copy.deepcopy(ASK)),
+                ToolCall("c2", "write_file", {"path": "decided.txt", "content": "Local\n"}),
+                ToolCall("c3", "propose_options", copy.deepcopy(ASK))])
+        with patch.object(agent.client, "chat", side_effect=chat):
+            self.assertTrue(agent.run_turn("Set up drafts"))
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(ui.asked), 1, "the user is asked once")
+        self.assertFalse((agent.config.project_root / "decided.txt").exists(), "the dependent write never ran")
+        tools = [m for m in agent.messages if m.get("role") == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in tools], ["c1", "c2", "c3"], "every call still has a result")
+        self.assertEqual([m["content"] for m in tools[1:]], [Q.NOT_RUN_AFTER_DISMISSAL] * 2)
+        self.assertNotIn("_dgc_decision", tools[2])
+
     def test_dismissal_pauses_an_active_goal_and_starts_no_next_cycle(self):
         ui = StubUI({"outcome": "dismissed"})
         agent = self.agent(ui)
@@ -431,6 +454,30 @@ class HistoryShapeTests(unittest.TestCase):
         self.assertEqual(resolved[0]["questions"][0]["header"], "Storage")
         self.assertIsNone(ep.event_error({**resolved[0], "seq": 0}))
         self.assertEqual(items[-1]["reason"], "cancelled")
+
+    def interrupted(self, call_id="call_0"):
+        return {"role": "tool", "tool_call_id": call_id,
+                "content": "error: tool result unavailable after session interruption"}
+
+    def read_call(self, call_id="call_0"):
+        return {"role": "assistant", "content": "", "tool_calls": [{"id": call_id, "type": "function", "function": {
+            "name": "read_file", "arguments": json.dumps({"path": "a.txt"})}}]}
+
+    def test_interrupted_call_ids_reused_across_turns_resolve_to_their_own_call(self):
+        # call_0 style ids repeat per turn: an interrupted read_file must not replay as a question
+        items = self.history([{"role": "user", "content": "Read it"}, self.read_call(), self.interrupted(),
+                              {"role": "user", "content": "Now ask"}, self.call("call_0"),
+                              {"role": "tool", "tool_call_id": "call_0", "content": "The user answered your question: ..."}])
+        self.assertEqual([i["type"] for i in items if i["type"] in ("tool_call", "tool_result", "options_resolved")],
+                         ["tool_call", "tool_result", "tool_call", "tool_result"])
+        # ...and an interrupted question followed by a read_file with the same id still replays as cancelled
+        items = self.history([{"role": "user", "content": "Ask"}, self.call("call_0"), self.interrupted(),
+                              {"role": "user", "content": "Read it"}, self.read_call(),
+                              {"role": "tool", "tool_call_id": "call_0", "content": "hello"}])
+        kinds = [(i["type"], i.get("name")) for i in items if i["type"] in ("tool_call", "tool_result", "options_resolved")]
+        self.assertEqual(kinds, [("tool_call", "propose_options"), ("options_resolved", None),
+                                 ("tool_result", "propose_options"), ("tool_call", "read_file"), ("tool_result", "read_file")])
+        self.assertEqual(next(i for i in items if i["type"] == "options_resolved")["outcome"], "cancelled")
 
     def test_dismissed_turn_replays_as_completed(self):
         questions = Q.normalize_questions(ASK)

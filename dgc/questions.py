@@ -36,6 +36,10 @@ ERR_SHAPE = "each question needs question text and a list of options."
 
 DISMISSED_RESULT = ("The user closed this question without answering. Do not choose for them or act "
                     "on it; wait for their next message.")
+# A call the model made after a question in the same batch that the user closed: it never runs,
+# because it may depend on the answer the user declined to give (a Stop skips it the same way).
+NOT_RUN_AFTER_DISMISSAL = ("not run: the user closed a question earlier in this batch. Wait for their "
+                           "next message.")
 CANCELLED_RESULT = "No decision was submitted. Do not assume a choice or act on unanswered questions."
 UNAVAILABLE_RESULT = ("error: nobody can answer questions here. If a wrong guess is cheap to undo, "
                       "decide, and state the assumption in your reply; otherwise stop and report the "
@@ -45,7 +49,12 @@ OWN_WORDS = ("Their written answers are their own words: follow what they say, e
 CONTINUE = "Continue with these decisions."
 
 _ID = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-_SUFFIX = re.compile(r"\s*\(\s*recommended\s*\)\s*$", re.IGNORECASE)
+# A recommendation marker. Models put "(Recommended)" at the end of the label as asked, but also at
+# the end or start of the description, or write "Recommended:" before either; each is the same flag.
+_MARK = re.compile(r"\(\s*recommended\s*\)", re.IGNORECASE)
+_LEAD_MARK = re.compile(r"^\s*recommended\s*(?:[:\u00b7\u2013\u2014-]\s*|\.\s+)", re.IGNORECASE)
+# ...or as a last clause of its own: "Easy to set up; recommended." (never "not recommended").
+_TRAIL_MARK = re.compile(r"(?:^|[,;:\u00b7\u2013\u2014-]|\.(?=\s))\s*recommended\s*[.!]?\s*$", re.IGNORECASE)
 # A model-added free-text row: the client always offers one, so a second would be a duplicate.
 _OTHER = re.compile(r"^(?:other|something else)\s*[.…:!?]*\s*(?:\([^)]*\))?\s*[.…:!?]*$", re.IGNORECASE)
 
@@ -92,6 +101,29 @@ def _header_from(question: str) -> str:
     return (kept + "…") if kept else cut_cells(text, MAX_HEADER_CELLS)
 
 
+def _unmark(text: str) -> tuple[str, bool]:
+    """``text`` without a recommendation marker, and whether it carried one.
+
+    "Easy to deploy (Recommended)", "Feature rich, (Recommended)", "(Recommended) Fast.",
+    "Recommended: fast" and "Easy to set up; recommended." all mark the option; the text left reads as if the marker was never there.
+    Text without a marker comes back unchanged.
+    """
+    stripped = _MARK.sub(" ", text)
+    found = stripped != text
+    lead = _LEAD_MARK.match(stripped)
+    if lead:
+        stripped, found = stripped[lead.end():], True
+    trail = _TRAIL_MARK.search(stripped)
+    if trail:
+        stripped, found = stripped[:trail.start()], True
+    if not found:
+        return text, False
+    stripped = re.sub(r"\s+([,;.!?])", r"\1", stripped)           # "apps ." -> "apps."
+    stripped = re.sub(r"([,;])(?:\s*[,;])+", r"\1", stripped)       # "rich, , good" -> "rich, good"
+    stripped = " ".join(stripped.split()).strip(" ,;:\u00b7\u2013\u2014-")
+    return stripped, True
+
+
 def _option(raw) -> dict | None:
     """One normalised option, or None for a model-added Other row. Raises on a hard-rule breach."""
     if isinstance(raw, str):
@@ -105,15 +137,17 @@ def _option(raw) -> dict | None:
         description = raw.get("description")
         description = description.strip() if isinstance(description, str) else ""
         flagged = bool(raw.get("recommended", False))
-        if len(label) > MAX_LABEL or len(description) > MAX_DESCRIPTION:
-            raise ValueError(ERR_LENGTH)
     else:
         raise ValueError("give every option a label.")
     label = label.strip()
     if _OTHER.match(label):
         return None
-    if _SUFFIX.search(label):
-        label, flagged = _SUFFIX.sub("", label).strip(), True
+    # The bounds apply to what is shown, so a marker the normaliser removes never counts against them.
+    label, marked_label = _unmark(label)
+    description, marked_description = _unmark(description)
+    flagged = flagged or marked_label or marked_description
+    if isinstance(raw, dict) and (len(label) > MAX_LABEL or len(description) > MAX_DESCRIPTION):
+        raise ValueError(ERR_LENGTH)
     if not label:
         raise ValueError("give every option a label.")
     return {"label": label, "description": description, "recommended": flagged}

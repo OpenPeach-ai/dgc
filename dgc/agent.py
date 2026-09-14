@@ -4214,6 +4214,20 @@ class Agent(GoalLifecycle):
                     flush_text_results()
                     self.ui.info("turn cancelled")
                     return False
+                if (self._end_turn_after_batch == "dismissed" and call_index not in parallel_tasks
+                        and call_index not in parallel_outputs):
+                    # The user closed a question earlier in this batch: nothing after it runs (a
+                    # write that depends on the unanswered choice, a second question). Each call
+                    # still gets a result, so the transcript stays a valid call/result group.
+                    from .questions import NOT_RUN_AFTER_DISMISSAL
+                    self.ui.tool_call(call.name, self._safe_value(call.arguments), call.id)
+                    self.ui.tool_result(call.name, NOT_RUN_AFTER_DISMISSAL, call.id)
+                    if native:
+                        self.messages.append({"role": "tool", "tool_call_id": call.id,
+                                              "content": NOT_RUN_AFTER_DISMISSAL})
+                    else:
+                        text_results.append(f"<result tool=\"{call.name}\">\n{NOT_RUN_AFTER_DISMISSAL}\n</result>")
+                    continue
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
                 if call.name not in _LOOP_EXEMPT_CALLS:

@@ -3398,14 +3398,7 @@ class Backend:
         open_questions = getattr(ui, "_open_questions", None) or {}
         if not isinstance(rid, str) or rid not in open_questions:
             return                      # late, duplicate or unknown: the request is already settled
-        pending = self.pending
-        lock, slots = getattr(pending, "_lock", None), getattr(pending, "_slots", None)
-        if lock is None or not isinstance(slots, dict):
-            return
-        with lock:
-            slot = slots.get(rid)
-            still_open = bool(slot) and not slot[0].is_set()
-        if still_open:
+        if self.pending.is_open(rid):
             self.em.emit("command_rejected", command="options_response", reason="invalid_response",
                          request_id=rid,
                          message="DGC could not use that answer. Pick an option, write an answer, "
@@ -3434,8 +3427,12 @@ class Backend:
         elif "tool result unavailable after session interruption" in str(message.get("content") or ""):
             # A question the session stopped under: say it was never answered, rather than leaving
             # the replayed step looking like an ordinary tool with a cryptic result.
+            # Call ids repeat across turns (call_0 style), so the call is the nearest one BEFORE this
+            # result, never the latest in the whole transcript.
+            messages = self.agent.messages
+            index = next((i for i, prior in enumerate(messages) if prior is message), len(messages))
             name = None
-            for prior in reversed(self.agent.messages):
+            for prior in reversed(messages[:index]):
                 for tc in prior.get("tool_calls") or [] if prior.get("role") == "assistant" else []:
                     if str(tc.get("id") or "") == call_id:
                         name = (tc.get("function") or {}).get("name")

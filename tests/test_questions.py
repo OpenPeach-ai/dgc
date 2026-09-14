@@ -2,6 +2,7 @@
 import copy
 import itertools
 import json
+import re
 import threading
 import time
 import types
@@ -84,6 +85,45 @@ class NormaliseTests(unittest.TestCase):
         self.assertEqual(error({"question": "x" * 2001, "options": ["A", "B"]}),
                          "error: keep labels short (a few words) and descriptions to one sentence.")
         self.assertTrue(error({"question": " ", "options": ["A", "B"]}).startswith("error: "))
+
+    def test_recommendation_marker_in_the_description_or_before_the_text(self):
+        # The shapes qwen2.5:14b actually sent through dgc serve: the marker in the description, not
+        # the label, with recommended false. Each is the recommendation, and the marker is removed.
+        def first(option):
+            return normalize_questions({"questions": [{"question": "Which database?", "options": [
+                option, {"label": "Other store", "description": "Anything else"}]}]})[0]["options"][0]
+        self.assertEqual(first({"label": "SQLite", "description": "Easy to deploy, best for small apps (Recommended)",
+                                "recommended": False}),
+                         opt("SQLite", "Easy to deploy, best for small apps", True))
+        self.assertEqual(first({"label": "Postgres", "description": "Feature rich, good for large scale, (Recommended)",
+                                "recommended": False}),
+                         opt("Postgres", "Feature rich, good for large scale", True))
+        self.assertEqual(first({"label": "JSON", "description": "(Recommended) Fast to read."}),
+                         opt("JSON", "Fast to read.", True))
+        self.assertEqual(first({"label": "Mongo", "description": "Recommended: flexible schema"}),
+                         opt("Mongo", "flexible schema", True))
+        self.assertEqual(first({"label": "Redis (Recommended) cache", "description": "Best choice. (Recommended)"}),
+                         opt("Redis cache", "Best choice.", True))
+        self.assertEqual(first({"label": "SQLite", "description": "Easy to set up; recommended."}),
+                         opt("SQLite", "Easy to set up", True))
+        self.assertEqual(first({"label": "Postgres", "description": "Powerful. Recommended"}),
+                         opt("Postgres", "Powerful", True))
+        self.assertEqual(first({"label": "JSON", "description": "Quick to try, not recommended"}),
+                         opt("JSON", "Quick to try, not recommended", False))
+        self.assertEqual(first({"label": "Recommended settings", "description": "The recommended defaults"}),
+                         opt("Recommended settings", "The recommended defaults", False), "prose is not a marker")
+        # a marker the normaliser removes never counts against the length bounds
+        self.assertEqual(first({"label": "x" * 120 + " (Recommended)", "description": "d" * 400 + " (Recommended)"}),
+                         opt("x" * 120, "d" * 400, True))
+        # one flag per single-choice question, wherever the markers sit
+        with self.assertRaises(ValueError) as caught:
+            normalize_questions({"question": "Pick", "options": [
+                {"label": "A", "description": "fast (Recommended)"}, {"label": "B (Recommended)"}]})
+        self.assertEqual(str(caught.exception), Q.ERR_RECOMMENDED)
+        record = normalize_questions({"question": "Pick", "options": [
+            {"label": "SQLite", "description": "Easy to deploy (Recommended)"}, {"label": "Postgres"}]})
+        self.assertIn('chose "SQLite" (your recommendation)',
+                      format_result(record, {"outcome": "answered", "answers": {"q1": {"selected": [0], "other": ""}}}))
 
     def test_multi_select_alias_several_recommended_and_headers(self):
         multi = normalize_questions({"questions": [{"question": "Which extras ship in the first version?",
@@ -291,6 +331,23 @@ class QuestionTests(unittest.TestCase):
         self.assertEqual(self.agent._end_turn_after_batch, "dismissed")
         self.assertEqual(self.wait("options_resolved")["outcome"], "dismissed")
 
+    def test_invalid_response_is_rejected_only_while_the_request_is_open(self):
+        rid, event = self.backend.pending.register(lambda value: False)
+        self.assertTrue(self.backend.pending.is_open(rid))
+        self.assertFalse(self.backend.pending.is_open("r999"))
+        self.assertFalse(self.backend.pending.is_open(None))
+        self.backend.ui.__dict__.setdefault("_open_questions", {})[rid] = QUESTIONS
+        self.addCleanup(lambda: self.backend.ui._open_questions.pop(rid, None))
+        self.backend.dispatch({"type": "options_response", "id": rid, "answers": {"storage": {"selected": [9]}}})
+        rejected = self.wait("command_rejected", command="options_response")
+        self.assertEqual((rejected["request_id"], rejected["reason"]), (rid, "invalid_response"))
+        count = sum(e["type"] == "command_rejected" for e in self.events)
+        self.backend.pending.cancel_all()
+        self.assertFalse(self.backend.pending.is_open(rid))
+        self.backend.dispatch({"type": "options_response", "id": rid, "answers": {"storage": {"selected": [9]}}})
+        self.assertEqual(sum(e["type"] == "command_rejected" for e in self.events), count,
+                         "a settled request drops a late response silently")
+
     def test_question_bounds_and_skip_is_allowed(self):
         self.assertEqual(normalize_questions({"questions": QUESTIONS}), QUESTIONS)
         for raw in ([], QUESTIONS * 3, [{"question": "Pick", "options": [None, "B"]}]):
@@ -438,6 +495,42 @@ class QuestionTests(unittest.TestCase):
         worker.join(2)
         self.assertEqual(output, [{"outcome": "dismissed", "answers": {}}])
         self.assertEqual(tui.input_buf.text, "draft two")
+
+    def test_tui_shortcut_bar_names_dismiss_and_stop_while_a_question_is_open(self):
+        tui = self._tui()
+        worker, output, press = self._open(tui, normalize_questions({"question": "Pick", "options": ["A", "B"]}))
+        from prompt_toolkit.formatted_text import to_plain_text
+        text = to_plain_text(tui._shortcut_bar())
+        self.assertIn("dismiss", text)
+        self.assertIn("Ctrl+C", text)
+        self.assertNotIn("confirm", text)
+        self.assertNotIn("cancel", text)
+
+    def test_tui_resumed_session_shows_the_settled_questions(self):
+        tui = self._tui()
+        questions = copy.deepcopy(QUESTIONS)
+        answered = Q.decision_record("call_q", questions, {"outcome": "answered", "answers": {
+            "storage": {"selected": [0], "other": ""}, "appearance": {"selected": [], "other": "Lavender"}}})
+        dismissed = Q.decision_record(None, questions[:1], {"outcome": "dismissed"})
+        messages = [
+            {"role": "user", "content": "Set up drafts"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call_q", "type": "function",
+                                                                 "function": {"name": "propose_options", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_q", "content": "The user answered your 2 questions: ...",
+             "_dgc_decision": answered},
+            {"role": "user", "content": "<tool_results>\n<result tool=\"propose_options\">closed</result>\n</tool_results>",
+             "_dgc_decision": [dismissed]},
+        ]
+        rows = tui._message_rows(messages)[0][0]
+        asked = [row for row in rows if row["who"] == "asked"]
+        self.assertEqual([row["lines"] for row in asked], [
+            ["Asked 2 questions", "Storage → Local (recommended)", 'Appearance → "Lavender"'],
+            ["Asked 1 question", "Dismissed without an answer"]])
+        self.assertFalse(any("The user answered" in (row.get("body") or "") for row in rows),
+                         "the model-facing result is not the recap")
+        blocks, _ = tui._history_blocks(rows)
+        rendered = re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(str(block) for block in blocks))
+        self.assertIn("Storage → Local (recommended)", rendered)
 
     def test_classic_cli_menu_starts_on_recommendation_with_skip_and_numbers(self):
         from dgc.cli import UI
