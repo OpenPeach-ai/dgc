@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { realpath } from "fs/promises";
 import * as fs from "fs";
 import * as path from "path";
@@ -280,6 +280,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionReady = false;
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
+  private testProbeNonce = "";
   private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
@@ -351,6 +352,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
     be.completeHandshake();
+    // A new backend (first start, crash recovery) owns the truth about this chat's agents: its
+    // snapshot replaces whatever the webview marked stopped when the old one exited.
+    if (this.lastReadyEvent?.capabilities?.agents) {
+      be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
+    }
     this.scheduleWorkspaceChanges(0);
     void this.resumeInterruptedWork(be);
   }
@@ -1786,7 +1792,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }
+    if (msg?.type === "agentsProbeRequest") {
+      // Ask the live webview what the agents pill shows. The nonce marks the request as the
+      // bridge's; only a reply carrying it is recorded (testOnlyWebviewReply).
+      this.testProbeNonce = randomBytes(16).toString("hex");
+      this.post({ type: "agentsProbe", probe: this.testProbeNonce });
+      return;
+    }
     await this.onMessage(msg);
+  }
+
+  /** The webview's answer to a bridge probe, recorded with the delivery evidence. False (and the
+   * message goes on to onMessage) unless the test token is set and the reply carries the nonce. */
+  private testOnlyWebviewReply(msg: any): boolean {
+    if (!process.env.DGC_EXTENSION_TEST_TOKEN || msg?.type !== "agentsProbeResult") return false;
+    if (!this.testProbeNonce || msg.probe !== this.testProbeNonce) return true;
+    this.testProbeNonce = "";
+    this.testPostedMessages.push({ type: "agentsProbeResult", state: msg.hidden ? "hidden" : String(msg.state || ""),
+      label: String(msg.label || "").slice(0, 80) });
+    return true;
   }
 
   testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> {
@@ -1850,6 +1874,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
       });
       view.webview.onDidReceiveMessage((msg) => {
+        if (this.testOnlyWebviewReply(msg)) return;
         void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
           err?.message || "DGC could not process that editor request."));
       });
@@ -1956,6 +1981,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           // it would drop the end of one that is still running. The backend's list restores both.
           if (this.lastReadyEvent?.capabilities?.monitors) {
             be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
+          }
+          // A reloaded webview has no agents list; the backend's snapshot brings back the pill.
+          if (this.lastReadyEvent?.capabilities?.agents) {
+            be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
           }
         }
         const actions = this.pendingWebviewActions.splice(0);
@@ -4370,6 +4399,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       </div>
       <div class="cf-right">
+      <div class="picker agents-picker" id="agents-picker" hidden>
+        <button type="button" id="agents-pill" class="fbtn agents-pill" data-state="idle" title="No agents working · Click to see the agents" aria-label="0 agents · No agents working · Click to see the agents" aria-haspopup="dialog" aria-expanded="false" aria-controls="agentsmenu"><span class="agents-dot" aria-hidden="true"></span><span class="agents-label"><span id="agents-count">0</span><span class="agents-word"> agents</span><span class="agents-need" hidden> · needs you</span></span></button>
+        <section id="agentsmenu" class="cmenu agents-menu" role="dialog" aria-labelledby="agents-title" hidden>
+          <div id="agents-title" class="agents-title">Agents</div>
+          <p id="agents-summary" class="agents-summary"></p>
+          <ul id="agents-tree" class="agent-tree"></ul>
+          <p id="agents-more" class="agents-more" hidden></p>
+          <p id="agents-stop-note" class="agents-note" hidden>Stop ends the whole turn, including every agent.</p>
+          <button type="button" id="agents-settings" class="link agents-settings" title="Open Settings ▸ Agents to change the sub-agent model and host">Sub-agent settings</button>
+        </section>
+      </div>
       <div class="picker">
         <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
         <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>

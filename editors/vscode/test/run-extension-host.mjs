@@ -279,6 +279,65 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
   }
   // ---- 0.40 agents (fixture command branches) ----
+  // Two parallel task sub-agents, one waiting on a permission card; list_agents answers from this
+  // process's own record (a restarted fixture knows no agents), new_session clears it.
+  globalThis.agentsKnown ??= 0;
+  if (cmd.type === "prompt" && cmd.text === "host agents probe") {
+    send({ type: "turn_start", turn_id: "agents-turn", prompt: cmd.text, kind: "prompt" });
+    for (const n of [1, 2]) {
+      send({ type: "tool_call", call_id: "agents-call-" + n, name: "task", args: { description: "part " + n },
+        summary: "part " + n });
+    }
+    for (const [n, id] of [[1, "sub-aaaaaaaaaaaa"], [2, "sub-bbbbbbbbbbbb"]]) {
+      send({ type: "agent_started", id, parent_id: null, call_id: "agents-call-" + n, description: "part " + n,
+        depth: 1, state: "running", started_at: Date.now() / 1000, isolated: true, parallel: true, turn_id: "agents-turn" });
+    }
+    globalThis.agentsKnown = 2;
+    send({ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "waiting", waiting_for: "permission" });
+    send({ type: "permission_request", id: "agents-permission", call_id: "sub-aaaaaaaaaaaa:c1", name: "bash",
+      args: { command: "npm test" }, command: "npm test", suggested_rule: "Bash(npm test)",
+      choices: ["once", "always", "deny"] });
+    return;
+  }
+  if (cmd.type === "permission_response" && cmd.id === "agents-permission") {
+    send({ type: "agent_updated", id: "sub-aaaaaaaaaaaa", state: "running", tool_calls: 1 });
+    send({ type: "agent_ended", id: "sub-aaaaaaaaaaaa", state: "finished", duration_ms: 1200, tool_calls: 2, tokens: 300 });
+    send({ type: "agent_ended", id: "sub-bbbbbbbbbbbb", state: "finished", duration_ms: 900, tool_calls: 1 });
+    for (const n of [1, 2]) send({ type: "tool_result", call_id: "agents-call-" + n, name: "task",
+      output: "Sub-task 'part " + n + "' completed.", is_error: false, is_diff: false });
+    send({ type: "turn_end", turn_id: "agents-turn", reason: "completed", token_estimate: 3 });
+    return;
+  }
+  if (cmd.type === "list_agents") {
+    const known = globalThis.agentsKnown;
+    const items = Array.from({ length: known }, (_, i) => ({ id: i ? "sub-bbbbbbbbbbbb" : "sub-aaaaaaaaaaaa",
+      parent_id: null, call_id: "agents-call-" + (i + 1), description: "part " + (i + 1), depth: 1, state: "finished",
+      tool_calls: 1, isolated: true, parallel: true, restored: false, duration_ms: 1000 }));
+    send({ type: "agents", items, total: known, active: 0, request_id: cmd.request_id });
+    return;
+  }
+  if (cmd.type === "new_session") {
+    globalThis.agentsKnown = 0;
+    currentSession = "host-new-" + process.pid;
+    send({ type: "session", kind: "new", message_count: 0, session_id: currentSession, name: "", request_id: cmd.request_id });
+    send({ type: "agents", items: [], total: 0, active: 0 });
+    return;
+  }
+  if (cmd.type === "prompt" && cmd.text === "host agents exit probe") {
+    send({ type: "turn_start", turn_id: "agents-exit", prompt: cmd.text, kind: "prompt" });
+    for (const [n, id] of [[1, "sub-cccccccccccc"], [2, "sub-dddddddddddd"]]) {
+      send({ type: "tool_call", call_id: "exit-call-" + n, name: "task", args: { description: "exit " + n }, summary: "exit " + n });
+      send({ type: "agent_started", id, parent_id: null, call_id: "exit-call-" + n, description: "exit " + n,
+        depth: 1, state: "running", started_at: Date.now() / 1000, isolated: true, parallel: true });
+    }
+    setTimeout(() => process.exit(0), 400);
+    return;
+  }
+  if (cmd.type === "prompt" && cmd.text === "host agents stray field") {
+    send({ type: "agent_started", id: "sub-eeeeeeeeeeee", parent_id: null, call_id: "stray", description: "stray",
+      depth: 1, state: "running", started_at: 1, isolated: false, parallel: false, foo: 1 });
+    return;
+  }
   // ---- end 0.40 agents ----
 
   // ---- 0.40 images (fixture command branches) ----

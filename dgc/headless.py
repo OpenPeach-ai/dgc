@@ -832,6 +832,9 @@ class Backend:
         self._monitors_timer: threading.Timer | None = None
         self._monitors_timer_lock = threading.Lock()
         self.agent.monitors.listener = self._on_monitor
+        self._agents_timer: threading.Timer | None = None
+        self._agents_timer_lock = threading.Lock()
+        self.agent.subagents.listener = self._on_subagent
         self.ui.monitor_wake_enabled = True
 
     def _add_rule(self, rule_text: str) -> None:
@@ -2958,6 +2961,7 @@ class Backend:
             self._emit_context(request_id)
             self._emit_goal()
             self._emit_monitors()
+            self._emit_agents()
         elif t == "fork_session":
             # "Branch from here" keeps the conversation and hands it a new identity, so the
             # chat it came from stops where the branch began instead of being overwritten.
@@ -2997,6 +3001,7 @@ class Backend:
             self._emit_context()
             self._emit_goal()
             self._emit_monitors()
+            self._emit_agents()
         elif t == "resume_session":
             path = cmd.get("path")
             if not path and cmd.get("latest"):
@@ -3015,6 +3020,7 @@ class Backend:
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
                 self._emit_history()
+                self._emit_agents()
                 self._emit_context()
                 self._emit_goal()
                 note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
@@ -3114,12 +3120,15 @@ class Backend:
                      for (i, p, nf) in self.agent.checkpoints.listing()]
             self.em.emit("checkpoints", items=items, **_request_fields(request_id))
         elif t == "rewind":
+            agents_before = self._agents_total()
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
             ok = msgs >= 0
             self.em.emit("rewound", ok=ok, files_restored=nfiles,
                          **_request_fields(request_id))
             if ok:
                 self._emit_history()
+                if agents_before or self._agents_total():   # an empty list has nothing to drop
+                    self._emit_agents()
                 self._emit_context()
         elif t == "list_retained_tasks":
             self._emit_retained_tasks(request_id)
@@ -3158,6 +3167,8 @@ class Backend:
             self._emit_context(request_id)
         elif t == "list_monitors":
             self._emit_monitors(request_id)
+        elif t == "list_agents":
+            self._emit_agents(request_id)
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,
             # which reports monitor_ended when it is gone.
@@ -3341,7 +3352,62 @@ class Backend:
     # ================================================================================================
 
     # ---- 0.40 agents ------------------------------------------------------------------------------
-    # (sub-agent registry listener, `agents` emission and the list_agents branch live here)
+    # Lock order: the registry's publish lock is held while this listener emits (so frames go out in
+    # the order the states changed), then the emitter's lock. Nothing here calls back into the
+    # registry from the listener; a snapshot is emitted from a timer or the command loop instead.
+    _AGENT_FRAMES = {"started": "agent_started", "updated": "agent_updated", "ended": "agent_ended"}
+
+    def _on_subagent(self, kind: str, payload: dict) -> None:
+        """Sub-agent registry callbacks, from task workers, the stall watcher and its flush timer."""
+        try:
+            name = self._AGENT_FRAMES.get(kind)
+            if name is None:
+                if kind == "resync":
+                    self._schedule_agents_snapshot()
+                return
+            fields = dict(payload)
+            if name == "agent_started" and not fields.get("turn_id"):
+                turn_id = getattr(self.ui, "turn_id", "")
+                if isinstance(turn_id, str) and turn_id:
+                    fields["turn_id"] = turn_id
+            self.em.emit(name, **fields)
+        except Exception:
+            # A frame that failed validation is lost; a snapshot shortly after heals the client.
+            self._schedule_agents_snapshot()
+
+    def _emit_agents(self, request_id: str | None = None) -> None:
+        """The `agents` snapshot: every active record, then the most recent ended, exact counts."""
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        if registry is None:
+            return
+        registry.snapshot(emit=lambda snap: self.em.emit(
+            "agents", items=snap["items"], total=snap["total"], active=snap["active"],
+            **_request_fields(request_id)))
+
+    def _agents_total(self) -> int:
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        return int(registry.counts().get("total", 0)) if registry is not None else 0
+
+    def _schedule_agents_snapshot(self) -> None:
+        """Coalesce resync requests into one `agents` snapshot 0.25 s later."""
+        lock = getattr(self, "_agents_timer_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if self._agents_timer is not None:
+                return
+
+            def fire():
+                with lock:
+                    self._agents_timer = None
+                try:
+                    self._emit_agents()
+                except Exception:
+                    pass
+            timer = threading.Timer(0.25, fire)
+            timer.daemon = True
+            self._agents_timer = timer
+            timer.start()
     # ---- end 0.40 agents --------------------------------------------------------------------------
 
 

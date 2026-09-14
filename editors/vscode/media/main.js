@@ -544,10 +544,24 @@
       timer = setTimeout(() => {
         if (target !== el0 || !el0.isConnected) return;
         if (native) el0.removeAttribute("title");
-        paint(el0, label);
+        paint(el0, (native || el0.dataset.tip || "").trim() || label);
       }, delay);
     }
-    return { show, hide, node };
+    // A control that changes its own `title` while its label is up or about to be (the agents pill
+    // as its agents end) goes through here: setting `title` directly would be undone by hide(),
+    // which puts back the copy it lifted, and the label on screen would keep the old words.
+    function retitle(el0, label) {
+      if (el0 !== target) {
+        if (el0.getAttribute("title") !== label) el0.setAttribute("title", label);
+        return;
+      }
+      native = label;
+      if (node.hidden) { el0.setAttribute("title", label); return; }
+      if (!label) { hide(); el0.removeAttribute("title"); return; }
+      node.className = "tip";
+      paint(el0, label);
+    }
+    return { show, hide, retitle, node };
   })();
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
   document.addEventListener("pointerover", (e) => {
@@ -2705,6 +2719,10 @@
       case "monitors":
         renderMonitors(ev);
         break;
+      case "agent_started": applyAgentEvent(ev); break;
+      case "agent_updated": applyAgentEvent(ev); break;
+      case "agent_ended": applyAgentEvent(ev); break;
+      case "agents": renderAgentsSnapshot(ev); break;
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
@@ -4238,6 +4256,477 @@
   function agentsOnToolCard(card, ev) {}
   // With a click event: hide only when the click fell outside the pill and its menu.
   function hideAgentsMenu(event) {}
+
+  // The "● 2 agents" pill and its list: every task sub-agent started in this chat (Claude Code's
+  // rule), a dot for whether any is working or waiting on you, and a read-only list whose rows jump
+  // to each agent's task card. State comes from agent_started/agent_updated/agent_ended frames and
+  // `agents` snapshots; a backend that exits marks the active ones stopped until the new backend's
+  // snapshot says otherwise.
+  const AGENT_ACTIVE = new Set(["queued", "running", "waiting"]);
+  const AGENT_ENDED_WORD = { finished: "Finished", failed: "Failed", stopped: "Stopped" };
+  const agentRecords = new Map();          // id -> record (the frame's fields + receivedAt, order)
+  const agentAnchors = new Map();          // id -> the task card this record claimed
+  let agentTotalExtra = 0, agentActiveExtra = 0;   // a snapshot's records it did not itemise
+  let agentOrder = 0, agentsRenderQueued = false, agentsTick = null;
+  let agentsAnnounceTimer = null, agentsSpokenActive = false;
+  const agentsBatch = new Set();           // ids active since the last "working" announcement
+  const agentRowNodes = new Map();         // id -> that record's dialog row, kept across renders
+  // Set by a rewind until its snapshot arrives: the replayed cards must not be claimed by records
+  // the rewind is about to prune (call_0 repeats in every turn of a provider that sends no ids).
+  let agentsHoldClaims = false;
+
+  // The one place that picks the number (the TUI's _agents_count is the same switch). Claude Code's
+  // rule: every sub-agent started in this chat. "Working while any work, else all": `active || total`.
+  function agentsLabelCount(active, total) { return total; }
+
+  function agentNow() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
+  function agentPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+  function agentElapsed(ms) {
+    const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  }
+  function agentLiveMs(record) {
+    return Number(record.elapsed_ms || 0) + Math.max(0, agentNow() - Number(record.receivedAt || agentNow()));
+  }
+  function agentCounts() {
+    const c = { queued: 0, running: 0, waiting: 0, waitingPermission: 0, waitingAnswer: 0,
+      finished: 0, failed: 0, stopped: 0 };
+    for (const record of agentRecords.values()) {
+      if (record.state in c) c[record.state] += 1;
+      if (record.state === "waiting") {
+        if (record.waiting_for === "answer") c.waitingAnswer += 1; else c.waitingPermission += 1;
+      }
+    }
+    c.active = c.queued + c.running + c.waiting + agentActiveExtra;
+    c.total = agentRecords.size + agentTotalExtra;
+    return c;
+  }
+
+  function agentRecordFrom(fields, receivedAt) {
+    const record = { ...fields, receivedAt, order: agentOrder++ };
+    delete record.type; delete record.seq; delete record.request_id;
+    record.description = String(record.description || "");
+    record.tool_calls = Number(record.tool_calls || 0);
+    if (record.state !== "waiting") delete record.waiting_for;
+    return record;
+  }
+
+  function applyAgentEvent(ev) {
+    const id = String(ev.id || "");
+    if (!id) return;
+    const record = agentRecords.get(id);
+    const now = agentNow();
+    if (ev.type === "agent_started") {
+      if (record) return;
+      agentsHoldClaims = false;
+      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0 }, now));
+      agentsBatch.add(id);
+      claimAgentAnchors();
+    } else if (ev.type === "agent_updated") {
+      if (!record || !AGENT_ACTIVE.has(record.state)) return;
+      if (record.state === "queued" && ev.state !== "queued") { record.receivedAt = now; record.elapsed_ms = 0; }
+      record.state = String(ev.state || record.state);
+      if (ev.state === "waiting" && ev.waiting_for) record.waiting_for = ev.waiting_for; else delete record.waiting_for;
+      for (const key of ["activity", "model", "tool_calls", "tokens"]) if (key in ev) record[key] = ev[key];
+    } else if (ev.type === "agent_ended") {
+      if (!record) { if (agentActiveExtra > 0) agentActiveExtra -= 1; renderAgents(); return; }
+      if (!AGENT_ACTIVE.has(record.state)) return;
+      record.state = String(ev.state || "finished");
+      for (const key of ["duration_ms", "tool_calls", "tokens", "message"]) if (key in ev) record[key] = ev[key];
+      delete record.waiting_for; delete record.activity;
+    }
+    renderAgents();
+    agentAnnounce();
+  }
+
+  function renderAgentsSnapshot(ev) {
+    const items = Array.isArray(ev.items) ? ev.items : [];
+    const now = agentNow();
+    agentRecords.clear();
+    for (const item of items) {
+      if (item && typeof item === "object" && item.id && !agentRecords.has(String(item.id))) {
+        agentRecords.set(String(item.id), agentRecordFrom(item, now));
+      }
+    }
+    const listedActive = [...agentRecords.values()].filter((r) => AGENT_ACTIVE.has(r.state)).length;
+    agentTotalExtra = Math.max(0, Number(ev.total || 0) - agentRecords.size);
+    agentActiveExtra = Math.max(0, Number(ev.active || 0) - listedActive);
+    for (const [id, card] of [...agentAnchors]) {
+      if (!agentRecords.has(id) || !card.isConnected) agentAnchors.delete(id);
+    }
+    agentsHoldClaims = false;
+    claimAgentAnchors();
+    // A snapshot never speaks. It drops from the batch only the agents it no longer lists, so an
+    // agent that ended before a mid-batch snapshot (list_agents while busy, a reload, a resync)
+    // is still in the "Agents finished: …" count when the batch ends.
+    clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null;
+    for (const id of [...agentsBatch]) if (!agentRecords.has(id)) agentsBatch.delete(id);
+    for (const record of agentRecords.values()) if (AGENT_ACTIVE.has(record.state)) agentsBatch.add(record.id);
+    agentsSpokenActive = agentCounts().active > 0;
+    renderAgents();
+  }
+
+  // ---- anchors: which task card is this agent's ----
+  // call_ids repeat across turns (call_0, call_1…), so a record claims one card and keeps it: among
+  // the task cards carrying its call_id that no other record holds, records and cards pair up from
+  // the newest backwards (so the latest turn's record takes the latest turn's card).
+  function agentAnchor(id) {
+    const card = agentAnchors.get(id);
+    if (card && card.isConnected && card.dataset.agentId === id) return card;
+    if (card) agentAnchors.delete(id);
+    return null;
+  }
+  function claimAgentAnchors() {
+    if (agentsHoldClaims) return;
+    const waiting = new Map();
+    for (const record of [...agentRecords.values()].sort((a, b) => a.order - b.order)) {
+      if (!record.call_id || agentAnchor(record.id)) continue;
+      const key = String(record.call_id);
+      if (!waiting.has(key)) waiting.set(key, []);
+      waiting.get(key).push(record);
+    }
+    if (!waiting.size) return;
+    const cards = [...document.querySelectorAll('.tool[data-tool-name="task"]')];
+    for (const [callId, records] of waiting) {
+      const free = cards.filter((card) => card.dataset.callId === callId
+        && !(card.dataset.agentId && agentAnchor(card.dataset.agentId) === card));
+      for (let i = records.length - 1, j = free.length - 1; i >= 0 && j >= 0; i -= 1, j -= 1) {
+        free[j].dataset.agentId = records[i].id;
+        agentAnchors.set(records[i].id, free[j]);
+      }
+    }
+  }
+  function agentsToolCard(card, ev) {
+    if (card.dataset.toolName !== "task" || !agentRecords.size) return;
+    // A replayed page is built detached and inserted when it is complete; claim once it is.
+    if (replaying || !card.isConnected) queueMicrotask(() => { claimAgentAnchors(); scheduleAgentsMenuRender(); });
+    else { claimAgentAnchors(); scheduleAgentsMenuRender(); }
+  }
+
+  // ---- the pill ----
+  function renderAgents() {
+    renderAgentsPill();
+    scheduleAgentsMenuRender();
+  }
+  function renderAgentsPill() {
+    const picker = $("agents-picker"), pill = $("agents-pill");
+    if (!picker || !pill) return;
+    const c = agentCounts();
+    if (c.total <= 0) {
+      agentsHideMenu();
+      picker.hidden = true;
+      return;
+    }
+    picker.hidden = false;
+    const n = agentsLabelCount(c.active, c.total);
+    const state = c.waiting > 0 ? "waiting" : c.active > 0 ? "running" : "idle";
+    const hint = "Click to see the agents";
+    const title = state === "waiting"
+      ? `${c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer"} · ${hint}`
+      : state === "running"
+        ? `Agents are working${c.active !== c.total ? ` (${c.active} of ${c.total} working)` : ""} · ${hint}`
+        : `No agents working · ${hint}`;
+    pill.dataset.state = state;
+    $("agents-count").textContent = String(n);
+    pill.querySelector(".agents-word").textContent = n === 1 ? " agent" : " agents";
+    pill.querySelector(".agents-need").hidden = state !== "waiting";
+    hoverTip.retitle(pill, title);
+    pill.setAttribute("aria-label", `${agentPlural(n, "agent")} · ${title}`);
+  }
+
+  // ---- the list ----
+  function agentsMenuOpen() { const menu = $("agentsmenu"); return !!menu && !menu.hidden; }
+  function scheduleAgentsMenuRender() {
+    if (!agentsMenuOpen() || agentsRenderQueued) return;
+    agentsRenderQueued = true;
+    const run = () => { agentsRenderQueued = false; if (agentsMenuOpen()) renderAgentsMenu(); };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else setTimeout(run, 16);
+  }
+  function agentSummary(c) {
+    const parts = [agentPlural(c.total, "agent")];
+    for (const [count, label] of [[c.running, "working"], [c.waitingPermission, "waiting for your permission"],
+      [c.waitingAnswer, "waiting for your answer"], [c.queued, "queued"], [c.finished, "finished"],
+      [c.failed, "failed"], [c.stopped, "stopped"]]) {
+      if (count > 0) parts.push(`${count} ${label}`);
+    }
+    return parts.join(" · ");
+  }
+  function agentMeta(record) {
+    const parts = [];
+    const state = record.state;
+    if (AGENT_ENDED_WORD[state]) parts.push(AGENT_ENDED_WORD[state]);
+    else if (state === "waiting") parts.push(record.waiting_for === "answer" ? "waiting for your answer" : "waiting for your permission");
+    else if (state === "queued") parts.push("Queued");
+    else if (record.activity) parts.push(String(record.activity));
+    // An ended row's reason goes last: the meta is clamped to two lines, and what gets cut should be
+    // the tail of a long provider message (the row's label has all of it), never the stats.
+    const why = AGENT_ENDED_WORD[state] && record.message ? agentFirstLine(record.message) : "";
+    if (record.restored) return [...parts, ...(why ? [why] : [])].join(" · ");
+    if (record.agent_type) parts.push(String(record.agent_type));
+    if (record.model && record.model !== curModel) parts.push(String(record.model));
+    if (state === "running" || state === "waiting") parts.push(agentElapsed(agentLiveMs(record)));
+    else if (AGENT_ENDED_WORD[state] && record.duration_ms !== undefined) parts.push(agentElapsed(record.duration_ms));
+    const tools = Number(record.tool_calls || 0);
+    if (tools > 0) parts.push(agentPlural(tools, "tool"));
+    if (Number(record.tokens || 0) > 0) parts.push(`${fmtTokens(record.tokens)} tokens`);
+    if (why) parts.push(why);
+    return parts.join(" · ");
+  }
+  // A failure message can be many lines of provider JSON: the row shows one bounded line and the
+  // row's label carries the whole (already redacted and URL-scrubbed) text.
+  function agentFirstLine(text, limit = 120) {
+    const line = (String(text || "").split("\n").find((part) => part.trim()) || "").replace(/\s+/g, " ").trim();
+    if (line.length <= limit) return line;
+    let cut = limit - 1;
+    const marker = line.lastIndexOf("[REDACTED]", cut);
+    if (marker >= 0 && marker < cut && cut < marker + 10) cut = marker;   // never half a marker
+    return `${line.slice(0, cut).trimEnd()}…`;
+  }
+  function agentTree() {
+    const children = new Map();
+    const records = [...agentRecords.values()];
+    const ids = new Set(records.map((r) => r.id));
+    // By start, children under their parent. A restored record has no start time: it began before
+    // anything this backend saw, so it sorts first.
+    const key = (r) => [r.started_at === undefined || r.started_at === null ? -Infinity : Number(r.started_at), r.order];
+    records.sort((a, b) => { const [x1, y1] = key(a), [x2, y2] = key(b); return x1 - x2 || y1 - y2; });
+    for (const record of records) {
+      const parent = record.parent_id && ids.has(record.parent_id) ? record.parent_id : "";
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(record);
+    }
+    return children;
+  }
+  // Rows are kept per record and updated in place: the 1 s tick and every frame change only the
+  // text, dot and label that changed, so a focused row keeps its focus (a screen reader does not
+  // re-read it), its hover label stays put and a click that spans a tick still lands.
+  function agentsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
+  function agentRowEntry(record) {
+    let entry = agentRowNodes.get(record.id);
+    if (entry) return entry;
+    const item = document.createElement("li");
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "agent-row"; row.dataset.agentId = record.id; row.tabIndex = -1;
+    const dot = document.createElement("span");
+    dot.className = "agent-dot"; dot.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span"); text.className = "agent-text";
+    const desc = document.createElement("span"); desc.className = "agent-desc";
+    const meta = document.createElement("span"); meta.className = "agent-meta";
+    text.append(desc, meta); row.append(dot, text); item.appendChild(row);
+    const id = record.id;
+    row.addEventListener("click", () => agentJump(id));
+    entry = { item, row, dot, desc, meta, nested: null };
+    agentRowNodes.set(id, entry);
+    return entry;
+  }
+  function agentRowUpdate(entry, record) {
+    const { row, dot, desc, meta } = entry;
+    if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
+    agentsSetText(desc, record.description || "(no description)");
+    agentsSetText(meta, agentMeta(record));
+    const jump = !!agentAnchor(record.id);
+    if (jump && row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
+    if (!jump && row.getAttribute("aria-disabled") !== "true") row.setAttribute("aria-disabled", "true");
+    const why = AGENT_ENDED_WORD[record.state] && record.message ? String(record.message).trim() : "";
+    hoverTip.retitle(row, (jump ? "Show this agent's task" : "This agent's task is not on screen") + (why ? `\n${why}` : ""));
+  }
+  // Put `nodes` in `list` in order, moving only the ones out of place (a moved node loses focus).
+  function agentsPlace(list, nodes) {
+    const wanted = new Set(nodes);
+    for (const child of [...list.children]) if (!wanted.has(child)) child.remove();
+    let cursor = list.firstElementChild;
+    for (const node of nodes) {
+      if (node === cursor) { cursor = cursor.nextElementSibling; continue; }
+      list.insertBefore(node, cursor);
+    }
+  }
+  function renderAgentsMenu() {
+    const menu = $("agentsmenu");
+    if (!menu) return;
+    claimAgentAnchors();
+    const c = agentCounts();
+    agentsSetText($("agents-summary"), agentSummary(c));
+    const tree = $("agents-tree");
+    const active = document.activeElement;
+    const focusedRow = active && tree.contains(active) ? active.closest(".agent-row") : null;
+    for (const id of [...agentRowNodes.keys()]) if (!agentRecords.has(id)) agentRowNodes.delete(id);
+    const children = agentTree();
+    const fill = (parentId, list) => {
+      const items = [];
+      for (const record of children.get(parentId) || []) {
+        const entry = agentRowEntry(record);
+        agentRowUpdate(entry, record);
+        if (children.has(record.id)) {
+          if (!entry.nested) entry.nested = document.createElement("ul");
+          if (entry.nested.parentNode !== entry.item) entry.item.appendChild(entry.nested);
+          fill(record.id, entry.nested);
+        } else if (entry.nested) {
+          entry.nested.remove(); entry.nested = null;
+        }
+        items.push(entry.item);
+      }
+      agentsPlace(list, items);
+    };
+    fill("", tree);
+    const rows = [...tree.querySelectorAll(".agent-row")];
+    const kept = focusedRow && focusedRow.isConnected ? focusedRow : null;
+    const tabbable = kept || rows.find((row) => row.tabIndex === 0) || rows[0];
+    for (const row of rows) { const want = row === tabbable ? 0 : -1; if (row.tabIndex !== want) row.tabIndex = want; }
+    // Focus is put back only when this render took it: a focused row that moved, or one whose
+    // agent a snapshot dropped (then the list keeps it, on the row that is now tabbable).
+    if (focusedRow && document.activeElement !== focusedRow) (kept || tabbable || $("agents-settings")).focus();
+    $("agents-more").hidden = agentTotalExtra <= 0;
+    agentsSetText($("agents-more"), agentTotalExtra > 0 ? `+${agentTotalExtra} more not listed` : "");
+    $("agents-stop-note").hidden = c.active <= 0;
+    if (c.active > 0 && !agentsTick) agentsTick = setInterval(() => { if (agentsMenuOpen()) renderAgentsMenu(); }, 1000);
+    if (c.active <= 0 && agentsTick) { clearInterval(agentsTick); agentsTick = null; }
+  }
+  function openAgentsMenu() {
+    const menu = $("agentsmenu");
+    if (!menu || agentCounts().total <= 0) return;
+    hideModelMenu(); hideModeMenu(); hideContextMenu(); hideAddMenu();
+    menu.hidden = false;
+    $("agents-pill").setAttribute("aria-expanded", "true");
+    renderAgentsMenu();
+    const rows = [...menu.querySelectorAll(".agent-row")];
+    (rows.find((row) => row.getAttribute("aria-disabled") !== "true") || rows[0] || $("agents-settings")).focus();
+  }
+  function agentsHideMenu(event) {
+    const menu = $("agentsmenu");
+    if (!menu || menu.hidden) return;
+    if (event && event.target && $("agents-picker").contains(event.target)) return;
+    menu.hidden = true;
+    $("agents-pill").setAttribute("aria-expanded", "false");
+    if (agentsTick) { clearInterval(agentsTick); agentsTick = null; }
+  }
+  function agentJump(id) {
+    const card = agentAnchor(id);
+    if (!card) return;
+    agentsHideMenu();
+    for (let node = card.parentElement; node; node = node.parentElement) {
+      if (node.tagName === "DETAILS" && !node.open) node.open = true;
+    }
+    card.scrollIntoView?.({ block: "center" });
+    card.classList.remove("flash");
+    void card.offsetWidth;
+    card.classList.add("flash");
+    clearTimeout(card._agentFlash);
+    card._agentFlash = setTimeout(() => card.classList.remove("flash"), 1200);
+    card.querySelector(".tool-toggle")?.focus();
+  }
+  $("agents-pill").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (agentsMenuOpen()) agentsHideMenu(); else openAgentsMenu();
+  });
+  $("agents-settings").addEventListener("click", () => {
+    agentsHideMenu();
+    vscode.postMessage({ type: "slash", action: "subagent" });
+  });
+  $("agentsmenu").addEventListener("keydown", (event) => {
+    const rows = [...$("agentsmenu").querySelectorAll(".agent-row")];
+    const at = rows.indexOf(document.activeElement);
+    const move = (index) => {
+      if (!rows.length) return;
+      const next = rows[Math.max(0, Math.min(rows.length - 1, index))];
+      rows.forEach((row) => { row.tabIndex = row === next ? 0 : -1; });
+      next.focus();
+    };
+    if (event.key === "Escape") {
+      // Esc in the composer is Stop: this one must never reach it.
+      event.preventDefault(); event.stopPropagation();
+      agentsHideMenu();
+      $("agents-pill").focus();
+    } else if (event.key === "ArrowDown" && rows.length) { event.preventDefault(); move(at < 0 ? 0 : at + 1); }
+    else if (event.key === "ArrowUp" && rows.length) { event.preventDefault(); move(at < 0 ? rows.length - 1 : at - 1); }
+    else if (event.key === "Home" && rows.length) { event.preventDefault(); move(0); }
+    else if (event.key === "End" && rows.length) { event.preventDefault(); move(rows.length - 1); }
+  });
+  $("agentsmenu").addEventListener("focusout", (event) => {
+    // Tab out of the dialog closes it; a click inside that lands on no control does not.
+    const next = event.relatedTarget;
+    if (next && !$("agents-picker").contains(next)) agentsHideMenu();
+  });
+
+  // ---- announcements (debounced so a batch speaks once) ----
+  function agentAnnounce() {
+    if (replaying) return;
+    clearTimeout(agentsAnnounceTimer);
+    agentsAnnounceTimer = setTimeout(() => {
+      agentsAnnounceTimer = null;
+      const c = agentCounts();
+      if (c.active > 0 && !agentsSpokenActive) {
+        agentsSpokenActive = true;
+        speak(`${agentPlural(c.active, "agent")} working`);
+      } else if (c.active === 0 && agentsSpokenActive) {
+        agentsSpokenActive = false;
+        const ended = { finished: 0, failed: 0, stopped: 0 };
+        for (const id of agentsBatch) {
+          const record = agentRecords.get(id);
+          if (record && record.state in ended) ended[record.state] += 1;
+        }
+        agentsBatch.clear();
+        const parts = Object.entries(ended).filter(([, count]) => count > 0).map(([state, count]) => `${count} ${state}`);
+        speak(`Agents finished${parts.length ? `: ${parts.join(", ")}` : ""}`);
+      }
+      if (c.active === 0) agentsBatch.clear();
+    }, 750);
+  }
+
+  // ---- chat boundaries and backend exits ----
+  function agentsSessionReset(kind) {
+    if (kind === "rewound") {
+      // Records are kept until the snapshot that follows the history, but their anchors are not:
+      // the history rebuilds every card, and claiming those cards now would pair them with records
+      // the snapshot is about to prune. The backend sends that snapshot whenever the chat had agents.
+      agentAnchors.clear();
+      for (const card of document.querySelectorAll(".tool[data-agent-id]")) delete card.dataset.agentId;
+      agentsHoldClaims = agentRecords.size > 0 || agentTotalExtra > 0;
+      scheduleAgentsMenuRender();
+      return;
+    }
+    const wasOpen = agentsMenuOpen();
+    agentsHoldClaims = false;
+    agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); agentRowNodes.clear();
+    $("agents-tree")?.replaceChildren();
+    agentTotalExtra = 0; agentActiveExtra = 0;
+    clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false;
+    renderAgentsPill();
+    if (wasOpen) input.focus();
+  }
+  function agentsBackendExit() {
+    for (const record of agentRecords.values()) {
+      if (!AGENT_ACTIVE.has(record.state)) continue;
+      record.state = "stopped";
+      record.message = "DGC's backend stopped";
+      delete record.waiting_for; delete record.activity; delete record.duration_ms;
+    }
+    agentActiveExtra = 0;
+    clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false; agentsBatch.clear();
+    agentsHideMenu();
+    renderAgentsPill();
+  }
+
+  // Installed-host tests (extension-host/index.cjs) ask what the pill shows. Only the host's test
+  // bridge sends `agentsProbe` (while its token is set), with a fresh nonce it checks on the reply;
+  // anything else is ignored.
+  globalThis.addEventListener("message", (event) => {
+    const probe = event.data?.type === "agentsProbe" ? event.data.probe : "";
+    if (typeof probe !== "string" || !/^[0-9a-f]{32}$/.test(probe)) return;
+    const pill = $("agents-pill");
+    vscode.postMessage({ type: "agentsProbeResult", probe, hidden: $("agents-picker").hidden, state: pill.dataset.state,
+      label: `${$("agents-count").textContent}${pill.querySelector(".agents-word").textContent}` });
+  });
+
+  // The four seams above stay the foundation's no-op stubs (lane-hooks.test.mjs instruments them in
+  // place); the agents indicator chains its handlers onto them.
+  function agentsChain(stub, handler) { return function (...args) { stub(...args); return handler(...args); }; }
+  agentsOnSessionReset = agentsChain(agentsOnSessionReset, agentsSessionReset);
+  agentsOnBackendExit = agentsChain(agentsOnBackendExit, agentsBackendExit);
+  agentsOnToolCard = agentsChain(agentsOnToolCard, agentsToolCard);
+  hideAgentsMenu = agentsChain(hideAgentsMenu, agentsHideMenu);
   // ---- end 0.40 agents ----------------------------------------------------------------------------
 
 

@@ -285,6 +285,9 @@ class AgentSession:
         binder = getattr(ui, "_bind_session_monitors", None)
         if callable(binder):
             binder(self)
+        agents_binder = getattr(ui, "_bind_session_agents", None)
+        if callable(agents_binder):
+            agents_binder(self)
 
     @property
     def name(self) -> str | None:
@@ -2353,6 +2356,14 @@ class TUI:
         key, lbl, sep = f"bold {th.muted}", th.faint, th.faint
         body = f"[{sep}]  {glyphs.RAIL}  [/]".join(
             f"[{key}]{_esc(k)}[/] [{lbl}]{_esc(l)}[/]" for k, l in chips)
+        agents = self._agents_segment()     # this chat's task sub-agents (● 2 agents)
+        if agents:
+            # The bar is cut at the terminal's edge and the chips alone can fill a narrow one, so
+            # under 80 columns the (compact) count leads; wider, it follows the chips.
+            if int(getattr(self, "_width", 0) or 0) >= 80:
+                body += f"[{sep}]  {glyphs.RAIL}  [/]" + agents
+            else:
+                body = agents + f"[{sep}]  {glyphs.RAIL}  [/]" + body
         # fleet indicator: how many agents + whether a BACKGROUND one is running / needs you (^\ = dashboard)
         if len(self._sessions) > 1:
             need = sum(1 for i, s in enumerate(self._sessions) if i != self._active_idx and s.state == "needs_input")
@@ -2365,6 +2376,93 @@ class TUI:
             seg += f" [{th.faint}]Ctrl+\\ [/]"          # trailing space: avoid rich reading \] as an escape
             body += f"[{sep}]  {glyphs.RAIL}  [/]" + seg
         return ANSI("  " + self._rich(body))
+
+    # ---- this chat's task sub-agents (the agents indicator) ----
+    def _bind_session_agents(self, sess: "AgentSession") -> None:
+        """Repaint when one session's sub-agents change; the bar reads the registry at paint time."""
+        registry = getattr(getattr(sess, "agent", None), "subagents", None)
+        if registry is not None:
+            registry.listener = lambda *_: self._invalidate()
+
+    @staticmethod
+    def _agents_count(active: int, total: int) -> int:
+        """The number the agents segment shows (the editor's agentsLabelCount is the same switch).
+        Claude Code's rule: every sub-agent started in this chat. "Working while any work, else
+        all" would be `return active or total`."""
+        return total
+
+    def _agents_segment(self) -> str:
+        """``● 2 agents`` / ``● 5 agents · 2 working`` / ``◆ 5 agents · 1 needs you`` / ``○ 5 agents``,
+        or the compact ``●2`` / ``●2/5`` / ``◆5`` / ``○5`` under 80 columns; "" with no agents."""
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        counts = getattr(registry, "counts", None)
+        if not callable(counts):
+            return ""
+        c = counts()
+        total, active, waiting = int(c.get("total", 0)), int(c.get("active", 0)), int(c.get("waiting", 0))
+        if total <= 0:
+            return ""
+        th = style_mod.theme()
+        n = self._agents_count(active, total)
+        noun = f"{n} agent" + ("" if n == 1 else "s")
+        wide = int(getattr(self, "_width", 0) or 0) >= 80
+        if waiting:
+            if not wide:
+                return f"[{th.err}]{glyphs.AGENT_WAIT}{n}[/]"
+            need = "needs you" if waiting == 1 else "need you"
+            return (f"[{th.err}]{glyphs.AGENT_WAIT}[/] [{th.muted}]{noun}[/] "
+                    f"[bold {th.err}]· {waiting} {need}[/]")
+        if active:
+            if not wide:
+                return f"[{th.ok}]{glyphs.AGENT_RUN}{active}{'' if active == n else f'/{n}'}[/]"
+            working = f" · {active} working" if active != n else ""
+            return f"[{th.ok}]{glyphs.AGENT_RUN}[/] [{th.muted}]{noun}{working}[/]"
+        if not wide:
+            return f"[{th.faint}]{glyphs.AGENT_IDLE}{n}[/]"
+        return f"[{th.faint}]{glyphs.AGENT_IDLE} {noun}[/]"
+
+    def _agents_listing(self) -> str:
+        """The "agents in this chat" block `/agents` prints above the sub-agent settings."""
+        from rich.cells import cell_len
+        from .subagents import meta_text, summary_parts, tree_items
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        if registry is None:
+            return ""
+        snap, counts = registry.snapshot(), registry.counts()
+        if not counts.get("total"):
+            return ""
+        th = style_mod.theme()
+        marks = {"queued": (glyphs.AGENT_QUEUED, th.faint), "running": (glyphs.AGENT_RUN, th.ok),
+                 "waiting": (glyphs.AGENT_WAIT, th.err), "finished": (glyphs.CHECK, th.faint),
+                 "failed": (glyphs.CROSS, th.err), "stopped": (glyphs.BLOCKED, th.warn)}
+        main_model = str(getattr(self.config, "model", "") or "")
+        rows = []
+        for level, item in tree_items(snap["items"]):
+            desc = style_mod.terminal_safe_text(item.get("description") or "(no description)")
+            desc = " ".join(desc.split())
+            meta = meta_text(item, main_model=main_model, fmt_tokens=render_mod.fmt_tokens,
+                             finished_word=False)
+            rows.append((level, item.get("state"), desc, " ".join(style_mod.terminal_safe_text(meta).split())))
+        width = min(32, max((cell_len(desc) + 2 * level for level, _s, desc, _m in rows), default=0))
+        lines = [f"[bold {th.accent}]agents in this chat[/] "
+                 f"[{th.muted}]· {_esc(' · '.join(summary_parts(counts)))}[/]"]
+        for level, state, desc, meta in rows:
+            mark, colour = marks.get(state, (glyphs.AGENT_IDLE, th.faint))
+            gap = " " * max(2, width - cell_len(desc) - 2 * level + 2)
+            lines.append(f"  {'  ' * level}[{colour}]{mark}[/] [{th.text}]{_esc(desc)}[/]"
+                         + (f"{gap}[{th.faint}]{_esc(meta)}[/]" if meta else ""))
+        hidden = int(counts.get("total", 0)) - len(snap["items"])
+        if hidden > 0:
+            lines.append(f"  [{th.faint}]{glyphs.ELLIPSIS_V} {hidden} more not listed[/]")
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _agents_working_desc(agent) -> str:
+        """`` · 2 agents working`` for a fleet session whose sub-agents are active, else ""."""
+        registry = getattr(agent, "subagents", None)
+        counts = getattr(registry, "counts", None)
+        active = int(counts().get("active", 0)) if callable(counts) else 0
+        return f" · {active} agent{'' if active == 1 else 's'} working" if active else ""
 
     @staticmethod
     def _md(text: str):
@@ -2684,6 +2782,7 @@ class TUI:
             title = (s.name or (preview[:40] if preview else "(new agent)"))[:40]
             pin = "⟐ " if s.pinned else ""
             tools = f" · {s._tool_count} tools" if s._tool_count else ""
+            tools += self._agents_working_desc(s.agent)
             workspace = (f" · isolated {s.workspace_branch}" if getattr(s, "workspace_branch", "")
                          else " · shared checkout")
             rows.append({"label": f"{_MARK.get(st, '○')} {pin}{title}",
@@ -4920,7 +5019,8 @@ class TUI:
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"
             st = cfg.get("subagent_api_mode") or "(inherit/infer)"
             defs = ", ".join(getattr(self.agent, "agent_defs", {}).keys()) or "(none)"
-            self._append(self._rich(f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
+            listing = self._agents_listing()     # this chat's agents first, then the configuration
+            self._append(self._rich(listing + f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
                                     f"  host   [{th.text}]{_esc(sh)}[/]\n"
                                     f"  route  [{th.text}]{_esc(st)}[/]\n"
                                     f"  named  [{th.faint}]{_esc(defs)}[/]\n"
@@ -5977,6 +6077,7 @@ class TUI:
         sess.agent = new_agent
         sess._cancel = new_agent.cancelled
         self._bind_session_monitors(sess)
+        self._bind_session_agents(sess)
         from . import sessions as _sess
         new_agent.session_file = _sess.new_path(self._fleet_root)
         new_agent.session_name = f"worktree {branch}"
