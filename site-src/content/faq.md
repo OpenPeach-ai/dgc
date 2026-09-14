@@ -23,7 +23,7 @@ DGC requires Python 3.10 or newer. The one-line Bash installer supports Linux an
 
 ## How do I uninstall DGC?
 
-The standard installer puts the application in `~/dgc` and a symlink at `~/.local/bin/dgc`; it does not require root. Remove those two paths to remove the installed program. CLI-managed configuration, credentials, sessions, plans, checkpoints, and other private state live separately under `~/.dgc`; remove that directory only if you also want to erase that CLI state. Delete the DGC extension through your editor’s Extensions view. Credentials saved by the extension live in the editor's SecretStorage, while extension settings and update metadata live in editor-managed storage; use the editor or operating system's credential and profile controls if you also want those records removed.
+The standard installer puts the application in `~/.local/share/dgc` and a symlink at `~/.local/bin/dgc`; it does not require root. Remove those two paths to remove the installed program (an install made by an older installer may also have left `~/dgc`). CLI-managed configuration, credentials, sessions, plans, checkpoints, and other private state live separately under `~/.dgc`; remove that directory only if you also want to erase that CLI state. Delete the DGC extension through your editor’s Extensions view. Credentials saved by the extension live in the editor's SecretStorage, while extension settings and update metadata live in editor-managed storage; use the editor or operating system's credential and profile controls if you also want those records removed.
 
 ## What is included in a training export?
 
