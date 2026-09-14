@@ -37,9 +37,10 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Using DGC", ["Permission modes", "Plan mode", "Sessions & rewind", "Checkpoints & rewind", "Context notes",
                    "Standing goals", "Files pane", "Diff pane", "In your editor",
                    "Turn ETA & notifications", "Background monitors"]),
-    ("Providers & models", ["Connect your model", "Subscriptions", "Thinking & reasoning", "Token usage"]),
-    ("Features", ["Artifacts", "Looking at a page", "MCP servers", "Lifecycle hooks", "Skills",
-                  "Multiple agents", "Training export", "Python code-action (power mode)"]),
+    ("Providers & models", ["Connect your model", "Reconnecting", "Subscriptions", "Thinking & reasoning",
+                            "Token usage"]),
+    ("Features", ["Artifacts", "Looking at a page", "Viewed images", "MCP servers", "Lifecycle hooks", "Skills",
+                  "Multiple agents", "Sub-agents", "Training export", "Python code-action (power mode)"]),
     ("Reference", ["Configuration"]),
 ]
 

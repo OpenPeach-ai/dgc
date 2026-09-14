@@ -92,6 +92,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" aria-current="page" class="active" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -100,10 +101,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>
@@ -127,6 +130,25 @@
 <p>Reasoning models (o-series, DeepSeek-R1, qwen-thinking) tend to do better on hard tasks with <code>/think high</code> (or <code>xhigh</code>); non-reasoning models often ignore the dial.</p>
 <div class="heading-row h2-row"><h2 id="showing-thinking">Showing thinking</h2><a class="anchor" href="#showing-thinking" aria-label="Link to this section">#</a></div>
 <p><code>show_reasoning</code> (<code>/thoughts show|hide</code>) controls whether the model&#x27;s thinking is shown, muted, in the transcript. It does <strong>not</strong> change how hard the model reasons — that is <code>/think</code>.</p>
+<div class="heading-row h2-row"><h2 id="where-thinking-came-from">Where thinking came from</h2><a class="anchor" href="#where-thinking-came-from" aria-label="Link to this section">#</a></div>
+<p>Not every provider hands back the model&#x27;s own reasoning. Some return a summary written from it, and some send nothing readable at all. Every block of thinking DGC shows says which, in a muted label after its header:</p>
+<div class="docs-table" role="region" aria-label="Where thinking came from table" tabindex="0"><table><thead><tr>
+<th scope="col">Label</th>
+<th scope="col">What it is</th>
+</tr></thead><tbody>
+<tr><td><code>Thought for 4s · raw</code></td><td>The model&#x27;s own reasoning, as a runtime serving open weights streamed it (Ollama, or llama.cpp, vLLM or LM Studio on your machine or network)</td></tr>
+<tr><td><code>Thought for 4s · summarized by Anthropic</code></td><td>The provider returned a summary; the full reasoning is not available. OpenAI&#x27;s reasoning summaries read <code>summarized by OpenAI</code></td></tr>
+<tr><td><code>Thought for 4s · hidden by OpenAI</code></td><td>The provider kept the reasoning hidden and sent no readable text, so there is nothing to open</td></tr>
+<tr><td><code>Thought for 4s</code></td><td>DGC cannot tell whether this is the model&#x27;s own reasoning or a summary</td></tr>
+</tbody></table></div>
+<p>DGC decides from the endpoint&#x27;s host, the API it speaks and the model, never from the name of an event. A local or private host — <code>localhost</code>, a LAN address, a <code>.local</code> or Tailscale name — is never labelled as summarized or hidden by a provider. Thinking from a sub-agent is marked <em>Sub-agent</em> before its label. Hover a label in the editor for the same explanation in a sentence.</p>
+<div class="heading-row h2-row"><h2 id="short-summaries-inline">Short summaries inline</h2><a class="anchor" href="#short-summaries-inline" aria-label="Link to this section">#</a></div>
+<p>A short provider summary written between tool calls reads better as a line of the answer than as another fold, so it is shown inline, muted and marked <code>· summarized</code>. Raw thinking, thinking DGC cannot place, and anything from a sub-agent always stay collapsed.</p>
+<ul>
+<li><code>/thoughts inline</code> (the default) shows short summaries inline; <code>/thoughts collapsed</code> folds every block. Both also turn thinking on. In the editor, <strong>Settings → General → Show model thinking</strong> offers inline, collapsed and hidden.</li>
+<li><code>thinking_inline_max_chars</code> (default 280, at most 1000) is the longest summary shown inline; a summary with a code block or more than four lines stays collapsed, and <code>0</code> keeps every summary collapsed.</li>
+</ul>
+<p>Thinking is saved with the session within fixed bounds, so a resumed chat shows the same blocks and labels. A block that was cut to fit says so when you open it.</p>
 <div class="heading-row h2-row"><h2 id="preserving-thinking-across-turns">Preserving thinking across turns</h2><a class="anchor" href="#preserving-thinking-across-turns" aria-label="Link to this section">#</a></div>
 <p>Backends differ in whether prior-turn reasoning is carried back into context:</p>
 <ul>
@@ -141,6 +163,8 @@
   </article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#levels" data-id="levels" class="lvl2">Levels</a>
 <a href="#showing-thinking" data-id="showing-thinking" class="lvl2">Showing thinking</a>
+<a href="#where-thinking-came-from" data-id="where-thinking-came-from" class="lvl2">Where thinking came from</a>
+<a href="#short-summaries-inline" data-id="short-summaries-inline" class="lvl2">Short summaries inline</a>
 <a href="#preserving-thinking-across-turns" data-id="preserving-thinking-across-turns" class="lvl2">Preserving thinking across turns</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><label class="docs-search"><span class="sr-only">Search documentation</span><input data-docsearch type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><nav><div class="grp">
@@ -168,6 +192,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" aria-current="page" class="active" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -176,10 +201,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>

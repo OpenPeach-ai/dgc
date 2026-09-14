@@ -27,15 +27,18 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Turn ETA & notifications: https://docs.vibedgc.com/turn-eta-notifications
 - Background monitors: https://docs.vibedgc.com/background-monitors
 - Connect your model: https://docs.vibedgc.com/connect-your-model
+- Reconnecting: https://docs.vibedgc.com/reconnecting
 - Subscriptions: https://docs.vibedgc.com/subscriptions
 - Thinking & reasoning: https://docs.vibedgc.com/thinking-reasoning
 - Token usage: https://docs.vibedgc.com/token-usage
 - Artifacts: https://docs.vibedgc.com/artifacts
 - Looking at a page: https://docs.vibedgc.com/looking-at-a-page
+- Viewed images: https://docs.vibedgc.com/viewed-images
 - MCP servers: https://docs.vibedgc.com/mcp-servers
 - Lifecycle hooks: https://docs.vibedgc.com/lifecycle-hooks
 - Skills: https://docs.vibedgc.com/skills
 - Multiple agents: https://docs.vibedgc.com/multiple-agents
+- Sub-agents: https://docs.vibedgc.com/sub-agents
 - Training export: https://docs.vibedgc.com/training-export
 - Python code-action (power mode): https://docs.vibedgc.com/python-code-action-power-mode
 - Configuration: https://docs.vibedgc.com/configuration

@@ -703,6 +703,60 @@ baseline fingerprints remain visible and droppable but deliberately require manu
 of unsafe auto-apply. VS Code/Cursor exposes the same operations through its command Quick Pick.
 """.strip()),
 
+    ("Sub-agents", "every sub-agent this chat started, and what each one is doing", """
+# Sub-agents
+
+The model can hand part of a job to a sub-agent with its `task` tool: a separate agent with its own
+context that does the work and reports back. A delegated step can take minutes, so DGC shows every
+sub-agent the chat has started and what each one is doing, instead of one spinner.
+
+## The count
+
+- **Every sub-agent started in this chat**, including the ones that finished, failed or were
+  stopped. This is the same rule Claude Code uses. Nothing shows until the first one starts.
+- **The mark says whether any is working.** A diamond (◆) means an agent is waiting for you: a
+  permission, or a plan to review. A filled dot (●) means at least one is queued or running. An empty
+  ring (○) means none is working any more.
+- **How many are working right now** is next to the count: `● 5 agents · 2 working`.
+- The count starts again when you start a new chat, clear it, or resume another session. A rewind
+  drops the agents that were started after the point you go back to.
+
+## In the terminal
+
+The status bar shows the count after the shortcut hints:
+
+    ● 2 agents        ● 5 agents · 2 working        ◆ 5 agents · 1 needs you        ○ 5 agents
+
+Under 80 columns it shortens to `●2`, `●2/5`, `◆5` or `○5` and moves to the front of the bar.
+
+`/agents` lists the agents in this chat above the sub-agent settings, and works while a turn is
+running. Each row has the agent's state, its task description, and what DGC knows about it: what it is
+doing now, the agent type, the model when it is not the chat's own, how long it ran, its tool calls and
+its tokens. An agent started by another agent is indented under it. The `/dashboard` entry of a busy
+chat says how many of its agents are working. The classic `dgc` prompt prints the same list without
+colour.
+
+## In the editor
+
+A pill at the start of the controls under the prompt shows `● 2 agents` (only the number in a narrow
+panel). Hover it to read how many are working. Click it for the list:
+
+- a summary such as **5 agents · 2 working · 3 finished**;
+- one row per agent with the same facts the terminal shows, updated as it works;
+- click a row to jump to that agent's step in the conversation;
+- **Sub-agent settings** opens Settings ▸ Agents, where the sub-agent model and host are chosen.
+
+The list is for looking. **Stop** ends the whole turn, including every agent. When the chat is
+reopened, the list comes back from the saved session and shows each earlier agent's final state. If
+DGC's backend stops, the agents that were still running are marked stopped.
+
+## Limits
+
+- The list shows up to 64 agents, the working ones first; the count stays exact beyond that.
+- Descriptions and failure messages are redacted the same way the transcript is. A row shows the first
+  line of a failure message.
+""".strip()),
+
     ("Context notes", "what the project already learned, across context windows", """
 # Context notes
 
@@ -1173,6 +1227,33 @@ When DGC needs permission, the card shows what will actually happen — the comm
 the edit would apply — not the raw arguments. **Allow once**, **Always allow** (which writes a
 permission rule) or **Deny**, and a denial can carry a note that reaches the model as the reason.
 
+## When DGC asks you to decide
+
+Some choices are yours: a trade-off with no safe default, or a requirement the request leaves open.
+The model asks with a question card instead of a list of options in prose. It can ask up to four
+questions at once, each with two to six options, and it puts the option it recommends first.
+
+- **The card docks in the prompt box** in place of the text box. **Stop**, the mode and model pickers
+  and the context meter stay where they are, and anything you had typed comes back when the question
+  closes.
+- **The recommended option is chosen for you but not sent.** It carries a **Recommended** badge and
+  starts checked and highlighted, so **Enter**, a click on it or **Next** takes it. Nothing is sent
+  until you act.
+- Every option has a one-line description of what choosing it means. **Something else…** lets you
+  write your own answer, and **Skip** leaves a question unanswered. With several questions, each
+  answer moves on to the next and they are sent together at the end.
+- **×** or **Esc** (with the text field empty) closes the question without answering. DGC does not
+  choose for you: it tells the model you closed it, ends the turn, and pauses a standing goal that was
+  waiting on the answer. Tool calls the model made after the question in the same step do not run.
+- Answered questions stay in the step as **Asked 2 questions** (or **Asked · SQLite file**) with each
+  question and your answer, after a reload or resume as well.
+
+The full-screen terminal asks the same questions: one row per option with the cursor on the
+recommended one, digits to pick, Space to toggle a multi-choice option, and ←/→ or Tab between
+questions; the classic prompt uses an arrow menu that starts on the recommended option. Sub-agents
+and `dgc -p` runs are not offered the question tool; a sub-agent hands the decision back to the main
+agent with its recommendation.
+
 ## Settings
 
 The gear opens five pages: **General** (permission mode, thinking, context size, tool profile),
@@ -1211,7 +1292,7 @@ stays out of the way the rest of the time.
 | `wait` | Blocks until text appears, capped at 30 seconds |
 | `console` | Console messages since load, with severity |
 | `requests` | Network responses: status, type, and what failed |
-| `screenshot` | A PNG saved under `.dgc/screenshots/`, shown to the model if it has vision |
+| `screenshot` | A PNG saved under `.dgc/screenshots/`, shown in the chat, and to the model if it has vision |
 | `close` | Ends the browser session |
 
 A snapshot looks like this, and every `[e12]` is a handle the model can act on:
@@ -1226,13 +1307,16 @@ back a fresh snapshot, and stale refs fail with a message telling the model to t
 
 ## Screenshots and local models
 
-A screenshot is only useful if something can look at it. In the editor panel it appears in the
-conversation as a thumbnail: click once to expand it in place, once more to open it full size.
+A screenshot is only useful if something can look at it. In the editor panel the step that took it
+shows an image count; open the step to see the image as a thumbnail, and click the thumbnail to open
+it in a viewer. In the terminal, open the step and click `open` to hand it to your system's image
+viewer. *Viewed images* has the details.
 
 Whether the *model* can see it is a separate question, and DGC checks rather than guesses. With a
-vision model the picture is attached for it to read; without one you get the file path and a nudge
-to use `snapshot` instead, which is more precise anyway. Check with `ollama show <model>` — look
-for `vision` under Capabilities.
+vision model the picture is attached for it to read. A model without vision is told the image exists
+and never receives it, with a nudge to use `snapshot` instead, which is more precise anyway. If an
+endpoint turns out not to accept images, DGC stops sending them for the rest of the session. Check
+with `ollama show <model>` — look for `vision` under Capabilities.
 
 ## Which browser
 
@@ -1271,6 +1355,65 @@ Everything the browser returns is web page content, and it comes back labelled a
 same treatment `web_fetch` gets. Text on a page is evidence about that page, never an instruction
 to DGC.
 """),
+
+    ("Viewed images", "screenshots and image files the model looked at, kept with the step that looked", """
+# Viewed images
+
+When the model looks at an image, you can see the same image, in the step that looked at it. That
+covers a browser screenshot, an image file from your workspace, and an image an MCP tool returned.
+
+## Where they come from
+
+- **Screenshots.** The `browser` tool's `screenshot` (see *Looking at a page*).
+- **Image files.** With a model that accepts images, the agent can use `view_image` on a PNG, JPEG, GIF
+  or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about
+  something only a picture shows, and when `read_file` runs into an image. A BMP is shown to you but
+  never sent to the model; convert it to PNG if the model needs to look at it.
+- **MCP tools** that return images.
+
+A step keeps up to eight images. More than that are counted, not kept.
+
+## In the editor
+
+A step that produced images shows an image count on its row. Open the step and its images sit above
+its output as thumbnails. Click one to open the viewer over the panel:
+
+- the image's name, size and where it came from (browser screenshot, workspace image, MCP image);
+- **←** and **→** move between the step's images, **Home** and **End** jump to the first and last;
+- **Z** switches between fitting the panel and actual size, and **Shift+arrows** move around a large
+  image;
+- **Open file** opens DGC's stored copy in the editor;
+- **Esc** or **×** closes it and puts the focus back where you were.
+
+If DGC needs you while the viewer is open (a permission, a plan, a question), the viewer says so and
+**Show** takes you to it. Images come back when you reload the panel or reopen the chat. A thumbnail
+marked **Unavailable** means the stored copy is gone or has changed since the model saw it; **Too
+large** means the image is too big to show in the panel, so open the file instead.
+
+## In the terminal
+
+The step's row says how many images it produced. Click it, or use `/expand`, to list them with their
+size, and click `open` to hand one to your system's image viewer. DGC never opens a web browser for
+this; without a display it shows where the file is instead. The classic `dgc` prompt prints one
+`↳ image:` line per image with its path.
+
+## What the model receives
+
+- A model that accepts images gets them after the batch of tool calls that produced them. Text inside
+  an image is treated as data, never as instructions.
+- A model without vision is told that an image exists and never receives it, and `view_image` is not
+  offered to it.
+- If an endpoint refuses an image, DGC sends the request again without it and stops sending images to
+  that endpoint for the rest of the session.
+
+## Where they are kept
+
+Each session keeps a private copy of its images beside its transcript, in
+`~/.dgc/sessions/<project>/<session>.images/`, readable only by you. A session's images take at most
+256 MB, oldest removed first. They are deleted with the session and copied when you branch it. The
+editor receives an image's name, size and source, never its path on disk. Screenshots are also saved
+under `.dgc/screenshots/` in the project.
+""".strip()),
     ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
 # Turn ETA & notifications
 
@@ -1415,6 +1558,65 @@ prompt for the provider's key and use its native auth contract. See **Subscripti
 to instead run your own Claude/Codex/Qwen/Kimi/Copilot plan through its official CLI.
 """.strip()),
 
+    ("Reconnecting", "what DGC does when a model request fails, is refused as busy, or is cut off", """
+# Reconnecting
+
+Local servers restart, laptops change networks, hosted APIs get busy. When a model request fails in a
+way that is worth another try, DGC tries again, and says in one line of the conversation what went
+wrong and whether trying again worked.
+
+## What DGC tries again
+
+- **The connection failed**: refused, a name that does not resolve, TLS, a proxy, a reset, or a
+  timeout while connecting.
+- **The server is busy or failed**: 429 and overloaded answers, and 5xx errors. A `Retry-After` the
+  server sends is respected.
+
+These are sent again up to three more times, with a short backoff between tries.
+
+- **The answer was cut off**: the stream ended before the provider's end-of-answer event. DGC keeps
+  what already arrived and asks the model to continue exactly where it stopped, after a backoff that
+  starts at 0.25 seconds and doubles up to 8 seconds, at most eight times in a turn. That request is
+  marked in the transcript so it is never shown as something you typed.
+- **The model went quiet**: the stall watcher keeps its own wording, *No response from the model*.
+
+A wrong key, a model the server does not have, or another answer that will not change on a second
+try is not retried. The error says what failed and what to check.
+
+## In the editor
+
+A muted line inside the turn follows each run of tries and changes in place:
+
+- *Reconnecting 1/3 · connection refused by 127.0.0.1:11434*
+- *Server is busy, retrying 2/3* or *Server error, retrying 1/3*
+- then *Reconnected after 1 retry*, *Recovered after 2 retries*, *Reconnected · continued from the
+  partial answer*, *Gave up after 3 retries* or *Stopped while reconnecting*.
+
+Click the line for the details: the cause, the model and API, the endpoint, the HTTP status, each
+attempt and how long DGC waited before it, the transport's own message, and a hint. **Copy details**
+copies them. While DGC waits, the activity row says *Waiting to reconnect*, *Server is busy* or
+*Server error*, with the host, the backoff and the try count. A line from a sub-agent starts with
+*Sub-agent*, and one from a subscription engine with the engine's name.
+
+If DGC gives up, the error row leads with what failed, for example *Could not reach the model ·
+connection refused*, shows the hint underneath, and keeps the full message behind its chevron.
+
+When the extension restarts DGC's own backend, the activity row says *Restarting the DGC backend*, so
+it is never confused with a model reconnect.
+
+## In the terminal
+
+The same run is one collapsible block: `↻ ▸ Reconnecting 2/3 · connection refused by …`. Click it, or
+use `/expand` (`/expandall` opens every one), to read the details. `dgc -p` and the classic prompt print
+one line per try, such as `↻ HTTP 503 from 127.0.0.1:8080 — retrying (1/3) in 0.5s`, and one when it
+works.
+
+## Privacy
+
+Causes, endpoints and details never carry credentials: DGC removes a `user:password@` part, the query
+string and the fragment from every URL it shows or saves, and redacts known secret values.
+""".strip()),
+
     ("Thinking & reasoning", "off · low · medium · high · xhigh, and preserving it", """
 # Thinking & reasoning
 
@@ -1438,6 +1640,41 @@ tasks with `/think high` (or `xhigh`); non-reasoning models often ignore the dia
 `show_reasoning` (`/thoughts show|hide`) controls whether the model's thinking is
 shown, muted, in the transcript. It does **not** change how hard the model reasons —
 that is `/think`.
+
+## Where thinking came from
+
+Not every provider hands back the model's own reasoning. Some return a summary written
+from it, and some send nothing readable at all. Every block of thinking DGC shows says
+which, in a muted label after its header:
+
+| Label | What it is |
+| --- | --- |
+| `Thought for 4s · raw` | The model's own reasoning, as a runtime serving open weights streamed it (Ollama, or llama.cpp, vLLM or LM Studio on your machine or network) |
+| `Thought for 4s · summarized by Anthropic` | The provider returned a summary; the full reasoning is not available. OpenAI's reasoning summaries read `summarized by OpenAI` |
+| `Thought for 4s · hidden by OpenAI` | The provider kept the reasoning hidden and sent no readable text, so there is nothing to open |
+| `Thought for 4s` | DGC cannot tell whether this is the model's own reasoning or a summary |
+
+DGC decides from the endpoint's host, the API it speaks and the model, never from the name
+of an event. A local or private host — `localhost`, a LAN address, a `.local` or Tailscale
+name — is never labelled as summarized or hidden by a provider. Thinking from a sub-agent
+is marked *Sub-agent* before its label. Hover a label in the editor for the same explanation
+in a sentence.
+
+## Short summaries inline
+
+A short provider summary written between tool calls reads better as a line of the answer
+than as another fold, so it is shown inline, muted and marked `· summarized`. Raw thinking,
+thinking DGC cannot place, and anything from a sub-agent always stay collapsed.
+
+- `/thoughts inline` (the default) shows short summaries inline; `/thoughts collapsed` folds
+  every block. Both also turn thinking on. In the editor, **Settings → General → Show model
+  thinking** offers inline, collapsed and hidden.
+- `thinking_inline_max_chars` (default 280, at most 1000) is the longest summary shown inline;
+  a summary with a code block or more than four lines stays collapsed, and `0` keeps every
+  summary collapsed.
+
+Thinking is saved with the session within fixed bounds, so a resumed chat shows the same
+blocks and labels. A block that was cut to fit says so when you open it.
 
 ## Preserving thinking across turns
 
@@ -1617,6 +1854,9 @@ Useful keys:
   the context sent back so a compatible/local model keeps its own thinking across
   turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and
   Ollama already round-trip their reasoning natively).
+- `thinking_inline`, `thinking_inline_max_chars` — show a short provider summary of the
+  model's thinking inline instead of folded (default on, `/thoughts inline|collapsed`), up to
+  `thinking_inline_max_chars` characters (default 280, 0-1000). See **Thinking & reasoning**.
 - `think_budget_tokens`, `max_tokens` — safety backstops: a reasoning phase that
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation

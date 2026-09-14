@@ -92,6 +92,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -100,10 +101,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>
@@ -122,6 +125,7 @@
 <li><code>base_url</code>, <code>model</code> — the endpoint and model (<code>/connect</code>, <code>/model</code>). Credentials live in owner-only <code>~/.dgc/secrets.json</code>, VS Code SecretStorage, or <code>DGC_API_KEY</code> / the other <code>DGC_*_API_KEY</code> environment references; they are not written into normal config.</li>
 <li><code>mode</code>, <code>thinking</code> — permission mode and reasoning effort. <code>thinking</code> is <strong><code>off</code> by default</strong> (a coding agent should act, not deliberate at length) and accepts <code>off · low · medium · high · xhigh</code>. DGC maps the requested level to each provider&#x27;s supported control. Some reasoning-only models translate <code>off</code> to their minimum effort, and endpoints that do not expose a compatible control may ignore it; a set level reaches Qwen3-family llama.cpp/unsloth templates through <code>chat_template_kwargs</code>. <strong>Reasoning models (o-series, DeepSeek-R1, qwen-thinking) may do better on hard tasks with <code>/think high</code>.</strong> See the <strong>Thinking &amp; reasoning</strong> guide.</li>
 <li><code>show_reasoning</code>, <code>preserve_thinking</code> — <code>show_reasoning</code> (<code>/thoughts show|hide</code>) shows the model&#x27;s thinking, muted, in the transcript. <code>preserve_thinking</code> (<code>/preserve-thinking on|off</code>, default off) re-embeds the prior turn&#x27;s reasoning in the context sent back so a compatible/local model keeps its own thinking across turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and Ollama already round-trip their reasoning natively).</li>
+<li><code>thinking_inline</code>, <code>thinking_inline_max_chars</code> — show a short provider summary of the model&#x27;s thinking inline instead of folded (default on, <code>/thoughts inline|collapsed</code>), up to <code>thinking_inline_max_chars</code> characters (default 280, 0-1000). See <strong>Thinking &amp; reasoning</strong>.</li>
 <li><code>think_budget_tokens</code>, <code>max_tokens</code> — safety backstops: a reasoning phase that runs away with no output is aborted + retried with less reasoning (<code>think_budget_tokens</code>, 0=off); output is capped at <code>max_tokens</code> (length-truncation auto-continues, 0=don&#x27;t send).</li>
 <li><code>api_mode</code>, <code>provider_state</code>, <code>prompt_cache</code> — transport and continuity. <code>auto</code> selects native Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for OpenAI, and Chat Completions for compatible servers. Use <code>api_mode: ollama</code> or <code>api_mode: anthropic</code> only when a proxy hides its provider identity. Anthropic Messages preserves signed thinking and grouped tool-result continuation blocks locally; it never sends the key as Bearer authentication. Responses defaults to stateless (<code>store: false</code>) with local encrypted-reasoning replay and a hashed cache-routing key when DGC derives the key. An explicit <code>prompt_cache_key</code> of up to 64 characters is sent verbatim. Choose <code>provider_state: server</code> only when provider-side response storage is acceptable.</li>
 <li><code>provider_capabilities</code>, <code>capability_cache_ttl_s</code> — explicit feature overrides and the bounded interval before DGC retries a capability that an endpoint/model rejected.</li>
@@ -247,6 +251,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -255,10 +260,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>

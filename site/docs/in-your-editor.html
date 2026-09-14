@@ -92,6 +92,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -100,10 +101,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>
@@ -152,6 +155,16 @@
 </ul>
 <div class="heading-row h2-row"><h2 id="approving-work">Approving work</h2><a class="anchor" href="#approving-work" aria-label="Link to this section">#</a></div>
 <p>When DGC needs permission, the card shows what will actually happen — the command, or the diff the edit would apply — not the raw arguments. <strong>Allow once</strong>, <strong>Always allow</strong> (which writes a permission rule) or <strong>Deny</strong>, and a denial can carry a note that reaches the model as the reason.</p>
+<div class="heading-row h2-row"><h2 id="when-dgc-asks-you-to-decide">When DGC asks you to decide</h2><a class="anchor" href="#when-dgc-asks-you-to-decide" aria-label="Link to this section">#</a></div>
+<p>Some choices are yours: a trade-off with no safe default, or a requirement the request leaves open. The model asks with a question card instead of a list of options in prose. It can ask up to four questions at once, each with two to six options, and it puts the option it recommends first.</p>
+<ul>
+<li><strong>The card docks in the prompt box</strong> in place of the text box. <strong>Stop</strong>, the mode and model pickers and the context meter stay where they are, and anything you had typed comes back when the question closes.</li>
+<li><strong>The recommended option is chosen for you but not sent.</strong> It carries a <strong>Recommended</strong> badge and starts checked and highlighted, so <strong>Enter</strong>, a click on it or <strong>Next</strong> takes it. Nothing is sent until you act.</li>
+<li>Every option has a one-line description of what choosing it means. <strong>Something else…</strong> lets you write your own answer, and <strong>Skip</strong> leaves a question unanswered. With several questions, each answer moves on to the next and they are sent together at the end.</li>
+<li><strong>×</strong> or <strong>Esc</strong> (with the text field empty) closes the question without answering. DGC does not choose for you: it tells the model you closed it, ends the turn, and pauses a standing goal that was waiting on the answer. Tool calls the model made after the question in the same step do not run.</li>
+<li>Answered questions stay in the step as <strong>Asked 2 questions</strong> (or <strong>Asked · SQLite file</strong>) with each question and your answer, after a reload or resume as well.</li>
+</ul>
+<p>The full-screen terminal asks the same questions: one row per option with the cursor on the recommended one, digits to pick, Space to toggle a multi-choice option, and ←/→ or Tab between questions; the classic prompt uses an arrow menu that starts on the recommended option. Sub-agents and <code>dgc -p</code> runs are not offered the question tool; a sub-agent hands the decision back to the main agent with its recommendation.</p>
 <div class="heading-row h2-row"><h2 id="settings">Settings</h2><a class="anchor" href="#settings" aria-label="Link to this section">#</a></div>
 <p>The gear opens five pages: <strong>General</strong> (permission mode, thinking, context size, tool profile), <strong>Models</strong> (a local host, a provider, or your own subscription CLI), <strong>Agents</strong> (the model and host that sub-agents and the fallback route use), <strong>Security</strong> (sandbox confinement and plan-mode limits) and <strong>Extensions</strong> (skills, MCP servers, hooks, permission rules, memory and these docs). Everything is a row: what it is on the left, the control on the right, the explanation beneath.</p>
 <div class="heading-row h2-row"><h2 id="what-the-editor-adds">What the editor adds</h2><a class="anchor" href="#what-the-editor-adds" aria-label="Link to this section">#</a></div>
@@ -170,6 +183,7 @@
 <a href="#what-an-answer-can-show" data-id="what-an-answer-can-show" class="lvl2">What an answer can show</a>
 <a href="#when-a-turn-finishes" data-id="when-a-turn-finishes" class="lvl2">When a turn finishes</a>
 <a href="#approving-work" data-id="approving-work" class="lvl2">Approving work</a>
+<a href="#when-dgc-asks-you-to-decide" data-id="when-dgc-asks-you-to-decide" class="lvl2">When DGC asks you to decide</a>
 <a href="#settings" data-id="settings" class="lvl2">Settings</a>
 <a href="#what-the-editor-adds" data-id="what-the-editor-adds" class="lvl2">What the editor adds</a></aside>
 </div>
@@ -198,6 +212,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -206,10 +221,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>

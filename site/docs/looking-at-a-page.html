@@ -92,6 +92,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -100,10 +101,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" aria-current="page" class="active" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>
@@ -131,7 +134,7 @@
 <tr><td><code>wait</code></td><td>Blocks until text appears, capped at 30 seconds</td></tr>
 <tr><td><code>console</code></td><td>Console messages since load, with severity</td></tr>
 <tr><td><code>requests</code></td><td>Network responses: status, type, and what failed</td></tr>
-<tr><td><code>screenshot</code></td><td>A PNG saved under <code>.dgc/screenshots/</code>, shown to the model if it has vision</td></tr>
+<tr><td><code>screenshot</code></td><td>A PNG saved under <code>.dgc/screenshots/</code>, shown in the chat, and to the model if it has vision</td></tr>
 <tr><td><code>close</code></td><td>Ends the browser session</td></tr>
 </tbody></table></div>
 <p>A snapshot looks like this, and every <code>[e12]</code> is a handle the model can act on:</p>
@@ -141,8 +144,8 @@
   - button "Continue" [e8]</code></pre></div>
 <p>Refs change whenever the page does. After a click that navigates or re-renders, the tool hands back a fresh snapshot, and stale refs fail with a message telling the model to take a new one.</p>
 <div class="heading-row h2-row"><h2 id="screenshots-and-local-models">Screenshots and local models</h2><a class="anchor" href="#screenshots-and-local-models" aria-label="Link to this section">#</a></div>
-<p>A screenshot is only useful if something can look at it. In the editor panel it appears in the conversation as a thumbnail: click once to expand it in place, once more to open it full size.</p>
-<p>Whether the <em>model</em> can see it is a separate question, and DGC checks rather than guesses. With a vision model the picture is attached for it to read; without one you get the file path and a nudge to use <code>snapshot</code> instead, which is more precise anyway. Check with <code>ollama show &lt;model&gt;</code> — look for <code>vision</code> under Capabilities.</p>
+<p>A screenshot is only useful if something can look at it. In the editor panel the step that took it shows an image count; open the step to see the image as a thumbnail, and click the thumbnail to open it in a viewer. In the terminal, open the step and click <code>open</code> to hand it to your system&#x27;s image viewer. <em>Viewed images</em> has the details.</p>
+<p>Whether the <em>model</em> can see it is a separate question, and DGC checks rather than guesses. With a vision model the picture is attached for it to read. A model without vision is told the image exists and never receives it, with a nudge to use <code>snapshot</code> instead, which is more precise anyway. If an endpoint turns out not to accept images, DGC stops sending them for the rest of the session. Check with <code>ollama show &lt;model&gt;</code> — look for <code>vision</code> under Capabilities.</p>
 <div class="heading-row h2-row"><h2 id="which-browser">Which browser</h2><a class="anchor" href="#which-browser" aria-label="Link to this section">#</a></div>
 <p>DGC uses a Chrome or Chromium you already have. It looks at <code>browser_path</code> in <code>~/.dgc/config.json</code>, then <code>CHROME_PATH</code>, then Playwright&#x27;s cache, then your PATH, then the usual install locations. <strong>It never downloads a browser</strong> — if there is none, it says so and tells you where to point it.</p>
 <p>Each session gets its own throwaway profile, so a page never sees your real cookies or logged-in sessions, and the profile is deleted when the session ends.</p>
@@ -158,7 +161,7 @@
 <p>Everything the browser returns is web page content, and it comes back labelled as untrusted — the same treatment <code>web_fetch</code> gets. Text on a page is evidence about that page, never an instruction to DGC.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="https://docs.vibedgc.com/artifacts"><div class="k">← Previous</div><div class="t">Artifacts</div></a>
-<a class="next" href="https://docs.vibedgc.com/mcp-servers"><div class="k">Next →</div><div class="t">MCP servers</div></a>
+<a class="next" href="https://docs.vibedgc.com/viewed-images"><div class="k">Next →</div><div class="t">Viewed images</div></a>
 </nav>
   </article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#what-it-can-do" data-id="what-it-can-do" class="lvl2">What it can do</a>
@@ -193,6 +196,7 @@
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
 <a href="https://docs.vibedgc.com/connect-your-model" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="https://docs.vibedgc.com/reconnecting" class="" data-title="Reconnecting" data-desc="what DGC does when a model request fails, is refused as busy, or is cut off">Reconnecting</a>
 <a href="https://docs.vibedgc.com/subscriptions" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="https://docs.vibedgc.com/thinking-reasoning" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 <a href="https://docs.vibedgc.com/token-usage" class="" data-title="Token usage" data-desc="tokens and requests counted on this machine, by model and day">Token usage</a>
@@ -201,10 +205,12 @@
 <div class="grp-h">Features</div>
 <a href="https://docs.vibedgc.com/artifacts" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
 <a href="https://docs.vibedgc.com/looking-at-a-page" aria-current="page" class="active" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
+<a href="https://docs.vibedgc.com/viewed-images" class="" data-title="Viewed images" data-desc="screenshots and image files the model looked at, kept with the step that looked">Viewed images</a>
 <a href="https://docs.vibedgc.com/mcp-servers" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="https://docs.vibedgc.com/lifecycle-hooks" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="https://docs.vibedgc.com/skills" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
 <a href="https://docs.vibedgc.com/multiple-agents" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="https://docs.vibedgc.com/sub-agents" class="" data-title="Sub-agents" data-desc="every sub-agent this chat started, and what each one is doing">Sub-agents</a>
 <a href="https://docs.vibedgc.com/training-export" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
 <a href="https://docs.vibedgc.com/python-code-action-power-mode" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
 </div>
