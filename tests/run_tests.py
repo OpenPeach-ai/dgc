@@ -11059,7 +11059,7 @@ def test_site_sitemap_and_robots():
     docs_routes = [route for route in routes if route == "/docs" or route.startswith("/docs/")]
     docs_locs = [loc for loc in locs if loc.startswith("https://docs.vibedgc.com")]
     check("site: the sitemap has one URL per routed page (docs pages on docs.vibedgc.com)",
-          len(locs) == len(routes) and len(docs_locs) == len(docs_routes) and docs_routes,
+          len(locs) == len(routes) and len(docs_locs) == len(docs_routes) and bool(docs_routes),
           detail=f"{len(locs)} locs, {len(routes)} routes, {len(docs_locs)} docs locs, {len(docs_routes)} docs routes")
     check("site: the sitemap invents no lastmod, changefreq or priority",
           not _re.search(r"<(?:lastmod|changefreq|priority)", sitemap))
