@@ -2387,7 +2387,15 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
-        return _run_oneshot(cli, config, args, parser, _oneshot_engine)
+        try:
+            code = _run_oneshot(cli, config, args, parser, _oneshot_engine)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            # The reader went away (`dgc -p ... | head -1`). Say nothing more: point stdout at
+            # /dev/null so the interpreter's own final flush cannot print a traceback and exit 120.
+            _silence_stdout()
+            return 141                          # what a shell reports for a SIGPIPE death
+        return code
     else:
         import atexit
 
@@ -2530,6 +2538,15 @@ def _oneshot_prompt(prompt: str) -> str:
     if prompt == "-":
         return data + note
     return f"{prompt}\n\n<input from stdin>\n{data}{note}\n</input>"
+
+
+def _silence_stdout() -> None:
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def _last_assistant_text(agent) -> str:
