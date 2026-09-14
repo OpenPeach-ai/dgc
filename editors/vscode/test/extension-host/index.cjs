@@ -542,11 +542,31 @@ async function run() {
   await config.update("command", backendPath, vscode.ConfigurationTarget.Global);
   await waitFor(() => logCount(commandRestart) > commandRestarts + 1, 15_000);
 
+  // 5. DGC: Add File to DGC from the palette with an image open in VS Code's image preview. That
+  //    editor is a custom editor with no activeTextEditor, and the command used to answer "Open or
+  //    select a file to add it to DGC." with the image in front of you.
+  const imagePath = join(primaryRoot, "host-add-file.png");
+  writeFileSync(imagePath, Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+  const imageUri = vscode.Uri.file(imagePath);
+  await vscode.commands.executeCommand("vscode.openWith", imageUri, "imagePreview.previewEditor");
+  await waitFor(() => {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    return input instanceof vscode.TabInputCustom && input.uri.fsPath === imageUri.fsPath;
+  }, 15_000);
+  assert.equal(vscode.window.activeTextEditor, undefined, "the image preview is not a text editor");
+  const attachesBefore = testApi.testOnlyPostedMessages(testToken).filter((m) => m.type === "attach").length;
+  await vscode.commands.executeCommand("dgc.addFile");
+  await waitFor(() => testApi.testOnlyPostedMessages(testToken)
+    .filter((m) => m.type === "attach").slice(attachesBefore)
+    .some((m) => /host-add-file\.png$/.test(m.label || "")), 15_000);
+  await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
+    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, addFileFromImagePreview: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };

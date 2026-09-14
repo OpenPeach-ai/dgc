@@ -137,6 +137,16 @@ const MCP_SENSITIVE_NAME_SUFFIXES = [
   "authorization", "bearer", "auth",
 ];
 
+/** The file of the focused editor tab, whatever kind of editor shows it (text, diff, notebook,
+ * or a custom editor such as the image preview). */
+function activeTabUri(): vscode.Uri | undefined {
+  const input = vscode.window.tabGroups?.activeTabGroup?.activeTab?.input;
+  if (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom
+    || input instanceof vscode.TabInputNotebook) { return input.uri; }
+  if (input instanceof vscode.TabInputTextDiff || input instanceof vscode.TabInputNotebookDiff) { return input.modified; }
+  return undefined;
+}
+
 function mcpSensitiveName(value: string): boolean {
   const lower = value.toLowerCase();
   const normalized = lower.replace(/[^a-z0-9]/g, "");
@@ -1796,6 +1806,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.testPostedMessages.push({
         type: String(msg?.type || ""),
         ...(["workspace_changes", "chat_changes"].includes(msg?.type) ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
+        ...(msg?.type === "attach" ? { label: String(msg.label || "").slice(0, 200) } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }),
@@ -4067,11 +4078,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } }));
   }
 
-  /** DGC: Add File to DGC — from the explorer, a tab, the palette, or a drop. */
+  /** DGC: Add File to DGC — from the explorer, a tab, the palette, or a drop. From the palette
+   * it adds the file in front of you, which is not always a text editor: an image in VS Code's
+   * image preview, a PDF or notebook in a custom editor has no activeTextEditor, and the command
+   * used to answer "Open or select a file" with the image open. */
   addFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): void {
     const picked = (Array.isArray(uris) && uris.length ? uris : uri ? [uri] : [])
       .filter((u): u is vscode.Uri => !!u && u.scheme === "file");
-    const active = vscode.window.activeTextEditor?.document.uri;
+    const active = vscode.window.activeTextEditor?.document.uri ?? activeTabUri();
     const list = picked.length ? picked : active && active.scheme === "file" ? [active] : [];
     if (!list.length) {
       void vscode.window.showInformationMessage("Open or select a file to add it to DGC.");

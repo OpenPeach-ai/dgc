@@ -364,6 +364,7 @@ try {
       || evidence.decisionLifecycle !== true
       || evidence.backendExitLifecycle !== true
       || evidence.monitorLifecycle !== true
+      || evidence.addFileFromImagePreview !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1
       || typeof evidence.vscodeVersion !== "string"
       || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
