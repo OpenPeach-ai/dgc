@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.24.0 — 2026-09-14
+
+- **Editor protocol v13; requires DGC CLI 0.39.0.** Adds background monitors, token usage reports
+  and resuming a turn the backend was interrupted in. A mismatched pair says which side to update.
+- **The backend no longer stops a turn on its own.** A command the agent ran could leave the
+  backend's input pipe non-blocking, and the backend took the next empty read for the editor closing
+  and ended the turn as Stopped. That is fixed in DGC CLI 0.39.0. If the backend does exit, the
+  panel now says why and offers **Continue**.
+- **Tasks sit in the bar above the prompt, like the goal.** Collapsed, the row reads `Tasks 2/5`
+  with the step in progress; expand it for the full list. The choice is remembered per chat, and
+  **Clear** works while a turn runs.
+- **A running command is shown once**, on its card. The group header and the activity row no
+  longer repeat it.
+- **Settings → Token Usage** shows input, output and cached tokens by model and by day, counted on
+  this machine. Pick Today, 7 days, 30 days, This month or All time.
+- **Background monitors.** When the agent watches a long-running command, each event is a card in
+  the transcript and running monitors sit in a row above the prompt with a Stop button. A turn a
+  monitor started is marked as such, never as something you typed. Turn wake-ups off with
+  Settings → **Wake on monitor events**.
+- **A quiet model request shows as waiting** on the activity row instead of looking frozen.
+- **Undo in the prompt box.** Cmd/Ctrl+Z brings back a message you just sent, text you deleted, or
+  a completion you did not mean to insert.
+- The prompt box keeps its size when you come back to DGC from another view after a turn stopped.
+- Queued messages survive slash commands and backend restarts.
+- The editor tabs and activity bar show the DGC mark instead of a terminal glyph.
+- An automatic CLI update runs `dgc update` in the installation it belongs to, and an older CLI's
+  failed update is reported instead of passing silently.
+
 ## 0.23.1 — 2026-09-14
 
 - When the CLI is older than this extension, DGC now updates it and reconnects on its own, with a
