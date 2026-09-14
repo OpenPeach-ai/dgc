@@ -248,6 +248,11 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
     mono_preload = ('<link rel="preload" href="/assets/fonts/jetbrains-mono-regular-latin.woff2" '
                     'as="font" type="font/woff2" crossorigin>'
                     if canonical_path(path).startswith("/docs") else "")
+    # The release banner uses Medium on the first paint. Once the wordmark has
+    # its own face, explicitly prioritize the banner font to avoid a late swap.
+    if canonical_path(path) == "/":
+        mono_preload += ('<link rel="preload" href="/assets/fonts/jetbrains-mono-medium-latin.woff2" '
+                         'as="font" type="font/woff2" crossorigin>')
     if canonical_path(path) == "/":
         style_loader = """<script>(()=>{const l=document.getElementById('site-styles'),r=document.documentElement,events=['wheel','touchstart','pointerdown','keydown','click','dgc:load-styles'];let ready=false,wanted=Boolean(location.hash),applied=false,failed=false,timer,guard;const cleanup=()=>events.forEach(n=>removeEventListener(n,want,true)),reveal=()=>r.classList.remove('defer-styles','fh'),fail=()=>{if(failed||applied)return;failed=true;clearTimeout(timer);r.dataset.stylesFailOpen='true';reveal();dispatchEvent(new Event('dgc:styles-fail-open'))},done=()=>{if(applied)return;applied=true;clearTimeout(timer);clearTimeout(guard);cleanup();l.media='all';delete r.dataset.stylesFailOpen;r.dataset.stylesReady='true';reveal();dispatchEvent(new Event('dgc:styles-ready'))},markReady=()=>{if(ready)return;ready=true;clearTimeout(guard);guard=undefined;if(wanted)done();else timer=setTimeout(done,3600)},want=()=>{wanted=true;l.media='all';if(ready)done();else if(!guard)guard=setTimeout(fail,3000)};guard=setTimeout(fail,3000);if(wanted)l.media='all';events.forEach(n=>addEventListener(n,want,{once:true,passive:true,capture:true}));l.addEventListener('load',markReady,{once:true});l.addEventListener('error',fail,{once:true});if(l.sheet)markReady()})()</script>"""
     else:
