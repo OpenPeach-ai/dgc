@@ -643,6 +643,9 @@ class _ACPUi:
     def turn_activity(self, state, label, detail=""):
         """ACP clients render their own progress from tool calls; nothing to forward."""
 
+    def model_wait(self, label, detail="", *, since=None, restore=True, origin=None):
+        """ACP has no transient status channel; a stall that fails the turn still reports an error."""
+
     # tools
     def tool_call(self, name, args, call_id=None):
         tcid = call_id or f"tc{next(self._tc)}"

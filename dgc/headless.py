@@ -482,6 +482,9 @@ class HeadlessUI:
         self._answer_message_id = None  # last stream_end whose phase was "answer"
         self._unphased_message_id = None  # last stream_end that stated no phase (compat path)
         self._activity_key = None       # (state, label, detail) of the last emitted turn_activity
+        self._model_wait_saved = None   # the activity a "no response from the model" notice replaced
+        self._model_wait_key = None     # the notice on screen, while it is still the latest word
+        self._model_waits = {}          # origin (None = the main agent, else a sub-agent) -> notice key
 
     def reset_turn_messages(self) -> None:
         """Start a new turn's prose numbering and forget the previous turn's designation."""
@@ -490,6 +493,9 @@ class HeadlessUI:
         self._answer_message_id = None
         self._unphased_message_id = None
         self._activity_key = None
+        self._model_wait_saved = None
+        self._model_wait_key = None
+        self._model_waits = {}
 
     @property
     def final_message_id(self):
@@ -552,6 +558,41 @@ class HeadlessUI:
         if key[2]:
             fields["detail"] = key[2]
         self.em.emit("turn_activity", **fields)
+
+    def model_wait(self, label, detail: str = "", *, since=None, restore: bool = True,
+                   origin=None) -> None:
+        """A model request is silent (or being retried). Rides the v12 ``turn_activity`` event.
+
+        ``label=None`` means that request is producing again (or ended). Each ``origin`` -- the
+        main agent (None) or one sub-agent -- holds its own notice, so parallel children that stall
+        together do not clear each other: when one resumes, the newest notice still outstanding is
+        shown again. When none is left, the activity the first notice replaced comes back, but only
+        with ``restore`` and only if nothing newer (text, a tool) has already said what the turn
+        is doing. ``restore=False`` is a call that ended in an error, a cancel or a stall.
+        """
+        waits = self.__dict__.setdefault("_model_waits", {})
+        if label:
+            key = ("waiting", str(label)[:80], str(detail or "")[:120])
+            if not waits:
+                self._model_wait_saved = self._activity_key
+            waits.pop(origin, None)
+            waits[origin] = key
+            self.turn_activity(*key)
+            self._model_wait_key = key
+            return
+        if origin not in waits:
+            return
+        waits.pop(origin, None)
+        showing = self._model_wait_key is not None and self._activity_key == self._model_wait_key
+        remaining = list(waits.values())
+        if remaining:
+            if showing:
+                self.turn_activity(*remaining[-1])
+                self._model_wait_key = remaining[-1]
+            return
+        saved, self._model_wait_saved, self._model_wait_key = self._model_wait_saved, None, None
+        if restore and showing and saved:
+            self.turn_activity(*saved)
 
     def steering_applied(self, request_id: str) -> None:
         hook = getattr(self, "_steering_hook", None)

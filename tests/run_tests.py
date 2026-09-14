@@ -15515,11 +15515,27 @@ def tool_delta(name: str, arg_chunks: list[str]) -> str:
     return out + sse_chunk({}, finish="tool_calls") + "data: [DONE]\n\n"
 
 
+def _mock_client_gone(handler, cap: float = 20.0) -> None:
+    """Hold a stalled mock request until the client hangs up (the stall watcher closes its socket),
+    so the single-threaded mock server is never blocked past the client's own deadline."""
+    import select as _select
+    import socket as _socket
+    end = time.monotonic() + cap
+    while time.monotonic() < end:
+        try:
+            readable, _, _ = _select.select([handler.connection], [], [], 0.05)
+            if readable and not handler.connection.recv(1, _socket.MSG_PEEK):
+                return
+        except (OSError, ValueError):
+            return
+
+
 class MockHandler(BaseHTTPRequestHandler):
     # scenario state set by the test before each run
     native_tools = True
-    scenario = "write"   # "write" | "plan"
+    scenario = "write"   # "write" | "plan" | "stall_once" | "keepalive_forever" | "partial_then_silent"
     text_protocol_seen = False
+    stall_requests: list = []
 
     def log_message(self, *a):
         pass
@@ -15547,6 +15563,41 @@ class MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+
+        if self.scenario in ("stall_once", "keepalive_forever", "partial_then_silent"):
+            MockHandler.stall_requests.append(req)
+            first = len(MockHandler.stall_requests) == 1
+            if self.scenario == "stall_once" and first:
+                _mock_client_gone(self)             # accept the request, never answer it
+                return
+            if self.scenario == "keepalive_forever":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()                  # close-delimited: bytes flow, tokens never do
+                import select as _select
+                end = time.monotonic() + 20
+                while time.monotonic() < end:
+                    try:
+                        self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
+                        readable, _, _ = _select.select([self.connection], [], [], 0.1)
+                        if readable and not self.connection.recv(1, __import__("socket").MSG_PEEK):
+                            return
+                    except OSError:
+                        return
+                return
+            if self.scenario == "partial_then_silent":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                try:
+                    self.wfile.write((sse_chunk({"content": "Working on it, "})
+                                      + sse_chunk({"content": "one moment"})).encode())
+                    self.wfile.flush()
+                except OSError:
+                    return
+                _mock_client_gone(self)
+                return
 
         messages = req.get("messages", [])
         if "tools" not in req and any("# Tool protocol" in str(m.get("content", ""))
@@ -18781,6 +18832,91 @@ def e2e_overthink(port: int, tmp: Path) -> bool:
     return ok
 
 
+def _e2e_stall_run(port: int, tmp: Path, name: str, scenario: str, settings: dict,
+                   timeout: float) -> tuple[subprocess.CompletedProcess | None, float, Path]:
+    """One `dgc -p` run against a mock that hangs in `scenario`, with tiny stall windows."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = scenario
+    MockHandler.stall_requests = []
+    home = tmp / f"home_{name}"; work = tmp / f"work_{name}"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    (home / ".dgc").mkdir(exist_ok=True)
+    (home / ".dgc" / "config.json").write_text(json.dumps({
+        "model_stall_notice_s": 0, "model_stall_retries": 1, "suggest": False,
+        "artifact_autostart": False, **settings}))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "make the file",
+             "--mode", "auto", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1",
+             "--model", "mock-model"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"  --- {name}: dgc -p did not finish within {timeout:.0f}s ---")
+        return None, time.monotonic() - started, work
+    return proc, time.monotonic() - started, work
+
+
+def e2e_stall_recovers(port: int, tmp: Path) -> bool:
+    """A request the server accepts and never answers is closed at the first-token window and
+    re-issued; the retried request does the work and the retry is said out loud."""
+    proc, _elapsed, work = _e2e_stall_run(
+        port, tmp, "stall_recovers", "stall_once", {"model_first_token_timeout_s": 1}, 60)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    ok = (proc.returncode == 0 and (work / "hello.txt").exists()
+          # stalled attempt + its retry (the write) + the closing summary
+          and len(MockHandler.stall_requests) == 3
+          and "retrying (1/1)" in output and "mock-model" in output)
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
+def e2e_stall_fails_precisely(port: int, tmp: Path) -> bool:
+    """Keep-alives with no tokens used to hang forever (each byte reset the socket timeout). Now the
+    turn fails fast, naming the model and endpoint, without the wrong 'start your server' hint and
+    without piling up synthetic continuation prompts."""
+    proc, elapsed, _work = _e2e_stall_run(
+        port, tmp, "stall_fails", "keepalive_forever", {"model_first_token_timeout_s": 1}, 20)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    interrupted = [r for r in MockHandler.stall_requests
+                   if "Your previous response was interrupted" in json.dumps(r)]
+    ok = (proc.returncode != 0 and elapsed < 20
+          and "mock-model" in output and f"127.0.0.1:{port}" in output and "no tokens" in output
+          and "start your server" not in output
+          and len(MockHandler.stall_requests) == 2 and not interrupted)
+    if not ok:
+        print(f"  --- rc={proc.returncode} posts={len(MockHandler.stall_requests)} ---")
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
+def e2e_stall_midstream(port: int, tmp: Path) -> bool:
+    """A stream that goes silent after partial prose is continued from what streamed, with its own
+    bound; when it stalls again the turn stops with a message naming the model and endpoint."""
+    proc, _elapsed, _work = _e2e_stall_run(
+        port, tmp, "stall_midstream", "partial_then_silent", {"model_idle_timeout_s": 1}, 40)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    ok = (proc.returncode != 0 and len(MockHandler.stall_requests) == 2
+          and "stopped streaming" in output and "mock-model" in output
+          and f"127.0.0.1:{port}" in output
+          and "provider stream repeatedly ended" not in output)
+    if not ok:
+        print(f"  --- rc={proc.returncode} posts={len(MockHandler.stall_requests)} ---")
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
 def test_multi_edit():
     """B4: apply several edits to one file; keep the good ones even if one fails."""
     import tempfile as _tf
@@ -19893,6 +20029,12 @@ def main():
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
             check("e2e explicit verifier-only policy → provider-free closeout", e2e_verify(port, tmp))
+            check("e2e stall watcher: a request with no response is retried and recovers",
+                  e2e_stall_recovers(port, tmp))
+            check("e2e stall watcher: keep-alives with no tokens fail fast, naming model and endpoint",
+                  e2e_stall_fails_precisely(port, tmp))
+            check("e2e stall watcher: a mid-stream stall continues once, then fails precisely",
+                  e2e_stall_midstream(port, tmp))
         finally:
             server.shutdown()
 

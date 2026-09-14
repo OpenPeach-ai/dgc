@@ -1597,8 +1597,23 @@ when you want to override it.
   repeated-call and no-progress guards remain active independently.
 - `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
   reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
-- `request_timeout` (default `1800`) — maximum seconds of provider-stream inactivity between
-  response chunks; an active response can take longer overall.
+- `request_timeout` (default `1800`) — hard ceiling on socket silence, including the wait for
+  response headers; an active response can take longer overall. The stall watcher below
+  normally acts first.
+- `model_first_token_timeout_s` (default `auto`) — how long a request may produce nothing (no
+  headers, a silent stream, or keep-alives with no tokens) before it counts as stalled. `auto` is
+  `900` for a local endpoint (loopback, private or Tailscale addresses, `*.local`, or an
+  Ollama/llama.cpp/LM Studio/vLLM server: room for a model load and a large prefill) and `300`
+  for a remote one. Streamed reasoning counts as progress. `0` turns it off.
+- `model_idle_timeout_s` (default `300`) — how long a stream may go silent after it started.
+  A stall after partial output continues from what already streamed. `0` turns it off.
+- `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
+  and host) in the status line and the editor. `0` never shows it.
+- `model_stall_retries` (default `2`) — how many times a stalled request is re-issued. After that
+  DGC switches to `fallback_model` when one is set, or fails the turn with a message naming the
+  model and endpoint. Esc / Stop works in every phase, including before any response headers.
+- `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
+  model still loading, the first-token clock is paused ("Loading the model") for up to this long.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.

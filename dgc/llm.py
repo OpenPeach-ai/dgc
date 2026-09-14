@@ -18,6 +18,10 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
+from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
+                          bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
+                          resolve_first_token_timeout, safe_endpoint)
+
 
 _DATA_IMAGE_RE = re.compile(
     r"\Adata:image/[a-z0-9.+-]+;base64,([A-Za-z0-9+/]*={0,2})\Z", re.IGNORECASE)
@@ -270,12 +274,13 @@ def _error_body(response, limit: int = 600) -> str:
         _close_response(response)
 
 
-def _bounded_body_text(response, maximum: int, label: str) -> str | None:
+def _bounded_body_text(response, maximum: int, label: str, *, on_chunk=None) -> str | None:
     """Read one bounded response body as text, without deciding what shape it is.
 
     Returns None when the response exposes no body to read (an injected double with only
     ``json()``), so the caller can take the object path instead. Every path that consumes or
-    rejects the response releases it, exactly as the JSON reader does.
+    rejects the response releases it, exactly as the JSON reader does. ``on_chunk`` is told about
+    each received chunk: a buffered body carries no keep-alive noise, so bytes are progress.
     """
     raw_length = str((getattr(response, "headers", {}) or {}).get("Content-Length") or "")
     if raw_length:
@@ -294,6 +299,8 @@ def _bounded_body_text(response, maximum: int, label: str) -> str | None:
             for chunk in iterator(chunk_size=65_536):
                 if not chunk:
                     continue
+                if on_chunk is not None:
+                    on_chunk()
                 body.extend(chunk)
                 if len(body) > maximum:
                     raise LLMError(f"{label} exceeded {maximum} bytes")
@@ -313,7 +320,7 @@ def _bounded_body_text(response, maximum: int, label: str) -> str | None:
 
 
 def _bounded_json_response(response, maximum: int, label: str,
-                           *, deadline: float | None = None):
+                           *, deadline: float | None = None, on_chunk=None):
     """Decode one streamed JSON response without trusting its declared or actual body size."""
     def check_deadline() -> None:
         if deadline is not None and time.monotonic() >= deadline:
@@ -336,6 +343,8 @@ def _bounded_json_response(response, maximum: int, label: str,
                 check_deadline()
                 if not chunk:
                     continue
+                if on_chunk is not None:
+                    on_chunk()
                 body.extend(chunk)
                 if len(body) > maximum:
                     raise LLMError(f"{label} exceeded {maximum} bytes")
@@ -361,38 +370,83 @@ def _bounded_json_response(response, maximum: int, label: str,
         _close_response(response)
 
 
-def _bounded_json_lifecycle(response, maximum: int, label: str, cancel=None):
+def _own_watch(response, cancel, watch):
+    """The watch a consumer should use: the caller's, or a cancel-only one it owns.
+
+    Consumers used to start their own copied cancel watcher after headers arrived. A chat loop
+    now passes the attempt's RequestWatch (which already covers the header wait); a consumer
+    called directly with only ``cancel`` still gets immediate cancellation.
+    """
+    if watch is not None or cancel is None:
+        return watch, None
+    owned = RequestWatch(cancel)
+    owned.attach_response(response)
+    owned.start()
+    return owned, owned
+
+
+def _bounded_json_lifecycle(response, maximum: int, label: str, cancel=None, watch=None):
     """Read one bounded JSON body and distinguish cancellation from transport interruption."""
-    stop_watch = threading.Event()
-    if cancel is not None:
-        def _watch(resp=response, ev=stop_watch, cx=cancel):
-            while not ev.wait(0.15):
-                if getattr(resp, "_dgc_closed", False):
-                    return
-                if cx.is_set():
-                    sock = _raw_socket(resp)
-                    if sock is not None:
-                        try:
-                            import socket as _socket
-                            sock.shutdown(_socket.SHUT_RDWR)
-                        except Exception:
-                            pass
-                    _close_response(resp)
-                    return
-        threading.Thread(target=_watch, daemon=True).start()
+    watch, owned = _own_watch(response, cancel, watch)
     try:
-        value = _bounded_json_response(response, maximum, label)
+        value = _bounded_json_response(
+            response, maximum, label, on_chunk=watch.progress if watch is not None else None)
     except Exception as exc:
         if cancel is not None and cancel.is_set():
             return None, "cancelled"
         if _is_transport_interruption(exc):
+            if watch is not None:
+                watch.observe_error(exc)
             return None, "incomplete"
         raise
     finally:
-        stop_watch.set()
+        if owned is not None:
+            owned.stop()
     if cancel is not None and cancel.is_set():
         return None, "cancelled"
     return value, ""
+
+
+def _stall_of(watch, finish_reason: str) -> dict | None:
+    """The stall that ended an attempt, when the attempt really did end without a terminal event."""
+    if watch is None or finish_reason != "incomplete":
+        return None
+    info = getattr(watch, "stall", None)
+    return info.as_dict() if isinstance(info, StallInfo) else None
+
+
+def _raw_chunks(raw, response):
+    """Read a close-delimited or Content-Length body as bytes arrive.
+
+    ``iter_content(65536)`` asks urllib3 for 64 KiB, and for a body that is not chunked urllib3
+    waits for all of it or EOF: tokens written 1.5 s apart all arrived together at the end, which
+    an idle-token watcher would read as silence. ``read1`` returns what the socket has. Errors are
+    translated exactly the way requests translates them for iter_content.
+    """
+    from urllib3.exceptions import DecodeError, ProtocolError, ReadTimeoutError
+    from urllib3.exceptions import SSLError as _Urllib3SSLError
+    while True:
+        # Only the watcher's own close ends this early. `raw.closed` is not a stop signal: urllib3
+        # can hold decoded bytes after the socket reached EOF, and read1 drains them first.
+        if getattr(response, "_dgc_closed", False):
+            return
+        try:
+            chunk = raw.read1(65_536, decode_content=True)
+        except ProtocolError as exc:
+            raise requests.exceptions.ChunkedEncodingError(exc) from exc
+        except DecodeError as exc:
+            raise requests.exceptions.ContentDecodingError(exc) from exc
+        except ReadTimeoutError as exc:
+            raise requests.exceptions.ConnectionError(exc) from exc
+        except _Urllib3SSLError as exc:
+            raise requests.exceptions.SSLError(exc) from exc
+        except (ValueError, AttributeError):
+            if getattr(response, "_dgc_closed", False) or getattr(raw, "closed", False):
+                return          # the watcher closed the response under this read
+            raise
+        if not chunk:
+            return
+        yield chunk
 
 
 def _bounded_stream_lines(response, maximum: int, label: str):
@@ -409,9 +463,14 @@ def _bounded_stream_lines(response, maximum: int, label: str):
             yield raw.decode("utf-8", "replace")
         return
 
+    body = getattr(response, "raw", None)
+    if callable(getattr(body, "read1", None)) and getattr(body, "chunked", None) is False:
+        chunks = _raw_chunks(body, response)          # a real, non-chunked urllib3 body
+    else:
+        chunks = iterator(chunk_size=65_536)          # chunked bodies and injected doubles
     total = 0
     pending = bytearray()
-    for chunk in iterator(chunk_size=65_536):
+    for chunk in chunks:
         if not chunk:
             continue
         if isinstance(chunk, str):
@@ -495,6 +554,15 @@ def _wait_for_retry(delay: float, cancel=None) -> bool:
         time.sleep(min(remaining, 0.05))
 
 
+MODEL_STALL_HINT = (
+    "the server is reachable but the model produced nothing — check its log (a model still loading, "
+    "an overloaded or wedged worker); raise model_first_token_timeout_s for very large prompts, "
+    "or set fallback_model")
+_STALL_MESSAGE_RE = re.compile(
+    r"no response from model '|opened a stream but sent no tokens|did not finish loading within"
+    r"|stopped streaming: no tokens")
+
+
 def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> str:
     """Turn a transport failure into the two lines `dgc doctor` would print.
 
@@ -505,7 +573,10 @@ def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> s
     text = str(message or "")
     low = text.lower()
     hint = ""
-    if re.search(r"connection refused|failed to establish|max retries|name or service not known"
+    if _STALL_MESSAGE_RE.search(low):
+        # The server is up -- it accepted the request -- so "start your server" would be wrong.
+        hint = MODEL_STALL_HINT
+    elif re.search(r"connection refused|failed to establish|max retries|name or service not known"
                  r"|nodename nor servname|could not connect|connection error|unreachable"
                  r"|timed out|timeout|no route to host", low):
         hint = (f"the endpoint {base_url or 'you configured'} is not answering — start your server "
@@ -525,6 +596,41 @@ def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> s
 
 class LLMError(Exception):
     pass
+
+
+class ModelStallError(LLMError):
+    """A model request produced nothing within its window, on every allowed attempt.
+
+    The endpoint answered the connection, so this is not an unreachable server: it names the
+    model and endpoint (never credentials or a query string) and carries its own hint.
+    """
+
+    hint = MODEL_STALL_HINT
+
+    def __init__(self, info: StallInfo, *, api_mode: str = "", attempts: int = 1):
+        self.info = info
+        self.endpoint = info.endpoint
+        self.model = info.model
+        self.api_mode = api_mode
+        self.phase = info.phase
+        self.silent_s = info.silent_s
+        self.attempts = max(1, int(attempts))
+        self.noise_frames = info.noise_frames
+        super().__init__(self._message())
+
+    def _message(self) -> str:
+        seconds = format_seconds(self.info.window_s or self.silent_s)
+        tries = f"{self.attempts} attempt{'s' if self.attempts != 1 else ''}"
+        model, endpoint = self.model or "the model", self.endpoint or "the endpoint"
+        if self.phase == "loading":
+            return f"model '{model}' at {endpoint} did not finish loading within {seconds}"
+        if self.phase == "headers":
+            return (f"no response from model '{model}' at {endpoint}: the server accepted the "
+                    f"request but sent no response headers for {seconds} ({tries})")
+        noise = (f"; {self.noise_frames} keep-alive frame{'s' if self.noise_frames != 1 else ''} only"
+                 if self.noise_frames else "")
+        return (f"model '{model}' at {endpoint} opened a stream but sent no tokens for "
+                f"{seconds} ({tries}{noise})")
 
 
 class ContextOverflowError(LLMError):
@@ -564,6 +670,9 @@ class ChatResult:
     response_id: str = ""
     provider_items: list[dict] = field(default_factory=list)
     provider_message: dict = field(default_factory=dict)
+    # Set when the stall watcher ended this generation after real output (finish "incomplete"):
+    # StallInfo.as_dict(). The Agent continues from the partial answer instead of re-issuing.
+    stall: dict | None = None
 
 
 def normalize_usage(usage: dict | None) -> dict[str, int]:
@@ -1055,7 +1164,9 @@ class LLMClient:
                  sampling: dict | None = None, api_mode: str = "auto",
                  provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
                  provider_state: str = "stateless", prompt_cache: bool = True,
-                 prompt_cache_key: str = "", context_size: int = 0):
+                 prompt_cache_key: str = "", context_size: int = 0,
+                 first_token_timeout="auto", idle_timeout=300, stall_notice=45,
+                 stall_retries=2, load_timeout=900):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -1065,7 +1176,20 @@ class LLMClient:
                                       if isinstance(provider_capabilities, dict) else {})
         self.capabilities = self.adapter.with_overrides(self._capability_overrides)
         self.capability_cache_ttl_s = max(1, int(capability_cache_ttl_s or 0))
-        self.read_timeout = read_timeout  # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
+        # Hard ceiling on socket silence, including the wait for response headers. The stall watcher
+        # (below) normally acts first; this stays as the backstop and is never lowered by it.
+        self.read_timeout = read_timeout
+        # Stall watcher (dgc/model_watch.py). "auto" resolves per endpoint; 0 turns a window off.
+        self.first_token_timeout = resolve_first_token_timeout(
+            first_token_timeout, self.base_url, self.family)
+        self.idle_timeout = bounded_seconds(idle_timeout, 300.0)
+        self.stall_notice = bounded_seconds(stall_notice, 45.0)
+        self.stall_retries = bounded_retries(stall_retries, 2)
+        self.load_timeout = bounded_seconds(load_timeout, 900.0)
+        self.stall_listener = None      # the Agent installs its wait handler for one _chat call
+        self.stall_route = None         # runner that delivers a notice on the caller's UI session
+        self._wait_channel: WaitChannel | None = None
+        self._active_watch: RequestWatch | None = None
         self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
         self.context_size = max(0, int(context_size or 0))
@@ -1301,10 +1425,10 @@ class LLMClient:
                 expiry = 0
         return not expiry
 
-    def _mark_rejected(self, feature: str) -> None:
+    def _mark_rejected(self, feature: str, ttl_s: float | None = None) -> None:
         with self._capability_lock:
             self._capability_rejections[self._capability_key(feature)] = (
-                time.monotonic() + self.capability_cache_ttl_s)
+                time.monotonic() + (self.capability_cache_ttl_s if ttl_s is None else ttl_s))
 
     def invalidate_capabilities(self) -> None:
         """Forget negotiated rejections for this endpoint+model (e.g. after a server upgrade)."""
@@ -1467,17 +1591,153 @@ class LLMClient:
         on_thinking=None,
         cancel=None,
     ) -> ChatResult:
-        if self.api_mode == "responses":
-            return self._chat_responses(messages, tools, reasoning_effort,
-                                        on_text, on_thinking, cancel)
-        if self.api_mode == "ollama":
-            return self._chat_ollama(messages, tools, reasoning_effort,
-                                     on_text, on_thinking, cancel)
-        if self.api_mode == "anthropic":
-            return self._chat_anthropic(messages, tools, reasoning_effort,
-                                        on_text, on_thinking, cancel)
-        return self._chat_completions(messages, tools, reasoning_effort,
-                                      on_text, on_thinking, cancel)
+        channel = WaitChannel(getattr(self, "stall_listener", None),
+                              getattr(self, "stall_route", None))
+        previous, self._wait_channel = getattr(self, "_wait_channel", None), channel
+        try:
+            if self.api_mode == "responses":
+                return self._chat_responses(messages, tools, reasoning_effort,
+                                            on_text, on_thinking, cancel)
+            if self.api_mode == "ollama":
+                return self._chat_ollama(messages, tools, reasoning_effort,
+                                         on_text, on_thinking, cancel)
+            if self.api_mode == "anthropic":
+                return self._chat_anthropic(messages, tools, reasoning_effort,
+                                            on_text, on_thinking, cancel)
+            return self._chat_completions(messages, tools, reasoning_effort,
+                                          on_text, on_thinking, cancel)
+        finally:
+            self._stop_watch()
+            channel.close()             # nothing about this call may reach the UI after it returns
+            self._wait_channel = previous
+
+    # ---- stall watcher ---------------------------------------------------------------------------
+    _load_probe_interval_s = 5.0
+
+    def _stall_windows(self) -> tuple[float, float]:
+        """First-token and idle windows, each clamped by this request's read timeout."""
+        try:
+            ceiling = float(self.read_timeout)
+        except (TypeError, ValueError):
+            ceiling = 0.0
+        first = float(getattr(self, "first_token_timeout", 0.0) or 0.0)
+        idle = float(getattr(self, "idle_timeout", 0.0) or 0.0)
+        if ceiling > 0:
+            first = min(first, ceiling) if first > 0 else 0.0
+            idle = min(idle, ceiling) if idle > 0 else 0.0
+        return first, idle
+
+    def _post_timeout(self, watch: RequestWatch | None) -> tuple:
+        """The socket timeout: the backstop, never lower than read_timeout and never ahead of the
+        watcher's own first-token deadline."""
+        first = watch.first_token_s if watch is not None else 0.0
+        read = self.read_timeout
+        return (15, max(read, first + 5) if first > 0 else read)
+
+    def _streaming_rejected(self) -> bool:
+        key = self._capability_key("streaming")
+        now = time.monotonic()
+        with self._capability_lock:
+            expiry = self._capability_rejections.get(key, 0)
+            if expiry and expiry <= now:
+                self._capability_rejections.pop(key, None)
+                return False
+        return bool(expiry)
+
+    def _note_non_streaming(self, response) -> None:
+        """An endpoint that answered stream:true with one JSON body sends nothing until it has
+        generated everything: later requests wait on read_timeout, not the first-token window.
+
+        Unlike a negotiated feature rejection this never ages out on capability_cache_ttl_s: an
+        endpoint does not start streaming on its own, and forgetting would put its next long
+        generation back under the first-token deadline -- exactly the false stall this prevents.
+        It lasts for the process, refreshed by every JSON body; invalidate_capabilities() clears it.
+        """
+        ctype = str((getattr(response, "headers", {}) or {}).get("Content-Type", "")).lower()
+        if "application/json" in ctype and "event-stream" not in ctype and "ndjson" not in ctype:
+            self._mark_rejected("streaming", ttl_s=math.inf)
+
+    def _ollama_load_probe(self):
+        """A read-only /api/ps probe: True when the model is loaded, False while it is not, None
+        when this endpoint cannot say (never an error)."""
+        if not (self.api_mode == "ollama" or self.family == "ollama") or not self.model:
+            return None
+        if is_hosted_ollama(self.base_url):
+            # Ollama's own cloud loads models out of sight; its /api/ps (if any) describes no
+            # hardware this request waits on, and an empty list would pause the clock for nothing.
+            # Every self-hosted Ollama -- local, LAN or on a public address -- is probed.
+            return None
+        url = f"{self._ollama_root}/api/ps"
+        headers = self._headers()
+        model = self.model
+
+        def probe():
+            try:
+                response = requests.get(url, headers=headers, stream=True, timeout=(1, 1))
+            except requests.RequestException:
+                return None
+            try:
+                if response.status_code != 200:
+                    return None
+                value = _bounded_json_response(
+                    response, _MAX_MODEL_METADATA_BYTES, "Ollama loaded-model probe",
+                    deadline=time.monotonic() + 2)
+            except (LLMError, requests.RequestException, ValueError, TypeError):
+                return None
+            finally:
+                _close_response(response)
+            return ollama_model_listed(value, model)
+        return probe
+
+    def _begin_attempt(self, cancel, endpoint: str) -> RequestWatch:
+        first, idle = self._stall_windows()
+        watch = RequestWatch(
+            cancel, first_token_s=first, idle_s=idle,
+            notice_s=float(getattr(self, "stall_notice", 0.0) or 0.0),
+            load_probe=self._ollama_load_probe(),
+            load_timeout_s=float(getattr(self, "load_timeout", 0.0) or 0.0),
+            load_poll_s=self._load_probe_interval_s,
+            channel=getattr(self, "_wait_channel", None),
+            headers_deadline=not self._streaming_rejected(),
+            model=self.model, endpoint=safe_endpoint(endpoint))
+        return watch.start()
+
+    def _next_watch(self, cancel, endpoint: str) -> RequestWatch:
+        """Stop the previous attempt's watch and start this attempt's."""
+        self._stop_watch()
+        watch = self._begin_attempt(cancel, endpoint)
+        self._active_watch = watch
+        return watch
+
+    def _stop_watch(self) -> None:
+        watch, self._active_watch = getattr(self, "_active_watch", None), None
+        if watch is not None:
+            watch.stop()
+
+    def _retry_stall(self, info: StallInfo, stalls: int, cancel) -> bool:
+        """Account for one stall that streamed nothing. True = issue the same request again;
+        False = cancelled while backing off. Raises ModelStallError once retries are spent."""
+        retries = int(getattr(self, "stall_retries", 0) or 0)
+        if stalls > retries:
+            raise ModelStallError(info, api_mode=self.api_mode, attempts=stalls)
+        channel = getattr(self, "_wait_channel", None)
+        if channel is not None:
+            channel.emit(WaitEvent(kind="retry", phase=info.phase, since=time.monotonic(),
+                                   silent_s=info.silent_s, threshold_s=info.window_s,
+                                   noise_frames=info.noise_frames, model=info.model,
+                                   endpoint=info.endpoint, attempt=stalls, retries=retries))
+        window = info.window_s if info.window_s > 0 else 10.0
+        return _wait_for_retry(min(2 ** (stalls - 1), window, 10.0), cancel)
+
+    @staticmethod
+    def _pre_progress_stall(result: ChatResult) -> StallInfo | None:
+        stall = getattr(result, "stall", None)
+        if not isinstance(stall, dict) or stall.get("progressed"):
+            return None
+        try:
+            return StallInfo(**stall)
+        except TypeError:
+            return None
 
     @staticmethod
     def _anthropic_content(content) -> list[dict]:
@@ -1804,13 +2064,16 @@ class LLMClient:
             retain_provider_state=terminal)
 
     def _consume_anthropic(self, response: requests.Response, on_text, on_thinking,
-                           cancel=None, think_budget: int = 0) -> ChatResult:
+                           cancel=None, think_budget: int = 0,
+                           watch: RequestWatch | None = None) -> ChatResult:
         if ("application/json" in response.headers.get("Content-Type", "").lower()
                 and "text/event-stream" not in response.headers.get("Content-Type", "").lower()):
+            self._note_non_streaming(response)
             value, finish = _bounded_json_lifecycle(
-                response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response", cancel)
+                response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response", cancel,
+                watch=watch)
             if finish:
-                return ChatResult(finish_reason=finish)
+                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
             return self._consume_anthropic_json(value, on_text, on_thinking)
         result = ChatResult()
         blocks: dict[int, dict] = {}
@@ -1824,26 +2087,7 @@ class LLMClient:
             return (message_started and message_stopped
                     and not active_blocks and stop_reason_seen)
 
-        stop_watch = threading.Event()
-        if cancel is not None:
-            def _watch(resp=response, ev=stop_watch, cx=cancel):
-                while not ev.wait(0.15):
-                    if getattr(resp, "_dgc_closed", False):
-                        return
-                    if cx.is_set():
-                        sock = _raw_socket(resp)
-                        if sock is not None:
-                            try:
-                                import socket as _socket
-                                sock.shutdown(_socket.SHUT_RDWR)
-                            except Exception:
-                                pass
-                        try:
-                            resp.close()
-                        except Exception:
-                            pass
-                        return
-            threading.Thread(target=_watch, daemon=True).start()
+        watch, owned_watch = _own_watch(response, cancel, watch)
         response.encoding = "utf-8"
         try:
             for line in _bounded_stream_lines(
@@ -1853,6 +2097,8 @@ class LLMClient:
                         result.finish_reason = "cancelled"
                     break
                 if not line.startswith("data:"):
+                    if line.startswith(":") and watch is not None:
+                        watch.noise()           # an SSE comment (the `event:` line pairs with data)
                     continue
                 data = line[5:].strip()
                 if not data:
@@ -1864,6 +2110,13 @@ class LLMClient:
                 if not isinstance(event, dict):
                     raise LLMError("Anthropic Messages emitted a non-object stream event")
                 typ = str(event.get("type") or "")
+                if watch is not None:
+                    delta = event.get("delta") if isinstance(event.get("delta"), dict) else {}
+                    if (typ in ("content_block_start", "content_block_delta", "message_stop")
+                            or (typ == "message_delta" and delta.get("stop_reason"))):
+                        watch.progress()
+                    else:
+                        watch.noise()           # ping, message_start, usage-only message_delta
                 if message_stopped and typ not in ("ping", ""):
                     raise LLMError("Anthropic stream emitted data after message_stop")
                 if typ == "message_start":
@@ -2000,12 +2253,15 @@ class LLMClient:
                     and not terminal_received()):
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
+                if watch is not None:
+                    watch.observe_error(exc)
                 if not terminal_received():
                     result.finish_reason = "incomplete"
             else:
                 raise
         finally:
-            stop_watch.set()
+            if owned_watch is not None:
+                owned_watch.stop()
         terminal = terminal_received()
         if (not terminal and cancel is not None and cancel.is_set()
                 and result.finish_reason != "overthink"):
@@ -2019,6 +2275,7 @@ class LLMClient:
             return result
         if not terminal:
             result.finish_reason = "incomplete"
+            result.stall = _stall_of(watch, result.finish_reason)
         return self._anthropic_result_from_blocks(
             blocks, result, retain_provider_state=terminal)
 
@@ -2058,18 +2315,30 @@ class LLMClient:
                  "none": "off", "off": "off"}
         last_err = ""
         max_tokens_limit: int | None = None
-        for _ in range(10):
+        stalls = 0
+        rounds = 0
+        while rounds < 10:
+            rounds += 1
             if cancel is not None and cancel.is_set():
                 return ChatResult(finish_reason="cancelled")
             payload = self._anthropic_payload(
                 messages, tools, level, disabled, max_tokens_limit)
+            watch = self._next_watch(cancel, f"{self.base_url}/messages")
             try:
-                response = requests.post(
-                    f"{self.base_url}/messages", headers=self._anthropic_headers(), json=payload,
-                    stream=True, timeout=(15, self.read_timeout))
+                with watch.registered():
+                    response = requests.post(
+                        f"{self.base_url}/messages", headers=self._anthropic_headers(),
+                        json=payload, stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as exc:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
+                if watch.stall is not None:
+                    stalls += 1
+                    rounds -= 1
+                    if not self._retry_stall(watch.stall, stalls, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 transient += 1
                 last_err = f"connection: {exc}"
                 if transient < 4:
@@ -2077,16 +2346,18 @@ class LLMClient:
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"cannot connect to Anthropic Messages: {exc}") from exc
-            except requests.Timeout as exc:
+            except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
-                transient += 1
-                last_err = f"timeout: {exc}"
-                if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
-                        return ChatResult(finish_reason="cancelled")
-                    continue
-                raise LLMError(f"Anthropic Messages timed out repeatedly: {exc}") from exc
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(watch.stall_from_timeout(), stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
+            watch.attach_response(response)
+            if response.status_code != 200:
+                watch.disarm()
             if (response.status_code in (404, 405, 501)
                     and self.requested_api_mode == "auto"):
                 _close_response(response)
@@ -2142,9 +2413,17 @@ class LLMClient:
             budget = self.think_budget_chars
             try:
                 result = self._consume_anthropic(
-                    response, on_text, on_thinking, cancel, think_budget=budget)
+                    response, on_text, on_thinking, cancel, think_budget=budget, watch=watch)
             finally:
                 _close_response(response)
+                watch.stop()
+            stall = self._pre_progress_stall(result)
+            if stall is not None:
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(stall, stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
             if result.finish_reason == "overthink":
                 overthink += 1
                 prior_level = str(level or "off").lower()
@@ -2258,7 +2537,7 @@ class LLMClient:
         return value if value in ("low", "medium", "high", "max") else True
 
     def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
-                        think_budget: int = 0) -> ChatResult:
+                        think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
         """Consume native Ollama JSON/NDJSON without translating it through SSE semantics."""
         result = ChatResult()
         filt = _ThinkFilter()
@@ -2280,6 +2559,12 @@ class LLMClient:
             message = obj.get("message") or {}
             if not isinstance(message, dict):
                 raise LLMError("Ollama emitted a non-object message")
+            if watch is not None:
+                if (done is True or message.get("thinking") or message.get("content")
+                        or message.get("tool_calls")):
+                    watch.progress()
+                else:
+                    watch.noise()
             reasoning = str(message.get("thinking") or "")
             if reasoning:
                 native_thinking += reasoning
@@ -2334,26 +2619,7 @@ class LLMClient:
                     "completion_tokens": obj.get("eval_count", 0),
                 })
 
-        stop_watch = threading.Event()
-        if cancel is not None:
-            def _watch(resp=r, ev=stop_watch, cx=cancel):
-                while not ev.wait(0.15):
-                    if getattr(resp, "_dgc_closed", False):
-                        return
-                    if cx.is_set():
-                        sock = _raw_socket(resp)
-                        if sock is not None:
-                            try:
-                                import socket as _socket
-                                sock.shutdown(_socket.SHUT_RDWR)
-                            except Exception:
-                                pass
-                        try:
-                            resp.close()
-                        except Exception:
-                            pass
-                        return
-            threading.Thread(target=_watch, daemon=True).start()
+        watch, owned_watch = _own_watch(r, cancel, watch)
 
         try:
             ctype = r.headers.get("Content-Type", "").lower()
@@ -2364,10 +2630,12 @@ class LLMClient:
                 # object -- so trusting the header parsed every cloud turn as one object and
                 # failed with "malformed JSON". This request always asks for `stream: true`, so
                 # read the body once and let its shape decide.
-                text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")
+                chunk_seen = watch.progress if watch is not None else None
+                text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response",
+                                          on_chunk=chunk_seen)
                 if text is None:
                     frames = [_bounded_json_response(
-                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")]
+                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response", on_chunk=chunk_seen)]
                     text = ""
                 try:
                     frames = frames if text == "" else [json.loads(text)]
@@ -2431,12 +2699,15 @@ class LLMClient:
             if cancel is not None and cancel.is_set() and not terminal_done:
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
+                if watch is not None:
+                    watch.observe_error(exc)
                 if not terminal_done:
                     result.finish_reason = "incomplete"
             else:
                 raise
         finally:
-            stop_watch.set()
+            if owned_watch is not None:
+                owned_watch.stop()
 
         if (not terminal_done and cancel is not None and cancel.is_set()
                 and result.finish_reason != "overthink"):
@@ -2444,6 +2715,7 @@ class LLMClient:
         aborted = result.finish_reason in ("cancelled", "overthink")
         if not aborted and not terminal_done:
             result.finish_reason = "incomplete"
+            result.stall = _stall_of(watch, result.finish_reason)
         for kind, chunk in filt.flush():
             if kind == "think":
                 result.thinking += chunk
@@ -2538,15 +2810,27 @@ class LLMClient:
         level = reasoning_effort
         lower = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off",
                  "none": "off", "off": "off"}
-        for _ in range(8):
+        stalls = 0
+        rounds = 0
+        while rounds < 8:
+            rounds += 1
             if cancel is not None and cancel.is_set():
                 return ChatResult(finish_reason="cancelled")
+            watch = self._next_watch(cancel, self._ollama_url)
             try:
-                r = requests.post(self._ollama_url, headers=self._headers(), json=payload,
-                                  stream=True, timeout=(15, self.read_timeout))
+                with watch.registered():
+                    r = requests.post(self._ollama_url, headers=self._headers(), json=payload,
+                                      stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as exc:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
+                if watch.stall is not None:
+                    stalls += 1
+                    rounds -= 1
+                    if not self._retry_stall(watch.stall, stalls, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 transient += 1
                 last_err = f"connection: {exc}"
                 if transient < 4:
@@ -2556,16 +2840,18 @@ class LLMClient:
                 raise LLMError(
                     f"cannot connect to {self._ollama_root} — is Ollama running? "
                     f"(/connect <url> to change it)\n{exc}") from exc
-            except requests.Timeout as exc:
+            except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
-                transient += 1
-                last_err = f"timeout: {exc}"
-                if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
-                        return ChatResult(finish_reason="cancelled")
-                    continue
-                raise LLMError(f"request timed out repeatedly: {last_err}") from exc
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(watch.stall_from_timeout(), stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
+            watch.attach_response(r)
+            if r.status_code != 200:
+                watch.disarm()
 
             if r.status_code in (404, 405, 501) and self.requested_api_mode == "auto":
                 _close_response(r)
@@ -2635,9 +2921,18 @@ class LLMClient:
                 raise LLMError(f"HTTP {status} from {self._ollama_url}: {body}")
             budget = self.think_budget_chars
             try:
-                result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
+                result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget,
+                                              watch=watch)
             finally:
                 _close_response(r)
+                watch.stop()
+            stall = self._pre_progress_stall(result)
+            if stall is not None:
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(stall, stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
             if result.finish_reason == "overthink":
                 overthink += 1
                 prior_level = str(level or "off").lower()
@@ -2683,18 +2978,32 @@ class LLMClient:
         overthink = 0      # F4: times the reasoning-watchdog fired this turn (bounded)
         level = reasoning_effort   # current thinking level; the watchdog steps it down on a runaway
         _LOWER = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
-        for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
+        stalls = 0         # attempts the stall watcher ended before anything streamed
+        rounds = 0
+        while rounds < 8:  # 400-fallbacks + up to 4 transient retries share this budget
+            rounds += 1
             # A deadline may expire while requests.post is waiting for response headers. Never turn
             # that terminal cancellation into several fresh provider generations via the transient
             # retry path; the abandoned in-flight attempt is already billable work.
             if cancel is not None and cancel.is_set():
                 return ChatResult(finish_reason="cancelled")
+            watch = self._next_watch(cancel, self._url)
             try:
-                r = requests.post(self._url, headers=self._headers(), json=payload,
-                                  stream=True, timeout=(15, self.read_timeout))
+                with watch.registered():
+                    r = requests.post(self._url, headers=self._headers(), json=payload,
+                                      stream=True, timeout=self._post_timeout(watch))
             except requests.ConnectionError as e:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
+                if watch.stall is not None:
+                    # The watcher closed a request that sent nothing. The same payload is safe to
+                    # re-issue: nothing reached the UI. Stall retries have their own bound.
+                    stalls += 1
+                    rounds -= 1
+                    if not self._retry_stall(watch.stall, stalls, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 # transient network drops (connection reset / broken pipe / socket hang-up) recover on
                 # a retry; a persistent refusal (server down) exhausts the budget and raises the hint.
                 last_err = f"connection: {e}"
@@ -2706,16 +3015,19 @@ class LLMClient:
                 raise LLMError(
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
                     f"(/connect <url> to change it)\n{e}") from e
-            except requests.Timeout as e:
+            except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
-                last_err = f"timeout: {e}"
-                transient += 1
-                if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
-                        return ChatResult(finish_reason="cancelled")
-                    continue
-                raise LLMError(f"request timed out repeatedly: {last_err}") from e
+                # The socket read timeout is the watcher's backstop; silence is silence either way.
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(watch.stall_from_timeout(), stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
+            watch.attach_response(r)
+            if r.status_code != 200:
+                watch.disarm()      # an error body is not a generation; only cancel applies
             if r.status_code == 429:
                 # rate limited — back off (honour Retry-After) and retry within the budget
                 headers = r.headers
@@ -2799,9 +3111,18 @@ class LLMClient:
                 raise LLMError(f"HTTP {status} from {self._url}: {body}")
             budget = self.think_budget_chars
             try:
-                res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
+                res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget,
+                                    watch=watch)
             finally:
                 _close_response(r)
+                watch.stop()
+            stall = self._pre_progress_stall(res)
+            if stall is not None:
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(stall, stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
             if res.finish_reason == "overthink":          # F4: reasoning ran away → retry with less
                 overthink += 1
                 prior_level = str(level or "off").lower()
@@ -3096,31 +3417,47 @@ class LLMClient:
                         cancel) -> ChatResult:
         transient = 0
         disabled: set[str] = set()
-        for _ in range(10):
+        stalls = 0
+        rounds = 0
+        while rounds < 10:
+            rounds += 1
             if cancel is not None and cancel.is_set():
                 return ChatResult(finish_reason="cancelled")
             payload, stateful = self._responses_payload(messages, tools, reasoning_effort, disabled)
+            watch = self._next_watch(cancel, f"{self.base_url}/responses")
             try:
-                response = requests.post(f"{self.base_url}/responses", headers=self._headers(), json=payload,
-                                         stream=True, timeout=(15, self.read_timeout))
+                with watch.registered():
+                    response = requests.post(f"{self.base_url}/responses", headers=self._headers(),
+                                             json=payload, stream=True,
+                                             timeout=self._post_timeout(watch))
             except requests.ConnectionError as e:
+                watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
+                if watch.stall is not None:
+                    stalls += 1
+                    rounds -= 1
+                    if not self._retry_stall(watch.stall, stalls, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 transient += 1
                 if transient < 4:
                     if not _wait_for_retry(0.5 * transient, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
-            except requests.Timeout as e:
+            except requests.Timeout:
+                watch.stop()
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
-                transient += 1
-                if transient < 4:
-                    if not _wait_for_retry(0.5 * transient, cancel):
-                        return ChatResult(finish_reason="cancelled")
-                    continue
-                raise LLMError(f"Responses API timed out repeatedly: {e}") from e
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(watch.stall_from_timeout(), stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
+            watch.attach_response(response)
+            if response.status_code != 200:
+                watch.disarm()
             if response.status_code == 404:
                 self._mark_rejected("responses")
                 self._reset_response_state()
@@ -3188,9 +3525,19 @@ class LLMClient:
                 body = _error_body(response, 400)
                 raise LLMError(f"HTTP {status} from Responses API: {body}")
             try:
-                result = self._consume_responses(response, on_text, on_thinking, cancel)
+                result = self._consume_responses(response, on_text, on_thinking, cancel,
+                                                 watch=watch)
             finally:
                 _close_response(response)
+                watch.stop()
+            stall = self._pre_progress_stall(result)
+            if stall is not None:
+                self._reset_response_state()
+                stalls += 1
+                rounds -= 1
+                if not self._retry_stall(stall, stalls, cancel):
+                    return ChatResult(finish_reason="cancelled")
+                continue
             if (stateful and result.response_id
                     and result.finish_reason in ("stop", "tool_calls")):
                 self._response_id = result.response_id
@@ -3202,12 +3549,14 @@ class LLMClient:
         raise LLMError("Responses API request failed repeatedly")
 
     def _consume_responses(self, response: requests.Response, on_text, on_thinking,
-                           cancel=None) -> ChatResult:
+                           cancel=None, watch: RequestWatch | None = None) -> ChatResult:
         if "application/json" in response.headers.get("Content-Type", ""):
+            self._note_non_streaming(response)
             value, finish = _bounded_json_lifecycle(
-                response, _MAX_RESPONSES_JSON_BYTES, "Responses API response", cancel)
+                response, _MAX_RESPONSES_JSON_BYTES, "Responses API response", cancel,
+                watch=watch)
             if finish:
-                return ChatResult(finish_reason=finish)
+                return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
             return self._consume_responses_json(value, on_text, on_thinking)
         result = ChatResult()
         calls: dict[str, dict] = {}
@@ -3220,26 +3569,7 @@ class LLMClient:
         terminal = ""
         terminal_output: list[dict] | None = None
         incomplete_reason = ""
-        stop_watch = threading.Event()
-        if cancel is not None:
-            def _watch():
-                while not stop_watch.wait(0.15):
-                    if getattr(response, "_dgc_closed", False):
-                        return
-                    if cancel.is_set():
-                        sock = _raw_socket(response)
-                        if sock is not None:
-                            try:
-                                import socket as _socket
-                                sock.shutdown(_socket.SHUT_RDWR)
-                            except Exception:
-                                pass
-                        try:
-                            response.close()
-                        except Exception:
-                            pass
-                        return
-            threading.Thread(target=_watch, daemon=True).start()
+        watch, owned_watch = _own_watch(response, cancel, watch)
         response.encoding = "utf-8"
         try:
             for line in _bounded_stream_lines(
@@ -3249,6 +3579,8 @@ class LLMClient:
                         result.finish_reason = "cancelled"
                     break
                 if not line or not line.startswith("data:"):
+                    if line.startswith(":") and watch is not None:
+                        watch.noise()           # an SSE comment keep-alive
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
@@ -3260,6 +3592,15 @@ class LLMClient:
                 if not isinstance(event, dict):
                     raise LLMError("Responses API emitted a non-object streaming event")
                 typ = str(event.get("type") or "")
+                if watch is not None:
+                    if (typ == "response.output_text.delta" or typ.startswith("response.reasoning")
+                            or ("reasoning" in typ and typ.endswith(".delta"))
+                            or typ == "response.function_call_arguments.delta"
+                            or typ in ("response.output_item.added", "response.output_item.done",
+                                       "response.completed", "response.incomplete")):
+                        watch.progress()
+                    else:
+                        watch.noise()           # response.created / in_progress and the like
                 if terminal:
                     raise LLMError("Responses API emitted data after its terminal response event")
                 if typ == "response.output_text.delta":
@@ -3346,12 +3687,15 @@ class LLMClient:
             if cancel is not None and cancel.is_set() and not terminal:
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
+                if watch is not None:
+                    watch.observe_error(exc)
                 if not terminal:
                     incomplete_reason = "stream_interrupted"
             else:
                 raise
         finally:
-            stop_watch.set()
+            if owned_watch is not None:
+                owned_watch.stop()
         if not terminal and cancel is not None and cancel.is_set():
             # requests may turn the watcher's socket shutdown into ordinary iterator exhaustion.
             result.finish_reason = "cancelled"
@@ -3420,6 +3764,8 @@ class LLMClient:
                 "incomplete" if incomplete_reason == "stream_interrupted" else
                 "length" if result.tool_calls or "token" in incomplete_reason else
                 "max_turn_requests")
+            if incomplete_reason == "stream_interrupted":
+                result.stall = _stall_of(watch, result.finish_reason)
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:
@@ -3485,11 +3831,12 @@ class LLMClient:
         return result
 
     def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None,
-                 think_budget: int = 0) -> ChatResult:
+                 think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
         ctype = r.headers.get("Content-Type", "")
         if "application/json" in ctype and "text/event-stream" not in ctype:
+            self._note_non_streaming(r)
             return self._consume_json(
-                r, on_text, on_thinking, cancel=cancel)   # server ignored stream:true
+                r, on_text, on_thinking, cancel=cancel, watch=watch)   # server ignored stream:true
         result = ChatResult()
         filt = _ThinkFilter()
         produced = False               # F4: has any content/tool-call appeared yet? (disarms the watchdog)
@@ -3515,33 +3862,11 @@ class LLMClient:
                     if on_text:
                         on_text(chunk)
 
-        # Cancel watcher: a stalled iter_lines() — the model still prefilling a huge resumed
-        # context, with no first token yet — never runs the in-loop cancel check, because the
-        # loop body doesn't execute until a line arrives. Closing the socket from a watcher
-        # thread unblocks the read, so Esc / Stop takes effect immediately instead of hanging
-        # forever on "responding…".
-        stop_watch = threading.Event()
-        if cancel is not None:
-            def _watch(resp=r, ev=stop_watch, cx=cancel):
-                while not ev.wait(0.15):
-                    if getattr(resp, "_dgc_closed", False):
-                        return
-                    if cx.is_set():
-                        # Shutting the raw socket down is what actually unblocks a stalled
-                        # recv(); resp.close() alone races and often waits for the server.
-                        sock = _raw_socket(resp)
-                        if sock is not None:
-                            try:
-                                import socket as _socket
-                                sock.shutdown(_socket.SHUT_RDWR)
-                            except Exception:
-                                pass
-                        try:
-                            resp.close()
-                        except Exception:
-                            pass
-                        return
-            threading.Thread(target=_watch, daemon=True).start()
+        # A stalled read -- the model still prefilling a huge resumed context, with no first token
+        # yet -- never runs the in-loop cancel check, because the loop body doesn't execute until a
+        # line arrives. The request watch shuts the socket down from its own thread, so Esc / Stop
+        # (or a stall deadline) takes effect immediately instead of hanging on "responding…".
+        watch, owned_watch = _own_watch(r, cancel, watch)
         # SSE streams are UTF-8, but requests defaults to latin-1 when the Content-Type carries no
         # charset — which mangles every multibyte char (→ becomes "â\x86\x92", ° becomes "Â°"). Pin it.
         r.encoding = "utf-8"
@@ -3555,9 +3880,13 @@ class LLMClient:
                         result.finish_reason = "cancelled"
                     break
                 if not line or not line.startswith("data:"):
+                    if line.startswith(":") and watch is not None:
+                        watch.noise()           # an SSE comment keep-alive carries no tokens
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
+                    if watch is not None:
+                        watch.progress()
                     saw_done = True
                     break
                 try:
@@ -3580,6 +3909,8 @@ class LLMClient:
                     raise LLMError("Chat Completions emitted a malformed choices array")
                 # OpenAI documents an empty final choices array when include_usage is enabled.
                 if not choices:
+                    if watch is not None:
+                        watch.noise()
                     continue
                 if saw_finish:
                     raise LLMError(
@@ -3587,6 +3918,15 @@ class LLMClient:
                 if not isinstance(choices[0], dict):
                     raise LLMError("Chat Completions emitted a malformed choice")
                 choice = choices[0]
+                if watch is not None:
+                    # Before any callback: a "cleared" notice must precede the text it announces.
+                    peek = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
+                    if (choice.get("finish_reason") not in (None, "") or peek.get("content")
+                            or peek.get("reasoning") or peek.get("reasoning_content")
+                            or peek.get("tool_calls") or peek.get("function_call")):
+                        watch.progress()
+                    else:
+                        watch.noise()           # role-only or empty delta
                 finish_reason = choice.get("finish_reason")
                 if finish_reason not in (None, ""):
                     if not isinstance(finish_reason, str):
@@ -3675,12 +4015,15 @@ class LLMClient:
                     and not (saw_done or saw_finish)):
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
+                if watch is not None:
+                    watch.observe_error(exc)
                 if not saw_finish:
                     result.finish_reason = "incomplete"
             else:
                 raise
         finally:
-            stop_watch.set()
+            if owned_watch is not None:
+                owned_watch.stop()
 
         if (not saw_done and not saw_finish and cancel is not None and cancel.is_set()
                 and result.finish_reason != "overthink"):
@@ -3697,6 +4040,7 @@ class LLMClient:
             # A clean EOF is recoverable, but never terminal: the Agent's bounded incomplete path
             # records non-executable call results or continues partial text on a fresh request.
             result.finish_reason = "incomplete"
+            result.stall = _stall_of(watch, result.finish_reason)
         emit(filt.flush())
 
         for idx in sorted(partial):
@@ -3727,18 +4071,18 @@ class LLMClient:
         return result
 
     def _consume_json(self, r: requests.Response, on_text, on_thinking,
-                      cancel=None) -> ChatResult:
+                      cancel=None, watch: RequestWatch | None = None) -> ChatResult:
         """A non-streaming server (ignored stream:true) returns one JSON completion — parse it
         through the same think-splitter / lenient-args / text-fallback path as the SSE stream."""
         try:
             obj, finish = _bounded_json_lifecycle(
-                r, _MAX_CHAT_JSON_BYTES, "Chat Completions response", cancel)
+                r, _MAX_CHAT_JSON_BYTES, "Chat Completions response", cancel, watch=watch)
         except Exception as exc:
             if isinstance(exc, (ValueError, RecursionError)) and not isinstance(exc, LLMError):
                 raise LLMError("Chat Completions response returned malformed JSON") from exc
             raise
         if finish:
-            return ChatResult(finish_reason=finish)
+            return ChatResult(finish_reason=finish, stall=_stall_of(watch, finish))
         if not isinstance(obj, dict):
             raise LLMError("Chat Completions emitted a non-object JSON response")
         choices = obj.get("choices")

@@ -280,7 +280,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionReady = false;
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
-  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number }> = [];
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
   private changesRefreshTimer?: NodeJS.Timeout;
@@ -1767,7 +1767,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ...(["workspace_changes", "chat_changes"].includes(msg?.type) ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
-          ...(event.command === undefined ? {} : { command: String(event.command) }) } : {}),
+          ...(event.command === undefined ? {} : { command: String(event.command) }),
+          // What the status row says (e.g. a silent model request), for the installed-host stall test.
+          ...(event.type === "turn_activity" ? { state: String(event.state || ""),
+            label: String(event.label || "").slice(0, 80),
+            detail: String(event.detail || "").slice(0, 120) } : {}) } : {}),
       });
       if (this.testPostedMessages.length > 256) {
         this.testPostedMessages.splice(0, this.testPostedMessages.length - 256);
@@ -1785,7 +1789,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.onMessage(msg);
   }
 
-  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number }> {
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }

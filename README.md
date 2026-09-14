@@ -293,6 +293,17 @@ process delegated work strictly serially.
 conversation, checkpoint-message, goal, title, or plan state is written. Live model/tool/wire
 credential masking and one-time-only sensitive approvals remain mandatory. Exact file rewind bytes
 are intentionally unchanged and protected by the session directory's owner-only permissions.
+A model request that hangs without an error (the server sends no response headers, opens a stream
+and goes silent, or sends only keep-alives) is watched separately from `request_timeout`, which
+stays the hard ceiling on socket silence. After `model_stall_notice_s` (45) the status line and
+the editor say "No response from the model" with the model and host. Nothing useful within
+`model_first_token_timeout_s` (`"auto"`: 900 for loopback, private, Tailscale or `*.local` hosts
+and local server families, 300 otherwise) counts as a stall; streamed reasoning is progress, and
+while a self-hosted Ollama reports the model still loading the clock pauses for up to
+`model_load_timeout_s` (900). A stalled request is re-issued `model_stall_retries` (2) times, then
+DGC switches to `fallback_model` when one is set or fails the turn naming the model and endpoint.
+A stream silent for `model_idle_timeout_s` (300) after partial output is continued from what
+already streamed. `0` turns a window off; Esc / Stop works in every phase.
 
 With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat`,
 `/api/tags`, and `/api/show` contracts; DGC carries native thinking, tool history, `tool_name`, context/output

@@ -244,6 +244,29 @@ def _tool_intents(text: str) -> set[str]:
             if pattern.search(source)}
 
 
+def _result_stall(result) -> dict | None:
+    """The stall watcher's record on a generation it ended after real output, if any."""
+    stall = getattr(result, "stall", None)
+    return stall if isinstance(stall, dict) and stall.get("progressed") else None
+
+
+def _call_model_wait(hook, label, detail="", **options):
+    """Call a UI's optional ``model_wait`` hook with only the keyword options it declares.
+
+    ``since`` is part of the original hook; ``restore`` and ``origin`` were added so parallel
+    sub-agents keep separate notices and a failed call does not bring back an old activity. A UI
+    written against the original signature keeps working.
+    """
+    import inspect
+    try:
+        params = inspect.signature(hook).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        options = {key: value for key, value in options.items() if key in params}
+    return hook(label, detail, **options)
+
+
 class _DeadlineCancel:
     """Cancellation view that adds a monotonic deadline without mutating the user's Stop event."""
     def __init__(self, parent: threading.Event, deadline: float):
@@ -689,6 +712,9 @@ class _SubUI:
         callback = getattr(self._parent, name, None)
         if not callback:
             return None
+        return self._routed(callback, *args, **kwargs)
+
+    def _routed(self, callback, *args, **kwargs):
         tls = getattr(self._parent, "_tls", None)
         sentinel = object()
         previous = getattr(tls, "session", sentinel) if tls is not None else sentinel
@@ -741,6 +767,19 @@ class _SubUI:
 
     def turn_activity(self, state, label, detail=""):
         self._emit("turn_activity", state, label, detail)
+
+    def model_wait(self, label, detail="", *, since=None, restore=True, origin=None):
+        # Transient and already late by definition: bypass the parallel-child buffer, routed to the
+        # parent's originating session exactly like every direct call. Each child is its own origin
+        # (a nested child's origin passes through), so parallel children that stall together keep
+        # separate notices on the one parent UI: one child resuming never hides another's.
+        hook = getattr(self._parent, "model_wait", None)
+        if callable(hook):
+            return self._routed(_call_model_wait, hook, label, detail, since=since,
+                                restore=restore, origin=origin or self._call_prefix)
+        if label:
+            return self._direct("turn_activity", "waiting", label, detail)
+        return None
 
     def tool_call(self, name, args, call_id=None):
         self._emit("tool_call", name, args, self._call_id(call_id))
@@ -1108,7 +1147,15 @@ class Agent(GoalLifecycle):
                          provider_state=str(self.config.get("provider_state", "stateless")),
                          prompt_cache=bool(self.config.get("prompt_cache", True)),
                          prompt_cache_key=str(self.config.get("prompt_cache_key", "")),
-                         context_size=int(self.config.get("context_size", 0)))
+                         context_size=int(self.config.get("context_size", 0)),
+                         # Stall watcher: every request this client sends (main, fallback,
+                         # sub-agent, compaction and title aux) is bounded by these windows,
+                         # each clamped by that request's read timeout.
+                         first_token_timeout=self.config.get("model_first_token_timeout_s", "auto"),
+                         idle_timeout=self.config.get("model_idle_timeout_s", 300),
+                         stall_notice=self.config.get("model_stall_notice_s", 45),
+                         stall_retries=self.config.get("model_stall_retries", 2),
+                         load_timeout=self.config.get("model_load_timeout_s", 900))
 
     def refresh_client(self) -> None:
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
@@ -1765,6 +1812,18 @@ class Agent(GoalLifecycle):
             if safe:
                 self.ui.on_thinking(safe)
 
+        # The stall watcher reports "no response yet" from its own thread. Capture the UI route on
+        # THIS thread so a background fleet session's notice lands on that session.
+        watch_client = self.client if hasattr(self.client, "stall_listener") else None
+        old_listener = old_route = None
+        if watch_client is not None:
+            old_listener, old_route = watch_client.stall_listener, getattr(
+                watch_client, "stall_route", None)
+            route_factory = getattr(self.ui, "callback_route", None)
+            watch_client.stall_listener = self._on_model_wait
+            watch_client.stall_route = route_factory() if callable(route_factory) else None
+        self._model_wait_shown = False
+        result = None
         try:
             try:
                 result = self.client.chat(safe_messages, tools=tools, reasoning_effort=effort,
@@ -1780,6 +1839,18 @@ class Agent(GoalLifecycle):
         finally:
             if old_timeout is not None:
                 self.client.read_timeout = old_timeout
+            if watch_client is not None:
+                watch_client.stall_listener, watch_client.stall_route = old_listener, old_route
+            if getattr(self, "_model_wait_shown", False):
+                self._model_wait_shown = False      # never leave a stale "no response" on screen
+                # Bring back the activity the notice replaced only when the call really produced a
+                # usable answer. After an error (a ModelStallError on its way to the fallback or
+                # _fail_turn), a cancel, or a mid-stream stall, restoring would announce a stale
+                # "Waiting for the model" just before the error / continuation says what happened.
+                ended_normally = (result is not None
+                                  and getattr(result, "finish_reason", "") != "cancelled"
+                                  and not getattr(result, "stall", None))
+                self._show_model_wait(None, restore=ended_normally)
         unsafe_provider_state = (
             (result.provider_items
              and provider_continuation_has_secret(result.provider_items, secrets))
@@ -3083,6 +3154,9 @@ class Agent(GoalLifecycle):
     def _explain_model_error(self, exc, prefix: str = "") -> str:
         """The failure plus what to do about it, in the words `dgc doctor` uses."""
         from .llm import explain_llm_error
+        hint = str(getattr(exc, "hint", "") or "")
+        if hint:        # a stall names its own cause; the endpoint answered, so no "start your server"
+            return f"{prefix}{exc}\n  → {hint}"
         client = getattr(self, "client", None)
         return explain_llm_error(prefix + str(exc),
                                  model=str(getattr(client, "model", "") or self.config.model or ""),
@@ -3100,6 +3174,107 @@ class Agent(GoalLifecycle):
         announce = getattr(self.ui, "turn_activity", None)
         if callable(announce):
             announce(state, label, detail)
+
+    # ---- model wait notices (the stall watcher) --------------------------------------------------
+    def _show_model_wait(self, label, detail: str = "", since=None, *, restore: bool = True) -> None:
+        """Show (label) or clear (None) this agent's model-wait notice. ``restore=False`` clears it
+        without bringing back the activity it replaced: the call ended in an error, a cancel or a
+        stall, and whatever the loop says next is the truth."""
+        hook = getattr(self.ui, "model_wait", None)
+        if callable(hook):
+            _call_model_wait(hook, label, detail, since=since, restore=restore)
+        elif label:
+            self._activity("waiting", label, detail)
+
+    @staticmethod
+    def _model_wait_text(ev) -> tuple[str, str]:
+        from .model_watch import endpoint_host, format_seconds
+        where = f"{ev.model} at {endpoint_host(ev.endpoint)}"
+        after = format_seconds(ev.threshold_s)
+        if ev.phase == "loading":
+            return "Loading the model", where
+        if ev.phase == "streaming":
+            return "The model stopped streaming", f"{where} · no tokens for {after}+"
+        if ev.phase == "first_token":
+            return ("No response from the model",
+                    f"{where} · stream open, no tokens for {after}+"
+                    + (" · keep-alives only" if ev.noise_frames else ""))
+        return "No response from the model", f"{where} · no reply for {after}+"
+
+    def _on_model_wait(self, ev) -> None:
+        """A request is silent, being retried, or streaming again. Runs on the watcher thread for
+        notices (routed to this agent's UI session) and on the request thread for retries."""
+        from .model_watch import endpoint_host, format_seconds
+        kind = getattr(ev, "kind", "")
+        if kind == "cleared":
+            self._model_wait_shown = False
+            self._show_model_wait(None)
+            return
+        if kind == "notice":
+            label, detail = self._model_wait_text(ev)
+            self._model_wait_shown = True
+            self._show_model_wait(label, self._safe_text(detail)[:120], since=ev.since)
+            return
+        if kind != "retry":
+            return
+        host = endpoint_host(ev.endpoint)
+        silent = format_seconds(ev.silent_s)
+        attempt, retries = int(ev.attempt or 0), int(ev.retries or 0)
+        if ev.phase == "loading":
+            what = f"{ev.model} at {host} did not finish loading in {silent}"
+        elif ev.phase == "first_token":
+            what = f"no tokens from {ev.model} at {host} for {silent}"
+        else:
+            what = f"no response from {ev.model} at {host} for {silent}"
+        self.ui.info(self._safe_text(f"↻ {what} — retrying ({attempt}/{retries})"))
+        self._model_wait_shown = True
+        self._show_model_wait(
+            "Retrying the model request",
+            self._safe_text(f"attempt {attempt + 1} of {retries + 1} · {ev.model} at {host}")[:120],
+            since=ev.since)
+        estimator = getattr(self, "eta", None)
+        if estimator is not None:
+            try:
+                estimator.on_retry("model_stall")
+            except Exception:
+                pass
+
+    def _stall_retry_budget(self) -> int:
+        from .model_watch import bounded_retries
+        client_value = getattr(getattr(self, "client", None), "stall_retries", None)
+        if isinstance(client_value, int) and not isinstance(client_value, bool):
+            return max(0, client_value)
+        return bounded_retries(self.config.get("model_stall_retries", 2), 2)
+
+    def _stall_backoff(self, stall: dict, recovery: int, cancel) -> bool:
+        """Say what happened, then wait briefly before continuing. False when cancelled."""
+        from .llm import _wait_for_retry
+        from .model_watch import endpoint_host, format_seconds
+        host = endpoint_host(str(stall.get("endpoint") or ""))
+        model = str(stall.get("model") or getattr(self.client, "model", "") or "the model")
+        silent = format_seconds(float(stall.get("silent_s") or 0))
+        budget = self._stall_retry_budget()
+        self.ui.info(self._safe_text(
+            f"↻ {model} at {host} stopped streaming for {silent} — continuing from the partial "
+            f"output ({recovery}/{budget})"))
+        estimator = getattr(self, "eta", None)
+        if estimator is not None:
+            try:
+                estimator.on_retry("model_stall")
+            except Exception:
+                pass
+        window = float(stall.get("window_s") or 0) or 10.0
+        return _wait_for_retry(min(2 ** (recovery - 1), window, 10.0), cancel)
+
+    def _stall_failure(self, stall: dict, recoveries: int) -> str:
+        from .llm import MODEL_STALL_HINT
+        from .model_watch import format_seconds
+        model = str(stall.get("model") or getattr(self.client, "model", "") or "the model")
+        endpoint = str(stall.get("endpoint") or "the endpoint")
+        silent = format_seconds(float(stall.get("window_s") or stall.get("silent_s") or 0))
+        noun = "recovery" if recoveries == 1 else "recoveries"
+        return (f"stopped — model '{model}' at {endpoint} stopped streaming: no tokens for {silent} "
+                f"after partial output ({recoveries} {noun})\n  → {MODEL_STALL_HINT}")
 
     def _fail_turn(self, message: str) -> bool:
         """Record and render one handled terminal failure for every frontend."""
@@ -3259,6 +3434,7 @@ class Agent(GoalLifecycle):
         verify_nudged = False
         summary_only = False        # explicit verifier-only task → deterministic closeout
         continues = 0               # length-truncation auto-continues used this turn
+        stall_recoveries = 0        # mid-stream stalls continued from their partial output this turn
         finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
         paused_assistant_index: int | None = None
@@ -3690,6 +3866,26 @@ class Agent(GoalLifecycle):
                     next_request_reason = "empty_final"
                     self._activity("continuing", "Asking for a written answer")
                     continue
+                if result.finish_reason in _INCOMPLETE_FINISH_REASONS and _result_stall(result):
+                    # The stall watcher ended a stream that had already produced output. Keep what
+                    # streamed and ask for the rest -- re-issuing would repeat text already shown.
+                    if stall_recoveries < self._stall_retry_budget():
+                        stall_recoveries += 1
+                        if not self._stall_backoff(_result_stall(result), stall_recoveries, chat_cancel):
+                            next_request_reason = "output_continue"
+                            continue        # cancelled: the next request returns "cancelled"
+                        self.messages.append({"role": "user", "content": (
+                            "Your previous response was interrupted before its terminal provider "
+                            "event. Continue exactly where you left off — do not repeat what you "
+                            "already wrote.")})
+                        next_request_reason = "output_continue"
+                        self._activity("continuing", "Continuing the cut-off response")
+                        continue
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: the model stopped streaming before completion.]",
+                            "completion withheld — the model stopped streaming")
+                    return self._fail_turn(self._stall_failure(_result_stall(result), stall_recoveries))
                 if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
                     if continues < _MAX_CONTINUE:
                         continues += 1
@@ -3858,6 +4054,16 @@ class Agent(GoalLifecycle):
                 # The generation ended at its output cap or before a terminal provider event while
                 # emitting calls. Arguments may be partial; never run them, including special tools
                 # that bypass the ordinary JSON-parse net.
+                stalled = _result_stall(result)
+                if stalled and stall_recoveries >= self._stall_retry_budget():
+                    return self._fail_turn(self._stall_failure(stalled, stall_recoveries))
+                if stalled:
+                    # A stall mid tool call is bounded by the stall budget, with a backoff, rather
+                    # than by the generic continuation budget that re-issues immediately. The calls
+                    # are still answered below; a cancel during the backoff ends the next request.
+                    stall_recoveries += 1
+                    self._stall_backoff(stalled, stall_recoveries, chat_cancel)
+                    continues = max(0, continues - 1)
                 if continues >= _MAX_CONTINUE:
                     return self._fail_turn(
                         ("stopped — the provider stream repeatedly ended before terminal tool-call "
