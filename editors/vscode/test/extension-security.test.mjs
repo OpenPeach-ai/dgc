@@ -244,6 +244,8 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   assert.match(backend, /cli_outdated: true/, "the backend marks an older CLI");
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
-  assert.match(panel, /install\.sh \| bash/, "the offer runs the installer");
+  // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
+  assert.match(panel, /runCliUpdate\(executable, token\)/, "the offer runs the CLI's update");
+  assert.match(panel, /createTerminal\(\s*updateTerminalOptions\(/, "or opens it in a terminal");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
 });

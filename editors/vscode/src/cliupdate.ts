@@ -96,6 +96,23 @@ export function updateTerminalOptions(executable: string, name = "DGC update"): 
   };
 }
 
+/** The terminal for a first install, when there is no dgc to run yet. The published installer is
+ *  the only way in, but DGC_SKIP_EXTENSION still applies: this extension is already running, and
+ *  the installer would otherwise force-install the published .vsix over it in every editor it finds. */
+export const INSTALL_COMMAND = "curl -fsSL https://vibedgc.com/install.sh | bash";
+export function installTerminalOptions(name = "Install DGC"): vscode.TerminalOptions {
+  return { name, env: { DGC_SKIP_EXTENSION: "1" } };
+}
+
+/** An OLD CLI's `dgc update` (0.38 and earlier) pipes the installer into bash, catches its failure,
+ *  prints "update failed (exit N)" and still exits 0. Only the first update from such a CLI can hit
+ *  this — the CLI it installs returns the installer's status — but that first update is exactly
+ *  the one the extension runs on its own. The installer's exit status, when that line is there. */
+export function swallowedInstallerExit(log: string): number | undefined {
+  const match = /(?:^|\n)[ \t]*update failed \(exit (\d+)\)/.exec(log.replace(/\u001B\[[0-9;]*m/g, ""));
+  return match ? Number(match[1]) : undefined;
+}
+
 /** True when the user chose the executable themselves. DGC manages the CLI it installed; a path
  *  someone set by hand belongs to them, and reinstalling over it would be a surprise. A path whose
  *  real location is a DGC versioned install is still DGC's: `dgc update` there finds its own data
@@ -184,6 +201,12 @@ export function runCliUpdate(
 
     const attempt = () => {
       if (settled) { return; }
+      let own = "";                 // this attempt's output: an earlier attempt's words are not its result
+      const record = (chunk: string) => {
+        append(chunk);
+        own += chunk;
+        if (own.length > MAX_LOG_BYTES) { own = own.slice(own.length - MAX_LOG_BYTES); }
+      };
       let current: ChildProcessWithoutNullStreams;
       try {
         // Its own process group. The installer forks bash, curl, python and pip; signalling only
@@ -197,13 +220,15 @@ export function runCliUpdate(
       child = current;
       current.stdout.setEncoding("utf8");
       current.stderr.setEncoding("utf8");
-      current.stdout.on("data", append);
-      current.stderr.on("data", append);
+      current.stdout.on("data", record);
+      current.stderr.on("data", record);
       current.on("error", (err: any) => {
         finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
       });
-      current.on("close", (code, signal) => {
+      current.on("close", (exitCode, signal) => {
         if (settled) { return; }
+        const swallowed = exitCode === 0 ? swallowedInstallerExit(own) : undefined;
+        const code = swallowed ?? exitCode;
         if (code === 0) { finish({ ok: true, log }); return; }
         if (code === LOCK_HELD_EXIT && lockRetries < maxLockRetries) {
           lockRetries += 1;
@@ -211,7 +236,8 @@ export function runCliUpdate(
           retryTimer = setTimeout(attempt, lockRetryMs);
           return;
         }
-        const how = signal ? `stopped by ${signal}` : `exit ${code}`;
+        const how = signal ? `stopped by ${signal}`
+          : swallowed !== undefined ? `installer exit ${swallowed}` : `exit ${code}`;
         finish({ ok: false, reason: `${failureHeadline(log) || "the installer failed"} (${how})`, log });
       });
     };
@@ -230,5 +256,8 @@ export function failureHeadline(log: string): string {
     .filter(Boolean);
   const refusal = lines.find((line) => line.startsWith("\u2717"));
   if (refusal) { return refusal.replace(/^\u2717\s*/, ""); }
-  return lines[lines.length - 1] || "";
+  // An old CLI's own summary ("update failed (exit 1). Run manually: curl … | bash") repeats the
+  // status and suggests the pipeline the editor no longer uses; the line before it says more.
+  const informative = lines.filter((line) => !/^update failed \(exit \d+\)/.test(line));
+  return informative[informative.length - 1] || "";
 }

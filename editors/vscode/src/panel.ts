@@ -6,7 +6,9 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
-import { autoUpdateEnabled, isUserChosenCommand, runCliUpdate, updateTerminalOptions } from "./cliupdate";
+import {
+  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, runCliUpdate, updateTerminalOptions,
+} from "./cliupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -1358,9 +1360,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (choice === RETRY) {
         this.restart();
       } else if (choice === INSTALL) {
-        const term = vscode.window.createTerminal("Install DGC");
+        const term = vscode.window.createTerminal(installTerminalOptions("Install DGC"));
         term.show();
-        term.sendText("curl -fsSL https://vibedgc.com/install.sh | bash");
+        term.sendText(INSTALL_COMMAND);
         vscode.window.showInformationMessage(
           "Installing the DGC CLI in the terminal. When it finishes, reload the window to connect.");
       } else if (choice === SETPATH) {
