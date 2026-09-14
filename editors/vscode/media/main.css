@@ -1165,6 +1165,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-row:hover { background: var(--surface2); }
 .agent-row[aria-disabled="true"] { cursor: default; }
 .agent-row[aria-disabled="true"]:hover { background: transparent; }
+/* A row with no card on screen to jump to reads quieter than one that jumps (its label says why). */
+.agent-row[aria-disabled="true"] .agent-desc { color: var(--muted); }
 .agent-dot { box-sizing: border-box; flex: none; width: 7px; height: 7px; margin-top: 6px;
   border-radius: var(--r-full); background: var(--agent-idle); }
 .agent-dot[data-state="running"] { background: var(--agent-run); }
@@ -1174,7 +1176,10 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: var(--del); }
 .agent-text { min-width: 0; display: grid; gap: 2px; }
 .agent-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.agent-meta { color: var(--faint); font-size: var(--t-xs); overflow-wrap: anywhere; }
+/* The meta line carries one line of a failure message, and two rows of it at most: the whole
+   message is in the row's label. */
+.agent-meta { color: var(--faint); font-size: var(--t-xs); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .agents-more, .agents-note { margin: var(--sp-1) var(--sp-2) 0; color: var(--faint);
   font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .agents-settings { margin: var(--sp-2) var(--sp-2) var(--sp-1); }
@@ -1194,6 +1199,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: Canvas; border: 2px solid CanvasText; border-radius: 0; }
   .agents-pill[data-state="waiting"] .agents-need { color: CanvasText; font-weight: var(--w-bold); text-decoration: underline; }
   .tool.flash { outline-color: Highlight; }
+  .agent-row[aria-disabled="true"] .agent-desc { color: GrayText; }
 }
 /* ---- end 0.40 agents -------------------------------------------------------------------------- */
 

@@ -544,10 +544,24 @@
       timer = setTimeout(() => {
         if (target !== el0 || !el0.isConnected) return;
         if (native) el0.removeAttribute("title");
-        paint(el0, label);
+        paint(el0, (native || el0.dataset.tip || "").trim() || label);
       }, delay);
     }
-    return { show, hide, node };
+    // A control that changes its own `title` while its label is up or about to be (the agents pill
+    // as its agents end) goes through here: setting `title` directly would be undone by hide(),
+    // which puts back the copy it lifted, and the label on screen would keep the old words.
+    function retitle(el0, label) {
+      if (el0 !== target) {
+        if (el0.getAttribute("title") !== label) el0.setAttribute("title", label);
+        return;
+      }
+      native = label;
+      if (node.hidden) { el0.setAttribute("title", label); return; }
+      if (!label) { hide(); el0.removeAttribute("title"); return; }
+      node.className = "tip";
+      paint(el0, label);
+    }
+    return { show, hide, retitle, node };
   })();
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
   document.addEventListener("pointerover", (e) => {
@@ -4256,6 +4270,10 @@
   let agentOrder = 0, agentsRenderQueued = false, agentsTick = null;
   let agentsAnnounceTimer = null, agentsSpokenActive = false;
   const agentsBatch = new Set();           // ids active since the last "working" announcement
+  const agentRowNodes = new Map();         // id -> that record's dialog row, kept across renders
+  // Set by a rewind until its snapshot arrives: the replayed cards must not be claimed by records
+  // the rewind is about to prune (call_0 repeats in every turn of a provider that sends no ids).
+  let agentsHoldClaims = false;
 
   // The one place that picks the number (the TUI's _agents_count is the same switch). Claude Code's
   // rule: every sub-agent started in this chat. "Working while any work, else all": `active || total`.
@@ -4303,6 +4321,7 @@
     const now = agentNow();
     if (ev.type === "agent_started") {
       if (record) return;
+      agentsHoldClaims = false;
       agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0 }, now));
       agentsBatch.add(id);
       claimAgentAnchors();
@@ -4338,10 +4357,13 @@
     for (const [id, card] of [...agentAnchors]) {
       if (!agentRecords.has(id) || !card.isConnected) agentAnchors.delete(id);
     }
+    agentsHoldClaims = false;
     claimAgentAnchors();
-    // A snapshot never speaks; it only resets what "working" and "finished" are measured from.
+    // A snapshot never speaks. It drops from the batch only the agents it no longer lists, so an
+    // agent that ended before a mid-batch snapshot (list_agents while busy, a reload, a resync)
+    // is still in the "Agents finished: …" count when the batch ends.
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null;
-    agentsBatch.clear();
+    for (const id of [...agentsBatch]) if (!agentRecords.has(id)) agentsBatch.delete(id);
     for (const record of agentRecords.values()) if (AGENT_ACTIVE.has(record.state)) agentsBatch.add(record.id);
     agentsSpokenActive = agentCounts().active > 0;
     renderAgents();
@@ -4358,6 +4380,7 @@
     return null;
   }
   function claimAgentAnchors() {
+    if (agentsHoldClaims) return;
     const waiting = new Map();
     for (const record of [...agentRecords.values()].sort((a, b) => a.order - b.order)) {
       if (!record.call_id || agentAnchor(record.id)) continue;
@@ -4410,7 +4433,7 @@
     $("agents-count").textContent = String(n);
     pill.querySelector(".agents-word").textContent = n === 1 ? " agent" : " agents";
     pill.querySelector(".agents-need").hidden = state !== "waiting";
-    pill.title = title;
+    hoverTip.retitle(pill, title);
     pill.setAttribute("aria-label", `${agentPlural(n, "agent")} · ${title}`);
   }
 
@@ -4438,8 +4461,10 @@
     else if (state === "waiting") parts.push(record.waiting_for === "answer" ? "waiting for your answer" : "waiting for your permission");
     else if (state === "queued") parts.push("Queued");
     else if (record.activity) parts.push(String(record.activity));
-    if (record.restored) return parts.join(" · ");
-    if (AGENT_ENDED_WORD[state] && record.message) parts.push(String(record.message));
+    // An ended row's reason goes last: the meta is clamped to two lines, and what gets cut should be
+    // the tail of a long provider message (the row's label has all of it), never the stats.
+    const why = AGENT_ENDED_WORD[state] && record.message ? agentFirstLine(record.message) : "";
+    if (record.restored) return [...parts, ...(why ? [why] : [])].join(" · ");
     if (record.agent_type) parts.push(String(record.agent_type));
     if (record.model && record.model !== curModel) parts.push(String(record.model));
     if (state === "running" || state === "waiting") parts.push(agentElapsed(agentLiveMs(record)));
@@ -4447,7 +4472,18 @@
     const tools = Number(record.tool_calls || 0);
     if (tools > 0) parts.push(agentPlural(tools, "tool"));
     if (Number(record.tokens || 0) > 0) parts.push(`${fmtTokens(record.tokens)} tokens`);
+    if (why) parts.push(why);
     return parts.join(" · ");
+  }
+  // A failure message can be many lines of provider JSON: the row shows one bounded line and the
+  // row's label carries the whole (already redacted and URL-scrubbed) text.
+  function agentFirstLine(text, limit = 120) {
+    const line = (String(text || "").split("\n").find((part) => part.trim()) || "").replace(/\s+/g, " ").trim();
+    if (line.length <= limit) return line;
+    let cut = limit - 1;
+    const marker = line.lastIndexOf("[REDACTED]", cut);
+    if (marker >= 0 && marker < cut && cut < marker + 10) cut = marker;   // never half a marker
+    return `${line.slice(0, cut).trimEnd()}…`;
   }
   function agentTree() {
     const children = new Map();
@@ -4464,54 +4500,86 @@
     }
     return children;
   }
+  // Rows are kept per record and updated in place: the 1 s tick and every frame change only the
+  // text, dot and label that changed, so a focused row keeps its focus (a screen reader does not
+  // re-read it), its hover label stays put and a click that spans a tick still lands.
+  function agentsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
+  function agentRowEntry(record) {
+    let entry = agentRowNodes.get(record.id);
+    if (entry) return entry;
+    const item = document.createElement("li");
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "agent-row"; row.dataset.agentId = record.id; row.tabIndex = -1;
+    const dot = document.createElement("span");
+    dot.className = "agent-dot"; dot.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span"); text.className = "agent-text";
+    const desc = document.createElement("span"); desc.className = "agent-desc";
+    const meta = document.createElement("span"); meta.className = "agent-meta";
+    text.append(desc, meta); row.append(dot, text); item.appendChild(row);
+    const id = record.id;
+    row.addEventListener("click", () => agentJump(id));
+    entry = { item, row, dot, desc, meta, nested: null };
+    agentRowNodes.set(id, entry);
+    return entry;
+  }
+  function agentRowUpdate(entry, record) {
+    const { row, dot, desc, meta } = entry;
+    if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
+    agentsSetText(desc, record.description || "(no description)");
+    agentsSetText(meta, agentMeta(record));
+    const jump = !!agentAnchor(record.id);
+    if (jump && row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
+    if (!jump && row.getAttribute("aria-disabled") !== "true") row.setAttribute("aria-disabled", "true");
+    const why = AGENT_ENDED_WORD[record.state] && record.message ? String(record.message).trim() : "";
+    hoverTip.retitle(row, (jump ? "Show this agent's task" : "This agent's task is not on screen") + (why ? `\n${why}` : ""));
+  }
+  // Put `nodes` in `list` in order, moving only the ones out of place (a moved node loses focus).
+  function agentsPlace(list, nodes) {
+    const wanted = new Set(nodes);
+    for (const child of [...list.children]) if (!wanted.has(child)) child.remove();
+    let cursor = list.firstElementChild;
+    for (const node of nodes) {
+      if (node === cursor) { cursor = cursor.nextElementSibling; continue; }
+      list.insertBefore(node, cursor);
+    }
+  }
   function renderAgentsMenu() {
     const menu = $("agentsmenu");
     if (!menu) return;
     claimAgentAnchors();
     const c = agentCounts();
-    $("agents-summary").textContent = agentSummary(c);
-    const focusedId = document.activeElement?.closest?.(".agent-row")?.dataset.agentId || "";
+    agentsSetText($("agents-summary"), agentSummary(c));
     const tree = $("agents-tree");
+    const active = document.activeElement;
+    const focusedRow = active && tree.contains(active) ? active.closest(".agent-row") : null;
+    for (const id of [...agentRowNodes.keys()]) if (!agentRecords.has(id)) agentRowNodes.delete(id);
     const children = agentTree();
-    const build = (parentId, list) => {
+    const fill = (parentId, list) => {
+      const items = [];
       for (const record of children.get(parentId) || []) {
-        const item = document.createElement("li");
-        const row = document.createElement("button");
-        row.type = "button"; row.className = "agent-row"; row.dataset.agentId = record.id; row.tabIndex = -1;
-        const dot = document.createElement("span");
-        dot.className = "agent-dot"; dot.dataset.state = record.state; dot.setAttribute("aria-hidden", "true");
-        const text = document.createElement("span"); text.className = "agent-text";
-        const desc = document.createElement("span"); desc.className = "agent-desc";
-        desc.textContent = record.description || "(no description)";
-        const meta = document.createElement("span"); meta.className = "agent-meta";
-        meta.textContent = agentMeta(record);
-        text.append(desc, meta); row.append(dot, text);
-        if (agentAnchor(record.id)) {
-          row.removeAttribute("aria-disabled");
-          row.title = "Show this agent's task";
-        } else {
-          row.setAttribute("aria-disabled", "true");
-          row.title = "This agent's task is not on screen";
-        }
-        row.onclick = () => agentJump(record.id);
-        item.appendChild(row);
+        const entry = agentRowEntry(record);
+        agentRowUpdate(entry, record);
         if (children.has(record.id)) {
-          const nested = document.createElement("ul");
-          build(record.id, nested);
-          item.appendChild(nested);
+          if (!entry.nested) entry.nested = document.createElement("ul");
+          if (entry.nested.parentNode !== entry.item) entry.item.appendChild(entry.nested);
+          fill(record.id, entry.nested);
+        } else if (entry.nested) {
+          entry.nested.remove(); entry.nested = null;
         }
-        list.appendChild(item);
+        items.push(entry.item);
       }
+      agentsPlace(list, items);
     };
-    const fresh = document.createElement("ul");
-    build("", fresh);
-    tree.replaceChildren(...fresh.childNodes);
+    fill("", tree);
     const rows = [...tree.querySelectorAll(".agent-row")];
-    const current = rows.find((row) => row.dataset.agentId === focusedId) || rows[0];
-    if (current) current.tabIndex = 0;
-    if (focusedId && current && current.dataset.agentId === focusedId) current.focus();
+    const kept = focusedRow && focusedRow.isConnected ? focusedRow : null;
+    const tabbable = kept || rows.find((row) => row.tabIndex === 0) || rows[0];
+    for (const row of rows) { const want = row === tabbable ? 0 : -1; if (row.tabIndex !== want) row.tabIndex = want; }
+    // Focus is put back only when this render took it: a focused row that moved, or one whose
+    // agent a snapshot dropped (then the list keeps it, on the row that is now tabbable).
+    if (focusedRow && document.activeElement !== focusedRow) (kept || tabbable || $("agents-settings")).focus();
     $("agents-more").hidden = agentTotalExtra <= 0;
-    $("agents-more").textContent = agentTotalExtra > 0 ? `+${agentTotalExtra} more not listed` : "";
+    agentsSetText($("agents-more"), agentTotalExtra > 0 ? `+${agentTotalExtra} more not listed` : "");
     $("agents-stop-note").hidden = c.active <= 0;
     if (c.active > 0 && !agentsTick) agentsTick = setInterval(() => { if (agentsMenuOpen()) renderAgentsMenu(); }, 1000);
     if (c.active <= 0 && agentsTick) { clearInterval(agentsTick); agentsTick = null; }
@@ -4609,9 +4677,20 @@
 
   // ---- chat boundaries and backend exits ----
   function agentsSessionReset(kind) {
-    if (kind === "rewound") return;          // kept until the snapshot that follows the history
+    if (kind === "rewound") {
+      // Records are kept until the snapshot that follows the history, but their anchors are not:
+      // the history rebuilds every card, and claiming those cards now would pair them with records
+      // the snapshot is about to prune. The backend sends that snapshot whenever the chat had agents.
+      agentAnchors.clear();
+      for (const card of document.querySelectorAll(".tool[data-agent-id]")) delete card.dataset.agentId;
+      agentsHoldClaims = agentRecords.size > 0 || agentTotalExtra > 0;
+      scheduleAgentsMenuRender();
+      return;
+    }
     const wasOpen = agentsMenuOpen();
-    agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear();
+    agentsHoldClaims = false;
+    agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); agentRowNodes.clear();
+    $("agents-tree")?.replaceChildren();
     agentTotalExtra = 0; agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false;
     renderAgentsPill();
@@ -4630,12 +4709,14 @@
     renderAgentsPill();
   }
 
-  // Installed-host tests (extension-host/index.cjs) ask what the pill shows; the host only relays
-  // this while its test bridge token is set.
+  // Installed-host tests (extension-host/index.cjs) ask what the pill shows. Only the host's test
+  // bridge sends `agentsProbe` (while its token is set), with a fresh nonce it checks on the reply;
+  // anything else is ignored.
   globalThis.addEventListener("message", (event) => {
-    if (event.data?.type !== "agentsProbe") return;
+    const probe = event.data?.type === "agentsProbe" ? event.data.probe : "";
+    if (typeof probe !== "string" || !/^[0-9a-f]{32}$/.test(probe)) return;
     const pill = $("agents-pill");
-    vscode.postMessage({ type: "agentsProbeResult", hidden: $("agents-picker").hidden, state: pill.dataset.state,
+    vscode.postMessage({ type: "agentsProbeResult", probe, hidden: $("agents-picker").hidden, state: pill.dataset.state,
       label: `${$("agents-count").textContent}${pill.querySelector(".agents-word").textContent}` });
   });
 

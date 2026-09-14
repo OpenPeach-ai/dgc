@@ -330,7 +330,8 @@ test("a queued agent that starts running restarts its clock; ended rows lead wit
   doc.getElementById("agents-pill").click();
   const metas = [...doc.querySelectorAll(".agent-meta")].map((node) => node.textContent);
   assert.equal(metas[0], "qwen3.8:27b · 0s");
-  assert.equal(metas[1], "Failed · the sub-agent stopped without a final summary · 48s · 9 tools · 18,200 tokens");
+  assert.equal(metas[1], "Failed · 48s · 9 tools · 18,200 tokens · the sub-agent stopped without a final summary",
+    "the reason goes last, so a two-line clamp only ever cuts the reason");
   void event;
   assert.deepEqual(errors, []);
 });
@@ -365,4 +366,146 @@ test("the palette clears 3:1 and forced colours keep each state distinct", () =>
   assert.match(section, /\.cf-right > \.picker\.agents-picker \{ flex: 0 0 auto; min-width: auto; \}/);
   assert.match(section, /@media \(max-width: 360px\) \{\s*\.agents-word, \.agents-need \{ display: none; \}/);
   assert.match(section, /prefers-reduced-motion: reduce\) \{ \.tool\.flash \{ animation: none; \} \}/);
+});
+
+// ---- review fixes -----------------------------------------------------------------------------
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("after a rewind in a chat whose task calls all share call_0, each row jumps to its own card (one task per frame)", async () => {
+  const { $, doc, event, errors } = view();
+  const liveTurn = (n) => [
+    { type: "turn_start", turn_id: `t${n}`, prompt: `p${n}` },
+    { type: "tool_call", call_id: "call_0", name: "task", args: { description: `turn${n}` }, summary: `turn${n}` },
+    { type: "agent_started", id: sid(n + 1), parent_id: null, call_id: "call_0", description: `turn${n}`, depth: 1,
+      state: "running", started_at: 100 + n, isolated: false, parallel: false },
+    { type: "agent_ended", id: sid(n + 1), state: "finished", duration_ms: 500, tool_calls: 1 },
+    { type: "tool_result", call_id: "call_0", name: "task", output: `Sub-task 'turn${n}' completed.`, is_error: false },
+    { type: "turn_end", turn_id: `t${n}`, reason: "completed", token_estimate: 0 },
+  ];
+  for (const frame of [0, 1, 2].flatMap(liveTurn)) { event(frame); await nextTask(); }
+  assert.deepEqual([...doc.querySelectorAll('.tool[data-tool-name="task"]')].map((card) => card.dataset.agentId),
+    [sid(1), sid(2), sid(3)], "live: each turn's record holds its own card");
+
+  // Rewind to before turn 2: the rewound frame, the history of turns 0 and 1, then the snapshot —
+  // each delivered in its own task, as VS Code does, so the history's microtasks run in between.
+  event({ type: "rewound", ok: true, message_count: 9 });
+  await nextTask();
+  event({ type: "history", items: [0, 1].flatMap((n) => liveTurn(n).filter((f) => !f.type.startsWith("agent_"))) });
+  await nextTask();
+  const kept = (n) => ({ id: sid(n + 1), parent_id: null, call_id: "call_0", description: `turn${n}`, depth: 1,
+    state: "finished", tool_calls: 1, duration_ms: 500, started_at: 100 + n, isolated: false, parallel: false, restored: false });
+  event({ type: "agents", items: [kept(0), kept(1)], total: 2, active: 0 });
+  await nextTask();
+
+  const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
+  for (const [index, card] of cards.entries()) {
+    $("agents-pill").click();
+    doc.querySelector(`.agent-row[data-agent-id="${sid(index + 1)}"]`).click();
+    assert.ok(card.classList.contains("flash"), `row turn${index} flashes its own card`);
+    assert.match(card.textContent, new RegExp(`turn${index}`));
+    card.classList.remove("flash");
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("a rewind in a chat with no agents holds nothing back, so a later agent still claims its card", async () => {
+  const { doc, event, start, errors } = view();
+  event({ type: "rewound", ok: true, message_count: 0 });
+  await nextTask();
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  event({ type: "tool_call", call_id: "call_0", name: "task", args: {}, summary: "one" });
+  start(sid(1), { call_id: "call_0" });
+  assert.equal(doc.querySelector('.tool[data-tool-name="task"]').dataset.agentId, sid(1));
+  assert.deepEqual(errors, []);
+});
+
+test("the dialog updates rows in place: a live render keeps the focused node, its label and its click", async () => {
+  const { $, doc, dom, start, update, end, frame, errors } = view();
+  start(sid(1), { description: "one" });
+  start(sid(2), { description: "two" });
+  $("agents-pill").click();
+  const rows = [...doc.querySelectorAll("#agents-tree .agent-row")];
+  rows[1].focus();
+  let focusins = 0, removed = 0;
+  doc.addEventListener("focusin", () => { focusins += 1; });
+  new dom.window.MutationObserver((records) => {
+    for (const r of records) removed += [...r.removedNodes].filter((n) => n.nodeType === 1).length;
+  })
+    .observe($("agents-tree"), { childList: true, subtree: true });
+  update(sid(2), { state: "running", activity: "reading files" });
+  update(sid(1), { state: "waiting", waiting_for: "permission" });
+  await frame();
+  end(sid(1), "failed", { message: "boom" });
+  await frame();
+  start(sid(3), { description: "three" });
+  await frame();
+  const after = [...doc.querySelectorAll("#agents-tree .agent-row")];
+  assert.equal(after[0], rows[0], "the same row node");
+  assert.equal(after[1], rows[1], "the same row node");
+  assert.equal(doc.activeElement, rows[1], "focus never left the row");
+  assert.equal(focusins, 0, "no focus event re-fired");
+  assert.equal(removed, 0, "no row or item element was removed (only text changed)");
+  assert.equal(after.length, 3);
+  assert.match(rows[1].querySelector(".agent-meta").textContent, /^reading files/);
+  assert.equal(rows[0].querySelector(".agent-dot").dataset.state, "failed");
+  assert.deepEqual(after.map((row) => row.tabIndex), [-1, 0, -1], "one tab stop, on the focused row");
+  assert.deepEqual(errors, []);
+});
+
+test("a snapshot mid-batch keeps agents that already ended in the batch's 'finished' announcement", () => {
+  const { doc, event, start, end, advance, errors } = view({ clock: true });
+  const said = () => doc.getElementById("announcer").textContent;
+  start(sid(1)); start(sid(2));
+  advance(800);
+  assert.equal(said(), "2 agents working");
+  end(sid(1), "failed", { message: "x" });
+  const item = (n, state) => ({ id: sid(n), parent_id: null, call_id: `call_${n}`, description: `agent ${n}`, depth: 1,
+    state, tool_calls: 0, isolated: false, parallel: false, restored: false, ...(state === "running" ? { elapsed_ms: 10 } : {}) });
+  event({ type: "agents", request_id: "agents-7", items: [item(1, "failed"), item(2, "running")], total: 2, active: 1 });
+  end(sid(2), "stopped");
+  advance(800);
+  assert.equal(said(), "Agents finished: 1 failed, 1 stopped");
+  assert.deepEqual(errors, []);
+});
+
+test("a long multi-line failure message shows one bounded line; the row's label carries all of it", () => {
+  const { $, doc, start, end, errors } = view();
+  start(sid(1), { description: "one" });
+  const first = `HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": "denied ${"x".repeat(200)}"}}`;
+  end(sid(1), "failed", { message: `${first}\n  → the endpoint rejected the key`, duration_ms: 1000, tool_calls: 0 });
+  start(sid(2), { description: "two" });
+  end(sid(2), "failed", { message: `${"y".repeat(110)} [REDACTED] tail`, duration_ms: 1000, tool_calls: 0 });
+  $("agents-pill").click();
+  const [row, marked] = doc.querySelectorAll("#agents-tree .agent-row");
+  const meta = row.querySelector(".agent-meta").textContent;
+  assert.ok(meta.startsWith("Failed · 1s · HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: "), meta);
+  assert.ok(meta.endsWith("…"), meta);
+  assert.ok(!meta.includes("rejected the key"), "only the first line");
+  assert.ok(meta.length <= "Failed · 1s · ".length + 120, `bounded (${meta.length})`);
+  assert.ok(row.title.includes("\n  → the endpoint rejected the key") || row.title.includes("→ the endpoint rejected the key"), row.title);
+  assert.ok(row.title.startsWith("This agent's task is not on screen\nHTTP 401"), row.title);
+  assert.ok(!/\[REDA(?!CTED\])/.test(marked.querySelector(".agent-meta").textContent), "never half a redaction marker");
+  assert.match(mainCss, /\.agent-meta \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(mainCss, /\.agent-row\[aria-disabled="true"\] \.agent-desc \{ color: var\(--muted\); \}/);
+  assert.deepEqual(errors, []);
+});
+
+test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps it out of the message switch", () => {
+  const { send, posted, start, errors } = view();
+  start(sid(1));
+  send({ type: "agentsProbe" });
+  send({ type: "agentsProbe", probe: "not-a-nonce" });
+  assert.deepEqual(posted.filter((m) => m.type === "agentsProbeResult"), []);
+  const probe = "0123456789abcdef0123456789abcdef";
+  send({ type: "agentsProbe", probe });
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "agentsProbeResult"))),
+    [{ type: "agentsProbeResult", probe, hidden: false, state: "running", label: "1 agent" }]);
+  const onMessage = panelSrc.slice(panelSrc.indexOf("private async onMessage("));
+  assert.doesNotMatch(onMessage.slice(0, onMessage.indexOf("\n  }\n")), /agentsProbe/);
+  const reply = panelSrc.slice(panelSrc.indexOf("private testOnlyWebviewReply("));
+  assert.match(reply.slice(0, reply.indexOf("\n  }\n")), /if \(!process\.env\.DGC_EXTENSION_TEST_TOKEN \|\| msg\?\.type !== "agentsProbeResult"\) return false;/);
+  assert.match(panelSrc, /onDidReceiveMessage\(\(msg\) => \{\s*if \(this\.testOnlyWebviewReply\(msg\)\) return;/);
+  assert.deepEqual(errors, []);
 });

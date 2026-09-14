@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { realpath } from "fs/promises";
 import * as fs from "fs";
 import * as path from "path";
@@ -280,6 +280,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionReady = false;
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
+  private testProbeNonce = "";
   private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
@@ -1791,7 +1792,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }
+    if (msg?.type === "agentsProbeRequest") {
+      // Ask the live webview what the agents pill shows. The nonce marks the request as the
+      // bridge's; only a reply carrying it is recorded (testOnlyWebviewReply).
+      this.testProbeNonce = randomBytes(16).toString("hex");
+      this.post({ type: "agentsProbe", probe: this.testProbeNonce });
+      return;
+    }
     await this.onMessage(msg);
+  }
+
+  /** The webview's answer to a bridge probe, recorded with the delivery evidence. False (and the
+   * message goes on to onMessage) unless the test token is set and the reply carries the nonce. */
+  private testOnlyWebviewReply(msg: any): boolean {
+    if (!process.env.DGC_EXTENSION_TEST_TOKEN || msg?.type !== "agentsProbeResult") return false;
+    if (!this.testProbeNonce || msg.probe !== this.testProbeNonce) return true;
+    this.testProbeNonce = "";
+    this.testPostedMessages.push({ type: "agentsProbeResult", state: msg.hidden ? "hidden" : String(msg.state || ""),
+      label: String(msg.label || "").slice(0, 80) });
+    return true;
   }
 
   testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number; state?: string; label?: string; detail?: string }> {
@@ -1855,6 +1874,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
       });
       view.webview.onDidReceiveMessage((msg) => {
+        if (this.testOnlyWebviewReply(msg)) return;
         void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
           err?.message || "DGC could not process that editor request."));
       });
@@ -2283,17 +2303,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "slashText":
         void this.slashText(String(msg.text || ""));
-        break;
-      // Installed-host tests only (the bridge token is set): ask the live webview what the agents
-      // pill shows, and record its answer with the rest of the delivery evidence.
-      case "agentsProbeRequest":
-        if (process.env.DGC_EXTENSION_TEST_TOKEN) { this.post({ type: "agentsProbe" }); }
-        break;
-      case "agentsProbeResult":
-        if (process.env.DGC_EXTENSION_TEST_TOKEN) {
-          this.testPostedMessages.push({ type: "agentsProbeResult", state: msg.hidden ? "hidden" : String(msg.state || ""),
-            label: String(msg.label || "").slice(0, 80) });
-        }
         break;
     }
   }

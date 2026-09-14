@@ -180,3 +180,161 @@ test("the dot colours clear 3:1 on the panel grounds they are drawn on", async (
     for (const [fg, bg, value] of ratios) assert.ok(value >= 3, `${fg} on ${bg}: ${value.toFixed(2)}`);
   } finally { await page.close(); }
 });
+
+// ---- review fixes: live renders, the hover label, quiet disabled rows, long failure messages ----
+async function blank(width, { light = false } = {}) {
+  const page = await browser.newPage({ viewport: { width, height: 700 } });
+  await page.setContent(html, { waitUntil: "load" });
+  if (light) {
+    await page.addStyleTag({ content: `:root { ${LIGHT} }` });
+    await page.evaluate(() => document.body.classList.add("vscode-light"));
+  } else {
+    await page.evaluate(() => document.body.classList.add("vscode-dark"));
+  }
+  await page.evaluate(([mjs, mdjs]) => {
+    window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+    eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+    eval(mjs);
+    window.__post = (data) => window.dispatchEvent(new MessageEvent("message", { data }));
+    window.__event = (data) => window.__post({ type: "event", event: data });
+    window.__post({ type: "session_ready", sessionId: "s1" });
+    window.__event({ type: "ready", version: "x", protocol_version: 14, capabilities: { live_steering: true, agents: true },
+      model: "m", mode: "default", think: "off", base_url: "http://127.0.0.1:11434/v1", workspace_trusted: true,
+      commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+    window.__post({ type: "state", state: { model: "m", mode: "default", think: "off" } });
+    window.__event({ type: "turn_start", turn_id: "t1", prompt: "split the work" });
+  }, [mainJs, markdownJs]);
+  return page;
+}
+const startAgent = (page, n, fields = {}) => page.evaluate(([k, extra]) => {
+  window.__event({ type: "tool_call", call_id: `call_${k}`, name: "task", args: { description: `part ${k}` }, summary: `part ${k}` });
+  window.__event({ type: "agent_started", id: `sub-00000000000${k}`, parent_id: null, call_id: `call_${k}`,
+    description: `part ${k}`, depth: 1, state: "running", started_at: k, isolated: false, parallel: true, ...extra });
+}, [n, fields]);
+
+test("with the dialog open and an agent working, the 1 s tick keeps the focused row, its label and a long click", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await blank(460);
+  try {
+    await startAgent(page, 1);
+    await startAgent(page, 2);
+    await page.evaluate(() => window.__event({ type: "agent_ended", id: "sub-000000000001", state: "failed", duration_ms: 900, tool_calls: 1, message: "boom" }));
+    await page.focus("#agents-pill");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(100);                 // the row's own label paints once, on focus
+    const before = await page.evaluate(() => {
+      window.__focusins = 0; window.__removed = 0; window.__tips = 0;
+      window.__row = document.activeElement;
+      document.addEventListener("focusin", (e) => { if (e.target.classList?.contains("agent-row")) window.__focusins += 1; });
+      new MutationObserver((ms) => { for (const m of ms) window.__removed += [...m.removedNodes].filter((n) => n.nodeType === 1).length; })
+        .observe(document.getElementById("agents-tree"), { childList: true, subtree: true });
+      const tip = document.getElementById("hover-tip");
+      new MutationObserver(() => { if (!tip.hidden) window.__tips += 1; }).observe(tip, { attributes: true, attributeFilter: ["hidden"] });
+      return { id: document.activeElement.dataset.agentId, meta: document.activeElement.querySelector(".agent-meta").textContent,
+        tip: !tip.hidden };
+    });
+    assert.equal(before.id, "sub-000000000002");
+    assert.equal(before.tip, true, "keyboard focus shows the row's label");
+    await page.waitForTimeout(2200);
+    const after = await page.evaluate(() => ({ same: document.activeElement === window.__row, focusins: window.__focusins,
+      removed: window.__removed, tips: window.__tips, meta: document.activeElement.querySelector(".agent-meta").textContent }));
+    assert.deepEqual([after.same, after.focusins, after.removed, after.tips], [true, 0, 0, 0],
+      `focus, rows and the label stay put across ticks (${JSON.stringify(after)})`);
+    assert.notEqual(after.meta, before.meta, "the elapsed time still counts");
+    // A press held across a tick still jumps.
+    const box = await page.locator('.agent-row[data-agent-id="sub-000000000002"]').boundingBox();
+    await page.mouse.move(box.x + 20, box.y + 8);
+    await page.mouse.down();
+    await page.waitForTimeout(1100);
+    await page.mouse.up();
+    await page.waitForTimeout(50);
+    const jumped = await page.evaluate(() => ({ open: !document.getElementById("agentsmenu").hidden,
+      flashed: document.querySelector(".tool.flash")?.dataset.callId || "" }));
+    assert.deepEqual(jumped, { open: false, flashed: "call_2" });
+  } finally { await page.close(); }
+});
+
+test("the pill's hover label follows its state: agents ending under the pointer leave the idle sentence", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await blank(460);
+  try {
+    await startAgent(page, 1);
+    await startAgent(page, 2);
+    await page.hover("#agents-pill");
+    await page.waitForTimeout(500);
+    const during = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
+      shown: !document.getElementById("hover-tip").hidden, title: document.getElementById("agents-pill").getAttribute("title") }));
+    assert.deepEqual(during, { tip: "Agents are working · Click to see the agents", shown: true, title: null });
+    await page.evaluate(() => {
+      for (const id of ["sub-000000000001", "sub-000000000002"]) window.__event({ type: "agent_ended", id, state: "finished", duration_ms: 1000, tool_calls: 1 });
+    });
+    await page.waitForTimeout(60);
+    const ended = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
+      title: document.getElementById("agents-pill").getAttribute("title") }));
+    assert.deepEqual(ended, { tip: "No agents working · Click to see the agents", title: null },
+      "the label on screen changes and the native title stays lifted (one tooltip)");
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(60);
+    const left = await page.evaluate(() => ({ title: document.getElementById("agents-pill").getAttribute("title"),
+      aria: document.getElementById("agents-pill").getAttribute("aria-label"), state: document.getElementById("agents-pill").dataset.state }));
+    assert.deepEqual(left, { title: "No agents working · Click to see the agents",
+      aria: "2 agents · No agents working · Click to see the agents", state: "idle" });
+
+    // A state change inside the label's show delay is not undone when the label paints.
+    await page.hover("#agents-pill");
+    await startAgent(page, 3);
+    await page.waitForTimeout(500);
+    const late = await page.evaluate(() => document.getElementById("hover-tip").textContent);
+    assert.equal(late, "Agents are working (1 of 3 working) · Click to see the agents");
+  } finally { await page.close(); }
+});
+
+for (const light of [false, true]) {
+  test(`${light ? "light" : "dark"}: a row that cannot jump reads quieter and still clears 4.5:1; a long failure stays two lines`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await blank(300, { light });
+    try {
+      await startAgent(page, 1);
+      await page.evaluate(() => {
+        window.__event({ type: "agent_started", id: "sub-000000000009", parent_id: null, call_id: "never_on_screen",
+          description: "not on screen", depth: 1, state: "running", started_at: 9, isolated: false, parallel: false });
+        window.__event({ type: "agent_ended", id: "sub-000000000001", state: "failed", duration_ms: 1200, tool_calls: 3,
+          message: `HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": "denied ${"x".repeat(300)}"}}\n  → the endpoint rejected the key` });
+      });
+      await page.click("#agents-pill");
+      await page.waitForTimeout(60);
+      const facts = await page.evaluate(() => {
+        const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+        const lum = (c) => { const v = c.map((p) => p / 255).map((x) => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+        const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+        let ground = document.getElementById("agentsmenu");
+        while (ground && getComputedStyle(ground).backgroundColor === "rgba(0, 0, 0, 0)") ground = ground.parentElement;
+        const bg = rgb(getComputedStyle(ground || document.body).backgroundColor);
+        const row = (id) => document.querySelector(`.agent-row[data-agent-id="${id}"]`);
+        const desc = (id) => getComputedStyle(row(id).querySelector(".agent-desc")).color;
+        const meta = row("sub-000000000001").querySelector(".agent-meta");
+        const lineHeight = parseFloat(getComputedStyle(meta).lineHeight);
+        const node = meta.firstChild, at = node.textContent.indexOf("3 tools"), range = document.createRange();
+        range.setStart(node, at); range.setEnd(node, at + "3 tools".length);
+        const statsVisible = at >= 0 && range.getBoundingClientRect().bottom <= meta.getBoundingClientRect().bottom + 0.5;
+        return { enabled: desc("sub-000000000001"), disabled: desc("sub-000000000009"),
+          disabledRatio: ratio(rgb(desc("sub-000000000009")), bg),
+          disabledAttr: row("sub-000000000009").getAttribute("aria-disabled"),
+          metaHeight: meta.getBoundingClientRect().height, lineHeight, statsVisible,
+          rowHeight: row("sub-000000000001").getBoundingClientRect().height,
+          menu: document.getElementById("agentsmenu").getBoundingClientRect().toJSON(), inner: innerWidth };
+      });
+      assert.equal(facts.disabledAttr, "true");
+      assert.notEqual(facts.disabled, facts.enabled, "a disabled row's description is muted");
+      assert.ok(facts.disabledRatio >= 4.5, `muted description contrast ${facts.disabledRatio.toFixed(2)}`);
+      assert.ok(facts.metaHeight <= facts.lineHeight * 2 + 1, `the meta is two lines at most (${facts.metaHeight} / ${facts.lineHeight})`);
+      assert.ok(facts.rowHeight < 80, `a failed row stays short (${facts.rowHeight}px)`);
+      assert.equal(facts.statsVisible, true, "the clamp cuts the reason, never the duration and tool count");
+      assert.ok(facts.menu.left >= 0 && facts.menu.right <= facts.inner);
+      if (process.env.DGC_AGENTS_SHOTS) {
+        await page.screenshot({ path: `${process.env.DGC_AGENTS_SHOTS}/review-dialog-${light ? "light" : "dark"}-300.png` });
+      }
+    } finally { await page.close(); }
+  });
+}
