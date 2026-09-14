@@ -4,6 +4,10 @@ import {resolve} from "node:path";
 import {QA_ORIGIN, QA_PORT} from "./origin.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+// Chromium on Linux finds every font, fallback glyph and rasterisation setting through fontconfig.
+// Point it at the repository's own font environment so baselines depend on the commit, not on the
+// fonts a desktop or CI image happens to have installed (qa/site/fonts/fonts.conf explains why).
+const QA_FONTCONFIG_FILE = resolve(ROOT, "qa/site/fonts/fonts.conf");
 
 export default defineConfig({
   testDir: resolve(ROOT, "qa/site/tests"),
@@ -40,6 +44,7 @@ export default defineConfig({
     browserName: "chromium",
     colorScheme: "light",
     deviceScaleFactor: 1,
+    launchOptions: {env: {...process.env, FONTCONFIG_FILE: QA_FONTCONFIG_FILE}},
     locale: "en-US",
     reducedMotion: "no-preference",
     serviceWorkers: "block",

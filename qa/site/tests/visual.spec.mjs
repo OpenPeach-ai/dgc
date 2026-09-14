@@ -1,5 +1,6 @@
 import {existsSync, readdirSync, rmSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {dirname, join, resolve} from "node:path";
+import {fileURLToPath} from "node:url";
 
 import {expect, test} from "@playwright/test";
 
@@ -21,6 +22,18 @@ const REPRESENTATIVE_ROUTES = [
 // that only changes the version string fails 3 small images rather than 18. Every route still
 // records its geometry.
 const SHARED_CHROME = new Set(["announcement", "footer"]);
+
+const FONTCONFIG_FILE = resolve(fileURLToPath(new URL("../fonts/fonts.conf", import.meta.url)));
+
+// Every glyph in a baseline comes from the site's own web fonts or from the two fallback faces in
+// qa/site/fonts. Anything else means the capture depends on the machine: a desktop drew arrows in
+// Noto Sans Math and Arial where a stock CI image has FreeSans and Unifont.
+// PostScript names: the four site/assets/fonts faces, then the two qa/site/fonts faces (DejaVu Sans
+// Mono is also the local() face behind 'JetBrains Mono Fallback').
+const PINNED_FONTS = new Set([
+  "Geist-Regular", "Geist-Medium", "JetBrainsMono-Regular", "JetBrainsMono-Medium",
+  "DejaVuSans", "DejaVuSansMono",
+]);
 
 // Text-bearing leaves. A grid cell's box does not move when its padding changes; the block-level
 // value and label inside it do — that is how the 18px hero-stats step went unseen.
@@ -68,6 +81,38 @@ async function prepare(page, route) {
     await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
     scrollTo(0, 0);
   });
+}
+
+// The fonts Chromium actually rasterised, per text-bearing node (including ::before/::after), from
+// the DevTools protocol. Returns "family (postscript name): text" for every glyph run drawn in a font
+// outside PINNED_FONTS.
+async function unpinnedFonts(page) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("DOM.enable");
+    await cdp.send("CSS.enable");
+    const {root} = await cdp.send("DOM.getDocument", {depth: -1, pierce: true});
+    const nodes = [];
+    const walk = node => {
+      const text = (node.children || []).filter(child => child.nodeType === 3).map(child => child.nodeValue).join("");
+      if (node.nodeType === 1 && text.trim()) nodes.push({nodeId: node.nodeId, text: text.trim()});
+      for (const pseudo of node.pseudoElements || []) nodes.push({nodeId: pseudo.nodeId, text: `::${pseudo.pseudoType}`});
+      for (const child of [...(node.children || []), ...(node.shadowRoots || [])]) walk(child);
+      if (node.contentDocument) walk(node.contentDocument);
+    };
+    walk(root);
+    const found = new Set();
+    for (const {nodeId, text} of nodes) {
+      const {fonts} = await cdp.send("CSS.getPlatformFontsForNode", {nodeId});
+      for (const font of fonts) {
+        if (PINNED_FONTS.has(font.postScriptName)) continue;
+        found.add(`${font.familyName} (${font.postScriptName || "no postscript name"}): ${JSON.stringify(text.slice(0, 60))}`);
+      }
+    }
+    return [...found].sort();
+  } finally {
+    await cdp.detach();
+  }
 }
 
 function measure(page) {
@@ -141,8 +186,16 @@ for (const route of REPRESENTATIVE_ROUTES) {
     // Each band is its own stable capture; the tall pages need more than the 30s default.
     test.setTimeout(90_000);
     const label = routeLabel(route);
+    // Baselines are only comparable inside the repository's font environment (fonts.conf).
+    expect(testInfo.project.use.launchOptions?.env?.FONTCONFIG_FILE,
+      "the browser must be launched through qa/site/playwright.config.mjs, which pins FONTCONFIG_FILE").toBe(FONTCONFIG_FILE);
     await prepare(page, route);
     const {bands, docWidth, geometry} = await measure(page);
+
+    // Checked before any pixels: a machine font shows up below as unexplained band diffs.
+    expect.soft(await unpinnedFonts(page),
+      `${label}: text drawn in a font outside the site's web fonts and qa/site/fonts (is FONTCONFIG_FILE honoured?)`,
+    ).toEqual([]);
 
     // Exact: a 1px move of any landmark or text leaf fails, and the diff names the element.
     expect.soft(geometry, `${label}: landmark and text geometry`).toMatchSnapshot([label, "geometry.txt"]);
