@@ -1077,6 +1077,44 @@ test("critical and full stylesheets agree on the hero stat band and mark", async
   }
 });
 
+test("stacked table labels come from the markup and match their column headers", async ({page}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-desktop-1440");
+  await page.setViewportSize({width: 390, height: 844});
+  const read = selector => page.locator(selector).evaluate(table => {
+    const headers = [...table.querySelectorAll("thead th")].map(th => th.textContent.trim());
+    return [...table.querySelectorAll("tbody tr")].flatMap(row => [...row.children].map((td, column) => ({
+      column,
+      header: headers[column],
+      label: td.dataset.label ?? null,
+      before: getComputedStyle(td, "::before").content,
+    })));
+  });
+
+  await page.goto("/vscode", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  await page.locator(".install-matrix").scrollIntoViewIfNeeded();
+  const install = await read(".install-matrix");
+  expect(install.length).toBe(12);
+  for (const cell of install) {
+    if (cell.column === 0) { expect(cell.label).toBeNull(); continue; }
+    expect(cell.label, JSON.stringify(cell)).not.toBeNull();
+    expect(cell.before).toBe(JSON.stringify(cell.label));
+    expect(cell.label.toLowerCase()).toBe(cell.header.toLowerCase());
+  }
+
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  await page.locator(".permission-table").scrollIntoViewIfNeeded();
+  const permissions = await read(".permission-table");
+  const gates = permissions.filter(cell => cell.column >= 1 && cell.column <= 3);
+  expect(gates.length).toBe(12);
+  for (const cell of gates) {
+    expect(cell.label, JSON.stringify(cell)).not.toBeNull();
+    expect(cell.before).toBe(JSON.stringify(cell.label));
+    expect(cell.header.toLowerCase().startsWith(cell.label.toLowerCase()), JSON.stringify(cell)).toBe(true);
+  }
+});
+
 function readHeroMark() {
   for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 0; }
   const art = document.querySelector(".hero-art");
