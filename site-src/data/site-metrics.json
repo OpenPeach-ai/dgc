@@ -32,6 +32,10 @@
       },
       {
         "install_count": 2,
+        "observed_at": "2026-09-09T07:27:08Z"
+      },
+      {
+        "install_count": 2,
         "observed_at": "2026-09-10T09:39:20Z"
       },
       {
@@ -39,13 +43,29 @@
         "observed_at": "2026-09-10T15:04:16Z"
       },
       {
+        "install_count": 2,
+        "observed_at": "2026-09-11T07:21:03Z"
+      },
+      {
+        "install_count": 3,
+        "observed_at": "2026-09-12T07:13:30Z"
+      },
+      {
         "install_count": 3,
         "observed_at": "2026-09-12T16:05:14Z"
+      },
+      {
+        "install_count": 3,
+        "observed_at": "2026-09-13T07:31:16Z"
+      },
+      {
+        "install_count": 3,
+        "observed_at": "2026-09-14T07:58:17Z"
       }
     ],
     "install_count": 3,
-    "listing_updated_at": "2026-09-12T11:28:13.31Z",
-    "observed_at": "2026-09-12T16:05:14Z",
+    "listing_updated_at": "2026-09-14T06:14:07.987Z",
+    "observed_at": "2026-09-14T07:58:17Z",
     "publisher": "vibedgc",
     "source": "visual-studio-marketplace-gallery-api",
     "source_url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",

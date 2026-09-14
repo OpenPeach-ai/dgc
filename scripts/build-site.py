@@ -474,6 +474,7 @@ def build_outputs() -> dict[str, str | bytes]:
     outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
     outputs["routes.json"] = json.dumps({"html": sorted(set(public_paths + docs_paths)), "generated": "build-site.py"}, separators=(",", ":")) + "\n"
     outputs["assets/brand/dgc-brand-kit.zip"] = brand_zip()
+    outputs["assets/fonts/jetbrains-mono-extrabold-wordmark.woff2"] = (SRC / "assets/fonts/jetbrains-mono-extrabold-wordmark.woff2").read_bytes()
     for name in ("tokens.css", "site.css"):
         source = (SRC / "assets" / name).read_text(encoding="utf-8")
         if name == "site.css":

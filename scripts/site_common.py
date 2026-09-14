@@ -182,6 +182,11 @@ def _critical_css_source(route_stylesheet: str) -> str:
         (SRC / "assets" / name).read_text(encoding="utf-8")
         for name in ("tokens.css", "critical-base.css", route_stylesheet)
     )
+    # Normal style and weight 400 are initial values; WOFF2 format hints are
+    # optional for these local WOFF2 URLs. Omit them only in critical CSS to
+    # keep the genuine wordmark face within the existing 10 KiB budget.
+    source = re.sub(r"@font-face\s*\{[^}]*\}",
+                    lambda m: m.group(0).replace("font-style:normal;", "").replace("font-weight:400;", "").replace(" format('woff2')", ""), source)
     # Full styles retain the complete token set. Inline only tokens used by this route's
     # first viewport (including dependencies), so brand geometry fits the 10 KiB budget.
     used = set(re.findall(r"var\((--[\w-]+)", source))
@@ -297,7 +302,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
 <link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC releases\" href=\"/changelog.xml\">
 {f'<link rel="preload" href="{html.escape(preload_mobile_image, quote=True)}" as="image" fetchpriority="high" media="(max-width:800px)">' if preload_mobile_image else ''}
 {f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high" media="(min-width:801px)">' if preload_image and preload_mobile_image else (f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high">' if preload_image else '')}
-<link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>{mono_preload}
+<link rel=\"preload\" href=\"/assets/fonts/jetbrains-mono-extrabold-wordmark.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>{mono_preload}
 <style data-critical-revision=\"{ctx['ASSET_REVISION']}\">{critical_css}</style>
 <link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\" media=\"print\" id=\"site-styles\">{style_loader}<noscript><link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\"></noscript>
 <script type=\"application/ld+json\">{json_script(ld)}</script>"""
