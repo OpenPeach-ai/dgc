@@ -1236,6 +1236,17 @@
   function appendText(value) {
     turn._buf = (turn._buf || "") + value;
     const node = textBlock(); node._markdown = turn._buf;
+    // A block the backend left open across a stall or length continuation keeps growing after the
+    // "↻ … continuing from the partial output" line (and any reasoning of the continuation) was
+    // placed under it. Left there, that line ended up below the whole merged answer card, reading
+    // as if the continuation came after the answer. It is part of the work that led to the answer,
+    // so it moves above the block the moment the continuation's text arrives.
+    let after = node.nextElementSibling;
+    const passed = [];
+    while (after && after !== turn.act && after.matches(".sys, .disclosure, .reasoning")) {
+      passed.push(after); after = after.nextElementSibling;
+    }
+    if (passed.length && after === turn.act) for (const moved of passed) node.before(moved);
     // Replay renders inline: a batch timer would hand the fragment back to the pager half empty.
     if (replaying || !turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {

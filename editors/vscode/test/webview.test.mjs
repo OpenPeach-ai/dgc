@@ -1573,6 +1573,34 @@ test("a silent model request shows its waiting notice, then the stream takes the
   dom.window.close();
 });
 
+test("a stall continuation's notice sits above the merged answer, not under it", () => {
+  // Before: the backend keeps the partial answer's block open across a mid-stream stall so the
+  // continuation streams into it. The "↻ … continuing" line was placed under the partial text, the
+  // continuation grew the block above it, and the finished turn showed the line BELOW the answer card.
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start", turn_id: "t1", prompt: "phase C: hello" });
+  event({ type: "text_delta", text: "Partial answer streamed" });
+  event({ type: "info", message: "↻ fake-model at 127.0.0.1:4972 stopped streaming for 15s — continuing from the partial output (1/2)" });
+  event({ type: "text_delta", text: " and the continuation" });
+  const block = doc.querySelector(".msg.dgc");
+  const kinds = () => [...block.children].filter((n) => !n.matches(".role")).map((n) => n.matches(".sys") ? "notice"
+    : n.matches(".thinking") ? "activity" : n.matches(".answer") ? "answer" : n.matches(".text") ? "text" : n.className);
+  assert.deepEqual(kinds(), ["notice", "text", "activity"], "live: the notice moves above the block the continuation grows");
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  assert.deepEqual(kinds(), ["notice", "activity", "answer"], "finished: notice, then Worked for, then the answer card");
+  assert.equal(block.querySelector(".answer .text").textContent.trim(), "Partial answer streamed and the continuation");
+  // A notice after the answer's last words, with no more text to follow, stays where it arrived.
+  event({ type: "turn_start", turn_id: "t2", prompt: "again" });
+  event({ type: "text_delta", text: "Done." });
+  event({ type: "info", message: "later note" });
+  const second = [...doc.querySelectorAll(".msg.dgc")].at(-1);
+  assert.equal(second.querySelector(".text").nextElementSibling.textContent, "later note");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("a running tool group reads as a present-tense sentence built like the finished one", () => {
   const { errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
