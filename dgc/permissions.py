@@ -33,6 +33,7 @@ DISPLAY = {
     "read_file": "Read", "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
+    "monitor": "Monitor", "monitor_stop": "MonitorStop",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser",
     "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
@@ -44,7 +45,8 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 
 # which argument a rule's pattern is matched against
 RULE_ARG = {
-    "bash": "command", "python": "code", "read_file": "path", "write_file": "path",
+    "bash": "command", "monitor": "command", "python": "code", "read_file": "path",
+    "write_file": "path",
     "edit_file": "path", "multi_edit": "path", "apply_patch": "path",
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path", "git_diff": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
@@ -57,6 +59,13 @@ RULE_ARG = {
 READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
                    "bash_output", "propose_options", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
+# Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
+# still wins.
+STOP_TOOLS = {"monitor_stop"}
+# A tool whose policy is another tool's: a `monitor` runs a shell command, so every Bash rule, the
+# compound-command matching, plan-mode denial and auto-mode allowance apply to it unchanged. Rules
+# naming the tool itself (`Monitor`, `Monitor(tail *)`) apply too; see PermissionEngine.decide.
+POLICY_ALIASES = {"monitor": "bash"}
 
 # A shell string is not a trustworthy read/write boundary. Redirections, substitutions, interpreters,
 # `find -delete`, git output flags, aliases/config, and wrapper commands all make token allowlists
@@ -117,7 +126,7 @@ class Rule:
                 return value_path == rule_path or value_path.is_relative_to(rule_path)
             except (OSError, ValueError):
                 return False
-        if tool == "bash":
+        if tool in ("bash", "monitor"):
             # compound commands: deny matches if ANY subcommand matches;
             # allow/ask only match when EVERY subcommand matches
             hits = [self._match_one(s) for s in _split_compound(value)] or [False]
@@ -155,6 +164,8 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
         return "mcp_call", {"name": _mcp_permission_route(tool)}
     if tool == "mcp_call":
         return tool, {**args, "name": _mcp_permission_route(args.get("name"))}
+    if tool in POLICY_ALIASES:
+        return POLICY_ALIASES[tool], {RULE_ARG[tool]: args.get(RULE_ARG[tool], "")}
     return tool, args
 
 
@@ -238,11 +249,24 @@ class PermissionEngine:
         external = self.external_paths(tool, args)
         ext_args = {"path": external[0]} if external else {}
         policy_tool, policy_args = _permission_subject(tool, args)
-        deny = self._rule_action(policy_tool, policy_args, DENY)
+        # An aliased tool is matched as itself AND as the tool whose policy it shares; within each
+        # action a match on either counts, and deny from either wins over everything below.
+        subjects = [(policy_tool, policy_args)]
+        if tool in POLICY_ALIASES:
+            subjects.append((tool, dict(args)))
+
+        def rule_for_action(action: str):
+            return next((r for subject, subject_args in subjects
+                         if (r := self._rule_action(subject, subject_args, action))), None)
+
+        deny = rule_for_action(DENY)
         ext_deny = self._rule_action("external_directory", ext_args, DENY) if external else None
         if deny or ext_deny:
             r = deny or ext_deny
             return DENY, f"blocked by deny rule: {r.render()}"
+
+        if policy_tool in STOP_TOOLS:
+            return ALLOW, "stopping a process this agent started"
 
         if self.mode == "plan":
             if external:
@@ -255,7 +279,7 @@ class PermissionEngine:
 
         # Security precedence is deny -> ask -> allow. A narrow ask must beat a broad allow.
         for action in (ASK, ALLOW):
-            r = self._rule_action(policy_tool, policy_args, action)
+            r = rule_for_action(action)
             er = self._rule_action("external_directory", ext_args, action) if external else None
             if r or er:
                 matched = r or er

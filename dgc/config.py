@@ -359,6 +359,10 @@ DEFAULTS: dict = {
     "trash_mode": "dgc",                        # /files deletes: dgc (~/.dgc/trash, 30-day) | os (system trash)
     "eta": True,                                # show a calibrated "~2–4 min left" range while a turn runs
     "notify": "off",                            # off | on — terminal/editor ping when a turn ≥20 s finishes
+    "monitor_wake": True,                       # an idle TUI/editor session starts a turn on a monitor event
+    "monitor_wake_delay_s": 2,                  # idle seconds after any turn before a wake (1-300)
+    "monitor_wake_cooldown_s": 5,               # seconds between the end of a wake turn and the next (1-3600)
+    "monitor_max_consecutive_wakes": 10,        # wake turns without a prompt before wakes pause (1-100)
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
     "suggest": True,                            # ghost-text: predict the next prompt after each turn

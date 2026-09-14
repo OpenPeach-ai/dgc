@@ -92,7 +92,10 @@ def _clean_messages(messages) -> tuple[list[dict], int]:
             name = str(message.get("name") or message.get("tool_name") or "").strip()
             if name:
                 clean["name"] = name
-        if role == "user":
+        from .workflows import notice_kind
+        if role == "user" and not notice_kind(message):
+            # A monitor notice is command output DGC delivered in the user role, fenced and labelled
+            # untrusted. It stays in the trajectory (the reply depends on it) but is not a user turn.
             turns += 1
         out.append(clean)
     return out, turns

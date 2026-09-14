@@ -23,6 +23,9 @@ import time
 import unicodedata
 
 
+# A matcher written for one tool also guards a tool that runs the same thing: a `bash` PreToolUse
+# guard applies to a `monitor`, which runs a shell command. The payload still names the real tool.
+_HOOK_TOOL_ALIASES = {"monitor": "bash"}
 _MAX_HOOKS = 32
 _MAX_COMMAND_CHARS = 16_384
 _MAX_PAYLOAD_BYTES = 1024 * 1024
@@ -304,7 +307,7 @@ def run_hooks(event: str, payload: dict, config, cwd, timeout: int | float = 20,
                 continue
             matcher = hook.get("matcher")
             tool = payload.get("tool")
-            if matcher and matcher not in ("*", tool):
+            if matcher and matcher not in ("*", tool, _HOOK_TOOL_ALIASES.get(tool)):
                 continue
             command = hook.get("command")
             if (not isinstance(command, str) or not command.strip()

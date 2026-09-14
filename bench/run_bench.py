@@ -43,6 +43,7 @@ _REQUEST_REASON_LABELS = frozenset({
     "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
     "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+    "monitor_event",
 })
 
 

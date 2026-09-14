@@ -46,6 +46,7 @@ REQUEST_REASON_LABELS = frozenset({
     "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
     "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+    "monitor_event",
 })
 _MAX_TIMING_NAMES = 64
 _MAX_TIMING_VALUE = (1 << 63) - 1
@@ -704,7 +705,9 @@ def display_rows(messages) -> list[dict]:
         skip_ack = False
         if role == "user":
             from .editor_context import _strip_editor_context
-            from .workflows import display_prompt
+            from .workflows import display_prompt, notice_kind
+            if notice_kind(message):
+                continue                # command output DGC delivered; nobody typed it
             text = display_prompt(_strip_editor_context(text))
             if text.startswith(_COMPACT_PREFIX):
                 skip_ack = True

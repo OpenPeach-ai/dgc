@@ -37,6 +37,7 @@ _KIND = {  # DGC tool -> ACP tool-call kind
     "read_file": "read", "repo_map": "read", "code_intel": "read", "glob": "read", "grep": "read",
     "write_file": "edit", "edit_file": "edit", "multi_edit": "edit", "apply_patch": "edit",
     "bash": "execute", "bash_output": "execute", "bash_kill": "execute",
+    "monitor": "execute", "monitor_stop": "execute",
     "web_fetch": "fetch", "web_search": "fetch",
     "todo": "think", "task": "think", "skill": "other", "save_memory": "other",
 }
@@ -853,6 +854,9 @@ class _ACPUi:
             content = message.get("content")
             if role not in ("user", "assistant"):
                 continue
+            from .workflows import notice_kind
+            if notice_kind(message):
+                continue                # a monitor notice from a TUI/editor run, not the user's words
             if isinstance(content, list):
                 text = "\n".join(str(p.get("text", "")) for p in content
                                  if isinstance(p, dict) and p.get("type") == "text")

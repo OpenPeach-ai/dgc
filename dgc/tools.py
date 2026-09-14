@@ -167,6 +167,22 @@ TOOL_SCHEMAS = [
         ["id"]),
     _fn("bash_kill", "Terminate a background bash task.",
         {"id": {"type": "string"}}, ["id"]),
+    # Exposed only by a frontend that can deliver the events (the TUI and the editor); see
+    # Agent._monitor_exposed. The executor delegates to the agent's MonitorHub.
+    _fn("monitor", "Watch a long-running shell command in the background and get a notification "
+        "for each line it prints to stdout, while you keep working. Notifications arrive between "
+        "your tool calls, and wake you if you have finished. Same permissions and sandbox as bash. "
+        "Returns a monitor id.",
+        {"command": {"type": "string", "description": "Shell script: each stdout line is one event; "
+                     "exiting ends the watch. stderr is kept for bash_output."},
+         "description": {"type": "string", "description": "Short label shown with every event"},
+         "timeout_ms": {"type": "integer", "default": 300000, "maximum": 3600000,
+                        "description": "Kill after this many ms; ignored when persistent"},
+         "persistent": {"type": "boolean", "default": False,
+                        "description": "Run until monitor_stop or the session ends"}},
+        ["command", "description"]),
+    _fn("monitor_stop", "Stop a running monitor by id (an unknown id lists the running ones).",
+        {"id": {"type": "string"}}, ["id"]),
     _fn("python", "Run Python in a PERSISTENT interpreter tied to this session. Variables, imports, and "
         "function definitions PERSIST across calls, so you can load data into a variable ONCE and then run "
         "computations over it across many turns instead of re-reading the data into context each time "
@@ -1175,6 +1191,10 @@ def bash_handle_tools(ctx) -> set[str]:
     if not has_output:
         with _OUTPUT_LOCK:
             has_output = any(entry.get("owner") == owner for entry in _OUTPUTS.values())
+    hub = getattr(ctx, "monitors", None)
+    if not has_output and hub is not None:
+        # A monitor's retained stdout and stderr are read with bash_output, running or ended.
+        has_output = bool(hub.has_any())
     tools = {"bash_output"} if has_output else set()
     if has_running:
         tools.add("bash_kill")
@@ -1408,7 +1428,7 @@ def bash(args: dict, ctx) -> str:
     if len(command) > MAX_BASH_COMMAND_CHARS:
         return f"error: bash command exceeds {MAX_BASH_COMMAND_CHARS} characters"
     if args.get("background"):
-        return _bash_background(command, ctx)
+        return _bash_background(command, ctx, notify_exit=args.get("_dgc_notify_exit") is True)
     raw_timeout = args.get("timeout")
     if raw_timeout is None:
         raw_timeout = ctx.config.get("bash_timeout", 120)
@@ -1566,7 +1586,7 @@ def direct_bash(command: str, ctx) -> str:
         lease.release()
 
 
-def _bash_background(command: str, ctx) -> str:
+def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
     _reap_background()
     bid = f"bg{next(_BG_N)}"
     from .scheduler import acquire_cancellable, workspace_mutation_lock
@@ -1574,12 +1594,14 @@ def _bash_background(command: str, ctx) -> str:
     if not acquire_cancellable(workspace_lock, getattr(ctx, "cancelled", None)):
         return (f"error: {workspace_lock.last_error}" if workspace_lock.last_error else
                 "error: background command was cancelled while waiting for the workspace write lease")
+    # The lease covers the spawn only, exactly as a monitor's does. Holding it until the process
+    # exited blocked every later edit and foreground command for as long as a dev server or watcher
+    # ran; a background command must therefore not be used to change the checkout.
     try:
         from . import sandbox
         sandbox_requested = sandbox.requested(ctx.config)
         argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
         if sandbox_requested and argv is None:
-            workspace_lock.release()
             return "error: sandbox policy cannot safely confine this workspace; background command was not run"
         popen_kw = dict(stdin=subprocess.DEVNULL,       # never the editor's command pipe
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -1591,12 +1613,15 @@ def _bash_background(command: str, ctx) -> str:
         else:
             proc = subprocess.Popen(["/bin/bash", "-o", "pipefail", "-c", command], **popen_kw)
     except Exception as e:
-        workspace_lock.release()
         return f"error: could not start background command: {e}"
+    finally:
+        workspace_lock.release()
     safe_command = _safe_command_label(command, ctx)
+    hub = getattr(ctx, "monitors", None) if notify_exit else None
     entry = {"proc": proc, "buf": [], "buf_chars": 0, "dropped_chars": 0,
-             "lock": _threading.Lock(), "cmd": safe_command, "owner": _tool_owner(ctx),
-             "started": time.time(), "finished": None, "thread": None}
+             "lock": _threading.Lock(), "command": safe_command, "owner": _tool_owner(ctx),
+             "started": time.time(), "finished": None, "thread": None, "killed": False,
+             "notify_epoch": getattr(hub, "epoch", 0)}
     with _BG_LOCK:
         _BG[bid] = entry
 
@@ -1639,14 +1664,25 @@ def _bash_background(command: str, ctx) -> str:
             proc.wait()
         finally:
             entry["finished"] = time.time()
-            workspace_lock.release()
+        # Tell the model once when the task ends on its own -- never after bash_kill or shutdown,
+        # and never into a conversation that replaced the one that started it (the hub's epoch).
+        if hub is not None and not entry.get("killed"):
+            with entry["lock"]:
+                tail = "".join(entry["buf"])[-4000:]
+            try:
+                hub.queue_background_exit(bid, safe_command, proc.returncode,
+                                          entry["finished"] - entry["started"], tail,
+                                          entry["notify_epoch"])
+            except Exception:
+                pass
 
     reader_thread = _threading.Thread(target=reader, daemon=True,
                                       name=f"dgc-background-{bid}")
     entry["thread"] = reader_thread
     reader_thread.start()
     return (f"started background task {bid}: {safe_command}\n"
-            f"Read its output with bash_output(id=\"{bid}\").")
+            f"Read its output with bash_output(id=\"{bid}\")."
+            + (" You are notified once when it exits." if hub is not None else ""))
 
 
 def bash_output(args: dict, ctx) -> str:
@@ -1667,11 +1703,16 @@ def bash_output(args: dict, ctx) -> str:
         output = dict(output) if output is not None and output.get("owner") == owner else None
     if output is not None:
         return _render_output(bid, output, args, background=False)
+    hub = getattr(ctx, "monitors", None)
+    if hub is not None:
+        rendered = hub.render_output(bid, args)
+        if rendered is not None:
+            return rendered
     with _BG_LOCK:
         active_bg = [key for key, entry in _BG.items() if entry.get("owner") == owner]
     with _OUTPUT_LOCK:
         active_out = [key for key, entry in _OUTPUTS.items() if entry.get("owner") == owner]
-    available = active_bg + active_out
+    available = active_bg + active_out + (hub.ids() if hub is not None else [])
     display_id = _prefix_without_split_marker(_safe_output(bid, ctx), 128)
     return f"no bash output '{display_id}' (available: {', '.join(available) or 'none'})"
 
@@ -1684,6 +1725,7 @@ def bash_kill(args: dict, ctx) -> str:
         return f"no background task '{bid}'"
     if e.get("finished") is not None:
         return f"{bid} already finished (exit code {e['proc'].poll()})"
+    e["killed"] = True                      # a kill the model asked for is not news to deliver
     _terminate_background(e["proc"], sweep_exited_group=True)
     if not _join_background_reader(e):
         return f"error: killed {bid}, but its output reader did not close and cleanup is incomplete"
@@ -1780,6 +1822,7 @@ def _shutdown_background() -> None:
         # Completed handles remain inspectable for 30 minutes. Never signal their stale process-group
         # IDs: the kernel may have reused one for an unrelated process by interpreter shutdown.
         if entry.get("finished") is None:
+            entry["killed"] = True
             _terminate_background(entry["proc"], sweep_exited_group=True)
             _join_background_reader(entry)
 
@@ -3353,10 +3396,28 @@ def save_memory(args: dict, ctx) -> str:
     return f"memory saved to {path}"
 
 
+def monitor_tool(args: dict, ctx) -> str:
+    hub = getattr(ctx, "monitors", None)
+    if hub is None:
+        return "error: background monitors are not available in this session"
+    return hub.start(args, ctx)
+
+
+def monitor_stop_tool(args: dict, ctx) -> str:
+    hub = getattr(ctx, "monitors", None)
+    mid = str(args.get("id", ""))
+    if hub is not None and hub.stop(mid, "stopped"):
+        return f"stopped {mid} (process group signalled; it is reaped in the background)"
+    running = ", ".join(m.id for m in hub.running()) if hub is not None else ""
+    shown = _prefix_without_split_marker(_safe_output(mid, ctx), 128)
+    return f"no running monitor '{shown}' (running: {running or 'none'})"
+
+
 EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,
+    "monitor": monitor_tool, "monitor_stop": monitor_stop_tool,
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
     "git_diff": git_diff,
     "web_fetch": web_fetch,

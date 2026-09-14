@@ -63,6 +63,7 @@ _ACTIVITY_VERBS = {
     "web_fetch": "Fetching a page", "todo": "Updating the plan", "task": "Delegating a task",
     "skill": "Reading a skill", "present_plan": "Presenting the plan",
     "memory": "Updating memory", "artifact": "Building an artifact",
+    "monitor": "Starting a monitor", "monitor_stop": "Stopping a monitor",
 }
 
 

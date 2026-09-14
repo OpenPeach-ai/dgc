@@ -109,6 +109,23 @@ STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were worki
 STEERING_SUFFIX = "\n</user-interjection>"
 
 
+def notice_kind(message) -> str:
+    """What kind of DGC-written notice a transcript message is, or "" for anything else.
+
+    Read from the private ``_dgc_notice`` key only, never from content: a user who literally types
+    ``<monitor-events`` still sent a prompt. Every transcript projection (editor history, the TUI,
+    session rows, recall, training export, ACP replay) asks here, so a notice can never come back
+    as something the user typed. Private keys never reach a provider.
+    """
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return ""
+    notice = message.get("_dgc_notice")
+    if not isinstance(notice, dict):
+        return ""
+    kind = notice.get("kind")
+    return kind if kind in ("monitor",) else ""
+
+
 def display_prompt(text: str) -> str:
     """Render the user's command for human history; never used to construct execution inputs."""
     if text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX):
