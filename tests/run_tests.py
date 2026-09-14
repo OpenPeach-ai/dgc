@@ -1988,19 +1988,136 @@ def unit_tests(tmp: Path):
         _missing_ok = "does not exist" in str(_error)
     check("browser_path that does not exist is named in the error", _missing_ok)
 
-    # Pixels are queued for the model only when the model can read them.
-    class _ShotCtx:
-        project_root = tmp
-        config = _output_ctx.config
-        tool_owner = "browser-vision-test"
-        cancelled = None
-        skills: dict = {}
-        todos: list = []
-        on_todo = None
-        vision = True
-    check("a vision model has images queued for it", _tools_bg._vision_available(_ShotCtx()))
-    _ShotCtx.vision = False
-    check("a text-only model has none queued", not _tools_bg._vision_available(_ShotCtx()))
+    # Pixels are queued for the model only when the model can read them. A real Agent's context
+    # reads its live client, so this is the vision answer a turn actually gets (a fixture context
+    # with a hard-coded flag hid that Agent.__init__ used to sync vision before the context existed).
+    import copy as _shot_copy
+    from unittest.mock import patch as _shot_patch
+    from dgc.agent import Agent as _ShotAgent
+    from dgc.config import Config as _ShotConfig, DEFAULTS as _SHOT_DEFAULTS
+    from dgc.llm import LLMClient as _ShotClient, ToolCall as _ShotCall
+
+    def _shot_config(root):
+        config = object.__new__(_ShotConfig)
+        config.project_root, config.project_dir, config._persist = root, root / ".dgc", False
+        config.data = _shot_copy.deepcopy(_SHOT_DEFAULTS)
+        config.data.update(base_url="http://localhost.invalid/v1", model="fixture", mode="auto",
+                           hooks={}, mcp_servers={}, suggest=False, artifact_autostart=False)
+        config._stored_secrets, config._env_secret_keys, config._explicit_keys = {}, set(), set()
+        config.credential_warnings = ()
+        config.permissions = {"allow": [], "ask": [], "deny": []}
+        return config
+
+    def _shot_client(vision):
+        class _PinnedVision(_ShotClient):
+            vision_supported = vision
+        return _PinnedVision("http://localhost.invalid/v1", "", "fixture")
+
+    class _ShotUI:
+        def __init__(self): self.images = []
+        def tool_images(self, call_id, images, caption="", **extra): self.images.append((call_id, images, extra))
+        def __getattr__(self, name): return lambda *args, **kwargs: None
+
+    _shot_ui = _ShotUI()
+    with _shot_patch.object(_ShotAgent, "_new_client", lambda self, *a, **k: _shot_client(True)):
+        _shot_agent = _ShotAgent(_shot_config(Path(tmp)), _shot_ui)
+    try:
+        check("a vision model has images queued for it", _tools_bg._vision_available(_shot_agent.ctx))
+        _shot_agent.client = _shot_client(False)
+        check("a text-only model has none queued", not _tools_bg._vision_available(_shot_agent.ctx))
+
+        class _ShotSession:
+            current_url = "https://user:pw@example.com/login"
+            def screenshot_png(self):
+                return (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + (64).to_bytes(4, "big")
+                        + (48).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00" + b"\x00" * 16)
+        with _shot_patch("dgc.tools._browser_session", return_value=_ShotSession()):
+            _shot_agent._image_batch_open = True
+            _shot_out = _shot_agent._handle_call(_ShotCall("shot-1", "browser", {"operation": "screenshot"}))
+        check("tool_images is emitted for a text-only model",
+              len(_shot_ui.images) == 1 and _shot_ui.images[0][0] == "shot-1"
+              and _shot_agent._turn_images == []
+              and "The user can see the screenshot in the chat." in _shot_out
+              and _shot_ui.images[0][2]["meta"][0]["host"] == "example.com",
+              (_shot_out, _shot_ui.images))
+    finally:
+        _shot_agent.mcp.stop_all()
+
+    # An endpoint that turns out not to accept images must lose vision, never native tools: the
+    # image is dropped from the retried request and every later one.
+    import http.server as _shot_http
+    _shot_bodies = []
+
+    class _RefusesImages(_shot_http.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            _shot_bodies.append(body)
+            imaged = "image_url" in json.dumps(body)
+            reply = ({"error": {"message": "this model does not support image input"}} if imaged else
+                     {"choices": [{"index": 0, "finish_reason": "stop",
+                                   "message": {"role": "assistant", "content": "ok"}}]})
+            raw = json.dumps(reply).encode()
+            self.send_response(400 if imaged else 200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    _shot_server = _shot_http.ThreadingHTTPServer(("127.0.0.1", 0), _RefusesImages)
+    threading.Thread(target=_shot_server.serve_forever, daemon=True).start()
+    try:
+        _refusing = _ShotClient(f"http://127.0.0.1:{_shot_server.server_address[1]}/v1", "", "refuses-images",
+                                api_mode="chat_completions")
+        _shot_messages = [{"role": "user", "content": [
+            {"type": "text", "text": "look"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}]}]
+        _shot_tools = [{"type": "function", "function": {"name": "ls", "description": "list",
+                                                         "parameters": {"type": "object", "properties": {}}}}]
+        _first = _refusing.chat(_shot_messages, tools=_shot_tools)
+        _second = _refusing.chat(_shot_messages, tools=_shot_tools)
+        check("an endpoint that refuses images keeps native tools and stops receiving images",
+              _first.content == "ok" and _second.content == "ok" and len(_shot_bodies) == 3
+              and _refusing.tools_supported and not _refusing.vision_supported
+              and all("tools" in body for body in _shot_bodies)
+              and ["image_url" in json.dumps(body) for body in _shot_bodies] == [True, False, False],
+              [("image_url" in json.dumps(b), "tools" in b) for b in _shot_bodies])
+    finally:
+        _shot_server.shutdown()
+        _shot_server.server_close()
+
+    # The frame budget: one image that alone does not fit is an explicit empty slot.
+    class _SlotEm:
+        def __init__(self): self.frames = []
+        def emit(self, _t, /, **f): self.frames.append(f)
+    _slot_ui = _headless_mod2.HeadlessUI.__new__(_headless_mod2.HeadlessUI)
+    _slot_ui.em = _SlotEm()
+    _headless_mod2.HeadlessUI.tool_images(_slot_ui, "c-big", ["data:image/png;base64," + "C" * 4_200_000],
+                                          "browser screenshot")
+    _slot_item = {"ref": "img_" + "d" * 32, "name": "big.png", "mime": "image/png", "width": 1,
+                  "height": 1, "bytes": 1, "source": "view_image", "host": ""}
+    _headless_mod2.HeadlessUI.tool_images(_slot_ui, "c-ref", ["data:image/png;base64," + "C" * 4_200_000],
+                                          "viewed image", items=[_slot_item], omitted=1)
+    check("a single over-budget image becomes an empty slot, never a vanished event",
+          _slot_ui.em.frames == [
+              {"call_id": "c-big", "images": [], "caption": "browser screenshot"},
+              {"call_id": "c-ref", "images": [""], "caption": "viewed image", "items": [_slot_item],
+               "omitted": 1}], _slot_ui.em.frames)
+    from dgc import editor_protocol as _shot_ep
+    check("tool_images declares items and omitted",
+          _shot_ep.event_error({"type": "tool_images", "seq": 0, **_slot_ui.em.frames[1]}) is None
+          and _shot_ep.event_error({"type": "tool_images", "seq": 0, **_slot_ui.em.frames[1], "foo": 1}) is not None)
+    from dgc.headless import _BUSY_MUTATIONS as _shot_busy, _WAKE_NEUTRAL_COMMANDS as _shot_neutral
+    check("get_image is read-only, wake-neutral and not a busy mutation",
+          "get_image" in _shot_neutral and "get_image" not in _shot_busy
+          and _shot_ep.command_error({"type": "get_image", "request_id": "r1", "ref": "img_" + "0" * 32}) is None
+          and _shot_ep.command_error({"type": "get_image", "request_id": "r1"}) is not None)
+    _shot_ready_source = Path(_headless_mod2.__file__).read_text(encoding="utf-8")
+    check("ready advertises image_views", '"image_views": True' in _shot_ready_source)
+    from dgc.permissions import Rule as _ShotRule
+    check("Read rules still parse to read_file",
+          _ShotRule.parse("Read(secret/**)", "deny").tool == "read_file"
+          and _ShotRule.parse("ViewImage(*.png)", "allow").tool == "view_image")
     check("draining an empty image queue is safe", _take_images("nobody-at-all") == [])
 
     # The snapshot script must read the DOM, because the accessibility tree drops

@@ -98,6 +98,7 @@ class AgentUI(Protocol):
 _ACTIVITY_VERBS = {
     "bash": "Running a command", "bash_output": "Reading command output",
     "read_file": "Reading a file", "write_file": "Writing a file", "edit_file": "Editing a file",
+    "view_image": "Viewing an image",
     "multi_edit": "Editing a file", "apply_patch": "Applying a patch", "grep": "Searching",
     "glob": "Finding files", "ls": "Listing files", "repo_map": "Mapping the repo",
     "code_intel": "Reading code structure", "web_search": "Searching the web",
