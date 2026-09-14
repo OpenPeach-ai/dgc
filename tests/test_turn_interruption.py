@@ -221,9 +221,11 @@ class KilledBackendResumeTests(unittest.TestCase):
             proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=work.name, env=env,
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, text=True)
-            self.addCleanup(lambda: proc.poll() is None and proc.kill())
+            # Cleanups run last-in first-out: close the pipes only after the process is gone, or a
+            # reader thread still inside readline() holds the stream and the close blocks on it.
             for pipe in (proc.stdin, proc.stdout):
                 self.addCleanup(pipe.close)
+            self.addCleanup(lambda: proc.poll() is None and (proc.kill(), proc.wait(30)))
             arrived = queue.Queue()
 
             def read():
