@@ -93,6 +93,15 @@ class TuiImageRowTests(unittest.TestCase):
         hits = [b for b in self.tui.blocks if b.get("kind") == "tool" and self.tui._tool_collapsible(b)]
         self.assertEqual(hits, [block], "/expand finds the image step (and not the one-line command)")
 
+    def test_images_change_the_cached_render_key(self):
+        self.tui.tool_call("browser", {"operation": "screenshot"}, "call_1")
+        self.tui.tool_result("browser", "saved", "call_1")
+        block = self.tui.blocks[0]
+        before = self.tui._block_key(block, "theme")
+        self.tui.tool_images("call_1", [""], "", meta=[self.meta(self.shot())])
+        self.assertNotEqual(self.tui._block_key(block, "theme"), before,
+                            "a step that gains images is drawn again, not served from the cache")
+
     def test_combined_toggle_when_output_is_also_clamped(self):
         block = self.step_with_image("\n".join(f"line {n}" for n in range(40)))
         rows = [part[1] for part in self.tui._tool_frags(block) if len(part) == 3 and "click" in part[1]]
@@ -120,7 +129,8 @@ class TuiImageRowTests(unittest.TestCase):
         block["exp"] = True
         with patch.dict(os.environ, {}, clear=True), patch("sys.platform", "linux"):
             text = text_of(self.tui._tool_frags(block))
-        self.assertIn(str(self.root / ".dgc" / "screenshots"), text)
+        from dgc.tui import _home_relative
+        self.assertIn(_home_relative(str(self.root / ".dgc" / "screenshots")), text)
         self.assertNotIn("   open", text)
 
     def test_orphan_images_get_a_step_of_their_own(self):
@@ -167,7 +177,8 @@ class OpenImageTests(unittest.TestCase):
         popen = self.open(self.record, {})
         popen.assert_not_called()
         self.assertIn("no display to open images here", self.tui._flash_msg)
-        self.assertIn(str(self.path), self.tui._flash_msg)
+        from dgc.tui import _home_relative
+        self.assertIn(_home_relative(str(self.path)), self.tui._flash_msg)
 
     def test_xdg_open_runs_detached_with_a_display(self):
         import subprocess

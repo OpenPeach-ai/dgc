@@ -299,6 +299,12 @@ class AgentSession:
         return "idle"
 
 
+def _home_relative(path: str) -> str:
+    """images: a stored image's path as a person would type it, with the home directory as ~."""
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if home and home != "/" and path.startswith(home + os.sep) else path
+
+
 def _active_prop(field: str):
     """A THREAD-AWARE TUI property so the ~150 existing `self.<field>` references keep working
     while the state lives per-session. On a worker thread it targets THAT thread's session (a
@@ -2009,7 +2015,8 @@ class TUI:
             if blk.get("running"):
                 return None
             return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
-                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "", theme_key)
+                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "", theme_key,
+                    len(blk.get("images") or ()), blk.get("images_omitted") or 0)   # images: rows
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
             # width and height in the identity preserves the resize reflow exactly.
@@ -2304,7 +2311,7 @@ class TUI:
             if display:
                 frags.append((f"fg:{th.accent_dim}", "   open", open_row))
             else:
-                path = style_mod.terminal_safe_text(str(record.get("path") or ""))
+                path = _home_relative(style_mod.terminal_safe_text(str(record.get("path") or "")))
                 frags.append((f"fg:{th.faint}", f"   {path}" if path else "", open_row))
         if omitted:
             frags.append(("", "\n"))
@@ -2325,7 +2332,7 @@ class TUI:
         from . import sessions as sessions_mod
         name = style_mod.terminal_safe_text(str(record.get("name") or "image"))[:128]
         path = str(record.get("path") or "")
-        shown = style_mod.terminal_safe_text(path)
+        shown = _home_relative(style_mod.terminal_safe_text(path))
         try:
             info = os.lstat(path) if path else None
         except OSError:
