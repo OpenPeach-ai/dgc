@@ -25,7 +25,7 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from benchmark_site import BenchmarkDataError, benchmark_context, subject_harness, validate_benchmark
 from release_bundle import validate_bundle
-from site_common import emitted_asset_revision, minify_css, site_asset_revision
+from site_common import CRITICAL_CSS_BUDGET, emitted_asset_revision, minify_css, site_asset_revision
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
@@ -200,8 +200,8 @@ def check_pages(errors: list[str]) -> dict[Path, PageParser]:
         )
         if len(critical) != 1:
             errors.append(f"{label}: expected one revisioned inline critical stylesheet")
-        elif len(critical[0].encode("utf-8")) > 10 * 1024:
-            errors.append(f"{label}: inline critical CSS exceeds 10 KiB")
+        elif len(critical[0].encode("utf-8")) > CRITICAL_CSS_BUDGET:
+            errors.append(f"{label}: inline critical CSS exceeds {CRITICAL_CSS_BUDGET // 1024} KiB")
 
     for page, parser in parsed.items():
         base = page_url(page)

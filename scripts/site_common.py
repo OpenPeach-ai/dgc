@@ -11,6 +11,12 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "site-src"
 SITE = ROOT / "site"
+# Ceiling for the inline critical stylesheet on any route, enforced at build time here and on the
+# built HTML by check-site.py. HTML is served no-cache, so these bytes are paid on every navigation
+# and the ceiling keeps inline CSS to the first viewport. Inline CSS compresses about 3.3:1, so 12 KiB
+# is at most ~3.8 KB on the wire; the home document through the end of its hero stays well inside a
+# 10-segment initial congestion window (14,600 bytes less ~1.3 KB of response headers).
+CRITICAL_CSS_BUDGET = 12 * 1024
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -183,7 +189,7 @@ def _critical_css_source(route_stylesheet: str) -> str:
         for name in ("tokens.css", "critical-base.css", route_stylesheet)
     )
     # Full styles retain the complete token set. Inline only tokens used by this route's
-    # first viewport (including dependencies), so brand geometry fits the 10 KiB budget.
+    # first viewport (including dependencies), so brand geometry fits CRITICAL_CSS_BUDGET.
     used = set(re.findall(r"var\((--[\w-]+)", source))
     return re.sub(r"(--[\w-]+):[^;{}]+;", lambda m: m.group(0) if m.group(1) in used else "", source)
 
@@ -222,8 +228,8 @@ def critical_css_for(path: str) -> str:
     else:
         route_stylesheet = "critical-page.css"
     result = minify_css(_critical_css_source(route_stylesheet))
-    if len(result.encode("utf-8")) > 10 * 1024:
-        raise ValueError(f"inline critical CSS exceeds 10 KiB for {path}")
+    if len(result.encode("utf-8")) > CRITICAL_CSS_BUDGET:
+        raise ValueError(f"inline critical CSS exceeds {CRITICAL_CSS_BUDGET // 1024} KiB for {path}")
     return result
 
 
