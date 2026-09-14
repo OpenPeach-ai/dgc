@@ -631,7 +631,10 @@ def _sitemap_errors(
                 "(no lastmod, changefreq or priority without a truthful source)"
             )
             continue
-        locs.append((children[0].text or "").strip())
+        text = children[0].text or ""
+        if text != text.strip():
+            errors.append(f"sitemap.xml: <loc> {text!r} has surrounding whitespace; it must be the canonical URL exactly")
+        locs.append(text)
     duplicates = sorted({loc for loc in locs if locs.count(loc) > 1})
     if duplicates:
         errors.append(f"sitemap.xml: duplicate <loc> {duplicates}")
@@ -691,15 +694,21 @@ def _robots_errors(text: str, sitemap_url: str, locs: list[str]) -> list[str]:
         errors.append(f"robots.txt: unsupported field {raw.strip()!r}")
     if sitemaps != [sitemap_url]:
         errors.append(f"robots.txt: expected exactly one 'Sitemap: {sitemap_url}', found {sitemaps}")
-    star_groups = [item for item in groups if "*" in item["agents"]]
-    if not star_groups:
+    # A crawler obeys only the group(s) naming its own product token, and falls back to "*" only when
+    # none does, so every agent's merged rules are checked on their own: a "User-agent: Googlebot"
+    # group with "Disallow: /" de-indexes the site for that crawler whatever the "*" group says.
+    rules_by_agent: dict[str, list[tuple[str, str]]] = {}
+    for item in groups:
+        for agent in item["agents"]:
+            rules_by_agent.setdefault(agent, []).extend(item["rules"])
+    if "*" not in rules_by_agent:
         errors.append("robots.txt: no 'User-agent: *' group")
-    rules = [rule for item in star_groups for rule in item["rules"]]
-    for loc in locs:
-        path = urlparse(loc).path or "/"
-        matches = [(len(value), field == "allow") for field, value in rules if value and path.startswith(value)]
-        if matches and not max(matches)[1]:
-            errors.append(f"robots.txt: blocks sitemap URL {loc}")
+    for agent, rules in rules_by_agent.items():
+        for loc in locs:
+            path = urlparse(loc).path or "/"
+            matches = [(len(value), field == "allow") for field, value in rules if value and path.startswith(value)]
+            if matches and not max(matches)[1]:
+                errors.append(f"robots.txt: User-agent: {agent} blocks sitemap URL {loc}")
     return errors
 
 
@@ -721,7 +730,7 @@ def check_sitemap_and_robots(parsed: dict[Path, PageParser], errors: list[str]) 
     errors.extend(sitemap_problems)
     try:
         locs = [
-            (element.text or "").strip()
+            element.text or ""
             for element in ElementTree.fromstring(sitemap_text).iter(SITEMAP_NS + "loc")
         ]
     except ElementTree.ParseError:

@@ -11045,6 +11045,7 @@ def test_site_sitemap_and_robots():
         "a duplicate URL": (sitemap.replace(end, about + end), "duplicate <loc> ['https://vibedgc.com/about']"),
         "an .html suffix": (sitemap.replace("https://vibedgc.com/about<", "https://vibedgc.com/about.html<"), "https://vibedgc.com/about.html is not the canonical URL of about.html"),
         "truncated XML": (sitemap[:-20], "not well-formed XML"),
+        "a whitespace-padded URL": (sitemap.replace("<loc>https://vibedgc.com/about</loc>", "<loc> https://vibedgc.com/about </loc>"), "' https://vibedgc.com/about ' has surrounding whitespace"),
     }
     for name, (text, needle) in tampered.items():
         problems = sitemap_problems(text)
@@ -11054,6 +11055,9 @@ def test_site_sitemap_and_robots():
     check("site: robots gate accepts the build and a Cloudflare-prepended comment preamble",
           not gate._robots_errors(robots, sitemap_url, locs)
           and not gate._robots_errors("# Content signals\n# managed by Cloudflare\n\n" + robots, sitemap_url, locs))
+    harmless = "User-agent: examplebot\nUser-agent: otherbot\nDisallow: /private\n\n" + robots
+    check("site: robots gate accepts a crawler-specific group that blocks no sitemap URL",
+          not gate._robots_errors(harmless, sitemap_url, locs), detail=repr(gate._robots_errors(harmless, sitemap_url, locs)))
     bad_robots = {
         "no Sitemap line": ("User-agent: *\nAllow: /\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
         "a docs-host Sitemap": ("User-agent: *\nAllow: /\nSitemap: https://docs.vibedgc.com/sitemap.xml\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
@@ -11061,6 +11065,9 @@ def test_site_sitemap_and_robots():
         "Disallow: /skills": ("User-agent: *\nDisallow: /skills\nSitemap: https://vibedgc.com/sitemap.xml\n", "blocks sitemap URL https://docs.vibedgc.com/skills"),
         "a wildcard rule": ("User-agent: *\nDisallow: /*.html$\nSitemap: https://vibedgc.com/sitemap.xml\n", "wildcard rule"),
         "no User-agent: * group": ("User-agent: examplebot\nDisallow:\nSitemap: https://vibedgc.com/sitemap.xml\n", "no 'User-agent: *' group"),
+        # The committed file stays intact below it: the * group allows everything, Googlebot does not.
+        "a Googlebot group that blocks everything": ("User-agent: Googlebot\nDisallow: /\n\n" + robots, "User-agent: googlebot blocks sitemap URL https://vibedgc.com/"),
+        "a shared group that blocks one docs page": ("User-agent: examplebot\nUser-agent: Bingbot\nDisallow: /skills\n\n" + robots, "User-agent: bingbot blocks sitemap URL https://docs.vibedgc.com/skills"),
     }
     for name, (text, needle) in bad_robots.items():
         problems = gate._robots_errors(text, sitemap_url, locs)
