@@ -4006,3 +4006,13 @@ test("a draft with a pasted-text chip survives a reload, and so does an unconfir
   assert.equal(again.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
   assert.deepEqual([...first.errors, ...reopened.errors, ...again.errors], []);
 });
+
+test("Settings Save says it applies to every workspace, which is where it writes", () => {
+  // Before: "Save these settings for this workspace", but saving writes the user config
+  // (~/.dgc/config.json through set_config) that every workspace on the machine reads.
+  const { doc, errors } = makeDom();
+  const save = doc.getElementById("set-save");
+  assert.doesNotMatch(save.title, /this workspace/);
+  assert.match(save.title, /every workspace/);
+  assert.deepEqual(errors, []);
+});

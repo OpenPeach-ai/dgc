@@ -4318,7 +4318,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </section>
   </div>
   <div class="set-foot">
-    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for this workspace">Save</button>
+    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for every workspace on this computer">Save</button>
     <button type="button" id="set-cancel" class="fbtn" title="Close without saving">Close</button>
   </div>
 </div>
