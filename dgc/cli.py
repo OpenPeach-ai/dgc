@@ -1171,6 +1171,27 @@ class CLI:
         elif cmd == "update":
             run_update()
         elif cmd == "agents":
+            from .subagents import meta_text, summary_parts, tree_items
+            registry = getattr(self.agent, "subagents", None)
+            counts = registry.counts() if registry is not None else {}
+            if counts.get("total"):              # this chat's task sub-agents, as the TUI lists them
+                from .render import fmt_tokens
+                snap = registry.snapshot()
+                marks = {"queued": glyphs.AGENT_QUEUED, "running": glyphs.AGENT_RUN,
+                         "waiting": glyphs.AGENT_WAIT, "finished": glyphs.CHECK,
+                         "failed": glyphs.CROSS, "stopped": glyphs.BLOCKED}
+                self.console.print(Text("agents in this chat · " + " · ".join(summary_parts(counts))))
+                for level, item in tree_items(snap["items"]):
+                    desc = " ".join(style_mod.terminal_safe_text(
+                        item.get("description") or "(no description)").split())
+                    meta = " ".join(style_mod.terminal_safe_text(meta_text(
+                        item, main_model=str(cfg.model or ""), fmt_tokens=fmt_tokens,
+                        finished_word=False)).split())
+                    mark = marks.get(item.get("state"), glyphs.AGENT_IDLE)
+                    self.console.print(Text(f"  {'  ' * level}{mark} {desc}" + (f"  {meta}" if meta else "")))
+                hidden = int(counts.get("total", 0)) - len(snap["items"])
+                if hidden > 0:
+                    self.console.print(Text(f"  {glyphs.ELLIPSIS_V} {hidden} more not listed"))
             defs = self.agent.agent_defs
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"

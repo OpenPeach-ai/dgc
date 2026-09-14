@@ -32,6 +32,7 @@ from .skills import (discover_skills, matching_skill_names, explicit_skill_instr
                      format_skill_instructions)
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 from .monitors import MonitorHub, Notification, NOTICE_CLOSE, NOTICE_OPEN, plural
+from .subagents import SubagentRegistry
 from .presentation import RESPONSE_GUIDANCE
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
 
@@ -265,6 +266,26 @@ def _call_model_wait(hook, label, detail="", **options):
     if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
         options = {key: value for key, value in options.items() if key in params}
     return hook(label, detail, **options)
+
+
+def _wire_call_id(ui, call_id):
+    """The call id ``ui`` puts on the wire for this agent's ``call_id``: a sub-agent's UI prefixes
+    it with its own id at every level. Looked up on the type, like ``approve_live``, so a permissive
+    fixture's ``__getattr__`` is not mistaken for it."""
+    wire = getattr(type(ui), "wire_call_id", None)
+    return wire(ui, call_id) if callable(wire) else call_id
+
+
+def _subagent_progress(agent) -> None:
+    """Publish a sub-agent's running tool and token totals to the agents list (coalesced there)."""
+    registry, agent_id = getattr(agent, "subagents", None), getattr(agent, "_subagent_id", None)
+    if registry is None or not agent_id:
+        return
+    with agent._usage_lock:
+        tool_calls = int(agent.activity_totals.get("tool_calls", 0) or 0)
+        tokens = (int(agent.usage_totals.get("input_tokens", 0) or 0)
+                  + int(agent.usage_totals.get("output_tokens", 0) or 0))
+    registry.progress(agent_id, tool_calls=tool_calls, tokens=tokens or None)
 
 
 class _DeadlineCancel:
@@ -707,6 +728,17 @@ class _SubUI:
     def _call_id(self, call_id):
         return f"{self._call_prefix}:{call_id}" if call_id else call_id
 
+    @property
+    def agent_id(self) -> str:
+        """This child's id in the agents list (``sub-`` + 12 hex), the prefix of its call ids."""
+        return self._call_prefix
+
+    def wire_call_id(self, call_id):
+        """The call id that reaches the front end for one of this child's calls."""
+        wire = getattr(type(self._parent), "wire_call_id", None)
+        own = self._call_id(call_id)
+        return wire(self._parent, own) if callable(wire) else own
+
     def _direct(self, name: str, *args, **kwargs):
         """Call the parent UI while preserving the originating TUI fleet-session route."""
         callback = getattr(self._parent, name, None)
@@ -1077,6 +1109,7 @@ class Agent(GoalLifecycle):
                                 notes=lambda: self.notes())
         self.monitors = MonitorHub(self.ctx.tool_owner, config, config.project_root)
         self.ctx.monitors = self.monitors
+        self.subagents = SubagentRegistry()      # this chat's task sub-agents (children share it)
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
         # ---- 0.40 shared plain state (declared once here; each lane gives its fields meaning) ----
         self._subagent_id = None                 # agents: this child's sub-<12 hex> id (None at depth 0)
@@ -1347,6 +1380,7 @@ class Agent(GoalLifecycle):
             reasons = self.timing_totals.setdefault("by_request_reason", {})
             reasons[reason] = min(_MAX_TIMING_VALUE, reasons.get(reason, 0) + 1)
         self._persist_metrics()
+        _subagent_progress(self)
         parent = getattr(self, "_metrics_parent", None)
         if parent is not None and parent is not self:
             # The child retains its detailed trajectory in its private counters. The root owns the
@@ -1361,6 +1395,7 @@ class Agent(GoalLifecycle):
                 key = "edit_fails" if edit_failed else "edits"
                 self.activity_totals[key] += 1
         self._persist_metrics()
+        _subagent_progress(self)
         parent = getattr(self, "_metrics_parent", None)
         if parent is not None and parent is not self:
             parent._record_activity(name, edit_failed)
@@ -1958,6 +1993,9 @@ class Agent(GoalLifecycle):
         monitors = getattr(self, "monitors", None)
         if monitors is not None:
             monitors.new_epoch("shutdown")
+        registry = getattr(self, "subagents", None)
+        if registry is not None:
+            registry.reset()                     # the agents list belongs to the chat being left
         self._last_turn_tool_intents = set()
         self._last_turn_mcp_tools = set()
         self._last_turn_mcp_query = ""
@@ -2499,6 +2537,10 @@ class Agent(GoalLifecycle):
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._eta_end(completed)
+                if self.depth == 0 and getattr(self, "subagents", None) is not None:
+                    # A child that never reported (an exception between its start and its end)
+                    # must not stay "working" in the agents list after the turn is over.
+                    self.subagents.end_open("stopped", "the turn ended before this agent reported")
                 if self.depth == 0:             # the checklist note was this turn's to read
                     self._todo_clear_note_in_prompt = False
                     # A monitor wake turn keeps the tools this task had turned on (the browser for
@@ -3173,6 +3215,7 @@ class Agent(GoalLifecycle):
             self._reset_todo_clear()
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
+            self.subagents.rebuild(self.messages, path.stem, redact=self._safe_text)
             checkpoint_state = record.get("checkpoints")
             self.checkpoints = CheckpointManager.from_state(
                 checkpoint_state if isinstance(checkpoint_state, dict) else {},
@@ -3262,6 +3305,8 @@ class Agent(GoalLifecycle):
         without bringing back the activity it replaced: the call ended in an error, a cancel or a
         stall, and whatever the loop says next is the truth."""
         hook = getattr(self.ui, "model_wait", None)
+        if getattr(self, "_subagent_id", None):
+            self.subagents.activity(self._subagent_id, label or "")   # the agents list's activity
         if callable(hook):
             _call_model_wait(hook, label, detail, since=since, restore=restore)
         elif label:
@@ -4631,7 +4676,14 @@ class Agent(GoalLifecycle):
                         notify(art)                     # the CLI proposes opening the plan in the browser
                 except Exception:
                     pass
-            choice = self.ui.present_plan(safe_plan)
+            waiting_id = getattr(self, "_subagent_id", None)
+            if waiting_id:
+                self.subagents.waiting(waiting_id, "answer")
+            try:
+                choice = self.ui.present_plan(safe_plan)
+            finally:
+                if waiting_id:
+                    self.subagents.waiting(waiting_id, None)
             if self.cancelled.is_set():
                 return "Plan review cancelled. No approval was granted; remain in plan mode."
             if choice is None:
@@ -4745,8 +4797,15 @@ class Agent(GoalLifecycle):
                 return "once" if result == ALLOW else "no" if result == DENY else None
             # Opt in via a real method, not a permissive fixture's __getattr__ fallback.
             live_approve = getattr(type(self.ui), "approve_live", None)
-            verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
-                       if callable(live_approve) else self.ui.approve(name, display_args, call_id))
+            waiting_id = getattr(self, "_subagent_id", None)
+            if waiting_id:                       # the agents list shows this child waiting on you
+                self.subagents.waiting(waiting_id, "permission")
+            try:
+                verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
+                           if callable(live_approve) else self.ui.approve(name, display_args, call_id))
+            finally:
+                if waiting_id:
+                    self.subagents.waiting(waiting_id, None)
             if verdict == "no":
                 reason = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets)
                 if hasattr(self.ui, "deny_reason"):
@@ -5037,6 +5096,7 @@ class Agent(GoalLifecycle):
                 if self.monitors.has_running() or self.monitors.pending_count():
                     self.ui.info("monitors stopped by rewind")
                 self.monitors.new_epoch("shutdown")
+                self.subagents.prune_to(self.messages)   # agents whose task call was rewound away go
                 if conversation is not None and self.session_file:
                     # Rewinding restores the very messages a later compaction archived; keeping
                     # those rows would render them twice.
@@ -5115,72 +5175,104 @@ class Agent(GoalLifecycle):
         retain, or clean the checkout: the parent coordinator performs those operations in stable
         model-call order after every parallel child has stopped.
         """
-        adef = self.agent_defs.get(agent_name) if agent_name else None
-        task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
-        isolated = workspace is not None
-        child_root = workspace.project_root if isolated else self.config.project_root
+        # The agents list must hear how this child ended on every path: an early return, a thrown
+        # exception, a cancel. The record ends here, on the worker thread, before any trace replay.
+        registry = getattr(self, "subagents", None)
+        agent_id = getattr(sub_ui, "agent_id", None)
+        sub = None
+        failure = result = start_error = raised = ""
+        if registry is not None and agent_id:
+            registry.running(agent_id)               # a worker slot was taken (queued -> running)
         try:
-            child_config = self.config.clone_for_root(child_root)
-        except Exception as exc:
-            return "", "", f"{type(exc).__name__}: {exc}"
+            adef = self.agent_defs.get(agent_name) if agent_name else None
+            task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
+            isolated = workspace is not None
+            child_root = workspace.project_root if isolated else self.config.project_root
+            try:
+                child_config = self.config.clone_for_root(child_root)
+            except Exception as exc:
+                start_error = f"{type(exc).__name__}: {exc}"
+                return "", "", start_error
 
-        isolated_mcp = None
-        thrown = ""
-        try:
-            if isolated:
-                isolated_mcp = MCPManager(
-                    child_config.project_root,
-                    client_capabilities=self._mcp_client_capabilities(sub_ui),
-                    disabled_names=child_config.get("disabled_mcp_servers", []))
-                child_servers = (child_config.mcp_runtime_servers()
-                                 if hasattr(child_config, "mcp_runtime_servers")
-                                 else child_config.get("mcp_servers"))
-                isolated_mcp.connect_all(child_servers, startup=True)
-            sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
-            sub.depth = self.depth + 1
-            sub.cancelled = self.cancelled
-            sub.ctx.cancelled = self.cancelled
-            if not isolated:
-                sub.checkpoints = self.checkpoints
-            else:
-                sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
-            sub._metrics_parent = self
-            # One link from a child to the step that started it, shared by every 0.40 feature that
-            # attributes a child's work (the agents list, viewed images).
-            sub._parent_agent = self
-            sub._parent_call_id = call_id
-            if getattr(self, "_monitor_turn", False):
-                # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
-                # for everything the turn delegates: the child refuses ASK steps and asks no question,
-                # plan or goal verdict either (auto mode still runs normally; see _handle_call).
-                sub._monitor_turn = True
-            override = self._subagent_client(adef)
-            if override is not None:
-                sub.client = override
-            if adef and adef.effort:
-                sub._effort_override = adef.effort
-            if self.cancelled.is_set():
-                thrown = "cancelled before the isolated run started"
-            else:
-                outcome = sub.run_turn(task_prompt)
-                if outcome is False:
-                    thrown = (sub._last_turn_error or sub._last_persist_error
-                              or "sub-agent turn failed")
-        except Exception as exc:
-            thrown = f"{type(exc).__name__}: {exc}"
+            isolated_mcp = None
+            thrown = ""
+            try:
+                if isolated:
+                    isolated_mcp = MCPManager(
+                        child_config.project_root,
+                        client_capabilities=self._mcp_client_capabilities(sub_ui),
+                        disabled_names=child_config.get("disabled_mcp_servers", []))
+                    child_servers = (child_config.mcp_runtime_servers()
+                                     if hasattr(child_config, "mcp_runtime_servers")
+                                     else child_config.get("mcp_servers"))
+                    isolated_mcp.connect_all(child_servers, startup=True)
+                sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
+                if registry is not None and agent_id:
+                    sub.subagents = registry             # one list per chat, whatever the depth
+                    sub._subagent_id = agent_id
+                sub.depth = self.depth + 1
+                sub.cancelled = self.cancelled
+                sub.ctx.cancelled = self.cancelled
+                if not isolated:
+                    sub.checkpoints = self.checkpoints
+                else:
+                    sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
+                sub._metrics_parent = self
+                # One link from a child to the step that started it, shared by every 0.40 feature that
+                # attributes a child's work (the agents list, viewed images).
+                sub._parent_agent = self
+                sub._parent_call_id = call_id
+                if getattr(self, "_monitor_turn", False):
+                    # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
+                    # for everything the turn delegates: the child refuses ASK steps and asks no question,
+                    # plan or goal verdict either (auto mode still runs normally; see _handle_call).
+                    sub._monitor_turn = True
+                override = self._subagent_client(adef)
+                if override is not None:
+                    sub.client = override
+                if registry is not None and agent_id:
+                    registry.running(agent_id, model=str(getattr(sub.client, "model", "") or ""))
+                if adef and adef.effort:
+                    sub._effort_override = adef.effort
+                if self.cancelled.is_set():
+                    thrown = "cancelled before the isolated run started"
+                else:
+                    outcome = sub.run_turn(task_prompt)
+                    if outcome is False:
+                        thrown = (sub._last_turn_error or sub._last_persist_error
+                                  or "sub-agent turn failed")
+            except Exception as exc:
+                thrown = f"{type(exc).__name__}: {exc}"
+            finally:
+                if isolated_mcp is not None:
+                    try:
+                        isolated_mcp.stop_all()
+                    except Exception as exc:
+                        if not thrown:
+                            thrown = f"isolated MCP cleanup failed: {type(exc).__name__}: {exc}"
+
+            failure = thrown or sub_ui.failure()
+            result = sub_ui.result()
+            if not failure and not result:
+                failure = "the sub-agent stopped without a final summary"
+            return failure, result, ""
+        except BaseException as exc:
+            raised = f"{type(exc).__name__}: {exc}"
+            raise
         finally:
-            if isolated_mcp is not None:
-                try:
-                    isolated_mcp.stop_all()
-                except Exception as exc:
-                    if not thrown:
-                        thrown = f"isolated MCP cleanup failed: {type(exc).__name__}: {exc}"
-
-        failure = thrown or sub_ui.failure()
-        result = sub_ui.result()
-        if not failure and not result:
-            failure = "the sub-agent stopped without a final summary"
-        return failure, result, ""
+            if registry is not None and agent_id:
+                why = failure or start_error or raised
+                if (why.startswith(("turn cancelled", "cancelled before"))
+                        or (why and self.cancelled.is_set())):
+                    state = "stopped"
+                else:
+                    state = "failed" if why else "finished"
+                tool_calls, tokens = 0, None
+                if sub is not None:
+                    tool_calls = int(sub.activity_totals.get("tool_calls", 0) or 0)
+                    tokens = (int(sub.usage_totals.get("input_tokens", 0) or 0)
+                              + int(sub.usage_totals.get("output_tokens", 0) or 0)) or None
+                registry.end(agent_id, state, self._safe_text(why), tool_calls=tool_calls, tokens=tokens)
 
     @staticmethod
     def _preserve_task_workspace(workspace, reason: str) -> str:
@@ -5290,6 +5382,13 @@ class Agent(GoalLifecycle):
             self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
 
         sub_ui = _SubUI(self.ui, description, cancel=self.cancelled)
+        registry = getattr(self, "subagents", None)
+        if registry is not None:
+            registry.start(id=sub_ui.agent_id, parent_id=getattr(self, "_subagent_id", None),
+                           call_id=_wire_call_id(self.ui, call_id), description=description,
+                           agent_type=agent_name if adef else "", depth=self.depth + 1,
+                           isolated=workspace is not None, parallel=False, queued=False,
+                           turn_hint=getattr(self.ui, "turn_id", ""))
         execution = self._execute_prepared_subagent(
             description, prompt, agent_name, workspace, sub_ui, call_id)
         outcome = self._finalize_subagent(description, workspace, *execution)
@@ -5413,6 +5512,13 @@ class Agent(GoalLifecycle):
                         self.ui.info(f"⟳ sub-task: {description}{tag}")
                         self.ui.info(self._safe_text(
                             f"↳ isolated checkout: {workspace.project_root}"))
+                        if getattr(self, "subagents", None) is not None:
+                            self.subagents.start(
+                                id=sub_uis[i].agent_id, parent_id=getattr(self, "_subagent_id", None),
+                                call_id=_wire_call_id(self.ui, calls[i].id), description=description,
+                                agent_type=agent_name if adef else "", depth=self.depth + 1,
+                                isolated=True, parallel=True, queued=True,
+                                turn_hint=getattr(self.ui, "turn_id", ""))
                         future = pool.submit(
                             self._execute_prepared_subagent, description, prompt,
                             agent_name, workspace, sub_uis[i], calls[i].id)
@@ -5427,6 +5533,8 @@ class Agent(GoalLifecycle):
             except Exception as exc:
                 failure = f"parallel task scheduler failed: {type(exc).__name__}: {exc}"
                 for i in prepared:
+                    if getattr(self, "subagents", None) is not None:
+                        self.subagents.end(sub_uis[i].agent_id, "failed", self._safe_text(failure))
                     executions.setdefault(i, (failure, "", ""))
                     replay_errors.extend(sub_uis[i].replay())
         if replay_errors:
