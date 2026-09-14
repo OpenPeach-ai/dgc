@@ -1847,3 +1847,33 @@ setTimeout(() => { if (generation === 1) process.kill(process.pid, "SIGKILL"); e
   assert.equal(failed.cause, "exited with code 3");
   h.provider.dispose();
 });
+
+test("a chat that never had a message is not restored on reopen, and nothing says it is unavailable", async () => {
+  // Before: the ready event's session id was remembered even though the backend writes a session
+  // file only once the chat has content, so reopening VS Code asked to resume a file that never
+  // existed and showed "no such session" and "The previous chat is unavailable".
+  const fresh = restorationHarness();
+  fresh.provider.currentSessionSaved = false;
+  fresh.provider.rememberSession();
+  assert.deepEqual(fresh.saved.get("dgc.activeSession.v1"), { scope: fresh.provider.draftScope(), id: "new-chat", saved: false });
+  // The next window: the remembered chat was never saved.
+  const reopened = restorationHarness();
+  reopened.saved.set("dgc.activeSession.v1", { scope: reopened.provider.draftScope(), id: "saved-chat", saved: false });
+  reopened.provider.sessionRestoreSaved = false;
+  reopened.provider.maybeCompleteHandshake(reopened.backend);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reopened.calls.length, 0, "no resume_session for a chat with no file");
+  assert.equal(reopened.released(), 1);
+  assert.equal(reopened.posted.some(message => message.type === "event"), false, "no error and no 'unavailable' notice");
+  assert.ok(reopened.posted.some(message => message.type === "session_ready"
+    && message.sessionId === "new-chat" && message.adoptDraftFrom === "saved-chat"), "its unsent draft still comes along");
+  // A chat becomes worth restoring as soon as it has a turn, a name or a resumed file.
+  const used = restorationHarness();
+  used.provider.currentSessionSaved = false;
+  used.provider.onEvent({ type: "turn_start", turn_id: "t1", prompt: "hello", kind: "prompt" });
+  assert.equal(used.saved.get("dgc.activeSession.v1").saved, true);
+  const named = restorationHarness();
+  named.provider.currentSessionSaved = false;
+  named.provider.onEvent({ type: "session_named", name: "Kiwi" });
+  assert.equal(named.saved.get("dgc.activeSession.v1").saved, true);
+});

@@ -270,7 +270,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private lastReadyEvent?: DgcEvent;
   private currentSessionId = "";
   private currentSessionName = "";
+  /** Whether the current chat has a session file: the backend writes one only once the chat has
+   *  content (a turn, a name) or when it was resumed or branched from one. */
+  private currentSessionSaved = false;
   private sessionRestoreCandidate = "";
+  /** The remembered chat had a file when it was remembered (older records say nothing: assume so). */
+  private sessionRestoreSaved = true;
   /** Automatic backend restarts in the recent past, so a crash loop cannot spin forever. */
   private backendRecoveries: number[] = [];
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -335,7 +340,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private rememberSession(): void {
     if (!this.currentSessionId) { return; }
     void this.context.workspaceState.update("dgc.activeSession.v1", {
-      scope: this.draftScope(), id: this.currentSessionId,
+      scope: this.draftScope(), id: this.currentSessionId, saved: this.currentSessionSaved,
     }).then(undefined, () => this.post({ type: "event", event: { type: "error",
       message: "DGC could not remember this chat for window reload. The saved conversation remains available under Resume." } }));
   }
@@ -853,6 +858,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.finishSessionHandshake(be);
       return;
     }
+    if (!this.sessionRestoreSaved) {
+      // The remembered chat never had a message, so there is no file to resume: asking for it only
+      // produced "no such session" and a notice that the chat was unavailable. Its draft still moves
+      // to the new chat, exactly as when a saved chat has gone missing.
+      this.sessionRestoreFinished = true;
+      this.sessionDraftSource = previous;
+      this.finishSessionHandshake(be, previous);
+      return;
+    }
     const command = this.stateCommand("restore-session", { type: "resume_session", path: `${previous}.json` });
     this.sessionRestoreRequestId = command.request_id;
     void be.request(command, "session", 10000, true)
@@ -1167,9 +1181,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
     }
     const cmd = executable.command;
-    const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+    const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
     this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
       ? saved.id! : "";
+    this.sessionRestoreSaved = saved?.saved !== false;
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
@@ -1428,13 +1443,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.sessionDraftSource = "";
         this.sessionHandshakeGeneration++;
         {
-          const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+          const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
           this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
             ? saved.id! : "";
+          this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
+        this.currentSessionSaved = false;           // a fresh backend's chat has no file yet
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
@@ -1497,11 +1514,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.currentSessionId = ev.session_id;
           this.post({ type: "chat_changes", sessionId: this.currentSessionId, files: [], total: 0 });
           this.currentSessionName = String(ev.name || "");
+          this.currentSessionSaved = ev.kind === "resumed" || ev.kind === "forked"
+            || (ev.kind !== "new" && ev.kind !== "cleared" && this.currentSessionSaved);
           this.rememberSession();
         }
         break;
       case "session_named":
         this.currentSessionName = String(ev.name || "");
+        if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // naming saves it
         break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
@@ -1584,6 +1604,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "turn_start":
+        if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // it has content now
         this.turnActive = this.confirmedTurnActive = true;
         this.monitorTurnActive = ev.kind === "monitor";
         this.turnStartedAt = Date.now();
