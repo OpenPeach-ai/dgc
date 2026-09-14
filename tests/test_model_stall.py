@@ -789,7 +789,11 @@ class AttemptLifecycleTests(StallTestCase):
         result = client.chat(MESSAGES)
         self.assertEqual(result.content, "second")
         self.assertEqual(len(self.server.chat_posts("/chat/completions")), 2)
-        self.assertEqual(events.kinds(), [], [(e.kind, e.phase, e.silent_s) for e in events.items])
+        # 0.40: the transport retry itself is announced (with its cause) and cleared by the answer;
+        # what must never appear is a "no response" notice about the attempt that already ended.
+        self.assertEqual(events.kinds(), ["retry", "cleared"],
+                         [(e.kind, e.phase, e.silent_s) for e in events.items])
+        self.assertEqual(events.items[0].cause, "reset")
         self.assertNoWatchThreads()
 
     def test_the_ollama_load_probe_covers_every_self_hosted_ollama(self):
@@ -873,6 +877,24 @@ class _QuietUI:
 
     def __getattr__(self, name):
         return lambda *a, **k: None
+
+
+class _HookUI(_QuietUI):
+    """A front end that draws retry runs and shows an error's cause (the TUI and the editor)."""
+
+    def __init__(self):
+        super().__init__()
+        self.retries, self.error_causes = [], []
+
+    def model_retry(self, state, **fields):
+        self.retries.append((state, fields))
+
+    def error(self, message, cause=None):
+        self.errors.append(message)
+        self.error_causes.append((message, cause))
+
+    def model_wait(self, label, detail="", *, since=None, restore=True, origin=None):
+        self.waits.append((label, detail))
 
 
 class AgentStallTests(StallTestCase):
@@ -968,6 +990,48 @@ class AgentStallTests(StallTestCase):
         self.assertTrue(any("stopped streaming" in line and "(1/1)" in line for line in ui.infos),
                         ui.infos)
         self.assertIn("ok done", "".join(ui.text))
+
+    # ---- 0.40: the same stalls seen by a front end that draws retry runs ------------------------
+    def hook_agent(self, **settings):
+        agent, _ = self.agent(**settings)
+        ui = _HookUI()
+        agent.ui = ui
+        return agent, ui
+
+    def test_a_hook_ui_gets_a_stall_run_instead_of_the_retry_line(self):
+        self.server.behaviours["/chat/completions"] = sequence(no_headers, chat_answer("second try"))
+        agent, ui = self.hook_agent()
+        self.assertIsNot(agent.run_turn("hello", reset_cancel=False), False)
+        self.assertEqual([(state, f["kind"], f["layer"], f["attempt"], f["max_attempts"]) for state, f in ui.retries],
+                         [("retrying", "stall", "request", 1, 1), ("recovered", "stall", "request", 1, 1)])
+        self.assertIn("no response from stall-model", ui.retries[0][1]["summary"])
+        self.assertFalse([line for line in ui.infos if "retrying (1/1)" in line], ui.infos)
+        self.assertIn("Retrying the model request", [label for label, _ in ui.waits if label])
+
+    def test_a_hook_ui_mid_stream_stall_is_a_continuation_run_with_a_tagged_notice(self):
+        self.server.behaviours["/chat/completions"] = sequence(
+            partial_then_silent(("The first half ",)), chat_answer("and the rest."))
+        agent, ui = self.hook_agent()
+        self.assertIsNot(agent.run_turn("hello", reset_cancel=False), False)
+        self.assertEqual([(state, f["kind"], f["layer"], f["attempt"]) for state, f in ui.retries],
+                         [("retrying", "stall", "continuation", 1), ("recovered", "stall", "continuation", 1)])
+        self.assertFalse([line for line in ui.infos if "stopped streaming" in line], ui.infos)
+        notices = [m.get("_dgc_notice") for m in agent.messages if m.get("_dgc_notice")]
+        self.assertEqual([(n["kind"], n["cause"], n["attempt"]) for n in notices], [("stream_recovery", "stall", 1)])
+        wire = self.server.chat_posts("/chat/completions")[1]["body"]["messages"]
+        self.assertNotIn("_dgc_notice", json.dumps(wire))
+        self.assertEqual("".join(ui.text), "The first half and the rest.")
+
+    def test_a_hook_ui_stall_that_fails_carries_its_cause(self):
+        self.server.behaviours["/chat/completions"] = silent_stream
+        agent, ui = self.hook_agent()
+        self.assertFalse(agent.run_turn("hello", reset_cancel=False))
+        self.assertEqual([state for state, _ in ui.retries], ["retrying", "gave_up"])
+        message, cause = ui.error_causes[-1]
+        self.assertIn("no tokens", message)
+        self.assertEqual(cause["kind"], "stall")
+        self.assertEqual(cause["run_n"], ui.retries[0][1]["run_n"])
+        self.assertNotIn("start your server", message)
 
     def test_a_stall_that_ends_the_turn_does_not_bring_back_the_old_activity(self):
         from dgc.headless import HeadlessUI

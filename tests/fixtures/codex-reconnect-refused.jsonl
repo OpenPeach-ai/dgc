@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a0a0ba-78ec-7763-94e9-46b72522433b"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `fake` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}

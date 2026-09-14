@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0a0ba-78d3-7b73-9606-8177bc732eb1"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `fake` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 1/2 (stream disconnected before completion: stream closed before response.completed)"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"RESUMED-2"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":0}}

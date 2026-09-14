@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a0a0ba-78ce-7df2-a83e-c6218129dd11"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `fake` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 1/2 (unexpected status 503 Service Unavailable: upstream unavailable (fake), url: http://127.0.0.1:4899/503always/v1/responses)"}
+{"type":"error","message":"Reconnecting... 2/2 (unexpected status 503 Service Unavailable: upstream unavailable (fake), url: http://127.0.0.1:4899/503always/v1/responses)"}
+{"type":"error","message":"unexpected status 503 Service Unavailable: upstream unavailable (fake), url: http://127.0.0.1:4899/503always/v1/responses"}
+{"type":"turn.failed","error":{"message":"unexpected status 503 Service Unavailable: upstream unavailable (fake), url: http://127.0.0.1:4899/503always/v1/responses"}}
