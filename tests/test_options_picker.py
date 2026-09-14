@@ -63,6 +63,15 @@ ASKS = [
     "ask me which approach to take",
     "can you call propose_options so I can see it",
     "demo the options picker",
+    "Can't you give me some options to pick from?",
+    "Couldn't you propose me options to select from?",
+    "Won't you let me choose?",
+    "Give me options to choose from for the title, based on @notes.md",
+    "Look at @src/app.tsx and give me options to choose from",
+    # A negation beside an ask is not parsed; the model reads it (test_a_take_back_is_left_to_the_model).
+    "I don't know which approach is best, give me options to choose from",
+    "Give me options to choose from, don't just pick one",
+    "Propose me options to select from, and don't list more than three options.",
 ]
 
 NOT_ASKS = [
@@ -123,97 +132,14 @@ BUILDING_NOT_ASKING = [
     "the propose_options description is too long",
     "show me the options picker, it doesn't open",
     "Build the settings page: render a dropdown that shows a list of options to select from, with tests",
-]
-
-# An ask the user negates in its own clause, or takes back later in the message, is not an ask: in
-# full-auto it would expose the blocking picker to a user who just said not to stop.
-NEGATED_OR_RETRACTED = [
-    "don't give me options, just pick",
-    "I don't want you to offer me alternatives",
-    "You don't need to give me options to choose from",
-    "Please don't propose me options to select from, just do it.",
-    "Do NOT give me options to choose from, decide yourself.",
-    "Just implement it, no need to let me choose.",
-    "don't use propose_options, just list them",
-    "implement it without using propose_options",
-    "Give me options to choose from. Actually, never mind, just pick one.",
-    "give me options to choose from - no wait, you decide",
-    "let me choose, actually no, you decide",
-    "Propose me options. Forget it, pick one yourself.",
-    "Offer me some alternatives. On second thought, you choose.",
-    "Give me options to choose from. Actually, don't give me options, just pick.",
-    "give me a few options to choose from\nnvm, you pick",
-]
-
-# A negation or a retraction word elsewhere in the message does not cancel a real ask.
-ASKS_BESIDE_A_NEGATION = [
-    "I don't know which approach is best, give me options to choose from",
-    "I don't know which approach is best so give me options to choose from",
-    "It didn't work before. Give me options to choose from",
-    "Give me options to choose from, don't just pick one",
-    "don't just pick one, give me options to choose from",
-    "please give me options to choose from, no need to explain each",
-    "Give me options to choose from. Never mind the tests.",
-    "Scratch that, give me options to choose from",
-    "Never mind, let me choose.",
-    "Don't implement anything yet. Propose me options to pick from.",
-    "Give me options to choose from, then you decide the file names",
-    "Actually no, give me options to choose from",
-]
-
-# A negation that only limits which options to offer is part of the ask, not a take-back (review
-# finding: each of these lost the picker in full-auto, and the -p and wake-turn notes everywhere).
-ASKS_WITH_A_LIMIT = [
-    "Propose me options to select from, and don't list more than three options.",
-    "Give me options to choose from, but don't give me more than 3 choices.",
-    "Give me options to choose from. Don't give me any option that needs a new dependency.",
-    "let me choose which approach, and don't show me the code until I pick",
-    "Give me a few options to pick from; don't offer the option of rewriting everything.",
-    "Give me options to choose from. Please don't list options that break backwards compat.",
-    "Propose me options to select from. Never suggest the option to drop the database.",
-    "Give me options to pick from, without listing the obvious choice of doing nothing.",
-    "Offer me some alternatives to choose from and do not suggest anything that changes the API.",
-    "Give me options to choose from. I don't want options with more than two steps.",
-    "Give me options to choose from. Don't give me options other than Postgres and SQLite.",
-]
-
-# ... while a negation of the options themselves still takes the ask back.
-LIMIT_LOOKALIKES_THAT_TAKE_IT_BACK = [
-    "Give me options to choose from. Actually, don't give me a list of options, just pick.",
-    "Give me options to choose from. Don't give me options, you choose.",
-    "Give me options to choose from. No wait, don't show me options, decide.",
-    "don't give me options to choose from that need a migration",
-    "give me options to choose from\nactually no, don't ask me to pick",
-    "Give me options to choose from. Actually, don't ask me to pick which one, just do it.",
-    "Give me options to choose from. Stop giving me options that I have to choose from, just pick.",
-    "Give me options to choose from. Don't give me options like last time, just pick one.",
-]
-
-# A question is an ask ("can't you just ..."), and a file the user @mentions beside the ask is context.
-ASKS_AS_QUESTIONS_OR_BESIDE_A_MENTION = [
-    "Can't you just give me options to choose from?",
-    "Can't you give me some options to pick from?",
-    "Couldn't you propose me options to select from?",
-    "Won't you let me choose?",
-    "Why can't you propose me options to select from?",
-    "Give me options to choose from for the title, based on @notes.md",
-    "Look at @src/app.tsx and give me options to choose from",
-]
-
-# ... but not the picker named beside a file, nor options placed in one, nor a negation before "you".
-MENTIONS_AND_QUESTIONS_NOT_ASKING = [
     "show me options to choose from in @src/Dropdown.tsx",
     "use propose_options in @dgc/agent.py",
     "use propose_options with @notes.md",
-    "Don't you dare give me options to choose from",
-    "You can't give me options to choose from, you have to decide",
 ]
 
-# Known limit: only quoting marks a message as someone else's. A quoted or blockquoted ask does not
-# count (the quote mark or ">" keeps it out of an imperative position), but a report without quotes
-# ("My teammate wrote: give me options to choose from") reads as the user's own ask, as does text the
-# user pastes into the composer (the TUI paste chip and the editor's folded paste are sent as typed
-# text, with no frame to tell them apart). Attached files and editor context are framed, and never count.
+# A quoted or blockquoted ask is not in an imperative position. Unquoted reported speech and text pasted
+# into the composer still read as typed (no frame tells them apart); attached files and editor context
+# are framed, and never count.
 QUOTED = [
     'My teammate wrote: "give me options to choose from"',
     "> give me options to choose from\nwhat does this message mean?",
@@ -328,25 +254,12 @@ class OptionsIntentTests(unittest.TestCase):
                 f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("options", _tool_intents(text))
 
-    def test_a_negated_or_retracted_ask_is_not_an_ask(self):
-        for text in NEGATED_OR_RETRACTED:
-            self.assertNotIn("options", _tool_intents(text), text)
-
-    def test_a_negation_elsewhere_does_not_cancel_an_ask(self):
-        for text in ASKS_BESIDE_A_NEGATION:
+    def test_a_take_back_is_left_to_the_model(self):
+        # Offering the picker never forces it, so a negation or a take-back is not parsed: the ask
+        # opens the picker and the model, reading the whole message, decides whether to call it.
+        for text in ("Give me options to choose from. Actually, never mind, just pick one.",
+                     "let me choose, actually no, you decide"):
             self.assertIn("options", _tool_intents(text), text)
-
-    def test_a_limit_on_the_options_does_not_take_the_ask_back(self):
-        for text in ASKS_WITH_A_LIMIT:
-            self.assertIn("options", _tool_intents(text), text)
-        for text in LIMIT_LOOKALIKES_THAT_TAKE_IT_BACK:
-            self.assertNotIn("options", _tool_intents(text), text)
-
-    def test_a_question_or_an_at_mention_beside_the_ask_still_asks(self):
-        for text in ASKS_AS_QUESTIONS_OR_BESIDE_A_MENTION:
-            self.assertIn("options", _tool_intents(text), text)
-        for text in MENTIONS_AND_QUESTIONS_NOT_ASKING:
-            self.assertNotIn("options", _tool_intents(text), text)
 
     def test_an_at_mentioned_attachment_beside_the_ask_still_asks(self):
         from dgc.attachments import expand_attachments
@@ -430,15 +343,6 @@ class ToolListMatrixTests(AgentTests):
                 self.assertNotIn("# Options picker", agent.system_prompt(), label)
                 self.assertIn("propose_options", agent._text_protocol_section(), label)
                 self.assertFalse(self.offered(agent, "now add the tests"), f"{label}: per turn only")
-
-    def test_full_auto_offers_the_picker_for_an_ask_with_a_limit(self):
-        for text in ASKS_WITH_A_LIMIT[:3] + ASKS_AS_QUESTIONS_OR_BESIDE_A_MENTION[:1]:
-            agent = self.agent(mode="auto")
-            self.assertTrue(self.offered(agent, text), text)
-            self.assertNotIn("# Options picker", agent.system_prompt(), text)
-        agent = self.agent(ui=OneShotUI(), mode="auto")
-        self.assertFalse(self.offered(agent, ASKS_WITH_A_LIMIT[0]))
-        self.assertIn("# Options picker", agent.system_prompt(), "-p is still told why")
 
     def test_full_auto_keeps_the_picker_out_of_a_turn_that_builds_a_ui(self):
         agent = self.agent(mode="auto")
@@ -588,28 +492,12 @@ class TurnTests(AgentTests):
         self.assertTrue(agent.run_monitor_turn(wake_note(agent)))
         self.assertNotIn("# Options picker", calls[0]["system"])
 
-    def test_steering_that_takes_the_ask_back_closes_it(self):
-        steered = []
-
-        def steer_then_answer(text):
-            def step(agent, request):
-                steered.append(agent.steer(text))
-                return ChatResult(content="Here is my first thought.")
-            return step
-        for text, still_open in (("never mind, you pick", False),
-                                 ("actually, don't give me options, just decide", False),
-                                 ("but don't list more than three options", True),
-                                 ("also mention the costs", True)):
-            agent = self.agent(mode="auto")
-            calls = scripted(agent, [steer_then_answer(text), ChatResult(content="done")])
-            self.assertTrue(agent.run_turn("give me options to choose from for the deploy target"), text)
-            self.assertTrue(steered[-1], text)
-            self.assertIn("propose_options", calls[0]["tools"], text)
-            self.assertEqual(len(calls), 2, text)
-            self.assertEqual("propose_options" in calls[1]["tools"], still_open, text)
-        # Steering that asks opens the picker on a turn that did not ask, as before.
+    def test_steering_that_asks_opens_the_picker_mid_turn(self):
+        def steer(agent, request):
+            self.assertTrue(agent.steer("wait, let me choose"))
+            return ChatResult(content="Here is my first thought.")
         agent = self.agent(mode="auto")
-        calls = scripted(agent, [steer_then_answer("wait, let me choose"), ChatResult(content="done")])
+        calls = scripted(agent, [steer, ChatResult(content="done")])
         self.assertTrue(agent.run_turn("pick a deploy target"))
         self.assertNotIn("propose_options", calls[0]["tools"])
         self.assertIn("propose_options", calls[1]["tools"])
@@ -677,8 +565,6 @@ class SubscriptionTests(unittest.TestCase):
                                                       "instructions": "Notes. " + FOUNDER}})
         framed = skill + "\n\n" + context
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, framed, "auto"))
-        self.assertNotIn("<dgc-options-note>", delegated_prompt(
-            cfg, "Give me options to choose from. Actually, never mind, you decide.", "auto"))
 
     def test_a_goal_cycle_prompt_is_not_the_users_ask(self):
         from dgc.goals import CYCLE_MARKER

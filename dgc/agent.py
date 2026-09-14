@@ -164,32 +164,29 @@ class _OptionsAsk:
     """Does the user's own text ask DGC to offer them choices on this turn?
 
     It lifts full-auto's picker removal and, where the picker cannot exist, adds the one note saying
-    why (see Agent._options_unavailable_note). So it has to hear an ask addressed to the agent, not
-    a description of software being built: "propose me options to select from" and "let me choose"
-    count; "the popup should list the options for me to select a region", "make the screen offer
-    three choices so I can pick a plan" and "write tests for propose_options" do not. A missed ask
-    costs what it cost before (no picker in full-auto); a false one exposes a blocking picker in a
-    mode that promised not to stop, so every doubt resolves to "not an ask".
+    why (see Agent._options_unavailable_note). Being offered never forces the picker: the model
+    still decides whether to ask, so an ask the user negates or takes back ("give me options.
+    Actually, never mind, you pick") needs no parsing here. A missed ask is the costly error (the
+    model denies the picker exists); a false one only offers a tool that goes unused.
 
-    Each sentence is judged alone and needs all of:
+    It still has to hear an ask addressed to the agent, not a description of software being built,
+    so an ordinary coding turn in full-auto keeps its tool list: "propose me options to select from"
+    and "let me choose" count; "the popup should list the options for me to select a region", "make
+    the screen offer three choices so I can pick a plan" and "write tests for propose_options" do
+    not. A sentence counts when it has all of:
     * the verb in an imperative position (sentence start, after a comma, "please", "and", "can
       you", "can't you", "you to"): "the combobox should list options" describes a UI;
     * the user as the one choosing: "me"/"us" as the recipient ("give me options to choose from",
       "offer me alternatives"), or a first-person chooser whose object is the choice itself ("so I
       can pick one", "let me decide which approach"), not a thing in an app ("so I can pick a
       plan", "let me select the files", "ask me to choose later");
-    * nothing in the sentence that marks a spec or code (a dropdown, a page, a function, a file
-      path, "should", "when the user ...", "in the TUI"); a file the user @mentions beside an ask
-      is context ("... based on @notes.md"), except to the picker-by-name forms, which also need a
-      message that is not a bug report.
+    * nothing that marks a spec or code (a dropdown, a page, a function, a file path, "should",
+      "when the user ...", "in the TUI"); a file the user @mentions beside an ask is context
+      ("... based on @notes.md"), except to the picker-by-name forms, which also need a message
+      that is not a bug report.
 
     Only what the user typed is read: attached files, editor context, ACP resources and selected
     skill bodies arrive in DGC's frames and are cut out first, wherever they sit in the message.
-    An ask the user negates ("don't give me options", "I don't want you to offer me alternatives",
-    "without using propose_options") or takes back later ("... Actually, never mind, you pick")
-    does not count; a later ask in the same message does. A negation that only limits the options
-    ("don't list more than three", "don't give me any option that needs a new dependency") leaves
-    the ask standing, and so does steering typed during the turn unless it takes the ask back.
     """
 
     _POS = (r"(?:^|(?<=[,:(])|\b(?:please|pls|kindly|just|now|then|and|so|also|first|"
@@ -270,99 +267,26 @@ class _OptionsAsk:
         r"<(editor-context-json|embedded-resource-json|resource-link-json|dgc-skill-instructions-json)"
         r"\b[^>\n]*>.*?(?:</\1>|\Z)|<dgc_attachment>.*?(?:</dgc_attachment>|\Z)",
         re.DOTALL)
-    # A negation in the clause that holds the ask: "don't give me options", "I don't want you to offer
-    # me alternatives", "no need to let me choose", "without using propose_options". Up to four
-    # words may sit between the negation and the verb, never a conjunction or a clause break, so
-    # "I don't know which is best, give me options" and "... so give me options" still ask; nor
-    # "don't just pick one", "don't forget to", "why don't you" or a question ("can't you just ...").
-    _NEG_ASK = re.compile(
-        r"(?<!why\s)\b(?:\w+n't|dont|doesnt|didnt|cant|wont|do\s+not|does\s+not|never|not|no|without|"
-        r"stop|quit|avoid|instead\s+of|rather\s+than)\b(?!\s+(?:just|only|forget|hesitate|you|we)\b)"
-        r"(?:\s+(?!(?:and|so|but|then|or|because)\b)[\w']+){0,4}?\s+"
-        r"(?:propos|offer|giv|gave|show|present|list|suggest|let|ask|us(?:e|ing)\b|call|invok|"
-        r"trigger|demo)\w*[^,;:.!?\n]{0,60}?\b(?:options?|choices?|alternatives?|choose|pick|select|"
-        r"decide|picker|propose_options|multiple[- ]choice)\b",
-        re.IGNORECASE)
-    # A negation that only limits which options to offer leaves the ask standing: "don't list more
-    # than three options", "don't give me any option that needs a new dependency", "never suggest the
-    # option to drop the database", "don't show me the code until I pick". Only a limit inside the
-    # negated phrase, or a qualifier right after the options it names whose clause chooses nothing
-    # ("don't give me options that I have to pick from" takes the ask back), makes it one; and a
-    # negation that overlaps an ask ("don't give me options to choose from that ...") still cancels it.
-    _NEG_LIMIT = re.compile(
-        r"\b(?:(?:more|fewer|less|other)\s+than|at\s+(?:most|least)|beyond|except|besides|apart\s+from|"
-        r"until|till|unless)\b", re.IGNORECASE)
-    _NEG_QUALIFIER = re.compile(
-        r"\s*(?:that|which|whose|where|with|without|involving|requiring|needing|"
-        r"including|of|(?:other\s+)?than|beyond|except|besides|until|unless|"
-        r"to\s+(?!(?:choose|pick|select|decide)\b)\w+)\b(?![^,;:.!?\n]*\b(?:choose|pick|select|decide)\b)",
-        re.IGNORECASE)
-    # Taking an ask back, alone in its clause right after the ask or at the start of a later
-    # sentence: "never mind", "scratch that", "actually no, you decide", "forget it, pick one
-    # yourself". A clause that goes on ("you decide the file names", "never mind the tests") is
-    # about something else.
-    _RETRACT = re.compile(
-        r"[\s,;:!?.\-–—]*(?:(?:actually|ok(?:ay)?|no|nah|nope|wait|hm+|so|then|and|or|just|well|um+|"
-        r"oh|sorry)\b[\s,;:!?.\-–—]*)*"
-        r"(?:never\s*mind|nvm|scratch\s+that|forget\s+(?:about\s+)?(?:it|that|the\s+(?:options|choices|"
-        r"alternatives|picker))|on\s+second\s+thoughts?|just\s+kidding|jk|cancel\s+that|no\s+need|"
-        r"don'?t\s+bother|you\s+(?:can\s+)?(?:decide|choose|pick)|"
-        r"(?:decide|choose|pick)(?:\s+one)?\s+(?:for\s+me|yourself))"
-        r"(?:\s+(?:for\s+me|yourself|one|it|instead|then|please|after\s+all|for\s+now))*"
-        r"\s*(?=$|[,;:!?.)\-–—])",
-        re.IGNORECASE)
-
-    def retracts(self, text: str) -> bool:
-        """Does `text`, typed after an ask (steering during the turn), take that ask back?
-
-        Judged as the later part of one message, so the same rules hold: "never mind, you pick" and
-        "actually, don't give me options" do; a limit ("don't list more than three options") or an
-        unrelated interjection does not."""
-        return not self.search("Give me options to choose from.\n" + str(text or ""))
 
     def search(self, text: str) -> bool:
-        source = _trusted_intent_text(self._FRAME.sub("\n", str(text or ""))).replace("’", "'")
+        source = _trusted_intent_text(self._FRAME.sub("\n", str(text or ""))).replace("\u2019", "'")
         if not self._CUE.search(source):
             return False
         bug_report = bool(self._BUG.search(source))
-        last_ask = -1            # where the latest ask that no negation covers starts
-        cancels = []             # where a negated ask or a retraction starts
-        start = 0
-        for boundary in [*self._SENTENCE.finditer(source), None]:
-            end = boundary.start() if boundary else len(source)
-            sentence, offset = source[start:end], start
-            start = boundary.end() if boundary else end
-            offset += len(sentence) - len(sentence.lstrip())
+        for sentence in self._SENTENCE.split(source):
             sentence = sentence.strip()
-            if not sentence:
-                continue
-            if self._RETRACT.match(sentence):
-                cancels.append(offset)
             if not self._CUE.search(sentence):
                 continue
             spec = self._PICKER_NAME.sub(" ", sentence)
             if self._SPEC.search(self._MENTION.sub(" ", spec)):
                 continue
+            if self._ASK.search(sentence):
+                return True
             # An @mentioned file is fine beside an ask addressed to the user, never beside the
             # picker named alone ("use propose_options in @dgc/agent.py").
-            by_name = not bug_report and not self._SPEC.search(spec)
-            asks = [*self._ASK.finditer(sentence), *(self._BY_NAME.finditer(sentence) if by_name else ())]
-            negated = []
-            for match in self._NEG_ASK.finditer(sentence):
-                whole = any(match.start() < ask.end() and ask.start() < match.end() for ask in asks)
-                names_options = match.group().lower().endswith(("option", "options", "choice", "choices",
-                                                                "alternative", "alternatives"))
-                if whole or not (self._NEG_LIMIT.search(match.group()) or (
-                        names_options and self._NEG_QUALIFIER.match(sentence, match.end()))):
-                    negated.append(match.span())
-            cancels += [offset + negation for negation, _ in negated]
-            for ask in asks:
-                if any(first < ask.end() and ask.start() < last for first, last in negated):
-                    continue
-                last_ask = max(last_ask, offset + ask.start())
-                if self._RETRACT.match(sentence, ask.end()):
-                    cancels.append(offset + ask.end())
-        return last_ask >= 0 and not any(cancel > last_ask for cancel in cancels)
+            if not bug_report and not self._SPEC.search(spec) and self._BY_NAME.search(sentence):
+                return True
+        return False
 
 
 _TOOL_INTENT_PATTERNS = {
@@ -2607,11 +2531,6 @@ class Agent(GoalLifecycle):
             # Keep ownership until preparation succeeds, so a missing skill or read failure
             # returns the complete original input instead of losing accepted steering.
             for item in msgs:
-                # "never mind, you pick" typed mid-turn closes an ask to be offered choices still
-                # open; an ask the steering makes itself is opened below, as before.
-                if ("options" in self._active_tool_intents
-                        and _TOOL_INTENT_PATTERNS["options"].retracts(item["text"])):
-                    self._active_tool_intents.discard("options")
                 self._activate_tool_intents(item["text"])
                 self._activate_skill_intents(item["text"])
                 self._mcp_query_text = (self._mcp_query_text + "\n"
