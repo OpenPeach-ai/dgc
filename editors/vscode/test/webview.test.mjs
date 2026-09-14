@@ -257,6 +257,17 @@ test("the collapsed tasks row reads like the goal row: count, the step in progre
   assert.equal(text(), "all done");
   assert.equal(bar.dataset.status, "done");
   assert.equal(main.getAttribute("aria-label"), "Tasks, 2 of 2 done, all done");
+  // Cancelled is finished but not done: never "all done" beside a count that says otherwise.
+  event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "done" }] });
+  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/2");
+  assert.equal(text(), "1 cancelled");
+  assert.equal(bar.dataset.status, "done", "nothing is left open");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 2 done, 1 cancelled");
+  event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "pending" }] });
+  assert.equal(text(), "1 pending", "open work still leads");
+  event({ type: "todos", todos: [{ content: "X", status: "cancelled" }, { content: "Y", status: "blocked" }] });
+  assert.equal(text(), "");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 0 of 2 done, 1 blocked");
   assert.deepEqual(errors, []);
 });
 
@@ -389,16 +400,57 @@ test("an unanswered Clear times out with a note, but never while the backend is 
   button.click();
   assert.equal(note.hidden, true, "a new attempt takes the old note down");
   send({ type: "backend_exit", code: 1, recovering: true, resumes: "none" });
-  advance(60000);
-  assert.equal(note.hidden, true, "no timeout against a backend that is not there");
+  advance(29000);
+  assert.equal(note.hidden, true, "no five-second timeout against a backend that is reconnecting");
   assert.equal(button.getAttribute("aria-busy"), "true");
   event({ type: "ready", session_id: "chat-a", capabilities: {} });
   advance(4000);
-  assert.equal(note.hidden, true);
+  assert.equal(note.hidden, true, "back in time: the reconnect bound is off and the normal clock runs");
   // The late answer lands before the clock runs out: the row goes, and no note is left behind.
   event({ type: "todos", todos: [] });
-  advance(5000);
+  advance(60000);
   assert.equal(note.hidden, true);
+  assert.equal(doc.getElementById("tasksbar").hidden, true);
+  // A recovery that never completes is bounded the way a recovering turn is: thirty seconds.
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  button.click();
+  send({ type: "backend_exit", code: 1, recovering: true, resumes: "none" });
+  advance(29999);
+  assert.equal(button.getAttribute("aria-busy"), "true");
+  advance(1);
+  assert.equal(button.getAttribute("aria-busy"), null, "the spinner does not run for ever");
+  assert.match(note.textContent, /^DGC did not confirm the clear/);
+  assert.deepEqual(errors, []);
+});
+
+test("Clear against a backend that exited for good says so instead of spinning", () => {
+  const { doc, send, posted, advance, errors } = makeDom({ clock: true });
+  const event = data => send({ type: "event", event: data });
+  const note = doc.getElementById("tasks-note"), button = doc.getElementById("tasks-clear");
+  const cleared = () => posted.filter(m => m.type === "clear_todos").length;
+  event({ type: "ready", session_id: "chat-a", capabilities: {} });
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  // Pressed, then the backend exits with no recovery coming: settled at once, with the reason.
+  button.click();
+  assert.equal(cleared(), 1);
+  send({ type: "backend_exit", code: 1, recovering: false, resumes: "none" });
+  assert.equal(button.getAttribute("aria-busy"), null, "not busy for ever");
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /^DGC is not running\. Run DGC: Restart Backend/);
+  // Pressed after that exit: nothing is posted (it would start a backend whose restore could bring
+  // the list straight back), and the row says what to do.
+  button.click();
+  assert.equal(cleared(), 1, "no command sent into a backend that is gone");
+  assert.equal(button.getAttribute("aria-busy"), null);
+  assert.match(note.textContent, /^DGC is not running/);
+  advance(120000);
+  assert.equal(button.getAttribute("aria-busy"), null);
+  // Once a backend is back, Clear works again and the old note is gone with the new attempt.
+  event({ type: "ready", session_id: "chat-a", capabilities: {} });
+  button.click();
+  assert.equal(cleared(), 2);
+  assert.equal(note.hidden, true);
+  event({ type: "todos", todos: [] });
   assert.equal(doc.getElementById("tasksbar").hidden, true);
   assert.deepEqual(errors, []);
 });
@@ -430,6 +482,22 @@ test("a custom slash command that errors or is refused gives the composer back",
     assert.equal(posted.filter(m => m.type === "clear_todos").length, before + 1, "and Clear still posts");
     event({ type: "command_rejected", command: "clear_todos", reason: "x", message: "x" });
   }
+  // An unrelated error while the command is still on its way is not its answer: Stop stays until
+  // the command's own turn starts (or its own error arrives).
+  submit("/foo");
+  event({ type: "error", message: "MCP server docs disconnected" });
+  event({ type: "error", message: "unknown command: /foobar" });
+  event({ type: "error", message: "custom command /other is empty" });
+  assert.equal(running(), true, "another error does not hand the composer back early");
+  event({ type: "turn_start", prompt: "rendered foo" });
+  assert.equal(running(), true);
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(running(), false);
+  submit("/foo please");
+  event({ type: "error", message: "a tool failed" });
+  assert.equal(running(), true);
+  event({ type: "error", message: "unknown command: /foo please" });
+  assert.equal(running(), false, "its own unknown-command answer, arguments and all, settles it");
   // The normal path is untouched: the command's turn keeps its Stop through an unrelated error.
   submit("/foo");
   event({ type: "turn_start", prompt: "rendered foo" });

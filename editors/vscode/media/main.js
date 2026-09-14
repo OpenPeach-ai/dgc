@@ -287,9 +287,9 @@
   ];
 
   let streaming = false, turn = null;
-  // A custom slash command sent while idle shows Stop before its turn exists; set until that turn
-  // starts or the backend answers with an error or refusal instead.
-  let customCommandPending = false;
+  // A custom slash command sent while idle shows Stop before its turn exists. Holds the command's
+  // name until that turn starts or the backend answers that command with an error or refusal.
+  let customCommandPending = "";
   const attachments = [];
   let promptSequence = 0;
   const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -305,7 +305,8 @@
   // The Tasks row: which chats keep the checklist expanded (keyed by session id; a chat never seen
   // starts collapsed), a Clear waiting for the backend's answer, and whether a backend is up.
   const tasksExpanded = new Set();
-  let todoClear = null, backendLive = false;
+  // `backendDown`: the backend exited and the extension is not bringing it back on its own.
+  let todoClear = null, backendLive = false, backendDown = false;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
   function cleanDraft(value) {
@@ -1038,6 +1039,10 @@
     cancelled:   ["✗", "cancel", "cancelled"],
   };
   const TASKS_TIMEOUT_MS = 5000;
+  // How long a Clear may wait for a backend that is reconnecting, the same bound a turn gets
+  // (the backend_exit handler's thirty seconds) before it is reported as unanswered.
+  const TASKS_RECONNECT_MS = 30000;
+  const TASKS_NOT_RUNNING = "DGC is not running. Run DGC: Restart Backend, then clear the checklist again.";
   function tasksOpen() { return tasksExpanded.has(draftSession); }
   function paintTasksExpanded() {
     const open = tasksOpen(), toggle = $("tasks-toggle");
@@ -1070,17 +1075,32 @@
   // the command is held until it is back. The clock only runs against a live backend.
   function armTodoClearTimer() {
     if (!todoClear || todoClear.timer || !backendLive || !sessionReady) return;
+    if (todoClear.reconnect) { clearTimeout(todoClear.reconnect); todoClear.reconnect = null; }
     todoClear.timer = setTimeout(() => {
       if (todoClear) todoClear.timer = null;
       settleTodoClear("DGC did not confirm the clear. Try again, or run DGC: Restart Backend.");
     }, TASKS_TIMEOUT_MS);
   }
-  function pauseTodoClearTimer() {
-    if (todoClear?.timer) { clearTimeout(todoClear.timer); todoClear.timer = null; }
+  // The backend went away. Recovering, the clear is held for the new backend and its clock stops,
+  // bounded by the reconnect allowance so a recovery that never completes cannot spin for ever.
+  // Not recovering, nothing will ever answer: say so now.
+  function pauseTodoClearTimer(recovering = true) {
+    if (!todoClear) return;
+    if (todoClear.timer) { clearTimeout(todoClear.timer); todoClear.timer = null; }
+    if (!recovering) { settleTodoClear(TASKS_NOT_RUNNING); return; }
+    if (!todoClear.reconnect) {
+      todoClear.reconnect = setTimeout(() => {
+        if (todoClear) todoClear.reconnect = null;
+        settleTodoClear("DGC did not confirm the clear. Try again, or run DGC: Restart Backend.");
+      }, TASKS_RECONNECT_MS);
+    }
   }
   function requestTodoClear() {
     if (todoClear) return;                      // one clear at a time; the answer settles it
-    todoClear = { timer: null };
+    // A backend that exited and is not coming back by itself cannot answer. Posting would start a
+    // fresh one whose session restore could bring the list straight back, so say what to do.
+    if (backendDown) { showTasksNote(TASKS_NOT_RUNNING); return; }
+    todoClear = { timer: null, reconnect: null };
     showTasksNote("");
     paintTodoClearBusy(true);
     vscode.postMessage({ type: "clear_todos" });
@@ -1089,7 +1109,8 @@
   // Every way a clear ends goes through here, and every one of them takes the old note down: a
   // refusal or timeout note must never sit beside a list it was not about.
   function settleTodoClear(message = "") {
-    pauseTodoClearTimer();
+    if (todoClear?.timer) clearTimeout(todoClear.timer);
+    if (todoClear?.reconnect) clearTimeout(todoClear.reconnect);
     todoClear = null;
     paintTodoClearBusy(false);
     showTasksNote(message);
@@ -1118,15 +1139,19 @@
     const doing = rows.find((t) => statusOf(t) === "in_progress");
     const pending = rows.filter((t) => statusOf(t) === "pending").length;
     const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
+    const cancelled = rows.filter((t) => statusOf(t) === "cancelled").length;
     count.textContent = `Tasks ${complete}/${rows.length}`;
-    const summary = doing ? doing.content.replace(/\s+/g, " ").trim()
-      : pending ? `${pending} pending` : blocked ? "" : "all done";
+    // "all done" only when every row is done. Cancelled rows are finished but not done, so a list
+    // with nothing left open says how many were cancelled instead of contradicting its own count.
+    const settled = doing ? "" : pending ? `${pending} pending` : blocked ? ""
+      : cancelled ? `${cancelled} cancelled` : "all done";
+    const summary = doing ? doing.content.replace(/\s+/g, " ").trim() : settled;
     $("tasks-text").textContent = summary;
     $("tasks-blocked").textContent = `${blocked} blocked`;
     $("tasks-blocked").hidden = blocked === 0;
     tasksBar.dataset.status = doing ? "active" : blocked ? "blocked" : pending ? "pending" : "done";
     $("tasks-main").setAttribute("aria-label", `Tasks, ${complete} of ${rows.length} done`
-      + (doing ? `, in progress: ${summary.slice(0, 180)}` : pending ? `, ${pending} pending` : blocked ? "" : ", all done")
+      + (doing ? `, in progress: ${summary.slice(0, 180)}` : settled ? `, ${settled}` : "")
       + (blocked ? `, ${blocked} blocked` : ""));
     list.innerHTML = rows.map((t) => {
       const g = TODO_GLYPHS[statusOf(t)];
@@ -2010,7 +2035,7 @@
     const stick = atBottom();
     switch (ev.type) {
       case "ready": {
-        backendLive = true; armTodoClearTimer();
+        backendLive = true; backendDown = false; armTodoClearTimer();
         if (Array.isArray(ev.commands) && ev.commands.length
             && ev.commands.every((c) => c && typeof c === "object")) {
           builtinCommands = ev.commands;
@@ -2076,7 +2101,7 @@
       case "turn_start":
         if (!replaying) removeRecoveryCards();
         startTurn(ev.prompt, ev.kind, ev.turn_id);
-        if (!replaying) customCommandPending = false;
+        if (!replaying) customCommandPending = "";
         if (!replaying) {
           setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); }
           // A queued prompt leaves the queue when its own turn starts, matched by the request id the
@@ -2531,7 +2556,8 @@
       case "error":
         speak(`DGC error: ${ev.message}`); sysLine(ev.message, true);
         if (ev.fatal) { endTurn("error"); setSending(false); }
-        else settleCustomCommand();     // "unknown command" / "custom command is empty": no turn is coming
+        // "unknown command: /foo" / "custom command /foo is empty": no turn is coming for it.
+        else if (answersCustomCommand(ev.message)) settleCustomCommand();
         break;
       case "turn_end":
         speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
@@ -2563,8 +2589,18 @@
   }
   function settleCustomCommand() {
     if (!customCommandPending) return;
-    customCommandPending = false;
+    customCommandPending = "";
     if (!turn) setSending(false);
+  }
+  // Only the backend's answer to the pending command settles it. `slash_command` errors carry no
+  // request id, so match their two fixed texts for that command's name; any other error (a tool,
+  // an MCP server, a setting) says nothing about whether the command's turn is on its way.
+  function answersCustomCommand(message) {
+    const name = customCommandPending;
+    if (!name) return false;
+    const text = String(message || "").toLowerCase();
+    return text === `custom command /${name} is empty`
+      || text === `unknown command: /${name}` || text.startsWith(`unknown command: /${name} `);
   }
   function setSending(on) {
     streaming = on; renderComposerControls();
@@ -2685,7 +2721,7 @@
           log.appendChild(m); settleBlock(m);
           // Idle, this shows Stop until the command's turn starts. If the backend answers with an
           // error or a refusal instead, no turn is coming and the composer must come back.
-          if (!streaming) customCommandPending = true;
+          if (!streaming) customCommandPending = name;
           setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
@@ -3394,7 +3430,7 @@
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "session_ready") {
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
-      backendLive = true; armTodoClearTimer();
+      backendLive = true; backendDown = false; armTodoClearTimer();
       renderUnconfirmedDrafts();
     }
     else if (msg.type === "state") {
@@ -3491,8 +3527,9 @@
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
       sessionReady = !draftScope;
-      // A Clear sent to this backend is held for the next one; do not call it unanswered meanwhile.
-      backendLive = false; pauseTodoClearTimer();
+      // A Clear sent to a recovering backend is held for the next one, so it is not unanswered
+      // yet; with no recovery coming, the row says so at once instead of spinning.
+      backendLive = false; backendDown = !msg.recovering; pauseTodoClearTimer(Boolean(msg.recovering));
       // The extension is restarting the backend and will pick the work back up, so the turn has
       // not failed. Ending it here relabelled an already-answered turn "Failed for 41s" and took
       // its answer chrome away. Say what is happening instead — and bound it: if nothing arrives
