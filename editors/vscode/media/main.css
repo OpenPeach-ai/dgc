@@ -1146,8 +1146,10 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
    shape; the icon alone may take --err or --good. Nothing here truncates the label: at 300 px it
    wraps, and only the cause (repeated in the open details) ellipsises or hides. */
 .model-retry { min-width: 0; margin: var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.model-retry-toggle, .model-error-toggle { display: flex; width: 100%; min-width: 0; min-height: 22px; align-items: center;
-  flex-wrap: nowrap; gap: var(--sp-2); padding: 0; border: 0; border-radius: var(--r-sm); background: transparent;
+/* 3 px of inline padding keeps the focus ring off the icon; the matching negative margin keeps the
+   icon and label on the same edges as the tool rows around the line. */
+.model-retry-toggle, .model-error-toggle { display: flex; width: calc(100% + 6px); min-width: 0; min-height: 22px; align-items: center;
+  flex-wrap: nowrap; gap: var(--sp-2); margin: 0 -3px; padding: 0 3px; border: 0; border-radius: var(--r-sm); background: transparent;
   color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
 .model-retry-toggle:focus-visible, .model-error-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .model-retry-icon, .model-retry-chev, .model-error-icon { flex: none; font-size: 14px; line-height: 1; }
@@ -1167,12 +1169,15 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .model-retry-raw, .model-error-message { max-height: 16em; margin: var(--sp-1) 0 0; padding: var(--sp-1) var(--sp-2); overflow: auto;
   border-radius: var(--r-sm); background: var(--code); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
   font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
-.model-retry-hint { margin: var(--sp-1) 0 0; color: var(--text); overflow-wrap: anywhere; }
+.model-retry-hint { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.model-retry-section { margin-top: var(--sp-2); color: var(--muted); }
 button.link.model-retry-copy { display: inline-flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-2); }
-/* The final model error keeps its headline in the error colour every error row uses, and its hint
-   one glance away: the actionable line never moves behind a click. */
+/* The final model error: the icon alone carries the error colour (--err-text is ~3:1 on light
+   themes, too weak for a clickable headline), the words say it failed, and the hint stays one glance
+   away: the actionable line never moves behind a click. */
 .model-error { margin: var(--sp-1) 0; }
-.model-error-toggle { color: inherit; }
+.model-error-toggle { color: var(--text); }
+.model-error-icon { color: var(--err-text); }
 .model-error-headline { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .model-error-hint { margin: 2px 0 0 22px; color: var(--text); overflow-wrap: anywhere; }
 .model-error-label { margin-top: var(--sp-1); color: var(--muted); }

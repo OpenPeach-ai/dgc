@@ -4269,8 +4269,11 @@
   function forgetTurnlessRetries() { retryTurnless.clear(); retryTurnlessSpeech.lost = retryTurnlessSpeech.recovered = false; }
   function retryOnSessionReset(kind) { forgetTurnlessRetries(); }
   function retryOnBackendExit(msg) {
-    // The process that owned these runs is gone: a restarted backend's ids must never update them.
+    // The process that owned these runs is gone: a restarted backend's ids must never update them,
+    // and no line may keep saying "Reconnecting 1/3" beside "Restarting the DGC backend". A turn's
+    // lines settle now, not when the turn's own end arrives (up to 30 s later while recovering).
     for (const line of retryTurnless.values()) if (line.state === "retrying") paintRetryLine(line, "unfinished");
+    for (const line of turn?.retryLines?.values() || []) if (line.state === "retrying") paintRetryLine(line, "unfinished");
     forgetTurnlessRetries();
   }
   function retryOnReady(ev) { forgetTurnlessRetries(); }
@@ -4312,16 +4315,30 @@
     const match = text.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i);
     return match ? match[1] : text;
   }
+  // The same words as dgc/model_watch.format_seconds: a 0.25 s backoff reads "0.25s".
   function retrySeconds(ms) {
     const s = ms / 1000;
+    if (s < 1 && Math.abs(s - Math.round(s)) > 0.05) return `${s.toFixed(2).replace(/0$/, "")}s`;
     return s < 10 && Math.abs(s - Math.round(s)) > 0.05 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
   }
+  // Which words a kind's line uses: one table for the label and the screen-reader phrase.
+  function retryVerb(kind) {
+    if (kind === "rate_limited" || kind === "overloaded") return "busy";
+    if (kind === "http") return "http";
+    if (kind === "stall" || kind === "loading") return "silent";
+    if (kind === "auth" || kind === "model_not_found") return "plain";
+    return "reconnect";
+  }
+  const RETRY_SPEECH = { reconnect: "Connection to the model lost, reconnecting", busy: "The model server is busy, retrying",
+    http: "The model server returned an error, retrying", silent: "The model is not responding, retrying",
+    plain: "Retrying the model request" };
   // [words, counter] for a line; the counter is drawn in its own span.
   function retryWords(line, state) {
-    const busy = line.kind === "rate_limited" || line.kind === "overloaded";
-    const plain = ["stall", "loading", "auth", "model_not_found"].includes(line.kind);
-    const reconnect = !busy && line.kind !== "http" && !plain;
-    const count = line.max ? `${line.attempt}/${line.max}` : `${line.attempt}`;
+    const verb = retryVerb(line.kind);
+    const busy = verb === "busy";
+    const reconnect = verb === "reconnect";
+    // A run can span two budgets; the counter never reads "4/3".
+    const count = line.max ? `${line.attempt}/${Math.max(line.max, line.attempt)}` : `${line.attempt}`;
     const tries = `${line.attempt} ${line.attempt === 1 ? "retry" : "retries"}`;
     if (state === "retrying") {
       if (busy) return ["Server is busy, retrying", count];
@@ -4354,8 +4371,11 @@
       + '<span class="model-retry-cause"></span>'
       + '<span class="codicon codicon-chevron-down model-retry-chev" aria-hidden="true"></span></button>'
       + `<div class="model-retry-detail" id="model-retry-detail-${n}" hidden>`
-      + '<dl class="model-retry-facts"></dl><ol class="model-retry-attempts" aria-label="Attempts"></ol>'
-      + '<pre class="model-retry-raw" hidden></pre><p class="model-retry-hint" hidden></p>'
+      + '<dl class="model-retry-facts"></dl>'
+      + `<div class="model-retry-section" id="model-retry-attempts-${n}" hidden>Attempts</div>`
+      + `<ol class="model-retry-attempts" aria-labelledby="model-retry-attempts-${n}"></ol>`
+      + '<div class="model-retry-section model-retry-raw-label" hidden>Details</div><pre class="model-retry-raw" hidden></pre>'
+      + '<div class="model-retry-section model-retry-hint-label" hidden>Hint</div><p class="model-retry-hint" hidden></p>'
       + '<button type="button" class="link model-retry-copy"><span class="codicon codicon-copy" aria-hidden="true"></span> Copy details</button></div>';
     const toggle = node.querySelector(".model-retry-toggle"), detail = node.querySelector(".model-retry-detail");
     toggle.addEventListener("click", () => {
@@ -4414,9 +4434,12 @@
       list.appendChild(li);
     }
     list.hidden = !line.attempts.length && !line.dropped;
+    list.previousElementSibling.hidden = list.hidden;
     const raw = node.querySelector(".model-retry-raw"), hint = node.querySelector(".model-retry-hint");
     raw.textContent = line.detail; raw.hidden = !line.detail;
     hint.textContent = line.hint; hint.hidden = !line.hint;
+    node.querySelector(".model-retry-raw-label").hidden = raw.hidden;
+    node.querySelector(".model-retry-hint-label").hidden = hint.hidden;
   }
   function retryCopyText(line) {
     const [words, count] = retryWords(line, line.state);
@@ -4469,8 +4492,7 @@
     if (replaying || document.visibilityState === "hidden") return;
     if (frame.state === "retrying" && frame.attempt === 1 && !speech.lost) {
       speech.lost = true;
-      speak(frame.kind === "rate_limited" || frame.kind === "overloaded"
-        ? "The model server is busy, retrying" : "Connection to the model lost, reconnecting");
+      speak(RETRY_SPEECH[retryVerb(frame.kind)]);
     } else if (frame.state === "recovered" && speech.lost && !speech.recovered) {
       speech.recovered = true;
       speak("Reconnected to the model");
@@ -4521,7 +4543,8 @@
       ["Endpoint", retryText(cause.endpoint, 300)],
       ["HTTP status", retryInt(cause.http_status, 100, 599) ? String(cause.http_status) : ""],
       ["Attempts", retryInt(cause.attempts, 1, 1000000) ? String(cause.attempts) : ""],
-      ["Details", retryText(cause.detail, 4000)]];
+      // The message below already prints the transport's words: never show them twice.
+      ["Details", message.includes(retryText(cause.detail, 4000).replace(/^\w+: /, "")) ? "" : retryText(cause.detail, 4000)]];
     retryFacts(row.querySelector(".model-retry-facts"), facts);
     row.querySelector(".model-error-message").textContent = message;
     const toggle = row.querySelector(".model-error-toggle"), detail = row.querySelector(".model-error-detail");
