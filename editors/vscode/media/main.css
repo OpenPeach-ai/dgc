@@ -404,26 +404,6 @@ button.act { min-height: var(--control); display: inline-flex; align-items: cent
 button.act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; font-weight: var(--w-semi); }
 button.act.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.act:hover { border-color: var(--accent); }
-/* propose_options: a vertical list of readable, wrapping rows */
-.opts { display: flex; flex-direction: column; gap: var(--sp-1); }
-button.opt { display: flex; gap: var(--sp-2); align-items: baseline; width: 100%; text-align: left; cursor: pointer;
-  font: var(--w-med) var(--t-sm)/1.45 var(--sans); color: var(--text); background: var(--surface2);
-  border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); }
-button.opt .n { flex: none; min-width: 14px; color: var(--muted); font: var(--w-bold) var(--t-xs)/1.45 var(--sans); }
-button.opt .ol { min-width: 0; overflow-wrap: anywhere; }
-button.opt:hover { border-color: var(--accent); background: var(--surface); }
-button.opt.rec { border-color: var(--border-strong); background: var(--sel); }
-button.opt.rec .n { color: var(--accent-text); }
-.card.resolved .opts { display: none; }
-.question-tabs { display: flex; gap: var(--sp-1); overflow-x: auto; margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--border); }
-.question-tab { flex: 0 0 auto; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: var(--sp-2); color: var(--muted); background: transparent; cursor: pointer; font: inherit; }
-.question-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
-button.opt.selected { border-color: var(--accent); background: var(--sel); }
-.question-form button.opt.rec:not(.selected) { border-color: var(--border); background: var(--surface); box-shadow: none; }
-.question-hint { display: block; font-size: var(--t-xs); color: var(--muted); }
-.question-other { box-sizing: border-box; width: 100%; margin-top: var(--sp-2); resize: vertical; }
-.question-progress { color: var(--muted); margin-right: auto; font-size: var(--t-xs); }
-.question-summary { white-space: pre-wrap; overflow-wrap: anywhere; }
 .card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
 .card.resolved .btns { display: none; }
 
@@ -998,15 +978,15 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   }
   .tool, .diff, .card, .tasks-panel, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
   #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
-  #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
+  #settings input, #settings select, button.act, button.link, .artifact .abtn {
     border-color: CanvasText;
   }
-  button.act.primary, button.opt.rec, .cmenu .mrow.sel, .pop .pi.sel,
+  button.act.primary, .cmenu .mrow.sel, .pop .pi.sel,
   .csend, .csend[data-mode="auto"], .artifact .abtn.primary {
     forced-color-adjust: none; background: Highlight; color: HighlightText;
     border-color: Highlight; box-shadow: none;
   }
-  button.act.primary *, button.opt.rec *, .cmenu .mrow.sel *, .pop .pi.sel * {
+  button.act.primary *, .cmenu .mrow.sel *, .pop .pi.sel * {
     color: inherit;
   }
   button:disabled, input:disabled, select:disabled, textarea:disabled { color: GrayText; }
@@ -1146,6 +1126,107 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 
 
 /* ---- 0.40 options ----------------------------------------------------------------------------- */
+/* The question card docks inside the composer frame in place of the text box and attachment chips;
+   the footer (Stop, mode, model, context) stays. It has no frame of its own: #cbox is the frame. */
+#cbox.asking > .cinput, #cbox.asking > #attachments { display: none; }
+body.ask-docked #tasks-panel { display: none; }
+.ask { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: var(--sp-3) var(--sp-2) var(--sp-1);
+  border-bottom: 1px solid var(--border); color: var(--text); border-radius: var(--r-2xl) var(--r-2xl) 0 0; }
+.ask:focus { outline: none; }
+.ask:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -2px; }
+.ask-head { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 0 0 var(--sp-2) var(--sp-2); }
+.ask-q { flex: 1; min-width: 0; font: var(--w-med) var(--t-base)/1.45 var(--sans); color: var(--text-strong); overflow-wrap: anywhere; white-space: pre-wrap; }
+.ask-x, .ask-page { flex: none; width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0;
+  border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.ask-x:hover, .ask-page:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.ask-page:disabled { opacity: .4; cursor: default; }
+.ask-hint { margin: 0 0 var(--sp-1) var(--sp-2); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }
+/* The list scrolls (whole rows snap) when the panel is short; script caps its height so the
+   transcript keeps max(96px, 20vh). */
+.ask-opts { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y proximity; }
+.ask-opt { flex: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) 14px; gap: var(--sp-2); align-items: start; width: 100%;
+  min-height: var(--control); padding: 6px var(--sp-2); border: 0; border-radius: var(--r-lg); background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; font: inherit; scroll-snap-align: start; }
+.ask-opt:hover, .ask-opt.hot { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ask-opt:focus-visible { outline-offset: -1px; }
+.ask-n { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
+  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
+/* On the highlight the circle needs a firmer edge to stay visible (3:1 against the tint). */
+.ask-opt.hot .ask-n { border-color: color-mix(in srgb, var(--text) 60%, transparent); }
+.ask-multi .ask-n { border-radius: var(--r-sm); }
+.ask-opt.checked .ask-n { background: var(--text-strong); border-color: var(--text-strong); color: var(--surface2); }
+.ask-body { min-width: 0; padding-top: 2px; }
+.ask-label { font: var(--w-med) var(--t-base)/1.35 var(--sans); color: var(--text-strong); overflow-wrap: anywhere; }
+.ask-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: var(--r-full); vertical-align: 1px;
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); color: var(--text); background: color-mix(in srgb, var(--text) 11%, transparent);
+  white-space: nowrap; }
+.ask-desc { display: block; margin-top: 2px; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+.ask-opt.hot .ask-desc { color: color-mix(in srgb, var(--muted) 80%, var(--text)); }
+.ask-arrow { padding-top: 4px; color: var(--muted); font-size: 14px; visibility: hidden; }
+.ask-opt.hot .ask-arrow, .ask-opt:hover .ask-arrow { visibility: visible; }
+.ask-other { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: center;
+  padding: var(--sp-1) var(--sp-1) 2px var(--sp-2); }
+.ask-pencil { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
+  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--muted); font-size: 12px; }
+.ask-field { min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans); padding: 3px 0; overflow: hidden; }
+.ask-field:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; border-radius: var(--r-sm); }
+.ask-field::placeholder { color: var(--muted); }
+.ask-act { min-height: var(--control); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  background: transparent; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.ask-act:hover:not(:disabled) { border-color: var(--text); }
+.ask-act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+.ask-act.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ask-foot { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2) 0;
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.ask-pg { font-variant-numeric: tabular-nums; }
+.ask-error { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--err-text); }
+.ask-sending { margin: var(--sp-1) var(--sp-2) 0; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }
+.ask.sending .ask-opts, .ask.sending .ask-other, .ask.sending .ask-head, .ask.sending .ask-foot { opacity: .6; }
+.ask button:disabled { cursor: default; }
+@media (prefers-reduced-motion: no-preference) {
+  .ask-opt, .ask-act, .ask-x, .ask-page { transition: background-color .12s ease, border-color .12s ease; }
+}
+/* A short panel: the rail and "Workspace changes" step aside while a question is open, and below
+   560px only the highlighted row keeps its description. */
+@media (max-height: 599px) {
+  body.ask-docked #composer-rail, body.ask-docked #workspace-changes { display: none; }
+}
+@media (max-height: 559px) {
+  .ask-opt:not(.hot) .ask-desc { display: none; }
+  .ask { padding-top: var(--sp-2); }
+}
+@media (max-width: 360px) {
+  .ask { padding-right: var(--sp-1); padding-left: var(--sp-1); }
+}
+/* The answered questions, inside the propose_options step (collapsed until opened). */
+.tool.asked-card:not(.open) .body { display: none; }
+.tool.asked-card .body { padding-top: var(--sp-1); }
+.asked-list { margin: 0; padding: 0 0 0 var(--sp-4); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.asked-list li { margin: 0 0 var(--sp-2); }
+.asked-list li:last-child { margin-bottom: 0; }
+.asked-q { color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.asked-a { color: var(--text-strong); overflow-wrap: anywhere; }
+.asked-a .ask-badge { margin-left: 4px; }
+.asked-words { display: block; white-space: pre-wrap; }
+.asked-words-label { margin-right: 4px; color: var(--muted); font-size: var(--t-xs); }
+.asked-skipped, .asked-outcome { color: var(--muted); }
+.asked-outcome { margin: 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+@media (forced-colors: active) {
+  .ask-opt { border: 1px solid transparent; }
+  .ask-opt.hot { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
+  .ask-opt.hot * { color: HighlightText; }
+  .ask-opt.hot .ask-n { border-color: HighlightText; }
+  .ask-badge { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+  .ask-opt.hot .ask-badge { background: HighlightText; color: Highlight; border-color: HighlightText; }
+  .ask-n, .ask-pencil { border-color: CanvasText; }
+  .ask-opt.checked .ask-n { forced-color-adjust: none; background: CanvasText; color: Canvas; border-color: CanvasText; }
+  .ask-act { border-color: CanvasText; }
+  .ask-act.primary { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
+  .ask { border-bottom-color: CanvasText; }
+}
 /* ---- end 0.40 options ------------------------------------------------------------------------- */
 
 

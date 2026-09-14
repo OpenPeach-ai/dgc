@@ -269,11 +269,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (cmd.type === "plan_response" && cmd.id === "host-plan") {
     send({ type: "request_expired", id: "host-plan" });
-    send({ type: "options_request", id: "host-questions", question: "Storage?", options: ["Local", "Cloud"],
-      questions: [
-        { id: "storage", header: "Storage", question: "Storage?", options: ["Local", "Cloud"] },
-        { id: "accent", header: "Accent", question: "Accent?", options: ["Purple", "Blue"] }
-      ] });
+    send({ type: "options_request", id: "host-questions", call_id: "host-options-call", questions: [
+      { id: "storage", header: "Storage", question: "Storage?", multi_select: false, options: [
+        { label: "Local", description: "Saved on this machine", recommended: true },
+        { label: "Cloud", description: "Synced to your account", recommended: false }] },
+      { id: "accent", header: "Accent", question: "Accent?", multi_select: false, options: [
+        { label: "Purple", description: "", recommended: false },
+        { label: "Blue", description: "", recommended: false }] }
+    ] });
   }
   if (cmd.type === "options_response" && cmd.id === "host-questions") {
     send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
@@ -285,6 +288,19 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   // ---- end 0.40 images ----
 
   // ---- 0.40 options (fixture command branches) ----
+  if (cmd.type === "prompt" && cmd.text === "installed-host question dismissal") {
+    send({ type: "turn_start", turn_id: "dismiss-turn", prompt: cmd.text });
+    send({ type: "tool_call", call_id: "host-dismiss-call", name: "propose_options", args: {}, summary: "1 question · Scope" });
+    send({ type: "options_request", id: "host-dismiss", call_id: "host-dismiss-call", questions: [
+      { id: "q1", header: "Scope", question: "Which scope?", multi_select: false, options: [
+        { label: "Project", description: "Only this repository", recommended: true },
+        { label: "User", description: "Every project", recommended: false }] }] });
+  }
+  if (cmd.type === "options_response" && cmd.id === "host-dismiss") {
+    send({ type: "options_resolved", id: "host-dismiss", call_id: "host-dismiss-call", outcome: "dismissed",
+      questions: [] });
+    send({ type: "turn_end", turn_id: "dismiss-turn", reason: "completed", token_estimate: 0 });
+  }
   // ---- end 0.40 options ----
   if (cmd.type === "shutdown") process.exit(0);
 });

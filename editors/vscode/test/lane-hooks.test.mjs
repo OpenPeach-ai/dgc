@@ -18,18 +18,19 @@ const STUBS = {
 function instrumented() {
   let script = mainJs;
   for (const [name, params] of Object.entries(STUBS)) {
-    const stub = `function ${name}(${params}) {}`;
-    assert.equal(script.split(stub).length, 2, `exactly one stub ${stub}`);
+    // A stub, or the lane's implementation of it: the recording call goes first in its body.
+    const head = `function ${name}(${params}) {`;
+    assert.equal(script.split(head).length, 2, `exactly one ${head}`);
     const first = params.split(",")[0].trim();
     const detail = name === "agentsOnToolCard" ? "{ inGroup: !!card.closest('.tool-group'), callId: card.dataset.callId, name: ev.name }"
       : name === "settleRetryLines" ? "{ turn: !!t, reason }"
         : name === "hideAgentsMenu" ? "event ? event.type : null"
           : name.endsWith("OnBackendExit") ? "msg.code" : name.endsWith("OnReady") ? "ev.type" : first;
-    script = script.replace(stub, `function ${name}(${params}) { (window.__hooks ||= []).push([${JSON.stringify(name)}, ${detail}]); }`);
+    script = script.replace(head, `${head} (window.__hooks ||= []).push([${JSON.stringify(name)}, ${detail}]);`);
   }
-  const docked = "function askCardDocked() { return false; }";
+  const docked = "function askCardDocked() {";
   assert.equal(script.split(docked).length, 2);
-  script = script.replace(docked, "function askCardDocked() { return window.__docked === true; }");
+  script = script.replace(docked, `${docked} if (window.__docked !== undefined) return window.__docked === true;`);
   const shared = "function endToolGroup() { if (turn) turn.toolGroup = null; }";
   assert.equal(script.split(shared).length, 2);
   return script.replace(shared, `${shared}\n  window.__endToolGroup = endToolGroup;`);
@@ -122,7 +123,8 @@ test("ready, backend_exit and request cards reach their hooks", () => {
   event({ type: "permission_request", id: "p1", call_id: "c1", name: "bash", args: { command: "ls" }, command: "ls",
     suggested_rule: "Bash(ls)", choices: ["once", "always", "deny"] });
   event({ type: "plan_proposal", id: "p2", plan: "1. x", choices: ["auto", "acceptEdits", "default", "reject"] });
-  event({ type: "options_request", id: "p3", question: "Pick", options: ["A", "B"] });
+  event({ type: "options_request", id: "p3", call_id: null, questions: [{ id: "q1", header: "Pick", question: "Pick",
+    multi_select: false, options: [{ label: "A", description: "", recommended: true }, { label: "B", description: "", recommended: false }] }] });
   event({ type: "mcp_input_request", id: "p4", server: "srv", kind: "sampling_request", payload: {} });
   send({ type: "continue_offer", cause: "", sessionId: "someone-else" });
   send({ type: "continue_offer", cause: "" });

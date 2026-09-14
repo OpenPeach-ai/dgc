@@ -1427,6 +1427,14 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   assert.ok(doc.querySelector(".thinking").classList.contains("waiting-input"));
   doc.querySelector('.card button[data-d="deny"]').click();
   assert.equal(verb(), "Finishing open todos", "answered, and the backend's own state comes back");
+  // A question docked in the composer is a request card too.
+  event({ type: "tool_call", call_id: "q", name: "propose_options", args: {}, summary: "1 question · Pick" });
+  event({ type: "options_request", id: "o1", call_id: "q", questions: [{ id: "q1", header: "Pick", question: "Pick",
+    multi_select: false, options: [{ label: "A", description: "", recommended: false }, { label: "B", description: "", recommended: false }] }] });
+  assert.equal(verb(), "waiting for your input");
+  assert.ok(doc.querySelector(".thinking").classList.contains("waiting-input"));
+  event({ type: "options_resolved", id: "o1", call_id: "q", outcome: "dismissed", questions: [] });
+  assert.equal(verb(), "Finishing open todos", "undocked, and the backend's own state comes back");
   event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
   assert.equal(verb(), undefined, "the verb does not outlive the turn");
   assert.match(doc.querySelector(".thinking.done").textContent, /^Worked for \d+s$/);
@@ -1990,104 +1998,107 @@ test("concurrent pasted images reserve bytes before FileReader can cross the agg
   dom.window.close();
 });
 
+// v14: a question docks in the composer frame; nothing is posted until the reader acts, and one card
+// produces at most one response. (The full behaviour is pinned in options-card.test.mjs.)
+const V14_QUESTIONS = [
+  { id: "storage", header: "Storage", question: "Where?", multi_select: false, options: [
+    { label: "Local", description: "On this machine", recommended: true }, { label: "Cloud", description: "", recommended: false }] },
+  { id: "accent", header: "Appearance", question: "Which accent?", multi_select: false, options: [
+    { label: "Purple", description: "", recommended: false }, { label: "Blue", description: "", recommended: false }] },
+];
+const pointer = (dom, node) => node.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, detail: 1 }));
+
 test("question tabs retain custom answers and submit exactly one complete response", () => {
-  const { dom, errors, posted, send, doc } = makeDom();
+  const { dom, errors, posted, send, doc, advance } = makeDom({ clock: true });
   send({ type: "event", event: { type: "turn_start" } });
-  send({ type: "event", event: { type: "options_request", id: "form",
-    question: "Where?", options: ["Local", "Cloud"], questions: [
-      { id: "storage", header: "Storage", question: "Where?", options: ["Local", "Cloud"] },
-      { id: "accent", header: "Appearance", question: "Which accent?", options: ["Purple", "Blue"] },
-    ] } });
-  const card = doc.querySelector('.card[data-request-id="form"]');
-  assert.equal(card.querySelector(".question-submit").disabled, true);
-  card.querySelector('[data-choice="0"]').click();
-  assert.equal(posted.some((m) => m.type === "options_response"), false);
-  card.querySelector('[data-tab="1"]').click();
-  card.querySelector('[data-choice="other"]').click();
-  let input = card.querySelector(".question-other");
-  assert.equal(input.hidden, false);
-  input.value = "Lavender <script>alert(1)</script>";
-  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  card.querySelector('[data-tab="0"]').click();
-  assert.equal(card.querySelector('[data-choice="0"]').getAttribute("aria-pressed"), "true");
-  card.querySelector('[data-tab="1"]').click();
-  input = card.querySelector(".question-other");
-  assert.equal(input.value, "Lavender <script>alert(1)</script>");
+  send({ type: "event", event: { type: "options_request", id: "form", call_id: "c1", questions: V14_QUESTIONS } });
+  const card = doc.querySelector('#cbox > .ask[data-request-id="form"]');
+  assert.ok(card, "the question docks inside the composer");
+  pointer(dom, card.querySelectorAll(".ask-opt")[0]);
+  advance(150);
+  assert.equal(posted.some((m) => m.type === "options_response"), false, "one answer of two sends nothing");
+  assert.equal(card.querySelector(".ask-q").textContent, "Which accent?");
+  const field = card.querySelector(".ask-field");
+  field.value = "Lavender <script>alert(1)</script>";
+  field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  pointer(dom, card.querySelector('.ask-page[data-step="-1"]'));
+  assert.equal(card.querySelector(".ask-q").textContent, "Where?");
+  pointer(dom, card.querySelector('.ask-page[data-step="1"]'));
+  assert.equal(card.querySelector(".ask-field").value, "Lavender <script>alert(1)</script>", "drafts are kept per question");
   assert.equal(card.querySelector("script"), null);
-  const submit = card.querySelector(".question-submit");
-  assert.equal(submit.disabled, false);
-  submit.click(); submit.click();
+  const action = card.querySelector(".ask-act");
+  assert.equal(action.textContent, "Submit");
+  pointer(dom, action); pointer(dom, action);
   const responses = posted.filter((m) => m.type === "options_response");
   assert.equal(responses.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(responses[0])), { type: "options_response", id: "form",
-    answers: { storage: "Local", accent: "Lavender <script>alert(1)</script>" } });
-  assert.match(card.querySelector(".question-summary").textContent, /Lavender <script>/);
-  assert.equal(card.querySelector("script"), null);
+    answers: { storage: { selected: [0], other: "" }, accent: { selected: [], other: "Lavender <script>alert(1)</script>" } } });
   assert.deepEqual(errors, []);
   dom.window.close();
 });
 
-test("single question offers Other and cancellation never submits a default", () => {
-  const { dom, errors, posted, send, doc } = makeDom();
+test("single question offers free text and cancellation never submits a default", () => {
+  const { dom, errors, posted, send, doc } = makeDom({ clock: true });
   send({ type: "event", event: { type: "turn_start" } });
-  send({ type: "event", event: { type: "options_request", id: "single",
-    question: "Which approach?", options: ["One", "Two", "Three"] } });
-  const card = doc.querySelector('.card[data-request-id="single"]');
-  assert.equal(card.querySelectorAll(".opt").length, 4);
-  card.querySelector('[data-choice="other"]').click();
-  const input = card.querySelector(".question-other");
-  input.value = " "; input.dispatchEvent(new dom.window.Event("input"));
-  assert.equal(card.querySelector(".question-submit").disabled, true);
-  input.value = "Use both approaches"; input.dispatchEvent(new dom.window.Event("input"));
-  assert.equal(card.querySelector(".question-submit").disabled, false);
+  send({ type: "event", event: { type: "options_request", id: "single", call_id: "c1", questions: [{
+    id: "q1", header: "Approach", question: "Which approach?", multi_select: false, options: ["One", "Two", "Three"]
+      .map((label) => ({ label, description: "", recommended: false })) }] } });
+  const card = doc.querySelector('.ask[data-request-id="single"]');
+  assert.equal(card.querySelectorAll(".ask-opt").length, 3);
+  const field = card.querySelector(".ask-field");
+  field.value = " "; field.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".ask-act").textContent, "Skip");
+  field.value = "Use both approaches"; field.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".ask-act").textContent, "Submit");
   send({ type: "event", event: { type: "request_expired", id: "single" } });
-  assert.equal(input.disabled, true);
-  card.querySelector(".question-submit").click();
+  assert.equal(card.isConnected, false, "an expired request leaves the composer");
+  assert.equal(field.disabled, true);
+  pointer(dom, card.querySelector(".ask-act"));
   assert.equal(posted.some((m) => m.type === "options_response"), false);
-  assert.doesNotMatch(doc.getElementById("log").textContent, /Approval request expired/);
+  assert.equal(doc.querySelector(".cinput").hidden, false, "the text box comes back");
   assert.deepEqual(errors, []);
   dom.window.close();
 });
 
 test("decision cards expire by exact ID and cannot double-submit across cancel/exit races", () => {
-  const { dom, errors, posted, send, doc } = makeDom();
+  const { dom, errors, posted, send, doc, advance } = makeDom({ clock: true });
   send({ type: "event", event: { type: "turn_start" } });
   send({ type: "event", event: { type: "permission_request", id: "permission-old",
     name: "bash", command: "npm test", suggested_rule: "bash(npm test)",
     args: { command: "npm test" } } });
-  send({ type: "event", event: { type: "options_request", id: "options-live",
-    question: "Which implementation?", options: ["Safe", "Fast"] } });
+  send({ type: "event", event: { type: "options_request", id: "options-live", call_id: "c9",
+    questions: [{ ...V14_QUESTIONS[0], id: "q1", question: "Which implementation?" }] } });
   const expired = doc.querySelector('.card[data-request-id="permission-old"]');
-  const live = doc.querySelector('.card[data-request-id="options-live"]');
+  const live = doc.querySelector('.ask[data-request-id="options-live"]');
   assert.ok(expired && live, "request cards must expose their exact correlation IDs");
 
   send({ type: "event", event: { type: "request_expired", id: "permission-old" } });
   assert.equal(expired.classList.contains("resolved"), true);
   assert.equal(expired.getAttribute("aria-disabled"), "true");
   assert.equal(expired.querySelector("button").disabled, true);
-  assert.equal(live.classList.contains("resolved"), false,
-    "expiring one request must not disable a different active decision");
+  assert.equal(live.isConnected, true, "expiring one request must not retire a different active decision");
   expired.querySelector("button").click();
   assert.equal(posted.some((message) => message.type === "permission_response"), false,
     "an expired permission must not post a late approval");
 
-  const option = live.querySelector("button");
-  option.click(); option.click();
-  assert.equal(posted.filter((message) => message.type === "options_response").length, 0,
-    "selecting an option must wait for Submit");
-  const submit = live.querySelector(".question-submit");
-  submit.click(); submit.click();
+  const option = live.querySelector(".ask-opt");
+  pointer(dom, option); pointer(dom, option);
+  advance(150);
   assert.equal(posted.filter((message) => message.type === "options_response").length, 1,
     "one decision card must produce at most one response");
+  assert.equal(live.classList.contains("sending"), true);
 
   send({ type: "event", event: { type: "plan_proposal", id: "plan-exit",
     plan: "1. Change the API" } });
   const plan = doc.querySelector('.card[data-request-id="plan-exit"]');
   send({ type: "backend_exit", code: 7 });
   assert.equal(plan.classList.contains("resolved"), true);
+  assert.equal(live.isConnected, false, "backend exit undocks the question");
   plan.querySelector("button").click();
+  pointer(dom, option);
   assert.equal(posted.some((message) => message.type === "plan_response"), false,
     "backend exit must retire every outstanding decision before restart");
+  assert.equal(posted.filter((message) => message.type === "options_response").length, 1);
   assert.deepEqual(errors, [], "decision expiry race flow raised JS errors");
   dom.window.close();
 });

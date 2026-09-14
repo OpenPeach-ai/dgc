@@ -185,7 +185,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   active.on("ready", () => active.completeHandshake());
   active.start();
   await waitFor(active, "permission_request");
-  assert.equal(active.send({ type: "options_response", id: "r1", choice: 1 }), false,
+  assert.equal(active.send({ type: "options_response", id: "r1", answers: { q1: { selected: [0], other: "" } } }), false,
     "a response of the wrong lifecycle type must fail closed");
   const echoed = waitFor(active, "info",
     (event) => echoedCommand(event)?.type === "permission_response");
@@ -691,6 +691,64 @@ test("a child that never launched reports launch_failed, not a backend death", a
 
 
 // ---- 0.40 options ----------------------------------------------------------------------------------
+const protocolBundle = join(scratch, "protocol.cjs");
+await build({ entryPoints: [join(here, "../src/protocol.generated.ts")], bundle: true, format: "cjs",
+  platform: "node", target: "node18", outfile: protocolBundle, logLevel: "silent" });
+const { dgcCommandError, dgcEventError } = createRequire(import.meta.url)(protocolBundle);
+const V14_QUESTION = { id: "q1", header: "Storage", question: "Where?", multi_select: false, options: [
+  { label: "Local", description: "On this machine", recommended: true },
+  { label: "Cloud", description: "", recommended: false }] };
+
+test("v14 question frames validate and the v13 shapes fail closed", async () => {
+  assert.equal(dgcEventError({ type: "options_request", seq: 0, id: "r1", call_id: "c1", questions: [V14_QUESTION] }), undefined);
+  assert.equal(dgcEventError({ type: "options_request", seq: 0, id: "r1", questions: [V14_QUESTION] }), undefined);
+  assert.notEqual(dgcEventError({ type: "options_request", seq: 0, id: "r1", call_id: "c1" }), undefined, "questions is required");
+  for (const outcome of ["answered", "dismissed", "cancelled", "unavailable"]) {
+    assert.equal(dgcEventError({ type: "options_resolved", seq: 0, id: null, call_id: null, outcome, questions: [V14_QUESTION],
+      answers: { q1: { selected: [0], other: "" } } }), undefined, outcome);
+  }
+  assert.notEqual(dgcEventError({ type: "options_resolved", seq: 0, id: null, outcome: "skipped", questions: [] }), undefined);
+  assert.notEqual(dgcCommandError({ type: "options_response", id: "r1", choice: 1 }), undefined, "choice (v6) is gone");
+  assert.equal(dgcCommandError({ type: "options_response", id: "r1", answers: { q1: { selected: [0], other: "" } } }), undefined);
+  assert.equal(dgcCommandError({ type: "options_response", id: "r1", dismissed: true }), undefined);
+
+  const accepted = executable("options-v14-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+send(ready);
+send({ type: "options_request", id: "r1", call_id: "c1", questions: [${JSON.stringify(V14_QUESTION)}] });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  if (cmd.type === "options_response") {
+    send({ type: "info", message: "echo:" + JSON.stringify(cmd) });
+    send({ type: "options_resolved", id: "r1", call_id: "c1", outcome: "answered", questions: [], answers: cmd.answers });
+  }
+});`);
+  const backend = new DgcBackend(scratch, accepted);
+  backend.on("ready", () => backend.completeHandshake());
+  const request = waitFor(backend, "event", (event) => event.type === "options_request");
+  backend.start();
+  await request;
+  const resolved = waitFor(backend, "event", (event) => event.type === "options_resolved");
+  assert.equal(backend.send({ type: "options_response", id: "r1", choice: 1 }), false, "choice fails closed");
+  assert.equal(backend.send({ type: "options_response", id: "r1", answers: { q1: { selected: [0], other: "" } } }), true);
+  assert.equal(backend.send({ type: "options_response", id: "r1", dismissed: true }), false, "one response per request");
+  assert.deepEqual((await resolved).answers, { q1: { selected: [0], other: "" } });
+  backend.dispose();
+
+  const stray = executable("options-stray-backend", `
+${protocolFixture()}
+send(ready);
+send({ type: "options_request", id: "r1", questions: [${JSON.stringify(V14_QUESTION)}], options: ["Local", "Cloud"] });
+setInterval(() => {}, 1000);`);
+  const strayBackend = new DgcBackend(scratch, stray);
+  const failure = waitFor(strayBackend, "event", (event) => event.type === "error" && event.protocol_error === true);
+  strayBackend.start();
+  assert.match((await failure).message,
+    new RegExp(`violated protocol v${DGC_PROTOCOL_VERSION}: options_request has undeclared field "options"`));
+  strayBackend.dispose();
+});
 // ---- end 0.40 options ------------------------------------------------------------------------------
 
 
