@@ -403,11 +403,21 @@ class PreProgressStallTests(StallTestCase):
             handler.wfile.write(body)
         self.server.behaviours["/chat/completions"] = json_then_slow
         client, _ = self.client(model="json-gateway-model", first_token_timeout=0.3,
-                                stall_retries=0, read_timeout=5)
+                                stall_retries=0, read_timeout=5, capability_cache_ttl_s=1)
+        self.addCleanup(client.invalidate_capabilities)     # the rejection cache is process-wide
         self.assertEqual(client.chat(MESSAGES).content, "whole")
         self.assertTrue(client._streaming_rejected())
+        # Ordinary negotiated rejections age out after capability_cache_ttl_s (1 s here). This one
+        # must not: the endpoint still sends nothing until it has generated everything, and its
+        # next long generation would otherwise be killed at the first-token deadline.
+        client._mark_rejected("tools")
+        time.sleep(1.1)
+        self.assertTrue(client.tools_supported, "an ordinary rejection still expires")
+        self.assertTrue(client._streaming_rejected(), "the non-streaming verdict outlives the TTL")
         self.assertEqual(client.chat(MESSAGES).content, "slow but whole")
         self.assertEqual(len(self.server.chat_posts("/chat/completions")), 2)
+        client.invalidate_capabilities()
+        self.assertFalse(client._streaming_rejected(), "invalidate_capabilities() forgets it")
 
     def test_recovers_on_retry_and_emits_ordered_events(self):
         self.server.behaviours["/chat/completions"] = sequence(no_headers, chat_answer("recovered"))
@@ -620,6 +630,58 @@ class MidStreamStallTests(StallTestCase):
         self.assertEqual(events.kinds(), ["notice"])
         self.assertEqual(events.items[0].phase, "streaming")
 
+    def assertMidStreamStall(self, result, posts, content):
+        self.assertEqual(result.finish_reason, "incomplete")
+        self.assertEqual(result.content, content)
+        self.assertIsNotNone(result.stall)
+        self.assertEqual((result.stall["phase"], result.stall["progressed"]), ("streaming", True))
+        self.assertEqual(len(posts), 1, "the client never re-issues after text reached the UI")
+        self.assertDisconnected(posts[0], 0.4)
+
+    def test_anthropic_stall_after_partial_text(self):
+        def behaviour(handler, record):
+            _start_stream(handler)
+            _chunk(handler, "event: message_start\n" + _sse({"type": "message_start", "message": {
+                "id": "m", "role": "assistant", "content": [], "usage": {"input_tokens": 1}}}))
+            _chunk(handler, _sse({"type": "content_block_start", "index": 0,
+                                  "content_block": {"type": "text", "text": ""}}))
+            _chunk(handler, _sse({"type": "content_block_delta", "index": 0,
+                                  "delta": {"type": "text_delta", "text": "Hello"}}))
+            record["gone"] = _client_gone(handler)
+        self.server.behaviours["/messages"] = behaviour
+        client, _ = self.client(api_mode="anthropic", idle_timeout=0.4, first_token_timeout=5)
+        started = time.monotonic()
+        result = client.chat(MESSAGES)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertMidStreamStall(result, self.server.chat_posts("/messages"), "Hello")
+
+    def test_native_ollama_stall_after_partial_text(self):
+        def behaviour(handler, record):
+            _start_stream(handler, "application/x-ndjson")
+            _chunk(handler, json.dumps({"model": "stall-model", "done": False,
+                                        "message": {"role": "assistant", "content": "Hel"}}) + "\n")
+            record["gone"] = _client_gone(handler)
+        self.server.behaviours["/api/chat"] = behaviour
+        client, _ = self.client(path="", api_mode="ollama", idle_timeout=0.4, first_token_timeout=5)
+        started = time.monotonic()
+        result = client.chat(MESSAGES)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertMidStreamStall(result, self.server.chat_posts("/api/chat"), "Hel")
+
+    def test_responses_stall_after_partial_text(self):
+        def behaviour(handler, record):
+            _start_stream(handler)
+            _chunk(handler, _sse({"type": "response.created", "response": {"id": "r1"}}))
+            _chunk(handler, _sse({"type": "response.output_text.delta", "item_id": "i",
+                                  "output_index": 0, "content_index": 0, "delta": "Hi"}))
+            record["gone"] = _client_gone(handler)
+        self.server.behaviours["/responses"] = behaviour
+        client, _ = self.client(api_mode="responses", idle_timeout=0.4, first_token_timeout=5)
+        started = time.monotonic()
+        result = client.chat(MESSAGES)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertMidStreamStall(result, self.server.chat_posts("/responses"), "Hi")
+
 
 # ---- Esc / Stop in every phase -------------------------------------------------------------------
 class CancelInEveryPhaseTests(StallTestCase):
@@ -672,6 +734,74 @@ class CancelInEveryPhaseTests(StallTestCase):
         self.assertEqual(result.finish_reason, "cancelled")
         self.assertEqual(len(self.server.chat_posts("/chat/completions")), 1,
                          "a cancel during the backoff never issues the retry")
+
+
+# ---- one watch per attempt, stopped with it ------------------------------------------------------
+def _watch_threads() -> list[str]:
+    return [thread.name for thread in threading.enumerate()
+            if thread.name in ("dgc-request-watch", "dgc-load-probe") and thread.is_alive()]
+
+
+class AttemptLifecycleTests(StallTestCase):
+    def assertNoWatchThreads(self):
+        settle = time.monotonic() + 1.5
+        while _watch_threads() and time.monotonic() < settle:
+            time.sleep(0.02)
+        self.assertEqual(_watch_threads(), [], "every attempt's watch stops with its attempt")
+
+    def test_watches_stop_after_success_errors_and_stalls(self):
+        def http_400(handler, record):
+            body = b'{"error": {"message": "bad request"}}'
+            handler.send_response(400)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+        self.assertNoWatchThreads()
+        self.server.behaviours["/chat/completions"] = chat_answer("fine")
+        client, _ = self.client(first_token_timeout=0.4, stall_retries=0)
+        for _ in range(5):
+            self.assertEqual(client.chat(MESSAGES).content, "fine")
+        self.assertNoWatchThreads()
+        self.server.behaviours["/chat/completions"] = http_400
+        for _ in range(3):
+            with self.assertRaises(Exception):
+                client.chat(MESSAGES)
+        self.assertNoWatchThreads()
+        self.server.behaviours["/chat/completions"] = silent_stream
+        with self.assertRaises(ModelStallError):
+            client.chat(MESSAGES)
+        self.assertNoWatchThreads()
+
+    def test_a_failed_attempt_raises_no_notice_while_it_backs_off(self):
+        # The server hangs up without answering at 0.35 s; the transient retry then backs off for
+        # 0.5 s. The ended attempt's watch must not cross its 0.5 s notice threshold during that
+        # backoff and narrate "no response" about a request that is already over.
+        def hang_up(handler, record):
+            time.sleep(0.35)
+            handler.close_connection = True
+            try:
+                handler.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        self.server.behaviours["/chat/completions"] = sequence(hang_up, chat_answer("second"))
+        client, events = self.client(first_token_timeout=5, stall_notice=0.5, stall_retries=0)
+        result = client.chat(MESSAGES)
+        self.assertEqual(result.content, "second")
+        self.assertEqual(len(self.server.chat_posts("/chat/completions")), 2)
+        self.assertEqual(events.kinds(), [], [(e.kind, e.phase, e.silent_s) for e in events.items])
+        self.assertNoWatchThreads()
+
+    def test_the_ollama_load_probe_covers_every_self_hosted_ollama(self):
+        for url in ("http://127.0.0.1:11434", "http://192.168.1.60:11434",
+                    "http://203.0.113.5:11434", "https://ollama.example.org"):
+            with self.subTest(url=url):
+                client = LLMClient(url, "k", "some-model", api_mode="ollama")
+                self.assertTrue(callable(client._ollama_load_probe()))
+        hosted = LLMClient("https://ollama.com", "k", "some-model", api_mode="ollama")
+        self.assertIsNone(hosted._ollama_load_probe(), "Ollama's cloud loads models out of sight")
+        plain = LLMClient("https://api.example.com/v1", "k", "some-model")
+        self.assertIsNone(plain._ollama_load_probe())
 
 
 # ---- configuration --------------------------------------------------------------------------------
@@ -818,6 +948,48 @@ class AgentStallTests(StallTestCase):
         self.assertIn(f"127.0.0.1:{self.server.port}", message)
         self.assertNotIn("provider stream repeatedly ended", message)
 
+    def test_a_mid_stream_stall_inside_a_tool_call_never_runs_the_partial_call(self):
+        def partial_call(handler, record):
+            _start_stream(handler)
+            _chunk(handler, _chat_delta({"tool_calls": [{
+                "index": 0, "id": "call_1", "type": "function",
+                "function": {"name": "write_file", "arguments": '{"path": "hello.txt", "con'}}]}))
+            record["gone"] = _client_gone(handler)
+        self.server.behaviours["/chat/completions"] = sequence(partial_call, chat_answer("ok done"))
+        agent, ui = self.agent(mode="auto")
+        self.assertIsNot(agent.run_turn("write hello.txt", reset_cancel=False), False)
+        posts = self.server.chat_posts("/chat/completions")
+        self.assertEqual(len(posts), 2, "one stall recovery, then the model answers")
+        self.assertDisconnected(posts[0], 0.4)
+        self.assertFalse((agent.config.project_root / "hello.txt").exists(),
+                         "a tool call cut off mid-arguments is never run")
+        replay = json.dumps(posts[1]["body"]["messages"])
+        self.assertIn("was NOT run", replay)
+        self.assertTrue(any("stopped streaming" in line and "(1/1)" in line for line in ui.infos),
+                        ui.infos)
+        self.assertIn("ok done", "".join(ui.text))
+
+    def test_a_stall_that_ends_the_turn_does_not_bring_back_the_old_activity(self):
+        from dgc.headless import HeadlessUI
+        self.server.behaviours["/chat/completions"] = silent_stream
+        agent, _ = self.agent()
+        capture = _Capture()
+        ui = HeadlessUI(capture, None)
+        ui.turn_id = "t1"
+        agent.ui = ui
+        self.assertFalse(agent.run_turn("hello", reset_cancel=False))
+        frames = [(event.get("state"), event.get("label")) for event in capture.events
+                  if event["type"] in ("turn_activity", "error")]
+        notices = [index for index, (state, label) in enumerate(frames)
+                   if label in ("No response from the model", "Retrying the model request")]
+        self.assertTrue(notices, frames)
+        errors = [index for index, event in enumerate(capture.events) if event["type"] == "error"]
+        self.assertTrue(errors, [event["type"] for event in capture.events])
+        after_first_notice = frames[notices[0]:]
+        self.assertTrue(all(state == "waiting" and label != "Waiting for the model"
+                            for state, label in after_first_notice if state is not None),
+                        f"a stale activity came back before the error: {after_first_notice}")
+
 
 # ---- front ends ----------------------------------------------------------------------------------
 class _Capture:
@@ -836,6 +1008,7 @@ class FrontEndTests(unittest.TestCase):
         ui.turn_id = "t1"
         ui._activity_key = None
         ui._model_wait_saved = ui._model_wait_key = None
+        ui._model_waits = {}
         ui.turn_activity("responding", "Responding")
         ui.model_wait("No response from the model", "m at h · no reply for 45s+", since=1.0)
         ui.model_wait("Retrying the model request", "attempt 2 of 3 · m at h")
@@ -852,6 +1025,113 @@ class FrontEndTests(unittest.TestCase):
         ui.turn_activity("tool", "Running a command", "npm test")
         ui.model_wait(None)
         self.assertEqual(ui.em.events[-1]["label"], "Running a command")
+
+    def bare_headless(self):
+        from dgc.headless import HeadlessUI
+        ui = HeadlessUI(_Capture(), None)
+        ui.turn_id = "t1"
+        return ui
+
+    @staticmethod
+    def activity(ui):
+        return [(event["state"], event["label"], event.get("detail", ""))
+                for event in ui.em.events if event["type"] == "turn_activity"]
+
+    def test_headless_parallel_children_keep_separate_notices(self):
+        from dgc.agent import _SubUI
+        ui = self.bare_headless()
+        ui.turn_activity("tool", "Run sub-agents")
+        child_a = _SubUI(ui, "a", buffered=True)
+        child_b = _SubUI(ui, "b", buffered=True)
+        child_a.model_wait("No response from the model", "A at h · no reply for 45s+")
+        child_b.model_wait("No response from the model", "B at h · no reply for 45s+")
+        child_a.model_wait(None)            # A resumes; B is still silent
+        self.assertEqual(self.activity(ui)[-1],
+                         ("waiting", "No response from the model", "B at h · no reply for 45s+"))
+        child_b.model_wait(None)            # nobody is waiting any more
+        self.assertEqual(self.activity(ui)[-1], ("tool", "Run sub-agents", ""))
+        for event in ui.em.events:
+            self.assertIsNone(event_error({"seq": 0, **event}), event)
+
+    def test_headless_clear_after_a_failed_call_restores_nothing(self):
+        ui = self.bare_headless()
+        ui.turn_activity("waiting", "Waiting for the model")
+        ui.model_wait("No response from the model", "m at h · no reply for 45s+")
+        before = len(ui.em.events)
+        ui.model_wait(None, restore=False)
+        self.assertEqual(len(ui.em.events), before, "no stale 'Waiting for the model' frame")
+        ui.turn_activity("waiting", "Waiting for the model")               # the next request
+        ui.model_wait("No response from the model", "m at h · no reply for 45s+")
+        ui.model_wait(None)                 # a normal clear still restores
+        self.assertEqual(self.activity(ui)[-1], ("waiting", "Waiting for the model", ""))
+
+    def test_tui_parallel_children_keep_separate_notices(self):
+        from dgc.agent import _SubUI
+        tui = self.bare_tui()
+        child_a = _SubUI(tui, "a", buffered=True)
+        child_b = _SubUI(tui, "b", buffered=True)
+        now = time.monotonic()
+        child_a.model_wait("No response from the model", "child-a at 127.0.0.1:1 · no reply", since=now)
+        child_b.model_wait("No response from the model", "child-b at 127.0.0.1:2 · no reply", since=now)
+        child_a.model_wait(None)
+        status = self.plain(tui)
+        self.assertIn("child-b at 127.0.0.1:2", status)
+        self.assertNotIn("Responding", status)
+        child_b.model_wait(None)
+        self.assertIn("Responding", self.plain(tui))
+        # Streamed text is the newer truth: it hides a notice, and a later clear does not revive it.
+        child_a.model_wait("No response from the model", "child-a at 127.0.0.1:1 · no reply", since=now)
+        child_b.model_wait("No response from the model", "child-b at 127.0.0.1:2 · no reply", since=now)
+        tui._model_wait = None              # what on_text does
+        child_b.model_wait(None)
+        self.assertIsNone(tui._model_wait)
+
+    def test_a_ui_with_the_original_hook_signature_still_works(self):
+        from dgc.agent import _SubUI, _call_model_wait
+        seen = []
+
+        class OldUI:
+            def model_wait(self, label, detail="", *, since=None):
+                seen.append((label, detail, since))
+        _call_model_wait(OldUI().model_wait, "No response from the model", "d", since=1.0,
+                         restore=False, origin="x")
+        _SubUI(OldUI(), "child").model_wait("Loading the model", "m at h", since=2.0)
+        self.assertEqual(seen, [("No response from the model", "d", 1.0),
+                                ("Loading the model", "m at h", 2.0)])
+
+    def test_classic_repl_renames_a_live_spinner_only(self):
+        from unittest import mock
+        from dgc.cli import UI
+
+        class FakeTTY:
+            def isatty(self):
+                return True
+
+            def write(self, text):
+                return len(text)
+
+            def flush(self):
+                pass
+        ui = UI()
+        started = []
+        ui.start_working = started.append
+        with mock.patch.object(sys, "stdout", FakeTTY()):
+            ui.model_wait("No response from the model", "m at h")     # no spinner running
+            self.assertEqual(started, [])
+            ui._work_stop = threading.Event()
+            ui.model_wait("No response from the model", "m at h", since=1.0, origin=None)
+            ui.model_wait(None, restore=False)                          # clearing is a no-op
+        self.assertEqual(started, ["No response from the model"])
+
+    def test_acp_model_wait_sends_nothing(self):
+        from unittest import mock
+        from dgc.acp import _ACPUi
+        server = mock.MagicMock()
+        ui = _ACPUi(server, "sess-1", Path(tempfile.gettempdir()))
+        self.assertIsNone(ui.model_wait("No response from the model", "m at h", since=1.0,
+                                        origin="child"))
+        self.assertIsNone(ui.model_wait(None, restore=False))
+        self.assertEqual(server.mock_calls, [])
 
     def bare_tui(self):
         from rich.console import Console
@@ -902,8 +1182,8 @@ class FrontEndTests(unittest.TestCase):
         from dgc.tui import TUI
         tui = object.__new__(TUI)
         tui.app = None
-        session_a = SimpleNamespace(_model_wait=None)
-        session_b = SimpleNamespace(_model_wait=None)
+        session_a = SimpleNamespace(_model_wait=None, _model_waits={})
+        session_b = SimpleNamespace(_model_wait=None, _model_waits={})
         tui._sessions = [session_a, session_b]
         tui._active_idx = 1                     # B is on screen
         tui._tls = threading.local()
@@ -983,6 +1263,13 @@ class ServeEmitsTheWaitingNotice(unittest.TestCase):
         self.assertIn(f"model 'stall-model' at http://127.0.0.1:{server.port}/v1/chat/completions",
                       errors[-1]["message"])
         self.assertNotIn("start your server", errors[-1]["message"])
+        # Between the notice and the error nothing may bring back the activity the notice replaced.
+        first_notice = events.index(waiting[0])
+        last_error = events.index(errors[-1])
+        between = [(e.get("state"), e.get("label")) for e in events[first_notice:last_error]
+                   if e.get("type") == "turn_activity"]
+        self.assertTrue(all(label in ("No response from the model", "Retrying the model request")
+                            for _, label in between), between)
 
 
 if __name__ == "__main__":
