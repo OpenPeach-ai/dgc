@@ -436,7 +436,7 @@ class SubAgentAndMcpTests(unittest.TestCase):
                     return f"chart ready (model sees it: {seen})"
                 agent.mcp.call = call
                 out = agent.execute_mcp_tool("mcp__srv__chart", {}, "editor-1")
-                self.assertIn("model sees it: False", out)
+                self.assertIn("model sees it: False", out, "an idle editor call is display-only")
                 images = ui.named("tool_images")
                 self.assertEqual(len(images), 1)
                 self.assertEqual(images[0][1][0], "editor-1")
@@ -461,7 +461,7 @@ class SubAgentAndMcpTests(unittest.TestCase):
             def on_image(mime, data, *, name=""):  # noqa: E306
                 received.append((mime, data, name))
                 if data is None or sum(1 for r in received if r[1] is not None) > 8:
-                    return False
+                    return None
                 return vision
             with patch("dgc.mcp_context.request_complete", return_value={"content": blocks}):
                 out = manager.call("mcp__srv__shots", {}, on_image=on_image)
@@ -472,6 +472,7 @@ class SubAgentAndMcpTests(unittest.TestCase):
             self.assertEqual([r[0] for r in refused], ["image/jpeg", "image/png"])
             self.assertIn("not shown: the data is not image/jpeg", out)
             self.assertIn("not shown: not valid base64", out)
+            self.assertEqual(out.count("not kept: DGC keeps up to 8 images per step"), 1)
             if vision:
                 self.assertIn("16×9 · 1 KB — attached after this batch", out)
             else:

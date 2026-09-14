@@ -5025,9 +5025,9 @@ class Agent(GoalLifecycle):
         def on_image(mime, data, *, name=""):
             if data is None or sum(1 for entry in collected if entry) >= image_views.MAX_IMAGES_PER_CALL:
                 collected.append(None)
-                return False
+                return None                        # not kept
             collected.append(_image_entry(data, name=name, source="mcp"))
-            return self._image_batch_open and _vision_available(self.ctx)
+            return bool(self._image_batch_open and _vision_available(self.ctx))
         return on_image
 
     def _image_root(self, call_id):
