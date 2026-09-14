@@ -307,6 +307,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "resume",
         "continue"
       ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "turn_end": {
@@ -1339,6 +1345,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": true
+    },
+    "busy": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "model_changed": {

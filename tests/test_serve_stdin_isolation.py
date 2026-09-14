@@ -89,7 +89,7 @@ class _Model(BaseHTTPRequestHandler):
 class _Serve:
     """A real `dgc serve` child with its events collected on a thread."""
 
-    def __init__(self, test: unittest.TestCase, port: int):
+    def __init__(self, test: unittest.TestCase, port: int, *, share_read_end: bool = False):
         home = tempfile.TemporaryDirectory(prefix="dgc-stdin-home-")
         work = tempfile.TemporaryDirectory(prefix="dgc-stdin-work-")
         test.addCleanup(home.cleanup)
@@ -104,9 +104,21 @@ class _Serve:
                    PYTHONDONTWRITEBYTECODE="1")
         for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
             env[var] = str(self.home)
+        # share_read_end: this process keeps its own copy of the pipe's read end, so it shares the
+        # open file description serve reads from and can flip O_NONBLOCK on it from outside, the
+        # way an inheriting Node child did.
+        self.read_end = -1
+        stdin = subprocess.PIPE
+        write_end = -1
+        if share_read_end:
+            self.read_end, write_end = os.pipe()
+            stdin = self.read_end
         self.proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=str(self.work),
-                                     env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     env=env, stdin=stdin, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
+        self.writer = os.fdopen(write_end, "w") if share_read_end else self.proc.stdin
+        if share_read_end:
+            test.addCleanup(os.close, self.read_end)
         test.addCleanup(self.stop)
         self.events: list[dict] = []
         self._arrived: "queue.Queue[dict]" = queue.Queue()
@@ -129,8 +141,8 @@ class _Serve:
             self.stderr += line
 
     def send(self, command: dict) -> None:
-        self.proc.stdin.write(json.dumps(command) + "\n")
-        self.proc.stdin.flush()
+        self.writer.write(json.dumps(command) + "\n")
+        self.writer.flush()
 
     def wait(self, predicate, timeout: float = 60) -> dict:
         for event in list(self.events):
@@ -158,7 +170,7 @@ class _Serve:
     def stop(self) -> None:
         if self.proc.poll() is None:
             try:
-                self.proc.stdin.close()
+                self.writer.close()
             except OSError:
                 pass
             try:
@@ -166,7 +178,7 @@ class _Serve:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(timeout=10)
-        for pipe in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
+        for pipe in (self.writer, self.proc.stdout, self.proc.stderr):
             try:
                 pipe.close()
             except (OSError, ValueError):
@@ -285,6 +297,64 @@ class ServeCommandPipeTests(unittest.TestCase):
                     and "backend is stopping" in e.get("message", "")]
         self.assertTrue(stopping, [e for e in serve.events if e["type"] == "info"])
         self.assertEqual(serve.proc.wait(timeout=60), 0)
+        for event in serve.events:
+            self.assertIsNone(event_error(event), event)
+
+    def test_frames_split_across_external_nonblocking_flips_are_read_whole(self):
+        # A process sharing the pipe's open file description (as every inheriting child did) flips
+        # O_NONBLOCK while serve is in the middle of a frame. Serve must restore blocking mode, keep
+        # the half it already read, and parse the frame whole -- not drop it, not end the loop.
+        _Model.commands = [""]
+        serve = _Serve(self, self.port, share_read_end=True)
+        for n in range(5):
+            frame = json.dumps({"type": "status", "request_id": f"split-{n}"}) + "\n"
+            half = len(frame) // 2
+            serve.writer.write(frame[:half])
+            serve.writer.flush()
+            flags = fcntl.fcntl(serve.read_end, fcntl.F_GETFL)
+            fcntl.fcntl(serve.read_end, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            time.sleep(0.4)
+            serve.writer.write(frame[half:])
+            serve.writer.flush()
+            serve.wait(lambda e, rid=f"split-{n}": e["type"] == "status"
+                       and e.get("request_id") == rid, 30)
+        self.assertIsNone(serve.proc.poll(), serve.log() + serve.stderr)
+        self.assertEqual([e for e in serve.events if e["type"] in ("error", "command_rejected")], [])
+        serve.writer.close()                          # a real end of input still ends the loop
+        self.assertEqual(serve.proc.wait(timeout=60), 0)
+        self.assertIn("command pipe was non-blocking (a process changed it); restored", serve.log())
+        deadline = time.monotonic() + 10
+        while "serve loop ended: stdin closed" not in serve.stderr and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertIn("serve loop ended: stdin closed", serve.stderr)
+        self.assertIn("non-blocking-restored", serve.stderr)
+        for event in serve.events:
+            self.assertIsNone(event_error(event), event)
+
+    def test_queued_turn_start_names_its_prompt_and_status_reports_busy(self):
+        # The panel removes a queued message from its restore set by the id on turn_start, and asks
+        # status.busy before a deferred restart, because turn_end does not say the worker is idle.
+        _Model.commands = ["sleep 3; echo slow", ""]
+        serve = _Serve(self, self.port)
+        serve.auto_mode()
+        serve.send({"type": "status", "request_id": "idle-before"})
+        before = serve.wait(lambda e: e["type"] == "status" and e.get("request_id") == "idle-before")
+        self.assertIs(before["busy"], False)
+        serve.send({"type": "prompt", "text": "slow one", "request_id": "q-a"})
+        serve.wait(lambda e: e["type"] == "tool_call", 60)
+        serve.send({"type": "prompt", "text": "second one", "request_id": "q-b", "delivery": "queue"})
+        serve.wait(lambda e: e["type"] == "prompt_accepted" and e["request_id"] == "q-b"
+                   and e["state"] == "queued")
+        serve.send({"type": "status", "request_id": "busy"})
+        self.assertIs(serve.wait(lambda e: e["type"] == "status"
+                                 and e.get("request_id") == "busy")["busy"], True)
+        first = serve.wait(lambda e: e["type"] == "turn_start" and e.get("request_id") == "q-a", 60)
+        second = serve.wait(lambda e: e["type"] == "turn_start" and e.get("request_id") == "q-b", 60)
+        self.assertNotEqual(first["turn_id"], second["turn_id"])
+        serve.wait(lambda e: e["type"] == "turn_end" and e["turn_id"] == second["turn_id"], 60)
+        serve.send({"type": "status", "request_id": "idle-after"})
+        after = serve.wait(lambda e: e["type"] == "status" and e.get("request_id") == "idle-after")
+        self.assertIs(after["busy"], False)
         for event in serve.events:
             self.assertIsNone(event_error(event), event)
 
@@ -466,6 +536,10 @@ class ChildStdinTests(unittest.TestCase):
         self.assertIsNotNone(command_error({"type": "resume_turn", "text": "typed words"}))
         self.assertIsNone(event_error({"type": "turn_start", "seq": 0, "turn_id": "t1",
                                        "prompt": "", "kind": "continue"}))
+        self.assertIsNone(event_error({"type": "turn_start", "seq": 0, "turn_id": "t1",
+                                       "prompt": "p", "kind": "prompt", "request_id": "web-1"}))
+        self.assertIsNotNone(event_error({"type": "turn_start", "seq": 0, "turn_id": "t1",
+                                          "prompt": "p", "request_id": 7}))
 
 
 if __name__ == "__main__":

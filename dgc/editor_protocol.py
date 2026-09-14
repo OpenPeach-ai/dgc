@@ -62,9 +62,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # ``kind`` lets the panel show a resumed goal as what it is instead of replaying the
     # objective as though the user had just typed it. v13: "continue" is the turn the editor's
     # Continue card starts after DGC's backend stopped in the middle of an ordinary turn -- a DGC
-    # continuation marker, never words the user typed.
+    # continuation marker, never words the user typed. v13: ``request_id`` names the prompt this
+    # turn runs when the prompt carried one, so the panel removes exactly that message from its
+    # queue -- a queued custom slash command (no id) must not consume the user's queued words.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
-                   "kind": _f("string", required=False, enum=("prompt", "resume", "continue"))},
+                   "kind": _f("string", required=False, enum=("prompt", "resume", "continue")),
+                   "request_id": _S(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
     # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose
@@ -200,6 +203,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "subscription_engine": _S(False),
         "ultra_mode": _B(False),
         "goal": _O(), "context_used": _I(), "context_size": _I(),
+        # v13: a turn is running, queued to run, or a foreground operation (handoff, compaction)
+        # holds the backend. The panel asks before a deferred restart, because turn_end alone does
+        # not say whether the worker already has the next queued turn in hand.
+        "busy": _B(False),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
     "mode_changed": {

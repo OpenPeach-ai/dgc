@@ -961,6 +961,7 @@ class Backend:
                     item = self._queue.pop(0)
                     text, images, context = item[0], item[1], item[2]
                     turn_kind = item[3] if len(item) > 3 else "prompt"
+                    turn_request = item[4] if len(item) > 4 and isinstance(item[4], str) else ""
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
                     # Clear only stale cancellation while dequeue is serialized. A concurrent
@@ -987,7 +988,11 @@ class Backend:
                 reset_messages = getattr(self.ui, "reset_turn_messages", None)
                 if callable(reset_messages):
                     reset_messages()
-                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt, kind=turn_kind)
+                # The request id names WHICH queued message this is, so the panel drops that entry
+                # from its restorable queue rather than guessing by position (a queued custom slash
+                # command has no id and must not consume a user's queued prompt).
+                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt, kind=turn_kind,
+                             **({"request_id": turn_request} if turn_request else {}))
                 eta_stop = self._start_eta_ticker(tid)
                 failed = False
                 try:
@@ -2861,7 +2866,9 @@ class Backend:
                          ultra_mode=bool(self.config.get("ultra_mode", False)),
                          goal=self._goal_snapshot(),
                          context_used=self.agent.estimate_tokens(),
-                         context_size=self._context_window_size(), **_request_fields(request_id))
+                         context_size=self._context_window_size(),
+                         busy=self._busy() or bool(getattr(self, "_queue", None)),
+                         **_request_fields(request_id))
         elif t == "shutdown":
             raise _Shutdown()
         else:
