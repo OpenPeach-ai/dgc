@@ -4116,10 +4116,15 @@
         : msg.resumes === "held" ? "reconnecting; the goal will not resume by itself after repeated backend exits"
         : msg.resumes === "none" ? "reconnecting"
         : "reconnecting and picking the work back up";
-      const cause = typeof msg.cause === "string" && msg.cause ? ": " + msg.cause.slice(0, 300) : "";
+      const cause = typeof msg.cause === "string" ? msg.cause.slice(0, 300) : "";
+      // When the backend said nothing, the extension's cause is the exit status itself ("killed by
+      // SIGKILL", "exited with code 1"): say it once instead of "(killed by SIGKILL): killed by SIGKILL".
+      const status = why.slice(2, -1);
+      const restated = [status, `exited with ${status}`, "killed by an unreported signal"].includes(cause);
+      const detail = !cause ? why : restated ? ` (${cause})` : why + ": " + cause;
       sysLine(msg.recovering
-        ? "dgc backend stopped" + why + cause + "\u2009\u2014\u2009" + next
-        : "dgc backend exited" + why + cause, true);
+        ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
+        : "dgc backend exited" + detail, true);
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });

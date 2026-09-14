@@ -4016,3 +4016,22 @@ test("Settings Save says it applies to every workspace, which is where it writes
   assert.match(save.title, /every workspace/);
   assert.deepEqual(errors, []);
 });
+
+test("a backend killed without a word says 'killed by SIGKILL' once, on the line and on the Continue card", () => {
+  // Before: "dgc backend stopped (killed by SIGKILL): exited with killed by SIGKILL — reconnecting".
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { resume_turn: true } } });
+  send({ type: "session_ready", sessionId: "chat" });
+  send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true, cause: "killed by SIGKILL", resumes: "offer" });
+  const line = [...doc.querySelectorAll("#log .sys.err")].at(-1).textContent;
+  assert.match(line, /^dgc backend stopped \(killed by SIGKILL\) — reconnecting; you can continue/);
+  assert.equal(line.match(/SIGKILL/g).length, 1, line);
+  send({ type: "backend_exit", code: 3, signal: null, recovering: true, cause: "exited with code 3", resumes: "none" });
+  assert.match([...doc.querySelectorAll("#log .sys.err")].at(-1).textContent, /^dgc backend stopped \(exited with code 3\) — reconnecting$/);
+  send({ type: "backend_exit", code: 0, signal: null, recovering: true, cause: "stdin closed while the parent (7) is still alive", resumes: "none" });
+  assert.match([...doc.querySelectorAll("#log .sys.err")].at(-1).textContent,
+    /^dgc backend stopped \(code 0\): stdin closed while the parent \(7\) is still alive/, "a cause of the backend's own keeps the status beside it");
+  send({ type: "continue_offer", cause: "killed by SIGKILL", sessionId: "chat" });
+  assert.match(doc.querySelector(".recovery-card").textContent, /during your last turn \(killed by SIGKILL\)\./);
+  assert.deepEqual(errors, []);
+});

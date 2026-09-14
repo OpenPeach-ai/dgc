@@ -1827,3 +1827,23 @@ test("/usage typed in the editor opens Token Usage, with the range it names", as
   assert.equal(sent.some(command => command.type === "slash_command"), false,
     "never sent on as an unknown custom command");
 });
+
+test("an exit with no word from the backend names its signal or status once", async () => {
+  // Before: with no "serve loop ended" line the cause fell back to `exited with ${how}`, and how was
+  // already "killed by SIGKILL": the Continue card read "(exited with killed by SIGKILL)".
+  const counter = join(scratch, "panel-silent-generation");
+  writeFileSync(counter, "0");
+  const fixture = nodeFixture("panel-dies-silently", `
+const fs = require("node:fs");
+const generation = Number(fs.readFileSync(${JSON.stringify(counter)}, "utf8")) + 1;
+fs.writeFileSync(${JSON.stringify(counter)}, String(generation));
+setTimeout(() => { if (generation === 1) process.kill(process.pid, "SIGKILL"); else process.exit(3); }, 100);`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  h.provider.ensureBackend();
+  assert.ok(await until(() => h.posted.filter((m) => m.type === "backend_exit").length >= 2, 8000));
+  const [killed, failed] = h.posted.filter((m) => m.type === "backend_exit");
+  assert.equal(killed.cause, "killed by SIGKILL");
+  assert.equal(failed.cause, "exited with code 3");
+  h.provider.dispose();
+});

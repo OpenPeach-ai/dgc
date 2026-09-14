@@ -1207,7 +1207,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
       this.mcpUrls.clear();
       if (facts.cause) { return; }             // our own teardown: logged above and already handled
-      const cause = serveCause || `exited with ${how}`;
+      // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
+      // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
+      const cause = serveCause || (signal || code === null ? how : `exited with ${how}`);
       serveCause = "";
       const recentExits = this.recordUnassistedExit(cause, facts.lastFrame || "");
       const resumes = this.markInterruptedWork(cause, recentExits);
