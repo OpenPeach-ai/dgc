@@ -310,5 +310,86 @@ class TuiMonitorTests(unittest.TestCase):
         self.assertFalse(hub.policy.paused)
 
 
+    def _blocked_wake(self, ui, sess):
+        entered = threading.Event()
+
+        def chat(*args, **kwargs):
+            entered.set()
+            while not self.agent.cancelled.is_set():
+                time.sleep(0.02)
+            return ChatResult(content="", finish_reason="cancelled")
+        self.agent._chat = chat
+        hub = self.agent.monitors
+        hub.queue_background_exit("bg6", "deploy", 0, 1.0, "ok", hub.epoch)
+        ui._submit_monitor_wake(sess, hub.take_pending())
+        self.assertTrue(entered.wait(10))
+
+    def _wait_idle(self, sess):
+        self.assertTrue(wait_for(lambda: not sess._turn.is_set()
+                                 and not (sess._worker_thread and sess._worker_thread.is_alive()), 10))
+
+    def test_a_command_run_from_the_palette_during_a_wake_turn_makes_it_yield(self):
+        for picked in (False, True):
+            with self.subTest(picked=picked):
+                ui = self.tui()
+                sess = ui.active
+                self._blocked_wake(ui, sess)
+                ran = []
+                original = ui._handle_slash
+                ui._handle_slash = lambda text, _o=original: (ran.append(text), _o(text))[1]
+                ui._open_command_palette()
+                if picked:                      # a row chosen from the menu
+                    ui.input_buf.text = "/rewin"
+                    ui.input_buf.cursor_position = len(ui.input_buf.text)
+                    ui._overlay["on_submit"]({"kind": "command", "value": "rewind"}, "/rewin")
+                else:                           # typed in full, then Enter
+                    ui._overlay["on_submit"](None, "/rewind")
+                self.assertNotIn("waits for this turn", str(ui._flash_msg))
+                self.assertTrue(sess._wake_yield or not sess._turn.is_set())
+                self._wait_idle(sess)
+                ui._service_monitors()
+                self.assertEqual(ran, ["/rewind"])
+                self.assertFalse(self.agent.monitors.policy.paused, "yielding is not a stop")
+
+    def test_a_prompt_sent_after_a_waiting_command_runs_after_it(self):
+        ui = self.tui()
+        sess = ui.active
+        self._blocked_wake(ui, sess)
+        order = []
+        original = ui._handle_slash
+        ui._handle_slash = lambda text: (order.append(("command", text)), original(text))[1]
+        ui._submit = lambda text, **kwargs: order.append(("prompt", text))
+        self.assertEqual(ui._dispatch_composer_text("/rewind"), "local-command")
+        self.assertEqual(ui._dispatch_composer_text("now do this"), "follow-up")
+        self._wait_idle(sess)
+        self.assertEqual(order, [], "nothing jumps ahead into the chat the command is about to change")
+        ui._service_monitors()
+        self.assertEqual(order, [("command", "/rewind"), ("prompt", "now do this")])
+
+    def test_esc_after_a_typed_command_with_arguments_leaves_an_empty_composer(self):
+        ui = self.tui()
+        ui.input_buf.auto_suggest = None        # no application loop runs in this test
+
+        def esc():
+            back = ui._overlay.get("back")
+            back() if back else ui._close_overlay()
+        ui.input_buf.text = "/usage today"
+        ui._open_command_palette()
+        ui._overlay["on_submit"](None, "/usage today")
+        self.assertIsNotNone(ui._overlay, "the usage reader opened")
+        esc()
+        self.assertIsNone(ui._overlay, "one Esc closes the reader")
+        self.assertEqual(ui.input_buf.text, "")
+        # A menu that does step back to the palette leaves no stray "/" once that palette closes.
+        ui._open_command_palette()
+        ui._overlay["on_submit"](None, "/settings")
+        self.assertIs(ui._overlay.get("back").__func__, type(ui)._palette_back)
+        esc()
+        self.assertTrue(ui._overlay.get("composer_palette"))
+        esc()
+        self.assertIsNone(ui._overlay)
+        self.assertEqual(ui.input_buf.text, "", "no '/' left to turn /usage into //usage")
+
+
 if __name__ == "__main__":
     unittest.main()

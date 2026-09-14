@@ -282,6 +282,7 @@ class AgentSession:
         self._wake_turn = False            # this session's running turn was started by a monitor
         self._wake_yield = False           # ...and is stopping because the user sent a message
         self._after_wake_command = ""      # a command typed during that turn, run once it ends
+        self._prompt_after_wake_command = False  # a prompt typed after that command waits for it
         binder = getattr(ui, "_bind_session_monitors", None)
         if callable(binder):
             binder(self)
@@ -488,6 +489,10 @@ class TUI:
             elif typed.startswith("/") and len(typed) > 1:
                 self.input_buf.reset()
                 self._run_command(typed)
+                if len(typed[1:].split(maxsplit=1)) > 1:
+                    # `/usage today` ran to completion: whatever it opened is its result, not a
+                    # step in a menu, so Esc closes it rather than reopening this palette.
+                    return
             else:
                 return
             # if the command opened ANOTHER menu (sub-menu, model/provider/subagent picker, Skills modal…),
@@ -502,6 +507,9 @@ class TUI:
         """Reopen the `/` palette — the Esc-back target for any menu opened from it."""
         self.input_buf.reset(); self.input_buf.insert_text("/")
         self._open_command_palette()
+        # DGC typed that "/", not the user: closing this palette must not leave it behind, or the
+        # next "/usage" becomes "//usage".
+        self._overlay["drop_bare_slash"] = True
 
     # commands that take a fixed set of options → the palette opens a SUB-MENU to pick one
     _SUBMENUS = {
@@ -537,8 +545,11 @@ class TUI:
         cmd = parts[0].lower()
         # The composer refuses a mid-turn command through _handle_running_local_command, but the
         # `/` palette reaches this method directly — so a command declared unsafe during a turn
-        # (/todo clear, /rewind, /compact…) ran anyway when picked from the menu.
+        # (/rewind, /compact…) ran anyway when picked from the menu. The palette gets the same
+        # routing as the composer: a monitor wake turn yields, /todo clear clears now.
         if self._turn.is_set():
+            if self._yield_wake_turn_for(text) or self._run_mid_turn_form(text):
+                return
             spec = resolve_command(cmd, "tui")
             if spec is not None and not spec.available_while_running:
                 self._flash(f"/{spec.name} waits for this turn to finish \u00b7 Esc stops the turn")
@@ -713,6 +724,8 @@ class TUI:
     def _close_overlay(self) -> None:
         ov = self._overlay or {}
         draft = self.input_buf.document if ov.get("composer_palette") else ov.get("composer_draft")
+        if ov.get("drop_bare_slash") and draft is not None and draft.text == "/":
+            draft = None
         self._overlay = None
         self.input_buf.reset()
         if draft is not None:
@@ -1128,13 +1141,27 @@ class TUI:
             deferred = getattr(sess, "_after_wake_command", "")
             if (deferred and sess is self.active and not sess._turn.is_set()
                     and not (sess._worker_thread and sess._worker_thread.is_alive())):
-                sess._after_wake_command = ""
-                self._dispatch_composer_text(deferred)
+                self._run_after_wake_command(sess)
                 changed = True
                 continue
             if self._maybe_wake_session(sess):
                 changed = True
         return changed
+
+    def _run_after_wake_command(self, sess: "AgentSession") -> None:
+        """Run the command typed during a monitor wake turn, then the prompt typed after it.
+
+        The prompt follows the command into whichever chat the command left active (after /new,
+        the new chat), because that is the order the user typed them in."""
+        deferred = getattr(sess, "_after_wake_command", "")
+        sess._after_wake_command = ""
+        if deferred:
+            self._dispatch_composer_text(deferred)
+        if getattr(sess, "_prompt_after_wake_command", False):
+            sess._prompt_after_wake_command = False
+            queued = self._pop_followup(sess)
+            if queued is not None:
+                self._dispatch_composer_text(queued[0])
 
     def _wake_blocked(self, sess: "AgentSession") -> bool:
         hub = getattr(sess.agent, "monitors", None)
@@ -1229,7 +1256,12 @@ class TUI:
                     self._finalize_session_workspace(sess, "fleet session stopped")
                     sess._worker_thread = None
                     return
-                queued = self._pop_followup(sess) if (yielded or not cancelled) else None
+                self._flush_unsaved_todo_clear(sess)
+                # A command waiting for this wake turn runs first, from the UI loop; the prompt
+                # queued behind it must not jump ahead into this chat.
+                queued = (self._pop_followup(sess)
+                          if (yielded or not cancelled)
+                          and not getattr(sess, "_prompt_after_wake_command", False) else None)
                 sess._worker_thread = None
                 if queued is not None:
                     queued_text, shown = queued
@@ -1705,6 +1737,8 @@ class TUI:
         spec = resolve_command(name, "tui")
         if spec is None:
             return False                      # not a command: ordinary steering text
+        if self._run_mid_turn_form(text):
+            return True
         if not spec.available_while_running:
             # It used to fall through to steering, so "/model", "/compact" or "/help" typed during
             # a turn was silently sent to the model as a prompt. Refuse it visibly instead.
@@ -1713,12 +1747,61 @@ class TUI:
         self._run_command(text)
         return True
 
+    #: Command forms that act immediately during a turn although their command as a whole waits.
+    _MID_TURN_FORMS = ("/todo clear",)
+
+    def _run_mid_turn_form(self, text: str) -> bool:
+        """Handle a command form that is safe while a turn runs; False when `text` is not one.
+
+        `/todo clear` empties the list now, as the editor's Clear does. The running turn's worker
+        owns the session save, so the clear is written when that worker retires
+        (_flush_unsaved_todo_clear); the model is told once that the user cleared it.
+        """
+        if " ".join(text.strip().lower().split()) not in self._MID_TURN_FORMS:
+            return False
+        self.agent.clear_todos(persist=False)
+        self._todos = []
+        self._flash("todo list cleared")
+        self._invalidate()
+        return True
+
+    def _flush_unsaved_todo_clear(self, sess) -> None:
+        """Save a mid-turn /todo clear once the turn that owned the session has ended."""
+        agent = getattr(sess, "agent", None)
+        if getattr(agent, "todo_clear_unsaved", False) is not True:
+            return
+        try:
+            saved = agent._persist()
+        except Exception as exc:                  # a failed save must not take the worker down
+            saved = False
+            agent._last_persist_error = f"{type(exc).__name__}: {exc}"
+        if not saved:
+            self.error(getattr(agent, "_last_persist_error", "")
+                       or "todo list cleared, but the session could not be saved")
+
+    def _yield_wake_turn_for(self, text: str) -> bool:
+        """A command typed during a turn DGC started on a monitor event: that turn yields, and the
+        command runs from the UI loop the moment it has ended. False when no wake turn applies."""
+        if not self._turn.is_set():
+            return False
+        sess = self.active if getattr(self, "_sessions", None) else None
+        if not (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
+                and not self._runs_while_turn_runs(text)):
+            return False
+        sess._after_wake_command = text
+        sess._wake_yield = True
+        sess._cancel.set()
+        self._flash("stopping the monitor turn · your command runs next")
+        return True
+
     def _runs_while_turn_runs(self, text: str) -> bool:
         """A slash command that is handled on the spot even while a turn runs."""
         if not text.startswith("/"):
             return False
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         if text.strip().lower().startswith("/goal"):
+            return True
+        if " ".join(text.strip().lower().split()) in self._MID_TURN_FORMS:
             return True
         spec = resolve_command(name, "tui")
         return bool(spec is not None and spec.available_while_running)
@@ -1730,16 +1813,24 @@ class TUI:
         hub = getattr(getattr(self, "agent", None), "monitors", None)
         if hub is not None:
             hub.policy.note_command(self.config)       # no wake lands right on top of an action
+        sess = self.active if getattr(self, "_sessions", None) else None
+        pending_command = getattr(sess, "_after_wake_command", "")
+        if (pending_command and not self._turn.is_set()
+                and not (sess._worker_thread and sess._worker_thread.is_alive())):
+            # The wake turn has ended but the UI loop has not run the command typed during it yet:
+            # run it now, so this text lands after it rather than before it.
+            self._run_after_wake_command(sess)
         if self._turn.is_set():
             sess = self.active if getattr(self, "_sessions", None) else None
-            if (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
-                    and not self._runs_while_turn_runs(text)):
-                # A command typed during a turn DGC started on a monitor event: that turn yields,
-                # and the command runs from the UI loop the moment it has ended.
-                sess._after_wake_command = text
-                sess._wake_yield = True
-                sess._cancel.set()
-                self._flash("stopping the monitor turn · your command runs next")
+            if getattr(sess, "_after_wake_command", "") and text[:1] not in ("/", "!", "#"):
+                # A prompt sent while a command waits for the wake turn to end belongs after that
+                # command (after /new, in the new chat), not in the chat it is about to leave.
+                if not self._queue_followup(sess, text, shown=False):
+                    self._flash("follow-up queue full — wait for this turn")
+                    return "full"
+                sess._prompt_after_wake_command = True
+                return "follow-up"
+            if self._yield_wake_turn_for(text):
                 return "local-command"
             if self._handle_running_local_command(text):
                 return "local-command"
@@ -6630,6 +6721,7 @@ class TUI:
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._model_wait, self._model_waits = None, {}
                 self._turn.clear()
+                self._flush_unsaved_todo_clear(sess)
                 if hub is not None:
                     hub.policy.note_turn_end()
                 sess.last_activity = time.monotonic()

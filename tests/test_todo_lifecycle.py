@@ -4,6 +4,7 @@ import copy
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -858,21 +859,39 @@ class ChecklistProtocolTests(unittest.TestCase):
         reason = self.agent._gate_completion_report(report)["summary"]
         self.assertIn("or clear the checklist to drop them.", reason)
 
-    def test_tui_todo_clear_mid_turn_is_refused_visibly_and_the_list_is_kept(self):
-        # The terminal keeps its visible refusal while a turn runs; only the editor clears mid-turn.
+    def test_tui_todo_clear_mid_turn_clears_now_and_the_turn_worker_saves_it(self):
+        # The terminal clears mid-turn like the editor: the list empties at once, from the composer
+        # and from the `/` palette alike, and the save lands when the turn's worker retires.
+        from dgc.llm import ChatResult
         ui = self.tui()
         self.update([{"content": "Stale", "status": "pending"}])
         ui._todos = list(self.agent.todos)
-        ui._turn.set()
-        try:
-            self.assertEqual(ui._dispatch_composer_text("/todo clear"), "local-command")
-            self.assertIn("/todo waits for this turn to finish", ui._flash_msg)
-            self.assertEqual(self.agent.todos, [{"content": "Stale", "status": "pending"}])
-        finally:
-            ui._turn.clear()
-        self.assertEqual(ui._dispatch_composer_text("/todo clear"), "command")
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent._persist())
+        entered, release = threading.Event(), threading.Event()
+
+        def chat(*args, **kwargs):
+            entered.set()
+            release.wait(10)
+            return ChatResult(content="Done.")
+        self.agent._chat = chat
+        ui._submit("keep working")
+        self.assertTrue(entered.wait(10))
+        self.assertEqual(ui._dispatch_composer_text("/todo clear"), "local-command")
         self.assertEqual(self.agent.todos, [])
         self.assertEqual(ui.active._todos, [])
+        self.assertEqual(ui._flash_msg, "todo list cleared")
+        self.assertIs(self.agent.todo_clear_unsaved, True, "the running turn owns the save")
+        self.update([{"content": "Again", "status": "pending"}])
+        ui._open_command_palette()
+        ui._overlay["on_submit"](None, "/todo clear")
+        self.assertEqual(self.agent.todos, [], "the palette path clears too")
+        release.set()
+        worker = ui.active._worker_thread
+        self.assertTrue(worker is None or (worker.join(10) or not worker.is_alive()))
+        self.assertIs(self.agent.todo_clear_unsaved, False)
+        self.assertNotIn('"Stale"', self.agent.session_file.read_text())
+        self.assertNotIn('"Again"', self.agent.session_file.read_text())
 
     def test_every_history_snapshot_carries_the_redacted_checklist(self):
         # The token becomes a known secret only AFTER the session was saved, so the file holds it
@@ -956,7 +975,7 @@ class ChecklistProtocolTests(unittest.TestCase):
         from dgc.commands import resolve_command
         spec = resolve_command("todo", "tui")
         self.assertEqual(spec.surfaces, {"tui", "classic"})
-        self.assertFalse(spec.available_while_running)
+        self.assertFalse(spec.available_while_running)   # only the `/todo clear` form runs mid-turn
         self.assertEqual(spec.usage, "todo clear")
         self.assertIsNone(resolve_command("todo", "editor"))
         self.update([{"content": "Stale", "status": "pending"}])
