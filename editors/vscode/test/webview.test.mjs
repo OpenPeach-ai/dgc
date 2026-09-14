@@ -4063,3 +4063,33 @@ test("the backend exit line is still there after the reconnect replays the chat"
   assert.doesNotMatch(log.textContent, /dgc backend stopped/);
   assert.deepEqual(errors, []);
 });
+
+test("Stop with messages queued gives them back as not sent instead of leaving them looking sent", () => {
+  // Before: doStop emptied the restore set and the backend dropped the queue without a word, so
+  // both bubbles stayed below "Stopped" as ordinary sent messages that never ran.
+  const h = queuedPromptDom();
+  h.input.value = "And update the changelog";
+  h.input.dispatchEvent(new h.dom.window.Event("input"));
+  h.input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  const second = h.posted.findLast((m) => m.type === "prompt");
+  h.event({ type: "prompt_accepted", request_id: second.requestId, state: "queued" });
+  h.event({ type: "queued", count: 2, text: "And update the changelog" });
+  assert.equal(h.doc.getElementById("queued").textContent, "2 queued");
+  h.doc.getElementById("send").click();                       // empty composer while running: Stop
+  assert.equal(h.posted.at(-1).type, "cancel");
+  // What the backend answers a cancel with while messages are queued.
+  h.event({ type: "steering_update", request_id: h.queued.requestId, state: "returned",
+            message: "Stopped before 2 queued messages ran; they were not sent." });
+  h.event({ type: "steering_update", request_id: second.requestId, state: "returned" });
+  h.event({ type: "turn_end", turn_id: "t1", reason: "cancelled" });
+  const bubbles = [...h.doc.querySelectorAll(".msg.user")].filter((node) => /Then run the tests|update the changelog/.test(node.textContent));
+  assert.equal(bubbles.length, 2);
+  for (const bubble of bubbles) {
+    assert.equal(bubble.querySelector(".role").textContent, "you · not sent");
+    assert.ok([...bubble.querySelectorAll("button")].some((b) => /Restore unsent message/.test(b.textContent)));
+  }
+  assert.equal(h.input.value, "Then run the tests", "the first one is back in the empty composer");
+  assert.equal(h.doc.getElementById("queued").textContent, "");
+  assert.match(h.doc.getElementById("log").textContent, /Stopped before 2 queued messages ran; they were not sent\./);
+  assert.deepEqual(h.errors, []);
+});

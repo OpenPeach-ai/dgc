@@ -415,9 +415,7 @@ class PlanHandoffPromptTests(unittest.TestCase):
         self.assertNotIn("# Approved plan", resumed.system_prompt())
 
 
-class GracefulShutdownTests(unittest.TestCase):
-    """A closed pipe should cost seconds of work, not the turn."""
-
+class _HeadlessBackendFixture:
     def backend(self):
         from dgc.headless import Backend, HeadlessUI, PendingRequests
         from dgc.protocol import Emitter
@@ -441,6 +439,10 @@ class GracefulShutdownTests(unittest.TestCase):
         backend.pending = PendingRequests()
         backend._turn_state_lock = lambda: threading.RLock()
         return backend, events
+
+
+class GracefulShutdownTests(_HeadlessBackendFixture, unittest.TestCase):
+    """A closed pipe should cost seconds of work, not the turn."""
 
     def test_an_idle_backend_closes_at_once(self):
         backend, _ = self.backend()
@@ -487,6 +489,31 @@ class GracefulShutdownTests(unittest.TestCase):
         self.assertEqual(len(requests), 1, "no second model request after the pipe closed")
         self.assertIn("backend was shut down mid-turn", agent._last_turn_error)
         self.assertIn("saved", agent._last_turn_error)
+
+
+class StopWithQueuedMessagesTests(_HeadlessBackendFixture, unittest.TestCase):
+    """Stop cancels the running turn; the messages queued behind it go back to the person."""
+
+    def test_stop_hands_back_every_queued_message_by_its_id(self):
+        # Before: `cancel` cleared the queue and said nothing, so the editor kept both bubbles
+        # looking sent, neither ever ran, and there was nothing to restore.
+        backend, events = self.backend()
+        backend._queue = [("queued seven golf", None, None, "prompt", "web-7"),
+                          ("/deploy", None, None, "prompt", ""),
+                          ("queued eight hotel", None, None, "prompt", "web-8")]
+        backend.dispatch({"type": "cancel"})
+        self.assertEqual(backend._queue, [])
+        self.assertTrue(backend.agent.cancelled.is_set())
+        returned = [e for e in events if e["type"] == "steering_update"]
+        self.assertEqual([(e["request_id"], e["state"]) for e in returned],
+                         [("web-7", "returned"), ("web-8", "returned")])
+        self.assertIn("2 queued messages", returned[0]["message"])
+        self.assertNotIn("message", returned[1], "one line for the whole queue, not one per message")
+
+    def test_stop_with_nothing_queued_says_nothing_about_a_queue(self):
+        backend, events = self.backend()
+        backend.dispatch({"type": "interrupt"})
+        self.assertEqual([e for e in events if e["type"] == "steering_update"], [])
 
 
 class DelegatedEditCheckpointTests(unittest.TestCase):

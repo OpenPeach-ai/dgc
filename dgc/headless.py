@@ -2652,7 +2652,18 @@ class Backend:
         elif t in ("cancel", "interrupt"):
             with self._turn_state_lock():
                 self.agent.cancelled.set()
+                # Stop stops the queue too, but the messages in it are the person's words. Dropping
+                # them silently left their bubbles looking sent in the editor with nothing to restore;
+                # hand each one back by its id, the way close() does when the backend goes down.
+                returned = [item[4] for item in self._queue if len(item) > 4 and item[4]]
                 self._queue.clear()
+                for index, request_id in enumerate(returned):
+                    fields = {}
+                    if index == 0:
+                        many = len(returned) > 1
+                        fields["message"] = (f"Stopped before {len(returned)} queued messages ran; they were not sent."
+                                             if many else "Stopped before the queued message ran; it was not sent.")
+                    self.em.emit("steering_update", request_id=request_id, state="returned", **fields)
             hub = getattr(self.agent, "monitors", None)
             if hub is not None and hub.pending_count():
                 # Stop means stop: events keep arriving but no turn starts on them until the next

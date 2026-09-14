@@ -472,6 +472,9 @@
     if (!pending) return;
     pendingPrompts.delete(id); queuedPrompts.delete(id);
     pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
+    // A bubble that still said "you" or "you · queued" read as a message that went through.
+    const role = pending.node.querySelector(".role");
+    if (role && role.textContent.startsWith("you")) role.textContent = confirmed ? "you · not sent" : "you · delivery unconfirmed";
     const restore = () => {
       if (pending.session && pending.session !== draftSession) {
         sysLine("Reopen this message's original chat to restore its draft."); return;
@@ -2783,7 +2786,9 @@
       button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
     });
   }
-  function doStop() { queuedCount = 0; queuedPrompts.clear(); renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  // The messages queued behind the run stay in the restore set: the backend answers a cancel by
+  // handing each one back ("returned"), and that is what marks them not sent and restorable.
+  function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
