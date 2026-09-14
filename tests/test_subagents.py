@@ -854,7 +854,8 @@ class HeadlessSnapshotTests(HarnessCase):
         for command, after in (("new_session", "self._emit_monitors()\n            self._emit_agents()"),
                                ("clear_session", "self._emit_monitors()\n            self._emit_agents()"),
                                ("resume_session", "self._emit_history()\n                self._emit_agents()"),
-                               ("rewind", "self._emit_history()\n                self._emit_agents()")):
+                               ("rewind", "self._emit_history()\n                if agents_before or self._agents_total():"
+                                          "   # an empty list has nothing to drop\n                    self._emit_agents()")):
             block = source[source.index(f'elif t == "{command}":'):]
             block = block[:block.index("\n        elif t ==")]
             self.assertIn(after, block, command)

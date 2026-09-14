@@ -3120,13 +3120,15 @@ class Backend:
                      for (i, p, nf) in self.agent.checkpoints.listing()]
             self.em.emit("checkpoints", items=items, **_request_fields(request_id))
         elif t == "rewind":
+            agents_before = self._agents_total()
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
             ok = msgs >= 0
             self.em.emit("rewound", ok=ok, files_restored=nfiles,
                          **_request_fields(request_id))
             if ok:
                 self._emit_history()
-                self._emit_agents()
+                if agents_before or self._agents_total():   # an empty list has nothing to drop
+                    self._emit_agents()
                 self._emit_context()
         elif t == "list_retained_tasks":
             self._emit_retained_tasks(request_id)
@@ -3381,6 +3383,10 @@ class Backend:
         registry.snapshot(emit=lambda snap: self.em.emit(
             "agents", items=snap["items"], total=snap["total"], active=snap["active"],
             **_request_fields(request_id)))
+
+    def _agents_total(self) -> int:
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        return int(registry.counts().get("total", 0)) if registry is not None else 0
 
     def _schedule_agents_snapshot(self) -> None:
         """Coalesce resync requests into one `agents` snapshot 0.25 s later."""
