@@ -118,8 +118,9 @@ class DeclarationTests(unittest.TestCase):
         question = {"id": "q1", "header": "Storage", "question": "Where?", "multi_select": False,
                     "options": [{"label": "Local (Recommended)", "description": "On disk", "recommended": True},
                                 {"label": "Cloud", "description": "Synced", "recommended": False}]}
-        self.assertTrue(valid({"type": "options_request", "id": "r1", "question": "Where?",
-                               "options": ["Local", "Cloud"]}), "transitional legacy shape")
+        self.assertFalse(valid({"type": "options_request", "id": "r1", "question": "Where?",
+                                "options": ["Local", "Cloud"]}), "the flattened v13 shape is gone")
+        self.assertFalse(valid({"type": "options_request", "id": "r1"}), "questions is required")
         self.assertTrue(valid({"type": "options_request", "id": "r1", "call_id": "c1", "questions": [question]}))
         resolved = {"type": "options_resolved", "id": None, "call_id": None, "outcome": "answered",
                     "questions": [question], "answers": {"q1": {"selected": [0], "other": ""}}}
@@ -128,8 +129,9 @@ class DeclarationTests(unittest.TestCase):
         self.assertFalse(valid({**resolved, "outcome": "skipped"}))
         self.assertFalse(valid({k: v for k, v in resolved.items() if k != "id"}), "id is required, null on replay")
         for response in ({"id": "r1", "answers": {"q1": {"selected": [0], "other": ""}}},
-                         {"id": "r1", "dismissed": True}, {"id": "r1", "choice": 1}):
+                         {"id": "r1", "dismissed": True}):
             self.assertIsNone(ep.command_error({"type": "options_response", **response}), response)
+        self.assertIsNotNone(ep.command_error({"type": "options_response", "id": "r1", "choice": 1}))
         self.assertIsNone(ep.command_error({"type": "set_workspace_roots", "roots": [], "question_forms": True}))
 
     def test_agents_events_and_command(self):
@@ -288,7 +290,8 @@ class LiveTurnFrameTests(unittest.TestCase):
                 done = threading.Event()
                 def answer():
                     answered = set()
-                    replies = {"options_request": {"choice": 1}, "permission_request": {"decision": "once"}}
+                    replies = {"options_request": {"answers": {"q1": {"selected": [1], "other": ""}}},
+                               "permission_request": {"decision": "once"}}
                     while not done.wait(0.01):
                         for line in stream.getvalue().splitlines():
                             frame = json.loads(line)
@@ -311,7 +314,7 @@ class LiveTurnFrameTests(unittest.TestCase):
         for frame in frames:
             self.assertIsNone(ep.event_error(frame), frame)
         kinds = [frame["type"] for frame in frames]
-        for expected in ("thinking_delta", "options_request", "tool_call", "tool_result", "tool_images",
+        for expected in ("thinking_delta", "options_request", "options_resolved", "tool_call", "tool_result", "tool_images",
                          "text_delta", "stream_end"):
             self.assertIn(expected, kinds)
         self.assertEqual(len(calls), 2, kinds)
