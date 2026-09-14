@@ -2801,6 +2801,21 @@ class Agent(GoalLifecycle):
                 return_result["ok"] = False
             return return_result
 
+    def _save_turn_progress(self) -> None:
+        """Save the running turn at a step boundary: its prompt, then each completed tool batch.
+
+        The turn's own save runs in its finally block, which a backend killed outright (SIGKILL,
+        the OOM killer, a crash) never reaches. Without these saves the prompt and every completed
+        step vanished with the process, so the editor's Continue resumed the previous turn instead.
+        Best effort: a failed save here is not the turn's failure, and the final save reports.
+        """
+        if self.depth != 0 or not self.session_file or getattr(self, "_monitor_turn", False):
+            return
+        try:
+            self._persist()
+        except Exception:
+            pass
+
     def _persist(self) -> bool:
         if not self.session_file:
             self._last_persist_error = ""
@@ -3509,6 +3524,7 @@ class Agent(GoalLifecycle):
                 content = user_text
             self.messages.append({"role": "user", "content": content})
             self._drain_monitors(with_prompt=True)
+            self._save_turn_progress()
             thinking = self._effective_thinking(user_text)
         # Pass the raw level; the client maps it to the right per-provider reasoning
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
@@ -4352,6 +4368,7 @@ class Agent(GoalLifecycle):
             if shots:
                 self.messages.append({"role": "user", "content": self._screenshot_parts(shots)})
             next_request_reason = "tool_result"
+            self._save_turn_progress()
 
             # In a timed autonomous run, the configured verifier is an authoritative controller
             # primitive, not a decision that needs another model generation. If the model lands an
