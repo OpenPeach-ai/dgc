@@ -1077,6 +1077,101 @@ test("critical and full stylesheets agree on the hero stat band and mark", async
   }
 });
 
+function readHeroMark() {
+  for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 0; }
+  const art = document.querySelector(".hero-art");
+  const hero = document.querySelector(".hero").getBoundingClientRect();
+  let opacity = 1;
+  for (let element = art; element; element = element.parentElement) opacity *= parseFloat(getComputedStyle(element).opacity);
+  const slashes = [...art.querySelectorAll(".slash-cut")].map(path => path.getBoundingClientRect());
+  const copy = [];
+  const addText = (element, name) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    for (const rect of range.getClientRects()) copy.push([name, rect]);
+  };
+  const heroCopy = document.querySelector(".hero-copy");
+  addText(heroCopy.querySelector(".eyebrow"), "eyebrow");
+  addText(heroCopy.querySelector("h1"), "h1");
+  addText(heroCopy.querySelector(".lede"), "lede");
+  for (const element of document.querySelectorAll(".stat-value, .stat-label")) addText(element, "stat");
+  for (const selector of [".hero-actions", ".install-panel"]) copy.push([selector, document.querySelector(selector).getBoundingClientRect()]);
+  const overlaps = [];
+  for (const slash of slashes) {
+    for (const [name, rect] of copy) {
+      const w = Math.min(slash.right, rect.right) - Math.max(slash.left, rect.left);
+      const h = Math.min(slash.bottom, rect.bottom) - Math.max(slash.top, rect.top);
+      if (w > 0 && h > 0 && w * h > 0.25) overlaps.push([name, Math.round(w * h)]);
+    }
+  }
+  const eyebrowText = [...heroCopy.querySelector(".eyebrow").childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+  const lines = [];
+  for (const match of eyebrowText.data.matchAll(/\S+/g)) {
+    const range = document.createRange();
+    range.setStart(eyebrowText, match.index);
+    range.setEnd(eyebrowText, match.index + match[0].length);
+    const top = Math.round(range.getBoundingClientRect().top);
+    if (!lines.length || lines.at(-1).top !== top) lines.push({top, words: 0});
+    lines.at(-1).words += 1;
+  }
+  return {
+    opacity,
+    fill: getComputedStyle(art.querySelector(".slash-cut")).fill,
+    union: {
+      left: Math.min(...slashes.map(r => r.left)), right: Math.max(...slashes.map(r => r.right)),
+      top: Math.min(...slashes.map(r => r.top)), bottom: Math.max(...slashes.map(r => r.bottom)),
+    },
+    slashes: slashes.map(r => [r.left, r.top, r.right, r.bottom].map(v => Math.round(v * 2) / 2)),
+    hero: {top: hero.top, bottom: hero.bottom},
+    viewport: innerWidth,
+    overlaps,
+    eyebrowLastLineWords: lines.at(-1).words,
+  };
+}
+
+function expectWholeMark(mark, label) {
+  expect(mark.opacity, `${label} opacity`).toBe(1);
+  expect(mark.fill, `${label} fill`).toBe("rgb(124, 92, 255)");
+  expect(mark.union.left, `${label} left`).toBeGreaterThanOrEqual(0);
+  expect(mark.union.right, `${label} right`).toBeLessThanOrEqual(mark.viewport);
+  expect(mark.union.top, `${label} top`).toBeGreaterThanOrEqual(mark.hero.top);
+  expect(mark.union.bottom, `${label} bottom`).toBeLessThanOrEqual(mark.hero.bottom);
+  expect(mark.overlaps, `${label} overlaps`).toEqual([]);
+  expect(mark.eyebrowLastLineWords, `${label} eyebrow last line`).toBeGreaterThan(1);
+}
+
+async function heroMarkIsWhole({page}) {
+  // On phones the mark used to sit at 22% opacity with its right edge past the viewport, and the
+  // tablet range bled 58px off the right. It must be whole, full strength, clear of the copy, and
+  // placed identically by the critical CSS and by site.css.
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route("**/assets/site.css?*", async route => { await held; await route.continue(); });
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await page.evaluate(() => document.fonts.ready);
+  const critical = await page.evaluate(readHeroMark);
+  release();
+  await settle(page);
+  await expect(page.locator("html")).toHaveAttribute("data-styles-ready", "true", {timeout: 10_000});
+  const full = await page.evaluate(readHeroMark);
+  expectWholeMark(full, "full stylesheet");
+  expect(full.slashes).toEqual(critical.slashes);
+}
+
+test("hero mark is whole, full strength and clear of the copy", heroMarkIsWhole);
+test("hero mark is whole, full strength and clear of the copy with reduced motion @reduced", heroMarkIsWhole);
+
+test("hero mark stays whole and clear of the copy from phone to wide desktop", async ({page}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-desktop-1440");
+  test.setTimeout(120_000);
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  for (const width of [320, 360, 375, 390, 430, 463, 540, 600, 680, 760, 761, 800, 900, 1000, 1040, 1041, 1100, 1180, 1200, 1201, 1280, 1440, 1920]) {
+    await atWidth(page, width);
+    expectWholeMark(await page.evaluate(readHeroMark), `${width}px`);
+  }
+});
+
 test("the hero stats band sits on the hero's own ground, not an opaque plate", async ({page}) => {
   // An opaque background ended in a hard vertical seam at each container edge, over the hero's
   // tinted atmosphere — the band read as a slice cut out of the page.

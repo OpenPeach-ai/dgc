@@ -85,10 +85,10 @@ h4{font-size:15px;line-height:1.35}
 .slash-mark i:nth-child(2){clip-path:polygon(60% 20%,46.667% 26.667%,38.889% 80%,52.222% 73.333%)}
 .slash-mark i:nth-child(3){clip-path:polygon(84.444% 26.667%,71.111% 33.333%,63.333% 73.333%,76.667% 66.667%)}
 .hero{position:relative;min-height:760px;display:flex;align-items:center;overflow:hidden;background:var(--bg)}
-.hero .container{position:relative;z-index:1;padding-top:82px;padding-bottom:42px}
+.hero .container{position:relative;z-index:1;padding:82px 0 42px}
 .hero-copy{max-width:650px}.hero-copy h1{max-width:12ch}
 .hero-copy>.lede{margin-top:24px;max-width:51ch;font-size:17px;color:var(--text-2)}
-.hero-art{position:absolute;right:max(12px,calc((100vw - 1440px)/2));top:36px;width:600px;height:630px;pointer-events:none}
+.hero-art{position:absolute;right:max(12px,50vw - 720px);top:36px;width:600px;height:630px;pointer-events:none}
 
 .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:30px}
 .quiet-link{min-height:42px;display:inline-flex;align-items:center;padding:0 10px;color:var(--text-2);font:500 11px/1 var(--mono)}
@@ -118,9 +118,16 @@ h4{font-size:15px;line-height:1.35}
 .stat-label{display:block;margin-top:12px;color:var(--muted);font:500 11px/1.45 var(--mono);letter-spacing:.04em;text-transform:uppercase;overflow-wrap:anywhere}
 .stat-label a:focus-visible{outline-offset:-2px}
 
-@media(max-width:1200px){.hero-art{right:-100px;top:36px;width:500px}.hero-copy{max-width:60%}.stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stat:last-child{grid-column:span 2}}
-@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-135px;top:34px;width:420px;height:450px}}
-@media(max-width:760px){.hero .container{padding-top:54px;padding-bottom:24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:-26px;right:-110px;width:310px;height:260px;opacity:.22}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:28px}.stat{min-height:92px}.stat:last-child{grid-column:1/-1}.stat-value{font-size:23px}}
+/* The hero mark stays whole and full strength at every width. The slashes fill only part of the
+   square box: the visible right edge is 0.183 x width in from the box's right, the visible top
+   0.285 x width down from its top. 761-1200: 4vw equals --gutter (clamp(20px,4vw,48px) is linear
+   from 500 to 1200px), so right:calc(4vw - 92px) at 500px wide and right:-3.3vw at 40vw wide put
+   the visible right edge on the gutter. Up to 760px the box is 50vw: its visible top sits 14px
+   below the hero top, its visible right edge on the 20px gutter, beside an eyebrow capped (and
+   balanced, so no one-word second line) to clear it. If --gutter changes, these offsets drift. */
+@media(max-width:1200px){.hero-art{right:calc(4vw - 92px);width:500px}.hero-copy{max-width:60%}.stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stat:last-child{grid-column:span 2}}
+@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-3.3vw;width:40vw;height:450px}}
+@media(max-width:760px){.hero .container{padding:54px 0 24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw;height:50vw}.hero .eyebrow{max-width:calc(70% - 24px);text-wrap:balance}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:28px}.stat{min-height:92px}.stat:last-child{grid-column:1/-1}.stat-value{font-size:23px}}
 @media(max-width:480px){.hero-actions .button{flex:1;min-width:max-content}.hero-actions .quiet-link{width:100%;padding-left:0}}
 
 /* proof marquee */
@@ -386,7 +393,7 @@ h4{font-size:15px;line-height:1.35}
 @media(max-width:760px){.hero-atmosphere{opacity:.5}}
 
 /* A crisp logo holds between short, synchronized glitches and a soft contour echo. */
-.kinetic-mark{right:max(12px,calc((100vw - 1440px)/2));top:36px;--glitch-cycle:8s}
+.kinetic-mark{right:max(12px,50vw - 720px);top:36px;--glitch-cycle:8s}
 .kinetic-mark>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg)}
 .slash-trail{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12));animation:trail-glitch var(--glitch-cycle) ease-in-out infinite}
 .slash-front{animation:mark-glitch var(--glitch-cycle) steps(1,end) infinite;transform-origin:45px 45px}
@@ -398,10 +405,10 @@ h4{font-size:15px;line-height:1.35}
 @keyframes trail-glitch{0%,16%,30%,100%{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12))}20%{transform:translate(calc(var(--trail-x)*.38),calc(var(--trail-y)*.18))}23%{transform:translate(calc(var(--trail-x)*.06),calc(var(--trail-y)*.06))}}
 @keyframes ghost-glitch{0%,17%,25%,100%{opacity:0;transform:translate(0,0)}18%{opacity:.18;transform:translate(-1.6px,.2px)}19.5%{opacity:.12;transform:translate(1.4px,-.15px)}21.5%{opacity:.08;transform:translate(-.7px,0)}23%{opacity:0}}
 @keyframes slice-glitch{0%,18%,24%,100%{opacity:0;transform:translateX(0)}19.5%{opacity:.7;transform:translateX(var(--slice-shift))}21.5%{opacity:.4;transform:translateX(calc(var(--slice-shift)*-.45))}23%{opacity:0}}
-@media(max-width:1200px){.kinetic-mark{right:-100px;width:500px}}
+@media(max-width:1200px){.kinetic-mark{right:calc(4vw - 92px);width:500px}}
 @media(max-width:1240px){.loop-layout{grid-template-columns:1fr}.loop-dial{border-right:0;border-bottom:1px solid var(--line)}}
-@media(max-width:1040px){.kinetic-mark{right:-135px;top:34px;width:420px}}
-@media(max-width:760px){.kinetic-mark{right:-110px;top:-26px;width:310px;opacity:.22}}
+@media(max-width:1040px){.kinetic-mark{right:-3.3vw;width:40vw}}
+@media(max-width:760px){.kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw;height:50vw}}
 @media(prefers-reduced-motion:reduce){.slash-trail,.slash-front,.slash-ghost,.slash-slice{animation:none}.slash-front{transform:none;filter:none}.slash-ghost,.slash-slice{display:none}}
 
 /* Focus details share the demo's outer edges, with room for readable explanations. */
