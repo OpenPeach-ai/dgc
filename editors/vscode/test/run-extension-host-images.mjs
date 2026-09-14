@@ -13,7 +13,7 @@
 // python3) and a Chromium for the browser tool (DGC_TEST_BROWSER, else Playwright's cache).
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -32,12 +32,19 @@ if (!existsSync(join(extensionRoot, "dist", "extension.js"))) {
 
 function findBrowser() {
   if (process.env.DGC_TEST_BROWSER) return process.env.DGC_TEST_BROWSER;
-  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright");
-  const builds = existsSync(cache) ? readdirSync(cache).filter((name) => /^chromium-\d+$/.test(name))
-    .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1])) : [];
-  for (const build of builds) {
-    for (const binary of ["chrome-linux/chrome", "chrome-linux64/chrome", "chrome-mac/Chromium.app/Contents/MacOS/Chromium"]) {
-      if (existsSync(join(cache, build, binary))) return join(cache, build, binary);
+  // Documented runs override HOME with a throwaway directory, so Playwright's cache is also looked
+  // for under the invoking user's real home (what the operating system says, not $HOME).
+  let realHome = "";
+  try { realHome = userInfo().homedir; } catch { /* no passwd entry */ }
+  const caches = [process.env.PLAYWRIGHT_BROWSERS_PATH, join(homedir(), ".cache", "ms-playwright"),
+    realHome && join(realHome, ".cache", "ms-playwright")].filter(Boolean);
+  for (const cache of [...new Set(caches)]) {
+    const builds = existsSync(cache) ? readdirSync(cache).filter((name) => /^chromium-\d+$/.test(name))
+      .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1])) : [];
+    for (const build of builds) {
+      for (const binary of ["chrome-linux/chrome", "chrome-linux64/chrome", "chrome-mac/Chromium.app/Contents/MacOS/Chromium"]) {
+        if (existsSync(join(cache, build, binary))) return join(cache, build, binary);
+      }
     }
   }
   throw new Error("no Chromium for the browser tool: set DGC_TEST_BROWSER or install Playwright's chromium");

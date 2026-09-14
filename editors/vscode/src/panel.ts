@@ -1414,7 +1414,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
         || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"].includes(ev.command))) return;
-    this.noteImageEvent(ev);
+    const openImageAnswer = this.noteImageEvent(ev);
     switch (ev.type) {
       case "ready":
         this.sessionReady = false;
@@ -1647,8 +1647,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (ev.type === "image") {
       // The stored copy's path is for this host's Open file only; the webview asks by ref.
+      // An answer to Open file's own get_image went to its waiter: the bytes never cross the bridge.
+      if (openImageAnswer) { return; }
       const { path: _stored, ...answer } = ev as any;
-      if (this.imageOpenWaiters.has(String(ev.request_id))) { return; }
       this.post({ type: "event", event: answer });
       return;
     }
@@ -1781,6 +1782,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }),
+          ...(event.type === "image" ? { id: String(event.request_id || "") } : {}),
           // What the status row says (e.g. a silent model request), for the installed-host stall test.
           ...(event.type === "turn_activity" ? { state: String(event.state || ""),
             label: String(event.label || "").slice(0, 80),
@@ -2332,7 +2334,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.imageRefs.set(ref, {});
   }
 
-  private noteImageEvent(ev: DgcEvent): void {
+  /** Tracks refs and stored paths; true when ``ev`` answered an Open file request (consumed here). */
+  private noteImageEvent(ev: DgcEvent): boolean {
     const itemsOf = (event: any) => (event?.type === "tool_images" && Array.isArray(event.items) ? event.items : []);
     if (ev.type === "tool_images") {
       for (const item of itemsOf(ev)) { this.rememberImageRef(item?.ref); }
@@ -2349,8 +2352,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (waiter) {
         this.imageOpenWaiters.delete(String(ev.request_id));
         waiter(known ? stored : undefined);
+        return true;
       }
     }
+    return false;
   }
 
   /** The stored file behind a ref, only if it is a regular image file inside DGC's own image

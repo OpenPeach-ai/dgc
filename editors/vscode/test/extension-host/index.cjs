@@ -498,6 +498,14 @@ async function run() {
         assert.ok(!shown.at(-1).includes(hostImages[ref]), "the path is never echoed");
         assert.equal(tabPaths().length, tabsBefore, "and nothing opens");
       }
+      // Open file asked the backend itself for the refs the panel had no path for yet: those answers
+      // (full data URIs from a real backend) stay in the host.
+      await waitFor(() => backendCommands(backendLogPath).filter((command) =>
+        command.type === "get_image" && /^open-image-/.test(String(command.request_id || ""))).length >= 3);
+      const relayed = posted().filter((item) => item.eventType === "image").map((item) => item.id);
+      assert.ok(relayed.includes("host-image-1"), "the webview's own get_image answer reaches the webview");
+      assert.deepEqual(relayed.filter((id) => /^open-image-/.test(id)), [],
+        "Open file's answers stay in the host");
       const refused = shown.length;
       await testApi.testOnlyWebviewMessage(testToken, { type: "openImage", ref: "img_" + "9".repeat(32) });
       await waitFor(() => shown.length > refused);

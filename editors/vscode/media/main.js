@@ -1361,10 +1361,11 @@
     bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
     view_image: "viewed",
   };
-  // "viewed 2 images" counts the images the viewing steps returned, not the steps.
+  // "viewed 2 images" counts the images the viewing steps returned, not the steps. Finished, it also
+  // counts the images other steps in the group produced (a screenshot), so the count is said once.
   function viewedPhrase(cards, past) {
-    const n = cards.filter((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed")
-      .reduce((total, card) => total + Math.max(1, card._images?.length || 0), 0);
+    const n = cards.reduce((total, card) => total + (TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed"
+      ? Math.max(1, card._images?.length || 0) : past ? card._images?.length || 0 : 0), 0);
     return past ? `viewed ${n} ${n === 1 ? "image" : "images"}` : n === 1 ? "viewing an image" : `viewing ${n} images`;
   }
   function toolSentence(cards, tense) {
@@ -1413,8 +1414,8 @@
     // below holds the command or path, and the header used to print it a second time.
     let sentence = running.length ? toolSentence(running, "present") : toolSentence(cards, "past");
     // Images a step produced, where the sentence did not already count them ("viewed 2 images").
-    const images = cards.filter((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] !== "viewed")
-      .reduce((n, card) => n + (card._images?.length || 0), 0);
+    const viewing = cards.some((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed");
+    const images = viewing ? 0 : cards.reduce((n, card) => n + (card._images?.length || 0), 0);
     if (!running.length && images) sentence += ` · ${images} ${images === 1 ? "image" : "images"}`;
     if (!running.length && failures.length) {
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
@@ -4336,15 +4337,18 @@
     const count = (card._images || []).length;
     const toggle = card.querySelector(".tool-toggle");
     if (!toggle) return;
+    // Every image refused (bad data, over the cap): the pill says how many were not shown, never "0".
+    const omitted = count ? 0 : card._imagesOmitted || 0;
+    const words = omitted ? `${countOf(omitted, "image")} not shown` : countOf(count, "image");
     let pill = toggle.querySelector(".tool-image-count");
     if (!pill) {
       pill = el("span", "tool-image-count", '<span class="codicon codicon-file-media" aria-hidden="true"></span><span class="n" aria-hidden="true"></span><span class="sr-only"></span>');
       const arg = toggle.querySelector(".arg");
       if (arg) arg.after(pill); else toggle.appendChild(pill);
     }
-    pill.querySelector(".n").textContent = String(count);
-    pill.querySelector(".sr-only").textContent = countOf(count, "image");
-    toggle.title = `${card.dataset.toolName || "tool"} · ${countOf(count, "image")}`;
+    pill.querySelector(".n").textContent = omitted ? `+${omitted}` : String(count);
+    pill.querySelector(".sr-only").textContent = words;
+    toggle.title = `${card.dataset.toolName || "tool"} · ${words}`;
   }
   // The toggle opened the card: its chips are drawn now, and anything not loaded is fetched.
   function imagesOnCardOpen(card) {
@@ -4542,6 +4546,7 @@
     }
     renderViewerImage(false);
     q(".iv-close").focus();
+    hoverTip.hide();             // focus placed for the reader: no "Close (Esc)" label over the dialog
   }
   function onViewerKey(event) {
     if (!imageViewer) return;
@@ -4663,6 +4668,7 @@
     const notice = imageViewer.el.querySelector(".iv-notice");
     notice.querySelector(".iv-notice-text").textContent = text;
     notice.hidden = false;
+    hoverTip.hide();             // a label left over from the bar must not cover Show
     // The request's own handler announces itself right after this call; speak only when nothing
     // else did in the same tick, so a screen reader hears one line, not two.
     const before = announcer.textContent;

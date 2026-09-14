@@ -171,7 +171,8 @@ test("viewing steps are counted as images, and a diff card with images keeps its
   assert.ok(p.card("m1").classList.contains("no-body"));
   p.event({ type: "tool_images", call_id: "m1", images: [PNG] });
   assert.ok(!p.card("m1").classList.contains("no-body"), "the chips stay reachable");
-  assert.equal(p.doc.querySelector(".tool-group-label").textContent, "Viewed 2 images and used 1 tool · 1 image");
+  assert.equal(p.doc.querySelector(".tool-group-label").textContent, "Viewed 3 images and used 1 tool",
+               "the step's image joins the viewed count instead of a second count");
   assert.deepEqual(p.errors, []);
 });
 
@@ -324,5 +325,51 @@ test("omitted images are counted after the chips", () => {
   const more = p.card("c1").querySelector(".image-omitted");
   assert.equal(more.textContent, "+3 not shown");
   assert.equal(more.title, "DGC keeps up to 8 images per step, and only PNG, JPEG, GIF, WebP or BMP.");
+  assert.deepEqual(p.errors, []);
+});
+
+test("a step whose images were all refused says how many were not shown, never 0", () => {
+  const p = panel();
+  p.step("c1", "mcp__imgsrv__chart");
+  p.event({ type: "tool_images", call_id: "c1", images: [], omitted: 2 });
+  const pill = p.card("c1").querySelector(".tool-image-count");
+  assert.equal(pill.querySelector(".n").textContent, "+2");
+  assert.equal(pill.querySelector(".sr-only").textContent, "2 images not shown");
+  assert.equal(p.card("c1").querySelector(".tool-toggle").title, "mcp__imgsrv__chart · 2 images not shown");
+  p.event({ type: "tool_images", call_id: "c1", images: [PNG] });
+  assert.equal(pill.querySelector(".n").textContent, "1", "a shown image is counted as usual");
+  assert.deepEqual(p.errors, []);
+});
+
+test("a screenshot beside a viewing step is counted once, in the viewed phrase", () => {
+  const p = panel();
+  p.step("c1");
+  p.event({ type: "tool_images", call_id: "c1", images: [PNG] });
+  p.event({ type: "tool_call", call_id: "v1", name: "view_image", args: { path: "a.png" }, summary: "a.png" });
+  p.event({ type: "tool_result", call_id: "v1", name: "view_image", output: "viewed a.png", is_error: false, is_diff: false });
+  p.event({ type: "tool_images", call_id: "v1", images: [PNG2] });
+  assert.equal(p.doc.querySelector(".tool-group-label").textContent, "Looked at 1 page and viewed 2 images");
+  assert.deepEqual(p.errors, []);
+});
+
+test("no hover label covers the viewer: not on the focus it places, not over the attention notice", async () => {
+  const p = panel();
+  p.step("c1");
+  p.event({ type: "tool_images", call_id: "c1", images: [PNG] });
+  p.open("c1");
+  p.card("c1").querySelector(".image-chip").click();
+  await p.flush();
+  const tip = p.doc.getElementById("hover-tip");
+  assert.equal(p.doc.activeElement, p.viewer().querySelector(".iv-close"));
+  assert.ok(tip.hidden, "the programmatic focus on Close raises no label");
+  // A label a keyboard user raised on a bar control is taken down when the notice appears.
+  p.viewer().querySelector(".iv-zoom").dispatchEvent(new p.win.Event("pointerover", { bubbles: true }));
+  await new Promise((done) => p.win.setTimeout(done, 450));
+  assert.ok(!tip.hidden, "a hover label shows as usual");
+  p.event({ type: "permission_request", id: "p1", name: "bash", command: "ls", args: {}, summary: "ls",
+            suggested_rule: "Bash", choices: ["once", "always", "deny"] });
+  await p.flush();
+  assert.ok(!p.viewer().querySelector(".iv-notice").hidden);
+  assert.ok(tip.hidden, "the notice's Show button is not covered");
   assert.deepEqual(p.errors, []);
 });

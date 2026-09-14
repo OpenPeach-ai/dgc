@@ -1123,7 +1123,8 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .image-tile .codicon { font-size: 20px; }
 .image-chip:hover .image-tile { border-color: var(--border-strong); }
 .image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
-.image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite; }
+.image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite;
+  background: color-mix(in srgb, var(--text) 9%, var(--surface2)); }   /* visible on a white card too */
 .image-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .image-caption { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
@@ -1137,10 +1138,12 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 #image-viewer .iv-bar, #image-viewer .iv-notice { flex: none; min-width: 0; border: 1px solid var(--border);
   border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface)); }
 #image-viewer .iv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); }
-#image-viewer .iv-heading { flex: 1 1 11rem; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); }
-#iv-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* The name is what identifies the image: the controls wrap to their own line before it truncates,
+   and the meta line gives way first. */
+#image-viewer .iv-heading { flex: 1 1 16rem; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); }
+#iv-title { flex: 0 1 auto; margin: 0; min-width: min(12ch, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
-#iv-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+#iv-meta { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 #image-viewer .iv-controls { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
 #image-viewer .iv-pos { padding: 0 var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans);

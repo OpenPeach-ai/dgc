@@ -174,4 +174,71 @@ await p.events([{ type: "permission_request", id: "p1", name: "bash", command: "
   suggested_rule: "Bash(npm run deploy)", choices: ["once", "always", "deny"] }]);
 await shot(p, "viewer-attention-notice-dark-460.png");
 
+// ---- review fixes: the states the 0.40 review named ----
+// The name keeps its room at 460 (the controls wrap first), in both themes.
+for (const theme of ["dark", "light"]) {
+  p = await panel(460, 620, theme);
+  await turnWithShots(p, 2);
+  await openViewer(p);
+  await shot(p, `viewer-title-${theme}-460.png`);
+}
+// Opened from the keyboard, then a request arrives: no "Close (Esc)" label over the notice.
+for (const width of [300, 460]) {
+  p = await panel(width, 560, "dark");
+  await turnWithShots(p, 2);
+  await p.page.evaluate(() => document.querySelector('.tool[data-call-id="c1"] .image-chip').focus());
+  await p.page.keyboard.press("Enter");
+  await p.settle();
+  await p.events([{ type: "permission_request", id: "p1", name: "bash", command: "npm run deploy", args: {}, summary: "npm run deploy",
+    suggested_rule: "Bash(npm run deploy)", choices: ["once", "always", "deny"] }]);
+  await shot(p, `viewer-keyboard-notice-dark-${width}.png`);
+}
+// Replayed slots still loading, on a white card.
+for (const theme of ["light", "dark"]) {
+  p = await panel(900, 360, theme);
+  await p.events([
+    { type: "turn_start", turn_id: "t1", prompt: "Screenshot the pricing pages", kind: "prompt" },
+    { type: "tool_call", call_id: "c1", name: "browser", args: { operation: "screenshot" }, summary: "screenshot" },
+    { type: "tool_result", call_id: "c1", name: "browser", output: "screenshot saved", is_error: false, is_diff: false },
+    { type: "tool_images", call_id: "c1", caption: "browser screenshot", images: ["", "", ""], items: [item(1), item(2), item(3)] },
+  ]);
+  await p.page.evaluate(() => document.querySelector('.tool[data-call-id="c1"] .tool-toggle').click());
+  await shot(p, `skeleton-${theme}-900.png`);
+}
+// Every image an MCP step returned was refused: the pill says +2, not 0.
+for (const theme of ["dark", "light"]) {
+  p = await panel(460, 360, theme);
+  await p.events([
+    { type: "turn_start", turn_id: "t1", prompt: "Render the chart", kind: "prompt" },
+    { type: "tool_call", call_id: "m1", name: "mcp__imgsrv__chart", args: {}, summary: "chart" },
+    { type: "tool_result", call_id: "m1", name: "mcp__imgsrv__chart", output: "[MCP image: image/png · not shown: not valid base64]", is_error: false, is_diff: false },
+    { type: "tool_images", call_id: "m1", images: [], omitted: 2 },
+  ]);
+  await shot(p, `all-omitted-pill-${theme}-460.png`);
+}
+// A resumed session after a compaction: images whose steps were summarised sit in one row under the summary.
+p = await panel(460, 900, "dark");
+{
+  const image = await p.png(1280, 757, 200, "Folded");
+  await p.events([{ type: "history", items: [
+    { role: "compaction", text: "## Goal\n- Check the landing page" },
+    { type: "turn_start", turn_id: "h0", prompt: "", kind: "prompt" },
+    { type: "tool_images", call_id: null, images: ["", ""], caption: "", items: [item(1), item(2, { name: "logo.png", source: "view_image", host: "" })] },
+    { type: "turn_end", turn_id: "h0", reason: "completed", token_estimate: 0, final_message_id: null },
+    { type: "turn_start", turn_id: "h1", prompt: "", kind: "prompt" },
+    { type: "tool_call", call_id: "call_0", name: "view_image", args: { path: "b.png" }, summary: "b.png" },
+    { type: "tool_result", call_id: "call_0", name: "view_image", output: "viewed b.png", is_error: false, is_diff: false },
+    { type: "tool_images", call_id: "call_0", images: [""], caption: "", items: [item(3, { name: "b.png", source: "view_image", host: "" })] },
+    { type: "text_delta", text: "It is b." }, { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+    { type: "turn_start", turn_id: "h2", prompt: "and d.png", kind: "prompt" },
+    { type: "text_delta", text: "It is d." }, { type: "stream_end", message_id: "h2:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h2", reason: "completed", token_estimate: 0, final_message_id: "h2:1" },
+  ] }]);
+  void image;
+  await p.page.evaluate(() => { const row = document.querySelector("#log .image-orphan .tool-toggle"); row?.click();
+    document.getElementById("log").scrollTop = 0; });
+}
+await shot(p, "history-compaction-folded-dark-460.png");
+
 await browser.close();
