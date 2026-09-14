@@ -482,6 +482,9 @@ class HeadlessUI:
         self._answer_message_id = None  # last stream_end whose phase was "answer"
         self._unphased_message_id = None  # last stream_end that stated no phase (compat path)
         self._activity_key = None       # (state, label, detail) of the last emitted turn_activity
+        self._model_wait_saved = None   # the activity a "no response from the model" notice replaced
+        self._model_wait_key = None     # the notice on screen, while it is still the latest word
+        self._model_waits = {}          # origin (None = the main agent, else a sub-agent) -> notice key
 
     def reset_turn_messages(self) -> None:
         """Start a new turn's prose numbering and forget the previous turn's designation."""
@@ -490,6 +493,9 @@ class HeadlessUI:
         self._answer_message_id = None
         self._unphased_message_id = None
         self._activity_key = None
+        self._model_wait_saved = None
+        self._model_wait_key = None
+        self._model_waits = {}
 
     @property
     def final_message_id(self):
@@ -552,6 +558,41 @@ class HeadlessUI:
         if key[2]:
             fields["detail"] = key[2]
         self.em.emit("turn_activity", **fields)
+
+    def model_wait(self, label, detail: str = "", *, since=None, restore: bool = True,
+                   origin=None) -> None:
+        """A model request is silent (or being retried). Rides the v12 ``turn_activity`` event.
+
+        ``label=None`` means that request is producing again (or ended). Each ``origin`` -- the
+        main agent (None) or one sub-agent -- holds its own notice, so parallel children that stall
+        together do not clear each other: when one resumes, the newest notice still outstanding is
+        shown again. When none is left, the activity the first notice replaced comes back, but only
+        with ``restore`` and only if nothing newer (text, a tool) has already said what the turn
+        is doing. ``restore=False`` is a call that ended in an error, a cancel or a stall.
+        """
+        waits = self.__dict__.setdefault("_model_waits", {})
+        if label:
+            key = ("waiting", str(label)[:80], str(detail or "")[:120])
+            if not waits:
+                self._model_wait_saved = self._activity_key
+            waits.pop(origin, None)
+            waits[origin] = key
+            self.turn_activity(*key)
+            self._model_wait_key = key
+            return
+        if origin not in waits:
+            return
+        waits.pop(origin, None)
+        showing = self._model_wait_key is not None and self._activity_key == self._model_wait_key
+        remaining = list(waits.values())
+        if remaining:
+            if showing:
+                self.turn_activity(*remaining[-1])
+                self._model_wait_key = remaining[-1]
+            return
+        saved, self._model_wait_saved, self._model_wait_key = self._model_wait_saved, None, None
+        if restore and showing and saved:
+            self.turn_activity(*saved)
 
     def steering_applied(self, request_id: str) -> None:
         hook = getattr(self, "_steering_hook", None)
@@ -813,7 +854,7 @@ class Backend:
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
-                          "resume_turn": True, "monitors": True,
+                          "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -1525,6 +1566,21 @@ class Backend:
         from .docs import catalog
         items = catalog()
         self.em.emit("docs_catalog", request_id=request_id, items=items, total=len(items))
+
+    def _emit_usage(self, request_id: str, range_name: str) -> None:
+        """Answer get_usage from the local ledger on a short-lived thread.
+
+        An all-time aggregate over a busy year is a few hundred milliseconds of sqlite; the command
+        reader must stay free for a Stop meanwhile. The report never contains prompt or reply text.
+        """
+        def run() -> None:
+            from . import usage_ledger
+            try:
+                report = usage_ledger.report(range_name)
+            except Exception as exc:        # a report is informational; say why and carry on
+                report = usage_ledger.empty_report(range_name, error=f"{type(exc).__name__}: {exc}")
+            self.em.emit("usage_report", request_id=request_id, **report)
+        threading.Thread(target=run, name="dgc-usage-report", daemon=True).start()
 
     def _emit_doc(self, request_id: str, identifier: str) -> None:
         from .docs import find_id, slug
@@ -2430,6 +2486,14 @@ class Backend:
 
         elif t == "get_doc":
             self._emit_doc(str(cmd.get("request_id") or ""), str(cmd.get("id") or ""))
+
+        elif t == "get_usage":
+            usage_request = str(cmd.get("request_id") or "")
+            if not usage_request or len(usage_request) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                self._emit_usage(usage_request, str(cmd["range"]))
 
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))

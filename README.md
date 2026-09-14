@@ -31,8 +31,8 @@ One line — nothing needs root:
 curl -fsSL https://vibedgc.com/install.sh | bash
 ```
 
-If `cursor`, `code`, or `codium` is on `PATH`, the installer also checksum-verifies
-and installs the DGC extension into the first one found. Prefix the command with
+The installer also checksum-verifies the DGC extension and installs it into each of
+`cursor`, `code` and `codium` it finds on `PATH`. Prefix the command with
 `DGC_SKIP_EXTENSION=1` to install only the CLI.
 
 Then point it at a model and go:
@@ -297,6 +297,17 @@ process delegated work strictly serially.
 conversation, checkpoint-message, goal, title, or plan state is written. Live model/tool/wire
 credential masking and one-time-only sensitive approvals remain mandatory. Exact file rewind bytes
 are intentionally unchanged and protected by the session directory's owner-only permissions.
+A model request that hangs without an error (the server sends no response headers, opens a stream
+and goes silent, or sends only keep-alives) is watched separately from `request_timeout`, which
+stays the hard ceiling on socket silence. After `model_stall_notice_s` (45) the status line and
+the editor say "No response from the model" with the model and host. Nothing useful within
+`model_first_token_timeout_s` (`"auto"`: 900 for loopback, private, Tailscale or `*.local` hosts
+and local server families, 300 otherwise) counts as a stall; streamed reasoning is progress, and
+while a self-hosted Ollama reports the model still loading the clock pauses for up to
+`model_load_timeout_s` (900). A stalled request is re-issued `model_stall_retries` (2) times, then
+DGC switches to `fallback_model` when one is set or fails the turn naming the model and endpoint.
+A stream silent for `model_idle_timeout_s` (300) after partial output is continued from what
+already streamed. `0` turns a window off; Esc / Stop works in every phase.
 
 With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat`,
 `/api/tags`, and `/api/show` contracts; DGC carries native thinking, tool history, `tool_name`, context/output
@@ -362,7 +373,7 @@ DGC is a coding agent that runs shell commands and edits files on your machine. 
 - **Deny-rules** apply in every native local/API mode, including auto. They do not wrap a delegated vendor CLI's internal tools. Add native-loop hard blocks such as `/permissions deny Bash(rm -rf *)` or `/permissions deny Read(**/.env)`.
 - **Prompt injection.** Web content is marked as untrusted data and private/link-local fetch targets are blocked. A hostile page or repository can still influence a model, so use `default` mode for untrusted work.
 - **Optional OS confinement.** `/sandbox on` wraps native-loop spawned shell commands and hooks; it does not confine parent-process structured file tools or delegated vendor CLIs. Wrapped Linux/bubblewrap commands get private home/tmp/runtime and process namespaces; macOS/sandbox-exec instead uses policy enforcement with shared system temp paths. Both protect ambient home state and block network by default, normal approval prompts still apply, and unsupported platforms fail closed. `/sandbox` and `dgc doctor` report the exact active capability.
-- **The installer** is non-root, installs the CLI under `~/dgc` with a launcher in `~/.local/bin`, and the production path requires a matching published SHA-256. A custom/private mirror can explicitly opt into `DGC_ALLOW_UNVERIFIED=1`. When a supported editor CLI is on `PATH`, the installer also installs the checksum-verified extension into that editor unless `DGC_SKIP_EXTENSION=1` is set. The current GitHub release carries build-provenance attestations, and the release workflow is configured to produce them for future tagged builds.
+- **The installer** is non-root, builds each CLI version in its own directory and virtualenv under `~/.local/share/dgc/versions` and switches the launcher in `~/.local/bin` only once a build is complete (the previous two versions are kept for `dgc update --rollback`), and the production path requires a matching published SHA-256. A custom/private mirror can explicitly opt into `DGC_ALLOW_UNVERIFIED=1`. When a supported editor CLI is on `PATH`, the installer also installs the checksum-verified extension into each such editor unless `DGC_SKIP_EXTENSION=1` is set. The current GitHub release carries build-provenance attestations, and the release workflow is configured to produce them for future tagged builds.
 
 ## License
 

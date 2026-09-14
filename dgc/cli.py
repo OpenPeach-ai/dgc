@@ -184,6 +184,13 @@ class UI:
     def turn_activity(self, state: str, label: str, detail: str = "") -> None:
         """The REPL's spinner already names its own phase; the loop's activity adds nothing here."""
 
+    def model_wait(self, label, detail: str = "", *, since=None, restore: bool = True,
+                   origin=None) -> None:
+        """A silent model request renames a live spinner ("No response from the model…"). Tokens
+        resuming stop the spinner themselves, so clearing needs nothing here."""
+        if label and self._work_stop is not None and sys.stdout.isatty():
+            self.start_working(str(label))
+
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self.stop_working()
@@ -1035,6 +1042,14 @@ class CLI:
                 self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "status":
             self.banner()
+        elif cmd == "usage":
+            from . import usage_ledger
+            try:
+                report = usage_ledger.report(usage_ledger.normalize_range(rest))
+            except ValueError as exc:
+                self.ui.error(str(exc))
+            else:
+                self.console.print(render.render_markdown(usage_ledger.format_report(report)))
         elif cmd == "eta":
             from .eta import format_stats
             snapshot_fn = getattr(self.agent, "eta_snapshot", None)
@@ -1731,6 +1746,20 @@ def run_doctor(config: Config) -> None:
     if sandbox_requested and not sandbox_report.available:
         c.print("  [bold red]✗[/bold red] sandbox is enabled but this platform has no supported backend")
         c.print("    → install bubblewrap on Linux, use sandbox-exec on macOS, or run [bold]/sandbox off[/bold]")
+    # installation — which install runs, and which one `dgc update` would change
+    try:
+        from . import install_layout as _layout
+        install_rows, install_notes = _layout.installation_report()
+    except Exception as exc:  # a diagnostic must not stop the endpoint check below
+        install_rows, install_notes = [], [f"could not inspect the installation: {type(exc).__name__}: {exc}"]
+    c.print("  [bold]installation[/bold] — what runs and what `dgc update` changes")
+    # soft_wrap: these are mostly paths, and a path folded at the console width cannot be copied.
+    for label, value in install_rows:
+        c.print(f"    {label:15}{terminal_safe_text(value)}", markup=False, highlight=False,
+                soft_wrap=True)
+    for note in install_notes:
+        c.print(f"  [yellow]![/yellow] {_markup_literal(note)}", highlight=False, soft_wrap=True)
+    c.print("")
     # subscription engines — run your own plan through the official first-party CLI
     from . import subscriptions as _subs
     active = str(config.get("subscription_engine", "")).strip().lower()
@@ -2025,6 +2054,7 @@ def run_help() -> None:
     c.print("  dgc export [ID] [FILE]  save a session as Markdown")
     c.print("  dgc trust               list the folders the trust gate skips  (dgc trust revoke N|PATH|here)")
     c.print("  dgc notes [QUERY]       what this project already learned, across sessions")
+    c.print("  dgc usage               tokens counted on this machine, by model and day  (--range R, --json)")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
@@ -2036,14 +2066,43 @@ def run_help() -> None:
     render_help(c)
 
 
+def run_usage(argv: list[str]) -> int:
+    """`dgc usage [--range R] [--json]`: the local token ledger, read-only.
+
+    It never builds a Config or an Agent: reading the ledger needs no endpoint, key or project.
+    """
+    from . import usage_ledger
+    parser = argparse.ArgumentParser(
+        prog="dgc usage", allow_abbrev=False,
+        description="Tokens and requests DGC counted on this machine, by model and by day.")
+    parser.add_argument("--range", dest="range_name", default="7d",
+                        help="today, 7d, 30d, month or all (default 7d)")
+    parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    try:
+        args = parser.parse_args(argv)
+        range_name = usage_ledger.normalize_range(args.range_name)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    except ValueError as exc:
+        print(f"dgc usage: {exc}", file=sys.stderr)
+        return 2
+    report = usage_ledger.report(range_name)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        Console().print(render.render_markdown(usage_ledger.format_report(report)))
+    return 1 if report.get("error") else 0
+
+
 SUBCOMMAND_USAGE: dict[str, str] = {
     "setup": "dgc setup                          configure provider, model and context interactively",
     "doctor": "dgc doctor                         check that the endpoint and model are reachable",
     "help": "dgc help                           the command overview",
-    "update": "dgc update                         reinstall the latest DGC from vibedgc.com (runs the installer)",
+    "update": "dgc update [--rollback|--version X|--list]  install the latest DGC beside this one, or switch versions",
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
     "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
     "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
+    "usage": "dgc usage [--range today|7d|30d|month|all] [--json]   tokens counted on this machine, by model and day",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
@@ -2058,12 +2117,22 @@ def _subcommand_help(name: str) -> int:
     """`--help` on a subcommand prints its usage and exits; it never runs the subcommand."""
     print("usage: " + SUBCOMMAND_USAGE[name])
     if name == "update":
-        print("  Downloads and executes https://vibedgc.com/install.sh with bash.")
+        print("  Downloads https://vibedgc.com/install.sh to a temporary file and runs it with bash.\n"
+              "  The new version is built in its own directory; the dgc launcher switches to it only\n"
+              "  once it is complete, so a failed update leaves the current version running.\n"
+              "  --rollback     switch back to the newest kept version older than the active one\n"
+              "  --version X    switch to kept version X, or install X if it is the published release\n"
+              "  --list         show the kept versions and which one is active\n"
+              "  Exit status: 0 done, 1 failed (previous version still active), 3 another update is running.")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # A dgc started from a versioned install marks its version as in use, so an update's
+    # retention never deletes the tree under a running process (no-op for any other install).
+    from .install_layout import hold_runtime_lock
+    hold_runtime_lock()
     if raw_argv and raw_argv[0] in SUBCOMMAND_USAGE:
         # Every subcommand honours the universal help reflex BEFORE anything can run. Six of
         # eleven used to execute instead — `dgc update --help` piped a remote installer into bash.
@@ -2111,13 +2180,15 @@ def main(argv: list[str] | None = None) -> int | None:
                   "    https://github.com/OpenPeach-ai/dgc/issues\n")
             return
         if raw_argv[0] == "update":
-            run_update(); return
+            return run_update(raw_argv[1:])
         if raw_argv[0] == "notes":
             from .notes import handle_command
             cfg = Config()
             agent = Agent(cfg, UI())
             Console().print(render.render_markdown(handle_command(agent, " ".join(raw_argv[1:]))))
             return 0
+        if raw_argv[0] == "usage":
+            return run_usage(raw_argv[1:])
         if raw_argv[0] == "trust":
             from .trust import handle_trust_command
             cfg = Config()
@@ -2149,7 +2220,7 @@ def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
-        epilog="commands: setup · doctor · help · update · export · export-training · protocol · skills · mcp · "
+        epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · mcp · "
                "serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
@@ -2347,7 +2418,7 @@ def main(argv: list[str] | None = None) -> int | None:
                 cli.repl()
             else:
                 from .tui import TUI
-                TUI(config, agent=cli.agent).run()
+                return TUI(config, agent=cli.agent).run()   # non-zero when a /update failed
         finally:
             termbg.restore_stop_handlers(_stop_handlers)
             termbg.reset()

@@ -85,10 +85,12 @@ h4{font-size:15px;line-height:1.35}
 .slash-mark i:nth-child(2){clip-path:polygon(60% 20%,46.667% 26.667%,38.889% 80%,52.222% 73.333%)}
 .slash-mark i:nth-child(3){clip-path:polygon(84.444% 26.667%,71.111% 33.333%,63.333% 73.333%,76.667% 66.667%)}
 .hero{position:relative;min-height:760px;display:flex;align-items:center;overflow:hidden;background:var(--bg)}
-.hero .container{position:relative;z-index:1;padding-top:82px;padding-bottom:42px}
-.hero-copy{max-width:650px}.hero-copy h1{max-width:12ch}
+.hero .container{position:relative;z-index:1;padding:82px 0 42px}
+/* Without text-wrap:balance, 6.6em still breaks the headline as "Own your / coding agent." (see
+   critical-home.css). */
+.hero-copy{max-width:650px}.hero-copy h1{max-width:6.6em}
 .hero-copy>.lede{margin-top:24px;max-width:51ch;font-size:17px;color:var(--text-2)}
-.hero-art{position:absolute;right:max(12px,calc((100vw - 1440px)/2));top:36px;width:600px;height:630px;pointer-events:none}
+.hero-art{position:absolute;right:max(12px,50vw - 720px);top:36px;width:600px;height:630px;pointer-events:none}
 
 .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:30px}
 .quiet-link{min-height:42px;display:inline-flex;align-items:center;padding:0 10px;color:var(--text-2);font:500 11px/1 var(--mono)}
@@ -101,22 +103,34 @@ h4{font-size:15px;line-height:1.35}
 .install-command .prompt{color:var(--lavender)}.install-command code{color:var(--text);white-space:nowrap;overflow:auto;scrollbar-width:none}
 .copy-button{border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text-2);padding:7px 9px;cursor:pointer;font:500 10px/1 var(--mono)}
 .requirements{padding:9px 14px;border-top:1px solid var(--line);color:var(--muted);font:500 10px/1.4 var(--mono);letter-spacing:.02em}
-/* Hero stats. The band sits on the hero's own tinted ground: it used to paint an opaque plate,
-   which ended in a hard vertical seam at each container edge and read as a slice cut out of the
-   hero. Row-starting cells drop their left padding so every row begins on the container edge —
-   :first-child alone only covered the first row, and wrapped rows stepped 18px to the right.
-   :last-child drops its right padding so the single-row (5-column) layout ends where it begins,
-   which also buys the last label the 18px it was within 1.4px of needing at 1280. Wrapped rows
-   keep 18px on the cell that ends them: doing it per row costs more than the 10 KiB inline-CSS
-   budget has left, and nothing reaches that edge, because the labels are left-aligned and short. */
-.stat-grid{position:relative;display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin-top:54px;padding-top:10px}
-.stat{min-height:100px;padding:18px;border-left:1px solid var(--line)}.stat:first-child{border-left:0;padding-left:0}.stat:last-child{padding-right:0}
+/* Hero stats, on the hero's own ground (an opaque plate read as a slice cut out of the hero).
+   Dividers and row rules live in the gaps, not on the cells: ::before is the divider 18px left of a
+   cell, ::after the rule across the gap to its left and its own track, 11px above it (on the grid's
+   border-top for the first row, because row-gap = padding-top + border: change one, change both).
+   The grid clips horizontally, so the cell that starts a row loses its divider and overhang. No cell
+   has inline padding, so every row is flush at both ends at any column count, with no nth-child
+   rules to leak between breakpoints. Five columns size to their labels: at 11px the release label
+   (230.6px on Linux Chromium) cannot fit a fifth of the 1240px container; all five fit on one line
+   from a 1192px viewport, so the band is three columns up to 1200px. overflow-wrap and minmax(0,...)
+   keep any label inside its cell. The clip would also cut a link's outside focus ring where the link
+   meets a grid edge (two columns, 320-324 and 463-472px), so the stat link draws its ring inside. */
+.stat-grid{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,auto));gap:11px 36px;border-top:1px solid var(--line);margin-top:54px;padding-top:10px;overflow-x:clip}
+.stat{position:relative;min-height:100px;padding-block:18px}.stat::before,.stat::after{content:"";position:absolute;background:var(--line)}.stat::before{left:-18px;top:0;bottom:0;width:1px}.stat::after{left:-36px;right:0;top:-11px;height:1px}
 .stat-value{display:block;color:var(--text);font:500 27px/1 var(--sans);letter-spacing:-.025em}
-.stat-label{display:block;margin-top:12px;color:var(--muted);font:500 10px/1.45 var(--mono);letter-spacing:.04em;text-transform:uppercase}
+.stat-label{display:block;margin-top:12px;color:var(--muted);font:500 11px/1.45 var(--mono);letter-spacing:.04em;text-transform:uppercase;overflow-wrap:anywhere}
+.stat-label a:focus-visible{outline-offset:-2px}
 
-@media(max-width:1200px){.hero-art{right:-100px;top:36px;width:500px}.hero-copy{max-width:60%}}
-@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-135px;top:34px;width:420px;height:450px}.stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0;padding-left:0}.stat:last-child{grid-column:span 2}}
-@media(max-width:760px){.hero .container{padding-top:54px;padding-bottom:24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:-26px;right:-110px;width:310px;height:260px;opacity:.22}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0;padding-left:0}.stat:nth-child(4){border-left:1px solid var(--line);padding-left:18px}.stat:last-child{grid-column:1/-1;border-left:0;padding-left:0}.stat-value{font-size:23px}}
+/* The hero mark stays whole and full strength at every width. The slashes fill only part of the
+   square box: the visible right edge is 0.183 x width in from the box's right, the visible top
+   0.285 x width down from its top. 761-1200: 4vw equals --gutter (clamp(20px,4vw,48px) is linear
+   from 500 to 1200px), so right:calc(4vw - 92px) at 500px wide and right:-3.3vw at 40vw wide put
+   the visible right edge on the gutter. Up to 760px the box is 50vw: its visible top sits 14px
+   below the hero top, its visible right edge on the 20px gutter, beside an eyebrow capped to clear it
+   (balanced, and "you&nbsp;run" in the markup, so no one-word last line without balance either).
+   The headline's 6.6em cap keeps "coding" off the mark's line. If --gutter changes, these offsets drift. */
+@media(max-width:1200px){.hero-art{right:calc(4vw - 92px);width:500px}.hero-copy{max-width:60%}.stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stat:last-child{grid-column:span 2}}
+@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-3.3vw;width:40vw;height:450px}}
+@media(max-width:760px){.hero .container{padding:54px 0 24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw;height:50vw}.hero .eyebrow{max-width:calc(70% - 24px);text-wrap:balance}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:28px}.stat{min-height:92px}.stat:last-child{grid-column:1/-1}.stat-value{font-size:23px}}
 @media(max-width:480px){.hero-actions .button{flex:1;min-width:max-content}.hero-actions .quiet-link{width:100%;padding-left:0}}
 
 /* proof marquee */
@@ -296,7 +310,6 @@ h4{font-size:15px;line-height:1.35}
   .proof-facts{grid-template-columns:1fr}.proof-facts a{border-left:0;border-top:1px solid var(--line)}
   .pipeline-lane{grid-template-columns:78px repeat(5,1fr);gap:8px}.stage{padding:10px}.return-path{margin-left:86px}
   .provider-grid{grid-template-columns:repeat(2,1fr)}.provider-grid .card:last-child{grid-column:1/-1}
-  .stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0;padding-left:0}.stat:last-child{grid-column:span 2}
   .glass-grid{grid-template-columns:1fr 1fr}
   .language-grid{grid-template-columns:repeat(3,1fr)}.capability-grid{grid-template-columns:repeat(2,1fr)}
   .content-grid{grid-template-columns:1fr;gap:38px}.side-card{position:static}
@@ -308,7 +321,6 @@ h4{font-size:15px;line-height:1.35}
   body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;background:var(--bg)}.site-header,
 
   .install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}
-  .stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0;padding-left:0}.stat:nth-child(4){border-left:1px solid var(--line);padding-left:18px}.stat:last-child{grid-column:1/-1;border-left:0;padding-left:0}.stat-value{font-size:23px}
   .figure-title{grid-template-columns:1fr auto;gap:8px}.figure-title>span:nth-child(2):not(.figure-provenance){display:none}.figure-title>.figure-provenance{grid-column:1/-1;grid-row:2}.figure-title>.figure-state{grid-column:2;grid-row:1}
   .loop-dial{min-height:330px;padding:4px}.trace-list li{grid-template-columns:26px 46px minmax(0,1fr)}.trace-list .result{display:none}
   .terminal-body{min-height:270px;padding:18px 15px;font-size:10.5px;overflow:hidden}
@@ -317,7 +329,7 @@ h4{font-size:15px;line-height:1.35}
   .artifact-page{min-height:430px}.artifact-approval{flex-direction:column;gap:8px}.artifact-steps li{flex-wrap:wrap}.browser-bar{gap:7px;padding-inline:8px}.browser-select button{padding-inline:5px}.figure-coordinate{display:none}
   .glass-grid{grid-template-columns:1fr}.glass-grid .glass:last-child:nth-child(odd){grid-column:auto}.flow-mini{grid-template-columns:1fr}.flow-mini>span{transform:rotate(90deg);justify-self:center}
   .plot-grid{margin-left:88px;margin-right:34px}.plot-name{width:74px;right:calc(100% + 12px);font-size:10px}.plot-value{font-size:10px}.plot-row.dgc .plot-value::after{content:""}.plot-axis{margin-left:88px;margin-right:34px}.cost-grid{grid-template-columns:1fr 1fr}.cost-tile{min-height:120px;padding:18px}.cost-tile small{margin-top:20px}.language-grid{grid-template-columns:1fr 1fr}.benchmark-meta{grid-template-columns:1fr 1fr}
-  .permission-wrap{overflow:visible}.permission-table{min-width:0}.permission-table thead{display:none}.permission-table,.permission-table tbody,.permission-table tr,.permission-table td{display:block;width:100%!important;text-align:left!important}.permission-table tr{position:relative;padding:16px 126px 16px 14px;border-top:1px solid var(--line)}.permission-table td{border:0;padding:0}.permission-table td:nth-child(2),.permission-table td:nth-child(3),.permission-table td:nth-child(4){display:inline-block;width:32px!important;margin:12px 5px 0 0}.permission-table td:nth-child(2)::before,.permission-table td:nth-child(3)::before,.permission-table td:nth-child(4)::before{display:block;margin-bottom:5px;color:var(--muted);font:400 8px/1 var(--mono)}.permission-table td:nth-child(2)::before{content:"READ"}.permission-table td:nth-child(3)::before{content:"EDIT"}.permission-table td:nth-child(4)::before{content:"SHELL"}.permission-table td:last-child{position:absolute;right:12px;top:14px;width:112px!important;color:var(--muted);font-size:10px}.permission-legend .rules{margin-left:0}
+  .permission-wrap{overflow:visible}.permission-table{min-width:0}.permission-table thead{display:none}.permission-table,.permission-table tbody,.permission-table tr,.permission-table td{display:block;width:100%!important;text-align:left!important}.permission-table tr{position:relative;padding:16px 126px 16px 14px;border-top:1px solid var(--line)}.permission-table td{border:0;padding:0}.permission-table td:nth-child(2),.permission-table td:nth-child(3),.permission-table td:nth-child(4){display:inline-block;width:32px!important;margin:12px 5px 0 0}.permission-table td[data-label]::before{content:attr(data-label);display:block;margin-bottom:5px;color:var(--muted);font:400 8px/1 var(--mono);text-transform:uppercase}.permission-table td:last-child{position:absolute;right:12px;top:14px;width:112px!important;color:var(--muted);font-size:10px}.permission-legend .rules{margin-left:0}
   .pipeline-body{padding:18px 12px}.pipeline-lane,.pipeline-lane.model{grid-template-columns:1fr;margin:0}.lane-label{min-height:42px}.model-stage{grid-column:auto;width:100%;margin:0}.model-stage::after{display:none}.pipeline-lane.dgc .stage:not(:last-child)::after{content:"↓";left:50%;top:100%;width:12px;line-height:10px;transform:translateX(-50%)}.return-path{margin:12px 0;padding:10px;border:1px solid var(--accent-line)}.stage{min-height:75px}.capability-grid{grid-template-columns:1fr}
   .quote-grid{grid-template-columns:1fr;gap:28px}.quote-by{max-width:260px}
   .content-grid{grid-template-columns:1fr}.side-card{position:static}.pricing-grid,.faq,.brand-assets,.color-grid{grid-template-columns:1fr}.release{grid-template-columns:1fr auto;gap:14px}.release>div:first-child{grid-column:1;grid-row:1}.release>.status-pill{grid-row:1;align-self:start}.release>ul{grid-column:1/-1}
@@ -370,7 +382,7 @@ h4{font-size:15px;line-height:1.35}
 .side-card{align-self:start}
 .release>.status-pill{align-self:start}
 .install-matrix{min-width:640px}
-@media(max-width:760px){.install-matrix{min-width:0}.install-matrix thead{display:none}.install-matrix,.install-matrix tbody,.install-matrix tr,.install-matrix td{display:block;width:100%}.install-matrix tr{padding:14px;border-top:1px solid var(--line)}.install-matrix td{padding:10px 0 0;border:0}.install-matrix td:first-child{padding-top:0}.install-matrix td:not(:first-child)::before{display:block;margin-bottom:5px;color:var(--muted);font:400 8px/1 var(--mono);letter-spacing:.09em}.install-matrix td:nth-child(2)::before{content:"ONE CLICK"}.install-matrix td:nth-child(3)::before{content:"REGISTRY"}.install-matrix td:nth-child(4)::before{content:"SELF-HOSTED"}}
+@media(max-width:760px){.install-matrix{min-width:0}.install-matrix thead{display:none}.install-matrix,.install-matrix tbody,.install-matrix tr,.install-matrix td{display:block;width:100%}.install-matrix tr{padding:14px;border-top:1px solid var(--line)}.install-matrix td{padding:10px 0 0;border:0}.install-matrix td:first-child{padding-top:0}.install-matrix td[data-label]::before{content:attr(data-label);display:block;margin-bottom:5px;color:var(--muted);font:400 8px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase}}
 #reproduce .terminal-body{overflow-x:auto;white-space:pre}
 .docs-table{margin-top:18px;overflow-x:auto;border:1px solid var(--line);border-radius:7px;background:var(--bg)}
 .docs-table table{min-width:520px}.docs-table th{background:var(--surface);border-top:0;color:var(--text-2)}
@@ -384,7 +396,7 @@ h4{font-size:15px;line-height:1.35}
 @media(max-width:760px){.hero-atmosphere{opacity:.5}}
 
 /* A crisp logo holds between short, synchronized glitches and a soft contour echo. */
-.kinetic-mark{right:max(12px,calc((100vw - 1440px)/2));top:36px;--glitch-cycle:8s}
+.kinetic-mark{right:max(12px,50vw - 720px);top:36px;--glitch-cycle:8s}
 .kinetic-mark>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg)}
 .slash-trail{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12));animation:trail-glitch var(--glitch-cycle) ease-in-out infinite}
 .slash-front{animation:mark-glitch var(--glitch-cycle) steps(1,end) infinite;transform-origin:45px 45px}
@@ -396,10 +408,10 @@ h4{font-size:15px;line-height:1.35}
 @keyframes trail-glitch{0%,16%,30%,100%{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12))}20%{transform:translate(calc(var(--trail-x)*.38),calc(var(--trail-y)*.18))}23%{transform:translate(calc(var(--trail-x)*.06),calc(var(--trail-y)*.06))}}
 @keyframes ghost-glitch{0%,17%,25%,100%{opacity:0;transform:translate(0,0)}18%{opacity:.18;transform:translate(-1.6px,.2px)}19.5%{opacity:.12;transform:translate(1.4px,-.15px)}21.5%{opacity:.08;transform:translate(-.7px,0)}23%{opacity:0}}
 @keyframes slice-glitch{0%,18%,24%,100%{opacity:0;transform:translateX(0)}19.5%{opacity:.7;transform:translateX(var(--slice-shift))}21.5%{opacity:.4;transform:translateX(calc(var(--slice-shift)*-.45))}23%{opacity:0}}
-@media(max-width:1200px){.kinetic-mark{right:-100px;width:500px}}
+@media(max-width:1200px){.kinetic-mark{right:calc(4vw - 92px);width:500px}}
 @media(max-width:1240px){.loop-layout{grid-template-columns:1fr}.loop-dial{border-right:0;border-bottom:1px solid var(--line)}}
-@media(max-width:1040px){.kinetic-mark{right:-135px;top:34px;width:420px}}
-@media(max-width:760px){.kinetic-mark{right:-110px;top:-26px;width:310px;opacity:.22}}
+@media(max-width:1040px){.kinetic-mark{right:-3.3vw;width:40vw}}
+@media(max-width:760px){.kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw;height:50vw}}
 @media(prefers-reduced-motion:reduce){.slash-trail,.slash-front,.slash-ghost,.slash-slice{animation:none}.slash-front{transform:none;filter:none}.slash-ghost,.slash-slice{display:none}}
 
 /* Focus details share the demo's outer edges, with room for readable explanations. */

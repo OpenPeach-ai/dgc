@@ -51,9 +51,9 @@ metadata and the full text of documents queried through code intelligence.
 
 ## Install
 
-Requires **Python 3.10+**. The installer creates its own virtualenv under
-`~/dgc` and links the launcher into `~/.local/bin`, so it never touches your
-system Python:
+Requires **Python 3.10+**. The installer builds each version in its own
+directory with its own virtualenv under `~/.local/share/dgc/versions` and links
+the launcher into `~/.local/bin`, so it never touches your system Python:
 
 ```
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -71,12 +71,22 @@ If that reports `command not found`, add the bin directory to your PATH:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
-Two environment variables let you override where things land: `DGC_DIR` (the
-install directory, default `~/dgc`) and `DGC_BIN` (the launcher directory,
-default `~/.local/bin`).
+Two environment variables let you override where things land: `DGC_DATA_DIR`
+(where versions live, default `~/.local/share/dgc`; the older name `DGC_DIR` still
+works) and `DGC_BIN` (the launcher directory, default `~/.local/bin`). `dgc update`
+remembers both: it updates the install it was started from.
 
-If `cursor`, `code`, or `codium` is already on `PATH`, the installer also verifies
-and installs the self-hosted editor extension into the first one it finds. Set
+An update builds the new version beside the current one and switches the `dgc`
+launcher only once the build is complete, so a failed update leaves the version
+you had running, and `dgc` exits non-zero. The active version and the two newest
+others are kept: `dgc update --rollback` switches back, `dgc update --version X`
+switches to a kept version, and `dgc update --list` shows them. An install made
+by an older installer (under `~/dgc`) moves to the new layout on its next update;
+the old directory is left in place for you to delete. `dgc doctor` shows which
+install is running, where the launcher points and what `dgc update` would change.
+
+If `cursor`, `code`, or `codium` is on `PATH`, the installer also verifies and
+installs the self-hosted editor extension into each of them. Set
 `DGC_SKIP_EXTENSION=1` before the install command to leave editor-managed state
 untouched and install an extension later from the editor page.
 
@@ -238,9 +248,14 @@ API-key environment reference is process-only:
 ## Subcommands
 
 - `dgc setup` — configure provider / model / context.
-- `dgc doctor` — check that the endpoint and model are reachable.
-- `dgc update` — update DGC to the latest version.
+- `dgc doctor` — check that the endpoint and model are reachable, and show the installation.
+- `dgc update` — install the latest DGC beside the current version; `--rollback`,
+  `--version X` and `--list` switch between the versions kept on disk.
 - `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
+- `dgc usage [--range today|7d|30d|month|all] [--json]` — tokens and requests counted on this
+  machine (`~/.dgc/usage.sqlite`), by model and by day, from what each provider reported. The
+  same report is `/usage` inside DGC and Settings → Token Usage in the editor; nothing in it is
+  sent anywhere.
 - `dgc protocol describe` — print the installed headless/editor contract as JSON.
 - `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
   protocol-only.
@@ -1293,6 +1308,74 @@ estimate: DGC does not see their steps.
 - For anything else — a phone push, a sound, a script — use the **Stop** lifecycle hook, which
   already fires at the end of every turn (see *Lifecycle hooks*).
 """.strip()),
+    ("Background monitors", "watch a long-running command and hear about each line it prints", """
+# Background monitors
+
+Some work is a wait: a build that takes minutes, a test watcher, a dev server, a deploy log. A
+monitor lets the agent start that command, carry on with something else, and hear about each line
+the command prints, instead of polling it or sitting idle until it finishes.
+
+## How it works
+
+The agent starts one with the `monitor` tool: a shell command and a short label. Every line the
+command prints to standard output becomes an event, and lines that arrive close together are
+delivered as one event.
+
+- **While a turn runs,** events reach the model between its tool calls.
+- **When the chat is idle,** an event starts a short turn so the model can read it and act. The
+  transcript marks that turn as started by a monitor, never as something you typed.
+- Standard error is kept but creates no events; the model can read it with `bash_output`.
+- A monitor ends when its command exits, when it is stopped, or when its timeout runs out: 5
+  minutes by default, at most 1 hour. A persistent monitor runs until it is stopped or the chat ends.
+
+Only the terminal UI and the editor offer monitors, because only they can start a turn on their
+own. One-shot `dgc -p` runs and sub-agents cannot start one.
+
+## Background commands
+
+A command the agent runs with `bash` in background mode is not a monitor, but in the terminal and
+the editor the model is told once when it exits, with its exit code and the last lines it printed,
+so it does not have to keep checking.
+
+## Seeing and stopping them
+
+- **Terminal:** the status line shows running monitors and waiting events. `/monitors` lists
+  them, `/monitors stop ID` or `/monitors stop all` stops them, and `/monitors show ID` prints a
+  monitor's kept output.
+- **Editor:** a Monitors row above the prompt shows each running monitor with a Stop button, and
+  each event appears in the transcript as a card.
+- The model can stop one itself with `monitor_stop`.
+
+Monitors belong to one chat. They stop on `/new`, `/clear`, resuming another session, a rewind, or
+when DGC exits, including when it is killed.
+
+## Wake-ups
+
+- **On or off.** `monitor_wake` is on by default. Change it with `/monitors wake on|off`, with
+  Settings → **Wake on monitor events** in the editor, or in `config.json`. When it is off, events
+  wait for your next message.
+- **Timing.** A wake waits until the chat has been idle for `monitor_wake_delay_s` (2 seconds) and
+  leaves `monitor_wake_cooldown_s` (5 seconds) between one wake turn and the next.
+- **Pauses.** After `monitor_max_consecutive_wakes` (10) wake turns in a row with no message from
+  you, wake-ups pause until you send one. Stopping a wake turn pauses them too. `/monitors wake on`
+  resumes them.
+- **Plan mode** starts no wake turns; events wait for your next message.
+
+## Limits and safety
+
+- **Permissions.** Starting a monitor needs the same permission as `bash` and runs in the same
+  sandbox; plan mode refuses it. A wake turn has nobody at the keyboard, so outside auto mode any
+  step that would need your approval is not run. The model says what it wanted to do, and you can
+  approve it with your next message.
+- **Untrusted output.** Events reach the model labelled as command output, never as instructions.
+- **Floods.** A command that prints more than 1,000 lines or 1 MiB within a minute is stopped, and
+  the model is told which limit it hit. Lines are cut at 2,000 characters and an event shows at
+  most 40 lines; the rest stays readable with `bash_output`.
+- **How many.** At most 4 monitors run per chat, and 16 across one DGC process.
+- **Your checkout.** A monitor, like a background command, holds the workspace lock only while it
+  starts, so it never blocks edits or other commands. That also means it is not a way to change
+  files: use it to watch, not to edit.
+""".strip()),
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
 # Connect your model
 
@@ -1372,6 +1455,48 @@ multi-turn coherence but costs context tokens, and only affects the
 chat-completions path (the Anthropic/Ollama paths are untouched).
 """.strip()),
 
+    ("Token usage", "tokens and requests counted on this machine, by model and day", """
+# Token usage
+
+DGC keeps a small local record of what every model request cost in tokens, so you can see which
+models you lean on and how much, without trusting a dashboard somewhere else. It covers every
+provider DGC talks to: a local Ollama or llama.cpp server, an OpenAI-compatible host, Anthropic,
+and so on.
+
+## Where to see it
+
+- **In the editor:** Settings → **Token Usage**. Pick a range (Today, 7 days, 30 days, This month
+  or All time) to see input, output and cached-input totals, the request count, a table by model
+  with each one's share, and a day-by-day strip for input and output.
+- **In the terminal:** `/usage` inside DGC, or `dgc usage` from the shell. Both take a range:
+  `dgc usage --range 30d`. Add `--json` for a machine-readable report.
+
+Days follow this computer's local time, and the report says which time zone it used.
+
+## What is counted
+
+One row is recorded for each model request that finished, with the numbers the provider itself
+reported: input tokens, output tokens and cached input tokens. Each row notes which route sent it:
+your conversation, a sub-agent, the fallback model, or context compaction. A sub-agent's requests
+are counted once, as its own.
+
+- **Unmetered requests.** A request the provider accepted but that ended without a usage report
+  (you cancelled it, the stream broke, or a stalled attempt was retried) is still counted as a
+  request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in
+  the totals, and the report says so when there are any.
+- **OpenAI-compatible endpoints.** DGC asks these to include usage in the stream. An endpoint that
+  rejects the request is asked again without it and is not asked again for the rest of the session.
+  Its requests then show as unmetered rather than as zero tokens.
+- **Not counted:** turns delegated to a subscription CLI (Claude Code, Codex and the others) run in
+  the vendor's own tool, so DGC never sees their token counts.
+
+## Privacy
+
+Everything stays on this machine, in `~/.dgc/usage.sqlite` (readable only by you). No prompt or
+reply text is stored, and an endpoint is recorded by host and port only, never its full address,
+path or any credential. Rows older than 400 days are removed automatically. Delete the file at any
+time to start over; DGC creates a new one.
+""".strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions
 
@@ -1586,8 +1711,23 @@ when you want to override it.
   repeated-call and no-progress guards remain active independently.
 - `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
   reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
-- `request_timeout` (default `1800`) — maximum seconds of provider-stream inactivity between
-  response chunks; an active response can take longer overall.
+- `request_timeout` (default `1800`) — hard ceiling on socket silence, including the wait for
+  response headers; an active response can take longer overall. The stall watcher below
+  normally acts first.
+- `model_first_token_timeout_s` (default `auto`) — how long a request may produce nothing (no
+  headers, a silent stream, or keep-alives with no tokens) before it counts as stalled. `auto` is
+  `900` for a local endpoint (loopback, private or Tailscale addresses, `*.local`, or an
+  Ollama/llama.cpp/LM Studio/vLLM server: room for a model load and a large prefill) and `300`
+  for a remote one. Streamed reasoning counts as progress. `0` turns it off.
+- `model_idle_timeout_s` (default `300`) — how long a stream may go silent after it started.
+  A stall after partial output continues from what already streamed. `0` turns it off.
+- `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
+  and host) in the status line and the editor. `0` never shows it.
+- `model_stall_retries` (default `2`) — how many times a stalled request is re-issued. After that
+  DGC switches to `fallback_model` when one is set, or fails the turn with a message naming the
+  model and endpoint. Esc / Stop works in every phase, including before any response headers.
+- `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
+  model still loading, the first-token clock is paused ("Loading the model") for up to this long.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.

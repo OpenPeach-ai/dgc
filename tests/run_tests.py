@@ -7549,6 +7549,29 @@ def test_mcp_protocol():
           "requested commands fail closed" in doctor_output
           and "sandbox is enabled but this platform has no supported backend" in doctor_output
           and "not ready" in doctor_output and "[bold green]ready" not in doctor_output)
+    check("doctor has an installation section naming the install method and update target",
+          "installation[/bold] — what runs and what `dgc update` changes" in doctor_output
+          and "    method" in doctor_output and "    update target" in doctor_output
+          and "    update lock" in doctor_output)
+
+    from dgc import install_layout as _doctor_layout
+    broken_console = _DoctorConsole()
+    real_report = _doctor_layout.installation_report
+    try:
+        sandbox._backend = lambda: None
+        _doctor_cli.Console = lambda: broken_console
+        _doctor_llm.LLMClient = _DoctorClient
+        _doctor_layout.installation_report = lambda: (_ for _ in ()).throw(PermissionError("fixture"))
+        _doctor_cli.run_doctor(_DoctorConfig())
+    finally:
+        sandbox._backend = real_backend
+        _doctor_cli.Console = real_console
+        _doctor_llm.LLMClient = real_client
+        _doctor_layout.installation_report = real_report
+    broken_output = "\n".join(broken_console.lines)
+    check("an installation report that raises is a doctor warning, not a crash",
+          "could not inspect the installation: PermissionError: fixture" in broken_output
+          and "endpoint reachable" in broken_output)
 
     try:
         sandbox._backend = lambda: None
@@ -10438,9 +10461,11 @@ def test_release_script_contract():
           and 'site/*)' in github_release
           and '--require-public' in github_release)
 def test_installer_never_overwrites_a_checkout():
-    """The installer untars a release straight over its destination. A source checkout there would
-    lose uncommitted work silently — it has happened — so the installer refuses before it downloads
-    anything, and says how to install elsewhere or override on purpose."""
+    """Releases are built under <data dir>/versions, and a source checkout is no place for them —
+    it is where a mistake has cost uncommitted work before — so naming one as the install
+    directory is refused before anything downloads, with the ways forward. The other half of the
+    guard (a launcher that RUNS a checkout is never repointed) and the real installs are exercised
+    in tests/test_installer.py."""
     import pathlib
     import tempfile
     installer = PROJECT / "install.sh"
@@ -10452,11 +10477,12 @@ def test_installer_never_overwrites_a_checkout():
         keep.write_text("# uncommitted work\n")
         refused = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
-            env={**os.environ, "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1"})
+            env={**os.environ, "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1",
+                 "DGC_BIN": str(pathlib.Path(tmp) / "bin")})
         out = refused.stdout + refused.stderr
         check("installing over a git checkout is refused", refused.returncode != 0, out[-400:])
         check("the refusal names the checkout and both ways forward",
-              "is a git checkout" in out and "DGC_DIR=" in out and "DGC_FORCE_OVERWRITE=1" in out,
+              "is a git checkout" in out and "DGC_DATA_DIR=" in out and "DGC_FORCE_OVERWRITE=1" in out,
               out[-400:])
         check("the refusal costs no download", "downloading DGC" not in out, out[-400:])
         check("the working tree it refused to overwrite is untouched",
@@ -10469,10 +10495,13 @@ def test_installer_never_overwrites_a_checkout():
         proceeded = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
             env={**os.environ, "DGC_DIR": str(plain), "DGC_SKIP_EXTENSION": "1",
-                 "DGC_BASE_URL": "https://127.0.0.1:9"})
+                 "DGC_BIN": str(pathlib.Path(tmp) / "bin"), "DGC_BASE_URL": "https://127.0.0.1:9"})
         moved_on = proceeded.stdout + proceeded.stderr
         check("a normal install directory is not caught by the checkout guard",
               "is a git checkout" not in moved_on and "downloading DGC" in moved_on, moved_on[-300:])
+        check("a failed download exits non-zero and switches nothing",
+              proceeded.returncode == 1 and not (pathlib.Path(tmp) / "bin" / "dgc").exists()
+              and not any((plain / "versions").iterdir()), moved_on[-300:])
 
     check("the published installer is the reviewed one",
           (PROJECT / "site" / "install.sh").read_text() == installer.read_text())
@@ -10742,6 +10771,355 @@ def test_extension_vsix_guard():
         check("VSIX validator rejects symlink archive members", rejected(symlink, "non-regular"))
         check("VSIX validator rejects embedded release credentials",
               rejected(secret, "GitHub token"))
+
+
+def _load_site_scripts(label):
+    """Load scripts/site_common.py and scripts/check-site.py from this checkout under private names."""
+    import importlib.util as _importlib_util
+    scripts_dir = PROJECT / "scripts"
+    modules = []
+    sys.path.insert(0, str(scripts_dir))
+    try:
+        for name, filename in (("site_common", "site_common.py"), ("check_site", "check-site.py")):
+            spec = _importlib_util.spec_from_file_location(f"dgc_{label}_{name}", scripts_dir / filename)
+            assert spec is not None and spec.loader is not None
+            module = _importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules.append(module)
+    finally:
+        sys.path.remove(str(scripts_dir))
+    return modules
+
+
+def test_site_critical_css_budget():
+    """The inline critical-CSS ceiling is one 12 KiB constant, enforced at build time and by the site gate."""
+    import base64 as _base64
+    import tempfile as _tf
+    print("site critical CSS budget:")
+    site_common, gate = _load_site_scripts("css_budget")
+    budget = site_common.CRITICAL_CSS_BUDGET
+    check("site: the critical-CSS ceiling is 12 KiB", budget == 12 * 1024, detail=repr(budget))
+    gate_source = (PROJECT / "scripts" / "check-site.py").read_text(encoding="utf-8")
+    check("site: the gate uses the shared ceiling, not its own literal",
+          gate.CRITICAL_CSS_BUDGET == budget and "10 * 1024" not in gate_source
+          and "10240" not in gate_source and "> CRITICAL_CSS_BUDGET" in gate_source)
+    sizes = {path: len(site_common.critical_css_for(path).encode("utf-8"))
+             for path in ("/", "/docs/getting-started", "/pricing")}
+    check("site: every route's inline critical CSS fits the ceiling",
+          all(0 < size <= budget for size in sizes.values()), detail=repr(sizes))
+    try:
+        site_common.CRITICAL_CSS_BUDGET = 1024
+        try:
+            site_common.critical_css_for("/")
+            raised = ""
+        except ValueError as error:
+            raised = str(error)
+    finally:
+        site_common.CRITICAL_CSS_BUDGET = budget
+    check("site: the build refuses critical CSS over the ceiling",
+          raised == "inline critical CSS exceeds 1 KiB for /", detail=raised)
+
+    real_site = gate.SITE
+    with _tf.TemporaryDirectory(prefix="dgc-site-budget-") as tmp:
+        fake = Path(tmp)
+        gate.SITE = fake
+        try:
+            def page_errors(css_bytes):
+                (fake / "index.html").write_text(
+                    '<style data-critical-revision="0123456789ab">' + "a" * css_bytes + "</style>",
+                    encoding="utf-8")
+                errors = []
+                gate.check_pages(errors)
+                return [error for error in errors if "inline critical CSS" in error]
+            at_budget, over_budget = page_errors(budget), page_errors(budget + 1)
+            check("site gate: inline critical CSS at the ceiling passes, one byte over fails",
+                  at_budget == [] and over_budget == ["index.html: inline critical CSS exceeds 12 KiB"],
+                  detail=repr((at_budget, over_budget)))
+
+            source = (real_site / "index.html").read_bytes()
+            marker = gate.HOME_FIRST_FLIGHT_MARKER
+            filler = _base64.b64encode(os.urandom(18_000))
+            (fake / "index.html").write_bytes(source.replace(marker, filler + marker, 1))
+            heavy = []
+            gate.check_home_first_flight(heavy)
+            (fake / "index.html").write_bytes(source.replace(marker, b"<section>", 1))
+            unmarked = []
+            gate.check_home_first_flight(unmarked)
+            gate.SITE = real_site
+            real = []
+            gate.check_home_first_flight(real)
+            check("site gate: the home hero must arrive in the first flight (gzip -6 budget)",
+                  real == [] and len(heavy) == 1 and "first-flight budget" in heavy[0]
+                  and len(unmarked) == 1 and "proof strip not found" in unmarked[0],
+                  detail=repr((real, heavy, unmarked)))
+
+            gate.SITE = fake
+            (fake / "vscode").mkdir()
+            vscode = (real_site / "vscode" / "index.html").read_text(encoding="utf-8")
+            home = (real_site / "index.html").read_text(encoding="utf-8")
+            (fake / "vscode" / "index.html").write_text(
+                vscode.replace('data-label="Registry"', 'data-label="Store"', 1), encoding="utf-8")
+            (fake / "index.html").write_text(
+                home.replace('data-label="Edit"', "", 1), encoding="utf-8")
+            mislabeled = []
+            gate.check_stacked_table_labels(mislabeled)
+            gate.SITE = real_site
+            labeled = []
+            gate.check_stacked_table_labels(labeled)
+            check("site gate: stacked table labels come from data-label and match their headers",
+                  labeled == [] and len(mislabeled) == 2
+                  and "'Store' does not match header 'Registry'" in mislabeled[0]
+                  and "None does not match header 'Edit files'" in mislabeled[1],
+                  detail=repr((labeled, mislabeled)))
+        finally:
+            gate.SITE = real_site
+
+
+def _css_rules(site_common, css):
+    """Ordered (media, selector, {property: value}) rules of a stylesheet, one @media level deep."""
+    css = site_common.minify_css(css)
+    rules = []
+
+    def blocks(text):
+        cursor = 0
+        while cursor < len(text):
+            opening = text.find("{", cursor)
+            if opening < 0:
+                return
+            depth, at = 1, opening + 1
+            while depth and at < len(text):
+                depth += {"{": 1, "}": -1}.get(text[at], 0)
+                at += 1
+            yield text[cursor:opening].strip().lstrip("}; "), text[opening + 1:at - 1]
+            cursor = at
+
+    def declarations(body):
+        parts, depth, quote, start = [], 0, "", 0
+        for index, char in enumerate(body):
+            if quote:
+                quote = "" if char == quote else quote
+            elif char in "\"'":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == ";" and depth == 0:
+                parts.append(body[start:index])
+                start = index + 1
+        parts.append(body[start:])
+        result = {}
+        for part in parts:
+            name, _, value = part.partition(":")
+            if name.strip():
+                result[name.strip()] = value.strip()
+        return result
+
+    for prelude, body in blocks(css):
+        if prelude.startswith("@media"):
+            media = "".join(prelude.split())
+            rules.extend((media, selector, declarations(inner)) for selector, inner in blocks(body))
+        elif not prelude.startswith("@"):
+            rules.append(("", prelude, declarations(body)))
+    return rules
+
+
+def _css_applies(media, width):
+    import re as _re
+    if media == "":
+        return True
+    match = _re.fullmatch(r"@media\(max-width:(\d+)px\)", media)
+    return bool(match) and width <= int(match.group(1))
+
+
+def _hero_mark_problems(site_common, critical_css, site_css):
+    """Differences between the critical and full hero mark placement, and any dimming."""
+    critical, full = _css_rules(site_common, critical_css), _css_rules(site_common, site_css)
+    problems = []
+    for name, rules in (("critical-home.css", critical), ("site.css", full)):
+        for media, selector, props in rules:
+            if selector in (".hero-art", ".kinetic-mark") and "opacity" in props:
+                problems.append(f"{name}: {media or 'base'} {selector} sets opacity {props['opacity']}")
+    for width in (1920, 1440, 1201, 1200, 1041, 1040, 761, 760, 390, 320):
+        effective = []
+        for rules, selectors in ((critical, (".hero-art",)), (full, (".hero-art", ".kinetic-mark"))):
+            placed = {}
+            for media, selector, props in rules:
+                if selector in selectors and _css_applies(media, width):
+                    placed.update({key: props[key] for key in ("right", "top", "width", "height") if key in props})
+            effective.append(placed)
+        if effective[0] != effective[1]:
+            problems.append(f"{width}px: critical {effective[0]} != full {effective[1]}")
+    return problems
+
+
+# critical-home.css rules that deliberately differ from site.css: the reveal/defer states exist only
+# before the full stylesheet, and the atmosphere fades in once it loads.
+_CRITICAL_ONLY_RULES = {(".reveal-ready .hero .reveal", None), (".defer-styles .hero~*", None),
+                        (".hero-atmosphere", "opacity")}
+
+
+def _hero_mirror_problems(site_common, critical_css, site_css):
+    """Every critical-home.css declaration must have the same effective value in site.css at every width."""
+    critical, full = _css_rules(site_common, critical_css), _css_rules(site_common, site_css)
+    selectors = list(dict.fromkeys(selector for _media, selector, _props in critical
+                                   if (selector, None) not in _CRITICAL_ONLY_RULES))
+    problems = {}
+    for selector in selectors:
+        aliases = {selector, selector.replace(".hero-art", ".kinetic-mark")}
+        if not any(full_selector in aliases for _media, full_selector, _props in full):
+            problems[f"{selector}: missing from site.css"] = None
+            continue
+        for width in (1920, 1440, 1241, 1201, 1200, 1100, 1041, 1040, 900, 761, 760, 540, 481, 480, 390, 320):
+            expected, actual = {}, {}
+            for media, rule_selector, props in critical:
+                if rule_selector == selector and _css_applies(media, width):
+                    expected.update(props)
+            for media, rule_selector, props in full:
+                if rule_selector in aliases and _css_applies(media, width):
+                    actual.update(props)
+            for key, value in expected.items():
+                if (selector, key) not in _CRITICAL_ONLY_RULES and actual.get(key) != value:
+                    problems[f"{width}px {selector} {key}: critical {value!r}, site.css {actual.get(key)!r}"] = None
+    return list(problems)
+
+
+def test_site_hero_mark_lockstep_and_undimmed():
+    """The hero is styled twice (inline critical CSS, then site.css): both must place it identically."""
+    print("site hero lockstep:")
+    site_common, _gate = _load_site_scripts("hero_lockstep")
+    assets = PROJECT / "site-src" / "assets"
+    critical_css = (assets / "critical-home.css").read_text(encoding="utf-8")
+    site_css = (assets / "site.css").read_text(encoding="utf-8")
+    mark = _hero_mark_problems(site_common, critical_css, site_css)
+    check("site: the hero mark is never dimmed and site.css places it where the critical CSS does",
+          mark == [], detail="; ".join(mark))
+    mirror = _hero_mirror_problems(site_common, critical_css, site_css)
+    check("site: every critical hero rule (stats, mark, copy) has the same value in site.css",
+          mirror == [], detail="; ".join(mirror))
+    dimmed = critical_css.replace("width:50vw;height:50vw}", "width:50vw;height:50vw;opacity:.22}", 1)
+    moved = site_css.replace(".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw",
+                             ".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:54vw", 1)
+    drifted = site_css.replace("gap:11px 36px", "gap:12px 36px", 1)
+    check("site: the hero lockstep checks catch dimming, a moved mark and a drifted stat band",
+          dimmed != critical_css and moved != site_css and drifted != site_css
+          and any("opacity .22" in problem for problem in _hero_mark_problems(site_common, dimmed, site_css))
+          and any("54vw" in problem for problem in _hero_mark_problems(site_common, critical_css, moved))
+          and any(".stat-grid gap" in problem for problem in _hero_mirror_problems(site_common, critical_css, drifted)))
+
+
+def test_site_sitemap_and_robots():
+    """sitemap.xml lists every indexable page's own canonical URL; robots.txt allows them and names it."""
+    import importlib.util as _importlib_util
+    import re as _re
+    import xml.etree.ElementTree as _ET
+    print("site sitemap and robots:")
+    scripts_dir = PROJECT / "scripts"
+    site_common, gate = _load_site_scripts("sitemap")
+    before = list(sys.path)
+    try:
+        sys.path.insert(0, str(scripts_dir))
+        loaded = {}
+        for name, filename in (("builder", "build-site.py"), ("docs", "generate-docs-site.py")):
+            spec = _importlib_util.spec_from_file_location(f"dgc_sitemap_{name}", scripts_dir / filename)
+            assert spec is not None and spec.loader is not None
+            module = _importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            loaded[name] = module
+        outputs = loaded["builder"].build_outputs()
+        docs_pages = loaded["docs"].build()
+    finally:
+        sys.path[:] = before
+    site_url = "https://vibedgc.com"
+    ns = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+
+    robots = outputs.get("robots.txt", "")
+    robots_lines = [line.strip() for line in robots.splitlines()]
+    check("site: build_outputs emits robots.txt with a User-agent: * group and the sitemap line",
+          "User-agent: *" in robots_lines and f"Sitemap: {site_url}/sitemap.xml" in robots_lines,
+          detail=repr(robots))
+    check("site: robots.txt disallows nothing site-wide",
+          "Disallow: /" not in robots_lines and not any(line.lower().startswith("content-signal") for line in robots_lines),
+          detail=repr(robots))
+
+    rendered = [(path, value) for path, value in outputs.items() if path.endswith(".html")]
+    rendered += [(f"docs/{name}", value) for name, value in docs_pages.items()]
+    expected = set()
+    for label, source in rendered:
+        if label.endswith("404.html") or _re.search(r'<meta\s+name="robots"\s+content="[^"]*\bnoindex', source):
+            continue
+        expected.update(_re.findall(r'<link rel="canonical" href="([^"]+)">', source))
+    sitemap = outputs.get("sitemap.xml", "")
+    locs = [(element.text or "") for element in _ET.fromstring(sitemap).iter(ns + "loc")]
+    routes = json.loads((PROJECT / "site" / "routes.json").read_text(encoding="utf-8"))["html"]
+    check("site: the sitemap is exactly the canonical URL of every indexable page",
+          set(locs) == expected and len(locs) == len(expected), detail=repr(sorted(set(locs) ^ expected)))
+    # Counted from routes.json rather than pinned: a new docs page must add exactly one sitemap URL,
+    # on the docs host, and nothing else.
+    docs_routes = [route for route in routes if route == "/docs" or route.startswith("/docs/")]
+    docs_locs = [loc for loc in locs if loc.startswith("https://docs.vibedgc.com")]
+    check("site: the sitemap has one URL per routed page (docs pages on docs.vibedgc.com)",
+          len(locs) == len(routes) and len(docs_locs) == len(docs_routes) and docs_routes,
+          detail=f"{len(locs)} locs, {len(routes)} routes, {len(docs_locs)} docs locs, {len(docs_routes)} docs routes")
+    check("site: the sitemap invents no lastmod, changefreq or priority",
+          not _re.search(r"<(?:lastmod|changefreq|priority)", sitemap))
+    check("site: the committed sitemap and robots.txt match the build",
+          (PROJECT / "site" / "sitemap.xml").read_text(encoding="utf-8") == sitemap
+          and (PROJECT / "site" / "robots.txt").is_file()
+          and (PROJECT / "site" / "robots.txt").read_text(encoding="utf-8") == robots)
+
+    errors = []
+    parsed = gate.check_pages(errors)
+    page_errors = list(errors)
+    gate.check_sitemap_and_robots(parsed, errors)
+    check("site: the gate passes the committed sitemap and robots.txt",
+          errors == page_errors, detail=repr(errors[len(page_errors):]))
+
+    pages = gate.sitemap_page_facts(parsed)
+    resolve = gate._served_label
+    def sitemap_problems(text):
+        return gate._sitemap_errors(text, pages, resolve)
+    skills = "<url><loc>https://docs.vibedgc.com/skills</loc></url>"
+    about = "<url><loc>https://vibedgc.com/about</loc></url>"
+    end = "</urlset>"
+    check("site: sitemap tampering precondition", skills in sitemap and about in sitemap and not sitemap_problems(sitemap))
+    tampered = {
+        "a dropped docs page": (sitemap.replace(skills, ""), "indexable pages missing ['https://docs.vibedgc.com/skills']"),
+        "the 404 page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/404</loc></url>" + end), "https://vibedgc.com/404 is a 404 or noindex page (404.html)"),
+        "the docs 404 page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/docs/404</loc></url>" + end), "https://vibedgc.com/docs/404 is a 404 or noindex page (docs/404.html)"),
+        "a main-host docs duplicate": (sitemap.replace("https://docs.vibedgc.com/skills<", "https://vibedgc.com/docs/skills<"), "https://vibedgc.com/docs/skills is not the canonical URL of docs/skills.html"),
+        "a nonexistent page": (sitemap.replace(end, "<url><loc>https://vibedgc.com/nope</loc></url>" + end), "https://vibedgc.com/nope does not resolve to a built HTML page"),
+        "an invented lastmod": (sitemap.replace(about, "<url><loc>https://vibedgc.com/about</loc><lastmod>2026-09-14</lastmod></url>"), "exactly one <loc> and nothing else"),
+        "a duplicate URL": (sitemap.replace(end, about + end), "duplicate <loc> ['https://vibedgc.com/about']"),
+        "an .html suffix": (sitemap.replace("https://vibedgc.com/about<", "https://vibedgc.com/about.html<"), "https://vibedgc.com/about.html is not the canonical URL of about.html"),
+        "truncated XML": (sitemap[:-20], "not well-formed XML"),
+        "a whitespace-padded URL": (sitemap.replace("<loc>https://vibedgc.com/about</loc>", "<loc> https://vibedgc.com/about </loc>"), "' https://vibedgc.com/about ' has surrounding whitespace"),
+    }
+    for name, (text, needle) in tampered.items():
+        problems = sitemap_problems(text)
+        check(f"site: the sitemap gate rejects {name}", any(needle in problem for problem in problems), detail=repr(problems))
+
+    sitemap_url = f"{site_url}/sitemap.xml"
+    check("site: robots gate accepts the build and a Cloudflare-prepended comment preamble",
+          not gate._robots_errors(robots, sitemap_url, locs)
+          and not gate._robots_errors("# Content signals\n# managed by Cloudflare\n\n" + robots, sitemap_url, locs))
+    harmless = "User-agent: examplebot\nUser-agent: otherbot\nDisallow: /private\n\n" + robots
+    check("site: robots gate accepts a crawler-specific group that blocks no sitemap URL",
+          not gate._robots_errors(harmless, sitemap_url, locs), detail=repr(gate._robots_errors(harmless, sitemap_url, locs)))
+    bad_robots = {
+        "no Sitemap line": ("User-agent: *\nAllow: /\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
+        "a docs-host Sitemap": ("User-agent: *\nAllow: /\nSitemap: https://docs.vibedgc.com/sitemap.xml\n", "expected exactly one 'Sitemap: https://vibedgc.com/sitemap.xml'"),
+        "Disallow: /": ("User-agent: *\nDisallow: /\nSitemap: https://vibedgc.com/sitemap.xml\n", "blocks sitemap URL https://vibedgc.com/"),
+        "Disallow: /skills": ("User-agent: *\nDisallow: /skills\nSitemap: https://vibedgc.com/sitemap.xml\n", "blocks sitemap URL https://docs.vibedgc.com/skills"),
+        "a wildcard rule": ("User-agent: *\nDisallow: /*.html$\nSitemap: https://vibedgc.com/sitemap.xml\n", "wildcard rule"),
+        "no User-agent: * group": ("User-agent: examplebot\nDisallow:\nSitemap: https://vibedgc.com/sitemap.xml\n", "no 'User-agent: *' group"),
+        # The committed file stays intact below it: the * group allows everything, Googlebot does not.
+        "a Googlebot group that blocks everything": ("User-agent: Googlebot\nDisallow: /\n\n" + robots, "User-agent: googlebot blocks sitemap URL https://vibedgc.com/"),
+        "a shared group that blocks one docs page": ("User-agent: examplebot\nUser-agent: Bingbot\nDisallow: /skills\n\n" + robots, "User-agent: bingbot blocks sitemap URL https://docs.vibedgc.com/skills"),
+    }
+    for name, (text, needle) in bad_robots.items():
+        problems = gate._robots_errors(text, sitemap_url, locs)
+        check(f"site: the robots gate rejects {name}", any(needle in problem for problem in problems), detail=repr(problems))
 
 
 def test_benchmark_integrity():
@@ -15140,11 +15518,27 @@ def tool_delta(name: str, arg_chunks: list[str]) -> str:
     return out + sse_chunk({}, finish="tool_calls") + "data: [DONE]\n\n"
 
 
+def _mock_client_gone(handler, cap: float = 20.0) -> None:
+    """Hold a stalled mock request until the client hangs up (the stall watcher closes its socket),
+    so the single-threaded mock server is never blocked past the client's own deadline."""
+    import select as _select
+    import socket as _socket
+    end = time.monotonic() + cap
+    while time.monotonic() < end:
+        try:
+            readable, _, _ = _select.select([handler.connection], [], [], 0.05)
+            if readable and not handler.connection.recv(1, _socket.MSG_PEEK):
+                return
+        except (OSError, ValueError):
+            return
+
+
 class MockHandler(BaseHTTPRequestHandler):
     # scenario state set by the test before each run
     native_tools = True
-    scenario = "write"   # "write" | "plan"
+    scenario = "write"   # "write" | "plan" | "stall_once" | "keepalive_forever" | "partial_then_silent"
     text_protocol_seen = False
+    stall_requests: list = []
 
     def log_message(self, *a):
         pass
@@ -15172,6 +15566,41 @@ class MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+
+        if self.scenario in ("stall_once", "keepalive_forever", "partial_then_silent"):
+            MockHandler.stall_requests.append(req)
+            first = len(MockHandler.stall_requests) == 1
+            if self.scenario == "stall_once" and first:
+                _mock_client_gone(self)             # accept the request, never answer it
+                return
+            if self.scenario == "keepalive_forever":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()                  # close-delimited: bytes flow, tokens never do
+                import select as _select
+                end = time.monotonic() + 20
+                while time.monotonic() < end:
+                    try:
+                        self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
+                        readable, _, _ = _select.select([self.connection], [], [], 0.1)
+                        if readable and not self.connection.recv(1, __import__("socket").MSG_PEEK):
+                            return
+                    except OSError:
+                        return
+                return
+            if self.scenario == "partial_then_silent":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                try:
+                    self.wfile.write((sse_chunk({"content": "Working on it, "})
+                                      + sse_chunk({"content": "one moment"})).encode())
+                    self.wfile.flush()
+                except OSError:
+                    return
+                _mock_client_gone(self)
+                return
 
         messages = req.get("messages", [])
         if "tools" not in req and any("# Tool protocol" in str(m.get("content", ""))
@@ -18406,6 +18835,91 @@ def e2e_overthink(port: int, tmp: Path) -> bool:
     return ok
 
 
+def _e2e_stall_run(port: int, tmp: Path, name: str, scenario: str, settings: dict,
+                   timeout: float) -> tuple[subprocess.CompletedProcess | None, float, Path]:
+    """One `dgc -p` run against a mock that hangs in `scenario`, with tiny stall windows."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = scenario
+    MockHandler.stall_requests = []
+    home = tmp / f"home_{name}"; work = tmp / f"work_{name}"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    (home / ".dgc").mkdir(exist_ok=True)
+    (home / ".dgc" / "config.json").write_text(json.dumps({
+        "model_stall_notice_s": 0, "model_stall_retries": 1, "suggest": False,
+        "artifact_autostart": False, **settings}))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "make the file",
+             "--mode", "auto", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1",
+             "--model", "mock-model"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"  --- {name}: dgc -p did not finish within {timeout:.0f}s ---")
+        return None, time.monotonic() - started, work
+    return proc, time.monotonic() - started, work
+
+
+def e2e_stall_recovers(port: int, tmp: Path) -> bool:
+    """A request the server accepts and never answers is closed at the first-token window and
+    re-issued; the retried request does the work and the retry is said out loud."""
+    proc, _elapsed, work = _e2e_stall_run(
+        port, tmp, "stall_recovers", "stall_once", {"model_first_token_timeout_s": 1}, 60)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    ok = (proc.returncode == 0 and (work / "hello.txt").exists()
+          # stalled attempt + its retry (the write) + the closing summary
+          and len(MockHandler.stall_requests) == 3
+          and "retrying (1/1)" in output and "mock-model" in output)
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
+def e2e_stall_fails_precisely(port: int, tmp: Path) -> bool:
+    """Keep-alives with no tokens used to hang forever (each byte reset the socket timeout). Now the
+    turn fails fast, naming the model and endpoint, without the wrong 'start your server' hint and
+    without piling up synthetic continuation prompts."""
+    proc, elapsed, _work = _e2e_stall_run(
+        port, tmp, "stall_fails", "keepalive_forever", {"model_first_token_timeout_s": 1}, 20)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    interrupted = [r for r in MockHandler.stall_requests
+                   if "Your previous response was interrupted" in json.dumps(r)]
+    ok = (proc.returncode != 0 and elapsed < 20
+          and "mock-model" in output and f"127.0.0.1:{port}" in output and "no tokens" in output
+          and "start your server" not in output
+          and len(MockHandler.stall_requests) == 2 and not interrupted)
+    if not ok:
+        print(f"  --- rc={proc.returncode} posts={len(MockHandler.stall_requests)} ---")
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
+def e2e_stall_midstream(port: int, tmp: Path) -> bool:
+    """A stream that goes silent after partial prose is continued from what streamed, with its own
+    bound; when it stalls again the turn stops with a message naming the model and endpoint."""
+    proc, _elapsed, _work = _e2e_stall_run(
+        port, tmp, "stall_midstream", "partial_then_silent", {"model_idle_timeout_s": 1}, 40)
+    if proc is None:
+        return False
+    output = proc.stdout + proc.stderr
+    ok = (proc.returncode != 0 and len(MockHandler.stall_requests) == 2
+          and "stopped streaming" in output and "mock-model" in output
+          and f"127.0.0.1:{port}" in output
+          and "provider stream repeatedly ended" not in output)
+    if not ok:
+        print(f"  --- rc={proc.returncode} posts={len(MockHandler.stall_requests)} ---")
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
 def test_multi_edit():
     """B4: apply several edits to one file; keep the good ones even if one fails."""
     import tempfile as _tf
@@ -19462,6 +19976,9 @@ def main():
         test_release_promotion_contract()
         test_extension_vsix_guard()
         test_benchmark_integrity()
+        test_site_critical_css_budget()
+        test_site_hero_mark_lockstep_and_undimmed()
+        test_site_sitemap_and_robots()
         test_protocol_client()
         test_acp_protocol()
         test_bored_mode()
@@ -19515,6 +20032,12 @@ def main():
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
             check("e2e explicit verifier-only policy → provider-free closeout", e2e_verify(port, tmp))
+            check("e2e stall watcher: a request with no response is retried and recovers",
+                  e2e_stall_recovers(port, tmp))
+            check("e2e stall watcher: keep-alives with no tokens fail fast, naming model and endpoint",
+                  e2e_stall_fails_precisely(port, tmp))
+            check("e2e stall watcher: a mid-stream stall continues once, then fails precisely",
+                  e2e_stall_midstream(port, tmp))
         finally:
             server.shutdown()
 

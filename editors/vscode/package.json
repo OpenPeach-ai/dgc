@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.23.1",
+  "version": "0.24.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -536,6 +536,7 @@
     "package": "npm run check-types && node esbuild.js --production",
     "test": "node --test \"test/**/*.test.mjs\"",
     "test:host": "node test/run-extension-host.mjs",
+    "test:host:stall": "node test/run-extension-host-stall.mjs",
     "shot": "node test/render-panel.mjs",
     "scroll-check": "node test/render-scroll.mjs"
   },

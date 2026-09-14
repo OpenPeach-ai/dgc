@@ -107,7 +107,14 @@
           if (above.length) setActive(above[above.length-1].id);
         }
       }, { rootMargin: '-'+ (60) +'px 0px -70% 0px', threshold: [0,1] });
-      headings.forEach(function(h){ obs.observe(h); });
+      // Like revealCurrent(): while the style loader hides the page every heading measures top 0,
+      // and the "none intersecting" branch would mark the last heading active. Observe once styled.
+      var observe = function(){ headings.forEach(function(h){ obs.observe(h); }); };
+      if (root.dataset.stylesReady === 'true' || root.dataset.stylesFailOpen === 'true') observe();
+      else {
+        window.addEventListener('dgc:styles-ready', observe, {once:true});
+        window.addEventListener('dgc:styles-fail-open', observe, {once:true});
+      }
     }
   }
 })();

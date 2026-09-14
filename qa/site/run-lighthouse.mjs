@@ -8,6 +8,10 @@ import {chromium} from "@playwright/test";
 
 const ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const executable = chromium.executablePath();
+// The same font environment as the browser matrix (qa/site/fonts/fonts.conf). With a stock
+// Playwright arm64 image's system fonts, /vscode measured CLS 0.0007-0.078 on every run and failed
+// the CLS-exactly-0 limit; with this file, or with Arial installed as on a desktop, it measured 0.
+const fontconfig = resolve(ROOT, "qa", "site", "fonts", "fonts.conf");
 const lighthouse = resolve(
   ROOT,
   "node_modules",
@@ -89,7 +93,7 @@ function run(command, args) {
   return new Promise((accept, reject) => {
     const child = spawn(command, args, {
       cwd: ROOT,
-      env: {...process.env, CHROME_PATH: executable},
+      env: {...process.env, CHROME_PATH: executable, FONTCONFIG_FILE: fontconfig},
       stdio: "inherit",
     });
     child.once("error", reject);

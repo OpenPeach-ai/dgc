@@ -1542,6 +1542,37 @@ test("a running command is shown once, on its card, while the header and activit
   dom.window.close();
 });
 
+// The stall watcher needs no editor change: a silent model request arrives as the ordinary v12
+// `turn_activity` (state "waiting") with a label and a detail naming the model and host. These are
+// the exact strings `dgc serve` emits (tests/test_model_stall.py drives the real backend).
+test("a silent model request shows its waiting notice, then the stream takes the verb back", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const verb = () => doc.querySelector(".thinking .verb")?.textContent;
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting for the model" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "No response from the model",
+    detail: "qwen3.8:27b at 127.0.0.1:11434 · no reply for 45s+" });
+  assert.equal(verb(), "No response from the model · qwen3.8:27b at 127.0.0.1:11434 · no reply for 45s+");
+  assert.match(doc.querySelector(".thinking .meta").textContent, /^\(\d+s/);
+  event({ type: "info", message: "↻ no response from qwen3.8:27b at 127.0.0.1:11434 for 900s — retrying (1/2)" });
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "Retrying the model request",
+    detail: "attempt 2 of 3 · qwen3.8:27b at 127.0.0.1:11434" });
+  assert.equal(verb(), "Retrying the model request · attempt 2 of 3 · qwen3.8:27b at 127.0.0.1:11434");
+  event({ type: "turn_activity", turn_id: "t1", state: "responding", label: "Responding" });
+  event({ type: "text_delta", text: "Back on track." });
+  assert.equal(verb(), "Responding", "tokens flowing again replace the notice");
+  event({ type: "turn_activity", turn_id: "t1", state: "waiting", label: "The model stopped streaming",
+    detail: "qwen3.8:27b at 127.0.0.1:11434 · no tokens for 45s+" });
+  assert.equal(verb(), "The model stopped streaming · qwen3.8:27b at 127.0.0.1:11434 · no tokens for 45s+");
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "error", message: "stopped — model 'qwen3.8:27b' at http://127.0.0.1:11434/v1/chat/completions stopped streaming: no tokens for 300s after partial output (2 recoveries)" });
+  event({ type: "turn_end", turn_id: "t1", reason: "error", final_message_id: "t1:1" });
+  assert.equal(verb(), undefined, "the notice does not outlive the turn");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("a running tool group reads as a present-tense sentence built like the finished one", () => {
   const { errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
@@ -3675,4 +3706,262 @@ test("the settings form carries the wake-on-monitor toggle both ways", () => {
   const saved = posted.filter((m) => m.type === "saveSettings").pop();
   assert.equal(saved.values.monitor_wake, true, "saved as a boolean");
   assert.deepEqual(errors, []);
+});
+
+// ---- Token Usage settings tab ----
+// The tab reads the CLI's local ledger: opening it, changing the range and Refresh each ask again,
+// only the newest answer is drawn, and every number arrives as a provider-reported count.
+function usageReport(requestId, overrides = {}) {
+  const days = Array.from({ length: 7 }, (_, i) => ({
+    date: `2026-09-${String(8 + i).padStart(2, "0")}`,
+    input_tokens: i === 3 ? 0 : 10_000 * (i + 1), output_tokens: i === 3 ? 0 : 900 * (i + 1),
+    cached_input_tokens: 0, requests: i === 3 ? 0 : i + 1,
+  }));
+  return {
+    type: "usage_report", seq: 9, request_id: requestId, range: "7d",
+    generated_at: "2026-09-14T10:20:00Z", timezone: "IST, UTC+05:30",
+    totals: { input_tokens: 1_234_567, output_tokens: 89_012, cached_input_tokens: 400_000,
+              requests: 321, unmetered_requests: 0 },
+    by_model: [
+      { model: "qwen3.8:27b", provider: "ollama", host: "localhost:11434", requests: 300,
+        unmetered_requests: 0, input_tokens: 1_000_000, output_tokens: 80_000, cached_input_tokens: 400_000 },
+      { model: "claude-<b>opus</b>", provider: "anthropic", host: "api.anthropic.com", requests: 21,
+        unmetered_requests: 0, input_tokens: 234_567, output_tokens: 9_012, cached_input_tokens: 0 },
+    ],
+    by_day: days,
+    ...overrides,
+  };
+}
+
+function openUsageTab() {
+  const view = makeDom();
+  view.send({ type: "settings_open", providers: [], models: [], section: "usage" });
+  const requests = () => view.posted.filter((m) => m.type === "getUsage");
+  return { ...view, requests };
+}
+
+test("the Token Usage tab sits after Agents and asks for the selected range when it opens", () => {
+  const { doc, requests, errors } = openUsageTab();
+  const tabs = [...doc.querySelectorAll(".set-tab")].map((t) => t.dataset.section);
+  assert.deepEqual(tabs.slice(0, 4), ["general", "models", "agents", "usage"]);
+  assert.equal(doc.querySelector('.set-tab[data-section="usage"]').textContent, "Token Usage");
+  assert.equal(doc.querySelector('.set-section[data-section="usage"]').hidden, false);
+  assert.equal(doc.querySelector('.set-section[data-section="general"]').hidden, true);
+  assert.equal(requests().length, 1);
+  assert.equal(requests()[0].range, "7d");
+  assert.match(requests()[0].requestId, /^usage-/);
+  assert.equal(doc.getElementById("usage-status").textContent, "Counting…");
+  assert.deepEqual([...doc.getElementById("usage-range").options].map((o) => o.textContent),
+    ["Today", "7 days", "30 days", "This month", "All time"]);
+  assert.match(doc.querySelector(".usage-privacy").textContent,
+    /Counted on this machine from what each provider reports\. Nothing here is sent anywhere\./);
+  assert.deepEqual(errors, []);
+});
+
+test("a populated usage report renders figures, a sorted escaped model table and two day strips", () => {
+  const { doc, send, requests, errors } = openUsageTab();
+  send({ type: "event", event: usageReport(requests()[0].requestId) });
+  assert.equal(doc.getElementById("usage-content").hidden, false);
+  assert.equal(doc.getElementById("usage-empty").hidden, true);
+  const figures = [...doc.querySelectorAll(".usage-figure")];
+  assert.deepEqual(figures.map((f) => f.querySelector(".usage-figure-label").textContent),
+    ["Input", "Output", "Cached input", "Requests"]);
+  assert.deepEqual(figures.map((f) => f.querySelector(".usage-figure-value").textContent),
+    ["1.2M", "89K", "400K", "321"]);
+  assert.match(figures[0].getAttribute("aria-label"), /^Input: 1.234.567 tokens$/);
+  assert.match(figures[0].querySelector(".usage-figure-exact").textContent, /^1.234.567 tokens$/);
+  assert.equal(figures[3].querySelector(".usage-figure-exact"), null,
+    "a count that is not abbreviated is not repeated underneath");
+  assert.equal(doc.getElementById("usage-unmetered").hidden, true, "unmetered appears only when non-zero");
+  assert.match(doc.getElementById("usage-timezone").textContent, /local time \(IST, UTC\+05:30\)/);
+  assert.match(doc.getElementById("usage-status").textContent, /^Updated /);
+
+  const rows = [...doc.querySelectorAll("#usage-models tr")];
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].querySelector(".usage-name").textContent, "qwen3.8:27b");
+  assert.equal(rows[0].querySelector(".usage-where").textContent, "ollama · localhost:11434");
+  assert.equal(rows[0].querySelector(".usage-where .usage-tail").textContent, ":11434",
+    "the port that tells two local servers apart is never the part that gets clipped");
+  assert.equal(rows[0].querySelector(".usage-model").getAttribute("scope"), "row");
+  assert.deepEqual([...rows[0].querySelectorAll("td.num")].map((c) => c.textContent.replace(/\D/g, "")),
+    ["1000000", "80000", "400000", "300"], "input, output, cached, requests");
+  assert.deepEqual([...doc.querySelectorAll(".usage-table thead th")].map((c) => c.childNodes[0].textContent.trim()),
+    ["Model", "Input", "Output", "Cached", "Requests", "Share"]);
+  assert.equal(rows[1].querySelector(".usage-name").textContent, "claude-<b>opus</b>");
+  assert.equal(rows[1].querySelector("b"), null, "model ids are text, never markup");
+  assert.equal(rows[0].querySelector(".usage-share-text").textContent, "82%");
+  assert.equal(rows[0].querySelector(".usage-share-fill").style.width, `${(1_080_000 / 1_323_579) * 100}%`);
+  assert.equal(rows[1].querySelector(".usage-share").getAttribute("aria-label"), "18% of tokens");
+
+  const bars = [...doc.querySelectorAll("#usage-strip-in .usage-day")];
+  const outBars = [...doc.querySelectorAll("#usage-strip-out .usage-day")];
+  assert.equal(bars.length, 7, "one column per day, zero days included");
+  assert.equal(outBars.length, 7);
+  assert.equal(bars[3].querySelector(".usage-bar"), null, "a day with no requests draws no bar");
+  // Each strip has its own scale: output is 7% of input here, yet its busiest day fills its strip.
+  assert.equal(bars[6].querySelector(".usage-bar.usage-in").style.height, "100%");
+  assert.equal(outBars[6].querySelector(".usage-bar.usage-out").style.height, "100%");
+  assert.equal(outBars[0].querySelector(".usage-bar.usage-out").style.height, `${(900 / 6300) * 100}%`);
+  assert.equal(doc.getElementById("usage-peak-in").textContent, "peak 70K");
+  assert.match(doc.getElementById("usage-peak-out").textContent, /^peak 6.300$/);
+  assert.equal(doc.getElementById("usage-days").hidden, false);
+  assert.match(doc.getElementById("usage-day-readout").textContent,
+    /^Busiest — .*: 70.000 input · 6.300 output tokens · 7 requests$/);
+  assert.ok(bars[6].classList.contains("sel") && outBars[6].classList.contains("sel"),
+    "the selected day is marked in both strips");
+
+  const strip = doc.getElementById("usage-days");
+  strip.dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+  assert.match(doc.getElementById("usage-day-readout").textContent, /: 60.000 input · 5.400 output tokens · 6 requests$/);
+  assert.ok(bars[5].classList.contains("sel"));
+  strip.dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+  assert.match(doc.getElementById("usage-day-readout").textContent, /: 10.000 input · 900 output tokens · 1 request$/);
+  assert.ok(doc.getElementById("usage-days-first").textContent);
+  assert.ok(doc.getElementById("usage-days-last").textContent);
+  assert.deepEqual(errors, []);
+});
+
+test("changing the range or refreshing asks again and a late answer to an older range is ignored", () => {
+  const { doc, send, requests, errors } = openUsageTab();
+  const first = requests()[0].requestId;
+  const range = doc.getElementById("usage-range");
+  range.value = "30d";
+  range.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+  assert.equal(requests().length, 2);
+  assert.equal(requests()[1].range, "30d");
+  send({ type: "event", event: usageReport(first) });          // the 7-day answer arrives late
+  assert.equal(doc.getElementById("usage-content").hidden, true, "a superseded report is not drawn");
+  send({ type: "event", event: usageReport(requests()[1].requestId, { range: "30d",
+    totals: { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0, requests: 3, unmetered_requests: 2 } }) });
+  assert.equal(doc.getElementById("usage-content").hidden, false);
+  assert.equal(doc.getElementById("usage-unmetered").hidden, false);
+  assert.match(doc.getElementById("usage-unmetered").textContent,
+    /^2 unmetered requests ended without a usage report .*so their tokens are not/);
+  doc.getElementById("usage-refresh").click();
+  assert.equal(requests().length, 3);
+  assert.equal(requests()[2].range, "30d");
+  assert.equal(doc.getElementById("usage-status").textContent, "Refreshing…");
+  assert.equal(doc.querySelector('.set-section[data-section="usage"]').getAttribute("aria-busy"), "true");
+  // Re-opening the tab counts again, too.
+  doc.querySelector('.set-tab[data-section="general"]').click();
+  doc.querySelector('.set-tab[data-section="usage"]').click();
+  assert.equal(requests().length, 4);
+  assert.deepEqual(errors, []);
+});
+
+test("an empty range explains what will appear, and errors or an old CLI say so plainly", () => {
+  const { doc, send, requests, errors } = openUsageTab();
+  send({ type: "event", event: usageReport(requests()[0].requestId, {
+    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 },
+    by_model: [], by_day: [] }) });
+  const empty = doc.getElementById("usage-empty");
+  assert.equal(empty.hidden, false);
+  assert.equal(doc.getElementById("usage-content").hidden, true);
+  assert.match(empty.textContent, /No model requests counted in this range yet/);
+  assert.match(empty.textContent, /Each request DGC finishes \(chats, goals, sub-agents, fallbacks, compaction\) will appear here/);
+  assert.match(empty.textContent, /subscription CLI/);
+  assert.equal(doc.getElementById("usage-empty-all").hidden, false, "a short empty range points at All time");
+  doc.getElementById("usage-show-all").click();
+  assert.equal(doc.getElementById("usage-range").value, "all");
+  assert.equal(requests().at(-1).range, "all");
+  send({ type: "event", event: usageReport(requests().at(-1).requestId, { range: "all",
+    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 },
+    by_model: [], by_day: [] }) });
+  assert.equal(doc.getElementById("usage-empty-all").hidden, true, "All time has nowhere further to point");
+
+  doc.getElementById("usage-refresh").click();
+  send({ type: "event", event: usageReport(requests().at(-1).requestId, { error: "OperationalError: disk I/O error",
+    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 } }) });
+  assert.equal(empty.hidden, true);
+  assert.match(doc.getElementById("usage-status").textContent, /could not be read: OperationalError: disk I\/O error/);
+
+  doc.getElementById("usage-refresh").click();
+  send({ type: "usage_unavailable", requestId: requests().at(-1).requestId,
+    message: "Update the DGC CLI to see token usage in the editor." });
+  assert.equal(doc.getElementById("usage-status").textContent, "Update the DGC CLI to see token usage in the editor.");
+  assert.equal(doc.querySelector('.set-section[data-section="usage"]').hasAttribute("aria-busy"), false);
+  assert.deepEqual(errors, []);
+});
+
+test("a long range folds the day strip into weeks", () => {
+  const { doc, send, requests, errors } = openUsageTab();
+  const start = new Date(2026, 0, 1);
+  const days = Array.from({ length: 120 }, (_, i) => {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { date: iso, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0, requests: 1 };
+  });
+  send({ type: "event", event: usageReport(requests()[0].requestId, { range: "all", by_day: days }) });
+  assert.equal(doc.querySelectorAll("#usage-strip-in .usage-day").length, 18);
+  assert.equal(doc.querySelectorAll("#usage-strip-out .usage-day").length, 18);
+  assert.ok(doc.getElementById("usage-strip-in").classList.contains("dense") === false);
+  assert.match(doc.getElementById("usage-days-first").textContent, /^Week of /);
+  assert.match(doc.getElementById("usage-days").getAttribute("aria-label"), /per week, 18 weeks/);
+  assert.deepEqual(errors, []);
+});
+
+test("one day draws no strip, a singular unmetered request reads right, and long ids keep their tail", () => {
+  const { doc, send, requests, errors } = openUsageTab();
+  send({ type: "event", event: usageReport(requests()[0].requestId, {
+    range: "today",
+    totals: { input_tokens: 500, output_tokens: 40, cached_input_tokens: 0, requests: 3, unmetered_requests: 1 },
+    by_model: [
+      { model: "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M", provider: "openai", host: "192.168.1.111:8000",
+        requests: 2, unmetered_requests: 0, input_tokens: 400, output_tokens: 30, cached_input_tokens: 0 },
+      { model: "Qwen/Qwen3.5-122B-A10B-FP8", provider: "openai", host: "openrouter.ai",
+        requests: 1, unmetered_requests: 1, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0 },
+    ],
+    by_day: [{ date: "2026-09-14", input_tokens: 500, output_tokens: 40, cached_input_tokens: 0, requests: 3 }] }) });
+  assert.equal(doc.getElementById("usage-days").hidden, true, "a single day repeats the figures; no strip");
+  assert.match(doc.getElementById("usage-day-readout").textContent, /^[^B].*: 500 input · 40 output tokens · 3 requests$/);
+  assert.equal(doc.getElementById("usage-unmetered").textContent,
+    "1 unmetered request ended without a usage report (cancelled, interrupted, or the provider sent none), so its tokens are not in these totals.");
+  const [first, second] = doc.querySelectorAll("#usage-models tr");
+  assert.equal(first.querySelector(".usage-name .usage-tail").textContent, ":Q4_K_M");
+  assert.equal(first.querySelector(".usage-name").textContent, "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M");
+  assert.equal(first.querySelector(".usage-where .usage-tail").textContent, ":8000");
+  assert.equal(second.querySelector(".usage-name .usage-tail").textContent, "-FP8");
+  assert.equal(second.querySelector(".usage-where .usage-tail"), null, "a host without a port is not split");
+  assert.match(first.querySelector(".usage-model").title, /^hf\.co\/unsloth\/Qwen3\.5-27B-GGUF:Q4_K_M\nopenai · 192\.168\.1\.111:8000$/);
+  assert.deepEqual(errors, []);
+});
+
+test("a sideways-scrolling tab strip or model table fades the edge that hides more", () => {
+  const { doc, send, posted, errors } = makeDom();
+  const nav = doc.querySelector(".settings-nav");
+  const wrap = doc.querySelector(".usage-table-wrap");
+  let navLeft = 0, wrapLeft = 0;
+  // jsdom has no layout: stand in for a 300px panel whose tabs and table are wider than it.
+  for (const [node, width, get, set] of [[nav, 420, () => navLeft, (v) => { navLeft = v; }],
+    [wrap, 640, () => wrapLeft, (v) => { wrapLeft = v; }]]) {
+    Object.defineProperty(node, "scrollWidth", { configurable: true, get: () => width });
+    Object.defineProperty(node, "clientWidth", { configurable: true, get: () => 274 });
+    Object.defineProperty(node, "scrollLeft", { configurable: true, get, set });
+  }
+  send({ type: "settings_open", providers: [], models: [], section: "usage" });
+  assert.ok(nav.classList.contains("more-right"));
+  assert.ok(!nav.classList.contains("more-left"));
+  send({ type: "event", event: usageReport(posted.filter((m) => m.type === "getUsage").at(-1).requestId) });
+  assert.ok(wrap.classList.contains("more-right"), "drawing the table checks its edges");
+  navLeft = 146;
+  nav.dispatchEvent(new doc.defaultView.Event("scroll"));
+  assert.ok(nav.classList.contains("more-left") && !nav.classList.contains("more-right"));
+  wrapLeft = 0;
+  wrap.dispatchEvent(new doc.defaultView.Event("scroll"));
+  assert.ok(wrap.classList.contains("more-right"));
+  wrapLeft = 366;
+  wrap.dispatchEvent(new doc.defaultView.Event("scroll"));
+  assert.ok(!wrap.classList.contains("more-right") && wrap.classList.contains("more-left"));
+  assert.deepEqual(errors, []);
+});
+
+test("the typed /usage command opens the Token Usage tab through the extension host", () => {
+  assert.match(panelSrc, /case "usage": this\.openSettings\("usage"\); break;/);
+  assert.match(panelSrc, /case "getUsage": \{[\s\S]*?type: "get_usage", request_id: requestId, range/);
+  assert.match(mainCss, /\.usage-table-wrap \{[^}]*overflow-x: auto/);
+  assert.match(mainCss, /\.usage-table \{[^}]*font-variant-numeric: tabular-nums/);
+  assert.match(mainCss, /\.usage-section > \.set-group:first-child \{ margin-top: 0; \}/,
+    "the tab's first heading sits where every other tab's does");
+  assert.doesNotMatch(mainCss, /\.usage-clip \{[^}]*max-width: 140px/, "ids are not cut at a fixed 140px");
+  assert.match(mainCss, /\.usage-table-wrap\.more-right \{[^}]*mask-image/, "a table with hidden columns says so");
 });

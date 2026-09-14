@@ -1,5 +1,6 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="2.5" y="4" width="19" height="16" rx="3" stroke="currentColor" stroke-width="1.6"/>
-  <path d="M6.5 9.5L9.5 12L6.5 14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M11.5 14.5H15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DGC">
+  <title>DGC</title>
+  <path d="M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z"/>
+  <path d="M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z"/>
+  <path d="M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"/>
 </svg>

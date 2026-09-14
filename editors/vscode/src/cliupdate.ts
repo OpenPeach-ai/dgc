@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, realpathSync, statSync } from "fs";
+import { basename, delimiter, dirname, isAbsolute, join, resolve as resolvePath, sep } from "path";
 
 /** How long the installer may run before we stop waiting. It creates a virtualenv and installs
  *  pinned wheels, which is slow on a cold pip cache but is not an hour's work. */
@@ -9,19 +11,123 @@ const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
  *  the tail is what explains a failure, so keep the end rather than the beginning. */
 const MAX_LOG_BYTES = 64 * 1024;
 
+/** `dgc update` exits 3 when another update (another editor window, a terminal) holds the lock. */
+export const LOCK_HELD_EXIT = 3;
+const LOCK_RETRY_MS = 5000;
+const MAX_LOCK_RETRIES = 36;
+
 export type UpdateResult =
   | { ok: true; log: string }
   | { ok: false; reason: string; log: string };
 
+export type UpdateOptions = { lockRetryMs?: number; maxLockRetries?: number };
+
+/** The file `command` names the way spawn() finds it: a path as given, or the first executable
+ *  of that name on PATH. Undefined when there is none. */
+export function resolveCommandPath(command: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const executable = (candidate: string): boolean => {
+    try {
+      if (!statSync(candidate).isFile()) { return false; }
+      accessSync(candidate, fsConstants.X_OK);
+      return true;
+    } catch { return false; }
+  };
+  if (!command) { return undefined; }
+  if (command.includes("/") || command.includes(sep)) {
+    const absolute = isAbsolute(command) ? command : resolvePath(command);
+    return executable(absolute) ? absolute : undefined;
+  }
+  for (const folder of (env.PATH || "").split(delimiter)) {
+    if (!folder) { continue; }
+    const candidate = join(folder, command);
+    if (executable(candidate)) { return candidate; }
+  }
+  return undefined;
+}
+
+type InstallTree = { tree: string; dataDir: string; versioned: boolean };
+
+/** The install behind an executable, when its real path is <dir>/.venv/bin/dgc: either a
+ *  versioned install (<data>/versions/<v>, finished with .complete) or an older single tree. */
+function installTreeOf(realExecutable: string): InstallTree | undefined {
+  const bin = dirname(realExecutable);
+  const venv = dirname(bin);
+  if (basename(realExecutable) !== "dgc" || basename(bin) !== "bin" || basename(venv) !== ".venv") {
+    return undefined;
+  }
+  const tree = dirname(venv);
+  const versioned = basename(dirname(tree)) === "versions" && existsSync(join(tree, ".complete"));
+  return { tree, dataDir: versioned ? dirname(dirname(tree)) : tree, versioned };
+}
+
+/** DGC_DIR and DGC_BIN for the install the editor actually runs.
+ *
+ *  An update is often run by an OLD CLI, whose `dgc update` pipes the published installer into
+ *  bash without saying where it was installed; the installer then falls back to its defaults and a
+ *  custom location is orphaned. Its child inherits our environment, and the installer honours both
+ *  variables, so derive them from realpath(dgc.command) whenever that is <dir>/.venv/bin/dgc:
+ *  DGC_DIR is the old tree (or the data directory of a versioned install) and DGC_BIN is the
+ *  directory of the launcher symlink that led there. A dgc.command that points straight at the
+ *  venv script has no launcher to switch, so only DGC_DIR is passed for it. */
+export function cliUpdateEnvironment(command: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (process.platform === "win32") { return {}; }
+  const found = resolveCommandPath(command, env);
+  if (!found) { return {}; }
+  let real: string;
+  try { real = realpathSync(found); } catch { return {}; }
+  const install = installTreeOf(real);
+  if (!install) { return {}; }
+  const result: Record<string, string> = { DGC_DIR: install.dataDir };
+  try {
+    if (lstatSync(found).isSymbolicLink()) { result.DGC_BIN = dirname(found); }
+  } catch { /* the launcher vanished between the two looks: pass the directory only */ }
+  return result;
+}
+
+/** The terminal behind every manual "update the CLI" action: the exact executable with a fixed
+ *  `update` argument (never `curl | bash` typed into a shell), the install's own location, and
+ *  DGC_SKIP_EXTENSION so the installer cannot replace the running extension with the published one. */
+export function updateTerminalOptions(executable: string, name = "DGC update"): vscode.TerminalOptions {
+  return {
+    name,
+    shellPath: executable,
+    shellArgs: ["update"],
+    env: { DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) },
+  };
+}
+
+/** The terminal for a first install, when there is no dgc to run yet. The published installer is
+ *  the only way in, but DGC_SKIP_EXTENSION still applies: this extension is already running, and
+ *  the installer would otherwise force-install the published .vsix over it in every editor it finds. */
+export const INSTALL_COMMAND = "curl -fsSL https://vibedgc.com/install.sh | bash";
+export function installTerminalOptions(name = "Install DGC"): vscode.TerminalOptions {
+  return { name, env: { DGC_SKIP_EXTENSION: "1" } };
+}
+
+/** An OLD CLI's `dgc update` (0.38 and earlier) pipes the installer into bash, catches its failure,
+ *  prints "update failed (exit N)" and still exits 0. Only the first update from such a CLI can hit
+ *  this — the CLI it installs returns the installer's status — but that first update is exactly
+ *  the one the extension runs on its own. The installer's exit status, when that line is there. */
+export function swallowedInstallerExit(log: string): number | undefined {
+  const match = /(?:^|\n)[ \t]*update failed \(exit (\d+)\)/.exec(log.replace(/\u001B\[[0-9;]*m/g, ""));
+  return match ? Number(match[1]) : undefined;
+}
+
 /** True when the user chose the executable themselves. DGC manages the CLI it installed; a path
- *  someone set by hand belongs to them, and reinstalling over it would be a surprise — the
- *  installer writes to $HOME/dgc, which may not be where their binary lives at all. */
+ *  someone set by hand belongs to them, and reinstalling over it would be a surprise. A path whose
+ *  real location is a DGC versioned install is still DGC's: `dgc update` there finds its own data
+ *  directory and launcher, so it updates exactly the install the path runs. */
 export function isUserChosenCommand(): boolean {
   const inspected = vscode.workspace.getConfiguration("dgc").inspect<string>("command");
   const chosen = inspected?.globalValue;
   if (typeof chosen !== "string") { return false; }
   const trimmed = chosen.trim();
-  return trimmed.length > 0 && trimmed !== "dgc";
+  if (trimmed.length === 0 || trimmed === "dgc") { return false; }
+  try {
+    const found = resolveCommandPath(trimmed);
+    if (found && installTreeOf(realpathSync(found))?.versioned) { return false; }
+  } catch { /* unresolvable: the user's to manage */ }
+  return true;
 }
 
 export function autoUpdateEnabled(): boolean {
@@ -36,33 +142,28 @@ export function autoUpdateEnabled(): boolean {
  *  terminal, so the editor can report progress and restart the backend when it lands.
  *
  *  The subcommand is a fixed argument next to an exact executable path; nothing the user typed is
- *  ever interpolated into shell text. The installer it runs refuses to extract a release over a
- *  git checkout, so a contributor's working tree cannot be reverted by an automatic update. */
+ *  ever interpolated into shell text. The installer refuses to repoint a launcher that runs a git
+ *  checkout, so a contributor's working tree cannot be displaced by an automatic update. When
+ *  another update holds the lock (exit 3 — another window got there first), wait and try again:
+ *  the second run then finds the version already built and only switches to it. */
 export function runCliUpdate(
   executable: string,
   token?: vscode.CancellationToken,
+  options: UpdateOptions = {},
 ): Promise<UpdateResult> {
+  const lockRetryMs = options.lockRetryMs ?? LOCK_RETRY_MS;
+  const maxLockRetries = options.maxLockRetries ?? MAX_LOCK_RETRIES;
+  // DGC_SKIP_EXTENSION: the installer also reinstalls the editor extension from the published
+  // .vsix. Run from inside the editor, that would replace the extension that asked for this
+  // update — with an OLDER build for as long as the site has not caught up. The editor owns
+  // its own extensions; this update is only ever about the CLI.
+  const env = { ...process.env, DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) };
   return new Promise<UpdateResult>((resolve) => {
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      // Its own process group. The installer is a shell pipeline that forks curl, bash, python and
-      // pip; signalling only the process we spawned would leave those running, still holding the
-      // pipes, so a cancelled update would keep installing and the editor would never see the end
-      // of it. A group leader can be signalled as a whole.
-      child = spawn(executable, ["update"], {
-        // DGC_SKIP_EXTENSION: the installer also reinstalls the editor extension from the published
-        // .vsix. Run from inside the editor, that would replace the extension that asked for this
-        // update — with an OLDER build for as long as the site has not caught up. The editor owns
-        // its own extensions; this update is only ever about the CLI.
-        env: { ...process.env, DGC_SKIP_EXTENSION: "1" },
-        detached: process.platform !== "win32",
-      });
-    } catch (err: any) {
-      resolve({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log: "" });
-      return;
-    }
+    let child: ChildProcessWithoutNullStreams | undefined;
     let log = "";
     let settled = false;
+    let lockRetries = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const append = (chunk: string) => {
       log += chunk;
       if (log.length > MAX_LOG_BYTES) { log = log.slice(log.length - MAX_LOG_BYTES); }
@@ -71,41 +172,76 @@ export function runCliUpdate(
       if (settled) { return; }
       settled = true;
       clearTimeout(timer);
+      if (retryTimer) { clearTimeout(retryTimer); }
       subscription?.dispose();
       resolve(result);
+    };
+    const signalTree = (signal: NodeJS.Signals) => {
+      const current = child;
+      if (!current) { return; }
+      try {
+        if (process.platform !== "win32" && current.pid) { process.kill(-current.pid, signal); }
+        else { current.kill(signal); }
+      } catch { /* the group is already gone */ }
     };
     /** Stop the installer and everything it started, then answer without waiting for the pipes:
      *  a descendant that ignores the signal must not be able to hold the caller open. */
     const stop = (reason: string) => {
+      if (settled) { return; }
       signalTree("SIGTERM");
       const hard = setTimeout(() => signalTree("SIGKILL"), 2000);
       hard.unref?.();
-      child.stdout.destroy();
-      child.stderr.destroy();
+      child?.stdout.destroy();
+      child?.stderr.destroy();
       finish({ ok: false, reason, log });
-    };
-    const signalTree = (signal: NodeJS.Signals) => {
-      try {
-        if (process.platform !== "win32" && child.pid) { process.kill(-child.pid, signal); }
-        else { child.kill(signal); }
-      } catch { /* the group is already gone */ }
     };
 
     const timer = setTimeout(() => stop("the update took longer than 10 minutes"), UPDATE_TIMEOUT_MS);
     const subscription = token?.onCancellationRequested(() => stop("cancelled"));
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    child.on("error", (err: any) => {
-      finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
-    });
-    child.on("close", (code, signal) => {
-      if (code === 0) { finish({ ok: true, log }); return; }
-      const how = signal ? `stopped by ${signal}` : `exit ${code}`;
-      finish({ ok: false, reason: `${failureHeadline(log) || "the installer failed"} (${how})`, log });
-    });
+    const attempt = () => {
+      if (settled) { return; }
+      let own = "";                 // this attempt's output: an earlier attempt's words are not its result
+      const record = (chunk: string) => {
+        append(chunk);
+        own += chunk;
+        if (own.length > MAX_LOG_BYTES) { own = own.slice(own.length - MAX_LOG_BYTES); }
+      };
+      let current: ChildProcessWithoutNullStreams;
+      try {
+        // Its own process group. The installer forks bash, curl, python and pip; signalling only
+        // the process we spawned would leave those running, still holding the pipes, so a
+        // cancelled update would keep installing and the editor would never see the end of it.
+        current = spawn(executable, ["update"], { env, detached: process.platform !== "win32" });
+      } catch (err: any) {
+        finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
+        return;
+      }
+      child = current;
+      current.stdout.setEncoding("utf8");
+      current.stderr.setEncoding("utf8");
+      current.stdout.on("data", record);
+      current.stderr.on("data", record);
+      current.on("error", (err: any) => {
+        finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
+      });
+      current.on("close", (exitCode, signal) => {
+        if (settled) { return; }
+        const swallowed = exitCode === 0 ? swallowedInstallerExit(own) : undefined;
+        const code = swallowed ?? exitCode;
+        if (code === 0) { finish({ ok: true, log }); return; }
+        if (code === LOCK_HELD_EXIT && lockRetries < maxLockRetries) {
+          lockRetries += 1;
+          append(`\n[DGC: another update is running; trying again in ${Math.ceil(lockRetryMs / 1000)} s]\n`);
+          retryTimer = setTimeout(attempt, lockRetryMs);
+          return;
+        }
+        const how = signal ? `stopped by ${signal}`
+          : swallowed !== undefined ? `installer exit ${swallowed}` : `exit ${code}`;
+        finish({ ok: false, reason: `${failureHeadline(log) || "the installer failed"} (${how})`, log });
+      });
+    };
+    attempt();
   });
 }
 
@@ -120,5 +256,8 @@ export function failureHeadline(log: string): string {
     .filter(Boolean);
   const refusal = lines.find((line) => line.startsWith("\u2717"));
   if (refusal) { return refusal.replace(/^\u2717\s*/, ""); }
-  return lines[lines.length - 1] || "";
+  // An old CLI's own summary ("update failed (exit 1). Run manually: curl … | bash") repeats the
+  // status and suggests the pipeline the editor no longer uses; the line before it says more.
+  const informative = lines.filter((line) => !/^update failed \(exit \d+\)/.test(line));
+  return informative[informative.length - 1] || "";
 }

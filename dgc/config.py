@@ -321,7 +321,17 @@ DEFAULTS: dict = {
     "autonomous_max_turns": 30,                 # bound on failed autonomous_gate retries before the turn stops
     "bash_timeout": 120,
     "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
-    "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
+    "request_timeout": 1800,                    # hard ceiling on socket silence, including the wait for
+                                                #   response headers; the stall watcher normally acts first
+    # Stall watcher: a model request that hangs without an error (no headers, a silent stream, or
+    # keep-alives with no tokens) is closed, retried, then reported by model and endpoint.
+    "model_first_token_timeout_s": "auto",      # seconds until the first real delta; "auto" = 900 for a
+                                                #   local endpoint (load + large prefill), 300 remote; 0 = off
+    "model_idle_timeout_s": 300,                # seconds without a token mid-stream before it is a stall
+                                                #   (partial output is continued, not discarded); 0 = off
+    "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
+    "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
+    "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load
     "approval_timeout_s": 300,                  # bounded MCP input; native human decisions wait for reply/Stop
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)

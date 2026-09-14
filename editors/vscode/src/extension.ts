@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { resolveDgcExecutable } from "./configuration";
+import { updateTerminalOptions } from "./cliupdate";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -24,12 +25,16 @@ export function activate(context: vscode.ExtensionContext): void | object {
     }
     // Launch an exact executable/argv pair. Interpolating a configurable path into shell text would
     // allow metacharacters in that setting to execute an unrelated command.
-    const term = vscode.window.createTerminal({
-      name: subcommand === "update" ? "DGC update"
-        : subcommand === "notes" ? "DGC notes" : "DGC export-training",
-      shellPath: executable.command,
-      shellArgs: [subcommand],
-    });
+    // `update` also carries the install's own location and DGC_SKIP_EXTENSION (see
+    // updateTerminalOptions): without the latter, the installer run from this terminal would
+    // reinstall the published .vsix over the extension that is running it.
+    const term = vscode.window.createTerminal(subcommand === "update"
+      ? updateTerminalOptions(executable.command, "DGC update")
+      : {
+        name: subcommand === "notes" ? "DGC notes" : "DGC export-training",
+        shellPath: executable.command,
+        shellArgs: [subcommand],
+      });
     term.show();
     return true;
   };
@@ -73,8 +78,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.retainedTasks", () => provider.runEditorAction("retainedTasks")),
     vscode.commands.registerCommand("dgc.compact", () => provider.runEditorAction("compact")),
     vscode.commands.registerCommand("dgc.updateCli", () => {
-      // parity with the CLI's /update: run the installer in a terminal (curl | bash),
-      // then remind the user to restart the backend so the panel picks up the new version.
+      // parity with the CLI's /update: run `dgc update` in a terminal, then remind the user to
+      // restart the backend so the panel picks up the new version.
       if (runCliInTerminal("update")) {
         vscode.window.showInformationMessage(
           "Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");

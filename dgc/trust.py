@@ -130,6 +130,61 @@ def mark_trusted(config, path) -> None:
         apply()
 
 
+def trust_screen_text(project_root, cols: int, rows: int, secs: float) -> str:
+    """The trust gate's body as terminal text (ANSI), sized to `cols` x `rows` at time `secs`."""
+    from rich.align import Align
+    from rich.console import Console, Group
+    from rich.text import Text
+
+    th = style_mod.theme()
+
+    def _center(text, width):
+        return Align.center(text, width=width)
+
+    c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
+                width=cols, highlight=False)
+    out = []
+    top = max(1, (rows - 16) // 2)                # vertical centering
+    out += [Text("")] * top
+    # One offset for the whole mark: every row is padded to the art's width before centring.
+    # Centring the rows one by one (they are 13 to 19 cells wide) shifted each by a different
+    # amount and turned the /// into a zig-zag on this screen only.
+    for ln in logo_mod.shimmer_lines(secs, pad=logo_mod.WIDTH):
+        out.append(_center(ln, cols))
+    out.append(Text(""))
+    out.append(_center(Text("Do you trust the contents of this directory?", style=th.muted), cols))
+    safe_root = (style_mod.terminal_safe_text(project_root)
+                 .replace("\n", r"\n").replace("\t", r"\t"))
+    out.append(_center(Text(safe_root,
+                            style=f"bold {th.text_strong}"), cols))
+    out.append(Text(""))
+    out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
+    out.append(_center(Text("and files here can reach the model as untrusted input.", style=th.faint), cols))
+    out.append(_center(Text("Trusting it also loads the project's own DGC rules (.dgc/permissions.json).",
+                            style=th.faint), cols))
+    out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
+                            style=th.faint), cols))
+    broad = broad_trust_warning(project_root)   # $HOME or / would pre-trust every future clone
+    if broad:
+        out.append(Text(""))
+        out.append(_center(Text(broad, style=f"bold {th.err}"), cols))
+    if not in_git_repo(project_root):        # a warning when changes aren't tracked
+        out.append(Text(""))
+        out.append(_center(Text("Not inside a git repository — changes here are not version-controlled.",
+                                style=th.err), cols))
+    out.append(Text(""))
+    opt = Text()
+    opt.append("\u276f ", style=th.accent)                      # the selected row: Enter = yes
+    opt.append("Yes, proceed", style=f"bold {th.text_strong}")
+    opt.append("    "); opt.append("y \u00b7 Enter", style=th.faint); opt.append("\n")
+    opt.append("  ")
+    opt.append("No, quit    ", style=f"bold {th.text_strong}")
+    opt.append("    "); opt.append("n \u00b7 Esc", style=th.faint)
+    out.append(_center(opt, cols))
+    c.print(Group(*out))
+    return c.file.getvalue().rstrip("\n")
+
+
 def confirm_trust(config, project_root) -> bool:
     """Show the full-screen trust gate. Returns True to proceed (remembering the dir),
     False to quit. Already-trusted or non-interactive → True without prompting; the CLI
@@ -149,56 +204,10 @@ def confirm_trust(config, project_root) -> bool:
     state = {"ok": False}
     start = time.monotonic()
 
-    def _center(text, width):
-        from rich.align import Align
-        return Align.center(text, width=width)
-
     def body():
         import shutil
-
-        from rich.console import Console, Group
-        from rich.text import Text
         cols, rows = shutil.get_terminal_size((100, 30))
-        c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
-                    width=cols, highlight=False)
-        secs = time.monotonic() - start
-        out = []
-        top = max(1, (rows - 16) // 2)                # vertical centering
-        out += [Text("")] * top
-        for ln in logo_mod.shimmer_lines(secs):       # grey shimmer wordmark, centered
-            out.append(_center(ln, cols))
-        out.append(Text(""))
-        out.append(_center(Text("Do you trust the contents of this directory?", style=th.muted), cols))
-        safe_root = (style_mod.terminal_safe_text(project_root)
-                     .replace("\n", r"\n").replace("\t", r"\t"))
-        out.append(_center(Text(safe_root,
-                                style=f"bold {th.text_strong}"), cols))
-        out.append(Text(""))
-        out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
-        out.append(_center(Text("and files here can reach the model as untrusted input.", style=th.faint), cols))
-        out.append(_center(Text("Trusting it also loads the project's own DGC rules (.dgc/permissions.json).",
-                                style=th.faint), cols))
-        out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
-                                style=th.faint), cols))
-        broad = broad_trust_warning(project_root)   # $HOME or / would pre-trust every future clone
-        if broad:
-            out.append(Text(""))
-            out.append(_center(Text(broad, style=f"bold {th.err}"), cols))
-        if not in_git_repo(project_root):        # a warning when changes aren't tracked
-            out.append(Text(""))
-            out.append(_center(Text("Not inside a git repository — changes here are not version-controlled.",
-                                    style=th.err), cols))
-        out.append(Text(""))
-        opt = Text()
-        opt.append("\u276f ", style=th.accent)                      # the selected row: Enter = yes
-        opt.append("Yes, proceed", style=f"bold {th.text_strong}")
-        opt.append("    "); opt.append("y \u00b7 Enter", style=th.faint); opt.append("\n")
-        opt.append("  ")
-        opt.append("No, quit    ", style=f"bold {th.text_strong}")
-        opt.append("    "); opt.append("n \u00b7 Esc", style=th.faint)
-        out.append(_center(opt, cols))
-        c.print(Group(*out))
-        return ANSI(c.file.getvalue().rstrip("\n"))
+        return ANSI(trust_screen_text(project_root, cols, rows, time.monotonic() - start))
 
     def footer():
         import shutil
