@@ -114,6 +114,84 @@ test("forced colours keep the hint, the note and the static row visible", async 
   }
 });
 
+for (const width of [300, 460]) {
+  test(`a sub-agent's rows say so and every label lines up at ${width}px`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await openThinkingPage(browser, { width, theme: "light-modern", height: 1000, events: SCENARIOS.subagent });
+    try {
+      const facts = await page.evaluate(() => {
+        const labels = [...document.querySelectorAll(".disclosure .thought-agent, .disclosure .thought-label:first-of-type")];
+        const rows = [...document.querySelectorAll(".disclosure, .thought-static")];
+        const start = (row) => (row.querySelector(".thought-agent") || row.querySelector(".thought-label")).getBoundingClientRect().left;
+        const prefix = document.querySelector(".disclosure[data-agent] .thought-agent");
+        return {
+          starts: rows.map(start),
+          prefixVisible: !!prefix && prefix.getBoundingClientRect().width > 30,
+          prefixes: rows.map((row) => !!row.querySelector(".thought-agent")),
+          headerLines: [...document.querySelectorAll(".disclosure")].map((node) =>
+            Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))),
+          labels: labels.length,
+        };
+      });
+      assert.deepEqual(facts.prefixes, [false, true, true, false]);
+      assert.ok(facts.prefixVisible, "the Sub-agent prefix is visible");
+      for (const x of facts.starts) assert.ok(Math.abs(x - facts.starts[0]) <= 1, `label starts ${facts.starts.join(", ")}`);
+      for (const count of facts.headerLines) assert.ok(width >= 460 ? count === 1 : count <= 2, `header spans ${count} lines`);
+      const snapshot = await page.locator(".disclosure[data-agent]").ariaSnapshot();
+      assert.match(snapshot, /Sub-agent ?, Thought for 2s ?, raw/, "Chromium joins the parts with a space before each comma");
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+for (const width of [300, 460, 900]) {
+  test(`the Show model thinking select shows its whole value at ${width}px`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await openThinkingPage(browser, { width, theme: "dark-modern", height: 800, events: [] });
+    try {
+      await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "settings_open", providers: [], models: [], section: "general" } })));
+      await page.waitForTimeout(150);
+      const facts = await page.evaluate(() => {
+        const select = document.getElementById("s-show_reasoning");
+        const style = getComputedStyle(select);
+        const context = document.createElement("canvas").getContext("2d");
+        context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 18;
+        return { room, widths: [...select.options].map((option) => [option.textContent, context.measureText(option.textContent).width]) };
+      });
+      for (const [text, measured] of facts.widths) {
+        assert.ok(measured <= facts.room, `"${text}" is ${measured.toFixed(1)}px in ${facts.room.toFixed(1)}px`);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+test("a block whose text is not here says so inside its body", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await openThinkingPage(browser, { width: 300, theme: "light-modern", height: 1000, events: SCENARIOS.missing });
+  try {
+    await page.evaluate(() => document.querySelectorAll(".disclosure").forEach((button) => button.click()));
+    const facts = await page.evaluate((contrastSource) => {
+      const contrast = eval(contrastSource);
+      return [...document.querySelectorAll(".thought-cut")].map((node) => ({
+        text: node.textContent, visible: node.getBoundingClientRect().height > 8, ratio: contrast(node) }));
+    }, CONTRAST_SOURCE);
+    assert.deepEqual(facts.map((fact) => fact.text), ["The text of this reasoning is not in this view.",
+      "The text of this reasoning was not kept.", "… the rest of this reasoning was not kept."]);
+    for (const fact of facts) {
+      assert.ok(fact.visible);
+      assert.ok(fact.ratio >= 4.5, `contrast ${fact.ratio.toFixed(2)}`);
+    }
+    assert.equal(await page.locator(".thought-note").count(), 0);
+  } finally {
+    await page.close();
+  }
+});
+
 test("the settings select hint and hide-reasoning render as designed", async (t) => {
   if (skipOrFail(t)) return;
   const page = await openThinkingPage(browser, { width: 460, theme: "dark-modern", events: SCENARIOS.all,

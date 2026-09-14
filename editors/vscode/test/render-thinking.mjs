@@ -1,8 +1,8 @@
 // Thinking provenance in real Chromium: the scenarios the rendered tests measure, and a capture script.
 //   node test/render-thinking.mjs --out <dir>
 // writes labels-dark-modern-300.png, labels-light-modern-460.png, inline-note-dark-460.png,
-// withheld-row-light-300.png, hc-460.png, forced-colors-300.png, settings-select-dark-460.png and
-// tool-group-order-dark-460.png. Importing this module (thinking-provenance.test.mjs does) runs nothing.
+// withheld-row-light-300.png, hc-460.png, forced-colors-300.png, settings-select-{dark-460,light-300,dark-900}.png,
+// tool-group-order-dark-460.png, subagent-{dark-modern-300,light-modern-460}.png and missing-text-{dark-460,light-300}.png. Importing this module (thinking-provenance.test.mjs does) runs nothing.
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -72,6 +72,37 @@ export const SCENARIOS = {
     { type: "stream_end", message_id: "t1:1", phase: "answer" },
     { type: "thinking_end", block: "t1:think2", source: "withheld", provider: "openai", placement: "collapsed", seconds: 2 },
     { type: "text_delta", text: "And the rollback." },
+    { type: "stream_end", message_id: "t1:2", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 900, final_message_id: "t1:2" },
+  ],
+  // A Claude turn that delegates to a local sub-agent: the child's rows say "Sub-agent".
+  subagent: [
+    { type: "turn_start", turn_id: "t1", prompt: "Check the gate with a local helper", kind: "prompt" },
+    { type: "thinking_delta", block: "t1:think1", source: "summarized", provider: "anthropic", text: LONG },
+    { type: "thinking_end", block: "t1:think1", source: "summarized", provider: "anthropic", placement: "collapsed", seconds: 4.2 },
+    { type: "stream_end", phase: "commentary" },
+    { type: "tool_call", call_id: "c1", name: "task", args: { prompt: "read gate.py" }, summary: "read gate.py" },
+    { type: "thinking_delta", block: "t1:think2", source: "raw", agent: "sub-e051bf6ba1c3", text: "The helper reads gate.py and finds the > comparison." },
+    { type: "thinking_end", block: "t1:think2", source: "raw", agent: "sub-e051bf6ba1c3", placement: "collapsed", seconds: 2.3 },
+    { type: "thinking_end", block: "t1:think3", source: "withheld", provider: "anthropic", agent: "sub-e051bf6ba1c3", placement: "collapsed", seconds: 1.2 },
+    { type: "tool_result", call_id: "c1", name: "task", output: "gate.py uses >", is_error: false },
+    { type: "thinking_end", block: "t1:think4", source: "withheld", provider: "anthropic", placement: "collapsed", seconds: 6 },
+    { type: "text_delta", text: "The helper confirmed the comparison." },
+    { type: "stream_end", message_id: "t1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 900, final_message_id: "t1:1" },
+  ],
+  // Blocks whose text is not all here: an end with no deltas (a re-resolved view), a replayed header
+  // past the history budget, and a replayed stub with the rest cut.
+  missing: [
+    { type: "turn_start", turn_id: "t1", prompt: "Pick up where the long session left off", kind: "prompt" },
+    ...tool("c0", "git log -1"),
+    { type: "thinking_end", block: "t1:think9", source: "summarized", provider: "anthropic", placement: "inline", seconds: 2 },
+    { type: "thinking_end", block: "t1:think10", source: "raw", placement: "collapsed", seconds: 12, truncated: true },
+    { type: "text_delta", text: "Earlier work is summarized below." },
+    { type: "stream_end", message_id: "t1:1", phase: "commentary" },
+    { type: "thinking_delta", block: "t1:think11", source: "raw", text: "A first slice of a very long chain of thought" },
+    { type: "thinking_end", block: "t1:think11", source: "raw", placement: "collapsed", seconds: 40, truncated: true },
+    { type: "text_delta", text: "Done." },
     { type: "stream_end", message_id: "t1:2", phase: "answer" },
     { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 900, final_message_id: "t1:2" },
   ],
@@ -162,6 +193,17 @@ async function main() {
     console.log(join(out, name));
   };
   const expandFirst = (page) => page.evaluate(() => document.querySelector(".disclosure")?.click());
+  const expandAll = (page) => page.evaluate(() => document.querySelectorAll(".disclosure").forEach((b) => b.click()));
+  const openSettings = async (page) => {
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "settings_open", providers: [], models: [], section: "general" } })));
+    await page.waitForTimeout(200);
+    await page.evaluate(() => {
+      const select = document.getElementById("s-show_reasoning");
+      select.closest("label").scrollIntoView({ block: "center" });
+      select.closest("label").style.outline = "1px dashed #0078D4";
+    });
+  };
   await shoot("labels-dark-modern-300.png", { width: 300, theme: "dark-modern", events: SCENARIOS.labels });
   await shoot("labels-light-modern-460.png", { width: 460, theme: "light-modern", events: SCENARIOS.labels }, expandFirst);
   await shoot("inline-note-dark-460.png", { width: 460, theme: "dark-modern", events: SCENARIOS.note });
@@ -172,16 +214,13 @@ async function main() {
   await shoot("tool-group-order-dark-460.png", { width: 460, height: 900, theme: "dark-modern", events: SCENARIOS.note });
   await shoot("labels-dark-modern-900.png", { width: 900, theme: "dark-modern", events: SCENARIOS.all });
   await shoot("labels-light-modern-900.png", { width: 900, theme: "light-modern", events: SCENARIOS.all });
-  await shoot("settings-select-dark-460.png", { width: 460, height: 700, theme: "dark-modern", events: [] }, async (page) => {
-    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
-      data: { type: "settings_open", providers: [], models: [], section: "general" } })));
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      const select = document.getElementById("s-show_reasoning");
-      select.closest("label").scrollIntoView({ block: "center" });
-      select.closest("label").style.outline = "1px dashed #0078D4";
-    });
-  });
+  await shoot("settings-select-dark-460.png", { width: 460, height: 700, theme: "dark-modern", events: [] }, openSettings);
+  await shoot("settings-select-light-300.png", { width: 300, height: 700, theme: "light-modern", events: [] }, openSettings);
+  await shoot("settings-select-dark-900.png", { width: 900, height: 700, theme: "dark-modern", events: [] }, openSettings);
+  await shoot("subagent-dark-modern-300.png", { width: 300, theme: "dark-modern", events: SCENARIOS.subagent }, expandAll);
+  await shoot("subagent-light-modern-460.png", { width: 460, theme: "light-modern", events: SCENARIOS.subagent });
+  await shoot("missing-text-dark-460.png", { width: 460, theme: "dark-modern", events: SCENARIOS.missing }, expandAll);
+  await shoot("missing-text-light-300.png", { width: 300, theme: "light-modern", events: SCENARIOS.missing }, expandAll);
   await browser.close();
 }
 

@@ -4261,8 +4261,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"
                aria-label="Custom context size in tokens" hidden>
       </div></label>
-    <label>Show model thinking <span class="set-hint">Labels say where thinking came from: raw from the model, or summarized by the provider.</span>
-      <select id="s-show_reasoning"><option value="inline">collapsed, provider summaries inline when short</option><option value="collapsed">collapsed</option><option value="hidden">hidden</option></select></label>
+    <label>Show model thinking <span class="set-hint">Short provider summaries show inline; raw thinking stays collapsed. Labels say where thinking came from: raw from the model, or summarized by the provider.</span>
+      <select id="s-show_reasoning"><option value="inline">inline</option><option value="collapsed">collapsed</option><option value="hidden">hidden</option></select></label>
     <label>Prompt suggestions
       <select id="s-suggest"><option value="true">enabled</option><option value="false">disabled</option></select></label>
     <label>Wake on monitor events <span class="set-hint">When a background monitor prints while the chat is idle, DGC starts a short turn to read it. Off: events wait for your next message.</span>

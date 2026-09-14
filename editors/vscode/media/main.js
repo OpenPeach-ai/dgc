@@ -4285,12 +4285,29 @@
              provider, agent: typeof ev?.agent === "string" ? ev.agent.slice(0, 128) : "" };
   }
   function reasonInlineAllowed() { return lastConfig?.thinking_inline !== false; }
-  function reasonTitle(source, provider) {
+  // `agent` set: the block came from a sub-agent, whose model and host can differ from this chat's.
+  function reasonTitle(source, provider, agent) {
     const name = reasonProviderName(provider) || "The provider";
-    if (source === "raw") return "Raw reasoning from the model, as it streamed.";
-    if (source === "summarized") return `${name} returned a summary of the model’s reasoning; the full reasoning is not available.`;
-    if (source === "narration") return `A progress note from ${name} about what the model is doing.`;
-    return "DGC can’t tell whether this is the model’s own reasoning or a provider’s summary.";
+    const model = agent ? "a sub-agent’s model" : "the model";
+    if (source === "raw") return `Raw reasoning from ${model}, as it streamed.`;
+    if (source === "summarized") return `${name} returned a summary of ${agent ? "a sub-agent’s" : "the model’s"} reasoning; the full reasoning is not available.`;
+    if (source === "narration") return `A progress note from ${name} about what ${model} is doing.`;
+    if (source === "withheld") return `${name} kept ${agent ? "a sub-agent’s" : "the model’s"} reasoning hidden; no readable text was sent.`;
+    return `DGC can’t tell whether this is ${agent ? "a sub-agent’s" : "the model’s"} own reasoning or a provider’s summary.`;
+  }
+  // "Sub-agent · " before the label of a block a sub-agent produced. The dot is decorative; screen
+  // readers hear "Sub-agent, Thought for 2s, raw".
+  function reasonAgentPrefix(agent) {
+    if (!agent) return null;
+    const prefix = el("span", "thought-agent");
+    const dot = el("span"); dot.setAttribute("aria-hidden", "true"); dot.textContent = " ·";
+    const pause = el("span", "sr-only"); pause.textContent = ",";
+    prefix.append(document.createTextNode(" Sub-agent"), dot, pause);
+    return prefix;
+  }
+  // Under half a second rounds to nothing worth a number: "Thought", never "Thought for 0s".
+  function reasonDuration(seconds) {
+    return Number.isFinite(seconds) && seconds >= 0.5 ? `Thought for ${Math.round(seconds)}s` : "Thought";
   }
   // The muted suffix: " · raw", " · summarized by Anthropic", " · hidden by OpenAI"; nothing for
   // unknown. The middle dot is decorative; an sr-only comma gives screen readers the pause.
@@ -4313,11 +4330,10 @@
     if (group.open && (!group.parts.length || !group.parts.every((part) => part.ended))) return "Thinking…";
     if (group.parts.length && group.parts.every((part) => part.ended)) {
       if (!group.parts.every((part) => Number.isFinite(part.seconds))) return "Thought";
-      const total = group.parts.reduce((sum, part) => sum + part.seconds, 0);
-      return `Thought for ${Math.max(0, Math.round(total))}s`;
+      return reasonDuration(group.parts.reduce((sum, part) => sum + part.seconds, 0));
     }
     if (group.startedAt == null) return "Thought";
-    return `Thought for ${Math.max(0, Math.round((Date.now() - group.startedAt) / 1000))}s`;
+    return reasonDuration((Date.now() - group.startedAt) / 1000);
   }
   function paintReasonGroup(group) {
     if (!group?.button) return;
@@ -4331,10 +4347,13 @@
     body.id = id;
     button.dataset.source = identity.source; body.dataset.source = identity.source;
     if (identity.agent) { button.dataset.agent = identity.agent; body.dataset.agent = identity.agent; }
-    button.title = reasonTitle(identity.source, identity.provider);
+    button.title = reasonTitle(identity.source, identity.provider, identity.agent);
     const chev = el("span", "thought-chev"); chev.setAttribute("aria-hidden", "true"); chev.textContent = "▸";
     const label = el("span", "thought-label");
-    button.append(chev, label);
+    button.appendChild(chev);
+    const agentPrefix = reasonAgentPrefix(identity.agent);
+    if (agentPrefix) button.appendChild(agentPrefix);
+    button.appendChild(label);
     const prov = reasonProvenance(identity.source, identity.provider);
     if (prov) button.appendChild(prov);
     button.onclick = () => {
@@ -4474,16 +4493,22 @@
       // Consecutive withheld blocks read as one row.
       const known = previous.dataset.seconds !== "" && seconds != null;
       previous.dataset.seconds = known ? String(Number(previous.dataset.seconds) + seconds) : "";
-      previous.querySelector(".thought-label").textContent = known
-        ? `Thought for ${Math.round(Number(previous.dataset.seconds))}s` : "Thought";
+      previous.querySelector(".thought-label").textContent =
+        ` ${known ? reasonDuration(Number(previous.dataset.seconds)) : "Thought"}`;
       endToolGroup();
       return;
     }
     const row = el("div", "thought-static"); row.dataset.source = "withheld";
     row.dataset.provider = identity.provider; row.dataset.seconds = seconds == null ? "" : String(seconds);
     if (identity.agent) row.dataset.agent = identity.agent;
+    row.title = reasonTitle("withheld", identity.provider, identity.agent);
+    // An empty chevron slot, so the label lines up with the disclosure labels around it.
+    const slot = el("span", "thought-chev"); slot.setAttribute("aria-hidden", "true");
+    row.appendChild(slot);
+    const agentPrefix = reasonAgentPrefix(identity.agent);
+    if (agentPrefix) row.appendChild(agentPrefix);
     const label = el("span", "thought-label");
-    label.textContent = seconds == null ? "Thought" : `Thought for ${Math.round(seconds)}s`;
+    label.textContent = ` ${seconds == null ? "Thought" : reasonDuration(seconds)}`;
     row.appendChild(label);
     const prov = reasonProvenance("withheld", identity.provider);
     if (prov) row.appendChild(prov);
@@ -4497,7 +4522,8 @@
     let entry = id ? blocks.get(id) : null;
     if (!entry && identity.source === "withheld") { withheldRow(ev, identity); return; }
     if (!entry) {
-      // A replayed block whose text the history budget dropped: its header still says what it was.
+      // A block with no text here: a replayed block whose text the history budget dropped, or a live
+      // block whose deltas went to an earlier view. Its header still says what it was.
       entry = { id, ended: false, seconds: undefined, ...identity };
       if (id) blocks.set(id, entry);
       const open = turn.reasonGroup;
@@ -4508,7 +4534,9 @@
     if (entry.ended) return;
     entry.ended = true;
     entry.seconds = Number.isFinite(ev.seconds) ? Math.max(0, ev.seconds) : null;
-    const inline = ev.placement === "inline" && !entry.agent
+    const hasText = !!entry.text?.data.trim();
+    // A note is only ever made from text: an end with nothing to show keeps its collapsed header.
+    const inline = ev.placement === "inline" && !entry.agent && hasText && ev.truncated !== true
       && (entry.source === "summarized" || entry.source === "narration");
     if (entry.kind === "note") {
       if (inline) {
@@ -4516,13 +4544,21 @@
         entry.note.replaceWith(note);
         if (turn.reasonNote === entry.note) turn.reasonNote = null;
         entry.note = note;
-      } else {
-        paintReasonGroup(reasonNoteToGroup(entry));
+        return;
       }
-      return;
+      reasonNoteToGroup(entry);
     }
     if (inline && entry.group) { reasonGroupToNote(entry); return; }
+    if (!hasText || ev.truncated === true) reasonMarkMissing(entry, hasText, ev.truncated === true);
     paintReasonGroup(entry.group);
+  }
+  // Say so when a block's text is not all here, instead of expanding to an empty or silently cut body.
+  function reasonMarkMissing(entry, hasText, truncated) {
+    if (!entry.part || entry.part.querySelector(".thought-cut")) return;
+    const cut = el("span", hasText ? "thought-cut" : "thought-cut alone");
+    cut.textContent = hasText ? "… the rest of this reasoning was not kept."
+      : truncated ? "The text of this reasoning was not kept." : "The text of this reasoning is not in this view.";
+    entry.part.appendChild(cut);
   }
   // ---- end 0.40 thinking --------------------------------------------------------------------------
 

@@ -1153,8 +1153,10 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 /* Where each reasoning block came from, muted beside its header: "Thought for 9s · summarized by
    Anthropic". Short provider summaries render inline as a .thought-note (only the last paragraph
    shares a line with the " · summarized" hint); a withheld block is a static, non-interactive row. */
-.disclosure .thought-chev { display: inline-block; width: 1.1em; }
-.thought-prov { white-space: nowrap; }
+.disclosure .thought-chev, .thought-static .thought-chev { display: inline-block; width: 1.1em; }
+.thought-prov, .thought-agent { white-space: nowrap; }
+.reasoning .thought-cut { display: block; margin-top: var(--sp-1); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); white-space: normal; }
+.reasoning .thought-cut.alone { margin-top: 0; }
 .thought-static { margin-top: var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); cursor: default; }
 .thought-note { margin: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
 .thought-note > p { margin: 0 0 var(--sp-1); }
@@ -1167,6 +1169,6 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
     white-space: nowrap !important; border: 0 !important; }
 }
 @media (forced-colors: active) {
-  .thought-note, .thought-hint, .thought-static { color: CanvasText; }
+  .thought-note, .thought-hint, .thought-static, .reasoning .thought-cut { color: CanvasText; }
 }
 /* ---- end 0.40 thinking ------------------------------------------------------------------------ */
