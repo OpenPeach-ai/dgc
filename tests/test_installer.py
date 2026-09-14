@@ -1049,6 +1049,12 @@ class QaInstallerRegressions(unittest.TestCase):
         self.assertIn("2 usage error", text)
         self.assertIn("version that was active before the last switch", text)
 
+    def test_the_upgrade_guide_names_the_current_protocol(self):
+        from dgc.editor_protocol import PROTOCOL_VERSION
+        guide = (PROJECT / "docs" / "UPGRADING.md").read_text()
+        self.assertIn(f"use editor protocol v{PROTOCOL_VERSION}", guide)
+        self.assertNotIn("0.30.1", guide)
+        self.assertIn("dgc update --rollback", guide)
 
 if __name__ == "__main__":
     unittest.main()
