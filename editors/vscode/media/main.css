@@ -291,8 +291,8 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 .thinking .verb { color: var(--muted); }
 .thinking .meta { color: var(--faint); }
 .thinking.done { color: var(--faint); font-size: var(--t-xs); }
-.disclosure { cursor: pointer; border: 0; padding: 0; background: transparent; text-align: left; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
-.disclosure:hover { color: var(--muted); }
+.disclosure { cursor: pointer; border: 0; padding: 0; background: transparent; text-align: left; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); max-width: 100%; }
+.disclosure:hover { color: var(--text); }
 .reasoning { margin-top: var(--sp-1); font: var(--w-reg) var(--t-sm)/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; border-left: 2px solid var(--border-strong); padding-left: var(--sp-2); display: none; }
 .reasoning.show { display: block; }
 body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none !important; }
@@ -1411,4 +1411,25 @@ body.ask-docked #tasks-panel { display: none; }
 
 
 /* ---- 0.40 thinking ---------------------------------------------------------------------------- */
+/* Where each reasoning block came from, muted beside its header: "Thought for 9s · summarized by
+   Anthropic". Short provider summaries render inline as a .thought-note (only the last paragraph
+   shares a line with the " · summarized" hint); a withheld block is a static, non-interactive row. */
+.disclosure .thought-chev, .thought-static .thought-chev { display: inline-block; width: 1.1em; }
+.thought-prov, .thought-agent { white-space: nowrap; }
+.reasoning .thought-cut { display: block; margin-top: var(--sp-1); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); white-space: normal; }
+.reasoning .thought-cut.alone { margin-top: 0; }
+.thought-static { margin-top: var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); cursor: default; }
+.thought-note { margin: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+.thought-note > p { margin: 0 0 var(--sp-1); }
+.thought-note > p:last-of-type { display: inline; margin: 0; }
+.thought-hint { font-size: var(--t-xs); white-space: nowrap; user-select: none; }
+body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display: none !important; }
+@media (max-width: 360px) {
+  .thought-by { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;
+    margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important; border: 0 !important; }
+}
+@media (forced-colors: active) {
+  .thought-note, .thought-hint, .thought-static, .reasoning .thought-cut { color: CanvasText; }
+}
 /* ---- end 0.40 thinking ------------------------------------------------------------------------ */

@@ -1,0 +1,51 @@
+{
+ "row": "13",
+ "api_mode": "responses",
+ "base_url": "http://127.0.0.1:8000/v1",
+ "model": "gpt-oss-120b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "application/json",
+   "body": {
+    "id": "resp_k",
+    "status": "completed",
+    "usage": {},
+    "output": [
+     {
+      "type": "reasoning",
+      "id": "rs_k",
+      "summary": [],
+      "content": [
+       {
+        "type": "reasoning_text",
+        "text": "Raw chain of thought."
+       }
+      ]
+     },
+     {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+       {
+        "type": "output_text",
+        "text": "Answer."
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

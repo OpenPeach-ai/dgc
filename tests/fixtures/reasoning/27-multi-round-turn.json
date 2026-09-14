@@ -1,0 +1,77 @@
+{
+ "row": "27",
+ "api_mode": "ollama",
+ "base_url": "http://127.0.0.1:11434",
+ "model": "qwen3.8:27b",
+ "private": true,
+ "requests": [
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Round 1 thinking.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"function\": {\"name\": \"glob\", \"arguments\": {\"pattern\": \"*\"}}}]}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Round 2 thinking.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"function\": {\"name\": \"glob\", \"arguments\": {\"pattern\": \"*.md\"}}}]}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Round 3 thinking.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"function\": {\"name\": \"glob\", \"arguments\": {\"pattern\": \"**/*\"}}}]}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  },
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"All three rounds done.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "raw",
+    "",
+    "collapsed"
+   ],
+   [
+    "raw",
+    "",
+    "collapsed"
+   ],
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ],
+  "live_ids": [
+   "t1:think1",
+   "t1:think2",
+   "t1:think3"
+  ],
+  "history_ids": [
+   "h1:think1",
+   "h1:think2",
+   "h1:think3"
+  ]
+ }
+}

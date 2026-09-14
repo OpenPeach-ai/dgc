@@ -176,8 +176,10 @@ class TurnProseIdentityTests(unittest.TestCase):
         self.assertEqual(len(self.events("text_delta")), 500)
 
     def test_activity_names_each_step_and_repeats_none_of_them(self):
-        self.ui.on_thinking("…")
-        self.ui.on_thinking("…")
+        from dgc.reasoning import ReasoningBlock
+        thought = ReasoningBlock(key="r1", source="raw")
+        self.ui.on_thinking("…", thought)
+        self.ui.on_thinking("…", thought)
         self.ui.tool_call("read_file", {"path": "a.py"}, "c1")
         self.ui.tool_result("read_file", "contents", "c1")
         self.ui.tool_call("read_file", {"path": "b.py"}, "c2")     # a new target is a new step

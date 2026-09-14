@@ -163,15 +163,37 @@ class UI:
         self.console.file.flush()  # stream live — rich/stdout otherwise buffers until a newline
         self._streamed = True
 
-    def on_thinking(self, chunk: str) -> None:
+    def on_thinking(self, chunk: str, block=None) -> None:
         self.stop_working()
-        if not self._thinking:
-            self.console.print("\n[dim italic]· thinking…[/] ", end="")
+        key = getattr(block, "key", None)
+        if not self._thinking or (block is not None and key != getattr(self, "_thinking_key", None)):
+            if self._thinking:
+                self.console.print()
+            from .reasoning import cli_thinking_label
+            label = cli_thinking_label(getattr(block, "source", "unknown"),
+                                       getattr(block, "provider", ""))
+            self.console.print(f"\n[dim italic]{_markup_literal(label)}[/] ", end="")
             self._thinking = True
+        self._thinking_key = key
         self.console.print(terminal_safe_text(chunk), end="", markup=False, highlight=False,
                            style="dim italic")
         self.console.file.flush()
         self._streamed = True
+
+    def on_thinking_end(self, block) -> None:
+        source = getattr(block, "source", "unknown")
+        if source == "withheld":
+            self.stop_working()
+            if self._streamed:
+                self.console.print()
+            from .reasoning import cli_thinking_label
+            label = cli_thinking_label(source, getattr(block, "provider", ""))
+            self.console.print(f"[dim italic]{_markup_literal(label)}[/]", highlight=False)
+            self._streamed = False
+            self._thinking = False
+        elif source == "narration" and getattr(block, "placement", "") == "inline":
+            self.console.print(" · summarized", end="", markup=False, highlight=False, style="dim")
+            self.console.file.flush()
 
     def end_stream(self, phase: str = "") -> None:
         # The REPL prints one prose stream per round and has no turn envelope to designate an

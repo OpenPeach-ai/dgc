@@ -532,7 +532,9 @@
           "required": [
             "type",
             "seq",
-            "text"
+            "text",
+            "block",
+            "source"
           ],
           "additionalProperties": false
         },

@@ -33,6 +33,7 @@ from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEG
 from .permissions import Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
+from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
@@ -57,6 +58,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "capability_cache_ttl_s", "search_provider", "search_url",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
+    "thinking_inline", "thinking_inline_max_chars",
 })
 # Commands that only read state. Every other command is the user doing something, so a monitor
 # wake-up waits one wake delay after it -- and never starts while the command is being handled.
@@ -106,6 +108,7 @@ _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "ultra_mode", "monitor_wake",
+    "thinking_inline",
 })
 _CONFIG_STRING_LIMITS = {
     "subagent_model": 512,
@@ -138,6 +141,7 @@ _CONFIG_INTEGER_RANGES = {
     "monitor_wake_delay_s": (1, 300),
     "monitor_wake_cooldown_s": (1, 3600),
     "monitor_max_consecutive_wakes": (1, 100),
+    "thinking_inline_max_chars": (0, 1000),
 }
 
 
@@ -503,6 +507,12 @@ class HeadlessUI:
         self._model_wait_saved = None   # the activity a "no response from the model" notice replaced
         self._model_wait_key = None     # the notice on screen, while it is still the latest word
         self._model_waits = {}          # origin (None = the main agent, else a sub-agent) -> notice key
+        self._reasoning_ids: dict = {}  # tracker block key -> this turn's wire id "{turn}:think{n}"
+        self._reasoning_n = 0
+        self._reasoning_open: dict = {}  # wire id -> identity of a block with deltas and no end
+        self._reasoning_fallback = None  # the unknown block a one-argument on_thinking caller opened
+        self.reasoning_fallback_fired = 0     # observable: in-tree callers never use either path
+        self.reasoning_safety_net_fired = 0
 
     def reset_turn_messages(self) -> None:
         """Start a new turn's prose numbering and forget the previous turn's designation."""
@@ -514,6 +524,10 @@ class HeadlessUI:
         self._model_wait_saved = None
         self._model_wait_key = None
         self._model_waits = {}
+        self._reasoning_ids = {}
+        self._reasoning_n = 0
+        self._reasoning_open = {}
+        self._reasoning_fallback = None
 
     @property
     def final_message_id(self):
@@ -527,13 +541,82 @@ class HeadlessUI:
 
     # streaming ----------------------------------------------------------------
     def on_text(self, chunk: str) -> None:
+        self._close_reasoning_fallback()
         self.turn_activity("responding", "Responding")
         self._stream_open = True
         self.em.emit("text_delta", text=chunk)
 
-    def on_thinking(self, chunk: str) -> None:
+    # reasoning (v14 thinking provenance) ----------------------------------------------------------
+    def _reasoning_wire_fields(self, block) -> dict:
+        ids = self.__dict__.setdefault("_reasoning_ids", {})
+        key = str(getattr(block, "key", "") or "")
+        wire_id = ids.get(key)
+        if wire_id is None:
+            self._reasoning_n = int(self.__dict__.get("_reasoning_n", 0) or 0) + 1
+            wire_id = ids[key] = f"{self.turn_id or 'x'}:think{self._reasoning_n}"
+        source, provider = reasoning_mod.wire_identity(getattr(block, "source", ""),
+                                                       getattr(block, "provider", ""))
+        fields = {"block": wire_id, "source": source}
+        if provider:
+            fields["provider"] = provider
+        agent = getattr(block, "agent", "")
+        if isinstance(agent, str) and agent:
+            fields["agent"] = agent[:128]
+        return fields
+
+    def on_thinking(self, chunk: str, block=None) -> None:
         self.turn_activity("thinking", "Thinking")
-        self.em.emit("thinking_delta", text=chunk)
+        if block is None:
+            block = self.__dict__.get("_reasoning_fallback")
+            if block is None:
+                # An out-of-tree caller that predates provenance: one unknown block, closed
+                # (collapsed) by the next prose, tool call, stream end or turn end.
+                self.reasoning_fallback_fired = int(self.__dict__.get("reasoning_fallback_fired", 0)) + 1
+                self._reasoning_n_fallback = int(self.__dict__.get("_reasoning_n_fallback", 0)) + 1
+                block = reasoning_mod.ReasoningBlock(key=f"legacy{self._reasoning_n_fallback}")
+                self._reasoning_fallback = block
+                reasoning_mod._log_once(("headless", "block=None"),
+                                        "thinking without a reasoning block: labelled unknown")
+        fields = self._reasoning_wire_fields(block)
+        self.__dict__.setdefault("_reasoning_open", {})[fields["block"]] = fields
+        self.em.emit("thinking_delta", text=chunk, **fields)
+
+    def on_thinking_end(self, block) -> None:
+        fields = self._reasoning_wire_fields(block)
+        self.__dict__.setdefault("_reasoning_open", {}).pop(fields["block"], None)
+        placement = getattr(block, "placement", "collapsed")
+        if (placement != "inline" or fields["source"] not in reasoning_mod.INLINE_SOURCES
+                or "agent" in fields):
+            placement = "collapsed"
+        extra = {}
+        seconds = reasoning_mod.finite_seconds(getattr(block, "seconds", None))
+        if seconds is not None:
+            extra["seconds"] = seconds
+        self.em.emit("thinking_end", **fields, placement=placement, **extra)
+
+    def _close_reasoning_fallback(self) -> None:
+        block = self.__dict__.get("_reasoning_fallback")
+        if block is not None:
+            self._reasoning_fallback = None
+            self.on_thinking_end(block)
+
+    def close_open_reasoning(self) -> int:
+        """The safety net before ``turn_end`` and every ``stream_end``: a block that streamed but was
+        never closed gets its one ``thinking_end`` (collapsed). Returns how many it closed; in-tree
+        trackers always close their own blocks, and tests assert this stays zero."""
+        closed = 0
+        if self.__dict__.get("_reasoning_fallback") is not None:
+            self._close_reasoning_fallback()
+            closed += 1
+        still_open = self.__dict__.setdefault("_reasoning_open", {})
+        for wire_id, fields in list(still_open.items()):
+            still_open.pop(wire_id, None)
+            self.reasoning_safety_net_fired = int(self.__dict__.get("reasoning_safety_net_fired", 0)) + 1
+            reasoning_mod._log_once(("headless", "safety-net"),
+                                    "a reasoning block ended without thinking_end; closed collapsed")
+            self.em.emit("thinking_end", **fields, placement="collapsed")
+            closed += 1
+        return closed
 
     def end_stream(self, phase: str = "") -> None:
         """Close a prose block, naming it and saying what the loop already knows about it.
@@ -542,6 +625,7 @@ class HeadlessUI:
         designate a block the panel has no node for. A round that produced only tool calls closes
         an empty stream and is simply not a message.
         """
+        self.close_open_reasoning()
         fields: dict = {}
         if self._stream_open and self.turn_id:
             self._message_n += 1
@@ -723,6 +807,7 @@ class HeadlessUI:
 
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
+        self._close_reasoning_fallback()
         summary = arg_summary(name, args)
         self.turn_activity("tool", activity_verb(name), summary)
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
@@ -1334,6 +1419,9 @@ class Backend:
                     final_message_id = getattr(self.ui, "final_message_id", None)
                     if not isinstance(final_message_id, str):
                         final_message_id = None
+                    close_reasoning = getattr(self.ui, "close_open_reasoning", None)
+                    if callable(close_reasoning):
+                        close_reasoning()       # no reasoning block outlives its turn
                     self.em.emit("turn_end", turn_id=tid,
                                  reason="cancelled" if cancelled else ("error" if failed else "completed"),
                                  token_estimate=est, final_message_id=final_message_id)
@@ -2091,6 +2179,9 @@ class Backend:
                      sandbox=bool(c.get("sandbox", False)),
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
+                     thinking_inline=c.get("thinking_inline", True) is not False,
+                     thinking_inline_max_chars=reasoning_mod.clamp_max_chars(
+                         c.get("thinking_inline_max_chars", reasoning_mod.INLINE_MAX_CHARS_DEFAULT)),
                      preserve_thinking=bool(c.get("preserve_thinking", False)),
                      ultra_mode=bool(c.get("ultra_mode", False)),
                      code_action=bool(c.get("code_action", False)),
@@ -3946,18 +4037,94 @@ class Backend:
     # ---- 0.40 thinking ----------------------------------------------------------------------------
     def _history_begin_reasoning(self) -> None:
         """Reset per-call reasoning replay state (budget, block counters)."""
+        self._history_reasoning_cache = (None, [])
+        config = getattr(self, "config", None) or getattr(getattr(self, "agent", None), "config", None)
+        get = getattr(config, "get", None)
+        # Placement is recomputed from the settings in force now, so turning inline off also
+        # applies to chats saved earlier.
+        self._history_reasoning_settings = (
+            (get("thinking_inline", True) is not False) if callable(get) else True,
+            reasoning_mod.clamp_max_chars(
+                get("thinking_inline_max_chars", reasoning_mod.INLINE_MAX_CHARS_DEFAULT)
+                if callable(get) else reasoning_mod.INLINE_MAX_CHARS_DEFAULT))
 
     def _history_display_text(self, message: dict, text: str) -> str:
         """The assistant text as displayed (a thinking splice marker stripped)."""
-        return text
+        return reasoning_mod.display_text(message, text)
 
     def _history_reasoning_items(self, message: dict, turn: dict, *, after_text: bool) -> list:
         """``thinking_delta``/``thinking_end`` items for the reasoning blocks saved on an assistant
         message, before (``after_text`` False) or after its text. Block ids use ``turn["r"]``."""
-        return []
+        cached_id, entries = getattr(self, "_history_reasoning_cache", (None, []))
+        if cached_id is not message:
+            try:
+                entries = reasoning_mod.saved_reasoning(message)
+            except Exception:
+                entries = []             # an untrusted session file never breaks history
+            self._history_reasoning_cache = (message, entries)
+        if not entries or not isinstance(turn, dict):
+            return []
+        inline_enabled, max_chars = getattr(self, "_history_reasoning_settings",
+                                            (True, reasoning_mod.INLINE_MAX_CHARS_DEFAULT))
+        items: list = []
+        for entry in entries:
+            if bool(entry.get("after_text")) != bool(after_text):
+                continue
+            turn["r"] = int(turn.get("r", 0) or 0) + 1
+            block_id = f'{turn["id"]}:think{turn["r"]}'
+            source, provider = reasoning_mod.wire_identity(entry.get("source"), entry.get("provider"))
+            identity = {"block": block_id, "source": source}
+            if provider:
+                identity["provider"] = provider
+            full = str(entry.get("text") or "")
+            text = full[:reasoning_mod.REPLAY_BLOCK_CHARS]
+            truncated = bool(entry.get("truncated")) or len(full) > len(text)
+            if source != "withheld" and text:
+                items.append({"type": "thinking_delta", "text": text, **identity})
+            end = {"type": "thinking_end", **identity,
+                   "placement": reasoning_mod.placement(
+                       source, full, round_called_tools=entry.get("tools") is True,
+                       inline_enabled=inline_enabled, max_chars=max_chars, from_subagent=False)}
+            seconds = reasoning_mod.finite_seconds(entry.get("seconds"))
+            if seconds is not None:
+                end["seconds"] = seconds
+            if truncated or (source != "withheld" and not text):
+                end["truncated"] = True
+            items.append(end)
+        return items
 
     def _history_finish_reasoning(self, items: list) -> None:
         """Apply the history reasoning budget across the whole payload, newest first."""
+        budget = reasoning_mod.REPLAY_PAYLOAD_CHARS
+        ends: dict = {}
+        drop: set = set()
+        for index in range(len(items) - 1, -1, -1):
+            item = items[index]
+            kind = item.get("type") if isinstance(item, dict) else None
+            if kind == "thinking_end":
+                ends[item.get("block")] = item
+                continue
+            if kind != "thinking_delta":
+                continue
+            text = str(item.get("text") or "")
+            if len(text) <= budget:
+                budget -= len(text)
+                continue
+            # Over budget: the header and label survive; the text keeps a first slice while any
+            # budget is left, and nothing once it is spent.
+            stub = text[:min(reasoning_mod.REPLAY_STUB_CHARS, budget)]
+            budget -= len(stub)
+            end = ends.get(item.get("block"))
+            if end is not None:
+                end["truncated"] = True
+                if end.get("placement") == "inline":
+                    end["placement"] = "collapsed"
+            if stub:
+                item["text"] = stub
+            else:
+                drop.add(index)
+        if drop:
+            items[:] = [item for index, item in enumerate(items) if index not in drop]
     # ---- end 0.40 thinking ------------------------------------------------------------------------
 
 

@@ -1,0 +1,76 @@
+{
+ "row": "seconds",
+ "api_mode": "responses",
+ "base_url": "https://api.openai.com/v1",
+ "model": "gpt-5",
+ "private": false,
+ "requests": [
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_1\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_s\", \"summary\": []}}",
+    {
+     "advance": 0.5
+    },
+    "data: {\"type\": \"response.reasoning_summary_part.added\", \"item_id\": \"rs_s\", \"output_index\": 0, \"summary_index\": 0}",
+    "data: {\"type\": \"response.reasoning_summary_text.delta\", \"item_id\": \"rs_s\", \"output_index\": 0, \"summary_index\": 0, \"delta\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.reasoning_summary_part.done\", \"item_id\": \"rs_s\", \"output_index\": 0, \"summary_index\": 0}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"reasoning\", \"id\": \"rs_s\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}]}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 1, \"item\": {\"type\": \"function_call\", \"id\": \"fc_call_s\", \"call_id\": \"call_s\", \"name\": \"glob\", \"arguments\": \"\"}}",
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"\"}",
+    {
+     "advance": 1.0
+    },
+    "data: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc_call_s\", \"output_index\": 1, \"delta\": \"{\\\"pattern\\\": \\\"*\\\"}\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 1, \"item\": {\"type\": \"function_call\", \"id\": \"fc_call_s\", \"call_id\": \"call_s\", \"name\": \"glob\", \"arguments\": \"{\\\"pattern\\\": \\\"*\\\"}\", \"status\": \"completed\"}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_1\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"reasoning\", \"id\": \"rs_s\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"I compared the two gate implementations line by line. The first one compares with a strict greater-than, which drops the boundary value; the second uses greater-or-equal but also reads the threshold from a stale cache. The failing test covers exactly the boundary, so the first change is the real fix, and the cache is a separate issue worth a follow-up note.\"}]}, {\"type\": \"function_call\", \"id\": \"fc_call_s\", \"call_id\": \"call_s\", \"name\": \"glob\", \"arguments\": \"{\\\"pattern\\\": \\\"*\\\"}\", \"status\": \"completed\"}]}}"
+   ]
+  },
+  {
+   "match": "/responses",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "data: {\"type\": \"response.created\", \"response\": {\"id\": \"resp_s2\"}}",
+    "data: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_s2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": []}}",
+    "data: {\"type\": \"response.output_text.delta\", \"item_id\": \"msg_resp_s2\", \"output_index\": 0, \"content_index\": 0, \"delta\": \"Done.\"}",
+    "data: {\"type\": \"response.output_item.done\", \"output_index\": 0, \"item\": {\"type\": \"message\", \"id\": \"msg_resp_s2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Done.\"}]}}",
+    "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp_s2\", \"status\": \"completed\", \"usage\": {}, \"output\": [{\"type\": \"message\", \"id\": \"msg_resp_s2\", \"role\": \"assistant\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"text\": \"Done.\"}]}]}}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "summarized",
+    "openai",
+    "collapsed"
+   ]
+  ],
+  "seconds": [
+   1.5
+  ]
+ }
+}

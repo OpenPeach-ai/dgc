@@ -453,13 +453,13 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "types": [
         "string"
       ],
-      "required": false
+      "required": true
     },
     "source": {
       "types": [
         "string"
       ],
-      "required": false,
+      "required": true,
       "enum": [
         "raw",
         "summarized",

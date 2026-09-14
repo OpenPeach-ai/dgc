@@ -1,0 +1,70 @@
+{
+ "row": "25",
+ "api_mode": "anthropic",
+ "base_url": "https://api.anthropic.com/v1",
+ "model": "claude-opus-4-8",
+ "private": false,
+ "config": {
+  "thinking": "high",
+  "fallback_model": "qwen3.8:27b",
+  "fallback_base_url": "http://127.0.0.1:11434",
+  "fallback_api_mode": "ollama"
+ },
+ "requests": [
+  {
+   "match": "/messages",
+   "status": 200,
+   "content_type": "text/event-stream",
+   "lines": [
+    "event: message_start",
+    "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_1\", \"usage\": {\"input_tokens\": 3}}}",
+    "",
+    "event: content_block_start",
+    "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"thinking\", \"thinking\": \"\"}}",
+    "",
+    {
+     "advance": 0.5
+    },
+    "event: content_block_delta",
+    "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"thinking_delta\", \"thinking\": \"Starting on Claude.\"}}",
+    "",
+    {
+     "advance": 0.5
+    },
+    "event: content_block_delta",
+    "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"signature_delta\", \"signature\": \"sig-0\"}}",
+    "",
+    "event: content_block_stop",
+    "data: {\"type\": \"content_block_stop\", \"index\": 0}",
+    "",
+    "event: error",
+    "data: {\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\", \"message\": \"Stream rejected\"}}",
+    ""
+   ]
+  },
+  {
+   "match": "/api/chat",
+   "status": 200,
+   "content_type": "application/x-ndjson",
+   "lines": [
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"thinking\": \"Continuing locally.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"Done.\"}, \"done\": false}",
+    "{\"model\": \"m\", \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\"}"
+   ]
+  }
+ ],
+ "expect": {
+  "blocks": [
+   [
+    "summarized",
+    "anthropic",
+    "collapsed"
+   ],
+   [
+    "raw",
+    "",
+    "collapsed"
+   ]
+  ]
+ }
+}

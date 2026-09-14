@@ -18,6 +18,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
+from . import reasoning as _reasoning
 from .image_views import parse_dimensions as _image_dimensions   # one header parser, shared
 from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
                           bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
@@ -833,6 +834,31 @@ _PROVIDER_ADAPTERS = {
     "lmstudio": ProviderAdapter("lmstudio", ProviderCapabilities()),
     "compat": ProviderAdapter("compat", ProviderCapabilities()),
 }
+
+
+def _responses_reasoning_has_text(item: dict) -> bool:
+    """A Responses reasoning output item carries readable text (a summary or reasoning_text)."""
+    for part in list(item.get("summary") or []) + list(item.get("content") or []):
+        if isinstance(part, dict) and str(part.get("text") or "").strip():
+            return True
+    return False
+
+
+class _ThinkingParts:
+    """``ChatResult.thinking`` keeps every reasoning part of one generation, joined with a blank line
+    where the part changes (a new summary part, a new block, tags after a native field)."""
+
+    __slots__ = ("last",)
+
+    def __init__(self):
+        self.last = None
+
+    def add(self, result, part: str, chunk: str) -> None:
+        if (self.last is not None and part != self.last and result.thinking
+                and not result.thinking.endswith("\n\n")):
+            result.thinking += "\n\n"
+        self.last = part
+        result.thinking += chunk
 
 
 class _ThinkFilter:
@@ -1918,6 +1944,28 @@ class LLMClient:
         except Exception:
             pass
 
+    # ---- thinking provenance --------------------------------------------------------------------------
+    def _next_reasoning_attempt(self, requested_display: str = "") -> int:
+        """One more HTTP attempt that may stream reasoning. Part keys carry the attempt number, so
+        an overthink re-POST, a stall retry, a pause_turn continuation or the auto switch to Chat
+        Completions never appends into an earlier attempt's block. ``requested_display`` is what
+        this attempt really asked Anthropic for ("summarized" or "")."""
+        attempt = int(self.__dict__.get("_reasoning_attempt", 0) or 0) + 1
+        self._reasoning_attempt = attempt
+        self._reasoning_display = str(requested_display or "")
+        return attempt
+
+    def _reasoning_origin(self, channel: str, local: str, *, api_mode: str, event: str = "delta",
+                          t_start: float | None = None) -> _reasoning.ReasoningOrigin:
+        resolved = _reasoning.resolve_source(
+            api_mode=api_mode, channel=channel, base_url=str(getattr(self, "base_url", "") or ""),
+            model=str(getattr(self, "model", "") or ""),
+            requested_display=str(self.__dict__.get("_reasoning_display", "") or ""))
+        attempt = int(self.__dict__.get("_reasoning_attempt", 0) or 0)
+        return _reasoning.ReasoningOrigin(
+            source=resolved.source, provider=resolved.provider, private=resolved.private,
+            part=f"{attempt}:{local}", event=event, t_start=t_start)
+
     @staticmethod
     def _anthropic_content(content) -> list[dict]:
         """Translate DGC text/image content into Claude Messages content blocks."""
@@ -2151,13 +2199,17 @@ class LLMClient:
                     block["signature"] = str(source["signature"])
                     provider_content.append(block)
                 if emit_complete and thinking:
+                    if result.thinking:
+                        result.thinking += "\n\n"
                     result.thinking += thinking
                     if on_thinking:
-                        on_thinking(thinking)
+                        on_thinking(thinking, ("thinking", index))
             elif kind == "redacted_thinking":
                 if retain_provider_state:
                     provider_content.append({k: copy.deepcopy(v) for k, v in source.items()
                                              if not str(k).startswith("_")})
+                if emit_complete and on_thinking:
+                    on_thinking("", ("redacted", index))
             elif kind in ("tool_use", "server_tool_use"):
                 raw = source.get("_input_json", "")
                 if (not raw and source.get("input") is not None
@@ -2216,6 +2268,7 @@ class LLMClient:
         return result
 
     def _consume_anthropic_json(self, obj: dict, on_text, on_thinking) -> ChatResult:
+        on_thinking = _reasoning.origin_callback(on_thinking)
         if not isinstance(obj, dict):
             raise LLMError("Anthropic Messages emitted a non-object response")
         if obj.get("type") == "error" or obj.get("error"):
@@ -2240,13 +2293,26 @@ class LLMClient:
                            if terminal else "incomplete"),
             usage=obj.get("usage") or {},
         )
+
+        def complete_thinking(text: str, where: tuple) -> None:
+            kind, index = where
+            if kind == "redacted":
+                on_thinking("", self._reasoning_origin(
+                    "anthropic.redacted", f"a{index}", api_mode="anthropic", event="withheld"))
+                return
+            origin = self._reasoning_origin("anthropic.thinking", f"a{index}", api_mode="anthropic")
+            on_thinking(text, origin)
+            on_thinking("", self._reasoning_origin(
+                "anthropic.thinking", f"a{index}", api_mode="anthropic", event="stop"))
+
         return self._anthropic_result_from_blocks(
-            blocks, result, on_text, on_thinking, emit_complete=True,
-            retain_provider_state=terminal)
+            blocks, result, on_text, complete_thinking if on_thinking else None,
+            emit_complete=True, retain_provider_state=terminal)
 
     def _consume_anthropic(self, response: requests.Response, on_text, on_thinking,
                            cancel=None, think_budget: int = 0,
                            watch: RequestWatch | None = None) -> ChatResult:
+        on_thinking = _reasoning.origin_callback(on_thinking)
         if ("application/json" in response.headers.get("Content-Type", "").lower()
                 and "text/event-stream" not in response.headers.get("Content-Type", "").lower()):
             self._note_non_streaming(response)
@@ -2259,6 +2325,19 @@ class LLMClient:
             return self._consume_anthropic_json(value, on_text, on_thinking)
         result = ChatResult()
         blocks: dict[int, dict] = {}
+        thinking_parts = _ThinkingParts()
+        block_started: dict[int, float] = {}    # reasoning block index -> content_block_start stamp
+        # message_start, then each content_block_stop: a redacted_thinking block arrives whole at its
+        # start, so the time it took is the gap since the previous boundary, not start -> stop.
+        last_boundary: float | None = None
+
+        def think(index: int, chunk: str) -> None:
+            thinking_parts.add(result, f"a{index}", chunk)
+            if on_thinking:
+                on_thinking(chunk, self._reasoning_origin(
+                    "anthropic.thinking", f"a{index}", api_mode="anthropic",
+                    t_start=block_started.get(index)))
+
         produced = False
         message_started = False
         message_stopped = False
@@ -2309,6 +2388,7 @@ class LLMClient:
                         raise LLMError("Anthropic message_start omitted its message object")
                     result.response_id = str(message.get("id") or "")[:512]
                     message_started = True
+                    last_boundary = _reasoning.now()
                     if isinstance(message.get("usage"), dict):
                         result.usage.update(message["usage"])
                 elif typ == "content_block_start":
@@ -2327,6 +2407,11 @@ class LLMClient:
                         raise LLMError("Anthropic content block start is invalid")
                     blocks[index] = copy.deepcopy(block)
                     active_blocks.add(index)
+                    if kind == "thinking":
+                        block_started[index] = _reasoning.now()
+                    elif kind == "redacted_thinking":
+                        block_started[index] = (last_boundary if last_boundary is not None
+                                                else _reasoning.now())
                     if kind in ("tool_use", "server_tool_use"):
                         blocks[index]["_input_json"] = ""
                         produced = True
@@ -2338,9 +2423,8 @@ class LLMClient:
                             on_text(initial)
                     elif kind == "thinking":
                         initial = str(block.get("thinking") or "")
-                        result.thinking += initial
-                        if on_thinking and initial:
-                            on_thinking(initial)
+                        if initial:
+                            think(index, initial)
                 elif typ == "content_block_delta":
                     try:
                         index = int(event.get("index"))
@@ -2369,9 +2453,8 @@ class LLMClient:
                             raise LLMError("Anthropic thinking delta targeted a non-thinking block")
                         chunk = str(delta.get("thinking") or "")
                         block["thinking"] = str(block.get("thinking") or "") + chunk
-                        result.thinking += chunk
-                        if on_thinking and chunk:
-                            on_thinking(chunk)
+                        if chunk:
+                            think(index, chunk)
                     elif delta_type == "signature_delta":
                         if block.get("type") != "thinking":
                             raise LLMError("Anthropic signature delta targeted a non-thinking block")
@@ -2417,6 +2500,16 @@ class LLMClient:
                     if index not in active_blocks:
                         raise LLMError("Anthropic content stop has no active block")
                     active_blocks.remove(index)
+                    last_boundary = _reasoning.now()
+                    stopped_kind = str(blocks[index].get("type") or "")
+                    if on_thinking and stopped_kind == "thinking" and blocks[index].get("thinking"):
+                        on_thinking("", self._reasoning_origin(
+                            "anthropic.thinking", f"a{index}", api_mode="anthropic", event="stop"))
+                    elif on_thinking and stopped_kind == "redacted_thinking":
+                        # Readable text never comes; the row keeps its place before later prose.
+                        on_thinking("", self._reasoning_origin(
+                            "anthropic.redacted", f"a{index}", api_mode="anthropic",
+                            event="withheld", t_start=block_started.get(index)))
                 elif typ == "message_stop":
                     if not message_started or active_blocks or message_stopped:
                         raise LLMError("Anthropic message_stop arrived out of sequence")
@@ -2613,6 +2706,9 @@ class LLMClient:
                                          status, body, f"{self.base_url}/messages", transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
+            self._next_reasoning_attempt(
+                str((payload.get("thinking") or {}).get("display") or "")
+                if isinstance(payload.get("thinking"), dict) else "")
             try:
                 result = self._consume_anthropic(
                     response, on_text, on_thinking, cancel, think_budget=budget, watch=watch)
@@ -2743,8 +2839,16 @@ class LLMClient:
     def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
                         think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
         """Consume native Ollama JSON/NDJSON without translating it through SSE semantics."""
+        on_thinking = _reasoning.origin_callback(on_thinking)
         result = ChatResult()
         filt = _ThinkFilter()
+        thinking_parts = _ThinkingParts()
+
+        def think(channel: str, local: str, chunk: str) -> None:
+            thinking_parts.add(result, local, chunk)
+            if on_thinking:
+                on_thinking(chunk, self._reasoning_origin(channel, local, api_mode="ollama"))
+
         produced = False
         native_content = ""
         native_thinking = ""
@@ -2772,17 +2876,13 @@ class LLMClient:
             reasoning = str(message.get("thinking") or "")
             if reasoning:
                 native_thinking += reasoning
-                result.thinking += reasoning
-                if on_thinking:
-                    on_thinking(reasoning)
+                think("ollama.thinking", "ol", reasoning)
             content = str(message.get("content") or "")
             if content:
                 native_content += content
                 for kind, chunk in filt.feed(content):
                     if kind == "think":
-                        result.thinking += chunk
-                        if on_thinking:
-                            on_thinking(chunk)
+                        think("tags", "tags", chunk)
                     else:
                         result.content += chunk
                         # Some local templates put reasoning inside ``<think>`` tags in the
@@ -2924,9 +3024,7 @@ class LLMClient:
             result.interruption = _interruption_of(watch, result.finish_reason, "ollama")
         for kind, chunk in filt.flush():
             if kind == "think":
-                result.thinking += chunk
-                if on_thinking:
-                    on_thinking(chunk)
+                think("tags", "tags", chunk)
             else:
                 result.content += chunk
                 if on_text:
@@ -3133,6 +3231,7 @@ class LLMClient:
                                          status, body, self._ollama_url, transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
+            self._next_reasoning_attempt()
             try:
                 result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget,
                                               watch=watch)
@@ -3373,6 +3472,7 @@ class LLMClient:
                                          status, body, self._url, transient + 1)
             budget = self.think_budget_chars
             self._usage_opened()
+            self._next_reasoning_attempt()
             if usage_retry:
                 # The same endpoint accepted the request once stream_options was gone: that is
                 # proof it refuses the field, so stop asking it for the rest of this process.
@@ -3822,6 +3922,7 @@ class LLMClient:
                 raise self._answer_error(f"HTTP {status} from Responses API: {body}",
                                          status, body, f"{self.base_url}/responses", transient + 1)
             self._usage_opened()
+            self._next_reasoning_attempt()
             try:
                 result = self._consume_responses(response, on_text, on_thinking, cancel,
                                                  watch=watch)
@@ -3848,6 +3949,7 @@ class LLMClient:
 
     def _consume_responses(self, response: requests.Response, on_text, on_thinking,
                            cancel=None, watch: RequestWatch | None = None) -> ChatResult:
+        on_thinking = _reasoning.origin_callback(on_thinking)
         if "application/json" in response.headers.get("Content-Type", ""):
             self._note_non_streaming(response)
             value, finish = _bounded_json_lifecycle(
@@ -3859,6 +3961,25 @@ class LLMClient:
             return self._consume_responses_json(value, on_text, on_thinking)
         result = ChatResult()
         calls: dict[str, dict] = {}
+        thinking_parts = _ThinkingParts()
+        reasoning_started: dict[str, float] = {}   # reasoning item -> output_item.added stamp
+        reasoning_texted: set[str] = set()          # reasoning items that streamed readable text
+        reasoning_last_part: dict[str, str] = {}    # reasoning item -> its last streamed part
+
+        def reasoning_item(event: dict, item: dict | None = None) -> str:
+            identifier = (item or {}).get("id") if item is not None else event.get("item_id")
+            if identifier:
+                return str(identifier)[:200]
+            return f"#{event.get('output_index')}"
+
+        def think(channel: str, item_key: str, local: str, chunk: str) -> None:
+            thinking_parts.add(result, local, chunk)
+            reasoning_texted.add(item_key)
+            reasoning_last_part[item_key] = local
+            if on_thinking:
+                on_thinking(chunk, self._reasoning_origin(
+                    channel, local, api_mode="responses", t_start=reasoning_started.get(item_key)))
+
         # `response.output_item.done` may arrive in a different completion order from its declared
         # output position. Preserve both coordinates so stateless replay follows `response.output`,
         # never network timing. The terminal response's complete output array remains authoritative
@@ -3906,14 +4027,53 @@ class LLMClient:
                     delta = str(event.get("delta") or "")
                     result.content += delta
                     if on_text and delta: on_text(delta)
-                elif "reasoning" in typ and typ.endswith(".delta"):
+                elif typ == "response.reasoning_summary_text.delta":
                     delta = str(event.get("delta") or "")
-                    result.thinking += delta
-                    if on_thinking and delta: on_thinking(delta)
+                    key = reasoning_item(event)
+                    if delta:
+                        think("responses.summary", key,
+                              f"rs:{key}:{event.get('summary_index', 0)}", delta)
+                elif typ == "response.reasoning_text.delta":
+                    delta = str(event.get("delta") or "")
+                    key = reasoning_item(event)
+                    if delta:
+                        think("responses.reasoning_text", key,
+                              f"rt:{key}:{event.get('content_index', 0)}", delta)
+                elif "reasoning" in typ and typ.endswith(".delta"):
+                    # A reasoning-looking event this parser does not know proves nothing.
+                    delta = str(event.get("delta") or "")
+                    key = reasoning_item(event)
+                    if delta:
+                        think("responses.other", key, f"ro:{typ[:80]}:{key}", delta)
+                elif typ in ("response.reasoning_summary_part.done", "response.reasoning_text.done"):
+                    key = reasoning_item(event)
+                    local = (f"rs:{key}:{event.get('summary_index', 0)}"
+                             if typ == "response.reasoning_summary_part.done"
+                             else f"rt:{key}:{event.get('content_index', 0)}")
+                    if on_thinking and reasoning_last_part.get(key) == local:
+                        channel = ("responses.summary" if local.startswith("rs:")
+                                   else "responses.reasoning_text")
+                        on_thinking("", self._reasoning_origin(
+                            channel, local, api_mode="responses", event="stop"))
                 elif typ in ("response.output_item.added", "response.output_item.done"):
                     item = event.get("item") or {}
                     if not isinstance(item, dict):
                         raise LLMError("Responses API emitted a malformed output item")
+                    if item.get("type") == "reasoning":
+                        key = reasoning_item(event, item)
+                        if typ == "response.output_item.added":
+                            reasoning_started.setdefault(key, _reasoning.now())
+                        elif on_thinking and key in reasoning_texted:
+                            local = reasoning_last_part.get(key, "")
+                            channel = ("responses.summary" if local.startswith("rs:") else
+                                       "responses.reasoning_text" if local.startswith("rt:")
+                                       else "responses.other")
+                            on_thinking("", self._reasoning_origin(
+                                channel, local, api_mode="responses", event="stop"))
+                        elif on_thinking and not _responses_reasoning_has_text(item):
+                            on_thinking("", self._reasoning_origin(
+                                "responses.no_text", f"rw:{key}", api_mode="responses",
+                                event="withheld", t_start=reasoning_started.get(key)))
                     if typ == "response.output_item.done" and item:
                         output_index = _tool_call_index(event.get("output_index"))
                         key = (f"index:{output_index}" if output_index is not None else
@@ -4075,6 +4235,7 @@ class LLMClient:
         return result
 
     def _consume_responses_json(self, obj: dict, on_text, on_thinking) -> ChatResult:
+        on_thinking = _reasoning.origin_callback(on_thinking)
         if not isinstance(obj, dict):
             raise LLMError("Responses API emitted a non-object JSON response")
         status = str(obj.get("status") or "")
@@ -4104,10 +4265,28 @@ class LLMClient:
                         result.content += text
                         if on_text and text: on_text(text)
             elif item.get("type") == "reasoning":
-                for part in item.get("summary") or []:
-                    text = str(part.get("text") or "")
+                key = str(item.get("id") or f"#{next(i for i, x in enumerate(output) if x is item)}")[:200]
+                streamed = False
+                parts = [("responses.summary", f"rs:{key}:{index}", part)
+                         for index, part in enumerate(item.get("summary") or [])]
+                parts += [("responses.reasoning_text", f"rt:{key}:{index}", part)
+                          for index, part in enumerate(item.get("content") or [])
+                          if isinstance(part, dict) and part.get("type") == "reasoning_text"]
+                for channel, local, part in parts:
+                    text = str(part.get("text") or "") if isinstance(part, dict) else ""
+                    if not text:
+                        continue
+                    streamed = True
+                    if result.thinking:
+                        result.thinking += "\n\n"
                     result.thinking += text
-                    if on_thinking and text: on_thinking(text)
+                    if on_thinking:
+                        on_thinking(text, self._reasoning_origin(channel, local, api_mode="responses"))
+                        on_thinking("", self._reasoning_origin(
+                            channel, local, api_mode="responses", event="stop"))
+                if not streamed and on_thinking:
+                    on_thinking("", self._reasoning_origin(
+                        "responses.no_text", f"rw:{key}", api_mode="responses", event="withheld"))
             elif item.get("type") == "function_call":
                 if (status == "completed"
                         and (item.get("status") not in (None, "completed")
@@ -4132,6 +4311,7 @@ class LLMClient:
 
     def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None,
                  think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
+        on_thinking = _reasoning.origin_callback(on_thinking)
         ctype = r.headers.get("Content-Type", "")
         if "application/json" in ctype and "text/event-stream" not in ctype:
             self._note_non_streaming(r)
@@ -4139,6 +4319,13 @@ class LLMClient:
                 r, on_text, on_thinking, cancel=cancel, watch=watch)   # server ignored stream:true
         result = ChatResult()
         filt = _ThinkFilter()
+        thinking_parts = _ThinkingParts()
+
+        def think(channel: str, local: str, chunk: str) -> None:
+            thinking_parts.add(result, local, chunk)
+            if on_thinking:
+                on_thinking(chunk, self._reasoning_origin(channel, local, api_mode="chat_completions"))
+
         produced = False               # F4: has any content/tool-call appeared yet? (disarms the watchdog)
         partial: dict[int, dict] = {}  # index -> accumulated native tool call
         noidx = -1                     # fallback slot cursor when a server omits tool_call 'index'
@@ -4151,9 +4338,7 @@ class LLMClient:
                 if not chunk:
                     continue
                 if kind == "think":
-                    result.thinking += chunk
-                    if on_thinking:
-                        on_thinking(chunk)
+                    think("tags", "tags", chunk)
                 else:
                     result.content += chunk
                     # Raw ``content`` may still be a tagged reasoning stream. Seeing an opening
@@ -4242,13 +4427,12 @@ class LLMClient:
                     raise LLMError("Chat Completions emitted a malformed delta")
                 # reasoning is streamed in a separate field: Ollama-compatible gateways use
                 # `reasoning`; others commonly use `reasoning_content`.
+                reasoning_field = "reasoning" if delta.get("reasoning") else "reasoning_content"
                 reasoning = delta.get("reasoning") or delta.get("reasoning_content")
                 if reasoning is not None and not isinstance(reasoning, str):
                     raise LLMError("Chat Completions emitted malformed reasoning text")
                 if reasoning:
-                    result.thinking += reasoning
-                    if on_thinking:
-                        on_thinking(reasoning)
+                    think(f"chat.{reasoning_field}", reasoning_field, reasoning)
                 content = delta.get("content")
                 if content is not None and not isinstance(content, str):
                     raise LLMError("Chat Completions emitted malformed content text")
@@ -4377,6 +4561,7 @@ class LLMClient:
                       cancel=None, watch: RequestWatch | None = None) -> ChatResult:
         """A non-streaming server (ignored stream:true) returns one JSON completion — parse it
         through the same think-splitter / lenient-args / text-fallback path as the SSE stream."""
+        on_thinking = _reasoning.origin_callback(on_thinking)
         try:
             obj, finish = _bounded_json_lifecycle(
                 r, _MAX_CHAT_JSON_BYTES, "Chat Completions response", cancel, watch=watch)
@@ -4426,16 +4611,20 @@ class LLMClient:
         # A whole, valid JSON body can still omit the required finish reason on a compatible
         # gateway. Preserve its partial display/calls only for bounded non-executable reissue.
         result.finish_reason = finish_reason or "incomplete"
-        if reasoning:
-            result.thinking += reasoning
+        thinking_parts = _ThinkingParts()
+
+        def think(channel: str, local: str, chunk: str) -> None:
+            thinking_parts.add(result, local, chunk)
             if on_thinking:
-                on_thinking(reasoning)
+                on_thinking(chunk, self._reasoning_origin(channel, local, api_mode="chat_completions"))
+
+        if reasoning:
+            field_name = "reasoning" if msg.get("reasoning") else "reasoning_content"
+            think(f"chat.{field_name}", field_name, reasoning)
         filt = _ThinkFilter()
         for kind, chunk in filt.feed(content or "") + filt.flush():
             if kind == "think":
-                result.thinking += chunk
-                if on_thinking:
-                    on_thinking(chunk)
+                think("tags", "tags", chunk)
             else:
                 result.content += chunk
                 if on_text:

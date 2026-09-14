@@ -633,7 +633,8 @@ class _ACPUi:
     def on_text(self, chunk):
         self._update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": chunk}})
 
-    def on_thinking(self, chunk):
+    def on_thinking(self, chunk, block=None):
+        # Provenance has no ACP field yet; the thought chunk is forwarded unchanged.
         self._update({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": chunk}})
 
     def end_stream(self, phase: str = ""):

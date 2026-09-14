@@ -239,7 +239,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   } = { subagentBaseUrl: "", fallbackBaseUrl: "", nativeModel: "", nativeThink: "off",
         subscriptionEngine: "", subscriptionModel: "", subscriptionEffort: "",
         subscriptionEngines: [] };
-  private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
+  private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, McpBrowserRequest>();
   // ---- 0.40 images: refs this panel was shown, the stored path an `image` answer named for each,
   // and Open file requests waiting on a fresh answer. Never a path the webview supplies.
@@ -1554,6 +1554,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
+        this.behaviorState.thinkingInline = ev.thinking_inline !== false;
         this.behaviorState.preserveThinking = ev.preserve_thinking === true;
         this.behaviorState.codeAction = ev.code_action === true;
         this.state.ultra = ev.ultra_mode === true;
@@ -3714,7 +3715,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         api_mode: v.api_mode || "auto", provider_state: v.provider_state || "stateless",
         prompt_cache: v.prompt_cache !== false,
         sandbox: v.sandbox === true, sandbox_network: v.sandbox_network === true,
-        show_reasoning: v.show_reasoning !== false, suggest: v.suggest !== false,
+        show_reasoning: v.show_reasoning !== false,
+        thinking_inline: v.thinking_inline === undefined ? this.behaviorState.thinkingInline : v.thinking_inline !== false,
+        suggest: v.suggest !== false,
         monitor_wake: v.monitor_wake !== false,
         ultra_mode: v.ultra_mode === true,
         plan_artifact: v.plan_artifact !== false,
@@ -4414,8 +4417,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"
                aria-label="Custom context size in tokens" hidden>
       </div></label>
-    <label>Show model thinking
-      <select id="s-show_reasoning"><option value="true">shown in a collapsed block</option><option value="false">hidden</option></select></label>
+    <label>Show model thinking <span class="set-hint">Short provider summaries show inline; raw thinking stays collapsed. Labels say where thinking came from: raw from the model, or summarized by the provider.</span>
+      <select id="s-show_reasoning"><option value="inline">inline</option><option value="collapsed">collapsed</option><option value="hidden">hidden</option></select></label>
     <label>Prompt suggestions
       <select id="s-suggest"><option value="true">enabled</option><option value="false">disabled</option></select></label>
     <label>Wake on monitor events <span class="set-hint">When a background monitor prints while the chat is idle, DGC starts a short turn to read it. Off: events wait for your next message.</span>

@@ -17104,7 +17104,7 @@ def test_ollama_adapter():
             messages, tools=[{"type": "function", "function": {"name": "read_file",
                               "description": "read", "parameters": {"type": "object"}}}],
             reasoning_effort="off", on_text=text_chunks.append,
-            on_thinking=thinking_chunks.append)
+            on_thinking=lambda chunk, origin=None: thinking_chunks.append(chunk))
     finally:
         _llm.requests.post = original_post
     url, payload = posted[0]
@@ -19480,7 +19480,7 @@ def test_subscription_engines():
         class _SubscriptionUI:
             def __init__(self): self.rows = []
             def on_text(self, text): self.rows.append(("text", text))
-            def on_thinking(self, text): self.rows.append(("thinking", text))
+            def on_thinking(self, text, block=None): self.rows.append(("thinking", text))
             def tool_call(self, name, args, call_id=None): self.rows.append(("call", name, call_id))
             def tool_result(self, name, out, call_id=None): self.rows.append(("result", name, call_id))
             def info(self, text): self.rows.append(("info", text))

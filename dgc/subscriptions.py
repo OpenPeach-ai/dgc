@@ -716,6 +716,21 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     diffs: dict[str, str] = {}
     shown = {"text": False}
     fresh = {"first": cont is False}
+    from .reasoning import ReasoningOrigin, ReasoningTracker, resolve_source
+
+    def next_reasoning_seq() -> int:
+        agent._reasoning_seq = int(getattr(agent, "_reasoning_seq", 0) or 0) + 1
+        return agent._reasoning_seq
+
+    # A subscription engine cannot report the endpoint it really talks to, so every block it
+    # streams is ``unknown``. run_turn already redacts its thinking stream; the tracker only owns
+    # block identity, timing and the one thinking_end per block (v14 requires both).
+    reasoning = ReasoningTracker(ui, seq=next_reasoning_seq, inline_enabled=False)
+    engine_origin = ReasoningOrigin(**{**resolve_source(
+        api_mode="", channel="subscription", base_url="", model=str(model or ""))._asdict(),
+        "part": f"subscription:{engine.key}"})
+
+    held_space: list[str] = []
 
     def on_event(event: dict) -> None:
         kind = event.get("kind")
@@ -723,11 +738,21 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
             progressed = getattr(agent, "_engine_progress", None)   # reconnecting: a retry is over
             if callable(progressed):
                 progressed()
+        if kind in ("tool_call", "tool_result") or (
+                kind in ("text", "result") and str(event.get("text") or "").strip()):
+            reasoning.finish(round_called_tools=None)     # the open block ends at this boundary
         if kind == "text" and event.get("text"):
+            value = str(event["text"])
+            if not value.strip() and reasoning.open:
+                # Whitespace inside an open block is not prose: sent now, a frontend would end the
+                # block early. It joins the next text instead.
+                held_space.append(value)
+                return
             shown["text"] = True
-            ui.on_text(str(event["text"]))
+            ui.on_text("".join(held_space) + value)
+            held_space.clear()
         elif kind == "thinking" and event.get("text"):
-            ui.on_thinking(str(event["text"]))
+            reasoning.thinking(str(event["text"]), engine_origin)
         elif kind == "tool_call":
             name = str(event.get("name") or "tool")
             call_id = str(event.get("id") or "") or None
@@ -752,7 +777,8 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
                 relay(event, engine)
         elif kind == "result" and not shown["text"] and str(event.get("text") or "").strip():
             shown["text"] = True
-            ui.on_text(str(event["text"]))
+            ui.on_text("".join(held_space) + str(event["text"]))
+            held_space.clear()
 
     def delegate(safe_prompt: str) -> dict:
         session_id = "" if fresh["first"] else agent.subscription_session_id(
@@ -772,7 +798,12 @@ def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=N
     try:
         return agent.run_external_turn(prompt, delegate, reset_cancel=False)
     finally:
-        ui.end_stream()
+        try:
+            reasoning.finish(round_called_tools=None)
+            if held_space:
+                ui.on_text("".join(held_space))
+        finally:
+            ui.end_stream()
 
 
 def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,

@@ -69,7 +69,8 @@ class DeclarationTests(unittest.TestCase):
             self.assertEqual(schema["$id"], "urn:vibedgc:editor-protocol:v14")
 
     def test_thinking_events(self):
-        self.assertTrue(valid({"type": "thinking_delta", "text": "hm"}), "transitional: text alone")
+        self.assertFalse(valid({"type": "thinking_delta", "text": "hm"}),
+                         "thinking-provenance tightened block and source to required")
         self.assertTrue(valid({"type": "thinking_delta", "text": "hm", "block": "t1:think1",
                                "source": "summarized", "provider": "anthropic", "agent": "sub-0123456789ab"}))
         self.assertFalse(valid({"type": "thinking_delta", "text": "hm", "source": "made-up"}))

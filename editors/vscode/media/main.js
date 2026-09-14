@@ -1357,13 +1357,13 @@
   }
   function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
 
+  // Closes the reasoning group (or streaming progress note) that is still taking deltas. Its label
+  // then reads "Thought for Ns" from the backend's own seconds (see the 0.40 thinking section).
   function finishReasoning() {
-    if (!turn?.reasonEl) return;
-    const button = turn.reasonEl.previousElementSibling;
-    const seconds = Math.max(0, Math.round((Date.now() - turn.reasonStarted) / 1000));
-    button.dataset.label = `Thought for ${seconds}s`;
-    button.textContent = `${turn.reasonEl.classList.contains("show") ? "▾" : "▸"} ${button.dataset.label}`;
-    turn.reasonEl = null;
+    if (!turn) return;
+    const group = turn.reasonGroup;
+    turn.reasonGroup = null; turn.reasonNote = null; turn.reasonEl = null;
+    if (group) { group.open = false; paintReasonGroup(group); }
   }
 
   // Say what the cards did (or are doing) in a sentence, the way a colleague would: "Read 5 files
@@ -2361,17 +2361,9 @@
       }
       case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
-        ensureTurn(); turn.chars += ev.text.length;
-        if (!turn.reasonEl) {
-          const d = el("button", "disclosure", "▸ thinking"), r = el("div", "reasoning");
-          const reasonId = `reasoning-${++disclosureId}`;
-          d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
-          d.dataset.label = "Thinking"; turn.reasonStarted = Date.now();
-          d.title = "Show the model\u2019s reasoning for this turn";
-          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " " + d.dataset.label; d.setAttribute("aria-expanded", String(open)); };
-          appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
-        }
-        turn.reasonEl.textContent += ev.text; break;
+        ensureTurn(); turn.chars += String(ev.text || "").length;
+        reasoningDelta(ev); break;
+      case "thinking_end": ensureTurn(); reasoningEnd(ev); break;
       // The block that just closed, named and classified by the backend. `phase` absent means
       // undetermined (a cancelled or errored round genuinely does not know), and then nothing is
       // claimed here: `turn_end` still designates the answer.
@@ -3352,8 +3344,9 @@
     "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
     "artifact_in_plan", "tool_profile", "max_parallel_tasks", "monitor_wake",
     "subscription_engine", "subscription_model", "subscription_effort"];
+  // `show_reasoning` is a three-way select (inline | collapsed | hidden) that carries two settings.
   const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
-    "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
+    "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
     "monitor_wake"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
@@ -3368,7 +3361,8 @@
       prompt_cache: String(cfg.prompt_cache !== false),
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
       sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
-      show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      show_reasoning: cfg.show_reasoning === false ? "hidden" : cfg.thinking_inline === false ? "collapsed" : "inline",
+      suggest: String(cfg.suggest !== false),
       monitor_wake: String(cfg.monitor_wake !== false),
       ultra_mode: String(cfg.ultra_mode === true),
       plan_artifact: String(cfg.plan_artifact !== false),
@@ -3745,6 +3739,11 @@
     const v = {};
     SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
     SET_BOOLEAN_FIELDS.forEach((key) => { v[key] = v[key] !== "false"; });
+    // One select, two keys: hidden keeps whatever inline choice was already saved.
+    const shown = String(v.show_reasoning || "inline");
+    v.thinking_inline = shown === "hidden" ? lastConfig?.thinking_inline !== false
+      : shown === "inline" || shown === "true";
+    v.show_reasoning = shown !== "hidden" && shown !== "false";
     return v;
   }
   {
@@ -6008,6 +6007,298 @@
 
 
   // ---- 0.40 thinking ------------------------------------------------------------------------------
+  // Every reasoning block names where it came from: raw | summarized | narration | withheld | unknown.
+  // State is a Map from the backend's block id to its entry -- never a selector or HTML built from an
+  // id. A contiguous run with the same (source, provider, agent) is one collapsed group; a short
+  // provider summary the backend placed inline becomes a muted .thought-note; a withheld block is a
+  // static row. Live and replay drive the same code, so a reload draws what the live turn drew.
+  function reasonProviderName(provider) {
+    return provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : "";
+  }
+  function reasonIdentity(ev) {
+    const sources = ["raw", "summarized", "narration", "withheld", "unknown"];
+    const source = sources.includes(ev?.source) ? ev.source : "unknown";
+    const name = reasonProviderName(ev?.provider);
+    const provider = name && ["summarized", "narration", "withheld"].includes(source) ? ev.provider : "";
+    return { source: ["summarized", "narration", "withheld"].includes(source) && !provider ? "unknown" : source,
+             provider, agent: typeof ev?.agent === "string" ? ev.agent.slice(0, 128) : "" };
+  }
+  function reasonInlineAllowed() { return lastConfig?.thinking_inline !== false; }
+  // `agent` set: the block came from a sub-agent, whose model and host can differ from this chat's.
+  function reasonTitle(source, provider, agent) {
+    const name = reasonProviderName(provider) || "The provider";
+    const model = agent ? "a sub-agent’s model" : "the model";
+    if (source === "raw") return `Raw reasoning from ${model}, as it streamed.`;
+    if (source === "summarized") return `${name} returned a summary of ${agent ? "a sub-agent’s" : "the model’s"} reasoning; the full reasoning is not available.`;
+    if (source === "narration") return `A progress note from ${name} about what ${model} is doing.`;
+    if (source === "withheld") return `${name} kept ${agent ? "a sub-agent’s" : "the model’s"} reasoning hidden; no readable text was sent.`;
+    return `DGC can’t tell whether this is ${agent ? "a sub-agent’s" : "the model’s"} own reasoning or a provider’s summary.`;
+  }
+  // "Sub-agent · " before the label of a block a sub-agent produced. The dot is decorative; screen
+  // readers hear "Sub-agent, Thought for 2s, raw".
+  function reasonAgentPrefix(agent) {
+    if (!agent) return null;
+    const prefix = el("span", "thought-agent");
+    const dot = el("span"); dot.setAttribute("aria-hidden", "true"); dot.textContent = " ·";
+    const pause = el("span", "sr-only"); pause.textContent = ",";
+    prefix.append(document.createTextNode(" Sub-agent"), dot, pause);
+    return prefix;
+  }
+  // Under half a second rounds to nothing worth a number: "Thought", never "Thought for 0s".
+  function reasonDuration(seconds) {
+    return Number.isFinite(seconds) && seconds >= 0.5 ? `Thought for ${Math.round(seconds)}s` : "Thought";
+  }
+  // The muted suffix: " · raw", " · summarized by Anthropic", " · hidden by OpenAI"; nothing for
+  // unknown. The middle dot is decorative; an sr-only comma gives screen readers the pause.
+  function reasonProvenance(source, provider) {
+    const word = source === "raw" ? "raw" : source === "withheld" ? "hidden"
+      : source === "summarized" || source === "narration" ? "summarized" : "";
+    if (!word) return null;
+    const prov = el("span", "thought-prov");
+    const dot = el("span"); dot.setAttribute("aria-hidden", "true"); dot.textContent = " · ";
+    const pause = el("span", "sr-only"); pause.textContent = ", ";
+    prov.append(dot, pause, document.createTextNode(word));
+    const name = reasonProviderName(provider);
+    if (name && word !== "raw") { const by = el("span", "thought-by"); by.textContent = ` by ${name}`; prov.appendChild(by); }
+    return prov;
+  }
+  // "Thinking…" while it streams, "Thought for Ns" from the backend's seconds once every block in
+  // the group ended, "Thought" when a replayed block kept no timing, and the panel's own clock only
+  // for the moment between a group closing and its (pending) end arriving.
+  function reasonLabel(group) {
+    if (group.open && (!group.parts.length || !group.parts.every((part) => part.ended))) return "Thinking…";
+    if (group.parts.length && group.parts.every((part) => part.ended)) {
+      if (!group.parts.every((part) => Number.isFinite(part.seconds))) return "Thought";
+      return reasonDuration(group.parts.reduce((sum, part) => sum + part.seconds, 0));
+    }
+    if (group.startedAt == null) return "Thought";
+    return reasonDuration((Date.now() - group.startedAt) / 1000);
+  }
+  function paintReasonGroup(group) {
+    if (!group?.button) return;
+    const label = group.button.querySelector(".thought-label");
+    if (label) label.textContent = ` ${reasonLabel(group)}`;
+  }
+  function makeReasonGroup(identity) {
+    const button = el("button", "disclosure"), body = el("div", "reasoning");
+    const id = `reasoning-${++disclosureId}`;
+    button.type = "button"; button.setAttribute("aria-expanded", "false"); button.setAttribute("aria-controls", id);
+    body.id = id;
+    button.dataset.source = identity.source; body.dataset.source = identity.source;
+    if (identity.agent) { button.dataset.agent = identity.agent; body.dataset.agent = identity.agent; }
+    button.title = reasonTitle(identity.source, identity.provider, identity.agent);
+    const chev = el("span", "thought-chev"); chev.setAttribute("aria-hidden", "true"); chev.textContent = "▸";
+    const label = el("span", "thought-label");
+    button.appendChild(chev);
+    const agentPrefix = reasonAgentPrefix(identity.agent);
+    if (agentPrefix) button.appendChild(agentPrefix);
+    button.appendChild(label);
+    const prov = reasonProvenance(identity.source, identity.provider);
+    if (prov) button.appendChild(prov);
+    button.onclick = () => {
+      const open = body.classList.toggle("show");
+      chev.textContent = open ? "▾" : "▸";
+      button.setAttribute("aria-expanded", String(open));
+    };
+    const group = { button, body, parts: [], open: true, ...identity,
+                    startedAt: replaying ? null : Date.now() };
+    return group;
+  }
+  // A collapsed group, an inline note and a withheld row are all drawn at turn level, so each ends
+  // the tool group: a tool card after them opens a new group below (decision D7).
+  function openReasonGroup(identity) {
+    finishReasoning();
+    endToolGroup();
+    const group = makeReasonGroup(identity);
+    appendTurnContent(group.button); appendTurnContent(group.body);
+    turn.reasonGroup = group;
+    paintReasonGroup(group);
+    return group;
+  }
+  function addReasonPart(group, entry, text) {
+    const part = el("span", "thought-part");
+    entry.sep = group.parts.length ? document.createTextNode("\n\n") : null;
+    if (entry.sep) part.appendChild(entry.sep);
+    entry.text = document.createTextNode(String(text || ""));
+    part.appendChild(entry.text);
+    entry.part = part; entry.group = group; entry.kind = "group";
+    group.body.appendChild(part);
+    group.parts.push(entry);
+  }
+  function reasoningDelta(ev) {
+    const blocks = turn.reasonBlocks || (turn.reasonBlocks = new Map());
+    const id = String(ev.block || "");
+    const identity = reasonIdentity(ev);
+    const text = String(ev.text || "");
+    let entry = id ? blocks.get(id) : null;
+    if (entry && !entry.ended) {
+      if (entry.kind === "note") { entry.text.appendData(text); return; }
+      if (entry.kind === "group" && entry.group === turn.reasonGroup) { entry.text.appendData(text); return; }
+    }
+    if (identity.source === "withheld") return;             // a withheld block never streams text
+    const open0 = turn.reasonGroup;
+    if (!id && open0?.parts.length && open0.source === identity.source && open0.provider === identity.provider
+        && open0.agent === identity.agent) {
+      open0.parts.at(-1).text.appendData(text);             // a frame from a backend with no block ids
+      return;
+    }
+    entry = { id, ended: false, seconds: undefined, ...identity };
+    if (id) blocks.set(id, entry);
+    if (identity.source === "narration" && !identity.agent && reasonInlineAllowed()) {
+      // A progress note is shown the moment it starts, as plain text until it ends.
+      finishReasoning();
+      endToolGroup();
+      const note = el("div", "thought-note"); note.dataset.source = identity.source;
+      entry.text = document.createTextNode(text);
+      note.appendChild(entry.text);
+      entry.note = note; entry.kind = "note";
+      appendTurnContent(note);
+      turn.reasonNote = note;
+      return;
+    }
+    const open = turn.reasonGroup;
+    const group = open && open.source === identity.source && open.provider === identity.provider
+      && open.agent === identity.agent ? open : openReasonGroup(identity);
+    addReasonPart(group, entry, text);
+  }
+  function reasonNoteFrom(entry, text) {
+    const note = el("div", "thought-note"); note.dataset.source = entry.source;
+    note.innerHTML = md(String(text || "").trim());
+    const name = reasonProviderName(entry.provider);
+    const hint = el("span", "thought-hint");
+    hint.dataset.tip = entry.source === "narration" ? `Progress note from ${name}` : `Summary from ${name}`;
+    hint.appendChild(document.createTextNode(" · summarized"));
+    if (name) { const by = el("span", "sr-only"); by.textContent = ` by ${name}`; hint.appendChild(by); }
+    note.appendChild(hint);
+    return note;
+  }
+  function removeReasonGroup(group) {
+    group.button.remove(); group.body.remove();
+    if (turn.reasonGroup === group) turn.reasonGroup = null;
+  }
+  // Move one block out of its group into an inline note at the block's own position: parts before it
+  // stay in the group, parts after it move to a new group after the note.
+  function reasonGroupToNote(entry) {
+    const group = entry.group;
+    const index = group.parts.indexOf(entry);
+    const before = group.parts.slice(0, index), after = group.parts.slice(index + 1);
+    const hadFocus = document.activeElement === group.button;
+    const note = reasonNoteFrom(entry, entry.text.data);
+    entry.part.remove();
+    if (!before.length) {
+      group.button.before(note);
+      group.parts = after;
+      if (!after.length) removeReasonGroup(group);
+      else { const first = after[0]; if (first.sep) { first.sep.remove(); first.sep = null; } paintReasonGroup(group); }
+    } else {
+      group.body.after(note);
+      group.parts = before;
+      paintReasonGroup(group);
+      if (after.length) {
+        const rest = makeReasonGroup({ source: group.source, provider: group.provider, agent: group.agent });
+        rest.open = group.open; rest.startedAt = group.startedAt;
+        note.after(rest.button); rest.button.after(rest.body);
+        for (const moved of after) {
+          if (moved.sep && !rest.parts.length) { moved.sep.remove(); moved.sep = null; }
+          rest.body.appendChild(moved.part); moved.group = rest; rest.parts.push(moved);
+        }
+        if (turn.reasonGroup === group) { turn.reasonGroup = rest; group.open = false; }
+        paintReasonGroup(group); paintReasonGroup(rest);
+      }
+    }
+    entry.kind = "note"; entry.note = note; entry.group = null;
+    endToolGroup();
+    if (hadFocus && !replaying) { note.tabIndex = -1; note.focus(); }
+  }
+  // A progress note that cannot stay inline (over its cap, or inline turned off) becomes a group.
+  function reasonNoteToGroup(entry) {
+    const identity = { source: entry.source, provider: entry.provider, agent: entry.agent };
+    const group = makeReasonGroup(identity);
+    group.open = false;
+    const text = entry.text.data;
+    entry.note.replaceWith(group.button);
+    group.button.after(group.body);
+    if (turn.reasonNote === entry.note) turn.reasonNote = null;
+    addReasonPart(group, entry, text);
+    entry.note = null;
+    return group;
+  }
+  function withheldRow(ev, identity) {
+    finishReasoning();
+    const seconds = Number.isFinite(ev.seconds) ? Math.max(0, ev.seconds) : null;
+    const previous = turn.act?.previousElementSibling;
+    if (previous?.classList.contains("thought-static") && previous.dataset.provider === identity.provider
+        && (previous.dataset.agent || "") === identity.agent) {
+      // Consecutive withheld blocks read as one row.
+      const known = previous.dataset.seconds !== "" && seconds != null;
+      previous.dataset.seconds = known ? String(Number(previous.dataset.seconds) + seconds) : "";
+      previous.querySelector(".thought-label").textContent =
+        ` ${known ? reasonDuration(Number(previous.dataset.seconds)) : "Thought"}`;
+      endToolGroup();
+      return;
+    }
+    const row = el("div", "thought-static"); row.dataset.source = "withheld";
+    row.dataset.provider = identity.provider; row.dataset.seconds = seconds == null ? "" : String(seconds);
+    if (identity.agent) row.dataset.agent = identity.agent;
+    row.title = reasonTitle("withheld", identity.provider, identity.agent);
+    // An empty chevron slot, so the label lines up with the disclosure labels around it.
+    const slot = el("span", "thought-chev"); slot.setAttribute("aria-hidden", "true");
+    row.appendChild(slot);
+    const agentPrefix = reasonAgentPrefix(identity.agent);
+    if (agentPrefix) row.appendChild(agentPrefix);
+    const label = el("span", "thought-label");
+    label.textContent = ` ${seconds == null ? "Thought" : reasonDuration(seconds)}`;
+    row.appendChild(label);
+    const prov = reasonProvenance("withheld", identity.provider);
+    if (prov) row.appendChild(prov);
+    appendTurnContent(row);
+    endToolGroup();
+  }
+  function reasoningEnd(ev) {
+    const blocks = turn.reasonBlocks || (turn.reasonBlocks = new Map());
+    const id = String(ev.block || "");
+    const identity = reasonIdentity(ev);
+    let entry = id ? blocks.get(id) : null;
+    if (!entry && identity.source === "withheld") { withheldRow(ev, identity); return; }
+    if (!entry) {
+      // A block with no text here: a replayed block whose text the history budget dropped, or a live
+      // block whose deltas went to an earlier view. Its header still says what it was.
+      entry = { id, ended: false, seconds: undefined, ...identity };
+      if (id) blocks.set(id, entry);
+      const open = turn.reasonGroup;
+      const group = open && open.source === identity.source && open.provider === identity.provider
+        && open.agent === identity.agent ? open : openReasonGroup(identity);
+      addReasonPart(group, entry, "");
+    }
+    if (entry.ended) return;
+    entry.ended = true;
+    entry.seconds = Number.isFinite(ev.seconds) ? Math.max(0, ev.seconds) : null;
+    const hasText = !!entry.text?.data.trim();
+    // A note is only ever made from text: an end with nothing to show keeps its collapsed header.
+    const inline = ev.placement === "inline" && !entry.agent && hasText && ev.truncated !== true
+      && (entry.source === "summarized" || entry.source === "narration");
+    if (entry.kind === "note") {
+      if (inline) {
+        const note = reasonNoteFrom(entry, entry.text.data);
+        entry.note.replaceWith(note);
+        if (turn.reasonNote === entry.note) turn.reasonNote = null;
+        entry.note = note;
+        return;
+      }
+      reasonNoteToGroup(entry);
+    }
+    if (inline && entry.group) { reasonGroupToNote(entry); return; }
+    if (!hasText || ev.truncated === true) reasonMarkMissing(entry, hasText, ev.truncated === true);
+    paintReasonGroup(entry.group);
+  }
+  // Say so when a block's text is not all here, instead of expanding to an empty or silently cut body.
+  function reasonMarkMissing(entry, hasText, truncated) {
+    if (!entry.part || entry.part.querySelector(".thought-cut")) return;
+    const cut = el("span", hasText ? "thought-cut" : "thought-cut alone");
+    cut.textContent = hasText ? "… the rest of this reasoning was not kept."
+      : truncated ? "The text of this reasoning was not kept." : "The text of this reasoning is not in this view.";
+    entry.part.appendChild(cut);
+  }
   // ---- end 0.40 thinking --------------------------------------------------------------------------
 
 
