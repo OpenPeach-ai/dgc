@@ -355,7 +355,7 @@ class ClassifyTests(unittest.TestCase):
         busy = classify_status(429, "slow down", {}, endpoint=ep)
         self.assertEqual((busy.kind, busy.summary, busy.retryable), ("rate_limited", "HTTP 429 from 127.0.0.1:11434", True))
         waited = classify_status(429, "", {"Retry-After": "2"}, endpoint=ep, delay_s=2.0)
-        self.assertEqual(waited.summary, "HTTP 429 from 127.0.0.1:11434 · waited 2s")
+        self.assertEqual(waited.summary, "HTTP 429 from 127.0.0.1:11434 · Retry-After 2s")
         self.assertEqual(classify_status(503, "server busy, try again later", endpoint=ep).kind, "overloaded")
         self.assertEqual(classify_status(503, "upstream failed", endpoint=ep).kind, "http")
         for code in (500, 502, 504, 408):
@@ -1242,6 +1242,218 @@ class TuiRetryBlockTests(unittest.TestCase):
             self.assertEqual(kinds, ["user", "md", "retry"])
             self.assertIn("Reconnect did not finish", self.text(tui, blocks[-1]))
             self.assertNotIn("monitor events", json.dumps([b for b in blocks if isinstance(b, str)]))
+
+
+# ---- 18. review fixes --------------------------------------------------------------------------
+class ScrubAndHintReviewTests(unittest.TestCase):
+    def test_userinfo_ends_at_the_last_at_whatever_the_password_holds(self):
+        from dgc.model_watch import endpoint_host, safe_endpoint
+        cases = {
+            "http://user:p(ss)@127.0.0.1/v1": "http://127.0.0.1/v1",
+            "http://user:p/ss@127.0.0.1:11434/v1": "http://127.0.0.1:11434/v1",
+            "http://user:p#ss@127.0.0.1:11434/v1": "http://127.0.0.1:11434/v1",
+            "http://user:p'ss@127.0.0.1/v1": "http://127.0.0.1/v1",
+            "http://user:p?ss@127.0.0.1/v1?key=S": "http://127.0.0.1/v1?…",
+            "http://u:a@b@h:1/v1": "http://h:1/v1",
+            "(see http://u:p@h/v1?key=S).": "(see http://h/v1?…).",
+            "Invalid URL 'http://x/v1?key=abc': no": "Invalid URL 'http://x/v1?…': no",
+            "http://u:p@[::1]:11434/v1": "http://[::1]:11434/v1",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(scrub_urls(text), expected)
+        for raw in ("http://user:12/34@127.0.0.1:11434/v1?key=S", "http://user:p#ss@127.0.0.1:11434/v1"):
+            with self.subTest(raw=raw):
+                self.assertEqual(safe_endpoint(raw), "http://127.0.0.1:11434/v1")
+                self.assertEqual(endpoint_host(raw), "127.0.0.1:11434")
+        self.assertNotIn("user:12/", hint_for("connect", base_url="http://user:12/34@127.0.0.1:11434/v1"))
+        self.assertNotIn("/34@", hint_for("connect", base_url="http://user:12/34@127.0.0.1:11434/v1"))
+
+    def test_a_reset_or_cut_while_streaming_never_says_start_your_server(self):
+        base = "http://127.0.0.1:11434/v1"
+        for kind in ("reset", "stream_cut"):
+            with self.subTest(kind=kind):
+                hint = hint_for(kind, base_url=base, streaming=True)
+                self.assertIn("dropped mid-answer", hint)
+                self.assertNotIn("start your server", hint)
+        self.assertIn("before it answered", hint_for("reset", base_url=base))
+        self.assertNotIn("start your server", hint_for("reset", base_url=base))
+        for kind in ("connect", "connect_timeout"):
+            self.assertIn("start your server", hint_for(kind, base_url=base))
+
+    def test_sub_second_backoffs_keep_two_decimals(self):
+        from dgc.model_watch import format_seconds
+        self.assertEqual([format_seconds(v) for v in (0.25, 0.5, 1.5, 2.0, 0.999)],
+                         ["0.25s", "0.5s", "1.5s", "2s", "1s"])
+
+    def test_the_system_prompt_names_the_endpoint_without_credentials_or_query(self):
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-retry-prompt-")
+        self.addCleanup(tmp.cleanup)
+        cfg = Config()
+        cfg.project_root = Path(tmp.name)
+        cfg.data.update({"model": "m", "base_url": "http://u:p4ssw0rd@127.0.0.1:5130/v1?key=SECRETKEY123"})
+        agent = Agent(cfg, _Plain())
+        self.addCleanup(agent.mcp.stop_all)
+        prompt = agent.system_prompt()
+        self.assertIn("- Model: m @ http://127.0.0.1:5130/v1?…", prompt)
+        for secret in ("SECRETKEY123", "p4ssw0rd"):
+            self.assertNotIn(secret, prompt)
+
+    def test_codex_without_a_count_does_not_repeat_waiting_for_network_in_its_cause(self):
+        refused = [e for e in EngineRetryTests.events(self, "refused") if e["kind"] == "retry"]
+        self.assertEqual(refused[0]["summary"], "Connection failed: error sending request")
+
+    def test_the_429_summary_names_retry_after_not_a_finished_wait(self):
+        told = classify_status(429, "", {"Retry-After": "2"}, endpoint="http://127.0.0.1:1/v1", delay_s=2.0)
+        self.assertNotIn("waited", told.summary)
+        self.assertTrue(told.summary.endswith("· Retry-After 2s"))
+
+
+class AgentRunReviewTests(RetryTestCase):
+    def test_a_cut_answered_by_a_401_gives_the_continuation_up_and_links_it(self):
+        self.server.behaviours["/chat/completions"] = stall.sequence(cut("chat_completions", text="part "), status(401))
+        agent, ui = self.agent()
+        agent._stream_recovery_delay = lambda n: 0.0
+        self.assertFalse(agent.run_turn("hi", reset_cancel=False))
+        runs = list(ui.runs().values())
+        self.assertEqual(len(runs), 1)
+        self.assertEqual([(s, f["layer"]) for s, f in runs[0]],
+                         [("retrying", "continuation"), ("gave_up", "continuation")])
+        _message, cause = ui.errors[-1]
+        self.assertEqual(cause["kind"], "auth")
+        self.assertEqual(cause["run_n"], runs[0][0][1]["run_n"])
+
+    def test_a_refused_request_answered_by_a_404_still_closes_recovered(self):
+        self.server.behaviours["/chat/completions"] = status(404, json.dumps({"error": "model 'retry-model' not found"}))
+        self.refuse_first(1)
+        agent, ui = self.agent()
+        self.assertFalse(agent.run_turn("hi", reset_cancel=False))
+        self.assertEqual([s for s, _ in ui.frames], ["retrying", "recovered"])
+
+    def test_output_limit_continuations_spend_the_budget_and_a_cut_claims_no_reconnect(self):
+        class Client:
+            tools_supported = True
+            model = "m"
+            base_url = "http://127.0.0.1:5121/v1"
+
+            def __init__(self):
+                self.calls = 0
+
+            def chat(self, *a, **k):
+                self.calls += 1
+                if self.calls <= _MAX_CONTINUE:
+                    return llm.ChatResult(content=f"long{self.calls} ", finish_reason="length")
+                return llm.ChatResult(content="cut ", finish_reason="incomplete")
+        agent, ui = self.agent()
+        agent.client = Client()
+        agent._stream_recovery_delay = lambda n: 0.0
+        self.assertFalse(agent.run_turn("hi", reset_cancel=False))
+        self.assertEqual(ui.frames, [], "no line may say it reconnected")
+        message, cause = ui.errors[-1]
+        self.assertNotIn("repeatedly", message)
+        self.assertIn("output-limit continuations", message)
+        self.assertNotIn("run_n", cause)
+        self.assertNotIn("attempts", cause)
+        self.assertFalse([m for m in agent.messages if "_dgc_stream_gave_up" in m])
+
+    def test_cut_forever_names_the_host_once_hints_mid_answer_and_replays_the_give_up(self):
+        from dgc.tui import TUI
+        self.server.behaviours["/chat/completions"] = cut("chat_completions", "eof", text="x")
+        agent, ui = self.agent()
+        agent._stream_recovery_delay = lambda n: 0.0
+        self.assertFalse(agent.run_turn("hi", reset_cancel=False))
+        message, cause = ui.errors[-1]
+        host = f"127.0.0.1:{self.server.port}"
+        self.assertEqual(message.count(host), 1, message)
+        self.assertTrue(message.endswith("before a terminal event ([DONE])"), message)
+        self.assertIn("dropped mid-answer", cause["hint"])
+        self.assertNotIn("start your server", cause["hint"])
+        tagged_messages = [m for m in agent.messages if isinstance(m.get("_dgc_stream_gave_up"), dict)]
+        self.assertEqual(len(tagged_messages), 1)
+        self.assertIs(tagged_messages[0], [m for m in agent.messages if m.get("role") == "assistant"][-1])
+
+        items = history_of(agent.messages)
+        for item in items:
+            if item.get("type"):
+                self.assertIsNone(event_error({**item, "seq": 0}), item)
+        retries = [i for i in items if i.get("type") == "model_retry"]
+        self.assertEqual([i["state"] for i in retries], ["recovered"] * _MAX_CONTINUE + ["gave_up"])
+        self.assertEqual((retries[-1]["attempt"], retries[-1]["max_attempts"]), (_MAX_CONTINUE, _MAX_CONTINUE))
+        self.assertEqual(len({i["retry_id"] for i in retries}), len(retries))
+        types_ = [i.get("type") for i in items]
+        last_text = max(n for n, t in enumerate(types_) if t == "text_delta")
+        self.assertGreater(types_.index("model_retry", last_text), last_text, "the give-up follows the partial")
+        end = [i for i in items if i.get("type") == "turn_end"]
+        self.assertEqual((end[-1]["reason"], end[-1]["final_message_id"]), ("cancelled", None))
+        self.assertEqual(types_[-1], "turn_end")
+        self.assertEqual(types_[-2], "model_retry")
+
+        tui = object.__new__(TUI)
+        tui._width = 100
+        segments = tui._message_rows(agent.messages)
+        blocks, _ = TUI._history_blocks(tui, segments[-1][0])
+        retry_blocks = [b for b in blocks if isinstance(b, dict) and b.get("kind") == "retry"]
+        self.assertEqual([b["state"] for b in retry_blocks], ["recovered"] * _MAX_CONTINUE + ["gave_up"])
+        self.assertEqual(TUI._retry_label(retry_blocks[-1]), f"Gave up after {_MAX_CONTINUE} reconnects")
+
+    def test_a_reset_mid_stream_line_never_tells_the_reader_to_start_the_server(self):
+        self.server.behaviours["/chat/completions"] = stall.sequence(cut("chat_completions", "rst", text="part "),
+                                                                     stall.chat_answer("rest"))
+        agent, ui = self.agent()
+        agent._stream_recovery_delay = lambda n: 0.0
+        self.assertTrue(agent.run_turn("hi", reset_cancel=False))
+        first = ui.frames[0][1]
+        self.assertIn(first["kind"], ("reset", "stream_cut"))
+        self.assertIn("dropped mid-answer", first["hint"])
+        self.assertNotIn("start your server", first["hint"])
+
+    def test_a_run_spanning_two_budgets_never_counts_past_its_maximum(self):
+        from dgc.model_watch import WaitEvent
+        agent, ui = self.agent()
+        for _ in range(3):
+            agent._retry_step("request", kind="connect", summary="connection refused by h:1", max=3)
+        agent._on_model_wait(WaitEvent(kind="retry", phase="first_token", since=time.monotonic(), model="m",
+                                       endpoint="http://127.0.0.1:1/v1", attempt=1, retries=2, silent_s=1.0,
+                                       threshold_s=1.0))
+        self.assertEqual([(f["attempt"], f["max_attempts"]) for _, f in ui.frames], [(1, 3), (2, 3), (3, 3), (4, 4)])
+        buffer = io.StringIO()
+        headless = HeadlessUI(Emitter(buffer), None)
+        headless.turn_id = "t1"
+        headless.model_retry("retrying", run_n=1, kind="stall", layer="request", attempt=4, summary="x", max_attempts=2)
+        frame = json.loads(buffer.getvalue().splitlines()[-1])
+        self.assertEqual((frame["attempt"], frame["max_attempts"]), (4, 4))
+        self.assertIsNone(event_error(frame))
+        from dgc.tui import TUI
+        self.assertEqual(TUI._retry_label({"state": "retrying", "failure": "stall", "attempt": 3, "max_attempts": 2}),
+                         "Retrying 3/3")
+
+
+class HistoryReviewTests(unittest.TestCase):
+    def test_a_transcript_that_opens_with_a_notice_still_settles_it_in_one_pass(self):
+        items = history_of([{"role": "system", "content": "s"}, tagged(),
+                            {"role": "assistant", "content": "the rest"},
+                            {"role": "user", "content": "Next"}, tagged(), {"role": "user", "content": "Again"}])
+        retries = [(i["retry_id"], i["state"]) for i in items if i.get("type") == "model_retry"]
+        self.assertEqual(retries, [("h1:retry1", "recovered"), ("h2:retry1", "retrying")])
+        self.assertFalse(hasattr(Backend, "_history_opens_turn"), "no second copy of the turn-boundary rules")
+
+    def test_a_later_turn_never_recovers_an_earlier_notice(self):
+        items = history_of([{"role": "user", "content": "Go"}, {"role": "assistant", "content": "a"}, tagged(),
+                            {"role": "user", "content": "Next"}, {"role": "assistant", "content": "b"}])
+        self.assertEqual([i["state"] for i in items if i.get("type") == "model_retry"], ["retrying"])
+
+    def test_expandall_names_only_what_it_opened(self):
+        from dgc.tui import TUI
+        tui = TuiRetryBlockTests.tui(self)
+        tui._flash = lambda message: setattr(tui, "_flashed", message)
+        tui._invalidate = lambda: None
+        TuiRetryBlockTests.frame(self, tui, "retrying")
+        tui._handle_slash("/expandall")
+        self.assertEqual(tui._flashed, "expanded all reconnect details")
+        tui.blocks = [{"kind": "tool", "exp": False}]
+        with mock.patch.object(TUI, "_tool_collapsible", lambda self_, b: True):
+            tui._handle_slash("/expandall")
+        self.assertEqual(tui._flashed, "expanded all tool output")
 
 
 if __name__ == "__main__":

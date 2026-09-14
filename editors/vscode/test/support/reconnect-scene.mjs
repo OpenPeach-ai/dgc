@@ -193,14 +193,15 @@ export function measureInPage() {
   const visible = (el) => { const s = getComputedStyle(el); const r = el.getBoundingClientRect();
     return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0; };
   const texts = [];
-  for (const line of document.querySelectorAll(".model-retry")) {
+  for (const line of document.querySelectorAll(".model-retry, .model-error")) {
     const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const el = node.parentElement;
       if (!node.textContent.trim() || !visible(el) || el.closest("[hidden]")) continue;
       const fg = parse(getComputedStyle(el).color);
       const bg = background(el);
-      texts.push({ text: node.textContent.trim().slice(0, 60), ratio: ratio(over(fg, bg), bg) });
+      texts.push({ text: node.textContent.trim().slice(0, 60), ratio: ratio(over(fg, bg), bg),
+        row: line.classList.contains("model-error") ? "error" : "retry" });
     }
   }
   const html = document.documentElement;

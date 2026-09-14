@@ -101,6 +101,33 @@ test("the error row keeps its hint visible and its message pre-wrapped, without 
   }
 });
 
+for (const theme of ["dark", "light", "light-modern", "hc"]) {
+  test(`in ${theme}, the open model error row reads at 4.5:1, its headline included`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(browser, { width: 460, theme });
+    try {
+      await errorScene(panel);
+      await panel.page.locator(".model-error-toggle").first().click();
+      await panel.settle();
+      const facts = await panel.page.evaluate(measureInPage);
+      const rows = facts.texts.filter((entry) => entry.row === "error");
+      assert.ok(rows.some((entry) => entry.text.startsWith("Could not reach the model")), JSON.stringify(rows));
+      assert.ok(rows.length > 8, "the open row has text to measure");
+      for (const entry of rows) {
+        assert.ok(entry.ratio >= 4.5, `${theme}: "${entry.text}" is ${entry.ratio.toFixed(2)}:1`);
+      }
+      const icon = await panel.page.evaluate(() => {
+        const row = document.querySelector(".model-error");
+        return { icon: getComputedStyle(row.querySelector(".model-error-icon")).color,
+          headline: getComputedStyle(row.querySelector(".model-error-headline")).color };
+      });
+      if (theme !== "hc") assert.notEqual(icon.icon, icon.headline, "the icon alone carries the error colour");
+    } finally {
+      await panel.page.close();
+    }
+  });
+}
+
 test("a replayed turn draws its recoveries in place and settles the one that never finished", async (t) => {
   if (skipOrFail(t)) return;
   const panel = await openPanel(browser, { width: 460, theme: "dark" });

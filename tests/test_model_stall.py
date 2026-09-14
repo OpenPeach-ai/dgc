@@ -929,7 +929,7 @@ class AgentStallTests(StallTestCase):
         self.assertTrue(any("falling back to backup-model" in line for line in ui.infos))
         self.assertIn("from the fallback", "".join(ui.text))
         self.assertIn(("No response from the model",
-                       f"stall-model at 127.0.0.1:{self.server.port} · no reply for 0.1s+"),
+                       f"stall-model at 127.0.0.1:{self.server.port} · no reply for 0.15s+"),
                       [(label, detail) for label, detail in ui.waits if label])
         self.assertEqual(ui.waits[-1][0], None, "no stale notice is left on screen")
 

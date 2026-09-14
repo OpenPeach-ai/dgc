@@ -83,6 +83,11 @@ test("the reconnect line opens with the keyboard and shows every attempt's cause
   const facts = [...detail.querySelectorAll("dt")].map((dt) => dt.textContent);
   assert.deepEqual(facts, ["Cause", "Model", "Endpoint"]);
   assert.match(detail.querySelector(".model-retry-hint").textContent, /start your server/);
+  // The attempt list, the transport's words and the hint each sit under their own label.
+  const sections = [...detail.querySelectorAll(".model-retry-section")].filter((n) => !n.hidden).map((n) => n.textContent);
+  assert.deepEqual(sections, ["Attempts", "Details", "Hint"]);
+  const list = detail.querySelector(".model-retry-attempts");
+  assert.equal(doc.getElementById(list.getAttribute("aria-labelledby")).textContent, "Attempts");
   // An update while open keeps it open.
   event(retry({ state: "recovered", attempt: 2 }));
   assert.equal(toggle.getAttribute("aria-expanded"), "true");
@@ -177,13 +182,17 @@ test("every turn ending settles a live line, and only the backend can say Gave u
     send({ type: "backend_exit", code: 1, signal: null, recovering: false });
     assert.equal(label(lines()[0]), "Reconnect did not finish");
   }
-  // (c) backend exit while recovering, then the 30 s timer
+  // (c) backend exit while recovering: the process that owned the run is gone, so the line never
+  // keeps saying "Reconnecting 1/3" beside "Restarting the DGC backend", and the 30 s timer changes nothing
   {
     const { event, send, lines, label, advance, doc } = setup({ clock: true });
     event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
     event(retry());
+    event(retry({ retry_id: "t1:retry2", state: "recovered" }));
     send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true });
-    assert.equal(label(lines()[0]), "Reconnecting 1/3", "still recovering: nothing is claimed yet");
+    assert.equal(label(lines()[0]), "Reconnect did not finish");
+    assert.equal(lines()[0].dataset.state, "unfinished");
+    assert.equal(label(lines()[1]), "Reconnected after 1 retry", "a closed line keeps its words");
     assert.equal(doc.querySelector(".thinking .verb").textContent, "Restarting the DGC backend");
     advance(30000);
     assert.equal(label(lines()[0]), "Reconnect did not finish");
@@ -340,11 +349,57 @@ test("an engine's own retry has no endpoint and names the engine", () => {
   const { event, lines, label } = setup();
   event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
   event({ type: "model_retry", retry_id: "t1:retry1", state: "retrying", kind: "connect", layer: "request",
-          attempt: 1, summary: "waiting for network · Connection failed: error sending request",
+          attempt: 1, summary: "Connection failed: error sending request",
           origin: "engine", engine: "Codex", turn_id: "t1" });
   assert.equal(label(lines()[0]).trim(), "Codex · Reconnecting · waiting for network");
+  assert.equal(lines()[0].querySelector(".model-retry-cause").textContent, "Connection failed: error sending request",
+    "the cause never repeats the label's words");
   lines()[0].querySelector(".model-retry-toggle").click();
   const facts = [...lines()[0].querySelectorAll("dt")].map((dt) => dt.textContent);
   assert.ok(!facts.includes("Endpoint"));
   assert.ok(facts.includes("Engine"));
+});
+
+
+test("counters never pass their maximum, and a 0.25 s backoff reads 0.25s", () => {
+  const { event, lines, label } = setup();
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  event(retry({ attempt: 3 }));
+  event(retry({ attempt: 4, kind: "stall", max_attempts: 2, summary: "no tokens from m at h for 300s" }));
+  assert.equal(label(lines()[0]), "Retrying 4/4");
+  event(retry({ retry_id: "t1:retry2", kind: "stream_cut", layer: "continuation", max_attempts: 8, delay_ms: 250 }));
+  lines()[1].querySelector(".model-retry-toggle").click();
+  assert.match(lines()[1].querySelector(".model-retry-attempts li").textContent, / · retried after 0\.25s$/);
+});
+
+test("the screen reader hears the same verb the line shows", () => {
+  const cases = [["connect", "Connection to the model lost, reconnecting"], ["stream_cut", "Connection to the model lost, reconnecting"],
+    ["overloaded", "The model server is busy, retrying"], ["http", "The model server returned an error, retrying"],
+    ["stall", "The model is not responding, retrying"], ["loading", "The model is not responding, retrying"],
+    ["auth", "Retrying the model request"]];
+  for (const [kind, phrase] of cases) {
+    const { event, announcer } = setup();
+    event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+    event(retry({ kind }));
+    assert.equal(announcer(), phrase, kind);
+  }
+});
+
+test("the error row shows the transport's words once: in the message, or as Details when the message lacks them", () => {
+  const detail = "HTTPConnectionPool(host='127.0.0.1', port=11434): Max retries exceeded";
+  {
+    const { event, doc } = setup();
+    event({ type: "error", message: `cannot connect to http://${HOST}/v1 — connection refused by ${HOST}\n${detail}`,
+      cause: { kind: "connect", summary: `connection refused by ${HOST}`, detail: `ConnectionError: ${detail}` } });
+    const facts = [...doc.querySelectorAll(".model-error dt")].map((dt) => dt.textContent);
+    assert.ok(!facts.includes("Details"), JSON.stringify(facts));
+    assert.equal(doc.querySelector(".model-error-message").textContent.split(detail).length, 2);
+  }
+  {
+    const { event, doc } = setup();
+    event({ type: "error", message: "stopped — the provider stream repeatedly ended",
+      cause: { kind: "stream_cut", summary: "stream from h ended before [DONE]", detail: "stream closed before its terminal event ([DONE])" } });
+    const facts = [...doc.querySelectorAll(".model-error dt")].map((dt) => dt.textContent);
+    assert.ok(facts.includes("Details"), JSON.stringify(facts));
+  }
 });
