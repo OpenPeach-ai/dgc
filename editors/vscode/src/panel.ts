@@ -2148,6 +2148,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "saveSettings":
         await this.saveSettings(msg.values || {});
         break;
+      case "getUsage": {
+        // The Token Usage tab reads the CLI's local ledger. Only the range and a correlation id
+        // travel; the backend answers with a usage_report carrying the same request_id.
+        const requestId = String(msg.requestId || this.nextRequestId("usage")).slice(0, 128);
+        const range = ["today", "7d", "30d", "month", "all"].includes(msg.range) ? msg.range : "7d";
+        if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.usage_ledger) {
+          this.post({ type: "usage_unavailable", requestId,
+            message: "Update the DGC CLI to see token usage in the editor." });
+          break;
+        }
+        if (!be.send({ type: "get_usage", request_id: requestId, range })) {
+          this.post({ type: "usage_unavailable", requestId,
+            message: "DGC could not ask its backend for token usage. Try Refresh." });
+        }
+        break;
+      }
       case "pickMode":
         this.setMode();
         break;
@@ -2737,6 +2753,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "branchChat": void this.branchChat(""); break;
       case "retainedTasks": void this.retainedTasks(); break;
       case "subagent": this.openSettings("agents"); break;
+      case "usage": this.openSettings("usage"); break;
       case "settings": this.openSettings(); break;
       case "securitySettings": this.openSettings("security"); break;
       case "bug": void this.openSafeExternal("https://github.com/OpenPeach-ai/dgc/issues"); break;
@@ -4115,6 +4132,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <button type="button" class="set-tab active" role="tab" aria-selected="true" data-section="general" title="Permission mode, thinking, context size and tool profile">General</button>
     <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="models" title="Where DGC sends a turn: a local host, a provider, or your own subscription CLI">Models</button>
     <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="agents" title="The model and host that sub-agents and the fallback route use">Agents</button>
+    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="usage" title="Tokens and requests counted on this machine, by model and by day">Token Usage</button>
     <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="security" title="Sandbox confinement, plan-mode limits and artifact previews">Security</button>
     <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="extensions" title="Skills, MCP servers, hooks and permission rules">Extensions</button>
   </div>
@@ -4172,6 +4190,43 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <select id="s-fallback_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Fallback API key
       <input id="s-fallback_api_key" type="password" spellcheck="false" placeholder="same endpoint only / DGC_FALLBACK_API_KEY"></label>
+    </section>
+
+    <section class="set-section usage-section" data-section="usage" hidden>
+    <div class="set-group">Token usage <span class="set-hint">what each provider reported for requests DGC finished</span></div>
+    <label>Range <span id="usage-timezone" class="set-hint">Days follow this computer&rsquo;s local time.</span>
+      <select id="usage-range"><option value="today">Today</option><option value="7d" selected>7 days</option><option value="30d">30 days</option><option value="month">This month</option><option value="all">All time</option></select></label>
+    <div class="usage-toolbar">
+      <span id="usage-status" class="usage-status" role="status" aria-live="polite"></span>
+      <button type="button" id="usage-refresh" class="fbtn usage-refresh" title="Count again from this machine&rsquo;s usage ledger" aria-label="Refresh token usage"><span class="codicon codicon-refresh" aria-hidden="true"></span><span>Refresh</span></button>
+    </div>
+    <div id="usage-empty" class="usage-empty" hidden>
+      <p class="usage-empty-title">No model requests counted in this range yet</p>
+      <p>Each request DGC finishes (chats, goals, sub-agents, fallbacks, compaction) will appear here with the input, output and cached tokens its provider reported, totalled by model and by day.</p>
+      <p id="usage-empty-all" class="usage-empty-all" hidden>Earlier requests may be in a longer range. <button type="button" id="usage-show-all" class="link" title="Count every request the ledger keeps (up to 400 days)">Show all time</button></p>
+      <p>Turns delegated to a subscription CLI (Claude Code, Codex, &hellip;) are counted by that CLI, not here.</p>
+    </div>
+    <div id="usage-content" hidden>
+      <div id="usage-figures" class="usage-figures"></div>
+      <p id="usage-unmetered" class="usage-unmetered" hidden></p>
+      <div class="set-group">By model <span class="set-hint">sorted by total tokens</span></div>
+      <div class="usage-table-wrap" role="region" aria-label="Token usage by model" tabindex="0">
+        <table class="usage-table">
+          <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cached</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
+          <tbody id="usage-models"></tbody>
+        </table>
+      </div>
+      <div class="set-group">By day</div>
+      <div id="usage-days" class="usage-days" role="group" tabindex="0" aria-roledescription="bar strips" aria-label="Input and output tokens per day. Use the arrow keys to read each day." aria-describedby="usage-day-readout">
+        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-in"></span>Input</span><span id="usage-peak-in" class="usage-peak"></span></div>
+        <div id="usage-strip-in" class="usage-strip usage-strip-in"></div>
+        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-out"></span>Output</span><span id="usage-peak-out" class="usage-peak"></span></div>
+        <div id="usage-strip-out" class="usage-strip usage-strip-out"></div>
+        <div class="usage-axis" aria-hidden="true"><span id="usage-days-first"></span><span id="usage-days-last"></span></div>
+      </div>
+      <p id="usage-day-readout" class="usage-readout" aria-live="polite"></p>
+    </div>
+    <p class="set-note usage-privacy">Counted on this machine from what each provider reports. Nothing here is sent anywhere.</p>
     </section>
 
     <section class="set-section" data-section="general">

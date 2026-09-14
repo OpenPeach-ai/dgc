@@ -155,6 +155,7 @@
 <li><code>dgc doctor</code> — check that the endpoint and model are reachable, and show the installation.</li>
 <li><code>dgc update</code> — install the latest DGC beside the current version; <code>--rollback</code>, <code>--version X</code> and <code>--list</code> switch between the versions kept on disk.</li>
 <li><code>dgc export-training</code> — export sessions as scrubbed fine-tuning JSONL.</li>
+<li><code>dgc usage [--range today|7d|30d|month|all] [--json]</code> — tokens and requests counted on this machine (<code>~/.dgc/usage.sqlite</code>), by model and by day, from what each provider reported. The same report is <code>/usage</code> inside DGC and Settings → Token Usage in the editor; nothing in it is sent anywhere.</li>
 <li><code>dgc protocol describe</code> — print the installed headless/editor contract as JSON.</li>
 <li><code>dgc serve</code> — the headless JSON backend the VS Code extension drives. Stdout is protocol-only.</li>
 <li><code>dgc acp</code> — the agent-client-protocol surface.</li>

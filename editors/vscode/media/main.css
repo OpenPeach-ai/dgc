@@ -36,6 +36,10 @@
      everywhere, so it gets its own token: --del paints the gutter rail and row fill where
      the hue is the signal, --del-text clears 4.5:1 on all four panel surfaces. */
   --del:#E5484D; --del-text:#F0747E; --del-soft:rgba(229,72,77,.14);
+  /* Token Usage bar strip: two series that stay apart for every colour-vision type (checked with
+     the OKLab CVD validator against the dark and light panel grounds). Output is the DGC purple;
+     input is a teal, never a status colour. The light theme picks its own steps below. */
+  --usage-input:#14A89A; --usage-output:#8B6CFF;
   --sans: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace);
 
@@ -752,6 +756,93 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #followup-hint { padding: var(--sp-2) var(--sp-1) 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .set-foot .fbtn { height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); }
 
+/* Token Usage tab. It reuses the settings rows (label + select, .set-group headings, .set-note)
+   and adds only what a report needs: figures, a table that scrolls inside its own box, and two
+   day strips drawn in plain HTML. Every number is tabular so columns and figures line up. Data
+   labels use --muted, not --faint: VS Code's default disabledForeground is translucent. */
+body.vscode-light, body.vscode-high-contrast-light { --usage-input:#0A8F80; --usage-output:#7654F6; }
+body.vscode-high-contrast { --usage-input:var(--vscode-charts-green, #89D185); --usage-output:var(--vscode-charts-purple, #B180D7); }
+.usage-section > .set-group:first-child { margin-top: 0; }
+.usage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 40px; padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
+.usage-status { min-width: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+.usage-refresh { flex: none; height: 28px; color: var(--muted); border: 1px solid var(--border-strong); }
+.usage-refresh:hover { color: var(--text); background: var(--surface2); }
+.usage-section[aria-busy="true"] .usage-refresh .codicon { animation: usage-spin 1s linear infinite; }
+@keyframes usage-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .usage-section[aria-busy="true"] .usage-refresh .codicon { animation: none; } }
+.usage-section[aria-busy="true"] #usage-content { opacity: .6; }
+.usage-empty { margin: var(--sp-4) 0 var(--sp-2); padding: var(--sp-4); border: 1px dashed var(--border-strong); border-radius: var(--r-md); color: var(--muted); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); }
+.usage-empty p { margin: 0 0 var(--sp-2); }
+.usage-empty p:last-child { margin-bottom: 0; font-size: var(--t-xs); }
+.usage-empty .usage-empty-title { color: var(--text-strong); font-weight: var(--w-semi); }
+.usage-empty-all { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.usage-empty-all[hidden] { display: none; }
+.usage-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-2); }
+@media (min-width: 560px) { .usage-figures { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.usage-figure { min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
+.usage-figure-label { display: block; color: var(--muted); font: var(--w-med) var(--t-xs)/1.2 var(--sans); }
+.usage-figure-value { display: block; margin-top: var(--sp-1); color: var(--text-strong); font: var(--w-semi) var(--t-xl)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.usage-figure-exact { display: block; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.usage-unmetered { margin: 0 0 var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.usage-section #usage-content > .set-group { margin-top: var(--sp-4); }
+/* The table scrolls inside its own box; the model column stays put while the numbers scroll,
+   and whichever edge hides columns fades so the box reads as scrollable. */
+.usage-table-wrap { margin-top: var(--sp-2); overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
+.usage-table-wrap.more-right { -webkit-mask-image: linear-gradient(to left, transparent, #000 32px); mask-image: linear-gradient(to left, transparent, #000 32px); }
+.usage-table { width: 100%; border-collapse: collapse; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+.usage-table th, .usage-table td { padding: var(--sp-2) 6px; vertical-align: baseline; white-space: nowrap; }
+.usage-table tr > :first-child { padding-left: var(--sp-3); }
+.usage-table tr > :last-child { padding-right: var(--sp-3); }
+.usage-table thead th { border-bottom: 1px solid var(--border-strong); color: var(--muted); text-align: left; font: var(--w-med) var(--t-xs)/1.2 var(--sans); }
+.usage-table thead th.num { text-align: right; }
+.usage-th-sub { display: block; margin-top: 2px; font-weight: var(--w-reg); }
+.usage-table tbody > tr > * { border-bottom: 1px solid var(--border); color: var(--text); }
+.usage-table tbody tr:last-child > * { border-bottom: 0; }
+.usage-table .num { text-align: right; }
+.usage-table .usage-model { position: sticky; left: 0; z-index: 1; text-align: left; font-weight: var(--w-reg); background: var(--surface); }
+.usage-table thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.usage-table-wrap.more-left .usage-model, .usage-table-wrap.more-left thead th:first-child { box-shadow: inset -1px 0 0 var(--border-strong); }
+/* A long id clips its head and keeps its tail (":Q4_K_M", "-FP8", ":11434"); the column grows
+   with the panel instead of stopping at a fixed width. A table cell ignores max-width in
+   automatic layout, so the clip line carries it. */
+.usage-clip { display: flex; min-width: 0; max-width: clamp(108px, 34vw, 320px); }
+.usage-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-tail { flex: none; white-space: nowrap; }
+.usage-name { color: var(--text-strong); font: var(--w-reg) var(--t-xs)/1.45 var(--mono); }
+.usage-where { margin-top: 1px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.35 var(--sans); }
+.usage-share { display: flex; align-items: baseline; gap: 6px; }
+.usage-share-track { flex: none; align-self: center; width: 48px; height: 6px; overflow: hidden; border-radius: var(--r-full); background: var(--border); }
+.usage-share-fill { display: block; height: 100%; border-radius: inherit; background: var(--usage-output); }
+.usage-share-fill.nonzero { min-width: 3px; }
+.usage-share-text { flex: none; width: 4ch; color: var(--muted); text-align: right; font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
+/* Two strips, each on its own scale and each naming its peak: input dwarfs output for a coding
+   agent, so one shared scale would flatten output to a sliver. */
+.usage-days { margin-top: var(--sp-3); padding-bottom: var(--sp-1); border-radius: var(--r-sm); }
+.usage-days:focus-visible { outline-offset: 4px; }
+.usage-strip-label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.usage-strip-label:first-child { margin-top: 0; }
+.usage-key { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text); }
+.usage-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.usage-swatch.usage-in, .usage-bar.usage-in { background: var(--usage-input); }
+.usage-swatch.usage-out, .usage-bar.usage-out { background: var(--usage-output); }
+.usage-strip { display: flex; align-items: stretch; gap: 2px; padding: 0 1px; border-bottom: 1px solid var(--border-strong); }
+.usage-strip-in { height: 64px; }
+.usage-strip-out { height: 36px; }
+.usage-strip.dense { gap: 1px; }
+.usage-day { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 3px 3px 0 0; }
+.usage-day:hover, .usage-day.sel { background: var(--surface2); }
+.usage-strip-out .usage-day.sel::after { content: ""; position: absolute; left: 0; right: 0; bottom: -5px; height: 3px; border-radius: 2px; background: var(--text); }
+.usage-bar { display: block; min-height: 2px; border-radius: 3px 3px 0 0; }
+.usage-strip.dense .usage-bar { border-radius: 1px 1px 0 0; }
+.usage-bar.usage-unmetered-day { height: 3px; min-height: 0; border-top: 1px dashed var(--muted); border-radius: 0; }
+.usage-axis { display: flex; justify-content: space-between; gap: var(--sp-2); margin-top: 7px; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+.usage-readout { min-height: 1.45em; margin: var(--sp-1) 0 0; color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+.usage-privacy { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+/* Settings tabs wider than the panel scroll; fade the edge that hides more of them. */
+.settings-nav.more-right { -webkit-mask-image: linear-gradient(to left, transparent, #000 28px); mask-image: linear-gradient(to left, transparent, #000 28px); }
+.settings-nav.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
+.settings-nav.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+
 .surface-toolbar { display: flex; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); }
 .surface-toolbar input { min-width: 0; flex: 1; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-2); }
 .surface-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-3) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -884,6 +975,12 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
     color: inherit;
   }
   button:disabled, input:disabled, select:disabled, textarea:disabled { color: GrayText; }
+  .usage-bar.usage-out, .usage-swatch.usage-out, .usage-share-fill { forced-color-adjust: none; background: Highlight; }
+  .usage-bar.usage-in, .usage-swatch.usage-in { forced-color-adjust: none; background: CanvasText; }
+  .usage-figure, .usage-table-wrap, .usage-empty, .usage-refresh { border-color: CanvasText; }
+  .usage-day.sel { outline: 1px solid CanvasText; background: Canvas; }
+  .usage-strip-out .usage-day.sel::after { forced-color-adjust: none; background: CanvasText; }
+  .usage-table-wrap.more-right, .settings-nav.more-left, .settings-nav.more-right { -webkit-mask-image: none; mask-image: none; }
   .diff .add { color: CanvasText; background: Canvas; box-shadow: none;
     border-left: 3px solid Highlight; }
   .diff .del { color: GrayText; background: Canvas; box-shadow: none;

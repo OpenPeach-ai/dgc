@@ -1770,3 +1770,25 @@ test("Clear and a typed /todo clear reach the backend as one correlated clear_to
   await h.provider.onMessage({ type: "clear_todos" });
   assert.deepEqual(sent.at(-1), { type: "clear_todos" });
 });
+
+test("the Token Usage tab's request reaches get_usage, and an older CLI is told to update", async () => {
+  const h = harness(), posted = [], sent = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true } };
+  await h.provider.onMessage({ type: "getUsage", range: "30d", requestId: "usage-abc-1" });
+  assert.deepEqual(sent, [{ type: "get_usage", request_id: "usage-abc-1", range: "30d" }]);
+  await h.provider.onMessage({ type: "getUsage", range: "year; drop", requestId: "usage-abc-2" });
+  assert.deepEqual(sent.at(-1), { type: "get_usage", request_id: "usage-abc-2", range: "7d" },
+    "an unknown range falls back to the default instead of reaching the backend");
+  h.provider.lastReadyEvent = { capabilities: {} };
+  await h.provider.onMessage({ type: "getUsage", range: "today", requestId: "usage-old" });
+  assert.equal(sent.length, 2, "an older CLI is never sent a command it would reject");
+  assert.deepEqual(posted.at(-1), { type: "usage_unavailable", requestId: "usage-old",
+    message: "Update the DGC CLI to see token usage in the editor." });
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true } };
+  h.provider.backend.send = () => false;
+  await h.provider.onMessage({ type: "getUsage", range: "all", requestId: "usage-full" });
+  assert.equal(posted.at(-1).type, "usage_unavailable");
+  assert.equal(posted.at(-1).requestId, "usage-full");
+});
