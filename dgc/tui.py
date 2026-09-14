@@ -48,6 +48,7 @@ from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
+from .monitors import plural
 from .redaction import redact_text, redact_value, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -1063,7 +1064,8 @@ class TUI:
         else:
             summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · event {batch.event_index}'
             if batch.omitted_lines:
-                lines.append(f"… {batch.omitted_lines} more lines — /monitors show {batch.monitor_id}")
+                lines.append(f"… {plural(batch.omitted_lines, 'more line')} — "
+                             f"/monitors show {batch.monitor_id}")
         return {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
                 "call_id": None, "summary": summary[:200], "running": False, "error": False,
                 "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
@@ -1087,6 +1089,12 @@ class TUI:
                         f"{_esc(payload.get('description', ''))}[/]"))
                     changed = True
                 elif kind == "ended":
+                    hub = getattr(getattr(sess, "agent", None), "monitors", None)
+                    # The end of a monitor from a conversation /new, /clear, resume or rewind has
+                    # replaced is queued after that reset: the new chat does not show it.
+                    if hub is None or (payload.get("epoch", hub.epoch) != hub.epoch
+                                       or str(payload.get("id", "")) not in hub.ids()):
+                        continue
                     sess.blocks.append(self._rich(
                         f"[{th.faint}]◉ monitor {_esc(payload.get('id', ''))} · "
                         f"{_esc(payload.get('message', ''))}[/]"))
@@ -1233,10 +1241,10 @@ class TUI:
         if running:
             first = running[0]
             count = len(running)
-            parts.append(f"{count} monitor{'s' if count != 1 else ''} · {first.id} "
-                         f"{first.description} · {first.events_total} events")
+            parts.append(f"{plural(count, 'monitor')} · {first.id} "
+                         f"{first.description} · {plural(first.events_total, 'event')}")
         if pending:
-            parts.append(f"{pending} event{'s' if pending != 1 else ''} waiting")
+            parts.append(f"{plural(pending, 'event')} waiting")
         if hub.policy.paused:
             parts.append("wake paused · /monitors wake on")
         return " · ".join(parts)
@@ -1288,12 +1296,13 @@ class TUI:
         for item in items:
             state = item["state"] + (f" ({item.get('end_reason')})" if item.get("end_reason") else "")
             rows.append(f"  [{th.accent}]{_esc(item['id'])}[/]  {_esc(item['description'])}  "
-                        f"[{th.faint}]{_esc(state)} · {item['events']} events · "
+                        f"[{th.faint}]{_esc(state)} · {plural(item['events'], 'event')} · "
                         f"{_esc(item['command'][:80])}[/]")
         wake = ("paused" if hub.policy.paused else
                 "on" if self.config.get("monitor_wake", True) else "off")
         self._append(self._rich("background monitors\n" + "\n".join(rows)
-                                + f"\n\n[{th.faint}]{hub.pending_events()} events waiting · wake-ups {wake} · "
+                                + f"\n\n[{th.faint}]{plural(hub.pending_events(), 'event')} waiting · "
+                                f"wake-ups {wake} · "
                                 "/monitors stop ID|all · wake on|off · show ID · monitors do not "
                                 "survive /new or a restart[/]"))
 

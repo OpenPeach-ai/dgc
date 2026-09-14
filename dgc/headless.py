@@ -1021,6 +1021,7 @@ class Backend:
                         notification = (None if self._wake_blocked_locked()
                                         else hub.take_pending())
                         if notification is None:
+                            hub.policy.abandon_wake()   # a wake that never ran does not count
                             continue            # nothing left to deliver, or waking is not allowed
                     self._running_turn_kind = turn_kind
                     self._wake_yield = False
@@ -1163,11 +1164,17 @@ class Backend:
                 self._schedule_monitors_snapshot()
             elif kind == "ended":
                 exit_code = payload.get("exit_code")
-                self.em.emit("monitor_ended", id=payload["id"], description=payload["description"],
-                             reason=payload["reason"],
-                             exit_code=exit_code if isinstance(exit_code, int) else None,
-                             events=int(payload.get("events") or 0),
-                             message=str(payload.get("message") or ""))
+                hub = self.agent.monitors
+                # A monitor of a conversation that new chat, clear, resume or rewind has replaced
+                # ends after that command's acknowledgement; the new chat must not hear about it.
+                # Checking and publishing inside current_epoch keeps the two atomic.
+                with hub.current_epoch(payload.get("epoch", hub.epoch)) as current:
+                    if current:
+                        self.em.emit("monitor_ended", id=payload["id"],
+                                     description=payload["description"], reason=payload["reason"],
+                                     exit_code=exit_code if isinstance(exit_code, int) else None,
+                                     events=int(payload.get("events") or 0),
+                                     message=str(payload.get("message") or ""))
                 self._schedule_monitors_snapshot()
             elif kind == "delivered":
                 self._emit_monitor_events(payload["notification"], payload.get("delivery", "inline"),
@@ -1283,13 +1290,32 @@ class Backend:
         self._maybe_wake()
 
     def _yield_wake_turn(self) -> bool:
-        """If only a monitor wake turn holds the backend, stop it and wait for it to finish."""
+        """If only monitor wake work holds the backend, stop it and wait for it to finish.
+
+        That is a wake turn that is running, or a wake the timer queued that the worker has not
+        started yet (or both). The queued wake items are dropped -- they carry no events; the
+        events stay pending in the hub and wake the session again later -- and a running wake turn
+        is cancelled. Anything else in the queue or running (a prompt, a goal step, a foreground
+        operation) is real work and is not preempted.
+        """
         with self._turn_state_lock():
-            if (getattr(self, "_running_turn_kind", "") != "monitor" or self._queue
-                    or getattr(self, "_foreground_worker", None) is not None):
+            if getattr(self, "_foreground_worker", None) is not None:
                 return False
-            self._wake_yield = True
-            self.agent.cancelled.set()
+            running = getattr(self, "_running_turn_kind", "")
+            queue = getattr(self, "_queue", [])
+            queued_wakes = [item for item in queue if len(item) > 3 and item[3] == "monitor"]
+            if len(queued_wakes) != len(queue) or running not in ("", "monitor"):
+                return False
+            # running == "" with nothing queued is a worker that is retiring: waiting is enough.
+            if queued_wakes:
+                queue[:] = [item for item in queue if not (len(item) > 3 and item[3] == "monitor")]
+                hub = getattr(getattr(self, "agent", None), "monitors", None)
+                if hub is not None:
+                    for _ in queued_wakes:
+                        hub.policy.abandon_wake()
+            if running == "monitor":
+                self._wake_yield = True
+                self.agent.cancelled.set()
         return self._await_idle(_WAKE_YIELD_TIMEOUT)
 
     def _maybe_auto_resume_goal(self, failed: bool, cancelled: bool) -> bool:

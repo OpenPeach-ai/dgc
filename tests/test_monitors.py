@@ -1011,6 +1011,69 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(turns, 2)
 
 
+class TuiMonitorTests(unittest.TestCase):
+    def tui(self):
+        import types
+        from dgc.tui import TUI
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-monitor-tui-")
+        self.addCleanup(tmp.cleanup)
+        agent = Agent(make_config(Path(tmp.name), mode="auto"), FrontendUI())
+        self.addCleanup(agent.mcp.stop_all)
+        self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+        tui = object.__new__(TUI)
+        tui.agent = agent
+        tui._rich = lambda text: text
+        tui._invalidate = lambda: None
+        sess = types.SimpleNamespace(agent=agent, config=agent.config, blocks=[], _follow=False,
+                                     _scroll_off=0, _after_wake_command="",
+                                     _monitor_inbox=__import__("collections").deque(),
+                                     _monitor_inbox_lock=threading.Lock())
+        tui._sessions = [sess]
+        tui._active_idx = 0
+        tui._maybe_wake_session = lambda session: False
+        return tui, sess
+
+    def test_an_old_conversations_monitor_end_is_not_shown_in_the_new_chat(self):
+        tui, sess = self.tui()
+        hub = sess.agent.monitors
+        out = hub.start({"command": "sleep 30", "description": "api log", "persistent": True},
+                        sess.agent.ctx)
+        mid = out.split()[2]
+        stale = {"id": mid, "description": "api log", "reason": "shutdown", "exit_code": -15,
+                 "events": 12, "message": "stopped after 12 events", "epoch": hub.epoch}
+        hub.new_epoch("shutdown")                        # /new
+        tui._on_monitor(sess, "ended", stale)            # the reader reports the end afterwards
+        tui._service_monitors()
+        self.assertFalse(any("stopped after" in str(block) for block in sess.blocks), sess.blocks)
+        out = hub.start({"command": "sleep 30", "description": "build", "persistent": True},
+                        sess.agent.ctx)
+        current = out.split()[2]
+        tui._on_monitor(sess, "ended", {**stale, "id": "mon-from-another-runtime", "epoch": hub.epoch})
+        tui._on_monitor(sess, "ended", {**stale, "id": current, "epoch": hub.epoch,
+                                        "message": "ended: exit 0 after 1 event"})
+        tui._service_monitors()
+        shown = [str(block) for block in sess.blocks if "monitor" in str(block)]
+        self.assertEqual(len(shown), 1, shown)
+        self.assertIn(current, shown[0])
+
+    def test_the_status_line_and_listing_pluralise_counts(self):
+        tui, sess = self.tui()
+        hub = sess.agent.monitors
+        hub.start({"command": "echo one; sleep 30", "description": "api log", "persistent": True},
+                  sess.agent.ctx)
+        self.assertTrue(wait_for(lambda: hub.running()[0].events_total == 1, 5))
+        self.assertIn("1 monitor · ", tui._monitor_status_text())
+        self.assertIn("api log · 1 event", tui._monitor_status_text())
+        self.assertNotIn("1 events", tui._monitor_status_text())
+        shown = []
+        tui._append = shown.append
+        tui.config = sess.config
+        tui._tui_monitors("")
+        self.assertIn("1 event · ", shown[0])
+        self.assertIn("1 event waiting", shown[0])
+        self.assertNotIn("1 events", shown[0])
+
+
 class LifecycleTests(unittest.TestCase):
     def agent(self):
         tmp = tempfile.TemporaryDirectory(prefix="dgc-monitor-life-")
@@ -1150,6 +1213,80 @@ class BackendYieldTests(unittest.TestCase):
         self.assertEqual((state, count), ("queued", 1))
         self.assertEqual(backend._queue[0][0], "what happened?")
         self.assertTrue(backend.agent.cancelled.is_set(), "a message is never steered into a wake turn")
+
+    def queued_wake_not_yet_running(self, backend):
+        """The state a wake timer leaves for an instant: a wake item queued, its worker not yet on it.
+
+        The worker waits on a gate that the test opens only once the command under test is waiting
+        for the backend to go idle, so the race the timer makes by chance happens every time.
+        """
+        gate = threading.Event()
+        hub = backend.agent.monitors
+        hub.queue_background_exit("bg1", "npm run build", 0, 3.0, "done", hub.epoch)
+        hub.policy.begin_wake()
+
+        def worker():
+            gate.wait(10)
+            backend._run_turn_queue()
+        with backend._turn_state_lock():
+            backend._queue.append(("", None, None, "monitor", ""))
+            backend._worker = threading.Thread(target=worker, daemon=True)
+            backend._worker.start()
+        original = backend._await_idle
+
+        def await_idle(timeout):
+            gate.set()                          # only now may the worker look at its queue
+            return original(timeout)
+        backend._await_idle = await_idle
+        return gate
+
+    def test_a_busy_command_racing_a_queued_wake_runs_instead_of_being_refused(self):
+        for command, answer in (({"type": "set_think", "level": "high", "request_id": "cmd"}, "think_changed"),
+                                ({"type": "set_workspace_roots", "roots": [], "request_id": "cmd"},
+                                 "workspace_roots")):
+            self.events = []
+            backend = self.backend()
+            hub = backend.agent.monitors
+            self.queued_wake_not_yet_running(backend)
+            self.assertTrue(backend._busy())
+            backend.dispatch(command)
+            self.assertEqual(self.rejected(), [], command["type"])
+            self.assertTrue(any(e["type"] == answer for e in self.events),
+                            (command["type"], [e["type"] for e in self.events]))
+            self.assertFalse([e for e in self.events if e["type"] == "turn_start"],
+                             "the queued wake gave way; it never started")
+            self.assertEqual(backend._queue, [])
+            self.assertEqual(hub.pending_count(), 1, "its events stay pending for a later wake")
+            self.assertEqual(hub.policy.consecutive, 0, "a wake that never ran is not counted")
+            self.assertIsNone(backend._worker)
+
+    def test_a_queued_prompt_is_never_dropped_to_make_room_for_a_command(self):
+        backend = self.backend()
+        gate = self.queued_wake_not_yet_running(backend)
+        with backend._turn_state_lock():
+            backend._queue.append(("a real prompt", None, None, "prompt", "p1"))
+        backend._await_idle = lambda timeout: False
+        backend.dispatch({"type": "set_think", "level": "high", "request_id": "cmd"})
+        self.assertEqual([e["command"] for e in self.rejected()], ["set_think"])
+        self.assertEqual([item[3] for item in backend._queue], ["monitor", "prompt"])
+        with backend._turn_state_lock():
+            backend._queue.clear()
+        gate.set()
+        backend.agent.cancelled.set()
+        worker = backend._worker
+        if worker is not None:
+            worker.join(10)
+
+    def test_the_end_of_a_monitor_from_a_replaced_conversation_is_not_published(self):
+        backend = self.backend()
+        hub = backend.agent.monitors
+        payload = {"id": "mon1", "description": "api log", "reason": "shutdown", "exit_code": -15,
+                   "events": 3, "message": "stopped after 3 events", "epoch": hub.epoch}
+        hub.new_epoch("shutdown")
+        backend._on_monitor("ended", payload)
+        self.assertFalse([e for e in self.events if e["type"] == "monitor_ended"])
+        backend._on_monitor("ended", {**payload, "epoch": hub.epoch})
+        self.assertEqual([e["id"] for e in self.events if e["type"] == "monitor_ended"], ["mon1"])
 
     def test_cancel_pauses_wakes_while_events_wait(self):
         backend = self.backend()
@@ -1427,9 +1564,14 @@ class ServeTests(unittest.TestCase):
             serve.send({"type": "compact", "request_id": "c"})
             self.assertTrue(serve.wait(lambda e: e.get("request_id") == "c", 60))
             serve.send({"type": "new_session", "request_id": "n"})
-            self.assertTrue(serve.wait(lambda e: e["type"] == "session" and e.get("request_id") == "n", 30))
-            gone = serve.wait(lambda e: e["type"] == "monitor_ended" and e["reason"] == "shutdown", 30)
-            self.assertTrue(gone)
+            ack = serve.wait(lambda e: e["type"] == "session" and e.get("request_id") == "n", 30)
+            self.assertTrue(ack)
+            emptied = serve.wait(lambda e: e["type"] == "monitors" and e["seq"] > ack["seq"]
+                                 and not e["items"], 30)
+            self.assertTrue(emptied, "the new chat's monitors list is empty")
+            time.sleep(1.5)
+            self.assertFalse([e for e in serve.events if e["type"] == "monitor_ended" and e["seq"] > ack["seq"]],
+                             "the old chat's monitor ends silently for the new one")
             self.assertFalse([e for e in serve.events if e["type"] == "command_rejected"])
             serve.close()
             serve.assert_valid_stream(self)
@@ -1486,6 +1628,110 @@ class ServeTests(unittest.TestCase):
             self.assertFalse([e for e in serve.events if e["type"] == "command_rejected"])
             serve.close()
             serve.assert_valid_stream(self)
+
+    def test_a_wake_turns_sub_agent_raises_no_approval_card(self):
+        def script(body):
+            messages = body.get("messages") or []
+            text = json.dumps(messages)
+            if "CHILD-TASK" in text and "<monitor-events" not in text:
+                if messages and messages[-1].get("role") == "user":
+                    return sse_call("bash", {"command": "echo from-child > child.txt"}, "k1")
+                return sse_text("child done")
+            if "<monitor-events" in last_user(body) and ends_with_user(body):
+                return sse_call("task", {"description": "react to the deploy",
+                                         "prompt": "CHILD-TASK: write child.txt"}, "w1")
+            if messages and messages[-1].get("role") == "tool" and "<monitor-events" in text:
+                return sse_text("delegated")
+            if ends_with_user(body) and "watch" in last_user(body):
+                return sse_call("monitor", {"command": "sleep 1; echo DEPLOY FAILED; sleep 60",
+                                            "description": "deploy", "persistent": True}, "m1")
+            return sse_text("watching")
+        with MockModel(script) as model:
+            serve = Serve(self, model, monitor_wake_delay_s=1, monitor_wake_cooldown_s=1,
+                          permissions={"allow": ["Task"]})
+            serve.wait(lambda e: e["type"] == "ready")
+            serve.send({"type": "prompt", "text": "watch the deploy", "request_id": "p1"})
+            asked = serve.wait(lambda e: e["type"] == "permission_request", 60)
+            self.assertTrue(asked and asked["name"] == "monitor", kinds(serve.events))
+            serve.send({"type": "permission_response", "id": asked["id"], "decision": "once"})
+            woke = serve.wait(lambda e: e["type"] == "turn_start" and e.get("kind") == "monitor", 60)
+            self.assertTrue(woke, kinds(serve.events))
+            end = serve.wait(lambda e: e["type"] == "turn_end" and e["turn_id"] == woke["turn_id"], 60)
+            self.assertTrue(end, "the wake turn finished instead of waiting on a card")
+            self.assertEqual([e["name"] for e in serve.events if e["type"] == "permission_request"],
+                             ["monitor"], "only the user's own turn asked")
+            denied = [e for e in serve.events if e["type"] == "tool_denied" and e["name"] == "bash"]
+            self.assertEqual(denied[0]["reason"], "events waiting — approve on your next prompt")
+            self.assertFalse((serve.work / "child.txt").exists())
+            serve.send({"type": "stop_monitor", "id": "all"})
+            serve.close()
+            serve.assert_valid_stream(self)
+
+    def test_background_bash_wakes_an_adaptive_session_that_never_asked_to_watch(self):
+        def script(body):
+            results = [m for m in body.get("messages") or [] if m.get("role") == "tool"]
+            if "<monitor-events" in last_user(body) and ends_with_user(body):
+                return sse_text("the build finished")
+            if ends_with_user(body) and not results:
+                return sse_call("bash", {"command": "sleep 1; echo BUILD-OK", "background": True})
+            return sse_text("started it")
+        with MockModel(script) as model:
+            serve = Serve(self, model, monitor_wake_delay_s=1, monitor_wake_cooldown_s=1)
+            serve.auto()
+            serve.send({"type": "prompt", "text": "run the build in the background", "request_id": "p1"})
+            self.assertTrue(serve.wait(lambda e: e["type"] == "turn_end" and e["turn_id"] == "t1", 60))
+            first = model.requests[0]
+            names = {t["function"]["name"] for t in first.get("tools") or []}
+            self.assertNotIn("monitor", names, "the default adaptive profile; no watch words")
+            bash = next(t for t in first["tools"] if t["function"]["name"] == "bash")
+            self.assertIn("notified once when it exits", bash["function"]["description"])
+            woke = serve.wait(lambda e: e["type"] == "turn_start" and e.get("kind") == "monitor", 30)
+            self.assertTrue(woke, kinds(serve.events))
+            exit_event = serve.wait(lambda e: e["type"] == "monitor_event" and e["kind"] == "background_exit", 30)
+            self.assertTrue(exit_event and "BUILD-OK" in exit_event["lines"], exit_event)
+            self.assertEqual(exit_event.get("turn_id"), woke["turn_id"])
+            self.assertTrue(serve.wait(lambda e: e["type"] == "turn_end" and e["turn_id"] == woke["turn_id"], 60))
+            serve.close()
+            serve.assert_valid_stream(self)
+
+    def test_an_old_chats_monitor_end_never_follows_the_new_chats_acknowledgement(self):
+        gate = threading.Semaphore(0)
+
+        def script(body):
+            if not body.get("tools"):
+                return sse_text("## Goal\n- x\n## Progress\n- y\n## Next\n- z")
+            if "<monitor-events" in last_user(body) and ends_with_user(body):
+                gate.acquire(timeout=20)                 # a wake turn is running at the reset
+                return sse_text("noted")
+            if ends_with_user(body) and "keep" in last_user(body):
+                return sse_call("monitor", {"command": "while true; do echo OLD-LINE; sleep 0.1; done",
+                                            "description": "chatty", "persistent": True})
+            return sse_text("ok")
+        for command in ("clear_session", "new_session"):
+            with MockModel(script) as model:
+                serve = Serve(self, model, monitor_wake_delay_s=1, monitor_wake_cooldown_s=1)
+                serve.auto()
+                serve.send({"type": "prompt", "text": "keep watching", "request_id": "p1"})
+                self.assertTrue(serve.wait(lambda e: e["type"] == "turn_start" and e.get("kind") == "monitor", 60))
+                time.sleep(0.3)
+                serve.send({"type": command, "request_id": "reset"})
+                timer = threading.Timer(0.5, gate.release)
+                timer.daemon = True
+                timer.start()
+                ack = serve.wait(lambda e: e["type"] == "session" and e.get("request_id") == "reset", 40)
+                self.assertTrue(ack, kinds(serve.events))
+                time.sleep(3)
+                late = [e for e in serve.events if e["seq"] > ack["seq"]
+                        and e["type"] in ("monitor_ended", "monitor_event", "monitor_started")]
+                self.assertEqual(late, [], command)
+                before = len(model.requests)
+                serve.send({"type": "prompt", "text": "hello new chat", "request_id": "p2"})
+                self.assertTrue(serve.wait(lambda e: e["type"] == "turn_start" and e.get("request_id") == "p2", 30))
+                self.assertTrue(serve.wait(lambda e: e["type"] == "turn_end" and e["seq"] > ack["seq"], 30))
+                self.assertFalse([b for b in model.requests[before:]
+                                  if "OLD-LINE" in json.dumps(b["messages"])], command)
+                serve.close()
+                serve.assert_valid_stream(self)
 
     @staticmethod
     def orphan_script(marker):
