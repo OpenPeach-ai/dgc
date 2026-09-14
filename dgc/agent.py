@@ -281,6 +281,12 @@ def _call_accepting(hook, *args, **options):
     return hook(*args, **options)
 
 
+def _prompt_endpoint(base_url) -> str:
+    """The base URL as the system prompt names it: no credentials, no query string or fragment."""
+    from .model_errors import scrub_urls
+    return scrub_urls(base_url or "")
+
+
 def _ui_supports_model_retry(ui) -> bool:
     """Does this front end draw retry runs itself (the optional ``model_retry`` hook)?
 
@@ -2103,7 +2109,7 @@ class Agent(GoalLifecycle):
             f"- Date: {datetime.now().strftime('%Y-%m-%d')}",
             f"- OS: {platform.system()} {platform.release()}",
             f"- Project root (cwd for all tools): {cfg.project_root}",
-            f"- Model: {cfg.model} @ {cfg.base_url}",
+            f"- Model: {cfg.model} @ {_prompt_endpoint(cfg.base_url)}",
             "",
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
@@ -3459,9 +3465,19 @@ class Agent(GoalLifecycle):
     def _stream_cut_failure(template: str, spent: dict) -> str:
         from .model_watch import endpoint_host
         host = endpoint_host(str(spent.get("endpoint") or ""))
-        message = template.format(where=f" from {host}" if host else "")
+        again = bool(spent.get("attempts"))
+        message = (template if again else template.replace(" repeatedly", "")).format(
+            where=f" from {host}" if host else "")
         summary = str(spent.get("summary") or "")
-        return f"{message} ({summary})" if host and summary else message
+        # The template already names the host: add only what the stream never sent ("[DONE]"), or a
+        # summary that does not repeat the host ("connection reset by peer while streaming").
+        marker = " ended before "
+        extra = summary.split(marker, 1)[1] if marker in summary else summary
+        if host and extra:
+            message = f"{message} ({extra})"
+        if not again:       # no reconnect was tried: output-limit continuations spent the budget
+            message += "; this turn's continuations were already spent on output-limit continuations"
+        return message
 
     def _fail_turn(self, message: str, cause=None) -> bool:
         """Record and render one handled terminal failure for every frontend.
@@ -3583,7 +3599,10 @@ class Agent(GoalLifecycle):
                 "layer": str(run.get("layer") or "request"), "attempt": max(1, int(run.get("attempt") or 1)),
                 "summary": text(run.get("summary")) or "the model request failed",
                 "endpoint": text(run.get("endpoint")),
-                "max_attempts": int(run["max"]) if isinstance(run.get("max"), int) and run["max"] > 0 else None,
+                # One run can span two budgets (a stall retry after transport retries, an auto
+                # fallback's retries): "4/3" is never drawn, the count widens to the attempts made.
+                "max_attempts": (max(int(run["max"]), int(run.get("attempt") or 1))
+                                 if isinstance(run.get("max"), int) and run["max"] > 0 else None),
                 "model": text(run.get("model")), "api_mode": str(run.get("api_mode") or ""),
                 "detail": text(run.get("detail")), "hint": text(run.get("hint")),
                 "http_status": int(run.get("http_status") or 0),
@@ -3607,7 +3626,7 @@ class Agent(GoalLifecycle):
         if state == "retrying":
             verb = "reconnecting" if connect else "retrying"
             maximum = run.get("max")
-            count = f"{attempt}/{maximum}" if maximum else str(attempt)
+            count = f"{attempt}/{max(int(maximum), attempt)}" if isinstance(maximum, int) and maximum > 0 else str(attempt)
             delay = run.get("delay_ms")
             wait = f" in {format_seconds(delay / 1000)}" if isinstance(delay, (int, float)) else ""
             self.ui.info(self._safe_text(f"↻ {run.get('summary')} — {verb} ({count}){wait}"))
@@ -3633,7 +3652,7 @@ class Agent(GoalLifecycle):
         short = short_cause(FailureCause(kind=kind, summary=str(ev.summary or ""),
                                          http_status=int(ev.http_status or 0)))
         parts = [short, endpoint_host(ev.endpoint), f"backoff {format_seconds(delay)}",
-                 f"retry {run['attempt']}/{int(ev.retries or 0)}" if ev.retries else ""]
+                 f"retry {run['attempt']}/{max(int(ev.retries), int(run['attempt']))}" if ev.retries else ""]
         self._model_wait_shown = True
         self._show_model_wait(label, self._safe_text(" · ".join(p for p in parts if p))[:120],
                               since=ev.since)
@@ -3684,7 +3703,8 @@ class Agent(GoalLifecycle):
         return {"kind": kind if kind in ("stream_cut", "reset") else "stream_cut",
                 "summary": str(info.get("summary") or "the stream ended before its terminal event"),
                 "detail": str(info.get("detail") or ""), "endpoint": endpoint,
-                "hint": hint_for(kind, model=str(getattr(client, "model", "") or ""), base_url=base_url)}
+                "hint": hint_for(kind, model=str(getattr(client, "model", "") or ""), base_url=base_url,
+                                 streaming=True)}
 
     def _begin_stream_recovery(self, result, cuts: int, cancel) -> dict | None:
         """Open this cut's continuation run and back off. The notice to tag the continuation
@@ -3705,19 +3725,31 @@ class Agent(GoalLifecycle):
                                  "cause": facts["kind"], "summary": str(facts["summary"])[:200],
                                  "endpoint": endpoint_host(facts["endpoint"])})
 
-    def _stream_recovery_exhausted(self, result, cuts: int) -> dict:
-        """E3: the continuation budget is spent. Draw the run that gives up, return its cause."""
+    def _stream_recovery_exhausted(self, result, cuts: int, message: dict | None = None) -> dict:
+        """E3: the continuation budget is spent. Draw the run that gives up, return its cause.
+
+        No line claims a reconnect that never happened: when output-limit continuations spent the
+        shared budget (``cuts`` is 0) there is no run, only the cause. Otherwise the partial answer
+        ``message`` is tagged (``_dgc_stream_gave_up``, a private key no transport sends) so a
+        replayed session still shows that the turn gave up.
+        """
+        from .model_watch import endpoint_host
         facts = self._interruption_facts(result)
-        produced = self._produced_output(result)
-        attempt = max(1, int(cuts))
+        cause = {"kind": facts["kind"], "summary": facts["summary"], "endpoint": facts["endpoint"],
+                 "detail": facts["detail"], "hint": facts["hint"],
+                 "model": str(getattr(self.client, "model", "") or ""), "retryable": True}
+        if int(cuts) <= 0:
+            return cause
+        attempt = int(cuts)
         run = self._open_continuation_run(kind=facts["kind"], summary=facts["summary"], attempt=attempt,
                                           maximum=attempt, endpoint=facts["endpoint"], hint=facts["hint"],
-                                          detail=facts["detail"], produced=produced)
+                                          detail=facts["detail"], produced=self._produced_output(result))
         self._close_runs("gave_up", layers=("continuation",))
-        return {"kind": facts["kind"], "summary": facts["summary"], "endpoint": facts["endpoint"],
-                "detail": facts["detail"], "hint": facts["hint"], "attempts": attempt,
-                "run_n": int(run["run_n"]), "model": str(getattr(self.client, "model", "") or ""),
-                "retryable": True}
+        if isinstance(message, dict):
+            message["_dgc_stream_gave_up"] = self._safe_value({
+                "attempt": attempt, "cause": facts["kind"], "summary": str(facts["summary"])[:200],
+                "endpoint": endpoint_host(facts["endpoint"])})
+        return {**cause, "attempts": attempt, "run_n": int(run["run_n"])}
 
     def _model_failure_cause(self, exc) -> dict | None:
         """The structured cause a failed model request raised with, as ``error.cause`` wants it."""
@@ -3755,7 +3787,12 @@ class Agent(GoalLifecycle):
         answered = (not payload.pop("retryable", True)
                     or payload.get("kind") in self._NON_RETRYABLE_KINDS)
         if answered:
-            self._close_runs("recovered")
+            # The server answered, so a request run reconnected; but a continuation it answered with
+            # an error continued nothing, and its line must not say "continued from the partial answer".
+            self._close_runs("recovered", layers=("request",))
+            stopped = self._close_runs("gave_up", layers=("continuation",))
+            if "run_n" not in payload and stopped:
+                payload["run_n"] = int(stopped[0]["run_n"])
         else:
             closed = self._close_runs("gave_up")
             if "run_n" not in payload and closed:
@@ -4436,7 +4473,7 @@ class Agent(GoalLifecycle):
                              "[Completion withheld by DGC: the model repeatedly hit its output limit.]"),
                             "completion withheld — the model never produced a complete response")
                     if result.finish_reason == "incomplete":
-                        spent = self._stream_recovery_exhausted(result, stream_cuts)
+                        spent = self._stream_recovery_exhausted(result, stream_cuts, assistant)
                         return self._fail_turn(self._stream_cut_failure(
                             "stopped — the provider stream{where} repeatedly ended before a terminal event",
                             spent), cause=spent)
@@ -4599,7 +4636,7 @@ class Agent(GoalLifecycle):
                     continues = max(0, continues - 1)
                 if continues >= _MAX_CONTINUE:
                     if result.finish_reason == "incomplete" and not stalled:
-                        spent = self._stream_recovery_exhausted(result, stream_cuts)
+                        spent = self._stream_recovery_exhausted(result, stream_cuts, assistant)
                         return self._fail_turn(self._stream_cut_failure(
                             "stopped — the provider stream{where} repeatedly ended before terminal "
                             "tool-call completion", spent), cause=spent)

@@ -2137,7 +2137,7 @@ class TUI:
         continuation = blk.get("layer") == "continuation"
         reconnect = kind not in BUSY_KINDS and kind not in ("http", "stall", "loading", "auth",
                                                             "model_not_found")
-        count = f"{attempt}/{maximum}" if maximum else str(attempt)
+        count = f"{attempt}/{max(int(maximum), attempt)}" if maximum else str(attempt)
         tries = f"{attempt} {'retry' if attempt == 1 else 'retries'}"
         if state == "retrying":
             if kind in BUSY_KINDS:
@@ -4766,7 +4766,11 @@ class TUI:
                     b["exp"] = True
                 self._invalidate()
                 if cmd == "expandall":
-                    self._flash("expanded all tool output and reconnect details")
+                    # Name only what was opened: a chat with no reconnect never hears about one.
+                    kinds = {b.get("kind") for b in chosen}
+                    self._flash("expanded all tool output and reconnect details" if kinds == {"tool", "retry"}
+                                else "expanded all reconnect details" if kinds == {"retry"}
+                                else "expanded all tool output")
                 elif chosen[0].get("kind") == "retry":
                     self._flash("expanded the reconnect details")
                 else:
@@ -5495,6 +5499,14 @@ class TUI:
                         pending["state"] = "recovered"
                     pending_retries.clear()
                     rows.append({"who": "assistant", "body": body, "tools": names})
+                gave_up = m.get("_dgc_stream_gave_up")
+                if isinstance(gave_up, dict):
+                    # The partial answer the turn gave up after: its closed "Gave up" block follows it.
+                    attempt = gave_up.get("attempt") if isinstance(gave_up.get("attempt"), int) else 1
+                    rows.append({"who": "retry", "body": str(gave_up.get("summary") or ""), "tools": "",
+                                 "kind": str(gave_up.get("cause") or "stream_cut"), "attempt": attempt,
+                                 "max_attempts": attempt, "summary": str(gave_up.get("summary") or ""),
+                                 "endpoint": str(gave_up.get("endpoint") or ""), "state": "gave_up"})
             # role == "tool" (results) and "system" are omitted — too verbose for the recap
         segments.append((rows, None))
         return segments

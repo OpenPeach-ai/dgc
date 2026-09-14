@@ -644,8 +644,8 @@ class HeadlessUI:
             "summary": self._bounded_text(summary, 200) or "the model request failed",
         }
         maximum = self._bounded_int(max_attempts, 0, 100)
-        if maximum:                     # absent (or nonsense) means no fixed count
-            fields["max_attempts"] = maximum
+        if maximum:                     # absent (or nonsense) means no fixed count; never "4/3"
+            fields["max_attempts"] = max(maximum, fields["attempt"])
         where = str(endpoint or "")
         if "://" in where:
             where = safe_endpoint(where)
@@ -2119,6 +2119,7 @@ class Backend:
             nonlocal turn
             if turn is None:
                 return
+            items.extend(self._history_turn_closing_items(turn))
             if calls:                       # tool calls still waiting for a result when the turn ended
                 turn["interrupted"] = True
             # The turn reason is not persisted, but two things the file does support are whether
@@ -3478,29 +3479,32 @@ class Backend:
         ``model_retry`` items it replays as (possibly empty). A notice never opens a turn: the
         caller opens one only when none is open, then appends these items and moves on.
 
-        Each notice is its own run (one line per seam). Its state is what the file supports: the
-        continuation connected and streamed when a later assistant message in the same turn has
-        content or tool calls (``recovered``); otherwise ``retrying``, which the panel settles as
-        "Reconnect did not finish" when the replayed turn ends. A replay never says "Gave up".
+        One pass, no look-ahead. ``_history`` calls this for every message it reaches, so the state
+        of each notice is settled by what follows it in the same turn: each notice is its own run
+        (one line per seam) and starts ``retrying``; the next assistant message of that turn with
+        content or tool calls flips it to ``recovered``. A turn that closes first leaves it
+        ``retrying``, which the panel settles as "Reconnect did not finish". The only "Gave up" a
+        replay draws is the one the agent recorded on the partial answer it gave up after.
         """
         from .editor_protocol import MODEL_FAILURE_KINDS
         from .workflows import stream_recovery_notice
+        # A notice read while no turn was open is adopted by the turn the caller opens for it, which
+        # is the turn of the very next call; after that call nothing may adopt it.
+        orphans, self._history_orphan_recoveries = getattr(self, "_history_orphan_recoveries", None), None
+        if isinstance(turn, dict) and orphans and orphans[0].get("turn_id") == turn.get("id"):
+            turn.setdefault("pending_recoveries", []).extend(orphans)
         notice = stream_recovery_notice(message)
         if notice is None:
+            if isinstance(turn, dict) and message.get("role") == "assistant":
+                if str(message.get("content") or "").strip() or message.get("tool_calls"):
+                    for item in turn.pop("pending_recoveries", None) or ():
+                        item["state"] = "recovered"
+                gave_up = message.get("_dgc_stream_gave_up")
+                if isinstance(gave_up, dict):
+                    # Drawn after this message's text and tool cards, when the turn closes.
+                    turn["stream_gave_up"] = gave_up
+                    turn["interrupted"] = True
             return None
-        messages = list(getattr(getattr(self, "agent", None), "messages", None) or [])
-        index = next((i for i, m in enumerate(messages) if m is message), -1)
-        recovered = False
-        for later in (messages[index + 1:] if index >= 0 else ()):
-            if not isinstance(later, dict):
-                continue
-            role = later.get("role")
-            if role == "assistant":
-                if str(later.get("content") or "").strip() or later.get("tool_calls"):
-                    recovered = True
-                    break
-            elif role == "user" and self._history_opens_turn(later):
-                break
         # A turn is open for any notice DGC wrote after a prompt; only a transcript that starts with
         # one has none, and the caller then opens the first turn, "h1".
         turn_id = str(turn["id"]) if isinstance(turn, dict) else "h1"
@@ -3509,49 +3513,47 @@ class Backend:
             number = turn["retry_n"]
         else:
             number = 1
+        kind = notice.get("cause") if notice.get("cause") in MODEL_FAILURE_KINDS else "other"
+        item = self._history_retry_item(turn_id, number, "retrying", kind, notice.get("attempt"),
+                                        notice.get("max"), notice.get("summary"), notice.get("endpoint"))
+        if isinstance(turn, dict):
+            turn.setdefault("pending_recoveries", []).append(item)
+        else:
+            self._history_orphan_recoveries = [item]
+        return [item]
 
+    def _history_turn_closing_items(self, turn: dict) -> list:
+        """Items a replayed turn draws last, before its ``turn_end``: the reconnect it gave up on."""
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        turn.pop("pending_recoveries", None)
+        gave_up = turn.pop("stream_gave_up", None)
+        if not isinstance(gave_up, dict):
+            return []
+        turn["retry_n"] = int(turn.get("retry_n") or 0) + 1
+        kind = gave_up.get("cause") if gave_up.get("cause") in MODEL_FAILURE_KINDS else "stream_cut"
+        attempt = gave_up.get("attempt")
+        return [self._history_retry_item(str(turn["id"]), turn["retry_n"], "gave_up", kind, attempt,
+                                          attempt, gave_up.get("summary"), gave_up.get("endpoint"))]
+
+    @staticmethod
+    def _history_retry_item(turn_id: str, number: int, state: str, kind: str, attempt, maximum,
+                            summary, endpoint) -> dict:
         def bounded(value, low, high):
             return (int(value) if isinstance(value, int) and not isinstance(value, bool)
                     and low <= value <= high else None)
 
-        kind = notice.get("cause") if notice.get("cause") in MODEL_FAILURE_KINDS else "other"
-        item = {"type": "model_retry", "retry_id": f"{turn_id}:retry{number}",
-                "state": "recovered" if recovered else "retrying", "kind": kind,
-                "layer": "continuation",
-                "attempt": bounded(notice.get("attempt"), 1, 100) or min(number, 100),
-                "summary": str(notice.get("summary") or "the stream ended before its terminal event")[:200],
+        item = {"type": "model_retry", "retry_id": f"{turn_id}:retry{number}", "state": state,
+                "kind": kind, "layer": "continuation",
+                "attempt": bounded(attempt, 1, 100) or min(number, 100),
+                "summary": str(summary or "the stream ended before its terminal event")[:200],
                 "turn_id": turn_id}
-        maximum = bounded(notice.get("max"), 1, 100)
+        maximum = bounded(maximum, 1, 100)
         if maximum is not None:
-            item["max_attempts"] = maximum
-        endpoint = str(notice.get("endpoint") or "")[:300]
+            item["max_attempts"] = max(maximum, item["attempt"])
+        endpoint = str(endpoint or "")[:300]
         if endpoint:
             item["endpoint"] = endpoint
-        return [item]
-
-    @staticmethod
-    def _history_opens_turn(message: dict) -> bool:
-        """Would ``_history`` open a new turn at this user message? (notices and scaffolding do not)"""
-        from .agent import _COMPACT_PREFIX
-        from .workflows import display_prompt, notice_kind
-        kind = notice_kind(message)
-        if kind == "stream_recovery":
-            return False
-        if kind == "monitor":
-            return (message.get("_dgc_notice") or {}).get("delivery") == "wake"
-        content = message.get("content")
-        if isinstance(content, list):
-            text = " ".join(str(p.get("text", "")) for p in content
-                            if isinstance(p, dict) and p.get("type") == "text")
-        else:
-            text = str(content or "")
-        if isinstance(content, str) and (TURN_CONTINUE_MARKER in content or _goal_scaffold(content)):
-            return True
-        if isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
-            return False
-        shown = display_prompt(_strip_editor_context(text))
-        return not (shown.startswith("<tool_results>") or shown.startswith("<system-reminder>")
-                    or text.lstrip().startswith("<system-reminder>"))
+        return item
     # ---- end 0.40 reconnecting --------------------------------------------------------------------
 
 

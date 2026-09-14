@@ -83,8 +83,11 @@ class FailureCause:
 
 
 # ---- scrubbing -----------------------------------------------------------------------------------
-_SCHEME_URL_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.\-]{0,15}://)([^\s'\"<>()\[\]{}`]+)")
+# The whole token after ``scheme://``: a password may hold ' ( ) [ ] / # ? raw, so only whitespace, a
+# double quote, angle brackets and a backtick end it. Trailing punctuation is handed back below.
+_SCHEME_URL_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.\-]{0,15}://)([^\s\"<>`]+)")
 _PATH_URL_RE = re.compile(r"(\burl\s*[:=]\s*)(/[^\s'\"<>()\[\]{}`]*)", re.I)
+_CLOSERS = {")": "(", "]": "[", "}": "{"}
 
 
 def _strip_query(rest: str) -> str:
@@ -109,17 +112,21 @@ def scrub_urls(text) -> str:
         return value
 
     def scheme(match: re.Match) -> str:
-        rest = match.group(2)
-        slash = rest.find("/")
-        authority, path = (rest, "") if slash < 0 else (rest[:slash], rest[slash:])
-        query_in_authority = min((i for i in (authority.find("?"), authority.find("#")) if i >= 0),
-                                 default=-1)
-        if query_in_authority >= 0:                 # http://host?key=… with no path
-            path = authority[query_in_authority:] + path
-            authority = authority[:query_in_authority]
-        if "@" in authority:
-            authority = authority.rsplit("@", 1)[1]
-        return match.group(1) + authority + _strip_query(path)
+        rest, tail = match.group(2), ""
+        # Sentence punctuation and an unbalanced closing bracket ("(see http://h/v1).") are not
+        # part of the URL; a bracket the token opened itself ("[::1]", "p(ss)@h") is.
+        while rest:
+            last = rest[-1]
+            if last in ".,;:!'" or (last in _CLOSERS and rest.count(last) > rest.count(_CLOSERS[last])):
+                rest, tail = rest[:-1], last + tail
+            else:
+                break
+        # Userinfo ends at the LAST "@": a raw "/", "#", "?" or "@" inside a password would otherwise
+        # be read as the end of the authority and leave the rest of the password in the text.
+        if "@" in rest:
+            rest = rest.rsplit("@", 1)[1]
+        cut = min((i for i in (rest.find("/"), rest.find("?"), rest.find("#")) if i >= 0), default=len(rest))
+        return match.group(1) + rest[:cut] + _strip_query(rest[cut:]) + tail
 
     value = _SCHEME_URL_RE.sub(scheme, value)
     return _PATH_URL_RE.sub(lambda m: m.group(1) + _strip_query(m.group(2)), value)
@@ -242,9 +249,10 @@ def classify_status(status: int, body: str = "", headers=None, *, endpoint: str 
     summary = f"HTTP {code} from {host}"
     retry_after = bool(headers and str((headers or {}).get("Retry-After") or "").strip())
     if code == 429:
-        waited = f" · waited {format_seconds(delay_s)}" if retry_after and delay_s is not None else ""
+        # The server set the wait: say so while it is still being waited out, not as if it were over.
+        told = f" · Retry-After {format_seconds(delay_s)}" if retry_after and delay_s is not None else ""
         kind, retryable = "rate_limited", True
-        summary += waited
+        summary += told
     elif code == 503 and _BUSY_BODY_RE.search(text):
         kind, retryable = "overloaded", True
     elif code == 408 or code >= 500:
@@ -300,8 +308,12 @@ def short_cause(cause: FailureCause) -> str:
             "auth": "key rejected", "model_not_found": "no such model"}.get(cause.kind, "request failed")
 
 
-def hint_for(kind: str, *, model: str = "", base_url: str = "") -> str:
-    """The hint for a failure kind; ``llm.explain_llm_error`` prints these same strings."""
+def hint_for(kind: str, *, model: str = "", base_url: str = "", streaming: bool = False) -> str:
+    """The hint for a failure kind; ``llm.explain_llm_error`` prints these same strings.
+
+    ``streaming`` means the server had started answering (a reset or cut mid-stream): it is running,
+    so the hint never tells the reader to start it.
+    """
     base = safe_endpoint(base_url) if base_url else ""
     if kind in ("stall", "loading"):
         from .llm import MODEL_STALL_HINT       # llm imports this module at load time
@@ -314,7 +326,14 @@ def hint_for(kind: str, *, model: str = "", base_url: str = "") -> str:
                 "certificate (REQUESTS_CA_BUNDLE)")
     if kind == "proxy":
         return f"a proxy is between DGC and {base or 'the endpoint'} — check HTTPS_PROXY / NO_PROXY"
-    if kind in ("connect", "connect_timeout", "reset"):
+    if kind in ("reset", "stream_cut"):
+        where = base or "the endpoint"
+        if streaming or kind == "stream_cut":
+            return (f"the connection to {where} dropped mid-answer — check a proxy or VPN, or the "
+                    "server's logs; `dgc doctor` checks it")
+        return (f"the connection to {where} was dropped before it answered — check a proxy or VPN, or "
+                "the server's logs; `dgc doctor` checks it")
+    if kind in ("connect", "connect_timeout"):
         if not base or is_local_endpoint(base_url):
             return (f"the endpoint {base or 'you configured'} is not answering — start your server "
                     "(ollama serve / llama-server / LM Studio) or fix the URL; `dgc doctor` checks both")

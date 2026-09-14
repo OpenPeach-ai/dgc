@@ -332,8 +332,9 @@ def _codex_retry(message: str) -> list[dict] | None:
     else:
         failure = "engine"          # Codex's own verb is "Reconnecting" for every retry it reports
     first = detail.splitlines()[0].strip() if detail else ""
-    summary = ("waiting for network" + (f" · {first[:160]}" if first else "") if match.group(1) is None
-               else first[:200] or "reconnecting")
+    # The line itself says "Reconnecting · waiting for network" when Codex gives no count, so the
+    # cause is only what Codex said went wrong.
+    summary = (first[:200] or ("waiting for network" if match.group(1) is None else "reconnecting"))
     event = {"kind": "retry", "failure": failure,
              "attempt": int(match.group(1)) if match.group(1) else None,
              "max": int(match.group(2)) if match.group(2) else None,

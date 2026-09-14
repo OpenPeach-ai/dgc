@@ -216,10 +216,20 @@ def resolve_first_token_timeout(value, base_url: str, family: str = "") -> float
     return _number(value, AUTO_FIRST_TOKEN_REMOTE_S)
 
 
+def _without_userinfo(url) -> str:
+    """The URL with everything up to its LAST "@" after ``://`` removed: a raw "/", "#" or "?" in a
+    password would otherwise end urlsplit's authority early and leave the rest in the path."""
+    text = str(url or "")
+    start = text.find("://")
+    if start >= 0 and "@" in text[start + 3:]:
+        return text[:start + 3] + text[start + 3:].rsplit("@", 1)[1]
+    return text
+
+
 def safe_endpoint(url: str) -> str:
     """scheme://host:port/path with no credentials, query or fragment."""
     try:
-        parts = urlsplit(str(url or ""))
+        parts = urlsplit(_without_userinfo(url))
         host = parts.hostname or ""
         port = parts.port
     except ValueError:
@@ -233,7 +243,7 @@ def safe_endpoint(url: str) -> str:
 def endpoint_host(url: str) -> str:
     """host:port for a short label."""
     try:
-        parts = urlsplit(str(url or ""))
+        parts = urlsplit(_without_userinfo(url))
         host = parts.hostname or ""
         port = parts.port
     except ValueError:
@@ -250,6 +260,8 @@ def format_seconds(value: float) -> str:
         return "0s"
     if not math.isfinite(seconds) or seconds < 0:
         seconds = 0.0
+    if seconds < 1 and abs(seconds - round(seconds)) > 0.05:
+        return f"{seconds:.2f}".rstrip("0") + "s"      # a 0.25 s backoff reads 0.25s, not 0.2s
     if seconds < 10 and abs(seconds - round(seconds)) > 0.05:
         return f"{seconds:.1f}s"
     return f"{int(round(seconds))}s"
