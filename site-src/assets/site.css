@@ -101,14 +101,22 @@ h4{font-size:15px;line-height:1.35}
 .install-command .prompt{color:var(--lavender)}.install-command code{color:var(--text);white-space:nowrap;overflow:auto;scrollbar-width:none}
 .copy-button{border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text-2);padding:7px 9px;cursor:pointer;font:500 10px/1 var(--mono)}
 .requirements{padding:9px 14px;border-top:1px solid var(--line);color:var(--muted);font:500 10px/1.4 var(--mono);letter-spacing:.02em}
-.stat-grid{position:relative;display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);background:var(--bg);margin-top:54px;padding-top:10px}
-.stat{min-height:100px;padding:18px;border-left:1px solid var(--line)}.stat:first-child{border-left:0;padding-left:0}
+/* Hero stats. The band sits on the hero's own tinted ground: it used to paint an opaque plate,
+   which ended in a hard vertical seam at each container edge and read as a slice cut out of the
+   hero. Row-starting cells drop their left padding so every row begins on the container edge —
+   :first-child alone only covered the first row, and wrapped rows stepped 18px to the right.
+   :last-child drops its right padding so the single-row (5-column) layout ends where it begins,
+   which also buys the last label the 18px it was within 1.4px of needing at 1280. Wrapped rows
+   keep 18px on the cell that ends them: doing it per row costs more than the 10 KiB inline-CSS
+   budget has left, and nothing reaches that edge, because the labels are left-aligned and short. */
+.stat-grid{position:relative;display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin-top:54px;padding-top:10px}
+.stat{min-height:100px;padding:18px;border-left:1px solid var(--line)}.stat:first-child{border-left:0;padding-left:0}.stat:last-child{padding-right:0}
 .stat-value{display:block;color:var(--text);font:500 27px/1 var(--sans);letter-spacing:-.025em}
 .stat-label{display:block;margin-top:12px;color:var(--muted);font:500 10px/1.45 var(--mono);letter-spacing:.04em;text-transform:uppercase}
 
 @media(max-width:1200px){.hero-art{right:-100px;top:36px;width:500px}.hero-copy{max-width:60%}}
-@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-135px;top:34px;width:420px;height:450px}.stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0}.stat:last-child{grid-column:span 2}}
-@media(max-width:760px){.hero .container{padding-top:54px;padding-bottom:24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:-26px;right:-110px;width:310px;height:260px;opacity:.22}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,1fr);margin-top:30px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0}.stat:nth-child(4){border-left:1px solid var(--line)}.stat:last-child{grid-column:1/-1;border-left:0}.stat-value{font-size:23px}}
+@media(max-width:1040px){.hero{min-height:0}.hero .container{padding-top:66px}.hero-copy{max-width:70%}.hero-art{right:-135px;top:34px;width:420px;height:450px}.stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0;padding-left:0}.stat:last-child{grid-column:span 2}}
+@media(max-width:760px){.hero .container{padding-top:54px;padding-bottom:24px}.hero-copy{max-width:100%}.hero-copy>.lede{font-size:15.5px;max-width:47ch}.hero-art{top:-26px;right:-110px;width:310px;height:260px;opacity:.22}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0;padding-left:0}.stat:nth-child(4){border-left:1px solid var(--line);padding-left:18px}.stat:last-child{grid-column:1/-1;border-left:0;padding-left:0}.stat-value{font-size:23px}}
 @media(max-width:480px){.hero-actions .button{flex:1;min-width:max-content}.hero-actions .quiet-link{width:100%;padding-left:0}}
 
 /* proof marquee */
@@ -286,9 +294,9 @@ h4{font-size:15px;line-height:1.35}
   .artifact-layout{grid-template-columns:1fr}.artifact-copy{position:static;order:2}.browser{order:1}
   
   .proof-facts{grid-template-columns:1fr}.proof-facts a{border-left:0;border-top:1px solid var(--line)}
-  .pipeline-lane{grid-template-columns:78px repeat(5,minmax(0,1fr));gap:8px}.stage{padding:10px}.return-path{margin-left:86px}
+  .pipeline-lane{grid-template-columns:78px repeat(5,1fr);gap:8px}.stage{padding:10px}.return-path{margin-left:86px}
   .provider-grid{grid-template-columns:repeat(2,1fr)}.provider-grid .card:last-child{grid-column:1/-1}
-  .stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0}.stat:last-child{grid-column:span 2}
+  .stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0;padding-left:0}.stat:last-child{grid-column:span 2}
   .glass-grid{grid-template-columns:1fr 1fr}
   .language-grid{grid-template-columns:repeat(3,1fr)}.capability-grid{grid-template-columns:repeat(2,1fr)}
   .content-grid{grid-template-columns:1fr;gap:38px}.side-card{position:static}
@@ -300,7 +308,7 @@ h4{font-size:15px;line-height:1.35}
   body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;background:var(--bg)}.site-header,
 
   .install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}
-  .stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0}.stat:nth-child(4){border-left:1px solid var(--line)}.stat:last-child{grid-column:1/-1;border-left:0}.stat-value{font-size:23px}
+  .stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0;padding-left:0}.stat:nth-child(4){border-left:1px solid var(--line);padding-left:18px}.stat:last-child{grid-column:1/-1;border-left:0;padding-left:0}.stat-value{font-size:23px}
   .figure-title{grid-template-columns:1fr auto;gap:8px}.figure-title>span:nth-child(2):not(.figure-provenance){display:none}.figure-title>.figure-provenance{grid-column:1/-1;grid-row:2}.figure-title>.figure-state{grid-column:2;grid-row:1}
   .loop-dial{min-height:330px;padding:4px}.trace-list li{grid-template-columns:26px 46px minmax(0,1fr)}.trace-list .result{display:none}
   .terminal-body{min-height:270px;padding:18px 15px;font-size:10.5px;overflow:hidden}
@@ -395,7 +403,7 @@ h4{font-size:15px;line-height:1.35}
 @media(prefers-reduced-motion:reduce){.slash-trail,.slash-front,.slash-ghost,.slash-slice{animation:none}.slash-front{transform:none;filter:none}.slash-ghost,.slash-slice{display:none}}
 
 /* Focus details share the demo's outer edges, with room for readable explanations. */
-.focus-features{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:42px;row-gap:0;max-width:960px;margin:30px auto 0}
+.focus-features{display:grid;grid-template-columns:repeat(2,1fr);column-gap:42px;row-gap:0;max-width:960px;margin:30px auto 0}
 .focus-features article{padding:24px 0 26px;border-top:1px solid var(--line)}
 .focus-features h3{display:flex;align-items:baseline;gap:6px;font-size:15px;line-height:1.5}
 .focus-features p{max-width:53ch;margin-top:10px;color:var(--text-2);font-size:14px;line-height:1.7}

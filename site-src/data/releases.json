@@ -1,5 +1,5 @@
 {
-  "refreshed_at": "2026-09-13T00:00:00Z",
+  "refreshed_at": "2026-09-14T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
@@ -364,10 +364,21 @@
   ],
   "extension": [
     {
+      "version": "0.23.1",
+      "date": "2026-09-14",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.1",
+      "status": "current",
+      "notes": [
+        "Editor protocol v12, unchanged from 0.23.0: this release only changes how a version mismatch is resolved. A CLI older than the extension is now updated automatically, with a progress notification you can cancel, and the panel reconnects by itself. Editors update extensions on their own, so the old prompt reported a mismatch the user had not caused. Turn it off with dgc.autoUpdateCli.",
+        "A dgc.command you set yourself is never reinstalled over; that case still asks first.",
+        "The installer refuses to extract a release over a git checkout, so no update can revert uncommitted work in a contributor's tree."
+      ]
+    },
+    {
       "version": "0.23.0",
       "date": "2026-09-13",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.1",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Editor protocol v12; requires DGC CLI 0.38.1. A mismatched pair is refused at the handshake with a message that says which side to update, instead of failing on the first event.",
         "One session checklist above the composer, with a Clear button, replaces the task card per turn: it never scrolls you away from what you were reading, restores with the session, empties with a new chat, and shows blocked steps distinctly.",

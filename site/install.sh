@@ -13,6 +13,15 @@ die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 say "DGC installer"
 
+# A release is untarred straight over $DEST, so a source checkout there would lose uncommitted
+# work with no warning and no way back. Refuse, and name the two ways forward. A normal install
+# has no .git, so this only ever fires for someone working on DGC itself.
+if [ -e "$DEST/.git" ] && [ "${DGC_FORCE_OVERWRITE:-0}" != 1 ]; then
+  die "$DEST is a git checkout — refusing to extract a release over it.
+    Install elsewhere:  DGC_DIR=\$HOME/.dgc-cli bash install.sh
+    Or overwrite it anyway (uncommitted work in $DEST will be lost):  DGC_FORCE_OVERWRITE=1"
+fi
+
 command -v python3 >/dev/null 2>&1 || die "python3 (3.10+) is required — install it and re-run."
 PYV=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 python3 - <<'PY' || die "Python $PYV found, but DGC needs 3.10 or newer."

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.1 — 2026-09-14
+
+- When the CLI is older than this extension, DGC now updates it and reconnects on its own, with a
+  progress notification you can cancel, instead of asking you to run a command in a terminal.
+  Editors update extensions by themselves, so the old behaviour told you your CLI was out of date
+  because of a change you never made. Turn it off with `dgc.autoUpdateCli`.
+- A CLI you chose yourself with `dgc.command` is never reinstalled over; that case still asks.
+- Cancelling an update now stops the installer and everything it started, not just the process the
+  extension spawned.
+- The installer refuses to extract a release over a git checkout, so an automatic update can no
+  longer revert uncommitted work in a contributor's tree. Override with `DGC_FORCE_OVERWRITE=1`.
+
 ## 0.23.0 — 2026-09-13
 
 - **Editor protocol v12; requires DGC CLI 0.38.1.** The `history` snapshot now carries the session checklist and there is a `clear_todos` command, so the extension and the CLI move together — a mismatched pair says which side to update at the handshake.

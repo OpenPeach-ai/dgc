@@ -6,6 +6,7 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
+import { autoUpdateEnabled, isUserChosenCommand, runCliUpdate } from "./cliupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -202,6 +203,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                     goal: { text: "", status: "none", elapsed_seconds: 0 } };
   private _installPrompted = false;
   private _updatePrompted = false;
+  /** Survives restart() on purpose. A successful update restarts the backend, which clears the
+   *  per-attempt latch above; without this the next mismatch would reinstall again, and a CLI
+   *  that cannot reach the version the extension wants would reinstall forever. One attempt a
+   *  session, then the user decides. */
+  private cliAutoUpdateAttempted = false;
+  private updateChannel?: vscode.OutputChannel;
   private featureRequest = 0;
   private correlatedStateRequests = false;
   private routeState: {
@@ -1362,16 +1369,70 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /** The CLI is older than this extension — offer the update instead of only naming the problem.
-   *  DGC drives the CLI you installed rather than shipping its own copy, so the fix is one click
-   *  and then a restart, not a silent swap of a bundled binary. */
+  /** The CLI is older than this extension — bring it forward rather than naming the problem.
+   *
+   *  Updating the extension is the common way to land here: editors update extensions on their own
+   *  and the CLI does not follow, so the user is told their own tool is out of date by the thing
+   *  that just changed underneath them. So by default the extension does the update itself and
+   *  restarts, and the user watches a progress notification instead of running a command.
+   *
+   *  Two cases still ask first, because an automatic reinstall would be the wrong answer:
+   *  a CLI the user chose by path (the installer writes to $HOME/dgc, very likely not where their
+   *  binary lives), and dgc.autoUpdateCli turned off. A third case asks after the fact: the
+   *  installer refuses to extract a release over a git checkout, so a contributor's working tree
+   *  survives and the refusal is reported as the reason. */
   private promptUpdateCli(): void {
     if (this._updatePrompted) { return; }
     this._updatePrompted = true;
+    const executable = resolveDgcExecutable();
+    if (!autoUpdateEnabled() || isUserChosenCommand() || executable.ignoredWorkspaceOverride) {
+      this.offerManualCliUpdate("This DGC CLI is older than the DGC extension. Update it to reconnect.");
+      return;
+    }
+    if (this.cliAutoUpdateAttempted) {
+      // Already tried once this session and we are still mismatched, so the installer is not going
+      // to resolve it — most likely the matching CLI is not published yet. Say that, and stop.
+      this.offerManualCliUpdate(
+        "This DGC CLI is still older than the DGC extension after an update. "
+        + "The matching CLI may not be published yet.");
+      return;
+    }
+    this.cliAutoUpdateAttempted = true;
+    void this.updateCliInPlace(executable.command);
+  }
+
+  /** Run the update with a progress notification, then restart so the panel reconnects by itself. */
+  private async updateCliInPlace(executable: string): Promise<void> {
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: "DGC: updating the CLI to match the extension…", cancellable: true },
+      (_progress, token) => runCliUpdate(executable, token),
+    );
+    if (result.ok) {
+      this.backendNote("[extension: updated the DGC CLI and restarted the backend]");
+      this.restart();
+      void vscode.window.showInformationMessage("DGC CLI updated. Reconnected.");
+      return;
+    }
+    this.cliUpdateLog(result.log);
+    if (result.reason === "cancelled") {
+      this.offerManualCliUpdate("The DGC CLI update was cancelled. The CLI is still older than the extension.");
+      return;
+    }
+    this.offerManualCliUpdate(`DGC could not update the CLI automatically: ${result.reason}`);
+  }
+
+  /** Keep the installer's own output where the user can read it; a refusal explains itself there. */
+  private cliUpdateLog(log: string): void {
+    if (!log.trim()) { return; }
+    if (!this.updateChannel) { this.updateChannel = vscode.window.createOutputChannel("DGC update"); }
+    this.updateChannel.appendLine(log.trimEnd());
+    this.updateChannel.show(true);
+  }
+
+  /** The pre-existing route, now the fallback: name the problem and offer the two manual fixes. */
+  private offerManualCliUpdate(message: string): void {
     const UPDATE = "Update DGC CLI", SETPATH = "Set dgc.command…";
-    void vscode.window.showErrorMessage(
-      "This DGC CLI is older than the DGC extension. Update it to reconnect.", UPDATE, SETPATH,
-    ).then((choice) => {
+    void vscode.window.showErrorMessage(message, UPDATE, SETPATH).then((choice) => {
       if (choice === UPDATE) {
         const term = vscode.window.createTerminal("Update DGC");
         term.show();

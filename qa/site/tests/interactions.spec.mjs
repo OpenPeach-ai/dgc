@@ -722,3 +722,41 @@ test("power command demo types the complete command on focus", async ({page}) =>
   expect(runtime.pageErrors).toEqual([]);
   expect(runtime.httpErrors).toEqual([]);
 });
+
+test("hero stats begin on the container edge in every row, at every width", async ({page}) => {
+  // The full-page baseline cannot catch this: maxDiffPixelRatio 0.005 over an 18,000px-tall
+  // capture tolerates ~36,000 differing pixels, and an 18px text shift is far below that. The row
+  // wraps to 3 and then 2 columns, and only :first-child used to lose its left padding, so every
+  // row after the first began 18px to the right of the numbers above it.
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const rows = await page.locator(".stat-grid").evaluate(grid => {
+    const byTop = new Map();
+    for (const cell of grid.querySelectorAll(".stat")) {
+      const top = Math.round(cell.getBoundingClientRect().top);
+      if (!byTop.has(top)) byTop.set(top, []);
+      byTop.get(top).push(cell);
+    }
+    const gridLeft = grid.getBoundingClientRect().left;
+    return [...byTop.values()].map(row => {
+      const first = row.reduce((a, b) =>
+        a.getBoundingClientRect().left <= b.getBoundingClientRect().left ? a : b);
+      const style = getComputedStyle(first);
+      const contentLeft = first.getBoundingClientRect().left
+        + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth || 0);
+      return Math.round(contentLeft - gridLeft);
+    });
+  });
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows).toEqual(rows.map(() => 0));
+});
+
+test("the hero stats band sits on the hero's own ground, not an opaque plate", async ({page}) => {
+  // An opaque background ended in a hard vertical seam at each container edge, over the hero's
+  // tinted atmosphere — the band read as a slice cut out of the page.
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const background = await page.locator(".stat-grid")
+    .evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(background).toBe("rgba(0, 0, 0, 0)");
+});
