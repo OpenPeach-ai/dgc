@@ -421,6 +421,8 @@ class UI:
 
     def options_resolved(self, call_id, outcome, questions, answers) -> None:
         from .questions import asked_summary
+        if getattr(self, "non_interactive", False):
+            return                      # a -p run already said the question was skipped
         lines = asked_summary(questions, answers, outcome)
         self.console.print(f"  [{DIM}]▸ {_markup_literal(terminal_safe_text(lines[0]))}[/]", highlight=False)
         for line in lines[1:]:
