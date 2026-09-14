@@ -390,6 +390,9 @@ DEFAULTS: dict = {
     "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
     "sandbox_env_allow": [],                    # extra parent env names; runtime injection vars stay blocked
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
+    "thinking_inline": True,                     # short provider-summarized thinking beside tool calls
+                                                #   shows inline and muted (raw/unknown never inline)
+    "thinking_inline_max_chars": 280,            # longest summary shown inline (0..1000; 0 = none)
     "preserve_thinking": False,                  # keep the model's prior-turn reasoning in the context sent
                                                 #   back (helps multi-turn coherence, costs tokens; only
                                                 #   affects OpenAI-compatible/chat_completions — Anthropic/

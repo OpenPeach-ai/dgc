@@ -115,9 +115,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "text_delta": {"text": _S()},
     # v14: a reasoning chunk names its block ("{turn_id}:think{n}" live, "h{N}:think{k}" on replay),
     # where the text came from, and -- for a sub-agent -- the innermost child's id (sub-<12 hex>).
-    # TRANSITIONAL: ``block`` and ``source`` are optional until thinking-provenance emits them.
-    "thinking_delta": {"text": _S(), "block": _S(False),
-                       "source": _f("string", required=False, enum=REASONING_SOURCES),
+    "thinking_delta": {"text": _S(), "block": _S(),
+                       "source": _f("string", enum=REASONING_SOURCES),
                        "provider": _f("string", required=False, enum=REASONING_PROVIDERS),
                        "agent": _S(False)},
     # v14: a reasoning block closed. ``placement`` "inline" is only ever a summarized or narration
