@@ -1009,7 +1009,7 @@
       if (act === "branch") { vscode.postMessage({ type: "branchChat", prompt: String(prompt || "") }); return; }
       if (act === "retry") { resend(prompt); return; }
       if (act === "edit") {
-        input.value = String(prompt || ""); input.selectionStart = input.selectionEnd = input.value.length;
+        setComposerText(String(prompt || "")); input.selectionStart = input.selectionEnd = input.value.length;
         input.focus(); onInput(); scroll();
       }
     };
@@ -1025,8 +1025,8 @@
     const text = String(prompt || "").trim();
     if (!text) return;
     const draft = input.value;
-    input.value = text; submit();
-    if (input.value === "" && draft) { input.value = draft; onInput(); }
+    setComposerText(text); submit();
+    if (input.value === "" && draft) { setComposerText(draft); onInput(); }
   }
   function discardTurn() {
     if (turn) {
@@ -1916,7 +1916,7 @@
     if (skill?.enabled === false) return;
     if (!attachInvocation("skill", name)) return;
     if (!input.value.trim() && skill?.default_prompt) {
-      input.value = String(skill.default_prompt).slice(0, 4096);
+      setComposerText(String(skill.default_prompt).slice(0, 4096));
       input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     }
     closeSurface(); input.focus();
@@ -2811,7 +2811,7 @@
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
       skills: values("skill"), templates: values("template"), context: values("resource"),
       images: selected.filter(item => item.img).map(item => item.data) });
-    input.value = ""; input.style.height = "auto"; attachments.length = 0;
+    clearComposer(); attachments.length = 0;
     renderAtts(); persistDraft(); scroll();
   }
   function submit(delivery = nativeSteering ? "steer" : "queue") {
@@ -2838,7 +2838,7 @@
     }
     if (goalPrefix || text.toLowerCase() === "/goal") {
       vscode.postMessage({ type: "slashText", text });
-      input.value = ""; input.style.height = "auto"; persistDraft(); return;
+      clearComposer(); persistDraft(); return;
     }
     const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
     if (trailingGoal) { submitGoal(trailingGoal); return; }
@@ -2849,7 +2849,7 @@
       // The terminals' `/todo clear` does what the Tasks row's Clear does, pending state and all.
       if (/^\/todo\s+clear$/i.test(text)) {
         requestTodoClear();
-        input.value = ""; input.style.height = "auto"; persistDraft(); return;
+        clearComposer(); persistDraft(); return;
       }
       const custom = customCommands.includes(name);
       if (custom) {
@@ -2862,7 +2862,7 @@
           setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
-      input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
+      clearComposer(); persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m); settleBlock(m);
@@ -2872,7 +2872,7 @@
       delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });
-    input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
+    clearComposer(); attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
   }
   function renderAtts() {
     atts.innerHTML = "";
@@ -2891,7 +2891,7 @@
         show.title = "Put this text back into the composer";
         show.onclick = () => {
           const at = input.selectionStart ?? input.value.length;
-          input.value = input.value.slice(0, at) + a.pasted + input.value.slice(at);
+          editComposer(at, at, a.pasted);
           input.selectionStart = input.selectionEnd = at + a.pasted.length;
           attachments.splice(i, 1);
           renderAtts();
@@ -2924,7 +2924,7 @@
     pop.children[popIdx]?.scrollIntoView?.({ block: "nearest" });
   }
   function replacePopToken(value = "") {
-    input.value = input.value.slice(0, popStart) + value + input.value.slice(popEnd);
+    editComposer(popStart, popEnd, value);
     input.selectionStart = input.selectionEnd = popStart + value.length;
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 160) + "px";
@@ -2978,12 +2978,43 @@
     const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(input.value);
     const removed = current ? current[0].length : 0;
     const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
-    input.value = prefix + input.value.slice(removed);
+    editComposer(0, removed, prefix);
     input.selectionStart = input.selectionEnd = caret;
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     persistDraft(); input.focus();
   }
+  // ---- composer edits that Cmd/Ctrl+Z can take back ----
+  // A textarea keeps its own undo history, which is what makes Cmd+Z (and Edit → Undo) work in
+  // Claude's and Codex's composers. Assigning .value wipes that history, so undo did nothing here
+  // after a send, a completion or an inserted command. Edits made through the browser's own editing
+  // command stay in the history instead: undo after sending brings the prompt back. Where that
+  // command is unavailable (a test DOM), the edit still happens, just without history.
+  let composerEditing = false;
+  function editComposer(start, end, text) {
+    start = Math.max(0, Math.min(start, input.value.length));
+    end = Math.max(start, Math.min(end, input.value.length));
+    if (start === end && !text) return;
+    const expected = input.value.slice(0, start) + text + input.value.slice(end);
+    if (typeof document.execCommand === "function") {
+      composerEditing = true;
+      try {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(start, end);
+        const done = text ? document.execCommand("insertText", false, text)
+          : document.execCommand("delete", false);
+        if (done && input.value === expected) return;
+      } catch { /* fall through to a plain assignment */ }
+      finally { composerEditing = false; }
+    }
+    // No editing command, or it did not produce exactly this edit: set the result directly.
+    input.value = expected;
+    input.selectionStart = input.selectionEnd = start + text.length;
+  }
+  function setComposerText(text) { editComposer(0, input.value.length, String(text ?? "")); }
+  function clearComposer() { setComposerText(""); input.style.height = "auto"; }
+
   function onInput() {
+    if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     scheduleDraftSave();
     renderComposerControls();
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
@@ -3135,7 +3166,7 @@
     const at = input.selectionStart ?? input.value.length;
     const before = input.value.slice(0, at);
     const prefix = before && !/\s$/.test(before) ? " " : "";
-    input.value = before + prefix + ch + input.value.slice(at);
+    editComposer(at, at, prefix + ch);
     input.selectionStart = input.selectionEnd = at + prefix.length + 1;
     onInput();
   }
@@ -3189,7 +3220,7 @@
   function openCommandMenu() {
     const caret = input.selectionEnd;
     const prefix = caret && !/\s/.test(input.value[caret - 1]) ? " /" : "/";
-    input.value = input.value.slice(0, caret) + prefix + input.value.slice(caret);
+    editComposer(caret, caret, prefix);
     input.selectionStart = input.selectionEnd = caret + prefix.length; input.focus(); onInput();
   }
   $("btn-cmd").onclick = openCommandMenu;
@@ -3884,7 +3915,7 @@
       openCommandMenu();
     }
     else if (msg.type === "composer_text") {
-      input.value = String(msg.text || ""); input.selectionStart = input.selectionEnd = input.value.length;
+      setComposerText(String(msg.text || "")); input.selectionStart = input.selectionEnd = input.value.length;
       input.focus(); onInput();
     }
     else if (msg.type === "composer_skill") {
