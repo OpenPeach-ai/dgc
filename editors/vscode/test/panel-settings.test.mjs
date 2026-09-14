@@ -1,6 +1,6 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -1124,6 +1124,10 @@ test("files dropped into the chat attach as mentions, and non-file drops are ign
     provider.post = (msg) => posted.push(msg);
     provider.webviewReady = true;
     provider.focus = () => {};
+    // onMessage resolves a backend first. Without this stub the test spawned the real `dgc` on
+    // PATH (with the real HOME), and a well-behaved `dgc serve` that waits on its stdin kept the
+    // test process alive after the last assertion.
+    provider.ensureBackend = () => ({ ready: true, send: () => true });
     provider.onMessage({type: "drop_uris", uris: [
       `file://${scratch}/dropped.ts`, "untitled:Untitled-1", "not a uri at all",
     ]});
@@ -1413,4 +1417,262 @@ test("a backend that dies unattended still leaves its traceback on disk", async 
   assert.match(body, /killed by SIGKILL/);
   assert.match(body, /^\d{4}-\d\d-\d\dT/m, "each line is timestamped");
   provider.dispose();
+});
+
+// ---- backend exits: who asked, what the backend said, and what a reconnect picks back up ------
+
+function lifecycleProvider(extra = {}) {
+  const logDir = mkdtempSync(join(tmpdir(), "dgc-exit-log-"));
+  const stored = new Map();
+  const posted = [];
+  const sent = [];
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [], logUri: { fsPath: logDir },
+    globalState: { get() {}, async update() {} },
+    workspaceState: {
+      get: (key) => stored.get(key),
+      async update(key, value) { if (value === undefined) { stored.delete(key); } else { stored.set(key, value); } },
+    },
+    ...extra,
+  });
+  provider.post = (message) => posted.push(message);
+  provider.view = { visible: true };
+  const logText = () => {
+    try { return readFileSync(join(logDir, "backend.log"), "utf8"); } catch { return ""; }
+  };
+  return { provider, stored, posted, sent, logDir, logText };
+}
+
+function nodeFixture(name, body) {
+  const path = join(scratch, name);
+  writeFileSync(path, `#!/usr/bin/env node\n${body}\n`, "utf8");
+  chmodSync(path, 0o700);
+  return path;
+}
+
+async function until(predicate, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return predicate();
+}
+
+test("an unassisted exit logs no and recovers even after an earlier protocol failure", async () => {
+  // Before: the protocol failure set an instance-wide `intentional`, this.backend kept the disposed
+  // instance, and the next child's own exit was logged "asked for it: yes", skipped recovery and
+  // never told the webview -- the turn spun forever.
+  const counter = join(scratch, "panel-generation");
+  writeFileSync(counter, "0");
+  const fixture = nodeFixture("panel-malformed-then-dies", `
+const fs = require("node:fs");
+const generation = Number(fs.readFileSync(${JSON.stringify(counter)}, "utf8")) + 1;
+fs.writeFileSync(${JSON.stringify(counter)}, String(generation));
+if (generation === 1) { process.stdout.write("{not json\\n"); setTimeout(() => {}, 5000); }
+else {
+  process.stderr.write("[dgc serve] serve loop ended: stdin closed while the parent (1) is still alive; up 1s, 3 commands\\n");
+  setTimeout(() => process.exit(0), 100);
+}`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  const first = h.provider.ensureBackend();
+  assert.ok(await until(() => /stopping the backend — protocol: dgc backend emitted malformed NDJSON/.test(h.logText())));
+  assert.equal(h.provider.backend, undefined, "a protocol failure retires the instance at once");
+  assert.ok(h.posted.some((m) => m.type === "backend_exit" && /^protocol: /.test(m.cause || "") && m.recovering === false),
+    "and the webview is told, so a turn ends instead of spinning");
+  assert.ok(await until(() => /extension asked for it: yes \(protocol: dgc backend emitted malformed NDJSON/.test(h.logText())));
+
+  const second = h.provider.ensureBackend();
+  assert.notEqual(second, first, "the next command gets a fresh instance, not the retired one");
+  assert.ok(await until(() => h.posted.some((m) => m.type === "backend_exit" && m.recovering === true)));
+  const log = h.logText();
+  assert.match(log, /\[dgc serve exited: code 0 · extension asked for it: no · up \d+s · pid \d+ · frames sent \d+/);
+  assert.notEqual(h.provider.recoveryTimer, undefined, "recovery is scheduled");
+  const exit = h.posted.find((m) => m.type === "backend_exit" && m.recovering === true);
+  assert.match(exit.cause, /^stdin closed while the parent/, "the backend's own cause travels with the exit");
+  const exits = h.stored.get("dgc.unassistedExits.v1");
+  assert.equal(exits.length, 1, "only the unassisted exit counts toward the breaker");
+  h.provider.dispose();
+});
+
+test("restore timeout names its cause and clears the backend", async () => {
+  const panelSource = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  assert.match(panelSource, /timed out"\)\) \{\s*be\.dispose\("chat restoration timed out"\)/,
+    "the restore-timeout path passes its cause");
+  const fixture = nodeFixture("panel-lingers", `setTimeout(() => {}, 10000);
+process.stdin.on("data", (chunk) => { if (String(chunk).includes("shutdown")) process.exit(0); });`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  const be = h.provider.ensureBackend();
+  be.dispose("chat restoration timed out");
+  assert.equal(h.provider.backend, undefined, "the timed-out instance is not handed out again");
+  assert.ok(h.posted.some((m) => m.type === "backend_exit" && m.cause === "chat restoration timed out"));
+  assert.ok(await until(() => /extension asked for it: yes \(chat restoration timed out\)/.test(h.logText())));
+  assert.equal(h.provider.recoveryTimer, undefined, "an asked-for stop is not a crash to recover from");
+  h.provider.dispose();
+});
+
+test("a restart names its reason and is not recovered or offered back", async () => {
+  const fixture = nodeFixture("panel-restart-lingers", `setTimeout(() => {}, 10000);
+process.stdin.on("data", (chunk) => { if (String(chunk).includes("shutdown")) process.exit(0); });`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  h.provider.ensureBackend();
+  h.provider.restart("setting dgc.command changed");
+  assert.ok(await until(() => /extension asked for it: yes \(restart: setting dgc\.command changed\)/.test(h.logText())));
+  assert.match(h.logText(), /\[extension: restarting the backend — setting dgc\.command changed\]/);
+  assert.equal(h.posted.filter((m) => m.type === "backend_exit").length, 0);
+  h.provider.dispose();
+  assert.ok(await until(() => /asked for it: yes \(panel disposed/.test(h.logText())),
+    "the panel's own teardown still reaches backend.log after its channel is gone");
+});
+
+test("backendNote writes the file after the output channel is disposed", () => {
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const savedChannel = vs.window.createOutputChannel;
+  try {
+    vs.window.createOutputChannel = () => ({
+      appendLine() { throw new Error("Channel has been closed"); }, append() {}, show() {}, dispose() {},
+    });
+    const h = lifecycleProvider();
+    h.provider.backendNote("[dgc serve exited: code 0 · extension asked for it: yes (panel disposed)]");
+    assert.match(h.logText(), /extension asked for it: yes \(panel disposed\)/);
+    h.provider.dispose();
+  } finally {
+    vs.window.createOutputChannel = savedChannel;
+  }
+});
+
+function interruptedProvider({ turn, goalMark, goal, exits, capability = true } = {}) {
+  const h = recoveryProvider({ mark: goalMark, goal });
+  h.posted = [];
+  h.provider.post = (message) => h.posted.push(message);
+  h.provider.webviewReady = true;
+  h.provider.lastReadyEvent = { capabilities: { resume_turn: capability } };
+  if (turn) {
+    h.stored.set("dgc.interruptedTurn.v1", { scope: h.provider.draftScope(), id: "chat-alpha", ...turn });
+  }
+  if (exits) { h.stored.set("dgc.unassistedExits.v1", exits); }
+  return h;
+}
+
+test("an interrupted plain turn offers Continue, a goal auto-resumes", async () => {
+  const plain = interruptedProvider({
+    turn: { turnId: "t3", at: Date.now() - 60_000, exitedAt: Date.now() - 2000,
+            cause: "stdin closed while the parent (9) is still alive" },
+  });
+  await plain.provider.resumeInterruptedWork(plain.be);
+  const offer = plain.posted.find((m) => m.type === "continue_offer");
+  assert.ok(offer, "the plain turn is offered, not re-run");
+  assert.match(offer.cause, /stdin closed while the parent/);
+  assert.deepEqual(plain.sent, [], "nothing is sent until the user clicks Continue");
+  assert.equal(plain.stored.get("dgc.interruptedTurn.v1"), undefined, "the offer is one-shot");
+
+  await plain.provider.onMessage({ type: "resumeTurn" });
+  assert.equal(plain.sent.length, 1);
+  assert.equal(plain.sent[0].type, "resume_turn", "Continue is a DGC continuation, not typed words");
+  assert.equal(plain.sent[0].text, undefined);
+
+  const goal = interruptedProvider({
+    turn: { turnId: "t3", at: Date.now() - 60_000, exitedAt: Date.now() - 2000, cause: "x" },
+    goalMark: { id: "chat-alpha", at: Date.now() - 5000 },
+    goal: { text: "ship the release", status: "paused" },
+  });
+  await goal.provider.resumeInterruptedWork(goal.be);
+  assert.deepEqual(goal.sent, [{ type: "resume_goal" }], "a goal keeps its automatic resume");
+  assert.equal(goal.posted.some((m) => m.type === "continue_offer"), false);
+
+  const failedOnItsOwn = interruptedProvider({ turn: { turnId: "t4", at: Date.now() - 5000, endedAt: Date.now() - 4000 } });
+  await failedOnItsOwn.provider.resumeInterruptedWork(failedOnItsOwn.be);
+  assert.equal(failedOnItsOwn.posted.some((m) => m.type === "continue_offer"), false,
+    "a turn that failed with no backend death behind it is not offered back");
+
+  const stale = interruptedProvider({ turn: { turnId: "t5", at: Date.now() - 3_600_000, exitedAt: Date.now() - 3_600_000 } });
+  await stale.provider.resumeInterruptedWork(stale.be);
+  assert.equal(stale.posted.some((m) => m.type === "continue_offer"), false, "an hour-old interruption is not offered");
+});
+
+test("an exit mid-turn is marked for a Continue offer and the webview is told what will happen", () => {
+  const h = interruptedProvider();
+  h.provider.onEvent({ type: "turn_start", seq: 1, turn_id: "t1", prompt: "run npm install", kind: "prompt" });
+  const mark = h.stored.get("dgc.interruptedTurn.v1");
+  assert.equal(mark.turnId, "t1");
+  assert.equal(h.provider.markInterruptedWork("stdin closed"), "offer");
+  assert.equal(h.stored.get("dgc.interruptedTurn.v1").cause, "stdin closed");
+
+  // The backend's shutdown ends the turn "error" a moment before the process exits.
+  const late = interruptedProvider();
+  late.provider.onEvent({ type: "turn_start", seq: 1, turn_id: "t2", prompt: "p", kind: "prompt" });
+  late.provider.onEvent({ type: "turn_end", seq: 2, turn_id: "t2", reason: "error", token_estimate: 0 });
+  assert.equal(late.provider.markInterruptedWork("stdin closed"), "offer");
+
+  const finished = interruptedProvider();
+  finished.provider.onEvent({ type: "turn_start", seq: 1, turn_id: "t3", prompt: "p", kind: "prompt" });
+  finished.provider.onEvent({ type: "turn_end", seq: 2, turn_id: "t3", reason: "completed", token_estimate: 0 });
+  assert.equal(finished.stored.get("dgc.interruptedTurn.v1"), undefined);
+  assert.equal(finished.provider.markInterruptedWork("stdin closed"), "none", "an idle chat promises nothing");
+
+  const goalCycle = interruptedProvider();
+  goalCycle.provider.onEvent({ type: "turn_start", seq: 1, turn_id: "t4", prompt: "", kind: "resume" });
+  assert.equal(goalCycle.stored.get("dgc.interruptedTurn.v1"), undefined, "goal cycles are the goal's to resume");
+});
+
+test("three unassisted exits in 30 minutes stop goal auto-resume and say why", async () => {
+  const now = Date.now();
+  const h = interruptedProvider({
+    goalMark: { id: "chat-alpha", at: now - 5000 },
+    goal: { text: "ship the release", status: "paused" },
+    exits: [
+      { at: now - 20 * 60_000, cause: "stdin closed while the parent (7) is still alive", last: "get_workspace_changes" },
+      { at: now - 9 * 60_000, cause: "stdin closed while the parent (7) is still alive", last: "get_workspace_changes" },
+      { at: now - 60_000, cause: "stdin closed while the parent (7) is still alive", last: "get_chat_changes" },
+    ],
+  });
+  await h.provider.resumeInterruptedWork(h.be);
+  assert.deepEqual(h.sent, [], "the goal is not resumed behind a repeating cause");
+  const held = h.posted.find((m) => m.type === "goal_resume_held");
+  assert.ok(held, "the user is told, with a Resume goal action in the webview");
+  assert.equal(held.exits, 3);
+  assert.match(held.cause, /stdin closed while the parent/);
+  assert.equal(held.lastCommand, "get_chat_changes");
+
+  const old = interruptedProvider({
+    goalMark: { id: "chat-alpha", at: now - 5000 },
+    goal: { text: "ship the release", status: "paused" },
+    exits: [{ at: now - 50 * 60_000, cause: "a", last: "" }, { at: now - 45 * 60_000, cause: "a", last: "" },
+            { at: now - 60_000, cause: "a", last: "" }],
+  });
+  await old.provider.resumeInterruptedWork(old.be);
+  assert.deepEqual(old.sent, [{ type: "resume_goal" }], "exits older than the window do not count");
+});
+
+test("dgc.command changing during a turn restarts only after the turn ends", async () => {
+  const h = interruptedProvider();
+  const restarts = [];
+  h.provider.restart = (reason) => restarts.push(reason);
+  h.provider.turnActive = true;
+  h.provider.commandPathChanged();
+  assert.deepEqual(restarts, [], "the running turn is not killed");
+  assert.ok(notices.info.some((m) => /restart with the new command path when the current turn ends/.test(m)));
+  h.provider.onEvent({ type: "turn_end", seq: 3, turn_id: "t1", reason: "completed", token_estimate: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(restarts, ["setting dgc.command changed"]);
+
+  // A prompt sent optimistically and then refused never produces a turn_end; the restart must not
+  // wait forever for one.
+  const refused = interruptedProvider();
+  const refusedRestarts = [];
+  refused.provider.restart = (reason) => refusedRestarts.push(reason);
+  refused.provider.turnActive = true;
+  refused.provider.commandPathChanged();
+  refused.provider.onEvent({ type: "command_rejected", seq: 4, command: "prompt", message: "busy" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(refusedRestarts, ["setting dgc.command changed"]);
+
+  const idle = interruptedProvider();
+  const now = [];
+  idle.provider.restart = (reason) => now.push(reason);
+  idle.provider.commandPathChanged();
+  assert.deepEqual(now, ["setting dgc.command changed"], "an idle panel restarts at once");
 });

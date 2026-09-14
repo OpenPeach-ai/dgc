@@ -17,6 +17,27 @@ export { DGC_PROTOCOL_VERSION, MAX_COMMAND_BYTES };
 export type { DgcEvent };
 const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeListener"]);
 
+/** What the panel needs to say about one child's end, reported exactly once per child. */
+export interface ChildExitInfo {
+  pid?: number;
+  uptimeMs: number;
+  /** Set only when the EXTENSION decided to stop this child, naming why. */
+  cause?: string;
+  /** A write-side failure (EPIPE, ERR_STREAM_DESTROYED) seen before the exit. */
+  transport?: string;
+  framesWritten: number;
+  lastFrame?: string;
+}
+
+interface ChildLife {
+  pid?: number;
+  startedAt: number;
+  cause?: string;
+  transport?: string;
+  framesWritten: number;
+  lastFrame?: string;
+}
+
 interface PendingFrame {
   frame: string;
   bytes: number;
@@ -37,7 +58,11 @@ const QUEUED_TURN_COMMANDS = new Set(["prompt", "slash_command"]);
 /**
  * Owns the `dgc serve` child process: writes JSON commands to its stdin, parses
  * newline-delimited JSON from its stdout, and re-emits each event by `type`.
- * Also emits "event" for every event and "exit" when the child dies.
+ * Also emits "event" for every event, and three lifecycle channels:
+ * - "teardown" (cause, pid) the moment the extension decides to stop a child;
+ * - "launch_failed" (message) when a child could not be started;
+ * - "exit" (code, signal, info: ChildExitInfo) exactly once per child that ran, whether we
+ *   asked for it (info.cause) or not, including after a failed write to its stdin.
  *
  * Commands sent during startup or stream backpressure are queued in a strict,
  * bounded FIFO. Unexpected exits reject that queue instead of silently dropping
@@ -55,12 +80,15 @@ export class DgcBackend extends EventEmitter {
   private respondedRequests = new Set<string>();
   private draining = false;
   private startedAt = 0;
-  private exiting: ChildProcessWithoutNullStreams | undefined;
+  /**
+   * One record per child that has not reported its exit yet. Whether WE stopped a child is a fact
+   * about that child, not about this instance: an instance-wide flag set by one teardown stayed
+   * set for the next child this instance started, so that child's own death was logged as asked
+   * for and never recovered.
+   */
+  private life = new Map<ChildProcessWithoutNullStreams, ChildLife>();
 
-  /** Set when this instance is being torn down on purpose (restart/dispose/protocol failure). */
-  intentional = false;
-
-  /** The child's pid and how long it has been up — for the log that explains a lost turn. */
+  /** The current child's pid and how long it has been up — for the log that explains a lost turn. */
   get childPid(): number | undefined { return this.proc?.pid; }
   get uptimeMs(): number { return this.startedAt ? Date.now() - this.startedAt : 0; }
   private stopping = false;
@@ -96,6 +124,12 @@ export class DgcBackend extends EventEmitter {
     }
     this.proc = child;
     this.startedAt = Date.now();
+    this.life.set(child, { pid: child.pid, startedAt: this.startedAt, framesWritten: 0 });
+    // Every child, including one a later send() starts on this same instance, announces itself.
+    // A spawn that failed outright has no pid; its launch_failed says so instead.
+    if (child.pid !== undefined) {
+      this.emit("spawned", child.pid);
+    }
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -121,7 +155,13 @@ export class DgcBackend extends EventEmitter {
     });
     child.stdin.on("error", (err: any) => {
       // Writable streams can report EPIPE after the process has already been disposed. Always
-      // consume the event; only fail the active transport instance.
+      // consume the event; only fail the active transport instance. The child stays in `life`:
+      // its exit still has to be reported (this path used to swallow it entirely, so a backend
+      // that died under a busy host left no exit line, no recovery and a turn spinning forever).
+      const record = this.life.get(child);
+      if (record && !record.transport) {
+        record.transport = String(err?.code ?? err?.message ?? err);
+      }
       if (this.proc !== child) {
         return;
       }
@@ -150,6 +190,13 @@ export class DgcBackend extends EventEmitter {
       if (this.proc !== child) {
         return;
       }
+      // A child that never started has no exit worth reporting as a backend death: the launch
+      // error (a missing CLI above all) is the whole story, and recovery must not respawn it. A
+      // child that did start keeps its record, so its exit is still reported.
+      if (child.pid === undefined) {
+        this.life.delete(child);
+        this.emit("launch_failed", String(err?.message ?? err));
+      }
       this.proc = undefined;
       this.ready = false;
       this.draining = false;
@@ -165,15 +212,19 @@ export class DgcBackend extends EventEmitter {
     // killed process, and reporting only the code made a crash indistinguishable from a clean
     // exit(0) -- both surfaced as "dgc backend exited" with nothing after it.
     child.on("exit", (code, signal) => {
-      const disposed = this.exiting === child;
-      if (this.proc !== child && !disposed) {
-        return;
+      const record = this.life.get(child);
+      if (!record) {
+        return;                                  // a launch failure, or already reported
       }
-      if (disposed) {
-        // A shutdown we asked for. Report it — silently swallowing it is what left a lost turn
-        // with no record of who ended it — but do not disturb a newer instance's state.
-        this.exiting = undefined;
-        this.emit("exit", code, signal);
+      this.life.delete(child);
+      const info: ChildExitInfo = {
+        pid: record.pid, uptimeMs: Date.now() - record.startedAt, cause: record.cause,
+        transport: record.transport, framesWritten: record.framesWritten, lastFrame: record.lastFrame,
+      };
+      if (this.proc !== child) {
+        // Disposed, or its transport already failed: report it — silently swallowing it is what
+        // left a lost turn with no record of who ended it — but do not disturb a newer child.
+        this.emit("exit", code, signal, info);
         return;
       }
       this.proc = undefined;
@@ -187,7 +238,7 @@ export class DgcBackend extends EventEmitter {
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
       }
-      this.emit("exit", code, signal);
+      this.emit("exit", code, signal, info);
     });
   }
 
@@ -207,7 +258,7 @@ export class DgcBackend extends EventEmitter {
     this.emit("event", { type: "error", message, fatal: true, protocol_error: true,
                          ...(cliOutdated ? { cli_outdated: true } : {}) });
     this.rejectPending(message);
-    this.dispose();
+    this.dispose(`protocol: ${message}`);
   }
 
   private onStdout(chunk: string): void {
@@ -395,7 +446,7 @@ export class DgcBackend extends EventEmitter {
     return dropped;
   }
 
-  private writeFrame(frame: string): boolean {
+  private writeFrame(frame: string, type: string): boolean {
     const child = this.proc;
     if (!child || !child.stdin.writable) {
       return false;
@@ -403,6 +454,11 @@ export class DgcBackend extends EventEmitter {
     try {
       if (!child.stdin.write(frame)) {
         this.draining = true;
+      }
+      const record = this.life.get(child);
+      if (record) {
+        record.framesWritten += 1;
+        record.lastFrame = type;
       }
       return true;
     } catch {
@@ -417,7 +473,7 @@ export class DgcBackend extends EventEmitter {
       const item = (this.setupPending.length ? this.setupPending
         : this.controlPending.length ? this.controlPending : this.pending).shift()!;
       this.pendingBytes -= item.bytes;
-      if (!this.writeFrame(item.frame)) {
+      if (!this.writeFrame(item.frame, item.type)) {
         this.reject("DGC backend closed while writing a queued command");
         this.rejectPending("the backend closed before queued commands could run");
         return;
@@ -501,7 +557,7 @@ export class DgcBackend extends EventEmitter {
       }
       return accepted;
     }
-    if (!this.writeFrame(item.frame)) {
+    if (!this.writeFrame(item.frame, item.type)) {
       this.reject("DGC backend is unavailable; retry after it restarts");
       return false;
     }
@@ -591,7 +647,7 @@ export class DgcBackend extends EventEmitter {
     if (this.draining || this.setupPending.length) {
       return this.enqueue(item, true);
     }
-    if (!this.writeFrame(item.frame)) {
+    if (!this.writeFrame(item.frame, item.type)) {
       this.reject("DGC backend closed during handshake configuration");
       return false;
     }
@@ -607,7 +663,8 @@ export class DgcBackend extends EventEmitter {
     this.flushPending();
   }
 
-  dispose(): void {
+  /** Stop the current child on purpose. `cause` is what the exit line and the panel will report. */
+  dispose(cause = "disposed"): void {
     this.stopping = true;
     this.ready = false;
     this.draining = false;
@@ -620,11 +677,16 @@ export class DgcBackend extends EventEmitter {
     this.respondedRequests.clear();
     const p = this.proc;
     this.proc = undefined;
-    // Keep the doomed child addressable until its exit is observed. Dropping the reference here
-    // made the exit guard swallow the event, so the log line that says whether WE asked for the
-    // shutdown — the one question a lost turn needs answered — could never print "yes".
-    this.exiting = p;
-    this.intentional = true;
+    // The doomed child keeps its `life` record until its exit is observed, now carrying the
+    // cause, so the exit line says whether WE asked for the shutdown and why — the one question a
+    // lost turn needs answered.
+    const record = p ? this.life.get(p) : undefined;
+    if (record && !record.cause) {
+      record.cause = cause;
+    }
+    if (p) {
+      this.emit("teardown", cause, p.pid);
+    }
     this.emit("disposed");
     if (!p) {
       return;
@@ -632,6 +694,10 @@ export class DgcBackend extends EventEmitter {
     try {
       if (p.stdin.writable) {
         p.stdin.write(JSON.stringify({ type: "shutdown" }) + "\n");
+        if (record) {
+          record.framesWritten += 1;
+          record.lastFrame = "shutdown";
+        }
       }
     } catch {
       /* pipe already closed */

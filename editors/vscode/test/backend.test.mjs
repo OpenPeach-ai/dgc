@@ -496,3 +496,142 @@ setInterval(() => {}, 1000);`);
   shaped.dispose();
   sequenced.dispose();
 });
+
+// ---- per-child lifecycle: every exit is reported once, with who asked for it and why ----------
+
+function collectExits(backend) {
+  const exits = [];
+  backend.on("exit", (code, signal, info) => exits.push({ code, signal, info }));
+  return exits;
+}
+
+test("a child that closes its stdin and lingers still reports its exit", async () => {
+  // The stdin 'error' handler used to null the process before the exit guard ran, so the exit was
+  // swallowed: no backend.log line, no recovery, a turn spinning forever (measured 22 of 30).
+  const command = executable("close-stdin-and-linger", `
+${protocolFixture()}
+send(ready);
+setTimeout(() => { process.stdin.destroy(); require("node:fs").closeSync(0); }, 20);
+setTimeout(() => process.exit(0), 400);`);
+  const backend = new DgcBackend(scratch, command);
+  let writer;
+  backend.on("event", (event) => { if (event.transport_error) clearInterval(writer); });
+  const exits = collectExits(backend);
+  const exited = waitFor(backend, "exit", () => true, 5000);
+  backend.start();
+  await waitFor(backend, "ready");
+  backend.completeHandshake();
+  writer = setInterval(() => backend.send({ type: "status" }), 5);
+  try {
+    await exited;
+  } finally { clearInterval(writer); }
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  backend.dispose();
+  const own = exits.filter((row) => row.info && row.info.cause === undefined);
+  assert.equal(own.length >= 1, true, JSON.stringify(exits));
+  assert.equal(own[0].code === 0 || own[0].code === null, true);
+  assert.ok(own[0].info.framesWritten > 0, "the frames sent to the child are counted");
+  assert.equal(own[0].info.lastFrame, "status");
+  assert.match(String(own[0].info.transport), /EPIPE|ERR_STREAM|write/i,
+    "the failed write is recorded on the exit it preceded");
+  const pids = exits.map((row) => row.info.pid);
+  assert.equal(new Set(pids).size, pids.length, "each child reports its exit exactly once");
+});
+
+test("an EPIPE on a dying child is recorded on its exit instead of hiding it", async () => {
+  const command = executable("exit-without-reading", `
+${protocolFixture()}
+send(ready);
+setTimeout(() => process.exit(0), 60);`);
+  const backend = new DgcBackend(scratch, command);
+  const seen = [];
+  backend.on("event", (event) => seen.push(event));
+  const exits = collectExits(backend);
+  backend.start();
+  await waitFor(backend, "ready");
+  backend.completeHandshake();
+  const big = "x".repeat(256 * 1024);
+  const writer = setInterval(() => backend.send({ type: "prompt", text: big }), 2);
+  const exited = waitFor(backend, "exit", () => true, 5000);
+  try { await exited; } finally { clearInterval(writer); }
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const first = exits.find((row) => row.info.cause === undefined);
+  assert.ok(first, "the child's own death is reported");
+  if (seen.some((event) => event.transport_error === true)) {
+    assert.match(String(first.info.transport), /EPIPE|ERR_STREAM|write/i,
+      "a failed write is carried on the exit it preceded");
+  }
+  backend.dispose();
+});
+
+test("a respawn after a protocol failure is not reported as asked-for", async () => {
+  // An instance-wide `intentional` flag set by the protocol failure stayed set for the next child
+  // this instance started, so that child's own exit(0) logged "asked for it: yes" and was never
+  // recovered.
+  const counter = join(scratch, "generation-count");
+  writeFileSync(counter, "0");
+  const command = executable("malformed-then-ok", `
+const fs = require("node:fs");
+${protocolFixture()}
+const generation = Number(fs.readFileSync(${JSON.stringify(counter)}, "utf8")) + 1;
+fs.writeFileSync(${JSON.stringify(counter)}, String(generation));
+if (generation === 1) {
+  process.stdout.write("{not json\\n");
+  setTimeout(() => {}, 5000);
+} else {
+  send(ready);
+  setTimeout(() => process.exit(0), 150);
+}`);
+  const backend = new DgcBackend(scratch, command);
+  backend.on("event", () => {});
+  const exits = collectExits(backend);
+  const teardowns = [];
+  backend.on("teardown", (cause, pid) => teardowns.push({ cause, pid }));
+  backend.start();
+  await waitFor(backend, "exit", () => true, 5000);
+  assert.equal(teardowns.length, 1);
+  assert.match(teardowns[0].cause, /^protocol: dgc backend emitted malformed NDJSON/);
+  assert.match(String(exits[0].info.cause), /^protocol: dgc backend emitted malformed NDJSON/);
+  backend.send({ type: "status" });                // the next command starts generation 2
+  await waitFor(backend, "exit", (code) => code === 0, 5000);
+  assert.equal(exits.length, 2);
+  assert.equal(exits[1].info.cause, undefined, "generation 2 died on its own and must say so");
+  backend.dispose();
+});
+
+test("every teardown names its cause, and the exit carries it", async () => {
+  const backend = new DgcBackend(scratch, echoBackend("teardown-cause-backend"));
+  backend.on("event", () => {});
+  const exits = collectExits(backend);
+  const teardowns = [];
+  backend.on("teardown", (cause, pid) => teardowns.push({ cause, pid }));
+  backend.start();
+  await waitFor(backend, "ready");
+  backend.completeHandshake();
+  const pid = backend.childPid;
+  assert.equal(backend.send({ type: "status" }), true);
+  await waitFor(backend, "info");
+  const exited = waitFor(backend, "exit", () => true, 5000);
+  backend.dispose("chat restoration timed out");
+  await exited;
+  assert.deepEqual(teardowns, [{ cause: "chat restoration timed out", pid }]);
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].info.cause, "chat restoration timed out");
+  assert.equal(exits[0].info.pid, pid);
+  assert.equal(exits[0].info.framesWritten, 2, "the status command and the shutdown frame");
+  assert.equal(exits[0].info.lastFrame, "shutdown");
+  assert.ok(exits[0].info.uptimeMs >= 0);
+});
+
+test("a child that never launched reports launch_failed, not a backend death", async () => {
+  const backend = new DgcBackend(scratch, join(scratch, "no-such-dgc-binary"));
+  const events = [];
+  backend.on("event", (event) => events.push(event));
+  const exits = collectExits(backend);
+  const failed = waitFor(backend, "launch_failed", () => true, 3000);
+  backend.start();
+  assert.match(String(await failed), /ENOENT/);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(exits.length, 0, "recovery must not respawn a CLI that is not there");
+  assert.ok(events.some((event) => event.notInstalled === true));
+});

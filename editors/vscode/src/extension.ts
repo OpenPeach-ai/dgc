@@ -9,6 +9,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     return;
   }
   const provider = new DgcViewProvider(context);
+  let commandPath = resolveDgcExecutable().command;
 
   const runCliInTerminal = (subcommand: "update" | "export-training" | "notes"): boolean => {
     if (vscode.workspace.isTrusted === false) {
@@ -55,7 +56,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.addSelection", () => provider.addSelection()),
     vscode.commands.registerCommand("dgc.addFile",
       (uri?: vscode.Uri, uris?: vscode.Uri[]) => provider.addFiles(uri, uris)),
-    vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
+    vscode.commands.registerCommand("dgc.restart", () => provider.restart("command DGC: Restart Backend")),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
     vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
     vscode.commands.registerCommand("dgc.nameSession", () => provider.nameSession()),
@@ -100,10 +101,17 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc.command")) {
         // The backend is the configured executable; a new path used to take effect only on the
-        // next window reload.
-        provider.restart();
-        void vscode.window.showInformationMessage("DGC restarted with the new command path.");
-      } else if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
+        // next window reload. Restart only when the path DGC resolves actually changed: the event
+        // also fires for a workspace-scope edit DGC ignores (an agent or a checkout rewriting
+        // .vscode/settings.json), and restarting on that killed the turn for nothing.
+        const next = resolveDgcExecutable().command;
+        if (next !== commandPath) {
+          commandPath = next;
+          provider.commandPathChanged();
+          return;
+        }
+      }
+      if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
   );

@@ -909,6 +909,15 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 }
 .resume-note .codicon { font-size: var(--t-base); }
 
+/* After a backend death: one card, a DGC marker with actions, never a message from the user. */
+.recovery-card {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
+}
+.recovery-card .recovery-text { flex: 1 1 16em; min-width: 0; overflow-wrap: anywhere; }
+.recovery-card .recovery-actions { display: flex; gap: var(--sp-2); }
+
 /* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request. */
 .compaction { margin: var(--sp-2) 0; color: var(--faint); }
 .compaction > summary {

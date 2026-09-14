@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,10 @@ const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-host-"));
 const resultPath = join(scratch, "result.json");
 const backendPath = join(scratch, "dgc-fixture");
 const backendLogPath = join(scratch, "backend.ndjson");
+// Exit-path scenarios: the test writes a mode here and the fixture acts on the next prompt.
+const controlPath = join(scratch, "backend-control");
+// The same fixture under a second path, so a user-scope dgc.command change is a real change.
+const altBackendPath = join(scratch, "dgc-fixture-alt");
 const workspacePath = join(scratch, "primary-workspace");
 const secondaryWorkspace = join(scratch, "secondary-workspace");
 const workspaceFile = join(scratch, "multi-root.code-workspace");
@@ -77,6 +81,22 @@ send({ type: "ready", version: "fixture", protocol_version: 13,
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  let mode = "";
+  try { mode = fs.readFileSync(process.env.DGC_EXTENSION_TEST_CONTROL, "utf8").trim(); } catch {}
+  if (cmd.type === "prompt" && mode) {
+    fs.writeFileSync(process.env.DGC_EXTENSION_TEST_CONTROL, "");
+    if (mode === "die-on-own") {
+      process.stderr.write("[dgc serve] serve loop ended: fixture died on its own; up 1s\\n");
+      process.exit(0);
+    }
+    if (mode === "malformed-then-ok") { process.stdout.write("{not json\\n"); return; }
+    if (mode === "close-stdin-and-linger") {
+      process.stdin.destroy();
+      try { fs.closeSync(0); } catch {}
+      setTimeout(() => process.exit(0), 500);
+      return;
+    }
+  }
   if (cmd.type === "get_chat_changes") {
     send({ type: "chat_changes", request_id: cmd.request_id, session_id: currentSession,
       roots: workspaceFolders.map(root => ({ root, total: 0, complete: true, notices: [], files: [] })) });
@@ -216,6 +236,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
 chmodSync(backendPath, 0o700);
+symlinkSync(backendPath, altBackendPath);
+writeFileSync(controlPath, "");
 
 // This runner intentionally never downloads VS Code. CI or a developer supplies an installed
 // executable; the explicit environment variable also makes Insiders/Cursor-compatible runs easy.
@@ -272,11 +294,14 @@ try {
   env.DGC_EXTENSION_TEST_WORKSPACE_ENDPOINT = workspaceEndpoint;
   env.DGC_EXTENSION_TEST_WORKSPACE_GATE = workspaceGate;
   env.DGC_EXTENSION_TEST_TOKEN = testToken;
+  env.DGC_EXTENSION_TEST_CONTROL = controlPath;
+  env.DGC_EXTENSION_TEST_BACKEND_ALT = altBackendPath;
+  env.DGC_EXTENSION_TEST_USER_DATA = userDataDir;
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
     env,
     encoding: "utf8",
-    timeout: 90_000,
+    timeout: 180_000,
   });
   if (result.error) throw result.error;
   if (result.stdout) process.stdout.write(result.stdout);
@@ -292,6 +317,7 @@ try {
       || evidence.multiRootLifecycle !== true
       || evidence.secretStorageLifecycle !== true
       || evidence.decisionLifecycle !== true
+      || evidence.backendExitLifecycle !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1
       || typeof evidence.vscodeVersion !== "string"
       || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
@@ -302,7 +328,7 @@ try {
   if (expectedVersion && evidence.vscodeVersion !== expectedVersion) {
     throw new Error(`expected VS Code ${expectedVersion}, host reported ${evidence.vscodeVersion}`);
   }
-  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
+  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + backend exit paths)\n`);
 } finally {
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);

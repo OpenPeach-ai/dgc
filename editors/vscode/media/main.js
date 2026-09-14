@@ -291,6 +291,10 @@
   let promptSequence = 0;
   const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const pendingPrompts = new Map();
+  // Prompts the backend acknowledged as queued, in the order they will run. They used to be
+  // dropped from pendingPrompts on that acknowledgement, so a backend that stopped before running
+  // them lost the user's words with no way to restore them.
+  const queuedPrompts = new Map();
   const draftScope = document.documentElement.dataset.draftScope || "";
   const draftEntries = new Map();
   const pendingImages = new Set();
@@ -431,9 +435,9 @@
     }
   }
   function rejectPrompt(id, confirmed = true) {
-    const pending = pendingPrompts.get(id);
+    const pending = pendingPrompts.get(id) || queuedPrompts.get(id);
     if (!pending) return;
-    pendingPrompts.delete(id);
+    pendingPrompts.delete(id); queuedPrompts.delete(id);
     pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
     const restore = () => {
       if (pending.session && pending.session !== draftSession) {
@@ -655,11 +659,13 @@
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
     // A resumed goal is not something the user just typed. Show it as what it is instead of
-    // echoing the objective back into the chat as a fresh prompt.
-    if (kind === "resume") {
+    // echoing the objective back into the chat as a fresh prompt. The same holds for a turn the
+    // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
+    if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
       note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
-        + '<span>Resumed the standing goal</span>';
+        + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
+      if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
     } else {
       echoPrompt(prompt);
@@ -1403,6 +1409,28 @@
   function expireOpenRequests() {
     document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
   }
+  // The two cards a backend death can leave: Continue for an ordinary turn it cut off, and Resume
+  // goal when the same death kept repeating and automatic resume stood down. Each is a DGC marker
+  // with buttons — clicking Continue sends no words on the user's behalf.
+  function removeRecoveryCards() { log.querySelectorAll(".recovery-card").forEach((node) => node.remove()); }
+  function recoveryCard(kind, text, actionLabel, onAction) {
+    removeRecoveryCards();
+    const card = el("div", `sys recovery-card ${kind}`);
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", actionLabel);
+    card.appendChild(el("span", "codicon codicon-debug-continue"));
+    card.lastChild.setAttribute("aria-hidden", "true");
+    card.appendChild(el("span", "recovery-text", esc(text)));
+    const actions = el("span", "recovery-actions");
+    const go = el("button", "act primary", esc(actionLabel)); go.type = "button";
+    go.onclick = () => { card.remove(); onAction(); };
+    const dismiss = el("button", "act", "Dismiss"); dismiss.type = "button";
+    dismiss.onclick = () => card.remove();
+    actions.appendChild(go); actions.appendChild(dismiss); card.appendChild(actions);
+    appendConversationContent(card);
+    if (!replaying) { speak(text); scroll(); }
+    return card;
+  }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
@@ -1915,7 +1943,7 @@
         break;
       case "session":
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
-          discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
+          discardTurn(); log.innerHTML = ""; queuedCount = 0; queuedPrompts.clear(); renderQueued(); setSending(false);
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the slot is left for that event to overwrite.
@@ -1941,8 +1969,16 @@
         if (!$("settings").hidden) fillSettings(ev);
         break;
       case "turn_start":
+        if (!replaying) removeRecoveryCards();
         startTurn(ev.prompt, ev.kind, ev.turn_id);
-        if (!replaying) { setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } }
+        if (!replaying) {
+          setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); }
+          // A queued prompt leaves the queue when its own turn starts; goal and continue turns are
+          // DGC's, not one of the user's queued messages.
+          if ((ev.kind || "prompt") === "prompt" && queuedPrompts.size) {
+            queuedPrompts.delete(queuedPrompts.keys().next().value);
+          }
+        }
         break;
       // What the turn is doing, stated by the backend rather than guessed here. A turn that is
       // between model rounds because a gate continued it now says so, instead of a static verb
@@ -1970,6 +2006,7 @@
           if (pending?.node) pending.node.querySelector(".role").textContent = "you · steering pending";
         } else {
           if (ev.state === "queued" && pending?.node) pending.node.querySelector(".role").textContent = "you · queued";
+          if (ev.state === "queued" && pending) queuedPrompts.set(ev.request_id, pending);
           pendingPrompts.delete(ev.request_id);
         }
         if (ev.message) sysLine(ev.message);
@@ -1989,6 +2026,12 @@
               turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
               appendTurnContent(pending.node);
             }
+          }
+          // Unconsumed steering is spliced back in at the HEAD of the backend's queue.
+          if (ev.state === "queued" && pending) {
+            const rest = [...queuedPrompts]; queuedPrompts.clear();
+            queuedPrompts.set(ev.request_id, pending);
+            for (const [key, value] of rest) queuedPrompts.set(key, value);
           }
           pendingPrompts.delete(ev.request_id); persistDraft();
         }
@@ -2412,7 +2455,7 @@
     $("tasks-clear").disabled = on;
     $("tasks-clear").title = on ? "Available after this turn finishes" : "Drop every item from this chat\u2019s checklist";
   }
-  function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  function doStop() { queuedCount = 0; queuedPrompts.clear(); renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
@@ -3297,6 +3340,23 @@
         && typeof file.workspace === "string").slice(0, 600) : [];
       if (popMode === "@") onInput();
     }
+    else if (msg.type === "continue_offer") {
+      if (msg.sessionId && msg.sessionId !== draftSession) return;
+      const cause = String(msg.cause || "").slice(0, 300);
+      recoveryCard("continue-offer",
+        `DGC's backend stopped during your last turn${cause ? ` (${cause})` : ""}. `
+          + "Work up to the last completed step is saved.",
+        "Continue", () => vscode.postMessage({ type: "resumeTurn" }));
+    }
+    else if (msg.type === "goal_resume_held") {
+      const cause = String(msg.cause || "").slice(0, 300);
+      const exits = Math.max(0, Number(msg.exits) || 0);
+      recoveryCard("goal-resume-held",
+        `DGC's backend stopped ${exits} times in 30 minutes, so the goal was not resumed automatically.`
+          + (cause ? ` Last cause: ${cause}.` : "")
+          + (msg.logPath ? ` Details: ${String(msg.logPath).slice(0, 600)}` : " Details: the DGC Backend output channel."),
+        "Resume goal", () => vscode.postMessage({ type: "resumeGoal" }));
+    }
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
@@ -3317,6 +3377,10 @@
       } else endTurn("error");
       expireOpenRequests();
       for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
+      // Accepted as queued but never started: the backend that held them is gone, so they are
+      // the user's to send again (a backend that got to say so first already returned them).
+      for (const id of [...queuedPrompts.keys()]) rejectPrompt(id, true);
+      queuedCount = 0; renderQueued();
       renderUnconfirmedDrafts();
       // The goal clock is driven from this side: it keeps adding elapsed time for as long as the
       // goal reads active-and-running. With the backend gone nothing will ever say otherwise, so
@@ -3328,9 +3392,15 @@
       const why = msg.signal ? " (killed by " + msg.signal + ")"
         : typeof msg.code === "number" ? " (code " + msg.code + ")"
         : " (killed)";
+      // Say only what will actually happen: a goal resumes by itself, an ordinary turn is offered
+      // a Continue once the backend is back, and anything else simply reconnects.
+      const next = msg.resumes === "offer" ? "reconnecting; you can continue the interrupted turn when it is back"
+        : msg.resumes === "none" ? "reconnecting"
+        : "reconnecting and picking the work back up";
+      const cause = typeof msg.cause === "string" && msg.cause ? ": " + msg.cause.slice(0, 300) : "";
       sysLine(msg.recovering
-        ? "dgc backend stopped" + why + "\u2009\u2014\u2009reconnecting and picking the work back up"
-        : "dgc backend exited" + why, true);
+        ? "dgc backend stopped" + why + cause + "\u2009\u2014\u2009" + next
+        : "dgc backend exited" + why + cause, true);
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });

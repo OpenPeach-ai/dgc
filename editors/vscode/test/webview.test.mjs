@@ -2944,3 +2944,140 @@ test("a paused or blocked goal still offers to resume", () => {
     assert.deepEqual(errors, []);
   }
 });
+
+// ---- after a backend death: queued prompts come back, and Continue is DGC's marker ------------
+
+function queuedPromptDom() {
+  const h = makeDom({ scope: "workspace" });
+  const event = (ev) => h.send({ type: "event", event: ev });
+  h.send({ type: "session_ready", sessionId: "alpha" });
+  event({ type: "ready", capabilities: { live_steering: true, steering_native: true, resume_turn: true } });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Install the dependencies", kind: "prompt" });
+  const input = h.doc.getElementById("input");
+  input.value = "Then run the tests";
+  input.dispatchEvent(new h.dom.window.Event("input"));
+  input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  const queued = h.posted.findLast((m) => m.type === "prompt");
+  event({ type: "prompt_accepted", request_id: queued.requestId, state: "queued" });
+  event({ type: "queued", count: 1, text: "Then run the tests" });
+  return { ...h, event, input, queued };
+}
+
+test("a queued prompt can be restored after the backend exits", () => {
+  // Before: prompt_accepted "queued" deleted the entry from pendingPrompts, so a backend that died
+  // before running it lost the user's words with nothing to restore.
+  const h = queuedPromptDom();
+  assert.equal(h.input.value, "");
+  h.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer", cause: "stdin closed" });
+  assert.equal(h.input.value, "Then run the tests", "the queued message is back in the composer");
+  assert.equal(h.doc.getElementById("queued").textContent, "", "and nothing claims to be queued any more");
+  assert.deepEqual(h.errors, []);
+});
+
+test("a queued prompt the backend hands back is restorable too", () => {
+  const h = queuedPromptDom();
+  h.input.value = "an unrelated draft";
+  h.event({ type: "steering_update", request_id: h.queued.requestId, state: "returned",
+            message: "DGC's backend stopped before this queued message ran; it is back in the composer." });
+  assert.equal(h.input.value, "an unrelated draft", "a newer draft is never overwritten");
+  const restore = [...h.doc.querySelectorAll("button")].find((b) => /Restore unsent message/.test(b.textContent));
+  assert.ok(restore, "the returned message offers a restore");
+  h.input.value = "";
+  restore.click();
+  assert.equal(h.input.value, "Then run the tests");
+  assert.deepEqual(h.errors, []);
+});
+
+test("a queued prompt leaves the restore set once its own turn starts", () => {
+  const h = queuedPromptDom();
+  h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt" });
+  h.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer" });
+  assert.equal(h.input.value, "", "a message that already ran is not offered back as unsent");
+  assert.deepEqual(h.errors, []);
+});
+
+test("the exit line says what a reconnect will actually do", () => {
+  const offer = makeDom();
+  offer.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  offer.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer",
+               cause: "stdin closed while the parent (7) is still alive" });
+  const text = offer.doc.getElementById("log").textContent;
+  assert.match(text, /dgc backend stopped \(code 0\): stdin closed while the parent \(7\) is still alive/);
+  assert.match(text, /you can continue the interrupted turn/);
+  assert.doesNotMatch(text, /picking the work back up/, "no promise of a pickup that will not happen");
+
+  const none = makeDom();
+  none.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  none.send({ type: "backend_exit", code: 0, recovering: true, resumes: "none" });
+  assert.match(none.doc.getElementById("log").textContent, /stopped \(code 0\) — reconnecting$/);
+
+  const goal = makeDom();
+  goal.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  goal.send({ type: "backend_exit", code: 0, recovering: true, resumes: "goal" });
+  assert.match(goal.doc.getElementById("log").textContent, /picking the work back up/);
+  assert.deepEqual([...offer.errors, ...none.errors, ...goal.errors], []);
+});
+
+test("the Continue card is a DGC marker: one click, no words sent as the user", () => {
+  const { doc, send, posted, errors } = makeDom({ scope: "workspace" });
+  const event = (ev) => send({ type: "event", event: ev });
+  send({ type: "session_ready", sessionId: "alpha" });
+  event({ type: "ready", capabilities: { resume_turn: true } });
+  send({ type: "continue_offer", cause: "stdin closed while the parent (7) is still alive", sessionId: "alpha" });
+  const card = doc.querySelector(".recovery-card.continue-offer");
+  assert.ok(card, "the offer renders as a card");
+  assert.equal(card.closest(".msg.user"), null, "never a user bubble");
+  assert.match(card.textContent, /backend stopped during your last turn \(stdin closed while the parent \(7\) is still alive\)/);
+  const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
+  assert.deepEqual(buttons, ["Continue", "Dismiss"]);
+  card.querySelector("button").click();
+  assert.deepEqual(posted.filter((m) => m.type === "resumeTurn").map((m) => JSON.stringify(m)), ['{"type":"resumeTurn"}']);
+  assert.equal(posted.some((m) => m.type === "prompt"), false, "Continue does not post a prompt");
+  assert.equal(doc.querySelector(".recovery-card"), null, "the card goes once used");
+
+  event({ type: "turn_start", turn_id: "t9", kind: "continue",
+          prompt: "DGC's backend stopped during the previous turn, before it finished. Continue that turn…" });
+  const marker = doc.querySelector(".resume-note.continue-note");
+  assert.ok(marker, "the continuation renders as a DGC continuation marker");
+  assert.match(marker.textContent, /Continued the interrupted turn/);
+  assert.equal([...doc.querySelectorAll(".msg.user")].some((m) => /backend stopped/.test(m.textContent)), false,
+    "the instruction DGC wrote is never echoed as something the user typed");
+
+  send({ type: "continue_offer", cause: "", sessionId: "some-other-chat" });
+  assert.equal(doc.querySelector(".recovery-card"), null, "an offer for another chat is ignored");
+  send({ type: "continue_offer", cause: "", sessionId: "alpha" });
+  doc.querySelectorAll(".recovery-card button")[1].click();
+  assert.equal(doc.querySelector(".recovery-card"), null, "Dismiss removes it");
+  assert.equal(posted.filter((m) => m.type === "resumeTurn").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("a replayed continuation stays a marker", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "Install the dependencies", kind: "prompt" },
+    { type: "turn_end", turn_id: "h1", reason: "cancelled", token_estimate: 0 },
+    { type: "turn_start", turn_id: "h2", prompt: "Continued the interrupted turn", kind: "continue" },
+    { type: "text_delta", text: "Picking up after npm install." },
+    { type: "turn_end", turn_id: "h2", reason: "completed", token_estimate: 0 },
+  ] } });
+  assert.ok(doc.querySelector(".resume-note.continue-note"));
+  assert.equal([...doc.querySelectorAll(".msg.user")].some((m) => /Continued the interrupted turn/.test(m.textContent)), false);
+  assert.deepEqual(errors, []);
+});
+
+test("a goal held by the repeat-cause breaker shows the cause and a Resume goal button", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "goal_resume_held", exits: 3, cause: "stdin closed while the parent (7) is still alive",
+         lastCommand: "get_workspace_changes", logPath: "/logs/exthost1/vibedgc.dgc/backend.log" });
+  const card = doc.querySelector(".recovery-card.goal-resume-held");
+  assert.ok(card);
+  assert.match(card.textContent, /stopped 3 times in 30 minutes/);
+  assert.match(card.textContent, /Last cause: stdin closed while the parent \(7\) is still alive/);
+  assert.match(card.textContent, /backend\.log/);
+  card.querySelector("button").click();
+  assert.deepEqual(posted.filter((m) => m.type === "resumeGoal").map((m) => JSON.stringify(m)), ['{"type":"resumeGoal"}']);
+  assert.deepEqual(errors, []);
+});

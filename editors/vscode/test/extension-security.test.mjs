@@ -38,11 +38,15 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       get: (_key, fallback) => fallback,
       inspect: (key) => key === "command" ? inspectedCommand : undefined,
     }),
-    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidChangeConfiguration: (listener) => {
+      globalThis.__DGC_CONFIGURATION_LISTENER = listener;
+      return { dispose() {} };
+    },
     onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
   },
 };
 globalThis.__DGC_PANEL_CONSTRUCTIONS = 0;
+globalThis.__DGC_PANEL_CALLS = [];
 
 await build({
   entryPoints: [join(here, "../src/extension.ts")],
@@ -64,6 +68,9 @@ await build({
       builder.onLoad({ filter: /^panel$/, namespace: "test" }, () => ({
         contents: `exports.DgcViewProvider = class {
           constructor() { globalThis.__DGC_PANEL_CONSTRUCTIONS += 1; }
+          commandPathChanged() { globalThis.__DGC_PANEL_CALLS.push("commandPathChanged"); }
+          restart(reason) { globalThis.__DGC_PANEL_CALLS.push("restart:" + reason); }
+          applyNativeSettings() { globalThis.__DGC_PANEL_CALLS.push("applyNativeSettings"); }
         };`,
         loader: "js",
       }));
@@ -194,12 +201,17 @@ test("first-run dead ends: a queued selection, a restart on a new command path, 
   assert.match(addSelection, /this\.inVisiblePanel\(\(\) => this\.post\(\{ type: "attach"/,
     "the selection waits for the webview instead of being dropped when the view was never opened");
   assert.match(addSelection, /showInformationMessage\("Select some text first/);
-  const restart = panel.slice(panel.indexOf("restart(): void {"), panel.indexOf("restart(): void {") + 400);
+  const restartAt = panel.indexOf("  restart(reason");
+  const restart = panel.slice(restartAt, restartAt + 400);
   assert.match(restart, /this\._installPrompted = false/, "a restart earns a fresh install prompt");
   assert.match(panel, /RETRY = "Retry"/, "the install prompt offers a retry");
   const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
-  assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*provider\.restart\(\)/,
-    "changing dgc.command restarts the backend");
+  assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{[\s\S]{0,600}?if \(next !== commandPath\) \{\s*commandPath = next;\s*provider\.commandPathChanged\(\)/,
+    "changing the resolved dgc.command restarts the backend (after a running turn ends)");
+  const changed = panel.slice(panel.indexOf("commandPathChanged(): void {"), restartAt);
+  assert.match(changed, /if \(this\.turnActive\) \{[\s\S]*this\.pendingCommandRestart = true[\s\S]*return;/,
+    "a turn in flight is never killed by a settings change");
+  assert.match(changed, /this\.restart\("setting dgc\.command changed"\)/);
 });
 
 test("the recovery commands are never hidden behind a backend that will not start", () => {
@@ -245,4 +257,27 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
   assert.match(panel, /install\.sh \| bash/, "the offer runs the installer");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
+});
+
+test("a workspace-scope dgc.command edit does not restart the backend; a user-scope change does", () => {
+  // affectsConfiguration("dgc.command") also fires for a .vscode/settings.json edit (an agent, a git
+  // checkout) whose value DGC ignores, and restarting on it killed the running turn for nothing.
+  globalThis.__DGC_PANEL_CALLS.length = 0;
+  inspectedCommand = { defaultValue: "dgc", globalValue: "/opt/dgc/bin/dgc" };
+  extension.activate(context);
+  const changed = (keys) => globalThis.__DGC_CONFIGURATION_LISTENER({
+    affectsConfiguration: (section) => keys.some((key) => key === section || key.startsWith(section + ".")),
+  });
+  inspectedCommand = { defaultValue: "dgc", globalValue: "/opt/dgc/bin/dgc", workspaceValue: "/tmp/repo/dgc" };
+  changed(["dgc.command"]);
+  assert.equal(globalThis.__DGC_PANEL_CALLS.includes("commandPathChanged"), false,
+    "an ignored workspace value changes nothing");
+  inspectedCommand = { defaultValue: "dgc", globalValue: "/home/me/.local/bin/dgc" };
+  changed(["dgc.command"]);
+  assert.deepEqual(globalThis.__DGC_PANEL_CALLS.filter((c) => c === "commandPathChanged"), ["commandPathChanged"]);
+  assert.equal(globalThis.__DGC_PANEL_CALLS.some((c) => c.startsWith("restart:")), false,
+    "the panel decides when: after a running turn, never in the middle of it");
+  changed(["dgc.command"]);
+  assert.equal(globalThis.__DGC_PANEL_CALLS.filter((c) => c === "commandPathChanged").length, 1,
+    "a repeat event for the same path does nothing");
 });

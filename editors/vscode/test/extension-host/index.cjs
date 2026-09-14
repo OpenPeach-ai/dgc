@@ -1,8 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-const { basename, resolve } = require("node:path");
+const { existsSync, readFileSync, readdirSync, statSync, writeFileSync } = require("node:fs");
+const { basename, join, resolve } = require("node:path");
 const vscode = require("vscode");
 
 async function waitFor(predicate, timeoutMs = 10_000) {
@@ -28,6 +28,29 @@ function sameRoots(actual, expected) {
   const right = expected.map((path) => resolve(path)).sort();
   return left.every((path, index) => path === right[index]);
 }
+
+/** The extension's own backend.log, wherever VS Code put this window's log directory. */
+function findBackendLog(dir) {
+  let found = "";
+  let newest = 0;
+  const walk = (current, depth) => {
+    if (depth > 8) return;
+    let entries = [];
+    try { entries = readdirSync(current, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path, depth + 1);
+      else if (entry.name === "backend.log") {
+        const mtime = statSync(path).mtimeMs;
+        if (mtime >= newest) { newest = mtime; found = path; }
+      }
+    }
+  };
+  walk(dir, 0);
+  return found;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -163,6 +186,17 @@ async function run() {
   await waitFor(() => modelCommands().slice(beforeEndpointRestore).some((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret));
 
+  const userData = process.env.DGC_EXTENSION_TEST_USER_DATA;
+  assert.ok(userData, "the host runner must provide its user-data directory");
+  const backendLogText = () => {
+    const path = findBackendLog(join(userData, "logs"));
+    return path ? readFileSync(path, "utf8") : "";
+  };
+  const logCount = (pattern) => (backendLogText().match(new RegExp(pattern.source, "g")) || []).length;
+  const startedCount = () => logCount(/\[dgc serve started: pid \d+/);
+  const startedBeforeFolders = startedCount();
+  assert.ok(startedBeforeFolders >= 1, "backend.log records every child the extension starts");
+
   const initialCount = rootsCommands().length;
   assert.ok(rootsCommands().some(command => command.question_forms === true),
     "the installed host must opt into grouped question events when supported");
@@ -179,6 +213,8 @@ async function run() {
   await waitFor(() => (vscode.workspace.workspaceFolders || []).length === 2);
   await waitFor(() => rootsCommands().slice(removedCount).some((command) =>
     sameRoots(command.roots, [primaryRoot, secondaryRoot])));
+  assert.equal(startedCount(), startedBeforeFolders,
+    "adding or removing a workspace folder updates the roots and never restarts the backend");
 
   // Cross the real extension-host/webview boundary in both directions. The jsdom suite proves the
   // actual buttons emit these messages; this installed-host layer proves that correlated permission
@@ -386,11 +422,91 @@ async function run() {
     typeof command.request_id === "string" && command.request_id.length > 0),
   "delegated editor controls must retain correlated state acknowledgements");
 
+  // ---- backend exits in the installed host: every path names its cause in backend.log ----------
+  const control = process.env.DGC_EXTENSION_TEST_CONTROL;
+  const altBackend = process.env.DGC_EXTENSION_TEST_BACKEND_ALT;
+  assert.ok(control && altBackend, "the host runner must provide the exit-path control file");
+  assert.match(backendLogText(), /\[extension: restarting the backend — command DGC: Restart Backend\]/,
+    "DGC: Restart Backend names itself");
+  assert.match(backendLogText(), /extension asked for it: yes \(restart: command DGC: Restart Backend\)/);
+  const unassisted = () => logCount(/extension asked for it: no/);
+  const resumes = () => backendCommands(backendLogPath).filter((command) => command.type === "resume_session").length;
+
+  // 1. The backend dies on its own: logged "no" with its own cause, recovered, session restored.
+  let started = startedCount();
+  let noCount = unassisted();
+  const resumesBeforeDeath = resumes();
+  writeFileSync(control, "die-on-own");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host death probe" });
+  await waitFor(() => unassisted() > noCount, 15_000);
+  assert.match(backendLogText(), /serve loop ended: fixture died on its own/,
+    "the backend's own stderr cause lands next to the exit line");
+  await waitFor(() => startedCount() > started, 15_000);
+  await waitFor(() => resumes() > resumesBeforeDeath, 15_000);
+  assert.ok(posted().some((item) => item.type === "backend_exit"), "the webview is told the backend stopped");
+
+  // 2. A protocol failure is asked-for with its cause, is not auto-recovered, and the NEXT child's
+  //    own death is still "no" and recovered (the stale-intentional regression).
+  await waitFor(() => backendCommands(backendLogPath).filter((command) => command.type === "set_workspace_roots").length > 0);
+  await sleep(1500);
+  started = startedCount();
+  writeFileSync(control, "malformed-then-ok");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host malformed probe" });
+  await waitFor(() => /\[extension: stopping the backend — protocol: dgc backend emitted malformed NDJSON/.test(backendLogText()), 15_000);
+  await waitFor(() => /extension asked for it: yes \(protocol: dgc backend emitted malformed NDJSON/.test(backendLogText()), 15_000);
+  await sleep(1500);
+  assert.equal(startedCount(), started, "a protocol failure is not respawned behind the user's back");
+  noCount = unassisted();
+  writeFileSync(control, "die-on-own");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host fresh generation" });
+  await waitFor(() => startedCount() > started, 15_000);
+  await waitFor(() => unassisted() > noCount, 15_000);
+  await waitFor(() => startedCount() > started + 1, 15_000);
+
+  // 3. A child that closes its stdin and lingers while the host keeps writing: its exit is still
+  //    reported (the EPIPE path used to swallow it) and the panel recovers.
+  await sleep(2500);
+  started = startedCount();
+  noCount = unassisted();
+  writeFileSync(control, "close-stdin-and-linger");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "host linger probe" });
+  for (let i = 0; i < 8; i += 1) {
+    await sleep(60);
+    await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" }).catch(() => {});
+  }
+  await waitFor(() => unassisted() > noCount, 15_000);
+  await waitFor(() => startedCount() > started, 15_000);
+
+  // 4. dgc.command: a workspace-scope value DGC ignores changes nothing; a user-scope change
+  //    restarts with its reason.
+  await sleep(2500);
+  started = startedCount();
+  const commandRestart = /\[extension: restarting the backend — setting dgc\.command changed\]/;
+  const commandRestarts = logCount(commandRestart);
+  let workspaceWrite = "applied";
+  try {
+    await config.update("command", altBackend, vscode.ConfigurationTarget.Workspace);
+  } catch {
+    workspaceWrite = "refused";                // a machine-scoped setting may not be writable there
+  }
+  await sleep(1500);
+  assert.equal(logCount(commandRestart), commandRestarts,
+    `a workspace-scope dgc.command edit (${workspaceWrite}) must not restart the backend`);
+  assert.equal(startedCount(), started);
+  if (workspaceWrite === "applied") {
+    await config.update("command", undefined, vscode.ConfigurationTarget.Workspace);
+  }
+  await config.update("command", altBackend, vscode.ConfigurationTarget.Global);
+  await waitFor(() => logCount(commandRestart) > commandRestarts, 15_000);
+  await waitFor(() => startedCount() > started, 15_000);
+  await config.update("command", backendPath, vscode.ConfigurationTarget.Global);
+  await waitFor(() => logCount(commandRestart) > commandRestarts + 1, 15_000);
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
+    decisionLifecycle: true, backendExitLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };

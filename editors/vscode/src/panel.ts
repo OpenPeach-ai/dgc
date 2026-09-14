@@ -4,7 +4,7 @@ import { realpath } from "fs/promises";
 import * as fs from "fs";
 import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
-import { DgcBackend, DgcEvent } from "./backend";
+import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import { autoUpdateEnabled, isUserChosenCommand, runCliUpdate } from "./cliupdate";
 import { workspaceFile } from "./navigation";
@@ -13,6 +13,23 @@ import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 /** Where the "a goal is being pursued" marker lives, and how long it stays believable. */
 const GOAL_PURSUIT_KEY = "dgc.goalPursuit.v1";
 const GOAL_PURSUIT_MAX_AGE_MS = 15 * 60 * 1000;
+/** An ordinary turn that was running when the backend went away, so a reconnect can offer to
+ *  continue it. Written on turn_start, cleared by a turn that ends on its own terms. */
+const INTERRUPTED_TURN_KEY = "dgc.interruptedTurn.v1";
+/** A turn_end "error" this close to an unassisted exit is the exit's doing, not the model's. */
+const EXIT_AFTER_ERROR_MS = 30 * 1000;
+/** Backend deaths nobody asked for, kept across hosts: a cause that repeats every few minutes
+ *  never trips the three-in-two-minutes crash budget, and each resumed goal would feed it again. */
+const UNASSISTED_EXITS_KEY = "dgc.unassistedExits.v1";
+const REPEAT_EXIT_WINDOW_MS = 30 * 60 * 1000;
+const REPEAT_EXIT_LIMIT = 3;
+const PANEL_DISPOSED_CAUSE = "panel disposed (window reload, close or extension update)";
+
+interface InterruptedTurnMark {
+  scope?: string; id?: string; turnId?: string; at?: number;
+  endedAt?: number; exitedAt?: number; cause?: string;
+}
+interface UnassistedExit { at: number; cause: string; last: string }
 
 const MODES = [
   { id: "default", label: "$(shield) default", detail: "ask before writes and shell commands" },
@@ -245,6 +262,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   /** Set while restart()/dispose() are tearing the backend down on purpose. */
   private intentionalShutdown = false;
+  /** dgc.command changed while a turn was running; restart once that turn ends. */
+  private pendingCommandRestart = false;
   private sessionRestoreStarted = false;
   private sessionRestoreFinished = false;
   private sessionRestoreRequestId?: string;
@@ -325,7 +344,95 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.nativeSettingsReady = false;
     be.completeHandshake();
     this.scheduleWorkspaceChanges(0);
-    void this.resumeInterruptedGoal(be);
+    void this.resumeInterruptedWork(be);
+  }
+
+  /** Post to the webview now, or as soon as it exists — without pulling the panel into focus. */
+  private whenWebviewReady(action: () => void): void {
+    if (this.webviewReady) { action(); return; }
+    if (this.pendingWebviewActions.length < 16) { this.pendingWebviewActions.push(action); }
+  }
+
+  /**
+   * After a reconnect, pick up what the dead backend was doing: a goal resumes by itself (unless
+   * the same death keeps repeating), and an ordinary turn is OFFERED a Continue — never re-run
+   * behind the user's back, because a half-finished step (a partial install, a migration) may not
+   * be safe to repeat.
+   */
+  private async resumeInterruptedWork(be: DgcBackend): Promise<void> {
+    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
+    if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) {
+      await this.forgetInterruptedTurn();          // the goal's own resume covers its turn
+      await this.resumeInterruptedGoal(be);
+      return;
+    }
+    await this.offerInterruptedTurn(be);
+  }
+
+  private async forgetInterruptedTurn(): Promise<void> {
+    try {
+      await this.context.workspaceState.update(INTERRUPTED_TURN_KEY, undefined);
+    } catch { /* losing the marker only costs a Continue offer */ }
+  }
+
+  private noteInterruptedTurn(update: Partial<InterruptedTurnMark> | undefined): void {
+    const current = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    // A new turn starts a fresh record; anything else only amends the record that exists.
+    if (update !== undefined && update.turnId === undefined && !current) { return; }
+    if (update === undefined && !current) { return; }
+    const next = update === undefined ? undefined
+      : { ...(update.turnId !== undefined ? {} : current), ...update };
+    void Promise.resolve(this.context.workspaceState.update(INTERRUPTED_TURN_KEY, next))
+      .then(undefined, () => { /* losing the marker only costs a Continue offer */ });
+  }
+
+  private async offerInterruptedTurn(be: DgcBackend): Promise<void> {
+    const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    if (!mark) { return; }
+    if (mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
+    await this.forgetInterruptedTurn();              // one offer per interruption, never a loop
+    // A turn that ended with an error and no backend death behind it failed on its own; the
+    // user has already seen why. A turn with neither an end nor a recorded exit was cut off with
+    // the extension host (a reload or crash), which is an interruption too.
+    if (mark.endedAt && !mark.exitedAt) { return; }
+    const age = Date.now() - Number(mark.exitedAt || mark.at || 0);
+    if (!(age >= 0 && age < GOAL_PURSUIT_MAX_AGE_MS)) { return; }
+    if (this.backend !== be || this.lastReadyEvent?.capabilities?.resume_turn !== true) { return; }
+    this.backendNote(`[extension: offering to continue the interrupted turn${mark.cause ? ` — ${mark.cause}` : ""}]`);
+    this.whenWebviewReady(() => this.post({ type: "continue_offer", cause: String(mark.cause || ""),
+                                            sessionId: this.currentSessionId }));
+  }
+
+  /** Continue the interrupted turn: the backend writes the instruction, the user clicked a button. */
+  private continueInterruptedTurn(): void {
+    if (this.turnActive) {
+      this.post({ type: "event", event: { type: "error",
+        message: "Finish or stop the current turn before continuing the interrupted one." } });
+      return;
+    }
+    const be = this.ensureBackend();
+    if (this.lastReadyEvent?.capabilities?.resume_turn !== true) {
+      this.post({ type: "event", event: { type: "error",
+        message: "This DGC CLI cannot continue an interrupted turn. Update it, then try again." } });
+      return;
+    }
+    if (be.send({ type: "resume_turn", request_id: this.nextRequestId("resume-turn") })) {
+      this.turnActive = true;
+    }
+  }
+
+  /** Unassisted exits in the repeat window, oldest first. */
+  private recentUnassistedExits(now = Date.now()): UnassistedExit[] {
+    const stored = this.context.workspaceState.get<UnassistedExit[]>(UNASSISTED_EXITS_KEY);
+    return (Array.isArray(stored) ? stored : [])
+      .filter((row) => row && Number.isFinite(row.at) && now - row.at >= 0 && now - row.at < REPEAT_EXIT_WINDOW_MS);
+  }
+
+  private recordUnassistedExit(cause: string, last: string): void {
+    const rows = [...this.recentUnassistedExits(), { at: Date.now(), cause: cause.slice(0, 300), last: last.slice(0, 64) }]
+      .slice(-16);
+    void Promise.resolve(this.context.workspaceState.update(UNASSISTED_EXITS_KEY, rows))
+      .then(undefined, () => { /* the breaker is a guard, not a ledger */ });
   }
 
   /**
@@ -370,6 +477,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       goal = status?.goal;
     } catch { return; }                        // a backend that cannot answer cannot be resumed
     if (this.backend !== be || !goal?.text || goal.status !== "paused") { return; }
+    // The repeat-cause breaker. Each resumed goal rewrites its marker, so a death that recurs
+    // every few minutes (the npm loop that kept killing the backend) would be resumed forever:
+    // stop after three in half an hour, say why, and leave the resume to a person.
+    const exits = this.recentUnassistedExits();
+    if (exits.length >= REPEAT_EXIT_LIMIT) {
+      const last = exits[exits.length - 1];
+      const cause = last.cause || "no cause was reported";
+      this.backendNote(`[extension: not resuming the goal automatically — ${exits.length} unassisted `
+        + `backend exits in 30 minutes; last: ${cause}]`);
+      this.whenWebviewReady(() => this.post({ type: "goal_resume_held", exits: exits.length, cause,
+                                              lastCommand: last.last || "", logPath: this.backendLogPath() }));
+      return;
+    }
     this.post({ type: "event", event: { type: "info", message:
       "DGC reconnected after its backend stopped, and is continuing the goal from where it left off." } });
     try {
@@ -711,7 +831,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .catch((error: any) => {
         if (this.backend !== be || generation !== this.sessionHandshakeGeneration) { return; }
         if (!be.ready || String(error?.message || "").includes("timed out")) {
-          be.dispose();
+          be.dispose("chat restoration timed out");
           this.post({ type: "event", event: { type: "error",
             message: "Chat restoration did not complete. Your draft is retained; restart DGC to reconnect." } });
           return;
@@ -987,12 +1107,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Record one line of backend output in both places, and never let logging break a turn. */
   private backendNote(line: string): void {
-    this.backendLog.appendLine(line);
+    // The file first: the output channel is disposed before a panel's final exit line arrives,
+    // and appending to a closed channel throws — which used to lose exactly that line.
     const file = this.backendLogPath();
-    if (!file) { return; }
+    if (file) {
+      try {
+        fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
+      } catch { /* a full or read-only disk must not take the panel down with it */ }
+    }
     try {
-      fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
-    } catch { /* a full or read-only disk must not take the panel down with it */ }
+      this.backendLog.appendLine(line);
+    } catch { /* the channel is already disposed */ }
   }
 
   private ensureBackend(): DgcBackend {
@@ -1015,46 +1140,97 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
+    // The backend's own last word ("serve loop ended: <cause>; …") arrives on stderr before the
+    // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
+    let serveCause = "";
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
-    be.on("stderr", (line: string) => { this.backendNote(line); this.post({ type: "stderr", line }); });
-    be.on("exit", (code: number | null, signal?: string | null) => {
-      let recovering = false;
+    be.on("stderr", (line: string) => {
+      const ended = /serve loop ended: ([^;\n]+)/.exec(line);
+      if (ended) { serveCause = ended[1].trim().slice(0, 300); }
+      this.backendNote(line); this.post({ type: "stderr", line });
+    });
+    be.on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
+    be.on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
+    be.on("teardown", (cause: string, pid?: number) => {
+      this.backendNote(`[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
+      // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
+      // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
+      // send() start a child on it, whose own later death was then mislabelled and never recovered.
+      if (cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE || this.backend !== be) { return; }
+      this.retireBackend();
+      this.post({ type: "backend_exit", code: null, signal: null, recovering: false, cause, resumes: "none" });
+    });
+    be.on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
+      const facts: ChildExitInfo = info || { uptimeMs: be.uptimeMs, framesWritten: 0 };
       // "code 0" alone reads like a clean, asked-for stop. Whether WE asked is the whole question
-      // when a turn disappears, so the log says it outright, next to how long the child had been up.
+      // when a turn disappears, so the log says it outright, with what the child was last sent.
       const how = signal ? `killed by ${signal}`
         : code === null ? "killed by an unreported signal" : `code ${code}`;
-      const up = Math.round(be.uptimeMs / 1000);
-      // The instance's own flag, not the panel's: restart() clears the panel flag synchronously
-      // while the old child is still dying, so by the time this ran it always read "no".
-      const asked = be.intentional || this.intentionalShutdown;
-      this.backendNote(`[dgc serve exited: ${how} · extension asked for it: `
-        + `${asked ? "yes" : "no"} · up ${up}s]`);
+      const up = Math.round((facts.uptimeMs || 0) / 1000);
+      const asked = facts.cause ? `yes (${facts.cause})` : "no";
+      this.backendNote(`[dgc serve exited: ${how} · extension asked for it: ${asked} · up ${up}s`
+        + ` · pid ${facts.pid ?? "?"} · frames sent ${facts.framesWritten}`
+        + `${facts.lastFrame ? `, last '${facts.lastFrame}'` : ""}`
+        + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
       this.mcpUrls.clear();
-      if (be.intentional) { return; }          // our own teardown: logged above, nothing to recover
-      this.setReadyContext(false);
-      if (this.backend === be) {
-        this.changesRefreshRevision++;
-        this.workspaceChanges = [];
-        this.sessionReady = false;
+      if (facts.cause) { return; }             // our own teardown: logged above and already handled
+      const cause = serveCause || `exited with ${how}`;
+      serveCause = "";
+      this.recordUnassistedExit(cause, facts.lastFrame || "");
+      const resumes = this.markInterruptedWork(cause);
+      this.pendingCommandRestart = false;       // the replacement starts from the new path anyway
+      if (this.backend !== be) { return; }
+      if (be.childPid !== undefined) {
+        // A command already started a new child on this instance; that child is the recovery.
         this.turnActive = this.confirmedTurnActive = false;
-        this.correlatedStateRequests = false;
-        this.workspaceRootsInFlight = undefined;
-        this.workspaceRootsDirty = true;
-        this.initializingBackend = undefined;
-        this.nativeSettingsReady = false;
-        // The dead child must not be handed out again. ensureBackend() returns `this.backend`
-        // whenever it is set, so leaving the corpse here meant every later command went to a
-        // closed pipe and the panel could never recover on its own -- the user had to find
-        // "DGC: Restart Backend" or reload the window.
-        this.backend = undefined;
-        recovering = this.recoverBackend();
+        this.post({ type: "backend_exit", code, signal, recovering: true, cause, resumes });
+        return;
       }
-      this.post({ type: "backend_exit", code, signal, recovering });
+      this.retireBackend();
+      const recovering = this.recoverBackend();
+      this.post({ type: "backend_exit", code, signal, recovering, cause, resumes: recovering ? resumes : "none" });
     });
     be.start();
     this.backend = be;
-    this.backendNote(`[dgc serve started: pid ${be.childPid ?? "?"}, host pid ${process.pid}]`);
     return be;
+  }
+
+  /** Forget the current backend and every piece of per-connection state that went with it. */
+  private retireBackend(): void {
+    this.setReadyContext(false);
+    this.changesRefreshRevision++;
+    this.workspaceChanges = [];
+    this.sessionReady = false;
+    this.turnActive = this.confirmedTurnActive = false;
+    this.correlatedStateRequests = false;
+    this.workspaceRootsInFlight = undefined;
+    this.workspaceRootsDirty = true;
+    this.initializingBackend = undefined;
+    this.nativeSettingsReady = false;
+    // The dead child must not be handed out again. ensureBackend() returns `this.backend`
+    // whenever it is set, so leaving the corpse here meant every later command went to a
+    // closed pipe and the panel could never recover on its own -- the user had to find
+    // "DGC: Restart Backend" or reload the window.
+    this.backend = undefined;
+  }
+
+  /**
+   * Decide, at the moment of an unassisted exit, what a reconnect will pick back up — and say so
+   * to the webview, which used to promise "picking the work back up" when nothing would be.
+   */
+  private markInterruptedWork(cause: string): "goal" | "offer" | "none" {
+    const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
+    if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) { return "goal"; }
+    const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
+    if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return "none"; }
+    const running = this.confirmedTurnActive || !mark.endedAt;
+    const justFailed = !!mark.endedAt && Date.now() - mark.endedAt <= EXIT_AFTER_ERROR_MS;
+    if (!running && !justFailed) {
+      this.noteInterruptedTurn(undefined);
+      return "none";
+    }
+    this.noteInterruptedTurn({ exitedAt: Date.now(), cause });
+    return this.lastReadyEvent?.capabilities?.resume_turn === true ? "offer" : "none";
   }
 
   /**
@@ -1096,20 +1272,51 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  restart(): void {
+  /**
+   * The resolved dgc.command changed (Settings Sync, settings.json, the settings UI). A restart
+   * mid-turn kills the turn, so a running turn finishes first and the restart follows its end.
+   */
+  commandPathChanged(): void {
+    if (this.turnActive) {
+      if (!this.pendingCommandRestart) {
+        this.pendingCommandRestart = true;
+        this.backendNote("[extension: dgc.command changed during a turn — restarting when it ends]");
+        void vscode.window.showInformationMessage(
+          "DGC will restart with the new command path when the current turn ends.");
+      }
+      return;
+    }
+    this.restart("setting dgc.command changed");
+    void vscode.window.showInformationMessage("DGC restarted with the new command path.");
+  }
+
+  /** The deferred half of commandPathChanged(): once nothing is running, apply the new path. */
+  private runPendingCommandRestart(): void {
+    if (!this.pendingCommandRestart || this.turnActive) { return; }
+    this.pendingCommandRestart = false;
+    // After the event being handled reaches the webview, so a finished turn renders as finished.
+    setTimeout(() => {
+      this.restart("setting dgc.command changed");
+      void vscode.window.showInformationMessage("DGC restarted with the new command path.");
+    }, 0);
+  }
+
+  restart(reason = "command DGC: Restart Backend"): void {
     this._installPrompted = false;      // a fresh start earns a fresh prompt if the CLI is still missing
     this._updatePrompted = false;
+    this.pendingCommandRestart = false;
     this.setReadyContext(false);
     this.changesRefreshRevision++;
     this.workspaceChanges = [];
     // A deliberate restart is not a crash: it must not spend the automatic-recovery budget, and
     // the respawn below is the one that counts.
-    this.backendNote("[extension: restarting the backend on request]");
-    if (this.backend) { this.backend.intentional = true; }
+    this.backendNote(`[extension: restarting the backend — ${reason}]`);
     this.intentionalShutdown = true;
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     this.backendRecoveries = [];
-    this.backend?.dispose();
+    // Restarting is the user's (or the updater's) decision, so a turn it cuts off is not offered back.
+    this.noteInterruptedTurn(undefined);
+    this.backend?.dispose(`restart: ${reason}`);
     this.backend = undefined;
     this.intentionalShutdown = false;
     this.mcpUrls.clear();
@@ -1299,6 +1506,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "turn_start":
         this.turnActive = this.confirmedTurnActive = true;
         this.turnStartedAt = Date.now();
+        // Goal cycles ("resume") are the goal's to pick back up; only an ordinary turn, or a
+        // continuation of one, is offered a Continue after a backend death.
+        if (ev.kind !== "resume" && this.currentSessionId) {
+          this.noteInterruptedTurn({ scope: this.draftScope(), id: this.currentSessionId,
+                                     turnId: String(ev.turn_id || ""), at: Date.now() });
+        }
         break;
       case "handoff_started":
         this.turnActive = this.confirmedTurnActive = true;
@@ -1306,11 +1519,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "handoff":
         this.turnActive = this.confirmedTurnActive = false;
         this.syncWorkspaceRoots();
+        this.runPendingCommandRestart();
         break;
       case "command_rejected":
-        if (ev.command === "prompt" || ev.command === "start_goal") {
+        if (ev.command === "prompt" || ev.command === "start_goal" || ev.command === "resume_turn") {
           this.turnActive = this.confirmedTurnActive;
           this.syncWorkspaceRoots();
+          this.runPendingCommandRestart();
         }
         if (ev.command === "set_workspace_roots" && this.workspaceRootsInFlight !== undefined
             && (this.workspaceRootsInFlight.requestId === undefined
@@ -1330,8 +1545,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "turn_end":
         this.mcpUrls.clear();
         this.turnActive = this.confirmedTurnActive = false;
+        // An error end is kept for thirty seconds: when the backend is shutting down under a turn
+        // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
+        if (ev.reason === "error") { this.noteInterruptedTurn({ endedAt: Date.now() }); }
+        else { this.noteInterruptedTurn(undefined); }
         this.syncWorkspaceRoots();
         this.notifyTurnEnd(String(ev.reason || "completed"));
+        this.runPendingCommandRestart();
         break;
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
@@ -1356,7 +1576,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       INSTALL, SETPATH, RETRY,
     ).then((choice) => {
       if (choice === RETRY) {
-        this.restart();
+        this.restart("install prompt Retry");
       } else if (choice === INSTALL) {
         const term = vscode.window.createTerminal("Install DGC");
         term.show();
@@ -1408,8 +1628,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       (_progress, token) => runCliUpdate(executable, token),
     );
     if (result.ok) {
-      this.backendNote("[extension: updated the DGC CLI and restarted the backend]");
-      this.restart();
+      this.restart("CLI updated to match the extension");
       void vscode.window.showInformationMessage("DGC CLI updated. Reconnected.");
       return;
     }
@@ -1440,7 +1659,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         void vscode.window.showInformationMessage(
           "Updating the DGC CLI in the terminal. When it finishes, run “DGC: Restart Backend”.",
           "Restart Backend",
-        ).then((next) => { if (next === "Restart Backend") { this.restart(); } });
+        ).then((next) => { if (next === "Restart Backend") { this.restart("manual CLI update"); } });
       } else if (choice === SETPATH) {
         void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
@@ -1767,6 +1986,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "cancel":
         this.mcpUrls.clear();
         be.send({ type: "cancel" });
+        break;
+      case "resumeTurn":
+        this.continueInterruptedTurn();
         break;
       case "clear_todos":
         // The backend answers with an empty `todos` event, which is what empties the slot in
@@ -3703,15 +3925,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
     this.backendNote("[extension: panel disposed — stopping the backend]");
-    this.backendLog.dispose();
     this.intentionalShutdown = true;                 // shutting down; do not respawn behind us
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
     this.changesRefreshDirty = false;
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
-    this.backend?.dispose();
+    this.backend?.dispose(PANEL_DISPOSED_CAUSE);
     this.sb.dispose();
+    // Last: the backend's exit line arrives after this and still reaches backend.log.
+    try { this.backendLog.dispose(); } catch { /* already gone */ }
   }
 
   // ---- html ----------------------------------------------------------------
