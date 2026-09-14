@@ -119,11 +119,25 @@ body {
 #log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
   overscroll-behavior: contain; overflow-anchor: none; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .msg { flex: none; display: flex; flex-direction: column; gap: var(--sp-1); }
+/* The space between transcript blocks is #log's gap and nothing else, so a block only gets it as a
+   flex item of #log. Restored history is kept in one wrapper so it can be replaced as a unit, and as
+   an ordinary box that wrapper stacked every restored answer, prompt and turn flush against the
+   next: a chat repainted after a backend restart, a reload, a resume or a rewind had 0px between
+   blocks. The wrapper groups the DOM only; it must never be a box of its own. */
+.history-pages { display: contents; }
+/* ...which makes "Show earlier messages" a column item too. It keeps its own width. */
+.history-older { align-self: flex-start; }
 /* Visually redundant -- the layout already says who spoke -- but a screen reader has no layout,
    and without this every message in the transcript is unattributed. */
 .role { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-.msg.user { align-items: flex-end; }
+/* A prompt opens a new exchange, so it stands a step further from the turn before it than from the
+   reply it asks for. Nothing sits above the first one. */
+.msg.user { align-items: flex-end; margin-top: var(--sp-2); }
+#log > .msg.user:first-child, .history-older[hidden] + .msg.user { margin-top: 0; }
+/* Steering applies a prompt inside the running turn, where blocks sit 4px apart. It is still the
+   user speaking, so it keeps the space between blocks on both sides: the turn's gap plus this. */
+.msg.dgc > .msg.user { margin-block: calc(var(--sp-4) - var(--sp-1)); }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
 .text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
