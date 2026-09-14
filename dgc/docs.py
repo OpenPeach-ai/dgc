@@ -1308,6 +1308,74 @@ estimate: DGC does not see their steps.
 - For anything else — a phone push, a sound, a script — use the **Stop** lifecycle hook, which
   already fires at the end of every turn (see *Lifecycle hooks*).
 """.strip()),
+    ("Background monitors", "watch a long-running command and hear about each line it prints", """
+# Background monitors
+
+Some work is a wait: a build that takes minutes, a test watcher, a dev server, a deploy log. A
+monitor lets the agent start that command, carry on with something else, and hear about each line
+the command prints, instead of polling it or sitting idle until it finishes.
+
+## How it works
+
+The agent starts one with the `monitor` tool: a shell command and a short label. Every line the
+command prints to standard output becomes an event, and lines that arrive close together are
+delivered as one event.
+
+- **While a turn runs,** events reach the model between its tool calls.
+- **When the chat is idle,** an event starts a short turn so the model can read it and act. The
+  transcript marks that turn as started by a monitor, never as something you typed.
+- Standard error is kept but creates no events; the model can read it with `bash_output`.
+- A monitor ends when its command exits, when it is stopped, or when its timeout runs out: 5
+  minutes by default, at most 1 hour. A persistent monitor runs until it is stopped or the chat ends.
+
+Only the terminal UI and the editor offer monitors, because only they can start a turn on their
+own. One-shot `dgc -p` runs and sub-agents cannot start one.
+
+## Background commands
+
+A command the agent runs with `bash` in background mode is not a monitor, but in the terminal and
+the editor the model is told once when it exits, with its exit code and the last lines it printed,
+so it does not have to keep checking.
+
+## Seeing and stopping them
+
+- **Terminal:** the status line shows running monitors and waiting events. `/monitors` lists
+  them, `/monitors stop ID` or `/monitors stop all` stops them, and `/monitors show ID` prints a
+  monitor's kept output.
+- **Editor:** a Monitors row above the prompt shows each running monitor with a Stop button, and
+  each event appears in the transcript as a card.
+- The model can stop one itself with `monitor_stop`.
+
+Monitors belong to one chat. They stop on `/new`, `/clear`, resuming another session, a rewind, or
+when DGC exits, including when it is killed.
+
+## Wake-ups
+
+- **On or off.** `monitor_wake` is on by default. Change it with `/monitors wake on|off`, with
+  Settings → **Wake on monitor events** in the editor, or in `config.json`. When it is off, events
+  wait for your next message.
+- **Timing.** A wake waits until the chat has been idle for `monitor_wake_delay_s` (2 seconds) and
+  leaves `monitor_wake_cooldown_s` (5 seconds) between one wake turn and the next.
+- **Pauses.** After `monitor_max_consecutive_wakes` (10) wake turns in a row with no message from
+  you, wake-ups pause until you send one. Stopping a wake turn pauses them too. `/monitors wake on`
+  resumes them.
+- **Plan mode** starts no wake turns; events wait for your next message.
+
+## Limits and safety
+
+- **Permissions.** Starting a monitor needs the same permission as `bash` and runs in the same
+  sandbox; plan mode refuses it. A wake turn has nobody at the keyboard, so outside auto mode any
+  step that would need your approval is not run. The model says what it wanted to do, and you can
+  approve it with your next message.
+- **Untrusted output.** Events reach the model labelled as command output, never as instructions.
+- **Floods.** A command that prints more than 1,000 lines or 1 MiB within a minute is stopped, and
+  the model is told which limit it hit. Lines are cut at 2,000 characters and an event shows at
+  most 40 lines; the rest stays readable with `bash_output`.
+- **How many.** At most 4 monitors run per chat, and 16 across one DGC process.
+- **Your checkout.** A monitor, like a background command, holds the workspace lock only while it
+  starts, so it never blocks edits or other commands. That also means it is not a way to change
+  files: use it to watch, not to edit.
+""".strip()),
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
 # Connect your model
 

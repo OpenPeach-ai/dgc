@@ -36,7 +36,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Getting started", ["Getting started", "Keyboard shortcuts", "Slash commands", "Command line"]),
     ("Using DGC", ["Permission modes", "Plan mode", "Sessions & rewind", "Checkpoints & rewind", "Context notes",
                    "Standing goals", "Files pane", "Diff pane", "In your editor",
-                   "Turn ETA & notifications"]),
+                   "Turn ETA & notifications", "Background monitors"]),
     ("Providers & models", ["Connect your model", "Subscriptions", "Thinking & reasoning", "Token usage"]),
     ("Features", ["Artifacts", "Looking at a page", "MCP servers", "Lifecycle hooks", "Skills",
                   "Multiple agents", "Training export", "Python code-action (power mode)"]),
