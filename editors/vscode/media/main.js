@@ -328,6 +328,9 @@
           item.img = true; item.data = source.data; item.bytes = Math.max(0, Number(source.bytes) || 0);
         } else if (source.resource && typeof source.resource === "object") {
           item.resource = JSON.parse(JSON.stringify(source.resource));
+        } else if (typeof source.pasted === "string" && source.pasted.length <= 1_000_000) {
+          // A long paste folded into a chip is part of the draft; dropping it lost the whole draft.
+          item.pasted = source.pasted; item.chars = source.pasted.length;
         } else return null;
         items.push(item);
       }
@@ -2893,7 +2896,9 @@
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
-    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
+    // What a restore puts back: the typed words and the chips. The pastes are already chips, so
+    // restoring `text` (which has them appended) as well would put every paste back twice.
+    pendingPrompts.set(requestId, { text: pastes.length ? typed : text, attachments: [...attachments], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
       delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,

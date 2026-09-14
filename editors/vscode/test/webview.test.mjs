@@ -3975,3 +3975,34 @@ test("settings opened on Token Usage with a range asks for that range", () => {
   assert.equal(doc.getElementById("usage-range").value, "30d", "an unknown range leaves the choice alone");
   assert.deepEqual(errors, []);
 });
+
+test("a draft with a pasted-text chip survives a reload, and so does an unconfirmed send of one", () => {
+  // Before: cleanDraft accepted only skill, template, image and resource chips, so a draft holding a
+  // pasted-text chip was dropped whole and the panel warned about storage limits for a 6 KB paste.
+  const first = makeDom({ scope: "workspace" });
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  const input = first.doc.getElementById("input");
+  input.value = "draft with a pasted chip: ";
+  const pasted = "line of pasted text\n".repeat(300);
+  const paste = new first.dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { items: [], getData: () => pasted } });
+  input.dispatchEvent(paste);
+  assert.equal(first.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
+  first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
+  assert.doesNotMatch(first.doc.getElementById("log").textContent, /exceed saved-draft storage limits/);
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.getElementById("input").value, "draft with a pasted chip: ");
+  assert.equal(reopened.doc.querySelectorAll("#attachments .pasted-chip").length, 1, "the chip is restored");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /6,000 chars/);
+  // Sent but never confirmed: the restore gives back the typed words and the chip, not the paste twice.
+  reopened.doc.getElementById("input").dispatchEvent(new reopened.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const sent = reopened.posted.findLast(message => message.type === "prompt");
+  assert.equal(sent.text, "draft with a pasted chip:\n\n" + pasted);
+  const again = makeDom({ scope: "workspace", state: reopened.savedState() });
+  again.send({ type: "session_ready", sessionId: "alpha" });
+  again.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(again.doc.getElementById("input").value, "draft with a pasted chip:");
+  assert.equal(again.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
+  assert.deepEqual([...first.errors, ...reopened.errors, ...again.errors], []);
+});
