@@ -24,6 +24,9 @@ up with ``getattr``:
     Called on the agent's worker thread; returns ``run(fn)`` that invokes ``fn`` as if on that
     thread's UI session. A multi-session front end (the TUI) needs it so a watcher-thread notice
     lands on the session that made the request.
+
+0.40 adds the optional hooks declared at the end of the Protocol body below. The Agent looks each
+one up with ``getattr`` and skips a UI that lacks it, so every existing implementation stays valid.
 """
 from __future__ import annotations
 
@@ -35,7 +38,10 @@ from typing import Protocol, runtime_checkable
 class AgentUI(Protocol):
     # streaming (agent → front-end) --------------------------------------------
     def on_text(self, chunk: str) -> None: ...
-    def on_thinking(self, chunk: str) -> None: ...
+    # ``block`` (0.40, thinking provenance) describes the reasoning block the chunk belongs to:
+    # its key, source (raw | summarized | narration | withheld | unknown), provider and sub-agent.
+    # None from a caller that does not know; a UI must accept both forms.
+    def on_thinking(self, chunk: str, block=None) -> None: ...
     # ``phase`` is the backend's own classification of the prose block just closed:
     # "commentary" when the same model round also called tools, "answer" when it did not.
     # Optional on purpose -- every existing implementation stays valid, and an empty phase
@@ -68,6 +74,21 @@ class AgentUI(Protocol):
     # notices ------------------------------------------------------------------
     def info(self, message: str) -> None: ...
     def error(self, message: str) -> None: ...
+    # 0.40 optional hooks (looked up with getattr; a UI may omit any of them) ----------------
+    # A reasoning block closed (thinking provenance).
+    def on_thinking_end(self, block) -> None: ...
+    # Images a tool step produced for the model to view. ``items`` describes each image (ref, name,
+    # mime, width, height, bytes, source, host); ``omitted`` counts images past the per-step cap;
+    # ``meta`` carries front-end-only detail such as the store path (viewed images).
+    def tool_images(self, call_id, images: list, caption: str = "", *, items=None,
+                    omitted: int = 0, meta=None) -> None: ...
+    # One retry run of a model request: state retrying | recovered | gave_up | cancelled, with the
+    # model_retry protocol fields as keywords (reconnecting).
+    def model_retry(self, state: str, **fields) -> None: ...
+    # Ask the user 1-4 normalised questions and return the answers (options picker).
+    def ask_questions(self, questions: list[dict], call_id=None) -> dict: ...
+    # How a question request ended: answered | dismissed | cancelled | unavailable.
+    def options_resolved(self, call_id, outcome, questions, answers) -> None: ...
 
 
 # ---- shared formatters (used by both the REPL and the JSON backend) ----------

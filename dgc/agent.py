@@ -1078,6 +1078,20 @@ class Agent(GoalLifecycle):
         self.monitors = MonitorHub(self.ctx.tool_owner, config, config.project_root)
         self.ctx.monitors = self.monitors
         self._monitor_turn = False               # a turn DGC started on a monitor event is running
+        # ---- 0.40 shared plain state (declared once here; each lane gives its fields meaning) ----
+        self._subagent_id = None                 # agents: this child's sub-<12 hex> id (None at depth 0)
+        self._parent_agent = None                # the Agent that spawned this child
+        self._parent_call_id = None              # the parent's `task` call id that spawned it
+        self._image_batch_open = False           # images: a tool batch may still queue images
+        self.image_views: list = []              # images: this session's viewed-image index
+        self._retry_runs: dict = {}              # reconnecting: open retry runs by layer/origin
+        self._retry_lock = threading.Lock()
+        self._last_model_cause = None            # reconnecting: the cause of the last failed request
+        self._reasoning_seq = 0                  # thinking: reasoning block counter
+        self._turn_reasoning_pending: list = []  # thinking: blocks not yet saved on a message
+        self._decision_records: dict = {}        # options: question outcomes by call id
+        self._end_turn_after_batch = ""          # options: end the turn once this batch finishes
+        # ---- end 0.40 shared plain state ----
         self._monitor_turn_notice_chars = 0
         self._last_turn_tool_intents: set[str] = set()
         self._last_turn_mcp_tools: set[str] = set()
@@ -4811,7 +4825,7 @@ class Agent(GoalLifecycle):
                         else:
                             out = self._run_subagent(
                                 str(args.get("description", "")), str(args.get("prompt", "")),
-                                str(args.get("agent", "")))
+                                str(args.get("agent", "")), call_id)
                     elif name == "mcp_search":
                         out = self._search_mcp_tools(
                             str(args.get("query", "")), args.get("limit", 8))
@@ -5093,7 +5107,8 @@ class Agent(GoalLifecycle):
         return Agent._new_client(self, base, key, model, api_mode=api_mode, source="subagent")
 
     def _execute_prepared_subagent(self, description: str, prompt: str, agent_name: str,
-                                   workspace, sub_ui: _SubUI) -> tuple[str, str, str]:
+                                   workspace, sub_ui: _SubUI,
+                                   call_id: str | None = None) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
 
         Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
@@ -5130,6 +5145,10 @@ class Agent(GoalLifecycle):
             else:
                 sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
             sub._metrics_parent = self
+            # One link from a child to the step that started it, shared by every 0.40 feature that
+            # attributes a child's work (the agents list, viewed images).
+            sub._parent_agent = self
+            sub._parent_call_id = call_id
             if getattr(self, "_monitor_turn", False):
                 # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
                 # for everything the turn delegates: the child refuses ASK steps and asks no question,
@@ -5229,7 +5248,8 @@ class Agent(GoalLifecycle):
             f"worktree is preserved at {workspace.path} on branch {workspace.branch}.\n"
             f"Summary:\n{result}")
 
-    def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
+    def _run_subagent(self, description: str, prompt: str, agent_name: str = "",
+                      call_id: str | None = None) -> str:
         """Run the normal one-task path; parallel batches use the same execution/finalization core."""
         from .worktree import TaskWorkspace, repo_root
 
@@ -5271,7 +5291,7 @@ class Agent(GoalLifecycle):
 
         sub_ui = _SubUI(self.ui, description, cancel=self.cancelled)
         execution = self._execute_prepared_subagent(
-            description, prompt, agent_name, workspace, sub_ui)
+            description, prompt, agent_name, workspace, sub_ui, call_id)
         outcome = self._finalize_subagent(description, workspace, *execution)
         self._last_task_integrated = outcome.integrated
         return outcome.output
@@ -5395,7 +5415,7 @@ class Agent(GoalLifecycle):
                             f"↳ isolated checkout: {workspace.project_root}"))
                         future = pool.submit(
                             self._execute_prepared_subagent, description, prompt,
-                            agent_name, workspace, sub_uis[i])
+                            agent_name, workspace, sub_uis[i], calls[i].id)
                         pending[future] = i
                     for future in as_completed(pending):
                         i = pending[future]

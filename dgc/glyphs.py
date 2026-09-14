@@ -27,6 +27,14 @@ DOT = _g("·", ".")
 MIDDOT = _g("·", "-")        # inline separator
 CURSOR = _g("▍", "|")        # block cursor (the purple mark)
 ELLIPSIS_V = _g("…", "...")
+# 0.40: the agents indicator (running, waiting on the user, all idle, queued), a model request
+# being retried, and an image the model viewed.
+AGENT_RUN = _g("●", "*")
+AGENT_WAIT = _g("◆", "!")
+AGENT_IDLE = _g("○", "o")
+AGENT_QUEUED = _g("◌", ".")
+RECONNECT = _g("↻", "~")
+IMAGE = _g("▣", "[img]")
 
 SPINNER = list("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏") if UNICODE else list("|/-\\")
 # the DGC mark, animated inline: the three slanted stripes light up one-by-one, hold, repeat

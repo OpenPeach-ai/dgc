@@ -685,6 +685,12 @@ class ChatResult:
     # Set when the stall watcher ended this generation after real output (finish "incomplete"):
     # StallInfo.as_dict(). The Agent continues from the partial answer instead of re-issuing.
     stall: dict | None = None
+    # 0.40: why a generation ended early (a cut stream, a stall), filled by the reconnecting lane
+    # so the Agent can report a continuation retry. None for a generation that was not interrupted.
+    interruption: dict | None = None
+    # 0.40: the reasoning blocks this generation produced, with their provenance, filled by the
+    # thinking-provenance lane. Empty when the model produced no reasoning.
+    reasoning: list = field(default_factory=list)
 
 
 def normalize_usage(usage: dict | None) -> dict[str, int]:
