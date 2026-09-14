@@ -10422,9 +10422,11 @@ def test_release_script_contract():
           and 'site/*)' in github_release
           and '--require-public' in github_release)
 def test_installer_never_overwrites_a_checkout():
-    """The installer untars a release straight over its destination. A source checkout there would
-    lose uncommitted work silently — it has happened — so the installer refuses before it downloads
-    anything, and says how to install elsewhere or override on purpose."""
+    """Releases are built under <data dir>/versions, and a source checkout is no place for them —
+    it is where a mistake has cost uncommitted work before — so naming one as the install
+    directory is refused before anything downloads, with the ways forward. The other half of the
+    guard (a launcher that RUNS a checkout is never repointed) and the real installs are exercised
+    in tests/test_installer.py."""
     import pathlib
     import tempfile
     installer = PROJECT / "install.sh"
@@ -10436,11 +10438,12 @@ def test_installer_never_overwrites_a_checkout():
         keep.write_text("# uncommitted work\n")
         refused = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
-            env={**os.environ, "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1"})
+            env={**os.environ, "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1",
+                 "DGC_BIN": str(pathlib.Path(tmp) / "bin")})
         out = refused.stdout + refused.stderr
         check("installing over a git checkout is refused", refused.returncode != 0, out[-400:])
         check("the refusal names the checkout and both ways forward",
-              "is a git checkout" in out and "DGC_DIR=" in out and "DGC_FORCE_OVERWRITE=1" in out,
+              "is a git checkout" in out and "DGC_DATA_DIR=" in out and "DGC_FORCE_OVERWRITE=1" in out,
               out[-400:])
         check("the refusal costs no download", "downloading DGC" not in out, out[-400:])
         check("the working tree it refused to overwrite is untouched",
@@ -10453,10 +10456,13 @@ def test_installer_never_overwrites_a_checkout():
         proceeded = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
             env={**os.environ, "DGC_DIR": str(plain), "DGC_SKIP_EXTENSION": "1",
-                 "DGC_BASE_URL": "https://127.0.0.1:9"})
+                 "DGC_BIN": str(pathlib.Path(tmp) / "bin"), "DGC_BASE_URL": "https://127.0.0.1:9"})
         moved_on = proceeded.stdout + proceeded.stderr
         check("a normal install directory is not caught by the checkout guard",
               "is a git checkout" not in moved_on and "downloading DGC" in moved_on, moved_on[-300:])
+        check("a failed download exits non-zero and switches nothing",
+              proceeded.returncode == 1 and not (pathlib.Path(tmp) / "bin" / "dgc").exists()
+              and not any((plain / "versions").iterdir()), moved_on[-300:])
 
     check("the published installer is the reviewed one",
           (PROJECT / "site" / "install.sh").read_text() == installer.read_text())

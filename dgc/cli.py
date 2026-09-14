@@ -2038,7 +2038,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "setup": "dgc setup                          configure provider, model and context interactively",
     "doctor": "dgc doctor                         check that the endpoint and model are reachable",
     "help": "dgc help                           the command overview",
-    "update": "dgc update                         reinstall the latest DGC from vibedgc.com (runs the installer)",
+    "update": "dgc update [--rollback|--version X|--list]  install the latest DGC beside this one, or switch versions",
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
     "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
     "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
@@ -2056,12 +2056,22 @@ def _subcommand_help(name: str) -> int:
     """`--help` on a subcommand prints its usage and exits; it never runs the subcommand."""
     print("usage: " + SUBCOMMAND_USAGE[name])
     if name == "update":
-        print("  Downloads and executes https://vibedgc.com/install.sh with bash.")
+        print("  Downloads https://vibedgc.com/install.sh to a temporary file and runs it with bash.\n"
+              "  The new version is built in its own directory; the dgc launcher switches to it only\n"
+              "  once it is complete, so a failed update leaves the current version running.\n"
+              "  --rollback     switch back to the newest kept version older than the active one\n"
+              "  --version X    switch to kept version X, or install X if it is the published release\n"
+              "  --list         show the kept versions and which one is active\n"
+              "  Exit status: 0 done, 1 failed (previous version still active), 3 another update is running.")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # A dgc started from a versioned install marks its version as in use, so an update's
+    # retention never deletes the tree under a running process (no-op for any other install).
+    from .install_layout import hold_runtime_lock
+    hold_runtime_lock()
     if raw_argv and raw_argv[0] in SUBCOMMAND_USAGE:
         # Every subcommand honours the universal help reflex BEFORE anything can run. Six of
         # eleven used to execute instead — `dgc update --help` piped a remote installer into bash.
@@ -2109,7 +2119,7 @@ def main(argv: list[str] | None = None) -> int | None:
                   "    https://github.com/OpenPeach-ai/dgc/issues\n")
             return
         if raw_argv[0] == "update":
-            run_update(); return
+            return run_update(raw_argv[1:])
         if raw_argv[0] == "notes":
             from .notes import handle_command
             cfg = Config()
@@ -2345,7 +2355,7 @@ def main(argv: list[str] | None = None) -> int | None:
                 cli.repl()
             else:
                 from .tui import TUI
-                TUI(config, agent=cli.agent).run()
+                return TUI(config, agent=cli.agent).run()   # non-zero when a /update failed
         finally:
             termbg.restore_stop_handlers(_stop_handlers)
             termbg.reset()
