@@ -102,7 +102,8 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
   registered.get("dgc.exportTraining")();
 
   assert.deepEqual(terminals.map((terminal) => terminal.options), [
-    { name: "DGC update", shellPath: "/opt/DGC CLI/dgc;literal", shellArgs: ["update"] },
+    { name: "DGC update", shellPath: "/opt/DGC CLI/dgc;literal", shellArgs: ["update"],
+      env: { DGC_SKIP_EXTENSION: "1" } },
     { name: "DGC export-training", shellPath: "/opt/DGC CLI/dgc;literal",
       shellArgs: ["export-training"] },
   ]);

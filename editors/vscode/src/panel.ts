@@ -6,7 +6,7 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
-import { autoUpdateEnabled, isUserChosenCommand, runCliUpdate } from "./cliupdate";
+import { autoUpdateEnabled, isUserChosenCommand, runCliUpdate, updateTerminalOptions } from "./cliupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -1377,10 +1377,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  restarts, and the user watches a progress notification instead of running a command.
    *
    *  Two cases still ask first, because an automatic reinstall would be the wrong answer:
-   *  a CLI the user chose by path (the installer writes to $HOME/dgc, very likely not where their
-   *  binary lives), and dgc.autoUpdateCli turned off. A third case asks after the fact: the
-   *  installer refuses to extract a release over a git checkout, so a contributor's working tree
-   *  survives and the refusal is reported as the reason. */
+   *  a CLI the user chose by path (unless that path is a DGC versioned install, which updates
+   *  itself in place), and dgc.autoUpdateCli turned off. A third case asks after the fact: the
+   *  installer refuses to repoint a launcher that runs a git checkout, so a contributor's working
+   *  tree stays in use and the refusal is reported as the reason. */
   private promptUpdateCli(): void {
     if (this._updatePrompted) { return; }
     this._updatePrompted = true;
@@ -1434,9 +1434,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const UPDATE = "Update DGC CLI", SETPATH = "Set dgc.command…";
     void vscode.window.showErrorMessage(message, UPDATE, SETPATH).then((choice) => {
       if (choice === UPDATE) {
-        const term = vscode.window.createTerminal("Update DGC");
+        // The exact executable with `update`, not `curl | bash` typed into a shell: an old CLI then
+        // still updates the install it belongs to (DGC_DIR/DGC_BIN), and DGC_SKIP_EXTENSION keeps
+        // the installer from replacing this running extension with the published .vsix.
+        const term = vscode.window.createTerminal(
+          updateTerminalOptions(resolveDgcExecutable().command, "Update DGC"));
         term.show();
-        term.sendText("curl -fsSL https://vibedgc.com/install.sh | bash");
         void vscode.window.showInformationMessage(
           "Updating the DGC CLI in the terminal. When it finishes, run “DGC: Restart Backend”.",
           "Restart Backend",
