@@ -3035,6 +3035,9 @@ class TUI:
                                    f"[{th.text}]{_esc(self._input.get('prompt', ''))}[/] "
                                    f"[{th.faint}]· type then Enter · Esc to cancel[/]"))
         if self._req:
+            # The turn is waiting on the person, not in a phase: whatever runs after the answer
+            # starts its own clock rather than inheriting one from before the card opened.
+            self._phase_act = None
             return ANSI(self._rich(f"[bold {th.accent}]{glyphs.DIAMOND}[/] "
                                    f"[{th.text}]waiting for your answer[/] "
                                    f"[{th.faint}]· {_esc(self._req.get('hint', ''))}[/]"))
@@ -3064,7 +3067,9 @@ class TUI:
             # per-phase timer : reset whenever the activity label changes.
             if getattr(self, "_phase_act", None) != act:
                 self._phase_act, self._phase_t0 = act, time.monotonic()
-            pel = time.monotonic() - self._phase_t0
+            # A phase cannot be older than the turn it is in (a label left over from the previous
+            # turn kept its clock when the new turn began with the same label).
+            pel = max(0.0, min(time.monotonic() - self._phase_t0, el))
             pstr = f"{pel:.1f}s" if pel < 60 else f"{int(pel // 60)}m{int(pel % 60)}s"
             #  turn-status structure: spinner + activity + phase-timer (left); total-time + ⇣tokens + [stop] (right).
             tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
@@ -5672,6 +5677,7 @@ class TUI:
         self._cancel_auxiliary()
         self._cancel.clear()
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
@@ -6724,6 +6730,7 @@ class TUI:
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
@@ -6866,6 +6873,7 @@ class TUI:
         self._scroll_off = 0
         self._follow = True
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()

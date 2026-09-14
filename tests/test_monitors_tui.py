@@ -364,6 +364,24 @@ class TuiMonitorTests(unittest.TestCase):
         self.assertIn("line 39", expanded)
         self.assertEqual(expanded.count("/monitors show mon1"), 1, expanded)
 
+    def test_the_phase_clock_never_exceeds_the_turn_or_survives_an_approval(self):
+        ui = self.tui()
+        now = time.monotonic()
+        ui._turn.set()
+        try:
+            ui._turn_t0 = now - 44
+            ui._phase_act, ui._phase_t0 = "Waiting", now - 72     # left over from before
+            status = self.plain(ui._status())
+            self.assertNotIn("1m12s", status)
+            self.assertIn("Waiting… 44", status)
+            ui._req = {"hint": "1 allow · 3 deny"}
+            self.plain(ui._status())
+            self.assertIsNone(ui._phase_act, "an approval card ends the phase")
+            ui._req = None
+            self.assertRegex(self.plain(ui._status()), r"Waiting… 0\.\ds")
+        finally:
+            ui._turn.clear()
+
     def _blocked_wake(self, ui, sess):
         entered = threading.Event()
 
