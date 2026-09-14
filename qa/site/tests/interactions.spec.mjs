@@ -336,6 +336,11 @@ test("late JavaScript cannot miss final fragment alignment after the CSS fail-op
 
   await page.goto("/about#work-on-this", {waitUntil: "load"});
   await expect(page.locator("html")).toHaveAttribute("data-styles-ready", "true");
+  // site.js aligns two animation frames after styles-ready (alignContainedTarget). Measuring
+  // sooner raced it: when frames ran late, or site.js landed before the fail-open or after the
+  // stylesheet, this read 580-1234px (699 in two full-suite runs). Two frames queued now run after
+  // the product's own two.
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
   const result = await page.locator("#work-on-this").evaluate(target => ({
     top: target.getBoundingClientRect().top,
     scrollMargin: Number.parseFloat(getComputedStyle(target).scrollMarginTop),
