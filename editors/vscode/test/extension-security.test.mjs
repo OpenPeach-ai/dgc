@@ -180,7 +180,7 @@ test("protocol v13: the approval card gets a summary and a diff, and a denial ca
 test("entry points: explorer and tab menus, drag-and-drop, and palette entries that need a backend are gated", () => {
   const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
   const menus = manifest.contributes.menus;
-  assert.ok(manifest.contributes.commands.some((c) => c.command === "dgc.addFile"), "DGC: Add File to Chat exists");
+  assert.ok(manifest.contributes.commands.some((c) => c.command === "dgc.addFile"), "DGC: Add File to DGC exists");
   assert.ok(menus["explorer/context"].some((m) => m.command === "dgc.addFile"), "explorer context menu");
   assert.ok(menus["editor/title/context"].some((m) => m.command === "dgc.addFile"), "editor tab context menu");
   const gated = new Map(menus.commandPalette.map((m) => [m.command, m.when]));
@@ -283,4 +283,17 @@ test("a workspace-scope dgc.command edit does not restart the backend; a user-sc
   changed(["dgc.command"]);
   assert.equal(globalThis.__DGC_PANEL_CALLS.filter((c) => c === "commandPathChanged").length, 1,
     "a repeat event for the same path does nothing");
+});
+
+test("palette titles name DGC once: the category supplies the prefix", () => {
+  // Before: every title began "DGC: " and every command also had category "DGC", which VS Code
+  // prefixes to the title, so the palette read "DGC: DGC: Focus Chat".
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  for (const command of manifest.contributes.commands) {
+    assert.equal(command.category, "DGC", `${command.command} is in the DGC category`);
+    assert.doesNotMatch(command.title, /^DGC\s*:/, `${command.command} does not repeat the category in "${command.title}"`);
+  }
+  // A context menu shows the bare title, so the one in the explorer still says whose chat it is.
+  const addFile = manifest.contributes.commands.find((c) => c.command === "dgc.addFile");
+  assert.match(addFile.title, /DGC/);
 });

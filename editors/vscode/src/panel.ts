@@ -4044,7 +4044,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } }));
   }
 
-  /** DGC: Add File to Chat — from the explorer, a tab, the palette, or a drop. */
+  /** DGC: Add File to DGC — from the explorer, a tab, the palette, or a drop. */
   addFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): void {
     const picked = (Array.isArray(uris) && uris.length ? uris : uri ? [uri] : [])
       .filter((u): u is vscode.Uri => !!u && u.scheme === "file");
