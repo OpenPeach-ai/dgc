@@ -1973,11 +1973,11 @@
         startTurn(ev.prompt, ev.kind, ev.turn_id);
         if (!replaying) {
           setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); }
-          // A queued prompt leaves the queue when its own turn starts; goal and continue turns are
-          // DGC's, not one of the user's queued messages.
-          if ((ev.kind || "prompt") === "prompt" && queuedPrompts.size) {
-            queuedPrompts.delete(queuedPrompts.keys().next().value);
-          }
+          // A queued prompt leaves the queue when its own turn starts, matched by the request id the
+          // backend carries on turn_start. Never by position: a queued custom slash command, a goal
+          // cycle or a continuation has no id of the user's, and popping the head for one of those
+          // silently discarded a message the user could otherwise restore after a backend exit.
+          if (typeof ev.request_id === "string" && ev.request_id) queuedPrompts.delete(ev.request_id);
         }
         break;
       // What the turn is doing, stated by the backend rather than guessed here. A turn that is
@@ -3395,6 +3395,7 @@
       // Say only what will actually happen: a goal resumes by itself, an ordinary turn is offered
       // a Continue once the backend is back, and anything else simply reconnects.
       const next = msg.resumes === "offer" ? "reconnecting; you can continue the interrupted turn when it is back"
+        : msg.resumes === "held" ? "reconnecting; the goal will not resume by itself after repeated backend exits"
         : msg.resumes === "none" ? "reconnecting"
         : "reconnecting and picking the work back up";
       const cause = typeof msg.cause === "string" && msg.cause ? ": " + msg.cause.slice(0, 300) : "";

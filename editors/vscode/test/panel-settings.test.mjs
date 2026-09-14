@@ -1496,6 +1496,25 @@ else {
   h.provider.dispose();
 });
 
+test("a third unassisted exit during a goal tells the webview the goal is held, not picked up", async () => {
+  const fixture = nodeFixture("panel-dies-third-time", `
+process.stderr.write("[dgc serve] serve loop ended: stdin closed while the parent (1) is still alive; up 1s, 2 commands\\n");
+setTimeout(() => process.exit(0), 100);`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  h.provider.currentSessionId = "chat-alpha";
+  const now = Date.now();
+  h.stored.set("dgc.goalPursuit.v1", { scope: h.provider.draftScope(), id: "chat-alpha", at: now - 5000 });
+  h.stored.set("dgc.unassistedExits.v1", [{ at: now - 20 * 60_000, cause: "a", last: "" },
+                                          { at: now - 60_000, cause: "a", last: "" }]);
+  h.provider.ensureBackend();
+  assert.ok(await until(() => h.posted.some((m) => m.type === "backend_exit")));
+  const exit = h.posted.find((m) => m.type === "backend_exit");
+  assert.equal(exit.resumes, "held", "the exit line matches the goal_resume_held card that follows");
+  assert.equal(h.stored.get("dgc.unassistedExits.v1").length, 3);
+  h.provider.dispose();
+});
+
 test("restore timeout names its cause and clears the backend", async () => {
   const panelSource = readFileSync(join(here, "../src/panel.ts"), "utf8");
   assert.match(panelSource, /timed out"\)\) \{\s*be\.dispose\("chat restoration timed out"\)/,
@@ -1675,4 +1694,55 @@ test("dgc.command changing during a turn restarts only after the turn ends", asy
   idle.provider.restart = (reason) => now.push(reason);
   idle.provider.commandPathChanged();
   assert.deepEqual(now, ["setting dgc.command changed"], "an idle panel restarts at once");
+});
+
+test("a deferred dgc.command restart waits for a queued prompt the backend already holds", async () => {
+  // Before: the restart fired on the first turn_end, although the worker had the queued prompt in
+  // hand. The shutdown cancelled it, the old child's "returned" was dropped, and the message was lost.
+  const h = interruptedProvider();
+  const restarts = [];
+  h.provider.restart = (reason) => restarts.push(reason);
+  let busy = true;
+  const asked = [];
+  h.provider.requestState = async (_be, _prefix, command) => { asked.push(command.type); return { type: "status", busy }; };
+  h.provider.onEvent({ type: "turn_start", seq: 1, turn_id: "t1", prompt: "a", kind: "prompt" });
+  h.provider.onEvent({ type: "prompt_accepted", seq: 2, request_id: "web-q", state: "queued" });
+  h.provider.onEvent({ type: "queued", seq: 3, count: 1, text: "" });
+  h.provider.commandPathChanged();
+  h.provider.onEvent({ type: "turn_end", seq: 4, turn_id: "t1", reason: "completed", token_estimate: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(asked, ["status"], "the panel asks the backend before restarting");
+  assert.deepEqual(restarts, [], "a backend with queued work is not restarted under it");
+  assert.equal(h.provider.pendingCommandRestart, true, "the restart stays pending");
+
+  h.provider.onEvent({ type: "turn_start", seq: 5, turn_id: "t2", prompt: "b", kind: "prompt", request_id: "web-q" });
+  busy = false;
+  h.provider.onEvent({ type: "turn_end", seq: 6, turn_id: "t2", reason: "completed", token_estimate: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(restarts, ["setting dgc.command changed"], "the restart follows the last queued turn");
+
+  // A prompt sent while the status check is out keeps the restart waiting for that turn too.
+  const racing = interruptedProvider();
+  const racingRestarts = [];
+  racing.provider.restart = (reason) => racingRestarts.push(reason);
+  let answer;
+  racing.provider.requestState = () => new Promise((resolve) => { answer = resolve; });
+  racing.provider.turnActive = true;
+  racing.provider.commandPathChanged();
+  racing.provider.onEvent({ type: "turn_end", seq: 7, turn_id: "t3", reason: "completed", token_estimate: 0 });
+  racing.provider.turnActive = true;                   // what sending a prompt does
+  answer({ type: "status", busy: false });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(racingRestarts, [], "a turn the user just started is not cut off");
+  assert.equal(racing.provider.pendingCommandRestart, true);
+});
+
+test("the exit line does not promise a goal pickup the repeat-cause breaker will hold", () => {
+  const now = Date.now();
+  const twoBefore = [{ at: now - 20 * 60_000, cause: "a", last: "" }, { at: now - 60_000, cause: "a", last: "" }];
+  const held = interruptedProvider({ goalMark: { id: "chat-alpha", at: now - 5000 }, exits: twoBefore });
+  assert.equal(held.provider.markInterruptedWork("stdin closed", 3), "held",
+    "the third exit in the window holds the goal, so the line must say so");
+  const first = interruptedProvider({ goalMark: { id: "chat-alpha", at: now - 5000 } });
+  assert.equal(first.provider.markInterruptedWork("stdin closed", 1), "goal");
 });

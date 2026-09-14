@@ -264,6 +264,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private intentionalShutdown = false;
   /** dgc.command changed while a turn was running; restart once that turn ends. */
   private pendingCommandRestart = false;
+  private commandRestartCheck: Promise<void> | undefined;
+  private commandRestartRecheck = false;
   private sessionRestoreStarted = false;
   private sessionRestoreFinished = false;
   private sessionRestoreRequestId?: string;
@@ -428,11 +430,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .filter((row) => row && Number.isFinite(row.at) && now - row.at >= 0 && now - row.at < REPEAT_EXIT_WINDOW_MS);
   }
 
-  private recordUnassistedExit(cause: string, last: string): void {
+  /** Record one unassisted exit; returns how many fall in the repeat window, this one included. */
+  private recordUnassistedExit(cause: string, last: string): number {
     const rows = [...this.recentUnassistedExits(), { at: Date.now(), cause: cause.slice(0, 300), last: last.slice(0, 64) }]
       .slice(-16);
     void Promise.resolve(this.context.workspaceState.update(UNASSISTED_EXITS_KEY, rows))
       .then(undefined, () => { /* the breaker is a guard, not a ledger */ });
+    return rows.length;
   }
 
   /**
@@ -1176,8 +1180,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (facts.cause) { return; }             // our own teardown: logged above and already handled
       const cause = serveCause || `exited with ${how}`;
       serveCause = "";
-      this.recordUnassistedExit(cause, facts.lastFrame || "");
-      const resumes = this.markInterruptedWork(cause);
+      const recentExits = this.recordUnassistedExit(cause, facts.lastFrame || "");
+      const resumes = this.markInterruptedWork(cause, recentExits);
       this.pendingCommandRestart = false;       // the replacement starts from the new path anyway
       if (this.backend !== be) { return; }
       if (be.childPid !== undefined) {
@@ -1217,10 +1221,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /**
    * Decide, at the moment of an unassisted exit, what a reconnect will pick back up — and say so
    * to the webview, which used to promise "picking the work back up" when nothing would be.
+   * `recentExits` counts the unassisted exits in the repeat window, this one included: at the
+   * breaker's limit the goal is "held" (resumeInterruptedGoal will not resume it), so the exit line
+   * must not promise the pickup that the goal_resume_held card then contradicts.
    */
-  private markInterruptedWork(cause: string): "goal" | "offer" | "none" {
+  private markInterruptedWork(cause: string, recentExits = this.recentUnassistedExits().length): "goal" | "held" | "offer" | "none" {
     const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
-    if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) { return "goal"; }
+    if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) {
+      return recentExits >= REPEAT_EXIT_LIMIT ? "held" : "goal";
+    }
     const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
     if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return "none"; }
     const running = this.confirmedTurnActive || !mark.endedAt;
@@ -1290,15 +1299,55 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     void vscode.window.showInformationMessage("DGC restarted with the new command path.");
   }
 
-  /** The deferred half of commandPathChanged(): once nothing is running, apply the new path. */
+  /**
+   * The deferred half of commandPathChanged(): once nothing is running, apply the new path.
+   *
+   * A turn_end is not "nothing is running": the backend's worker may already hold the next queued
+   * prompt (or a goal's retry), whose turn_start follows the turn_end, and a restart there shut
+   * the backend down under it and dropped the user's queued message. So ask the backend first --
+   * `status.busy` is computed under the same lock the queue uses, and commands are handled in
+   * order, so a prompt sent before this request is already counted. Anything still busy keeps the
+   * restart pending for the next turn_end.
+   */
   private runPendingCommandRestart(): void {
     if (!this.pendingCommandRestart || this.turnActive) { return; }
-    this.pendingCommandRestart = false;
-    // After the event being handled reaches the webview, so a finished turn renders as finished.
-    setTimeout(() => {
+    // One status check at a time; a turn that ends while one is out is looked at again after it.
+    if (this.commandRestartCheck) { this.commandRestartRecheck = true; return; }
+    this.commandRestartRecheck = false;
+    const be = this.backend;
+    const apply = () => {
+      this.pendingCommandRestart = false;
       this.restart("setting dgc.command changed");
       void vscode.window.showInformationMessage("DGC restarted with the new command path.");
-    }, 0);
+    };
+    if (!be) {
+      // After the event being handled reaches the webview, so a finished turn renders as finished.
+      setTimeout(() => { if (this.pendingCommandRestart && !this.turnActive) { apply(); } }, 0);
+      return;
+    }
+    const check = this.requestState(be, "command-restart", { type: "status" }, "status", 10000)
+      .then((status: any) => {
+        if (!this.pendingCommandRestart || this.backend !== be) { return; }
+        if (this.turnActive || status?.busy === true) {
+          this.backendNote("[extension: dgc.command restart still waiting — the backend has more work queued]");
+          // The next turn_end asks again. A foreground operation that ends with no turn event (a
+          // compaction) would leave nothing to ask, so look again later too; a no-op once applied.
+          const later = setTimeout(() => this.runPendingCommandRestart(), 15_000);
+          later.unref?.();
+          return;
+        }
+        apply();
+      }, () => {
+        // A backend that cannot answer is not proof that it is idle; keep waiting. Its exit clears
+        // the pending restart, because the replacement starts from the new path anyway.
+        this.backendNote("[extension: dgc.command restart still waiting — the backend did not answer a status check]");
+      })
+      .finally(() => {
+        if (this.commandRestartCheck !== check) { return; }
+        this.commandRestartCheck = undefined;
+        if (this.commandRestartRecheck) { this.commandRestartRecheck = false; this.runPendingCommandRestart(); }
+      });
+    this.commandRestartCheck = check;
   }
 
   restart(reason = "command DGC: Restart Backend"): void {

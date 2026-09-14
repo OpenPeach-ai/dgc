@@ -2991,9 +2991,39 @@ test("a queued prompt the backend hands back is restorable too", () => {
 test("a queued prompt leaves the restore set once its own turn starts", () => {
   const h = queuedPromptDom();
   h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
-  h.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt",
+            request_id: h.queued.requestId });
   h.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer" });
   assert.equal(h.input.value, "", "a message that already ran is not offered back as unsent");
+  assert.deepEqual(h.errors, []);
+});
+
+test("a queued slash command that runs first does not consume the user's queued prompt", () => {
+  // Before: turn_start popped the HEAD of the restore set for any kind "prompt" turn. A custom slash
+  // command queued ahead of the message runs as kind "prompt" with no request id, so its turn_start
+  // removed the user's words, and the backend's later "returned" found nothing to restore.
+  const h = makeDom({ scope: "workspace" });
+  const event = (ev) => h.send({ type: "event", event: ev });
+  h.send({ type: "session_ready", sessionId: "alpha" });
+  event({ type: "ready", capabilities: { live_steering: true, steering_native: true, resume_turn: true } });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Install the dependencies", kind: "prompt" });
+  event({ type: "queued", count: 1, text: "/deploy" });            // the slash command, queued first
+  const input = h.doc.getElementById("input");
+  input.value = "Then run the tests";
+  input.dispatchEvent(new h.dom.window.Event("input"));
+  input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  const queued = h.posted.findLast((m) => m.type === "prompt");
+  event({ type: "prompt_accepted", request_id: queued.requestId, state: "queued" });
+  event({ type: "queued", count: 2, text: "Then run the tests" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  event({ type: "turn_start", turn_id: "t2", prompt: "/deploy", kind: "prompt" });   // no request id
+  assert.equal(input.value, "");
+  event({ type: "steering_update", request_id: queued.requestId, state: "returned",
+          message: "DGC's backend stopped before this queued message ran; it is back in the composer." });
+  h.send({ type: "backend_exit", code: 0, recovering: true, resumes: "offer", cause: "stdin closed" });
+  assert.equal(input.value, "Then run the tests", "the user's queued words come back");
+  assert.ok([...h.doc.querySelectorAll("button")].some((b) => /Restore unsent message/.test(b.textContent)),
+    "and the message keeps its restore action");
   assert.deepEqual(h.errors, []);
 });
 
@@ -3016,7 +3046,16 @@ test("the exit line says what a reconnect will actually do", () => {
   goal.send({ type: "event", event: { type: "ready", capabilities: {} } });
   goal.send({ type: "backend_exit", code: 0, recovering: true, resumes: "goal" });
   assert.match(goal.doc.getElementById("log").textContent, /picking the work back up/);
-  assert.deepEqual([...offer.errors, ...none.errors, ...goal.errors], []);
+
+  // The repeat-cause breaker will hold the goal: the line must not promise the pickup the
+  // "not resumed automatically" card then contradicts.
+  const held = makeDom();
+  held.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  held.send({ type: "backend_exit", code: 0, recovering: true, resumes: "held", cause: "stdin closed" });
+  const heldText = held.doc.getElementById("log").textContent;
+  assert.match(heldText, /the goal will not resume by itself after repeated backend exits/);
+  assert.doesNotMatch(heldText, /picking the work back up/);
+  assert.deepEqual([...offer.errors, ...none.errors, ...goal.errors, ...held.errors], []);
 });
 
 test("the Continue card is a DGC marker: one click, no words sent as the user", () => {
