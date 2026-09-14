@@ -69,7 +69,7 @@
   function toggleModeMenu() {
     const mm = $("modemenu");
     if (!mm.hidden) { hideModeMenu(); return; }
-    hideModelMenu(); hideContextMenu();
+    hideModelMenu(); hideContextMenu(); hideAgentsMenu();
     mm.innerHTML =
       `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
       MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
@@ -132,7 +132,7 @@
   function toggleContextMenu() {
     const menu = $("ctxmenu");
     if (!menu.hidden) { hideContextMenu(); return; }
-    hideModelMenu(); hideModeMenu(); renderContextMenu();
+    hideModelMenu(); hideModeMenu(); hideAgentsMenu(); renderContextMenu();
     menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
     $("ctx-compact").focus();
   }
@@ -854,7 +854,7 @@
     const verb = turn.act.querySelector(".verb"), meta = turn.act.querySelector(".meta");
     if (!verb || !meta) return;
     // A question on screen is a fact about THIS client and beats anything the backend is doing.
-    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
+    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)") || askCardDocked();
     turn.act.classList.toggle("waiting-input", waiting);
     const activity = turn.activity;
     // A tool step's detail is its argument (the command, the path), and that tool's card is already
@@ -884,6 +884,8 @@
     if (!turn) return;
     flushText();
     finishReasoning();
+    settleRetryLines(turn, reason);
+    if (!replaying) undockAskCard("turn_end");
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
       setToolStatus(card, "stopped");
@@ -1458,6 +1460,7 @@
   function toolCard(ev) {
     const c = el("div", "tool");
     c.dataset.toolName = String(ev.name || "");
+    c.dataset.callId = String(ev.call_id || "");
     c.dataset.summary = String(ev.summary || "");
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
@@ -1485,7 +1488,7 @@
       elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
     }, 200);
     setToolStatus(c, "running");
-    appendTool(c); breakText(); return c;
+    appendTool(c); breakText(); agentsOnToolCard(c, ev); return c;
   }
   // A tool card shows its output as soon as there is any: the head says what ran, the body shows
   // the first few lines of what came back, and the toggle opens the rest. The body used to be
@@ -2318,6 +2321,7 @@
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         if (!draftScope && ev.session_id) selectDraftSession(ev.session_id);
+        imagesOnReady(ev); retryOnReady(ev);
         break;
       }
       case "context": {
@@ -2333,11 +2337,13 @@
       case "rewound":
         if (ev.ok) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
+          sessionResetHooks("rewound");
         }
         break;
       case "session":
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; queuedPrompts.clear(); renderQueued(); setSending(false);
+          sessionResetHooks(ev.kind);
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
@@ -2541,6 +2547,7 @@
       }
       case "permission_request": {
         ensureTurn();
+        imageViewerAttention("permission_request");
         speak(`Permission required to run ${ev.name}`);
         // v7: the step's summary and, for an edit, the diff it would apply — approve against
         // what will happen, not raw JSON. A denial can carry a note for the model.
@@ -2561,6 +2568,7 @@
       }
       case "plan_proposal": {
         ensureTurn();
+        imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
         const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
@@ -2572,12 +2580,14 @@
       }
       case "options_request": {
         ensureTurn();
+        imageViewerAttention("options_request");
         showQuestionForm(ev);
         break;
       }
       case "mcp_input_request": {
         closeSurface();
         ensureTurn();
+        imageViewerAttention("mcp_input_request");
         const p = ev.payload || {};
         const title = `MCP server ${ev.server} requests input`;
         speak(title);
@@ -2859,17 +2869,20 @@
   // ---- composer ----
   function hasComposerInput() { return Boolean(input.value.trim() || attachments.length); }
   function renderComposerControls() {
-    const hasDraft = hasComposerInput(), stop = streaming && !hasDraft;
+    // A question docked in the composer replaces the text box, so nothing typed is a draft: Send is
+    // Stop, and Queue and the follow-up hint have nothing to act on. The footer itself stays.
+    const docked = askCardDocked();
+    const hasDraft = hasComposerInput() && !docked, stop = streaming && !hasDraft;
     const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
     send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
     send.title = label; send.setAttribute("aria-label", label);
     // Filled (DGC purple) only when the button will actually do something: text to send, or a
     // run to stop. Empty composer leaves it a quiet surface, so the accent stays meaningful.
     send.classList.toggle("ready", hasDraft || streaming);
-    $("queue-send").hidden = !streaming || !nativeSteering;
+    $("queue-send").hidden = !streaming || !nativeSteering || docked;
     $("queue-send").disabled = !hasDraft;
     $("stop-run").hidden = !streaming || !hasDraft;
-    $("followup-hint").hidden = !streaming;
+    $("followup-hint").hidden = !streaming || docked;
     $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
   }
   function settleCustomCommand() {
@@ -3312,7 +3325,7 @@
       sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
     }
   });
-  send.onclick = () => { if (streaming && !hasComposerInput()) doStop(); else submit(); };
+  send.onclick = () => { if (streaming && (!hasComposerInput() || askCardDocked())) doStop(); else submit(); };
   $("stop-run").onclick = doStop;
   $("queue-send").onclick = () => submit("queue");
   $("btn-ctx").onclick = (e) => { e.stopPropagation(); toggleContextMenu(); };
@@ -3368,7 +3381,7 @@
   function toggleAddMenu() {
     const am = $("addmenu");
     if (!am.hidden) { hideAddMenu(); return; }
-    hideModeMenu(); hideModelMenu(); hideContextMenu();
+    hideModeMenu(); hideModelMenu(); hideContextMenu(); hideAgentsMenu();
     const items = addMenuItems();
     am.innerHTML = '<div role="group" aria-label="Add">'
       + '<div class="mhead" role="presentation"><span>Add</span></div>'
@@ -3397,7 +3410,7 @@
     const mm = $("modelmenu");
     if (!mm.hidden) { hideModelMenu(); return; }
     mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu();
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu(); hideAgentsMenu();
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
@@ -3406,6 +3419,7 @@
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
     if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
+    hideAgentsMenu(e);
   });
 
   // ---- settings page ----
@@ -4131,6 +4145,7 @@
     }
     else if (msg.type === "continue_offer") {
       if (msg.sessionId && msg.sessionId !== draftSession) return;
+      imageViewerAttention("continue_offer");
       const cause = String(msg.cause || "").slice(0, 300);
       recoveryCard("continue-offer",
         `DGC's backend stopped during your last turn${cause ? ` (${cause})` : ""}. `
@@ -4138,6 +4153,7 @@
         "Continue", () => vscode.postMessage({ type: "resumeTurn" }));
     }
     else if (msg.type === "goal_resume_held") {
+      imageViewerAttention("goal_resume_held");
       const cause = String(msg.cause || "").slice(0, 300);
       const exits = Math.max(0, Number(msg.exits) || 0);
       recoveryCard("goal-resume-held",
@@ -4149,6 +4165,7 @@
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
+      backendExitHooks(msg);
       sessionReady = !draftScope;
       // A Clear sent to a recovering backend is held for the next one, so it is not unanswered
       // yet; with no recovery coming, the row says so at once instead of spinning.
@@ -4197,6 +4214,64 @@
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });
+  // ---- 0.40 shared --------------------------------------------------------------------------------
+  // Hook dispatchers the handlers above call. Each 0.40 lane fills in only its own section below;
+  // the dispatchers keep the order agents, images, reconnecting, options.
+  function sessionResetHooks(kind) {
+    agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
+  }
+  function backendExitHooks(msg) {
+    agentsOnBackendExit(msg); imagesOnBackendExit(msg); retryOnBackendExit(msg); askOnBackendExit(msg);
+  }
+  // Anything drawn at turn level between tool rounds (text, a model-retry line, an inline thought
+  // note, a withheld-thinking row, a collapsed reasoning group, an image row with no step) ends the
+  // open tool group, so the next tool card starts a new group below it rather than joining one above.
+  function endToolGroup() { if (turn) turn.toolGroup = null; }
+  // ---- end 0.40 shared ----------------------------------------------------------------------------
+
+
+  // ---- 0.40 agents --------------------------------------------------------------------------------
+  // `kind`: "new" | "cleared" | "resumed" | "rewound".
+  function agentsOnSessionReset(kind) {}
+  function agentsOnBackendExit(msg) {}
+  // Called for every tool card once it is in its group; `card.dataset.callId` is the wire call id.
+  function agentsOnToolCard(card, ev) {}
+  // With a click event: hide only when the click fell outside the pill and its menu.
+  function hideAgentsMenu(event) {}
+  // ---- end 0.40 agents ----------------------------------------------------------------------------
+
+
+  // ---- 0.40 images --------------------------------------------------------------------------------
+  function imagesOnSessionReset(kind) {}
+  function imagesOnBackendExit(msg) {}
+  function imagesOnReady(ev) {}
+  // A request card or recovery offer arrived: `kind` is its message type.
+  function imageViewerAttention(kind) {}
+  // ---- end 0.40 images ----------------------------------------------------------------------------
+
+
+  // ---- 0.40 reconnecting --------------------------------------------------------------------------
+  function retryOnSessionReset(kind) {}
+  function retryOnBackendExit(msg) {}
+  function retryOnReady(ev) {}
+  // `t` is the turn being ended (never null here); `reason` is endTurn's reason.
+  function settleRetryLines(t, reason) {}
+  // ---- end 0.40 reconnecting ----------------------------------------------------------------------
+
+
+  // ---- 0.40 options -------------------------------------------------------------------------------
+  function askOnSessionReset(kind) {}
+  function askOnBackendExit(msg) {}
+  // True while a question card is docked in the composer in place of the text box.
+  function askCardDocked() { return false; }
+  function undockAskCard(reason) {}
+  // ---- end 0.40 options ---------------------------------------------------------------------------
+
+
+  // ---- 0.40 thinking ------------------------------------------------------------------------------
+  // ---- end 0.40 thinking --------------------------------------------------------------------------
+
+
   loadDraftState();
   window.addEventListener("pagehide", persistDraft);
   input.addEventListener("select", scheduleDraftSave);
