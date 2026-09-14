@@ -4359,7 +4359,8 @@ class TUI:
 
         if name:
             self._name_session(sess, name)
-        previous = self.active if getattr(self, "_sessions", None) else None
+        fleet, index = getattr(self, "_sessions", None) or [], getattr(self, "_active_idx", -1)
+        previous = fleet[index] if isinstance(index, int) and 0 <= index < len(fleet) else None
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
