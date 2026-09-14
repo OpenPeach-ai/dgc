@@ -3042,7 +3042,12 @@
     if (!input.isConnected || width < 40 || document.hidden) { composerSizedWidth = -1; return; }
     composerSizedWidth = width;
     input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    // scrollHeight is a whole number of pixels, and a 14px/1.45 line is 20.3px: a box sized to it
+    // was a fraction short, which on a HiDPI screen drew a scrollbar beside a single line. Leave a
+    // pixel over, and scroll only once the text really is taller than the cap.
+    const content = input.scrollHeight, capped = content >= 160;
+    input.style.overflowY = capped ? "auto" : "hidden";
+    input.style.height = (capped ? 160 : content + 1) + "px";
   }
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => { if (input.clientWidth !== composerSizedWidth) autosizeComposer(); })
