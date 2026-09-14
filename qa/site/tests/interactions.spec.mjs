@@ -394,6 +394,23 @@ test("a late docs stylesheet still applies and realigns after the fail-open dead
   ))).toBeLessThan(1);
 });
 
+test("docs on-this-page highlights nothing at the top of a fresh load when the stylesheet is slow", async ({page}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-desktop-1440");
+  // Until the stylesheet lands the TOC and sidebar are hidden and every heading measures top 0, so a
+  // scroll-spy that starts early marks the last heading ("Reference") active on an unscrolled page.
+  await page.route("**/assets/site.css?*", async route => {
+    await new Promise(resolve => setTimeout(resolve, 800));
+    await route.continue();
+  });
+  await page.goto("/docs", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  await expect(page.locator("html")).toHaveAttribute("data-styles-ready", "true");
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+  expect(await page.locator(".docs-toc a.active").evaluateAll(links =>
+    links.map(link => link.getAttribute("data-id")))).toEqual([]);
+});
+
 test("deferred enhancement does not rewind already-visible statistics", async ({page}, testInfo) => {
   test.skip(testInfo.project.name !== "chromium-desktop-1440");
   await page.setViewportSize({width: 1440, height: 1200});
