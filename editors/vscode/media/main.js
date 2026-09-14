@@ -2982,6 +2982,11 @@
     });
     const first = $(`settings`).querySelector(`.set-section[data-section="${wanted}"] input, .set-section[data-section="${wanted}"] select, .set-section[data-section="${wanted}"] button`);
     if (first) first.focus();
+    // A tab strip wider than the panel scrolls: keep the chosen tab in view and fade the edge
+    // that hides more tabs, so the ones past it are discoverable.
+    const activeTab = document.querySelector(`.set-tab[data-section="${wanted}"]`);
+    if (activeTab && typeof activeTab.scrollIntoView === "function") activeTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+    usageEdges(document.querySelector(".settings-nav"));
     if (wanted === "usage") requestUsage();     // opening the tab always counts again
   }
 
@@ -3049,6 +3054,37 @@
     $("usage-empty").hidden = true;
     setUsageStatus(String(msg.message || "Token usage is unavailable."), false);
   }
+  // A long id keeps the part that tells variants apart: the ":tag"/quantisation or "-suffix" of
+  // a model, the ":port" of a host. The head truncates with an ellipsis; the tail always shows.
+  function usageSplit(text, kind) {
+    const value = String(text || "");
+    let cut = -1;
+    if (kind === "host") {
+      const port = /:\d{1,5}$/.exec(value);
+      if (port) cut = port.index;
+    } else if (kind === "model" && value.length > 14) {
+      const colon = value.lastIndexOf(":");
+      const dash = value.lastIndexOf("-");
+      if (colon > 0 && value.length - colon <= 14) cut = colon;
+      else if (dash > 0 && value.length - dash <= 10) cut = dash;
+      else cut = value.length - 8;
+    }
+    const line = usageNode("span", kind === "model" ? "usage-clip usage-name" : "usage-clip usage-where");
+    if (cut <= 0) {
+      line.appendChild(usageNode("span", "usage-head", value));
+    } else {
+      line.appendChild(usageNode("span", "usage-head", value.slice(0, cut)));
+      line.appendChild(usageNode("span", "usage-tail", value.slice(cut)));
+    }
+    return line;
+  }
+  // A box that scrolls sideways says so: its hidden edge fades while there is more to see.
+  function usageEdges(node) {
+    if (!node) return;
+    const more = node.scrollWidth - node.clientWidth;
+    node.classList.toggle("more-right", more > 1 && node.scrollLeft < more - 1);
+    node.classList.toggle("more-left", more > 1 && node.scrollLeft > 1);
+  }
   function renderUsage(ev) {
     if (!ev || ev.request_id !== usageRequestId) return;   // a late answer to an older request
     clearTimeout(usageTimer);
@@ -3059,7 +3095,7 @@
       .filter((row) => row && typeof row === "object" && /^\d{4}-\d{2}-\d{2}$/.test(String(row.date)))
       .slice(-401);
     const zone = String(ev.timezone || "").slice(0, 64);
-    $("usage-timezone").textContent = `Days follow this computer\u2019s local time${zone ? ` (${zone})` : ""}.`;
+    $("usage-timezone").textContent = `Days follow this computer’s local time${zone ? ` (${zone})` : ""}.`;
     const stamp = new Date(String(ev.generated_at || ""));
     const updated = Number.isNaN(stamp.getTime()) ? "Updated just now"
       : `Updated ${stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -3073,9 +3109,14 @@
     const requests = usageCount(totals.requests);
     usageHasData = requests > 0;
     $("usage-empty").hidden = usageHasData;
+    $("usage-empty-all").hidden = usageHasData || $("usage-range").value === "all";
     $("usage-content").hidden = !usageHasData;
     setUsageStatus(updated, false);
-    if (!usageHasData) { usageBuckets = []; $("usage-days").replaceChildren(); return; }
+    if (!usageHasData) {
+      usageBuckets = [];
+      $("usage-strip-in").replaceChildren(); $("usage-strip-out").replaceChildren();
+      return;
+    }
 
     const figures = $("usage-figures");
     figures.replaceChildren();
@@ -3084,19 +3125,24 @@
       ["Requests", "requests", "requests"]]) {
       const figure = usageNode("div", "usage-figure");
       const exact = usageExact(totals[key]);
+      const compact = usageCompact(totals[key]);
       figure.setAttribute("role", "group");
       figure.setAttribute("aria-label", `${label}: ${exact} ${unit}`);
       figure.appendChild(usageNode("span", "usage-figure-label", label));
-      figure.appendChild(usageNode("span", "usage-figure-value", usageCompact(totals[key])));
-      figure.appendChild(usageNode("span", "usage-figure-exact", `${exact} ${unit}`));
+      figure.appendChild(usageNode("span", "usage-figure-value", compact));
+      // The exact count earns its line only when the big figure is abbreviated.
+      if (compact !== exact) figure.appendChild(usageNode("span", "usage-figure-exact", `${exact} ${unit}`));
       figures.appendChild(figure);
     }
     const unmetered = usageCount(totals.unmetered_requests);
     const unmeteredNote = $("usage-unmetered");
     unmeteredNote.hidden = unmetered === 0;
-    unmeteredNote.textContent = unmetered === 0 ? "" : `${unmetered.toLocaleString()} unmetered `
-      + `request${unmetered === 1 ? "" : "s"}: ended without a usage report (cancelled, interrupted, `
-      + "or the provider sent none), so their tokens are not in these totals.";
+    unmeteredNote.textContent = unmetered === 0 ? ""
+      : unmetered === 1
+        ? "1 unmetered request ended without a usage report (cancelled, interrupted, or the "
+          + "provider sent none), so its tokens are not in these totals."
+        : `${unmetered.toLocaleString()} unmetered requests ended without a usage report `
+          + "(cancelled, interrupted, or the provider sent none), so their tokens are not in these totals.";
 
     const body = $("usage-models");
     body.replaceChildren();
@@ -3106,14 +3152,16 @@
     for (const row of models) {
       const tr = document.createElement("tr");
       const model = String(row.model || "unknown").slice(0, 256);
-      const where = [row.provider, row.host].map((part) => String(part || "").slice(0, 255))
-        .filter(Boolean).join(" \u00b7 ");
-      const modelCell = usageNode("td", "usage-model");
-      modelCell.appendChild(usageNode("span", "usage-clip", model)); modelCell.title = model;
-      const whereCell = usageNode("td", "usage-where");
-      whereCell.appendChild(usageNode("span", "usage-clip", where || "\u2014")); whereCell.title = where;
-      tr.appendChild(modelCell); tr.appendChild(whereCell);
-      for (const key of ["requests", "input_tokens", "output_tokens", "cached_input_tokens"]) {
+      const provider = String(row.provider || "").slice(0, 64);
+      const host = String(row.host || "").slice(0, 255);
+      const where = [provider, host].filter(Boolean).join(" · ");
+      const modelCell = usageNode("th", "usage-model");
+      modelCell.setAttribute("scope", "row");
+      modelCell.title = where ? `${model}\n${where}` : model;
+      modelCell.appendChild(usageSplit(model, "model"));
+      modelCell.appendChild(usageSplit(where || "—", host ? "host" : "where"));
+      tr.appendChild(modelCell);
+      for (const key of ["input_tokens", "output_tokens", "cached_input_tokens", "requests"]) {
         tr.appendChild(usageNode("td", "num", usageExact(row[key])));
       }
       const share = tokenSum > 0 ? tokensOf(row) / tokenSum
@@ -3125,8 +3173,8 @@
       wrap.setAttribute("role", "img");
       wrap.setAttribute("aria-label", `${shareText} of ${tokenSum > 0 ? "tokens" : "requests"}`);
       const track = usageNode("span", "usage-share-track");
-      const fill = usageNode("span", "usage-share-fill");
-      fill.style.width = `${Math.max(percent > 0 ? 2 : 0, Math.min(100, percent))}%`;
+      const fill = usageNode("span", "usage-share-fill" + (percent > 0 ? " nonzero" : ""));
+      fill.style.width = `${Math.min(100, percent)}%`;
       track.appendChild(fill);
       wrap.appendChild(track);
       wrap.appendChild(usageNode("span", "usage-share-text", shareText));
@@ -3134,8 +3182,11 @@
       tr.appendChild(shareCell);
       body.appendChild(tr);
     }
+    usageEdges(document.querySelector(".usage-table-wrap"));
 
-    // One bar per local day; a long range folds into weeks so every bar stays readable.
+    // One column per local day (weeks past 62 days), drawn as two strips on their own scales:
+    // a coding agent reads far more than it writes, so output on the input scale would be a
+    // sliver whatever its size. Each strip names its own peak.
     const weekly = days.length > 62;
     usageBuckets = [];
     for (let i = 0; i < days.length; i += weekly ? 7 : 1) {
@@ -3148,38 +3199,37 @@
       });
     }
     const crossesYear = days.length > 0 && days[0].date.slice(0, 4) !== days[days.length - 1].date.slice(0, 4);
-    const peak = Math.max(1, ...usageBuckets.map((bucket) => bucket.input + bucket.output));
-    const strip = $("usage-days");
-    strip.replaceChildren();
-    strip.classList.toggle("dense", usageBuckets.length > 40);
-    usageBuckets.forEach((bucket, index) => {
-      const column = usageNode("div", "usage-day");
-      column.dataset.index = String(index);
-      const total = bucket.input + bucket.output;
-      if (total > 0) {
-        const stack = usageNode("div", "usage-stack" + (bucket.input && bucket.output ? " both" : ""));
-        stack.style.height = `${Math.max(3, (total / peak) * 100)}%`;
-        if (bucket.output) {
-          const out = usageNode("span", "usage-seg usage-out"); out.style.flexGrow = String(bucket.output);
-          stack.appendChild(out);
-        }
-        if (bucket.input) {
-          const inp = usageNode("span", "usage-seg usage-in"); inp.style.flexGrow = String(bucket.input);
-          stack.appendChild(inp);
-        }
-        column.appendChild(stack);
-      } else if (bucket.requests) {
-        column.appendChild(usageNode("div", "usage-stack usage-unmetered-day"));
-      }
-      column.addEventListener("mouseenter", () => selectUsageDay(index));
-      strip.appendChild(column);
-    });
     const label = (bucket) => weekly
       ? `Week of ${usageDate(bucket.first, crossesYear)}` : usageDate(bucket.first, crossesYear);
     usageBuckets.forEach((bucket) => { bucket.label = label(bucket); });
+    // A single day has nothing to compare: the figures above already are that day.
+    const single = usageBuckets.length <= 1;
+    $("usage-days").hidden = single;
+    const strips = [["usage-strip-in", "input", "usage-in", "usage-peak-in"],
+      ["usage-strip-out", "output", "usage-out", "usage-peak-out"]];
+    for (const [id, key, cls, peakId] of strips) {
+      const strip = $(id);
+      strip.replaceChildren();
+      strip.classList.toggle("dense", usageBuckets.length > 40);
+      const peak = Math.max(0, ...usageBuckets.map((bucket) => bucket[key]));
+      $(peakId).textContent = peak > 0 ? `peak ${usageCompact(peak)}` : "none";
+      usageBuckets.forEach((bucket, index) => {
+        const column = usageNode("div", "usage-day");
+        column.dataset.index = String(index);
+        if (bucket[key] > 0) {
+          const bar = usageNode("span", `usage-bar ${cls}`);
+          bar.style.height = `${(bucket[key] / peak) * 100}%`;
+          column.appendChild(bar);
+        } else if (key === "input" && bucket.requests) {
+          column.appendChild(usageNode("span", "usage-bar usage-unmetered-day"));
+        }
+        column.addEventListener("mouseenter", () => selectUsageDay(index));
+        strip.appendChild(column);
+      });
+    }
     $("usage-days-first").textContent = usageBuckets.length ? label(usageBuckets[0]) : "";
     $("usage-days-last").textContent = usageBuckets.length > 1 ? label(usageBuckets[usageBuckets.length - 1]) : "";
-    strip.setAttribute("aria-label", `Input and output tokens per ${weekly ? "week" : "day"}, `
+    $("usage-days").setAttribute("aria-label", `Input and output tokens per ${weekly ? "week" : "day"}, `
       + `${usageBuckets.length} ${weekly ? "weeks" : "days"}. Use the arrow keys to read each one.`);
     let busiest = usageBuckets.length - 1;
     usageBuckets.forEach((bucket, index) => {
@@ -3194,10 +3244,10 @@
     $("usage-days").querySelectorAll(".usage-day").forEach((column) => {
       column.classList.toggle("sel", Number(column.dataset.index) === usageDay);
     });
-    const text = `${bucket.label}: ${bucket.input.toLocaleString()} input \u00b7 `
-      + `${bucket.output.toLocaleString()} output tokens \u00b7 ${bucket.requests.toLocaleString()} `
+    const text = `${bucket.label}: ${bucket.input.toLocaleString()} input · `
+      + `${bucket.output.toLocaleString()} output tokens · ${bucket.requests.toLocaleString()} `
       + `request${bucket.requests === 1 ? "" : "s"}`;
-    $("usage-day-readout").textContent = (initial && usageBuckets.length > 1 ? "Busiest \u2014 " : "") + text;
+    $("usage-day-readout").textContent = (initial && usageBuckets.length > 1 ? "Busiest — " : "") + text;
   }
   $("usage-days").addEventListener("keydown", (e) => {
     if (!usageBuckets.length) return;
@@ -3208,6 +3258,14 @@
   });
   $("usage-range").onchange = requestUsage;
   $("usage-refresh").onclick = requestUsage;
+  $("usage-show-all").onclick = () => { $("usage-range").value = "all"; requestUsage(); };
+  document.querySelector(".usage-table-wrap").addEventListener("scroll", (e) => usageEdges(e.currentTarget), { passive: true });
+  const settingsNav = document.querySelector(".settings-nav");
+  if (settingsNav) settingsNav.addEventListener("scroll", () => usageEdges(settingsNav), { passive: true });
+  window.addEventListener("resize", () => {
+    usageEdges(settingsNav);
+    usageEdges(document.querySelector(".usage-table-wrap"));
+  });
   function openSettings(providers, models, section) {
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +

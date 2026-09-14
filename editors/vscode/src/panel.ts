@@ -4145,7 +4145,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </div>
     <div id="usage-empty" class="usage-empty" hidden>
       <p class="usage-empty-title">No model requests counted in this range yet</p>
-      <p>Every request DGC finishes &mdash; chats, goals, sub-agents, fallbacks and compaction &mdash; adds the input, output and cached tokens its provider reported here, with totals by model and by day.</p>
+      <p>Each request DGC finishes (chats, goals, sub-agents, fallbacks, compaction) will appear here with the input, output and cached tokens its provider reported, totalled by model and by day.</p>
+      <p id="usage-empty-all" class="usage-empty-all" hidden>Earlier requests may be in a longer range. <button type="button" id="usage-show-all" class="link" title="Count every request the ledger keeps (up to 400 days)">Show all time</button></p>
       <p>Turns delegated to a subscription CLI (Claude Code, Codex, &hellip;) are counted by that CLI, not here.</p>
     </div>
     <div id="usage-content" hidden>
@@ -4154,13 +4155,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <div class="set-group">By model <span class="set-hint">sorted by total tokens</span></div>
       <div class="usage-table-wrap" role="region" aria-label="Token usage by model" tabindex="0">
         <table class="usage-table">
-          <thead><tr><th scope="col">Model</th><th scope="col">Provider &middot; host</th><th scope="col" class="num">Requests</th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cached</th><th scope="col">Share</th></tr></thead>
+          <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cached</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
           <tbody id="usage-models"></tbody>
         </table>
       </div>
-      <div class="set-group">By day <span class="usage-legend" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-in"></span>Input</span><span class="usage-key"><span class="usage-swatch usage-out"></span>Output</span></span></div>
-      <div id="usage-days" class="usage-days" role="group" tabindex="0" aria-roledescription="bar strip" aria-label="Input and output tokens per day. Use the arrow keys to read each day." aria-describedby="usage-day-readout"></div>
-      <div class="usage-axis" aria-hidden="true"><span id="usage-days-first"></span><span id="usage-days-last"></span></div>
+      <div class="set-group">By day</div>
+      <div id="usage-days" class="usage-days" role="group" tabindex="0" aria-roledescription="bar strips" aria-label="Input and output tokens per day. Use the arrow keys to read each day." aria-describedby="usage-day-readout">
+        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-in"></span>Input</span><span id="usage-peak-in" class="usage-peak"></span></div>
+        <div id="usage-strip-in" class="usage-strip usage-strip-in"></div>
+        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-out"></span>Output</span><span id="usage-peak-out" class="usage-peak"></span></div>
+        <div id="usage-strip-out" class="usage-strip usage-strip-out"></div>
+        <div class="usage-axis" aria-hidden="true"><span id="usage-days-first"></span><span id="usage-days-last"></span></div>
+      </div>
       <p id="usage-day-readout" class="usage-readout" aria-live="polite"></p>
     </div>
     <p class="set-note usage-privacy">Counted on this machine from what each provider reports. Nothing here is sent anywhere.</p>

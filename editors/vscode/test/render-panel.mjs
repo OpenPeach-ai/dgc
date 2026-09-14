@@ -47,37 +47,68 @@ const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
 if (process.argv.includes("--usage")) {
   // The Token Usage tab, answered from a report the real CLI produced (`dgc usage --json`, or a
-  // map of range -> report). Checks the layout at the requested width: nothing may widen the
-  // panel, and the model table must scroll inside its own box rather than clip.
+  // map of range -> report). Without --usage-report it uses a built-in 30-day report with
+  // realistic 8-digit counts and long model ids, the case that once overflowed the table at
+  // 700px. Checks the layout at the requested width: nothing may widen the panel, the model
+  // table fits at 700px and scrolls inside its own box when narrower (with the first token
+  // column still in view), and the two day strips stay inside the panel.
   const out = process.argv[2] || "/tmp/usage.png";
   const option = (name, fallback) => (process.argv.find(a => a.startsWith(`--${name}=`)) || `--${name}=${fallback}`).slice(name.length + 3);
   const width = Number(option("width", "460"));
   const theme = option("theme", "dark");
-  const range = option("range", "7d");
+  const range = option("range", "30d");
   const empty = process.argv.includes("--empty");
   const source = option("usage-report", "");
-  const loaded = source ? JSON.parse(readFileSync(source, "utf8")) : {};
+  const fixture = () => {
+    const ids = [["qwen3.8:27b-q4km", "ollama", "localhost:11434", 844, 32110799, 1203825, 13486702],
+      ["hf.co/unsloth/Qwen3.8-27B-Instruct-GGUF:UD-Q4_K_XL", "ollama", "localhost:11434", 221, 7545460, 248382, 3018549],
+      ["claude-sonnet-4-5-20250929", "anthropic", "api.anthropic.com", 96, 4028466, 184045, 1744089],
+      ["Qwen/Qwen3.5-122B-A10B-FP8", "openai", "192.168.1.111:8000", 148, 3982064, 153601, 0],
+      ["gpt-oss:120b-32k", "ollama", "localhost:11434", 128, 2801552, 101812, 1066018],
+      ["deepseek/deepseek-v4-pro", "openai", "openrouter.ai", 70, 2048087, 90883, 878839],
+      ["claude-opus-4-1", "anthropic", "api.anthropic.com", 9, 337793, 26223, 132152],
+      ["claude-haiku-4-5", "anthropic", "api.anthropic.com", 41, 300948, 14737, 125769]];
+    const by_model = ids.map(([model, provider, host, requests, input_tokens, output_tokens, cached_input_tokens]) =>
+      ({ model, provider, host, requests, unmetered_requests: 0, input_tokens, output_tokens, cached_input_tokens }));
+    const today = new Date();
+    const by_day = Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + i);
+      const quiet = i === 16 || i === 17;
+      const wave = 0.55 + 0.45 * Math.abs(Math.sin(i * 1.7));
+      return { date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+        input_tokens: quiet ? 0 : Math.round(2_000_000 * wave), output_tokens: quiet ? 0 : Math.round(76_000 * (1.4 - wave)),
+        cached_input_tokens: quiet ? 0 : Math.round(760_000 * wave), requests: quiet ? 0 : Math.round(58 * wave) };
+    });
+    const sum = (key) => by_model.reduce((total, row) => total + row[key], 0);
+    return { "30d": { range: "30d", generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), timezone: "IST, UTC+05:30",
+      totals: { input_tokens: sum("input_tokens"), output_tokens: sum("output_tokens"), cached_input_tokens: sum("cached_input_tokens"),
+        requests: sum("requests"), unmetered_requests: 1 }, by_model, by_day } };
+  };
+  const loaded = source ? JSON.parse(readFileSync(source, "utf8")) : fixture();
   const reports = loaded.totals ? { [loaded.range]: loaded } : loaded;
-  const blank = (r) => ({ range: r, generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-    timezone: "IST, UTC+05:30", by_model: [], by_day: [],
-    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 } });
-  if (theme === "light") {
-    await page.addStyleTag({ content: `:root {
-      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF;
+  const THEMES = {
+    light: `--vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF;
       --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE;
       --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F; --vscode-descriptionForeground:#616161;
-      --vscode-disabledForeground:#6E6E6E; --vscode-list-activeSelectionBackground:#E8E8E8; --vscode-focusBorder:#005FB8; }` });
-  }
-  if (theme === "hc") {
-    await page.addStyleTag({ content: `:root {
-      --vscode-sideBar-background:#000000; --vscode-editor-background:#000000; --vscode-input-background:#000000;
+      --vscode-disabledForeground:#6E6E6E; --vscode-list-activeSelectionBackground:#E8E8E8; --vscode-focusBorder:#005FB8;`,
+    hc: `--vscode-sideBar-background:#000000; --vscode-editor-background:#000000; --vscode-input-background:#000000;
       --vscode-panel-border:#6FC3DF; --vscode-widget-border:#6FC3DF; --vscode-input-border:#6FC3DF;
       --vscode-foreground:#FFFFFF; --vscode-editor-foreground:#FFFFFF; --vscode-descriptionForeground:#FFFFFF;
       --vscode-disabledForeground:#A5A5A5; --vscode-list-activeSelectionBackground:#000000; --vscode-focusBorder:#F38518;
-      --vscode-charts-green:#89D185; --vscode-charts-purple:#B180D7; }` });
-  }
+      --vscode-charts-green:#89D185; --vscode-charts-purple:#B180D7;`,
+    // Dark Modern / Light Modern as VS Code ships them, translucent disabledForeground included.
+    "dark-modern": `--vscode-sideBar-background:#181818; --vscode-editor-background:#1F1F1F; --vscode-input-background:#313131;
+      --vscode-panel-border:#2B2B2B; --vscode-widget-border:#313131; --vscode-input-border:#3C3C3C;
+      --vscode-foreground:#CCCCCC; --vscode-editor-foreground:#CCCCCC; --vscode-descriptionForeground:#9D9D9D;
+      --vscode-disabledForeground:rgba(204,204,204,.5); --vscode-list-activeSelectionBackground:#04395E; --vscode-focusBorder:#0078D4;`,
+    "light-modern": `--vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF; --vscode-input-background:#FFFFFF;
+      --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE;
+      --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#3B3B3B; --vscode-descriptionForeground:#3B3B3B;
+      --vscode-disabledForeground:rgba(97,97,97,.5); --vscode-list-activeSelectionBackground:#E8E8E8; --vscode-focusBorder:#005FB8;`,
+  };
+  if (THEMES[theme]) await page.addStyleTag({ content: `:root { ${THEMES[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(
-    t === "light" ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
+    t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
   await page.evaluate(([all, isEmpty, fallbackRange]) => {
     window.__dgcOnPost = (m) => {
       if (m.type !== "getUsage") return;
@@ -90,7 +121,6 @@ if (process.argv.includes("--usage")) {
         event: { type: "usage_report", seq: 1, request_id: m.requestId, ...event } } })), 30);
     };
   }, [reports, empty, Object.keys(reports)[0] || "7d"]);
-  void blank;
   await page.setViewportSize({ width, height: 900 });
   await page.evaluate((r) => { document.getElementById("usage-range").value = r; }, range);
   await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
@@ -112,8 +142,10 @@ if (process.argv.includes("--usage")) {
       const box = f.getBoundingClientRect(), value = f.querySelector(".usage-figure-value");
       return { w: Math.round(box.width), clipped: value.scrollWidth > value.clientWidth + 1 };
     });
-    const strip = document.getElementById("usage-days").getBoundingClientRect();
+    const inside = (el) => { if (!el || el.closest("[hidden]")) return true; const r = el.getBoundingClientRect(); return r.right <= window.innerWidth && r.left >= 0; };
     const rows = new Set([...document.querySelectorAll(".usage-figure")].map((f) => Math.round(f.getBoundingClientRect().top))).size;
+    const firstNum = document.querySelector(".usage-table thead th.num");
+    const wrapBox = wrap && wrap.getBoundingClientRect();
     return {
       width: window.innerWidth,
       pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
@@ -121,9 +153,12 @@ if (process.argv.includes("--usage")) {
       bodyOverflow: body.scrollWidth - body.clientWidth,
       tableScrollsInside: wrap ? wrap.scrollWidth > wrap.clientWidth : null,
       tableWiderThanWrap: wrap && table ? Math.round(table.getBoundingClientRect().width) - wrap.clientWidth : null,
+      inputColumnInView: !!(firstNum && wrapBox && firstNum.getBoundingClientRect().right <= wrapBox.right),
+      tails: [...document.querySelectorAll(".usage-tail")].every((t) => { const r = t.getBoundingClientRect(); return r.width > 0 && (!wrapBox || r.left >= wrapBox.left); }),
       figureRows: rows, figures,
-      stripInside: strip.right <= window.innerWidth && strip.left >= 0,
-      bars: document.querySelectorAll("#usage-days .usage-day").length,
+      stripInside: inside(document.getElementById("usage-strip-in")) && inside(document.getElementById("usage-strip-out")),
+      stripsShown: !document.getElementById("usage-days").hidden,
+      bars: document.querySelectorAll("#usage-strip-in .usage-day").length,
       emptyShown: !document.getElementById("usage-empty").hidden,
       contentShown: !document.getElementById("usage-content").hidden,
       status: document.getElementById("usage-status").textContent,
@@ -137,7 +172,8 @@ if (process.argv.includes("--usage")) {
   const ok = geometry.pageOverflow <= 0 && geometry.settingsOverflow <= 0 && geometry.bodyOverflow <= 0
     && geometry.stripInside && geometry.figures.every((f) => !f.clipped)
     && (empty ? geometry.emptyShown && !geometry.contentShown
-              : geometry.contentShown && (width >= 700 ? !geometry.tableScrollsInside : geometry.tableScrollsInside));
+              : geometry.contentShown && geometry.tails && geometry.inputColumnInView
+                && (width >= 700 ? !geometry.tableScrollsInside : true));
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);
 }
