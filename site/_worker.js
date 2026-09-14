@@ -40,13 +40,16 @@ function applyResponsePolicy(response, pathname) {
       headers.set("cache-control", "public, max-age=31536000, immutable");
     } else if (isHtmlPath(pathname)
         || /\.(?:json|webmanifest|sha256)$/i.test(pathname)
-        || ["/install.sh", "/dgc.tar.gz", "/vscode/dgc.vsix"].includes(pathname)) {
+        || ["/install.sh", "/dgc.tar.gz", "/vscode/dgc.vsix", "/robots.txt", "/sitemap.xml"].includes(pathname)) {
       headers.set("cache-control", "no-cache");
     } else if (/\.(?:png|jpe?g|svg|webm|mp4|woff2|zip)$/i.test(pathname)) {
       headers.set("cache-control", "public, max-age=3600, must-revalidate");
     }
   }
   if (pathname === "/install.sh") {
+    headers.set("content-type", "text/plain; charset=utf-8");
+  }
+  if (pathname === "/robots.txt" && response.ok) {
     headers.set("content-type", "text/plain; charset=utf-8");
   }
   return new Response(response.body, {

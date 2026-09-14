@@ -46,7 +46,11 @@ jobs:
 
   site-acceptance:
     name: Website browser and Lighthouse acceptance
-    runs-on: ubuntu-24.04
+    # Visual baselines are generated on Linux arm64; compare them on the same architecture so the
+    # 10-pixel band budget measures regressions, not rasteriser differences. Fonts need nothing
+    # installed here: the QA browser uses only the site's web fonts and qa/site/fonts (fonts.conf),
+    # never the runner's system fonts.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
