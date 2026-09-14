@@ -208,6 +208,123 @@ class HubTests(HubBase):
             self.assertLessEqual(len(batch.lines), monitors_mod.MAX_LINES_PER_EVENT_SHOWN)
         self.assertLessEqual(self.hub.get(mid).ring_out.chars, monitors_mod.RING_OUT_CHARS)
 
+    def test_a_flood_names_the_limit_that_tripped(self):
+        cases = (
+            ("yes spam", "lines", "more than 1000 lines in 60s"),
+            ("python3 -u -c \"import sys\nwhile True: sys.stdout.write('y' * 3999 + '\\n')\"",
+             "bytes", "more than 1 MiB in 60s — filter"),
+            ("head -c 4000000 /dev/zero | tr '\\0' x; sleep 30", "partial", "without line breaks"),
+        )
+        for command, limit, words in cases:
+            mid = self.start(command, persistent=True)
+            self.assertTrue(self.ended(mid, 10), command)
+            monitor = self.hub.get(mid)
+            self.assertEqual((monitor.end_reason, monitor.flood_limit), ("flood", limit), command)
+            self.assertTrue(wait_for(lambda: any(b.kind == "ended" and b.monitor_id == mid
+                                                 for b in list(self.hub._pending)), 3))
+            ended = next(b for b in list(self.hub._pending) if b.kind == "ended" and b.monitor_id == mid)
+            self.assertIn(words, ended.lines[0], (limit, ended.lines[0]))
+            for other in ("lines", "bytes", "partial"):
+                if other != limit:
+                    self.assertNotEqual(ended.lines[0], monitors_mod.flood_message(other))
+            self.hub.discard_pending()
+
+    def test_counts_are_pluralised(self):
+        self.assertEqual(monitors_mod.plural(1, "event"), "1 event")
+        self.assertEqual(monitors_mod.plural(0, "event"), "0 events")
+        mid = self.start("echo once; exit 2")
+        self.assertTrue(self.ended(mid))
+        wait_for(lambda: self.hub.pending_count() >= 2, 3)
+        note = self.hub.take_pending()
+        self.assertEqual(note.batches[-1].lines[0], "ended: exit 2 after 1 event")
+        self.assertEqual(note.label, "fixture · 1 event · ended")
+        batch = monitors_mod.Batch("mon9", "d", "output", lines=["x"], omitted_lines=1,
+                                   dropped_before=1, event_index=2)
+        text = monitors_mod.render_batch(batch)
+        self.assertIn("(1 earlier event was dropped while waiting)", text)
+        self.assertIn("… 1 more line — ", text)
+
+    def test_a_batch_that_closes_as_the_conversation_is_replaced_never_reaches_the_new_one(self):
+        """Force the race: the batch has closed (its monitor lock released) but not yet been queued."""
+        from unittest import mock
+        closed, release = threading.Event(), threading.Event()
+        original = MonitorHub._queue_batch
+        calls = []
+        self.hub.listener = lambda kind, payload: calls.append((kind, dict(payload)))
+
+        def held(hub, monitor, batch):
+            closed.set()
+            release.wait(10)
+            return original(hub, monitor, batch)
+        with mock.patch.object(MonitorHub, "_queue_batch", held):
+            mid = self.start("echo OLD-CONVERSATION; sleep 30", persistent=True)
+            monitor = self.hub.get(mid)
+            self.assertTrue(closed.wait(5))
+            old_epoch = self.hub.epoch
+            self.hub.new_epoch("shutdown")
+            self.assertEqual(self.hub.snapshot(), [])
+            release.set()
+            monitor.thread.join(8)
+            self.assertFalse(monitor.thread.is_alive())
+        self.assertIsNone(self.hub.take_pending(), "the old conversation's line was dropped")
+        self.assertFalse([kind for kind, _ in calls if kind == "pending"])
+        ended = next(payload for kind, payload in calls if kind == "ended")
+        self.assertEqual(ended["epoch"], old_epoch)
+        self.assertNotEqual(ended["epoch"], self.hub.epoch)
+
+    def test_an_end_or_exit_notice_created_before_a_new_conversation_is_dropped(self):
+        from unittest import mock
+        in_finish, release = threading.Event(), threading.Event()
+        original_clean = monitors_mod._clean_line
+
+        def slow_clean(raw, secrets):
+            if b"ERRTAIL" in raw:
+                in_finish.set()
+                release.wait(10)
+            return original_clean(raw, secrets)
+        with mock.patch.object(monitors_mod, "_clean_line", slow_clean):
+            mid = self.start("echo ERRTAIL >&2; exit 4")
+            monitor = self.hub.get(mid)
+            self.assertTrue(in_finish.wait(8), "the end record is being built")
+            self.hub.new_epoch("shutdown")
+            release.set()
+            monitor.thread.join(8)
+            self.assertFalse(monitor.thread.is_alive())
+        self.assertIsNone(self.hub.take_pending(), "an old monitor's end is not news in the new chat")
+
+        epoch = self.hub.epoch
+        with mock.patch.object(monitors_mod, "_clean_line",
+                               lambda raw, secrets: (self.hub.new_epoch("shutdown"), "row")[1]):
+            self.assertFalse(self.hub.queue_background_exit("bg7", "build", 0, 1.0, "tail", epoch))
+        self.assertIsNone(self.hub.take_pending())
+        batch = monitors_mod.Batch("mon1", "d", "output", lines=["stale"], epoch=epoch)
+        self.hub.requeue(monitors_mod.Notification([batch], "x", "d"))
+        self.assertIsNone(self.hub.take_pending(), "requeue drops a replaced conversation's events")
+
+    def test_current_epoch_holds_new_epoch_until_the_publish_finishes(self):
+        entered, release, bumped = threading.Event(), threading.Event(), threading.Event()
+        seen = []
+
+        def publisher():
+            with self.hub.current_epoch(0) as current:
+                seen.append(current)
+                entered.set()
+                release.wait(5)
+
+        worker = threading.Thread(target=publisher)
+        worker.start()
+        self.assertTrue(entered.wait(5))
+        bumper = threading.Thread(target=lambda: (self.hub.new_epoch("shutdown"), bumped.set()))
+        bumper.start()
+        self.assertFalse(bumped.wait(0.3), "new_epoch waits for a publish in progress")
+        release.set()
+        self.assertTrue(bumped.wait(5))
+        worker.join(5)
+        bumper.join(5)
+        self.assertEqual(seen, [True])
+        with self.hub.current_epoch(0) as current:
+            self.assertFalse(current)
+
     def test_an_unterminated_line_is_cut_instead_of_buffered_forever(self):
         mid = self.start("head -c 200000 /dev/zero | tr '\\0' x; sleep 0.3; echo; echo done")
         self.assertTrue(self.ended(mid))
@@ -345,6 +462,15 @@ class WakePolicyTests(unittest.TestCase):
         self.assertGreaterEqual(policy.ready_in(cfg, 301.0), 5 * 2 - 1, "failures back off")
         policy.finish_wake(cfg, ok=False, cancelled=True, now=400.0)
         self.assertIsNone(policy.ready_in(cfg, 500.0), "a stopped wake pauses")
+
+    def test_a_wake_that_never_ran_does_not_count_toward_the_cap(self):
+        cfg = self.config(monitor_max_consecutive_wakes=1)
+        policy = WakePolicy()
+        policy.begin_wake()
+        policy.abandon_wake()
+        self.assertEqual(policy.ready_in(cfg, 10_000.0), 0)
+        policy.abandon_wake()
+        self.assertEqual(policy.consecutive, 0)
 
     def test_config_values_are_bounded(self):
         enabled, delay, cooldown, cap = monitors_mod.wake_settings(self.config(

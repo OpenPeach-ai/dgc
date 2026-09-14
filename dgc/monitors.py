@@ -16,6 +16,13 @@ Lock-ordering contract
     outside this module) while holding either. A frontend listener may take its own locks and then
     call back into the hub (``pending_count``, ``snapshot``, ``take_pending``); that order --
     frontend lock, then hub lock, then monitor lock -- is the only order anything takes them in.
+    The epoch lock comes before the hub lock (new_epoch takes both). A frontend may hold it through
+    ``current_epoch`` only around publishing one callback, so an old conversation's event can never
+    be published after the conversation that replaced it began.
+
+Conversations (epochs)
+    Every batch, end record and background-exit notice carries the epoch it was created in, and is
+    dropped under the hub lock when the conversation has since been replaced.
 
 The workspace lease
     A monitor takes the checkout's mutation lease only around process spawn. Holding it for the
@@ -42,6 +49,7 @@ import threading
 import time
 import weakref
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 MAX_MONITORS_PER_OWNER = 4
@@ -86,6 +94,12 @@ _CLOSE_TAG = re.compile(r"</(\s*)monitor-events", re.IGNORECASE)
 _ids = itertools.count(1)
 _hubs: "weakref.WeakSet[MonitorHub]" = weakref.WeakSet()
 _hubs_lock = threading.Lock()
+
+
+def plural(count: int, word: str) -> str:
+    """``1 event``, ``2 events``: every count DGC shows about monitors reads correctly."""
+    count = int(count or 0)
+    return f"{count} {word}{'' if count == 1 else 's'}"
 
 
 def _clean_line(raw: bytes, secrets) -> str:
@@ -141,6 +155,7 @@ class Batch:
     event_index: int = 0
     at: float = field(default_factory=time.time)
     dropped_before: int = 0        # earlier events dropped from the pending queue
+    epoch: int = 0                 # the conversation it belongs to (MonitorHub.epoch at its creation)
 
     def item(self) -> dict:
         return {"id": self.monitor_id, "description": self.description, "kind": self.kind,
@@ -175,10 +190,11 @@ def render_batch(batch: Batch) -> str:
     if batch.kind == "output":
         lines.append(f'[{batch.monitor_id} · "{name}" · event {batch.event_index} · {stamp}]')
         if batch.dropped_before:
-            lines.append(f"({batch.dropped_before} earlier events were dropped while waiting)")
+            dropped = plural(batch.dropped_before, "earlier event")
+            lines.append(f"({dropped} {'was' if batch.dropped_before == 1 else 'were'} dropped while waiting)")
         lines.extend(batch.lines)
         if batch.omitted_lines:
-            lines.append(f'… {batch.omitted_lines} more lines — bash_output(id="{batch.monitor_id}")')
+            lines.append(f'… {plural(batch.omitted_lines, "more line")} — bash_output(id="{batch.monitor_id}")')
     else:
         head = batch.lines[0] if batch.lines else "ended"
         lines.append(f'[{batch.monitor_id} · "{name}" · {head}]')
@@ -204,11 +220,24 @@ def notification_label(batches: list) -> str:
         name = batches[0].description or ids[0]
         parts = [name]
         if events:
-            parts.append(f"{events} event{'s' if events != 1 else ''}")
+            parts.append(plural(events, "event"))
         if ended:
             parts.append("exited" if ended[-1].kind == "background_exit" else "ended")
         return " · ".join(parts)[:160]
-    return f"{len(ids)} monitors · {events} event{'s' if events != 1 else ''}"
+    return f"{len(ids)} monitors · {plural(events, 'event')}"
+
+
+def flood_message(limit: str) -> str:
+    """Why a flooding monitor was stopped, naming the limit that tripped."""
+    if limit == "partial":
+        return (f"stopped: printed more than {FLOOD_BYTES_PER_60S // 1_048_576} MiB in 60s without "
+                "line breaks (a progress bar or binary output) — print whole lines, and only the "
+                "ones that matter")
+    if limit == "bytes":
+        return (f"stopped: printed more than {FLOOD_BYTES_PER_60S // 1_048_576} MiB in 60s — filter "
+                "with grep --line-buffered and print only lines that matter")
+    return (f"stopped: printed more than {FLOOD_LINES_PER_60S} lines in 60s — filter with "
+            "grep --line-buffered and print only lines that matter")
 
 
 class _Ring:
@@ -377,6 +406,7 @@ class Monitor:
         self.proc = proc
         self.pgid = proc.pid if os.name == "posix" else 0
         self.sandboxed = sandboxed
+        self.epoch = hub.epoch                   # its events and its end belong to this conversation
         self.started_mono = time.monotonic()
         self.started_at = time.time()
         self.state = "running"
@@ -394,6 +424,7 @@ class Monitor:
         self._flood_window: deque = deque()     # (monotonic, lines, bytes)
         self._flood_lines = 0
         self._flood_bytes = 0
+        self.flood_limit = ""                   # lines | bytes | partial: which flood limit tripped
         self._partial = b""
         self._skipping = False                  # dropping the rest of an over-long line
         self._batch: Batch | None = None
@@ -428,7 +459,7 @@ class Monitor:
 
     def _open_batch(self, now: float) -> Batch:
         if self._batch is None:
-            self._batch = Batch(self.id, self.description, "output")
+            self._batch = Batch(self.id, self.description, "output", epoch=self.epoch)
             self._batch_deadline = now + BATCH_WINDOW_S
         return self._batch
 
@@ -484,11 +515,21 @@ class Monitor:
         self.ring_err.append(redact_text(text, self._secrets()))
 
     def _flooding(self, now: float) -> bool:
+        """Has the output passed a flood limit in the last 60 s? Records which one in flood_limit."""
         while self._flood_window and now - self._flood_window[0][0] > 60.0:
             _, lines, size = self._flood_window.popleft()
             self._flood_lines -= lines
             self._flood_bytes -= size
-        return self._flood_lines > FLOOD_LINES_PER_60S or self._flood_bytes > FLOOD_BYTES_PER_60S
+        if self._flood_lines > FLOOD_LINES_PER_60S:
+            self.flood_limit = "lines"
+        elif self._flood_bytes > FLOOD_BYTES_PER_60S:
+            # Output whose lines average longer than the unterminated-line cut never broke lines
+            # at all (a progress bar, binary output): the partial-line limit is what it hit.
+            unbroken = self._flood_bytes > (self._flood_lines + 1) * MAX_PARTIAL_BYTES
+            self.flood_limit = "partial" if unbroken else "bytes"
+        else:
+            return False
+        return True
 
     def _close_batch(self) -> None:
         batch, self._batch = self._batch, None
@@ -636,6 +677,11 @@ class WakePolicy:
         with self._lock:
             self.consecutive += 1
 
+    def abandon_wake(self) -> None:
+        """A queued wake that never ran (a user command took its place) does not count."""
+        with self._lock:
+            self.consecutive = max(0, self.consecutive - 1)
+
     def finish_wake(self, config, *, ok: bool, cancelled: bool = False, yielded: bool = False,
                     now: float | None = None) -> None:
         _, _, cooldown, _ = wake_settings(config)
@@ -681,6 +727,7 @@ class MonitorHub:
         self.policy = WakePolicy()
         self.epoch = 0                          # bumped whenever the conversation is replaced
         self._lock = threading.Lock()
+        self._epoch_lock = threading.Lock()     # taken before _lock, never the other way round
         self._monitors: dict[str, Monitor] = {}
         self._pending: deque = deque()
         with _hubs_lock:
@@ -753,8 +800,13 @@ class MonitorHub:
         if monitor.pgid:
             _watchdog.add(monitor.pgid)
         with self._lock:
-            self._monitors[mid] = monitor
-        monitor.thread.start()
+            stale = monitor.epoch != self.epoch
+            if not stale:
+                self._monitors[mid] = monitor
+        monitor.thread.start()                  # the reader reaps it either way
+        if stale:
+            monitor.request_stop("shutdown")
+            return "error: the conversation was replaced while the monitor started; it was stopped"
         self._notify("started", {"id": mid, "description": description, "command": label,
                                  "persistent": persistent, "timeout_ms": timeout_ms,
                                  "sandboxed": bool(argv)})
@@ -769,6 +821,8 @@ class MonitorHub:
     # ---- events ---------------------------------------------------------------------------------
     def _queue_batch(self, monitor: Monitor, batch: Batch) -> None:
         with self._lock:
+            if batch.epoch != self.epoch:
+                return                          # its conversation was replaced after it closed
             mine = [item for item in self._pending
                     if item.monitor_id == monitor.id and item.kind == "output"]
             if len(mine) >= MAX_PENDING_BATCHES_PER_MONITOR:
@@ -791,8 +845,11 @@ class MonitorHub:
         if rows:
             lines.extend(_clean_line(row.encode("utf-8", "replace"), ())
                          for row in rows[-BACKGROUND_EXIT_TAIL_LINES:])
-        batch = Batch(bid, command_label[:MAX_DESCRIPTION_CHARS], "background_exit", lines=lines)
+        batch = Batch(bid, command_label[:MAX_DESCRIPTION_CHARS], "background_exit", lines=lines,
+                      epoch=epoch)
         with self._lock:
+            if batch.epoch != self.epoch:
+                return False                    # replaced while the tail was being cleaned
             self._pending.append(batch)
         self._notify("pending", {"id": bid})
         return True
@@ -810,24 +867,28 @@ class MonitorHub:
         if reason == "timeout":
             message = f"ended: timed out after {elapsed}s"
         elif reason == "flood":
-            message = (f"stopped: printed more than {FLOOD_LINES_PER_60S} lines in 60s — filter with "
-                       "grep --line-buffered and print only lines that matter")
+            message = flood_message(monitor.flood_limit)
         elif reason in ("stopped", "shutdown"):
-            message = f"stopped after {events} events"
+            message = f"stopped after {plural(events, 'event')}"
         else:
-            message = f"ended: exit {proc.returncode} after {events} events"
+            message = f"ended: exit {proc.returncode} after {plural(events, 'event')}"
         lines = [message]
         if reason == "exited" and proc.returncode not in (0, None):
             tail = [row for row in monitor.ring_err.text().splitlines() if row.strip()][-5:]
             lines.extend(_clean_line(row.encode("utf-8", "replace"), ()) for row in tail)
+        queued = False
         if reason not in ("stopped", "shutdown"):
-            batch = Batch(monitor.id, monitor.description, "ended", lines=lines)
+            batch = Batch(monitor.id, monitor.description, "ended", lines=lines, epoch=monitor.epoch)
             with self._lock:
-                self._pending.append(batch)
+                if batch.epoch == self.epoch:   # never into a conversation that replaced its own
+                    self._pending.append(batch)
+                    queued = True
+        # The epoch travels with the callback: a frontend drops the end of a monitor whose
+        # conversation it has already replaced (see current_epoch).
         self._notify("ended", {"id": monitor.id, "description": monitor.description,
                                "reason": reason, "exit_code": proc.returncode,
-                               "events": events, "message": message})
-        if reason not in ("stopped", "shutdown"):
+                               "events": events, "message": message, "epoch": monitor.epoch})
+        if queued:
             self._notify("pending", {"id": monitor.id})
 
     def pending_count(self) -> int:
@@ -858,7 +919,19 @@ class MonitorHub:
             return
         with self._lock:
             for batch in reversed(notification.batches):
-                self._pending.appendleft(batch)
+                if batch.epoch == self.epoch:
+                    self._pending.appendleft(batch)
+
+    @contextmanager
+    def current_epoch(self, epoch):
+        """Yield whether ``epoch`` is still the current conversation, holding it there meanwhile.
+
+        new_epoch waits for the block to finish, so a frontend that checks and then publishes a
+        callback inside it can never publish an old conversation's event after the new one began.
+        Only a frontend's own publish belongs inside; never call back into the hub from it.
+        """
+        with self._epoch_lock:
+            yield epoch == self.epoch
 
     def discard_pending(self) -> None:
         with self._lock:
@@ -962,7 +1035,7 @@ class MonitorHub:
 
     def new_epoch(self, reason: str = "shutdown") -> None:
         """The conversation was replaced: stop monitors, drop their events and stale exit notices."""
-        with self._lock:
+        with self._epoch_lock, self._lock:
             self.epoch += 1
         self.shutdown(reason)
         with self._lock:
