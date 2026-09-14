@@ -1050,6 +1050,8 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   align-items: center; justify-content: center; gap: var(--sp-3);
   padding: var(--sp-5); background: rgba(0, 0, 0, .82); cursor: zoom-out;
 }
+/* The whole overlay is the focused dialog; a ring round the edge of the panel would only be noise. */
+#lightbox:focus { outline: none; }
 #lightbox img {
   max-width: 100%; max-height: calc(100vh - 96px); object-fit: contain;
   border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface);

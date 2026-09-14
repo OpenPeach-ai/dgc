@@ -4142,3 +4142,36 @@ test("with wake-ups off, the monitors row says events are waiting for your next 
   assert.equal(count.textContent, "3 waiting");
   assert.deepEqual(errors, []);
 });
+
+test("the full-size viewer takes focus, keeps Tab inside, and gives focus back when it closes", () => {
+  // Before: the dialog was a div with no tabindex, so focusing it did nothing. Focus stayed on the
+  // thumbnail, Tab walked to the Copy and rating buttons hidden under the overlay, and after Escape
+  // focus was left wherever Tab had taken it.
+  const { errors, send, doc, dom } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "turn_start", turn_id: "one", prompt: "check the deployed build" });
+  event({ type: "tool_images", call_id: "c1", caption: "browser screenshot",
+          images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="] });
+  event({ type: "text_delta", text: "Looks right." });
+  event({ type: "turn_end", turn_id: "one", reason: "completed" });
+  const shot = doc.querySelector(".shots .shot");
+  shot.focus();
+  shot.click(); shot.click();
+  const box = doc.getElementById("lightbox");
+  assert.ok(box);
+  assert.equal(doc.activeElement, box, "focus moves into the dialog");
+  const key = (name, init = {}) => {
+    const e = new dom.window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...init });
+    doc.activeElement.dispatchEvent(e);
+    return e;
+  };
+  for (let i = 0; i < 4; i += 1) {
+    const tab = key("Tab", { shiftKey: i % 2 === 1 });
+    assert.equal(tab.defaultPrevented, true);
+    assert.equal(doc.activeElement, box, "Tab stays inside the viewer");
+  }
+  key("Escape");
+  assert.equal(doc.getElementById("lightbox"), null);
+  assert.equal(doc.activeElement, shot, "focus returns to the thumbnail that opened it");
+  assert.deepEqual(errors, []);
+});

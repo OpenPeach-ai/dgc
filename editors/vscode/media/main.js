@@ -1425,19 +1425,30 @@
 
   function openLightbox(src, caption) {
     document.getElementById("lightbox")?.remove();
+    // A modal dialog has to behave like one for a keyboard: it takes focus (a div needs a tabindex
+    // for that), Tab cannot leave it for the buttons hidden under the overlay, and closing it puts
+    // focus back where it was.
+    const opener = document.activeElement;
     const box = el("div"); box.id = "lightbox";
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.setAttribute("aria-label", caption || "Screenshot");
+    box.tabIndex = -1;
     const img = el("img"); img.src = src; img.alt = caption || "Screenshot";
     box.appendChild(img);
     if (caption) { const cap = el("div", "lb-cap"); cap.textContent = caption; box.appendChild(cap); }
-    const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
-    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    const close = () => {
+      box.remove(); document.removeEventListener("keydown", onKey, true);
+      if (opener && opener !== document.body && opener.isConnected && typeof opener.focus === "function") opener.focus();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === "Tab") { e.preventDefault(); box.focus(); }   // nothing else to reach while it is open
+    };
     box.addEventListener("click", close);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     document.body.appendChild(box);
-    box.focus?.();
+    box.focus();
   }
 
   function shotStrip(images, caption) {
