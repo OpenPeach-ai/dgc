@@ -3629,7 +3629,7 @@
     usageEdges(settingsNav);
     usageEdges(document.querySelector(".usage-table-wrap"));
   });
-  function openSettings(providers, models, section) {
+  function openSettings(providers, models, section, range) {
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
@@ -3640,6 +3640,8 @@
     }
     $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
     if (lastConfig) fillSettings(lastConfig);
+    // `/usage 30d` opens the tab on the range it named; anything else keeps the last choice.
+    if (USAGE_RANGES.includes(range)) $("usage-range").value = range;
     settingsReturnFocus = document.activeElement;
     $("settings").hidden = false;
     showSettingsSection(section || "general");
@@ -3929,7 +3931,7 @@
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
-    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
+    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section, msg.range); }
     else if (msg.type === "usage_unavailable") { usageUnavailable(msg); }
     else if (msg.type === "mcp_command_started") {
       mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");

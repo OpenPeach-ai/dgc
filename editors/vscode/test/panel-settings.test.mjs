@@ -1807,3 +1807,23 @@ test("the Token Usage tab's request reaches get_usage, and an older CLI is told 
   assert.equal(posted.at(-1).type, "usage_unavailable");
   assert.equal(posted.at(-1).requestId, "usage-full");
 });
+
+test("/usage typed in the editor opens Token Usage, with the range it names", async () => {
+  // Before: slashText had no /usage route, so the command the slash menu offers went on as a
+  // custom command and the backend answered "unknown command: /usage".
+  const h = harness(), posted = [], sent = [], opened = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  h.provider.openSettings = (section, range) => opened.push([section, range]);
+  await h.provider.slashText("/usage");
+  await h.provider.slashText("/usage 30d");
+  await h.provider.slashText("/USAGE  all-time");
+  await h.provider.slashText("/usage week");
+  assert.deepEqual(opened, [["usage", undefined], ["usage", "30d"], ["usage", "all"], ["usage", "7d"]]);
+  await h.provider.slashText("/usage fortnight");
+  assert.equal(opened.length, 4, "an unknown range opens nothing");
+  assert.deepEqual(posted.at(-1), { type: "event", event: { type: "error",
+    message: "usage: /usage [today|7d|30d|month|all]" } });
+  assert.equal(sent.some(command => command.type === "slash_command"), false,
+    "never sent on as an unknown custom command");
+});

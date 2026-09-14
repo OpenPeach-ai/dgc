@@ -3965,3 +3965,13 @@ test("the typed /usage command opens the Token Usage tab through the extension h
   assert.doesNotMatch(mainCss, /\.usage-clip \{[^}]*max-width: 140px/, "ids are not cut at a fixed 140px");
   assert.match(mainCss, /\.usage-table-wrap\.more-right \{[^}]*mask-image/, "a table with hidden columns says so");
 });
+
+test("settings opened on Token Usage with a range asks for that range", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "30d" });
+  assert.equal(doc.getElementById("usage-range").value, "30d");
+  assert.equal(posted.findLast(m => m.type === "getUsage").range, "30d");
+  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "bogus" });
+  assert.equal(doc.getElementById("usage-range").value, "30d", "an unknown range leaves the choice alone");
+  assert.deepEqual(errors, []);
+});

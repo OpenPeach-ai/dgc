@@ -25,6 +25,14 @@ const EXIT_AFTER_ERROR_MS = 30 * 1000;
 const UNASSISTED_EXITS_KEY = "dgc.unassistedExits.v1";
 const REPEAT_EXIT_WINDOW_MS = 30 * 60 * 1000;
 const REPEAT_EXIT_LIMIT = 3;
+/** The `/usage` range spellings, exactly as dgc/usage_ledger.py `_RANGE_ALIASES` reads them. */
+const USAGE_RANGE_ALIASES: Record<string, string> = {
+  today: "today", day: "today", "1d": "today",
+  "7d": "7d", "7": "7d", week: "7d", "7days": "7d",
+  "30d": "30d", "30": "30d", "30days": "30d",
+  month: "month", "this-month": "month", thismonth: "month",
+  all: "all", "all-time": "all", alltime: "all", ever: "all",
+};
 const PANEL_DISPOSED_CAUSE = "panel disposed (window reload, close or extension update)";
 
 interface InterruptedTurnMark {
@@ -2858,6 +2866,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (name === "usage") {
+      // The terminals print the ledger; the editor has the Token Usage tab for it. The ranges and
+      // their spellings are the CLI's (usage_ledger.normalize_range), so `/usage 30d` means the same.
+      const range = USAGE_RANGE_ALIASES[rest.toLowerCase().replace(/\s+/g, "")];
+      if (!rest) { this.openSettings("usage"); }
+      else if (range) { this.openSettings("usage", range); }
+      else {
+        this.post({ type: "event", event: { type: "error", message: "usage: /usage [today|7d|30d|month|all]" } });
+      }
+      return;
+    }
     if (name === "todo") {
       // The terminals' `/todo clear` works here too: the editor has no `todo` command of its own,
       // and sending it on as a custom command only ever produced "unknown command".
@@ -3448,11 +3467,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- in-webview settings page --------------------------------------------
-  openSettings(section = "general"): void {
-    this.inVisiblePanel(() => { void this.loadSettings(section); });
+  openSettings(section = "general", usageRange?: string): void {
+    this.inVisiblePanel(() => { void this.loadSettings(section, usageRange); });
   }
 
-  private async loadSettings(section: string): Promise<void> {
+  private async loadSettings(section: string, usageRange?: string): Promise<void> {
     const be = this.ensureBackend();
     const configReady = this.requestState(
       be, "config-read", { type: "get_config" }, "config", 5000);
@@ -3467,7 +3486,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         err?.message || "DGC could not read its current settings.");
     }
     await modelReady;
-    this.post({ type: "settings_open", providers, models, section });
+    this.post({ type: "settings_open", providers, models, section, ...(usageRange ? { range: usageRange } : {}) });
   }
 
   async saveSettings(v: any): Promise<void> {
