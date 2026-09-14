@@ -24,7 +24,9 @@ of questions has been asked, so the rest of the turn (a whole goal run) goes on 
 you type counts: attached files and editor context never ask, a goal's objective never re-opens the
 picker on later cycles or turns, and a sentence that describes software ("the dropdown should let me
 choose a region", "write tests for propose_options") is not an ask. Neither is an ask you negate or
-take back ("don't give me options, just pick", "... actually, never mind, you decide").
+take back ("don't give me options, just pick", "... actually, never mind, you decide"), including a
+take-back you type as steering while the turn runs. A limit on the options leaves the ask standing
+("give me options to choose from, but don't list more than three").
 
 Some turns still have nobody to answer: a turn DGC starts on a background event, a full-auto
 `dgc -p` run, a sub-agent in full-auto, and a subscription CLI turn. When you ask on one of these,
