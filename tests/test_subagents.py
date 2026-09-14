@@ -356,6 +356,38 @@ class RegistryTests(unittest.TestCase):
         self.assertLessEqual(len(clipped), 500)
         self.assertEqual(subagents.clip("short", 500), "short")
 
+    def test_urls_lose_userinfo_query_and_fragment_before_the_clip(self):
+        raw = ('HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": '
+               '"denied for Bearer [REDACTED] at https://[REDACTED]@internal.example/v1?token=abcdef0123456789abcdef"}}'
+               "\n  → the endpoint rejected the key")
+        self.assertEqual(subagents.scrub_urls(raw).splitlines()[0],
+                         'HTTP 401 from http://127.0.0.1:5101/v1/chat/completions: {"error": {"message": '
+                         '"denied for Bearer [REDACTED] at https://internal.example/v1"}}')
+        self.assertEqual(subagents.scrub_urls("at https://[::1]:8080/a/b?x=1#y and http://u:p@h.example?k=v"),
+                         "at https://[::1]:8080/a/b and http://h.example")
+        self.assertEqual(subagents.scrub_urls("plain http://host:1/path and file:///tmp/x"),
+                         "plain http://host:1/path and file:///tmp/x")
+        rec = Recorder()
+        reg = SubagentRegistry(rec)
+        reg.start(id=sid(1), description="d")
+        reg.end(sid(1), "failed", "x" * 490 + " https://h.example/v1?token=abcdef0123456789abcdef")
+        ended = [p for kind, p in rec.events if kind == "ended"][0]
+        self.assertNotIn("abcdef", json.dumps(ended))
+        self.assertNotIn("abcdef", json.dumps(reg.snapshot()))
+        self.assertLessEqual(len(ended["message"]), subagents.MAX_MESSAGE)
+        restored = subagents.restore_records(task_turn(
+            "c", "a", "Sub-task 'a' did not complete: HTTP 500 from https://h.example/v1?key=abcdef0123456789"), "s")
+        self.assertEqual(restored[0]["message"], "HTTP 500 from https://h.example/v1")
+
+    def test_terminal_meta_shows_one_line_of_a_long_message(self):
+        item = {"state": "failed", "message": "first line " + "y" * 300 + "\n  → second line", "duration_ms": 2000}
+        meta = subagents.meta_text(item)
+        self.assertNotIn("second line", meta)
+        self.assertNotIn("\n", meta)
+        self.assertTrue(meta.startswith("failed · first line y"))
+        self.assertTrue(meta.endswith("… · 2s"), meta)
+        self.assertLessEqual(len(subagents.first_line(item["message"])), subagents.MAX_MESSAGE_LINE)
+
     def test_redaction_happens_before_the_clip(self):
         secret = "known-secret-value-abcdefghijklmnop"
         config = fixture_config(Path(tempfile.gettempdir()), api_key=secret)
@@ -964,6 +996,34 @@ class RebuildTests(unittest.TestCase):
         reg.prune_to([])
         self.assertEqual(reg.snapshot()["total"], 0)
 
+    def test_rewind_prune_skips_a_surviving_call_that_never_started_an_agent(self):
+        # Turn 1's call_0 was denied (no record); turn 2's call_0 started one. Rewinding to the
+        # end of turn 1 must drop turn 2's record, not keep it on turn 1's call.
+        for result in ("The user DENIED this action. Do not retry it.",
+                       "Max sub-agent depth reached — handle this sub-task directly instead.",
+                       "BLOCKED by a PreToolUse hook: no"):
+            with self.subTest(result=result):
+                reg = SubagentRegistry()
+                reg.start(id=sid(2), call_id="call_0", description="real one")
+                reg.end(sid(2), "finished")
+                survivors = [{"role": "system", "content": "s"}, *task_turn("call_0", "denied", result)]
+                reg.prune_to(survivors)
+                snap = reg.snapshot()
+                self.assertEqual((snap["total"], snap["items"]), (0, []))
+        # A surviving call with no result yet (the turn was cut) still keeps its record.
+        reg = SubagentRegistry()
+        reg.start(id=sid(3), call_id="call_0", description="cut")
+        reg.end(sid(3), "stopped")
+        reg.prune_to(task_turn("call_0", "cut", None))
+        self.assertEqual([i["id"] for i in reg.snapshot()["items"]], [sid(3)])
+        # Denied in turn 1, started in turn 2, both surviving: the started one stays.
+        reg = SubagentRegistry()
+        reg.start(id=sid(4), call_id="call_0", description="second")
+        reg.end(sid(4), "finished")
+        reg.prune_to([*task_turn("call_0", "first", "PERMISSION DENIED: task"),
+                      *task_turn("call_0", "second", "Sub-task 'second' completed.")])
+        self.assertEqual([i["id"] for i in reg.snapshot()["items"]], [sid(4)])
+
 
 class AgentBoundaryTests(HarnessCase):
     def test_resume_rebuilds_rewind_prunes_reset_clears(self):
@@ -1259,10 +1319,41 @@ class TuiTests(unittest.TestCase):
         self.assertIn(f"{glyphs.AGENT_RUN} 2 agents", text)
         self.assertNotIn("3 agents", text, "a background session's agents stay off the active bar")
         self.assertLess(text.index("2 agents"), text.index("⧉"))
+        self.assertGreater(text.index("2 agents"), text.index("Enter"), "wide: the count follows the chips")
         self.assertEqual(TUI_cls()._agents_working_desc(background.agent), " · 3 agents working")
         self.assertEqual(TUI_cls()._agents_working_desc(SimpleNamespace(subagents=registry_with(running=1))),
                          " · 1 agent working")
         self.assertEqual(TUI_cls()._agents_working_desc(SimpleNamespace(subagents=registry_with(finished=1))), "")
+
+    def test_narrow_bar_leads_with_the_compact_count(self):
+        # The bar is cut at the terminal's edge; at 60 columns the idle chips alone fill it.
+        from prompt_toolkit.formatted_text import to_formatted_text
+        from rich.cells import cell_len
+        tui = bare_tui()
+        tui._quit_armed = 0.0
+        tui._mouse_on = True
+        tui._overlay = None
+        tui._pane = None
+        tui._pane_visible = lambda: False
+        tui._req = None
+        tui._turn = threading.Event()
+        tui._sessions = []
+        tui._active_idx = 0
+        tui._tls = threading.local()
+        tui._width = 60
+        for reg, segment in ((registry_with(finished=3), f"{glyphs.AGENT_IDLE}3"),
+                             (registry_with(running=2, finished=1), f"{glyphs.AGENT_RUN}2/3"),
+                             (registry_with(running=1, waiting=1), f"{glyphs.AGENT_WAIT}2")):
+            with self.subTest(segment=segment):
+                tui.agent = SimpleNamespace(subagents=reg)
+                text = "".join(part[1] for part in to_formatted_text(tui._shortcut_bar()))
+                self.assertIn(segment, text)
+                self.assertLessEqual(cell_len(text[:text.index(segment) + len(segment)]), 60,
+                                     "the count is inside a 60-column bar")
+                self.assertLess(text.index(segment), text.index("send"))
+        tui.agent = SimpleNamespace(subagents=SubagentRegistry())
+        self.assertTrue("".join(p[1] for p in to_formatted_text(tui._shortcut_bar())).startswith("  Enter"),
+                        "no agents: the bar is unchanged")
 
     def test_dashboard_row_says_how_many_agents_work(self):
         from dgc import artifacts, sessions

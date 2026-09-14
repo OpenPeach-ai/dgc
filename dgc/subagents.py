@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from typing import Callable
@@ -31,7 +32,9 @@ MAX_ACTIVITY = 80
 MAX_AGENT_TYPE = 64
 MAX_MODEL = 200
 MAX_CALL_ID = 256
+MAX_MESSAGE_LINE = 120     # the one line a terminal row shows of a failure message
 _MAX_SAFE = 2 ** 53 - 1
+_URL_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>`]+")
 
 
 def clip(text, limit: int) -> str:
@@ -50,6 +53,32 @@ def clip(text, limit: int) -> str:
     if 0 <= start < cut < start + len(REDACTED):
         cut = start                                   # drop the marker whole
     return value[:cut].rstrip() + "…"
+
+
+def scrub_urls(text) -> str:
+    """Every URL in ``text`` without its userinfo, query or fragment (``scheme://host:port/path``).
+
+    A provider error quotes the endpoint it called, and redact_text removes known credentials and
+    URL userinfo but not a ``?token=…`` query, so a failure message would carry it into the agents
+    list. URLs with none of the three are left exactly as written."""
+    def clean(match: re.Match) -> str:
+        url = match.group(0)
+        if not any(mark in url for mark in "@?#"):
+            return url
+        scheme, rest = url.split("://", 1)
+        end = min([len(rest)] + [at for at in (rest.find(c) for c in "/?#") if at >= 0])
+        host = rest[:end].rpartition("@")[2]           # userinfo can hold "@", "[", ":"
+        path = rest[end:].split("#", 1)[0].split("?", 1)[0]
+        return f"{scheme}://{host}{path}"
+    return _URL_RE.sub(clean, str(text or ""))
+
+
+def first_line(text, limit: int = MAX_MESSAGE_LINE) -> str:
+    """The first non-empty line of ``text``, bounded for a one-line row."""
+    for line in str(text or "").splitlines():
+        if line.strip():
+            return clip(" ".join(line.split()), limit)
+    return ""
 
 
 def _int(value) -> int:
@@ -315,7 +344,7 @@ class SubagentRegistry:
 
     def activity(self, id: str, label: str) -> None:
         """What the agent is doing now (a stall notice, a retry); ``""`` clears it. Coalesced."""
-        label = clip(label, MAX_ACTIVITY) if label else ""
+        label = clip(scrub_urls(label), MAX_ACTIVITY) if label else ""
         with self._lock:
             record = self._records.get(str(id or ""))
             if record is None or record.state not in ACTIVE or record.activity == label:
@@ -360,7 +389,7 @@ class SubagentRegistry:
         record.tool_calls = max(_int(record.tool_calls), _int(tool_calls))
         if tokens:
             record.tokens = _int(tokens)
-        record.message = clip(message, MAX_MESSAGE) if message else ""
+        record.message = clip(scrub_urls(message), MAX_MESSAGE) if message else ""
         record.waiting_for = None
         record.activity = ""
         record.dirty = False
@@ -419,11 +448,15 @@ class SubagentRegistry:
         """A rewind: keep records whose `task` call is still in the transcript, drop the rest.
 
         call_ids repeat across turns (``call_0``…), so the match is positional: with k surviving
-        `task` calls carrying an id, the k earliest top-level records with that id survive.
-        Nested records follow their top-level ancestor.
+        `task` calls carrying an id that started an agent, the k earliest top-level records with
+        that id survive. A surviving call whose result says no agent started (a permission
+        denial, the depth limit, a hook) is not counted, or it would keep a later turn's record
+        with the same id alive. Nested records follow their top-level ancestor.
         """
         surviving: dict[str, int] = {}
-        for _index, _call_index, call, _args in _task_calls(messages):
+        for _index, _call_index, call, _args, outcome in _task_outcomes(messages):
+            if outcome is None:
+                continue
             call_id = clip(str(call.get("id") or ""), MAX_CALL_ID)
             surviving[call_id] = surviving.get(call_id, 0) + 1
         with self._publish:
@@ -561,10 +594,11 @@ def classify_result(description: str, content: str | None) -> tuple[str, str] | 
     return "finished", ""
 
 
-def restore_records(messages, session_key: str, *,
-                    redact: Callable[[str], str] | None = None) -> list[dict]:
-    """Records for a reopened chat, paired positionally: an assistant message's `task` calls
-    with the `tool` messages after it and before the next assistant message."""
+def _task_outcomes(messages, redact: Callable[[str], str] | None = None):
+    """Yield ``(message_index, call_index, call, arguments, outcome)`` for every `task` call, its
+    outcome from classify_result (``None`` when no agent started). Paired positionally: an
+    assistant message's `task` calls with the `tool` messages after it and before the next
+    assistant message, so a call_id repeated in another turn never borrows this turn's result."""
     redact = redact or (lambda text: text)
     messages = list(messages or [])
     results_after: dict[int, dict[str, str]] = {}
@@ -579,13 +613,23 @@ def restore_records(messages, session_key: str, *,
         elif role == "tool" and current is not None:
             call_id = str(message.get("tool_call_id") or "")
             results_after[current].setdefault(call_id, _result_text(message.get("content")))
-    records = []
     for index, call_index, call, args in _task_calls(messages):
         call_id = str(call.get("id") or "")
         description = redact(str(args.get("description") or ""))
-        outcome = classify_result(description, results_after.get(index, {}).get(call_id))
+        yield index, call_index, call, args, classify_result(
+            description, results_after.get(index, {}).get(call_id))
+
+
+def restore_records(messages, session_key: str, *,
+                    redact: Callable[[str], str] | None = None) -> list[dict]:
+    """Records for a reopened chat, one per `task` call that started an agent (see _task_outcomes)."""
+    redact = redact or (lambda text: text)
+    records = []
+    for index, call_index, call, args, outcome in _task_outcomes(messages, redact):
         if outcome is None:
             continue
+        call_id = str(call.get("id") or "")
+        description = redact(str(args.get("description") or ""))
         state, message = outcome
         digest = hashlib.sha1(f"{session_key}:{index}:{call_index}".encode()).hexdigest()[:12]
         agent_type = redact(str(args.get("agent") or "")) if isinstance(args.get("agent"), str) else ""
@@ -594,7 +638,8 @@ def restore_records(messages, session_key: str, *,
             "call_id": clip(call_id, MAX_CALL_ID) if call_id else None,
             "description": clip(description, MAX_DESCRIPTION),
             "agent_type": clip(agent_type, MAX_AGENT_TYPE) if agent_type else "",
-            "depth": 1, "state": state, "message": clip(redact(message), MAX_MESSAGE) if message else "",
+            "depth": 1, "state": state,
+            "message": clip(scrub_urls(redact(message)), MAX_MESSAGE) if message else "",
             "isolated": False, "parallel": False, "restored": True, "listed": True,
         })
     return records
@@ -654,7 +699,7 @@ def meta_text(item: dict, *, main_model: str = "", fmt_tokens: Callable[[int], s
     elif state == "running" and item.get("activity"):
         parts.append(str(item["activity"]))
     if state in ENDED and item.get("message"):
-        parts.append(str(item["message"]))
+        parts.append(first_line(item["message"]))
     if item.get("restored"):
         return " · ".join(parts)
     if item.get("agent_type"):

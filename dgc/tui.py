@@ -2358,7 +2358,12 @@ class TUI:
             f"[{key}]{_esc(k)}[/] [{lbl}]{_esc(l)}[/]" for k, l in chips)
         agents = self._agents_segment()     # this chat's task sub-agents (● 2 agents)
         if agents:
-            body += f"[{sep}]  {glyphs.RAIL}  [/]" + agents
+            # The bar is cut at the terminal's edge and the chips alone can fill a narrow one, so
+            # under 80 columns the (compact) count leads; wider, it follows the chips.
+            if int(getattr(self, "_width", 0) or 0) >= 80:
+                body += f"[{sep}]  {glyphs.RAIL}  [/]" + agents
+            else:
+                body = agents + f"[{sep}]  {glyphs.RAIL}  [/]" + body
         # fleet indicator: how many agents + whether a BACKGROUND one is running / needs you (^\ = dashboard)
         if len(self._sessions) > 1:
             need = sum(1 for i, s in enumerate(self._sessions) if i != self._active_idx and s.state == "needs_input")
