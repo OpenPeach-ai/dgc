@@ -84,14 +84,38 @@ export function cliUpdateEnvironment(command: string, env: NodeJS.ProcessEnv = p
   return result;
 }
 
+/** Runs the executable and its fixed arguments, says how it ended, and waits for Enter. A terminal
+ *  whose own process is the CLI is disposed by VS Code the moment that process exits, which took the
+ *  installer's output, and any refusal in it, off the screen within seconds. */
+const HELD_TERMINAL_SCRIPT = [
+  'finished=$1; failed=$2; shift 2',
+  '"$@"',
+  "status=$?",
+  "echo",
+  'if [ "$status" -eq 0 ]; then printf "%s\\n" "$finished";',
+  'else printf "%s (exit %s). The output above says why.\\n" "$failed" "$status"; fi',
+  'printf "Press Enter to close this terminal. "',
+  "read -r _ || true",
+  'exit "$status"',
+].join("\n");
+
+/** A terminal that runs `executable args…` and stays open, with how it ended, until it is read.
+ *  Nothing configurable reaches shell text: the script is a constant, and the messages, the
+ *  executable and its arguments are positional parameters. On Windows the executable stays the
+ *  terminal's own process. */
+export function heldCliTerminalOptions(executable: string, args: string[], name: string,
+                                       done: string, failed: string): vscode.TerminalOptions {
+  if (process.platform === "win32") { return { name, shellPath: executable, shellArgs: args }; }
+  return { name, shellPath: "/bin/sh", shellArgs: ["-c", HELD_TERMINAL_SCRIPT, name, done, failed, executable, ...args] };
+}
+
 /** The terminal behind every manual "update the CLI" action: the exact executable with a fixed
  *  `update` argument (never `curl | bash` typed into a shell), the install's own location, and
  *  DGC_SKIP_EXTENSION so the installer cannot replace the running extension with the published one. */
 export function updateTerminalOptions(executable: string, name = "DGC update"): vscode.TerminalOptions {
   return {
-    name,
-    shellPath: executable,
-    shellArgs: ["update"],
+    ...heldCliTerminalOptions(executable, ["update"], name,
+      "DGC CLI update finished. Run DGC: Restart Backend to use it.", "DGC CLI update failed"),
     env: { DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) },
   };
 }

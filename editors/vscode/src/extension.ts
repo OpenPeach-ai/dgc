@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { resolveDgcExecutable } from "./configuration";
-import { updateTerminalOptions } from "./cliupdate";
+import { heldCliTerminalOptions, updateTerminalOptions } from "./cliupdate";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -28,13 +28,15 @@ export function activate(context: vscode.ExtensionContext): void | object {
     // `update` also carries the install's own location and DGC_SKIP_EXTENSION (see
     // updateTerminalOptions): without the latter, the installer run from this terminal would
     // reinstall the published .vsix over the extension that is running it.
+    // Every one of these prints its result and exits, and a terminal whose process has exited is
+    // closed at once: the output has to be held on screen until it has been read.
     const term = vscode.window.createTerminal(subcommand === "update"
       ? updateTerminalOptions(executable.command, "DGC update")
-      : {
-        name: subcommand === "notes" ? "DGC notes" : "DGC export-training",
-        shellPath: executable.command,
-        shellArgs: [subcommand],
-      });
+      : subcommand === "notes"
+        ? heldCliTerminalOptions(executable.command, ["notes"], "DGC notes",
+          "Those are this project's context notes.", "DGC notes failed")
+        : heldCliTerminalOptions(executable.command, ["export-training"], "DGC export-training",
+          "Export finished.", "DGC export-training failed"));
     term.show();
     return true;
   };

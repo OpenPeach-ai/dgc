@@ -108,12 +108,20 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
   registered.get("dgc.updateCli")();
   registered.get("dgc.exportTraining")();
 
-  assert.deepEqual(terminals.map((terminal) => terminal.options), [
-    { name: "DGC update", shellPath: "/opt/DGC CLI/dgc;literal", shellArgs: ["update"],
-      env: { DGC_SKIP_EXTENSION: "1" } },
-    { name: "DGC export-training", shellPath: "/opt/DGC CLI/dgc;literal",
-      shellArgs: ["export-training"] },
-  ]);
+  // The terminal holds the output open under /bin/sh, but the executable and its argv are still
+  // positional parameters after a constant script: never shell text.
+  const [update, exporting] = terminals.map((terminal) => terminal.options);
+  assert.equal(update.name, "DGC update");
+  assert.deepEqual(update.env, { DGC_SKIP_EXTENSION: "1" });
+  assert.equal(update.shellPath, "/bin/sh");
+  assert.deepEqual(update.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "update"]);
+  assert.equal(exporting.name, "DGC export-training");
+  assert.equal(exporting.shellPath, "/bin/sh");
+  assert.deepEqual(exporting.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "export-training"]);
+  for (const options of [update, exporting]) {
+    assert.equal(options.shellArgs[0], "-c");
+    assert.doesNotMatch(options.shellArgs[1], /opt\/DGC CLI|literal/, "the script never contains the configured path");
+  }
   assert.ok(warnings.every((message) => message.includes("workspace-level dgc.command")));
 
   inspectedCommand = {
@@ -121,7 +129,7 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
     workspaceFolderValue: "/tmp/folder-controlled",
   };
   registered.get("dgc.updateCli")();
-  assert.equal(terminals.at(-1).options.shellPath, "dgc",
+  assert.equal(terminals.at(-1).options.shellArgs.at(-2), "dgc",
     "a workspace-only executable override must fall back to the extension default");
 });
 

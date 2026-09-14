@@ -1,6 +1,7 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -247,10 +248,12 @@ test("every manual update terminal runs the exact executable with the install's 
   const tree = join(scratch, "terminal", "custom-dgc");
   const bin = join(scratch, "terminal", "bin");
   const launcher = launcherTo(bin, installTree(tree));
-  assert.deepEqual(updateTerminalOptions(launcher, "Update DGC"), {
-    name: "Update DGC", shellPath: launcher, shellArgs: ["update"],
-    env: { DGC_SKIP_EXTENSION: "1", DGC_DIR: tree, DGC_BIN: bin },
-  });
+  const options = updateTerminalOptions(launcher, "Update DGC");
+  assert.equal(options.name, "Update DGC");
+  assert.deepEqual(options.env, { DGC_SKIP_EXTENSION: "1", DGC_DIR: tree, DGC_BIN: bin });
+  assert.equal(options.shellPath, "/bin/sh");
+  assert.deepEqual(options.shellArgs.slice(-2), [launcher, "update"], "the executable and its argv are data, never shell text");
+  assert.doesNotMatch(options.shellArgs[1], new RegExp(launcher.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   // Both entry points use it, and neither types an installer pipeline into a shell any more.
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   const manual = panel.slice(panel.indexOf("private offerManualCliUpdate("));
@@ -359,4 +362,26 @@ test("the first-install terminal keeps the installer away from the running exten
   assert.match(body, /sendText\(INSTALL_COMMAND\)/);
   assert.doesNotMatch(body, /createTerminal\("/);
   assert.equal(INSTALL_COMMAND, "curl -fsSL https://vibedgc.com/install.sh | bash");
+});
+
+
+test("the update terminal keeps the installer's output on screen and says how it ended", () => {
+  // Before: the terminal's own process was dgc, and VS Code disposes such a terminal the moment it
+  // exits, so the output and any refusal were gone in about two seconds, leaving only a generic
+  // "terminal process terminated with exit code: 1" toast.
+  const odd = join(scratch, "odd path; touch INJECTED", "dgc");
+  mkdirSync(dirname(odd), { recursive: true });
+  writeFileSync(odd, '#!/usr/bin/env bash\necho "argv:$*"\necho "✗ this dgc runs from a git checkout"\nexit 1\n');
+  chmodSync(odd, 0o700);
+  const run = (options) => spawnSync(options.shellPath, options.shellArgs, {
+    cwd: scratch, input: "\n", encoding: "utf8", env: { ...process.env, ...options.env } });
+  const failed = run(updateTerminalOptions(odd));
+  assert.equal(failed.status, 1, "the terminal ends with the update's own status");
+  assert.match(failed.stdout, /argv:update\n✗ this dgc runs from a git checkout/, "the installer's words stay");
+  assert.match(failed.stdout, /DGC CLI update failed \(exit 1\)\. The output above says why\./);
+  assert.match(failed.stdout, /Press Enter to close this terminal/, "and it waits to be read");
+  assert.equal(existsSync(join(scratch, "INJECTED")), false, "a path with shell syntax in it is only a path");
+  const ok = run(updateTerminalOptions(fakeCli("dgc-ok", { stdout: "installed 0.39.0" })));
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /installed 0\.39\.0[\s\S]*DGC CLI update finished\. Run DGC: Restart Backend to use it\./);
 });
