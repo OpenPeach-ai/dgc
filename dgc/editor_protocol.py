@@ -299,6 +299,24 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "retained_tasks": {
         "items": _A(), "errors": _A(False), "total": _I(False), "request_id": _S(False),
     },
+    # ---- v13 token usage (local ledger) -------------------------------------------------------
+    # The answer to get_usage: what ~/.dgc/usage.sqlite holds for one range, aggregated on this
+    # machine from what each provider reported. Nothing is fetched from a provider. Nested shapes:
+    #   totals   {input_tokens, output_tokens, cached_input_tokens, requests, unmetered_requests}
+    #   by_model [{model, provider, host, requests, unmetered_requests, input_tokens,
+    #              output_tokens, cached_input_tokens}]  sorted by input+output tokens, at most 100
+    #   by_day   [{date "YYYY-MM-DD" (local), input_tokens, output_tokens, cached_input_tokens,
+    #              requests}]  every local day of the range, oldest first, zero days included
+    # ``timezone`` names the local time the day boundaries follow; ``error`` is set (with zero
+    # totals) when the ledger could not be read. ``host`` is an endpoint host[:port], never a URL.
+    "usage_report": {
+        "request_id": _S(),
+        "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+        "generated_at": _S(), "timezone": _S(False),
+        "totals": _O(), "by_model": _A(), "by_day": _A(),
+        "error": _S(False),
+    },
+    # ---- end v13 token usage -------------------------------------------------------------------
 }
 
 
@@ -431,6 +449,13 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_config": {"request_id": _S(False)},
     "status": {"request_id": _S(False)},
     "shutdown": {},
+    # ---- v13 token usage (local ledger) -------------------------------------------------------
+    # Read-only and allowed while a turn runs; answered by one usage_report with this request_id.
+    "get_usage": {
+        "request_id": _S(),
+        "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+    },
+    # ---- end v13 token usage -------------------------------------------------------------------
 }
 
 

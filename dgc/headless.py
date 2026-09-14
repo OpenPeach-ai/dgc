@@ -781,7 +781,7 @@ class Backend:
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
-                          "resume_turn": True,
+                          "resume_turn": True, "usage_ledger": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -1235,6 +1235,21 @@ class Backend:
         from .docs import catalog
         items = catalog()
         self.em.emit("docs_catalog", request_id=request_id, items=items, total=len(items))
+
+    def _emit_usage(self, request_id: str, range_name: str) -> None:
+        """Answer get_usage from the local ledger on a short-lived thread.
+
+        An all-time aggregate over a busy year is a few hundred milliseconds of sqlite; the command
+        reader must stay free for a Stop meanwhile. The report never contains prompt or reply text.
+        """
+        def run() -> None:
+            from . import usage_ledger
+            try:
+                report = usage_ledger.report(range_name)
+            except Exception as exc:        # a report is informational; say why and carry on
+                report = usage_ledger.empty_report(range_name, error=f"{type(exc).__name__}: {exc}")
+            self.em.emit("usage_report", request_id=request_id, **report)
+        threading.Thread(target=run, name="dgc-usage-report", daemon=True).start()
 
     def _emit_doc(self, request_id: str, identifier: str) -> None:
         from .docs import find_id, slug
@@ -2093,6 +2108,14 @@ class Backend:
 
         elif t == "get_doc":
             self._emit_doc(str(cmd.get("request_id") or ""), str(cmd.get("id") or ""))
+
+        elif t == "get_usage":
+            usage_request = str(cmd.get("request_id") or "")
+            if not usage_request or len(usage_request) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+            else:
+                self._emit_usage(usage_request, str(cmd["range"]))
 
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))
