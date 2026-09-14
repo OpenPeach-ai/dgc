@@ -2048,10 +2048,13 @@ def unit_tests(tmp: Path):
     _bgproc = _tools_bg._BG.get(_bgid, {}).get("proc")
     from dgc.scheduler import workspace_mutation_lock as _workspace_lock
     _lease = _workspace_lock(tmp)
-    _unexpected_lease = _lease.acquire(timeout=0.05)
-    if _unexpected_lease:
+    # The lease covers the spawn only (release 0.39): a running dev server or watcher must not
+    # block every later edit and foreground command for as long as it runs.
+    _running_lease = _lease.acquire(timeout=1.0)
+    if _running_lease:
         _lease.release()
-    check("background bash holds the shared workspace write lease", not _unexpected_lease)
+    check("background bash releases the workspace write lease once it has spawned",
+          _running_lease and bool(_bgproc) and _bgproc.poll() is None)
     killed = execute("bash_kill", {"id": _bgid}, ctx)
     check("background bash kill reaps the process group",
           bool(_bgproc) and _bgproc.poll() is not None and "process group reaped" in killed, killed)
@@ -2878,6 +2881,12 @@ def unit_tests(tmp: Path):
     }
     check(f"every literal headless event is declared in protocol v{_PROTOCOL_VERSION}",
           _emitted_types <= set(_EVENT_FIELDS))
+    # Emitter.emit builds {"type", "seq"} and then applies the payload: a payload field with either
+    # name would overwrite the frame's own ordering (a monitor event's per-monitor counter once did).
+    check("no protocol message declares a field the frame envelope owns (seq, type)",
+          not any({"seq", "type"} & set(fields)
+                  for specs in (_EVENT_FIELDS, _COMMAND_FIELDS) for fields in specs.values())
+          and "event_index" in _EVENT_FIELDS["monitor_event"])
 
     # The installed-build discovery command is intentionally usable without Config, user state,
     # a session, an update check, or a model endpoint.

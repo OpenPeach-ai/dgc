@@ -55,7 +55,19 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url",
+    "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
+    "monitor_max_consecutive_wakes",
 })
+# Commands that only read state. Every other command is the user doing something, so a monitor
+# wake-up waits one wake delay after it -- and never starts while the command is being handled.
+_WAKE_NEUTRAL_COMMANDS = frozenset({
+    "get_chat_changes", "get_chat_change", "get_workspace_changes", "get_workspace_change",
+    "list_models", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
+    "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
+    "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
+    "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
+})
+_WAKE_YIELD_TIMEOUT = 10.0
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
@@ -86,13 +98,13 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
-    "get_memory", "add_memory",
+    "get_memory", "add_memory", "list_monitors", "stop_monitor",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
-    "ultra_mode",
+    "ultra_mode", "monitor_wake",
 })
 _CONFIG_STRING_LIMITS = {
     "subagent_model": 512,
@@ -122,6 +134,9 @@ _CONFIG_INTEGER_RANGES = {
     "context_size": (2_048, MAX_SAFE_INTEGER),
     "max_parallel_tasks": (1, 8),
     "autonomous_max_turns": (1, 1_000),
+    "monitor_wake_delay_s": (1, 300),
+    "monitor_wake_cooldown_s": (1, 3600),
+    "monitor_max_consecutive_wakes": (1, 100),
 }
 
 
@@ -388,7 +403,7 @@ def _command_lines(stream, watch: _PipeWatch | None = None):
 # second projection with its own rules -- it is the live event vocabulary, replayed. Anything in
 # this set is a turn fragment: it is meaningless without the ``turn_start`` above it.
 _MID_TURN_ITEMS = ("text_delta", "thinking_delta", "stream_end",
-                   "tool_call", "tool_result", "tool_denied", "turn_end")
+                   "tool_call", "tool_result", "tool_denied", "monitor_event", "turn_end")
 
 
 def _safe_busy(backend) -> bool:
@@ -656,7 +671,7 @@ class HeadlessUI:
         rid, ev = self.pending.register()
         preview = edit_preview(name, args, self.preview_root) if self.preview_root else ""
         self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
-                     command=(args.get("command") if name == "bash" else None),
+                     command=(args.get("command") if name in ("bash", "monitor") else None),
                      summary=arg_summary(name, args), diff=preview or None,
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
@@ -764,6 +779,17 @@ class Backend:
         self._goal_auto_resumes = 0   # consecutive automatic goal restarts after a failed turn
         self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
+        # Background monitors. The flag is what exposes the `monitor` tool: only this backend (and
+        # the TUI) can deliver events and start a turn on one. `dgc -p --output-format json` shares
+        # HeadlessUI but never runs this constructor, so it never offers the tool.
+        self._running_turn_kind = ""
+        self._wake_yield = False
+        self._wake_suppressed = 0
+        self._wake_timer: threading.Timer | None = None
+        self._monitors_timer: threading.Timer | None = None
+        self._monitors_timer_lock = threading.Lock()
+        self.agent.monitors.listener = self._on_monitor
+        self.ui.monitor_wake_enabled = True
 
     def _add_rule(self, rule_text: str) -> None:
         try:
@@ -787,7 +813,7 @@ class Backend:
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
-                          "resume_turn": True,
+                          "resume_turn": True, "monitors": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -868,10 +894,23 @@ class Backend:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         if kind in ("prompt", "continue"):
             self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
+        if kind in ("prompt", "continue", "resume"):
+            hub = getattr(getattr(self, "agent", None), "monitors", None)
+            if hub is not None:
+                hub.policy.note_user_prompt()   # a person is here: wake-ups start counting again
         lock = self._turn_state_lock()
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
+            if (getattr(self, "_worker", None) is not None
+                    and getattr(self, "_running_turn_kind", "") == "monitor"
+                    and len(self._queue) < _MAX_QUEUED_TURNS):
+                # A turn DGC started on a monitor event yields to the person: their message is
+                # queued first, and the wake turn stops at its next boundary so it runs promptly.
+                self._queue.append((text, images, context, kind, request_id or ""))
+                self._wake_yield = True
+                self.agent.cancelled.set()
+                return "queued", len(self._queue)
             if getattr(self, "_worker", None) is not None:
                 steers = getattr(self, "_steer_payloads", {})
                 pending_bytes = sum(_turn_payload_bytes(*item[:3])
@@ -963,11 +1002,28 @@ class Backend:
                     # consuming it as an instant "stopped" turn nobody saw run.
                     if not self._queue or getattr(self.agent, "stopping", False) is True:
                         self._worker = None
-                        return
+                        retired = True
+                    else:
+                        retired = False
+                if retired:
+                    self._maybe_wake()
+                    return
+                with lock:
+                    if not self._queue or getattr(self.agent, "stopping", False) is True:
+                        continue
                     item = self._queue.pop(0)
                     text, images, context = item[0], item[1], item[2]
                     turn_kind = item[3] if len(item) > 3 else "prompt"
                     turn_request = item[4] if len(item) > 4 and isinstance(item[4], str) else ""
+                    notification = None
+                    if turn_kind == "monitor":
+                        hub = self.agent.monitors
+                        notification = (None if self._wake_blocked_locked()
+                                        else hub.take_pending())
+                        if notification is None:
+                            continue            # nothing left to deliver, or waking is not allowed
+                    self._running_turn_kind = turn_kind
+                    self._wake_yield = False
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
                     # Clear only stale cancellation while dequeue is serialized. A concurrent
@@ -983,7 +1039,8 @@ class Backend:
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if (turn_kind != "continue" and not getattr(self.agent, "session_name", None)
+                if (turn_kind not in ("continue", "monitor")
+                        and not getattr(self.agent, "session_name", None)
                         and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
                     if title and name_session(title):
@@ -997,8 +1054,12 @@ class Backend:
                 # The request id names WHICH queued message this is, so the panel drops that entry
                 # from its restorable queue rather than guessing by position (a queued custom slash
                 # command has no id and must not consume a user's queued prompt).
-                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt, kind=turn_kind,
+                self.em.emit("turn_start", turn_id=tid,
+                             prompt=notification.label if notification is not None else shown_prompt,
+                             kind=turn_kind,
                              **({"request_id": turn_request} if turn_request else {}))
+                if notification is not None:
+                    self._emit_monitor_events(notification, "wake", tid)
                 eta_stop = self._start_eta_ticker(tid)
                 failed = False
                 try:
@@ -1007,7 +1068,9 @@ class Backend:
                         config_get("subscription_engine", "") if callable(config_get)
                         else getattr(active_config, "data", {}).get("subscription_engine", "")
                     ).strip().lower()
-                    if engine_key and images:
+                    if notification is not None:
+                        outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
+                    elif engine_key and images:
                         self.agent._pending_images = None
                         self.ui.error(
                             "subscription CLI delegation does not yet support DGC image attachments")
@@ -1029,6 +1092,15 @@ class Backend:
                         secret_values(active_config))["traceback"])
                 cancelled = self.agent.cancelled.is_set()
                 eta_stop.set()
+                hub = getattr(self.agent, "monitors", None)
+                if hub is not None:
+                    if turn_kind == "monitor":
+                        with lock:
+                            yielded, self._wake_yield = self._wake_yield, False
+                        hub.policy.finish_wake(self.config, ok=not failed,
+                                               cancelled=cancelled and not yielded, yielded=yielded)
+                    else:
+                        hub.policy.note_turn_end()
                 self._finish_steering(cancelled, failed)
                 try:
                     est = self.agent.estimate_tokens()
@@ -1037,8 +1109,12 @@ class Backend:
                 # Decided BEFORE the worker can retire: enqueueing here means the idle check below
                 # keeps this worker alive, and turn_end is still published before the resume's
                 # turn_start. Doing it after would strand the follow-up with no worker to run it.
-                self._maybe_auto_resume_goal(failed, cancelled)
+                if turn_kind != "monitor":
+                    # A wake turn is not goal work: its success must not reset the retry budget and
+                    # its failure must not queue a goal resume.
+                    self._maybe_auto_resume_goal(failed, cancelled)
                 with self._turn_state_lock():
+                    self._running_turn_kind = ""
                     idle = not self._queue
                     if idle and self._worker is current:
                         self._worker = None
@@ -1060,14 +1136,161 @@ class Backend:
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._emit_context()
                 if idle:
+                    self._maybe_wake()
                     return
         finally:
             # A broken output stream or unexpected fixture/runtime exception must not leave the
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
             with self._turn_state_lock():
+                self._running_turn_kind = ""
                 if self._worker is current:
                     self._worker = None
                     self._flush_unsaved_todo_clear()
+
+    # ---- background monitors ---------------------------------------------------------------------
+    # Lock order: the turn-state lock may be held while calling into the hub (take_pending,
+    # pending_count); the hub never calls this listener while holding its own locks.
+    def _on_monitor(self, kind: str, payload: dict) -> None:
+        """Monitor callbacks, from reader threads and the turn worker."""
+        try:
+            turn_id = getattr(self.ui, "turn_id", "")
+            if kind == "started":
+                self.em.emit("monitor_started", id=payload["id"], description=payload["description"],
+                             command=payload["command"], persistent=bool(payload["persistent"]),
+                             timeout_ms=int(payload["timeout_ms"]),
+                             sandboxed=bool(payload.get("sandboxed")),
+                             **({"turn_id": turn_id} if turn_id else {}))
+                self._schedule_monitors_snapshot()
+            elif kind == "ended":
+                exit_code = payload.get("exit_code")
+                self.em.emit("monitor_ended", id=payload["id"], description=payload["description"],
+                             reason=payload["reason"],
+                             exit_code=exit_code if isinstance(exit_code, int) else None,
+                             events=int(payload.get("events") or 0),
+                             message=str(payload.get("message") or ""))
+                self._schedule_monitors_snapshot()
+            elif kind == "delivered":
+                self._emit_monitor_events(payload["notification"], payload.get("delivery", "inline"),
+                                          turn_id)
+                self._schedule_monitors_snapshot()
+            elif kind == "pending":
+                self._schedule_monitors_snapshot()
+                self._maybe_wake()
+        except Exception:
+            pass                               # a monitor callback must never break a reader thread
+
+    def _emit_monitor_events(self, notification, delivery: str, turn_id: str = "") -> None:
+        for batch in notification.batches:
+            self.em.emit("monitor_event", id=batch.monitor_id, description=batch.description,
+                         event_index=int(batch.event_index), lines=list(batch.lines),
+                         omitted_lines=int(batch.omitted_lines), kind=batch.kind,
+                         delivery=delivery, **({"turn_id": turn_id} if turn_id else {}))
+
+    def _emit_monitors(self, request_id: str | None = None) -> None:
+        hub = getattr(getattr(self, "agent", None), "monitors", None)
+        if hub is None:
+            return
+        self.em.emit("monitors", items=hub.snapshot(), wake_paused=bool(hub.policy.paused),
+                     pending_events=hub.pending_events(), **_request_fields(request_id))
+
+    def _schedule_monitors_snapshot(self) -> None:
+        """Coalesce bursts of monitor changes into one `monitors` event."""
+        lock = getattr(self, "_monitors_timer_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if self._monitors_timer is not None:
+                return
+
+            def fire():
+                with lock:
+                    self._monitors_timer = None
+                try:
+                    self._emit_monitors()
+                except Exception:
+                    pass
+            timer = threading.Timer(0.25, fire)
+            timer.daemon = True
+            self._monitors_timer = timer
+            timer.start()
+
+    def _cancel_wake_timer_locked(self) -> None:
+        timer, self._wake_timer = getattr(self, "_wake_timer", None), None
+        if timer is not None:
+            timer.cancel()
+
+    def _wake_blocked_locked(self) -> bool:
+        """A state in which no wake may start at all. Caller holds the turn-state lock."""
+        agent = getattr(self, "agent", None)
+        if (getattr(agent, "monitors", None) is None or getattr(self, "_wake_suppressed", 0)
+                or getattr(agent, "stopping", False)):
+            return True
+        config = getattr(self, "config", getattr(agent, "config", None))
+        get = getattr(config, "get", None)
+        engine = get("subscription_engine", "") if callable(get) else ""
+        # Plan mode is read-only and a delegated CLI owns its own turns: events wait for a prompt.
+        return bool(str(engine or "").strip() or getattr(agent, "mode", "default") == "plan")
+
+    def _wake_allowed_locked(self) -> float | None:
+        """Seconds until a wake may start (0 = now), or None. Caller holds the turn-state lock."""
+        if self._wake_blocked_locked() or self._busy() or getattr(self, "_queue", None):
+            return None
+        hub = self.agent.monitors
+        if not hub.pending_count():
+            return None
+        return hub.policy.ready_in(getattr(self, "config", getattr(self.agent, "config", None)))
+
+    def _maybe_wake(self) -> None:
+        """Start a monitor turn on an idle backend, or arm a timer for when one may start."""
+        agent = getattr(self, "agent", None)
+        hub = getattr(agent, "monitors", None)
+        if hub is None or not hasattr(self, "_queue") or not hub.pending_count():
+            return
+        lock = self._turn_state_lock()
+        paused_now = False
+        with lock:
+            self._cancel_wake_timer_locked()
+            delay = self._wake_allowed_locked()
+            if delay is None:
+                paused_now = hub.policy.paused and bool(hub.pending_count())
+            elif delay > 0:
+                timer = threading.Timer(delay + 0.02, self._maybe_wake)
+                timer.daemon = True
+                self._wake_timer = timer
+                timer.start()
+            else:
+                hub.policy.begin_wake()
+                self._queue.append(("", None, None, "monitor", ""))
+                worker = threading.Thread(target=self._run_turn_queue, daemon=True,
+                                          name="dgc-headless-turns")
+                self._worker = worker
+                worker.start()
+        if paused_now:
+            self._schedule_monitors_snapshot()
+
+    def _suppress_wakes(self, on: bool) -> None:
+        agent = getattr(self, "agent", None)
+        hub = getattr(agent, "monitors", None)
+        if hub is None:
+            return
+        with self._turn_state_lock():
+            if on:
+                self._wake_suppressed = getattr(self, "_wake_suppressed", 0) + 1
+                self._cancel_wake_timer_locked()
+                return
+            self._wake_suppressed = max(0, getattr(self, "_wake_suppressed", 0) - 1)
+        hub.policy.note_command(getattr(self, "config", getattr(agent, "config", None)))
+        self._maybe_wake()
+
+    def _yield_wake_turn(self) -> bool:
+        """If only a monitor wake turn holds the backend, stop it and wait for it to finish."""
+        with self._turn_state_lock():
+            if (getattr(self, "_running_turn_kind", "") != "monitor" or self._queue
+                    or getattr(self, "_foreground_worker", None) is not None):
+                return False
+            self._wake_yield = True
+            self.agent.cancelled.set()
+        return self._await_idle(_WAKE_YIELD_TIMEOUT)
 
     def _maybe_auto_resume_goal(self, failed: bool, cancelled: bool) -> bool:
         """Keep a standing goal running after a turn stops on its own.
@@ -1520,6 +1743,12 @@ class Backend:
         for worker in workers:
             if isinstance(worker, threading.Thread) and worker is not threading.current_thread():
                 worker.join(timeout=2)
+        hub = getattr(self.agent, "monitors", None)
+        if hub is not None:
+            with self._turn_state_lock():
+                self._wake_suppressed = getattr(self, "_wake_suppressed", 0) + 1
+                self._cancel_wake_timer_locked()
+            hub.shutdown("shutdown", wait=2.0)
         manager = getattr(self.agent, "mcp", None)
         if manager is not None:
             manager.stop_all()
@@ -1627,6 +1856,7 @@ class Backend:
                      artifact_in_plan=bool(c.get("artifact_in_plan", False)),
                      tool_profile=str(c.get("tool_profile", "adaptive")),
                      max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
+                     monitor_wake=bool(c.get("monitor_wake", True)),
                      goal=self._goal_snapshot(),
                      **_request_fields(request_id))
 
@@ -1719,11 +1949,36 @@ class Backend:
                 open_turn("", "prompt")     # saved work with no prompt above it still belongs to a turn
             return turn
 
+        from .workflows import notice_kind
         skip_next_ack = False
         for m in self.agent.messages:
             role = m.get("role")
             content = m.get("content")
             if role == "system":
+                continue
+            # First, before any content test: a notice's text is command output and may contain
+            # anything, including the markers below. It is a monitor turn or an event in a turn.
+            if notice_kind(m) == "monitor":
+                notice = m.get("_dgc_notice") or {}
+                if notice.get("delivery") == "wake":
+                    open_turn(str(notice.get("label") or "monitor events")[:200], "monitor")
+                current = ensure_turn()
+                for row in list(notice.get("items") or [])[:32]:
+                    if not isinstance(row, dict):
+                        continue
+                    kind = row.get("kind") if row.get("kind") in ("output", "ended",
+                                                                   "background_exit") else "output"
+                    items.append({
+                        "type": "monitor_event", "id": str(row.get("id") or "")[:64],
+                        "description": str(row.get("description") or "")[:200],
+                        "event_index": int(row.get("event_index") or 0)
+                        if isinstance(row.get("event_index"), int) else 0,
+                        "lines": [str(line)[:2000] for line in list(row.get("lines") or [])[:40]],
+                        "omitted_lines": max(0, int(row.get("omitted_lines") or 0))
+                        if isinstance(row.get("omitted_lines"), int) else 0,
+                        "kind": kind,
+                        "delivery": "wake" if notice.get("delivery") == "wake" else "inline",
+                        "turn_id": current["id"]})
                 continue
             # The resume instruction is written to the transcript as a user turn so the model
             # receives it, but the user did not type it. Live turns already render it as a marker
@@ -1825,6 +2080,21 @@ class Backend:
         return retained
 
     def dispatch(self, cmd: dict) -> None:
+        """Handle one command. A command that is not a pure read holds monitor wake-ups off while
+        it is handled and for one wake delay after, so a wake never starts under a user action
+        (new chat, resume, rewind, compact, settings) or right on top of it."""
+        kind = cmd.get("type") if isinstance(cmd, dict) else None
+        # A shutdown ends the loop by raising; nothing after it may arm a wake.
+        quiet = kind not in _WAKE_NEUTRAL_COMMANDS and kind != "shutdown"
+        if quiet:
+            self._suppress_wakes(True)
+        try:
+            self._dispatch(cmd)
+        finally:
+            if quiet:
+                self._suppress_wakes(False)
+
+    def _dispatch(self, cmd: dict) -> None:
         problem = command_error(cmd)
         if problem:
             safe_command = redact_value(
@@ -1841,7 +2111,7 @@ class Backend:
                              message="request_id must contain 1-128 characters")
                 return
 
-        if self._busy() and t in _BUSY_MUTATIONS:
+        if self._busy() and t in _BUSY_MUTATIONS and not self._yield_wake_turn():
             self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                          message=f"'{t}' is unavailable while a turn is running; cancel or wait",
                          **_request_fields(request_id))
@@ -2287,6 +2557,12 @@ class Backend:
             with self._turn_state_lock():
                 self.agent.cancelled.set()
                 self._queue.clear()
+            hub = getattr(self.agent, "monitors", None)
+            if hub is not None and hub.pending_count():
+                # Stop means stop: events keep arriving but no turn starts on them until the next
+                # prompt (or /monitors wake on).
+                hub.policy.pause("stopped")
+                self._schedule_monitors_snapshot()
             expired = self.pending.cancel_all(
                 {"decision": "no", "choice": None, "action": "cancel"})
             for rid in expired:
@@ -2564,6 +2840,7 @@ class Backend:
                          **_request_fields(request_id))
             self._emit_context(request_id)
             self._emit_goal()
+            self._emit_monitors()
         elif t == "fork_session":
             # "Branch from here" keeps the conversation and hands it a new identity, so the
             # chat it came from stops where the branch began instead of being overwritten.
@@ -2602,6 +2879,7 @@ class Backend:
             self.em.emit("history", items=[])
             self._emit_context()
             self._emit_goal()
+            self._emit_monitors()
         elif t == "resume_session":
             path = cmd.get("path")
             if not path and cmd.get("latest"):
@@ -2622,6 +2900,10 @@ class Backend:
                 self._emit_history()
                 self._emit_context()
                 self._emit_goal()
+                note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
+                if note:
+                    self.em.emit("info", message=note)
+                self._emit_monitors()
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
@@ -2757,6 +3039,18 @@ class Backend:
             self.em.emit("compacted", **self.agent.compaction_status(),
                          **_request_fields(request_id))
             self._emit_context(request_id)
+        elif t == "list_monitors":
+            self._emit_monitors(request_id)
+        elif t == "stop_monitor":
+            # Never blocks the command loop: the group is signalled here and reaped by its reader,
+            # which reports monitor_ended when it is gone.
+            hub = self.agent.monitors
+            target = str(cmd.get("id") or "")
+            if target == "all":
+                hub.stop_all("stopped")
+            elif not hub.stop(target, "stopped"):
+                self.em.emit("info", message=f"no running monitor '{target[:64]}'")
+            self._emit_monitors(request_id)
         elif t == "list_artifacts":
             self._emit_artifacts(request_id)
         elif t == "stop_artifact":

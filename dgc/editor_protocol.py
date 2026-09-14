@@ -65,8 +65,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # continuation marker, never words the user typed. v13: ``request_id`` names the prompt this
     # turn runs when the prompt carried one, so the panel removes exactly that message from its
     # queue -- a queued custom slash command (no id) must not consume the user's queued words.
+    # v13: "monitor" is a turn DGC started on its own because a background monitor printed
+    # something while the session was idle; ``prompt`` is then a short label, never user text.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
-                   "kind": _f("string", required=False, enum=("prompt", "resume", "continue")),
+                   "kind": _f("string", required=False,
+                              enum=("prompt", "resume", "continue", "monitor")),
                    "request_id": _S(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
@@ -193,6 +196,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "max_parallel_tasks": _I(False),
         "subscription_engine": _S(False), "subscription_engines": _A(False),
         "subscription_model": _S(False), "subscription_effort": _S(False),
+        "monitor_wake": _B(False),
     },
     "status": {
         "request_id": _S(False),
@@ -299,6 +303,25 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "retained_tasks": {
         "items": _A(), "errors": _A(False), "total": _I(False), "request_id": _S(False),
     },
+    # ---- v13: background monitors (TUI + editor) ----------------------------------------------
+    # A monitor is a command whose stdout lines reach the model as events: between tool calls
+    # during a turn ("inline"), or by starting a turn on an idle session ("wake", turn_start kind
+    # "monitor"). ``event_index`` counts one monitor's events from 1; it is deliberately not named
+    # ``seq``, which every frame carries as the stream's own ordering.
+    "monitor_started": {"id": _S(), "description": _S(), "command": _S(), "persistent": _B(),
+                        "timeout_ms": _I(), "sandboxed": _B(False), "turn_id": _S(False)},
+    "monitor_event": {"id": _S(), "description": _S(), "event_index": _I(), "lines": _A(),
+                      "omitted_lines": _I(False),
+                      "kind": _f("string", enum=("output", "ended", "background_exit")),
+                      "delivery": _f("string", enum=("inline", "wake")), "turn_id": _S(False)},
+    "monitor_ended": {"id": _S(), "description": _S(),
+                      "reason": _f("string", enum=("exited", "stopped", "timeout", "flood",
+                                                    "error", "shutdown")),
+                      "exit_code": _f("null", "integer"), "events": _I(), "message": _S(False)},
+    # items: {id, description, command, state: running|stopping|ended, events, pending_events,
+    # persistent, timeout_ms, started_at (epoch s), end_reason?, exit_code?}
+    "monitors": {"items": _A(), "wake_paused": _B(), "pending_events": _I(),
+                 "request_id": _S(False)},
 }
 
 
@@ -431,7 +454,21 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_config": {"request_id": _S(False)},
     "status": {"request_id": _S(False)},
     "shutdown": {},
+    # ---- v13: background monitors ------------------------------------------------------------
+    # Both answer with `monitors`. stop_monitor is allowed while a turn runs; id "all" stops every
+    # running monitor. Wake settings travel in set_config (monitor_wake and three bounded integers).
+    "list_monitors": {"request_id": _S(False)},
+    "stop_monitor": {"id": _S(), "request_id": _S(False)},
 }
+
+# Names the envelope owns. A payload field with either name would overwrite it on the wire
+# (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.
+RESERVED_FIELD_NAMES = frozenset({"type", "seq"})
+for _specs in (EVENT_FIELDS, COMMAND_FIELDS):
+    for _name, _fields in _specs.items():
+        _clash = RESERVED_FIELD_NAMES & set(_fields)
+        if _clash:
+            raise AssertionError(f"{_name} declares reserved protocol field {sorted(_clash)[0]!r}")
 
 
 def _type_ok(value, kind: str) -> bool:
