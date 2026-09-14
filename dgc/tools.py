@@ -1364,7 +1364,8 @@ def _render_output(oid: str, entry: dict, args: dict, *, background: bool) -> st
                       if folded_query in line.casefold()]
         offset = _positive_arg(args, "offset", 1)
         selected = candidates[offset - 1:offset - 1 + limit]
-        context = f"{len(candidates)} matching line(s) for a literal query"
+        context = (f"{len(candidates)} matching line{'' if len(candidates) == 1 else 's'} "
+                   "for a literal query")
         position = offset
     else:
         candidates = list(enumerate(lines, 1))
@@ -1373,7 +1374,7 @@ def _render_output(oid: str, entry: dict, args: dict, *, background: bool) -> st
         else:
             offset = _positive_arg(args, "offset", 1)
         selected = candidates[offset - 1:offset - 1 + limit]
-        context = f"{len(candidates)} retained line(s)"
+        context = f"{len(candidates)} retained line{'' if len(candidates) == 1 else 's'}"
         position = offset
 
     if background:

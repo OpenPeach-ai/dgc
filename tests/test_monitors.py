@@ -170,6 +170,8 @@ class HubTests(HubBase):
         self.assertIn("err-line", ended.lines)            # the stderr tail explains a failure
         self.assertEqual(self.hub.get(mid).exit_code, 3)
         shown = tools.bash_output({"id": mid}, self.ctx)
+        self.assertIn("3 retained lines]", shown)
+        self.assertNotIn("line(s)", shown, "/monitors show prints this text to the user")
         self.assertIn("[stderr]", shown)
         self.assertIn("err-line", shown)
         self.assertIn("exited 3", shown)
