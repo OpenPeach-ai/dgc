@@ -1923,7 +1923,10 @@ class Backend:
                                  workspace_trusted=self.workspace_trusted)
                     state, count = self._start_turn(text, images, context)
             else:
-                state, count = self._start_turn(text, images, context, request_id=request_id or "",
+                # The request id travels with a queued prompt so close() can hand it back if the
+                # backend stops before it runs; the delivery mode only when the editor chose one.
+                state, count = self._start_turn(text, images, context,
+                    **({"request_id": request_id} if request_id else {}),
                     **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
                 self.em.emit("prompt_accepted", request_id=request_id, state=state,
