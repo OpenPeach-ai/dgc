@@ -103,6 +103,9 @@ else
 fi
 BIN=$(abspath_of "${DGC_BIN:-$HOME/.local/bin}")
 LAUNCHER="$BIN/dgc"
+# What a refusal below offers as its override: this same install, at this same place, with the guard
+# lifted. A command to copy, where the refusals used to end in a bare DGC_FORCE_OVERWRITE=1.
+FORCED="curl -fsSL $BASE/install.sh | ${DGC_BASE_URL:+DGC_BASE_URL=$(printf '%q' "$BASE") }DGC_DATA_DIR=$(printf '%q' "$DATA") DGC_BIN=$(printf '%q' "$BIN") ${DGC_INSTALL_VERSION:+DGC_INSTALL_VERSION=$(printf '%q' "$DGC_INSTALL_VERSION") }DGC_FORCE_OVERWRITE=1 bash"
 if [ -n "$ADOPTED" ]; then
   say "found DGC on your PATH at $ADOPT_FOUND — updating that install (launcher $LAUNCHER)"
 fi
@@ -112,7 +115,7 @@ fi
 if [ -e "$DATA/.git" ] && [ "$FORCE" != 1 ]; then
   die "$DATA is a git checkout — refusing to install releases into it.
     Install elsewhere:  curl -fsSL $BASE/install.sh | DGC_DATA_DIR=\$HOME/.local/share/dgc bash
-    Or install into it anyway (the checkout's own files are not touched):  DGC_FORCE_OVERWRITE=1"
+    Or install into it anyway (the checkout's own files are not touched):  $FORCED"
 fi
 
 # The launcher is what actually changes. Replace only a launcher an installer made: a link into a
@@ -140,12 +143,12 @@ if [ -L "$LAUNCHER" ] || [ -e "$LAUNCHER" ]; then
   if [ "$LAUNCHER_KIND" = checkout ] && [ "$FORCE" != 1 ]; then
     die "$LAUNCHER runs $TREE, which is a git checkout — refusing to repoint it.
     Keep the checkout and put the release launcher elsewhere:  curl -fsSL $BASE/install.sh | DGC_BIN=\$HOME/.dgc-release/bin bash
-    Or repoint $LAUNCHER anyway (the checkout's files are not touched):  DGC_FORCE_OVERWRITE=1"
+    Or repoint $LAUNCHER anyway (the checkout's files are not touched):  $FORCED"
   fi
   if [ "$LAUNCHER_KIND" = foreign ] && [ "$FORCE" != 1 ]; then
     die "$LAUNCHER was not created by the DGC installer — refusing to replace it.
     Move it aside, or choose another launcher directory:  curl -fsSL $BASE/install.sh | DGC_BIN=<dir> bash
-    Or replace it anyway:  DGC_FORCE_OVERWRITE=1"
+    Or replace it anyway:  $FORCED"
   fi
 fi
 

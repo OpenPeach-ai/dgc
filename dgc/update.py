@@ -142,6 +142,7 @@ def _switch_to(c, location, version: str | None) -> int:
     download is needed to switch between complete versions."""
     from rich.markup import escape
     from . import install_layout as L
+    rollback = version is None
     fd = L.acquire_update_lock(location.data_dir)
     if fd is None:
         holder = L.update_lock_holder(location.data_dir)
@@ -181,7 +182,9 @@ def _switch_to(c, location, version: str | None) -> int:
         lines: list[str] = []
         code = L.activate(location.data_dir, location.bin_dir, version,
                           force=os.environ.get("DGC_FORCE_OVERWRITE") == "1",
-                          retention=False, out=lines.append)
+                          retention=False, out=lines.append,
+                          override="DGC_FORCE_OVERWRITE=1 dgc update "
+                                   + ("--rollback" if rollback else f"--version {version}"))
         for line in lines:
             c.print(line, highlight=False, markup=False)
         if code != 0:

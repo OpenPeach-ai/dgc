@@ -15,6 +15,7 @@ import http.server
 import io
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1064,6 +1065,51 @@ class QaInstallerRegressions(unittest.TestCase):
                 self.assertEqual(code, 0, printed.getvalue())
                 self.assertEqual(L.inspect_launcher(launcher).tree.name, target)
                 self.assertIn(str(launcher), printed.getvalue(), printed.getvalue())
+
+    def test_every_refusal_offers_an_override_command_that_runs_as_printed(self):
+        # The refusals ended in a bare 'DGC_FORCE_OVERWRITE=1': a variable, not something to run.
+        # Each now prints the install it refused, at the same place, with the guard lifted.
+        home = new_home("forced-command")
+        custom = home / "my tools"
+        bin_dir, data = custom / "bin", custom / "data dir"
+        launcher = bin_dir / "dgc"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/bin/sh\necho mine\n")
+        checkout_data = home / "src" / "dgc"
+        (checkout_data / ".git").mkdir(parents=True)
+        saved = dict(SITE.files)
+        self.addCleanup(lambda: setattr(SITE, "files", saved))
+        SITE.files = {"/install.sh": INSTALLER.read_bytes()}     # no archive: the forced run stops at the download
+        for env, refusal in ((clean_env(home, DGC_BIN=str(bin_dir), DGC_DATA_DIR=str(data)), "not created by the DGC installer"),
+                             (clean_env(home, DGC_BIN=str(home / "bin"), DGC_DATA_DIR=str(checkout_data)), "is a git checkout")):
+            done = run_installer(env)
+            text = output(done)
+            self.assertNotEqual(done.returncode, 0, text)
+            self.assertIn(refusal, text)
+            last = [line for line in text.replace("\x1b[0m", "").splitlines() if "anyway" in line][-1]
+            command = last.split(":  ", 1)[1].strip()
+            self.assertNotEqual(command, "DGC_FORCE_OVERWRITE=1", last)
+            self.assertTrue(command.startswith(f"curl -fsSL {SITE.url}/install.sh | "), command)
+            self.assertTrue(command.endswith("DGC_FORCE_OVERWRITE=1 bash"), command)
+            bare = {key: value for key, value in env.items() if not key.startswith("DGC_")}
+            bare["DGC_SKIP_EXTENSION"] = "1"
+            forced = subprocess.run(["bash", "-c", command], env=bare, capture_output=True, text=True,
+                                    timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, cwd=str(home))
+            self.assertNotIn(refusal, output(forced), "the printed command gets past the guard")
+            self.assertIn("downloading DGC", output(forced))
+        self.assertEqual(launcher.read_text(), "#!/bin/sh\necho mine\n")
+        refusal = L.launcher_refusal(L.Launcher(launcher, "foreign"), False)
+        self.assertIn(f"DGC_BIN={shlex.quote(str(bin_dir))} DGC_FORCE_OVERWRITE=1 bash", refusal)
+        # dgc update --version names itself as the override.
+        fake_version(data, "0.39.0")
+        location = L.Location("versions", data, bin_dir, None, None)
+        printed = io.StringIO()
+        from dgc import update
+        from rich.console import Console
+        with mock.patch.dict(os.environ, {"DGC_FORCE_OVERWRITE": ""}):
+            code = update._switch_to(Console(file=printed, width=300), location, "0.39.0")
+        self.assertEqual(code, 1, printed.getvalue())
+        self.assertIn("Or replace it anyway:  DGC_FORCE_OVERWRITE=1 dgc update --version 0.39.0", printed.getvalue())
 
     def test_update_help_names_the_base_url_and_every_exit_status(self):
         from dgc import cli

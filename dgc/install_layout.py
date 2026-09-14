@@ -29,6 +29,7 @@ import atexit
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -179,22 +180,27 @@ def inspect_launcher(path: Path) -> Launcher:
     return Launcher(path, "foreign", target, tree)
 
 
-def launcher_refusal(launcher: Launcher, force: bool) -> str | None:
+def launcher_refusal(launcher: Launcher, force: bool, override: str | None = None) -> str | None:
+    """Why the launcher must not be switched, or None. `override` is the command that does it
+    anyway, runnable as printed; without one, the installer run for this launcher directory."""
     if launcher.kind == "directory":
         return f"{launcher.path} is a directory — refusing to replace it."
     if force:
         return None
+    if override is None:
+        override = ("curl -fsSL https://vibedgc.com/install.sh | "
+                    f"DGC_BIN={shlex.quote(str(launcher.path.parent))} DGC_FORCE_OVERWRITE=1 bash")
     if launcher.kind == "checkout":
         return (f"{launcher.path} runs {launcher.tree}, which is a git checkout — refusing to repoint it.\n"
                 "    Keep the checkout and put the release launcher elsewhere:  "
                 "curl -fsSL https://vibedgc.com/install.sh | DGC_BIN=$HOME/.dgc-release/bin bash\n"
                 f"    Or repoint {launcher.path} anyway (the checkout's files are not touched):  "
-                "DGC_FORCE_OVERWRITE=1")
+                f"{override}")
     if launcher.kind == "foreign":
         return (f"{launcher.path} was not created by the DGC installer — refusing to replace it.\n"
                 "    Move it aside, or choose another launcher directory:  "
                 "curl -fsSL https://vibedgc.com/install.sh | DGC_BIN=<dir> bash\n"
-                "    Or replace it anyway:  DGC_FORCE_OVERWRITE=1")
+                f"    Or replace it anyway:  {override}")
     return None
 
 
@@ -450,7 +456,7 @@ def write_record(data_dir: Path, bin_dir: Path, version: str, previous: str | No
 # --------------------------------------------------------------- activate ---
 
 def activate(data_dir: Path, bin_dir: Path, version: str, *, force: bool = False,
-             retention: bool = True, out=print) -> int:
+             retention: bool = True, out=print, override: str | None = None) -> int:
     """Switch the launcher to a complete version. 0 on success, 1 with the launcher untouched."""
     data_dir, bin_dir = _real(data_dir), Path(os.path.abspath(os.path.expanduser(str(bin_dir))))
     if not valid_version(version):
@@ -462,7 +468,10 @@ def activate(data_dir: Path, bin_dir: Path, version: str, *, force: bool = False
         out(f"✗ DGC {version} is not a complete install in {versions_dir(data_dir)}")
         return 1
     launcher = inspect_launcher(bin_dir / "dgc")
-    refusal = launcher_refusal(launcher, force)
+    refusal = launcher_refusal(launcher, force, override or (
+        "curl -fsSL https://vibedgc.com/install.sh | "
+        f"DGC_DATA_DIR={shlex.quote(str(data_dir))} DGC_BIN={shlex.quote(str(bin_dir))} "
+        "DGC_FORCE_OVERWRITE=1 bash"))
     if refusal:
         out("✗ " + refusal)
         return 1
