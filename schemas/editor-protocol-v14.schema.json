@@ -1349,18 +1349,13 @@
             },
             "questions": {
               "type": "array"
-            },
-            "question": {
-              "type": "string"
-            },
-            "options": {
-              "type": "array"
             }
           },
           "required": [
             "type",
             "seq",
-            "id"
+            "id",
+            "questions"
           ],
           "additionalProperties": false
         },
@@ -3923,18 +3918,6 @@
             },
             "dismissed": {
               "type": "boolean"
-            },
-            "choice": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              ]
             }
           },
           "required": [

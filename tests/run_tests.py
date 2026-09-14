@@ -11399,6 +11399,49 @@ def test_benchmark_integrity():
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
                       "# Permission mode: auto"})
+        from dgc.tools import TOOL_SCHEMAS as _options_tool_schemas
+        _options_tool = next(t for t in _options_tool_schemas if t["function"]["name"] == "propose_options")
+        _options_text = json.dumps(_options_tool, separators=(",", ":"))
+        _options_description = _options_tool["function"]["description"]
+        check("propose_options schema stays slim",
+              len(_options_text) <= 1063 and len(_options_description) <= 430
+              and not any(key in _options_text for key in ('"minItems"', '"maxItems"', '"maxLength"'))
+              and '"recommended"' not in _options_text, (len(_options_text), len(_options_description)))
+        check("propose_options description keeps its boundaries",
+              all(part in _options_description for part in (
+                  "permission", "plan is ready", "recommend", "first", "(Recommended)", "Don't add Other",
+                  "free text", "make them, say so")))
+        with _tf.TemporaryDirectory(prefix="dgc-plan-asks-") as _plan_root:
+            _plan_config = _PS._isolated_config(_P(_plan_root))
+            _plan_config.data["mode"] = "plan"
+            _plan_agent = _PS.Agent(_plan_config, _PS._QuietUI())
+            try:
+                _plan_prompt = _plan_agent.system_prompt()
+            finally:
+                _plan_agent.mcp.stop_all()
+        check("plan mode asks before presenting",
+              "ask with propose_options" in _plan_prompt and "whether the plan is ready" in _plan_prompt)
+        _original_schemas = _PS.Agent._tool_schemas
+
+        def _auto_offering(self, *args, **kwargs):     # as if auto mode offered the question tool
+            mode = self.config.data.get("mode")
+            self.config.data["mode"] = "acceptEdits" if mode == "auto" else mode
+            try:
+                return _original_schemas(self, *args, **kwargs)
+            finally:
+                self.config.data["mode"] = mode
+        from unittest import mock as _probe_mock
+        with _probe_mock.patch.object(_PS.Agent, "_tool_schemas", _auto_offering):
+            _guarded_probe = _PS.run_probe()
+            with _probe_mock.patch.object(_PS._QuietUI, "non_interactive", False):
+                _unguarded_names = {tool.get("name") for tool in _PS.run_probe().get("tools", [])}
+        check("benchmark probe never offers questions",
+              _PS._QuietUI.non_interactive is True
+              and len(_guarded_probe.get("tools", [])) == 9
+              and "propose_options" not in {tool.get("name") for tool in _guarded_probe.get("tools", [])}
+              and "propose_options" in _unguarded_names
+              and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < 2300,
+              _guarded_probe.get("estimated_wire_tokens"))
         # The probe reports section sizes only; read the cadence section itself off the same
         # isolated agent the probe measures, so the two restored bullets cannot silently go again.
         with _tf.TemporaryDirectory(prefix="dgc-prompt-cadence-") as _cadence_root:
@@ -14098,24 +14141,33 @@ def test_oneshot_machine_readable():
         check("a plan in a -p run is reported, not executed",
               ui.present_plan("1. do the thing") is None and "final answer" in ui.plan_feedback
               and "do the thing" in ui.console.file.getvalue())
+        from dgc.questions import normalize_questions as _nq
+        _p_questions = _nq({"question": "which?", "options": ["a (Recommended)", "b"]})
         check("questions in a -p run are skipped",
-              ui.propose_options("which?", ["a", "b"]) == "" and ui.propose_questions([{"id": "q", "question": "?", "options": ["a"], "header": "h"}]) is None)
+              ui.ask_questions(_p_questions) == {"outcome": "unavailable", "answers": {}}
+              and "question skipped in a -p run" in ui.console.file.getvalue())
 
         # --- the JSON stream
+        from dgc import editor_protocol as _EPJ
         jui = _cli._json_oneshot_ui(cfg)
         sink = _io.StringIO(); jui.em.fp = sink
         jui.on_text("hello"); jui.tool_call("bash", {"command": "ls"}, "c1")
         decision = jui.approve("bash", {"command": "ls"}, "c1")
         plan = jui.present_plan("the plan")
-        choice = jui.propose_options("which?", ["a", "b"])
+        choice = jui.ask_questions(_p_questions, "c2")
         jui.end_stream()
         events = [_json.loads(line) for line in sink.getvalue().splitlines()]
         kinds = [e["type"] for e in events]
         check("--output-format json speaks the dgc serve event vocabulary",
               kinds == ["text_delta", "tool_call", "permission_request", "plan_proposal", "options_request", "stream_end"]
               and all(e["seq"] == i for i, e in enumerate(events)), kinds)
+        check("the JSON run's question is the v14 request, answered unavailable",
+              events[4]["id"] is None and events[4]["call_id"] == "c2" and events[4]["questions"] == _p_questions
+              and "options" not in events[4] and "question" not in events[4]
+              and events[4]["reason"] == "non-interactive run"
+              and _EPJ.event_error({**{k: v for k, v in events[4].items() if k not in ("decision", "reason")}, "id": "r"}) is None)
         check("the JSON run denies, rejects and skips on the spot and says why",
-              decision == "no" and plan is None and choice == ""
+              decision == "no" and plan is None and choice["outcome"] == "unavailable"
               and events[2]["decision"] == "deny" and events[2]["suggested_rule"] == "Bash(ls)"
               and events[3]["decision"] == "reject" and "--allow-tool" in jui.deny_reason)
         check("the JSON run is redacted with the config's secrets", True)
@@ -14250,6 +14302,16 @@ def test_editor_approval_gate():
                            "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
           and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                                "images": "data:image/png;base64,AAAA"}) is not None)
+    _options_request = _EP.EVENT_FIELDS["options_request"]
+    _options_response = _EP.COMMAND_FIELDS["options_response"]
+    check("protocol v14 declares structured questions",
+          _EP.PROTOCOL_VERSION == 14
+          and set(_options_request) == {"id", "call_id", "questions"} and _options_request["questions"]["required"]
+          and set(_options_response) == {"id", "answers", "dismissed"}
+          and list(_EP.EVENT_FIELDS["options_resolved"]["outcome"]["enum"]) == ["answered", "dismissed", "cancelled", "unavailable"]
+          and _EP.command_error({"type": "options_response", "id": "r1", "choice": 1}) is not None
+          and subprocess.run([sys.executable, str(PROJECT / "scripts" / "generate-editor-protocol.py"), "--check"],
+                             capture_output=True, text=True).returncode == 0)
     check("protocol v14 declares the summary, the diff and the denial note",
           _EP.PROTOCOL_VERSION == 14
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",

@@ -308,6 +308,55 @@ def _home_relative(path: str) -> str:
     return "~" + path[len(home):] if home and home != "/" and path.startswith(home + os.sep) else path
 
 
+def _asked_rows(message: dict) -> list[dict]:
+    """Recap rows for the question outcomes a saved message recorded (``_dgc_decision``): a native
+    tool result carries one record, a text-protocol ``<tool_results>`` message a list."""
+    records = message.get("_dgc_decision") if isinstance(message, dict) else None
+    if isinstance(records, dict):
+        records = [records]
+    if not isinstance(records, list):
+        return []
+    from .questions import asked_summary
+    rows = []
+    for record in records[:16]:
+        questions = record.get("questions") if isinstance(record, dict) else None
+        if not isinstance(questions, list) or not questions:
+            continue
+        try:
+            lines = asked_summary(questions, record.get("answers") or {}, str(record.get("outcome") or ""))
+        except (KeyError, TypeError, AttributeError, IndexError):
+            continue                        # a hand-edited record: the recap simply omits it
+        rows.append({"who": "asked", "body": "", "tools": "", "lines": lines})
+    return rows
+
+
+def one_line_text(text) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _wrap_cells(text: str, width: int, limit: int) -> list[str]:
+    """Word-wrap ``text`` into at most ``limit`` lines of ``width`` cells, the last one cut with "…"."""
+    lines, current = [], ""
+    for word in text.split(" "):
+        candidate = f"{current} {word}".strip()
+        if current and _cell_len(candidate) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) > limit:
+        lines = lines[:limit]
+        lines[-1] = lines[-1] + " …"
+    out = []
+    for line in lines:
+        while _cell_len(line) > width:
+            line = line[:-2] + "…"
+        out.append(line)
+    return out
+
+
 def _active_prop(field: str):
     """A THREAD-AWARE TUI property so the ~150 existing `self.<field>` references keep working
     while the state lives per-session. On a worker thread it targets THAT thread's session (a
@@ -962,7 +1011,10 @@ class TUI:
             if label.cell_len < labw:                    # (e.g. an artifact or Unicode session name)
                 label.append(" " * (labw - label.cell_len))
             line.append_text(label)
-            if r.get("desc"):
+            if isinstance(r.get("desc"), Text):       # pre-styled (a question's recommended marker)
+                line.append("  ")
+                line.append_text(r["desc"])
+            elif r.get("desc"):
                 line.append("  " + style_mod.terminal_safe_text(r["desc"]),
                             style=th.muted)   # readable (not dim faint) either way
             line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
@@ -2583,6 +2635,9 @@ class TUI:
             chips = [("Ctrl+C", "press again to quit")]
         elif not self._mouse_on:
             chips = [("select mode", "drag to select"), ("PgUp/PgDn", "scroll"), ("/select", "back")]
+        elif (self._req is not None and self._req.get("kind") == "questions" and self._input is None):
+            # A question card: Esc closes it without answering, and Ctrl+C is still the Stop.
+            chips = [("Esc", "dismiss"), ("Ctrl+C", "stop")]
         elif self._req is not None or self._input is not None or self._naming:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
@@ -3600,6 +3655,8 @@ class TUI:
         blk["running"] = False
         from .ui import tool_output_is_error
         blk["error"] = tool_output_is_error(out)
+        if blk.get("asked"):                            # a settled question: its Q → A lines, not the model text
+            out = "\n".join(blk["asked"][1:]) or blk["asked"][0]
         out = style_mod.terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
@@ -3929,66 +3986,163 @@ class TUI:
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
 
+    #: Keys that reach a question card within this many seconds of it opening are ignored, so a
+    #: digit or Enter typed for the composer never becomes a choice.
+    _QUESTION_KEY_GUARD_S = 0.4
+
+    def _question_keys_guarded(self) -> bool:
+        req = self._req
+        return (req is not None and req.get("kind") == "questions"
+                and time.monotonic() - req.get("opened_at", 0.0) < self._QUESTION_KEY_GUARD_S)
+
     def _show_questions_overlay(self, sess: "AgentSession") -> None:
-        """One persistent decision form: Tab changes questions; only Submit wakes the worker."""
+        """The question card: one line per option (so click targets stay exact), the focused
+        option's description under the question, the cursor starting on the recommended option.
+        A pick settles its question and moves on; the batch is sent once every question is answered
+        or skipped. Esc dismisses; Ctrl+C stops the turn."""
         from rich.text import Text
-        from .questions import valid_answers, MAX_ANSWER
+        from .questions import MAX_ANSWER
         req = sess._req
-        questions, answers = req["questions"], req["answers"]
+        questions = req["questions"]
+        answers, settled = req.setdefault("answers", {}), req.setdefault("settled", set())
         req.setdefault("composer_draft", self.input_buf.document)
+        req.setdefault("opened_at", time.monotonic())
         safe = style_mod.terminal_safe_text
+        dot = "·" if glyphs.UNICODE else "-"
+        multi_rows = len(questions) > 1
+
+        def entry(q):
+            return answers.setdefault(q["id"], {"selected": [], "other": ""})
+
+        def recommended_row(q):
+            return next((i for i, o in enumerate(q["options"]) if o["recommended"]), 0)
+
+        def tab_labels():
+            labels = []
+            for q in questions:
+                mark = ""
+                if q["id"] in settled:
+                    e = entry(q)
+                    mark = f" {glyphs.CHECK}" if (e["selected"] or e["other"]) else (" –" if glyphs.UNICODE else " -")
+                labels.append(safe(q["header"]) + mark)
+            return labels
 
         def rebuild(ov):
+            th = style_mod.theme()
+            if ov.get("tab") != req.get("tab_rendered"):
+                req["tab_rendered"] = ov["tab"]
+                ov["sel"] = recommended_row(questions[ov["tab"]])
             req["tab"] = ov["tab"]
+            if ov.get("tabs"):
+                ov["tabs"] = tab_labels()
             q = questions[ov["tab"]]
-            ov["header"] = [Text(safe(q["question"]), style="bold")]
-            rows = [{"label": f"{i + 1}  {'✓ ' if answers.get(q['id']) == o else ''}{safe(o)}",
-                     "value": i} for i, o in enumerate(q["options"])]
-            custom = answers.get(q["id"], "")
-            rows.append({"label": f"{len(rows) + 1}  Other — type your own answer",
-                         "desc": safe(custom) if custom not in q["options"] else "", "value": "other"})
-            rows.append({"label": f"Submit · {len(answers)}/{len(questions)} answered", "value": "submit"})
+            e = entry(q)
+            rows = []
+            width = max(3, len(q["options"]) + 2)
+            numw = len(str(width))
+            for i, o in enumerate(q["options"]):
+                box = (f"[{'x' if i in e['selected'] else ' '}] " if q["multi_select"]
+                       else ("● " if (glyphs.UNICODE and i in e["selected"]) else ("* " if i in e["selected"] else "  ")))
+                desc = Text()
+                if o["recommended"]:
+                    desc.append(f"recommended {dot} ", style=th.accent)
+                desc.append(safe(one_line_text(o["description"])), style=th.muted)
+                rows.append({"label": f"{box}{str(i + 1).rjust(numw)}  {safe(o['label'])}", "desc": desc,
+                             "value": i})
+            pad = "    " if q["multi_select"] else "  "
+            other = e["other"]
+            rows.append({"label": f"{pad}{str(len(rows) + 1).rjust(numw)}  Something else…",
+                         "desc": safe(one_line_text(other)) if other else "type your own answer",
+                         "value": "other"})
+            rows.append({"label": f"{pad}{str(len(rows) + 1).rjust(numw)}  Skip this question", "value": "skip"})
+            # The detail block under the question: the focused option's whole description.
+            avail = max(20, self._width - 2)
+            inner = min(max(46, self._width - 6), 108, avail - 4) - 4
+            header = [Text(safe(one_line_text(q["question"])), style="bold")]
+            sel = min(ov.get("sel", 0), len(rows) - 1)
+            focused = rows[sel]["value"]
+            detail = q["options"][focused]["description"] if isinstance(focused, int) else ""
+            limit = 1 if getattr(self, "_height", 30) < 20 else 3
+            wrapped = _wrap_cells(safe(one_line_text(detail)), inner, limit) if detail else []
+            for line in (wrapped or [""])[:limit]:
+                header.append(Text(line, style=th.muted))
+            ov["header"] = header
             return rows
+
+        def settle_and_advance(q):
+            settled.add(q["id"])
+            unsettled = [i for i, item in enumerate(questions) if item["id"] not in settled]
+            if not unsettled:
+                sess._req_answer = {"outcome": "answered", "answers": {
+                    item["id"]: dict(entry(item)) for item in questions}}
+                sess._req_event.set()
+                return
+            after = [i for i in unsettled if i > req.get("tab", 0)]
+            req["tab"] = (after or unsettled)[0]
+            self._show_questions_overlay(sess)
 
         def pick(row):
             if sess._req is not req:
                 return
             q = questions[req.get("tab", 0)]
+            e = entry(q)
             value = row["value"]
-            if value == "submit":
-                if valid_answers(questions, answers):
-                    sess._req_answer = dict(answers)
-                    sess._req_event.set()
-                    return
-                self._flash("Answer every question before submitting")
+            if value == "skip":
+                answers[q["id"]] = {"selected": [], "other": ""}
+                settle_and_advance(q)
             elif value == "other":
                 self.input_buf.reset()
-                custom = req.get("other_drafts", {}).get(q["id"], answers.get(q["id"], ""))
-                if custom and custom not in q["options"]:
-                    self.input_buf.insert_text(custom)
+                draft = req.get("other_drafts", {}).get(q["id"], e["other"])
+                if draft:
+                    self.input_buf.insert_text(draft)
                 def entered(text):
                     if sess._req is not req:
                         return
                     text = text.strip()
                     req.setdefault("other_drafts", {})[q["id"]] = text
-                    if text and len(text) <= MAX_ANSWER:
-                        answers[q["id"]] = text
-                    elif len(text) > MAX_ANSWER:
-                        self._flash(f"Keep your answer within {MAX_ANSWER} characters")
                     self.input_buf.set_document(req["composer_draft"])
+                    if len(text) > MAX_ANSWER:
+                        self._flash(f"Keep your answer within {MAX_ANSWER} characters")
+                    elif text:
+                        e["other"] = text
+                        if not q["multi_select"]:
+                            e["selected"] = []
+                            settle_and_advance(q)
+                            return
                     self._show_questions_overlay(sess)
-                self._input = {"cb": entered, "prompt": "Other — your answer (Esc returns to questions):",
+                self._input = {"cb": entered, "prompt": "Something else — your answer (Esc returns to the question):",
                                "question_owner": sess, "question_id": q["id"]}
                 self._invalidate()
-                return
+            elif q["multi_select"]:
+                settle_and_advance(q)                      # Enter advances; Space or a digit toggles
             else:
-                answers[q["id"]] = q["options"][value]
-            self._show_questions_overlay(sess)
+                answers[q["id"]] = {"selected": [value], "other": ""}
+                settle_and_advance(q)
 
-        self._open_overlay([], on_pick=pick, tabs=[q["header"] for q in questions], tab=req.get("tab", 0),
+        def toggle(index):
+            q = questions[req.get("tab", 0)]
+            e = entry(q)
+            if index in e["selected"]:
+                e["selected"].remove(index)
+            else:
+                e["selected"] = sorted(e["selected"] + [index])
+            settled.discard(q["id"])
+            self._invalidate()
+
+        req["toggle"] = toggle
+        req["pick"] = pick
+        tab = req.get("tab", 0)
+        self._open_overlay([], on_pick=pick, tabs=tab_labels() if multi_rows else None, tab=tab,
                            rebuild=rebuild, accent=True,
-                           footer="Tab switch question · ↑↓ move · Enter select · Submit sends all · Esc cancel")
+                           footer=f" {dot} ".join(
+                               ([] if questions[tab]["multi_select"] else ["↑↓ move"])
+                               + [f"1-{len(questions[tab]['options']) + 2} pick"]
+                               + (["Space toggle", "Enter next"] if questions[tab]["multi_select"] else ["Enter pick"])
+                               + (["←→ question"] if multi_rows else []) + ["Esc dismiss"]))
         self._overlay["selectable"] = True
+        self._overlay["questions"] = True
+        self._overlay["sel"] = recommended_row(questions[tab])   # (re)opened: cursor on the recommendation
+        req["tab_rendered"] = tab
 
     def _ask(self, req: dict, cancel=None, recheck=None):
         """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
@@ -4099,17 +4253,33 @@ class TUI:
         self.plan_feedback = self._ask_text("what should change in the plan (optional):")
         return None
 
-    def propose_options(self, question: str, options: list[str]) -> str:
-        answers = self.propose_questions([{"id": "q1", "header": "Question", "question": question,
-                                           "options": list(options)}])
-        return (answers or {}).get("q1", "")
-
-    def propose_questions(self, questions: list[dict]) -> dict | None:
-        from .questions import valid_answers
+    def ask_questions(self, questions: list[dict], call_id=None) -> dict:
         self._flush_text()
+        cancel = self._cur_session().agent.cancelled
         ans = self._ask({"kind": "questions", "questions": questions, "answers": {}, "tab": 0},
-                        cancel=self._cur_session().agent.cancelled)
-        return ans if valid_answers(questions, ans) else None
+                        cancel=cancel)
+        if isinstance(ans, dict):
+            return ans
+        if cancel.is_set():
+            return {"outcome": "cancelled", "answers": {}}
+        return {"outcome": "dismissed", "answers": {}}
+
+    def options_resolved(self, call_id, outcome, questions, answers) -> None:
+        """The settled batch in the transcript: ``▸ Asked 2 questions`` then one Q → A line each."""
+        from .questions import asked_summary
+        th = style_mod.theme()
+        lines = [style_mod.terminal_safe_text(line) for line in asked_summary(questions, answers, outcome)]
+        blk = self._live_tool_block("propose_options", call_id)
+        if blk is not None:
+            # The step's own block says what was asked and answered; the model-facing text stays out.
+            blk["asked"] = lines
+            blk["summary"] = lines[0]
+            self._invalidate()
+            return
+        body = f"[{th.accent}]{glyphs.TOOL_ICON.get('propose_options', '>')}[/] [bold]{_esc(lines[0])}[/]"
+        for line in lines[1:]:
+            body += f"\n  [{th.muted}]{_esc(style_mod.terminal_safe_text(line))}[/]"
+        self._append(self._rich(body))
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -5693,6 +5863,14 @@ class TUI:
                 names = row.get("tools") or ""
                 if names:
                     blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
+            elif who == "asked":
+                # A settled question batch: what was asked and answered, as the live step shows it.
+                lines = [style_mod.terminal_safe_text(line) for line in row.get("lines") or ()]
+                if lines:
+                    text = f"[{th.accent}]{glyphs.TOOL_ICON.get('propose_options', '>')}[/] [bold]{_esc(lines[0])}[/]"
+                    for line in lines[1:]:
+                        text += f"\n  [{th.muted}]{_esc(line)}[/]"
+                    blocks.append(self._rich(text))
         return blocks, made
 
     def _message_rows(self, messages):
@@ -5719,6 +5897,11 @@ class TUI:
                 skip_ack = False
                 continue                        # the model's canned "understood" is not a turn
             skip_ack = False
+            asked = _asked_rows(m)
+            if asked:
+                rows.extend(asked)
+                if role == "tool":
+                    continue
             if role == "user":
                 from .editor_context import _strip_editor_context
                 from .workflows import display_prompt, notice_kind, stream_recovery_notice
@@ -6656,6 +6839,8 @@ class TUI:
 
         @kb.add("enter")
         def _(ev):
+            if self._question_keys_guarded() and self._input is None:
+                return                              # a question card just opened: not a choice yet
             if self._overlay is not None:           # floating picker/modal
                 self._overlay_select()              # shared with mouse-click
                 return
@@ -6713,6 +6898,11 @@ class TUI:
                 cb = self._input["cb"]; self._input = None
                 cb("")
                 return
+            if self._req is not None and self._req.get("kind") == "questions":
+                if not self._question_keys_guarded():       # Esc closes the question: dismissed
+                    self._req_answer = {"outcome": "dismissed", "answers": {}}
+                    self._req_event.set()
+                return
             if self._req is not None:                       # blocking prompt (permission card) → deny/cancel
                 self._req_answer = None
                 self._req_event.set()
@@ -6740,6 +6930,10 @@ class TUI:
                 self.input_buf.reset()
 
         def cancel_gesture(ev):
+            if self._req is not None and self._req.get("kind") == "questions":
+                self._input = None               # Ctrl+C on a question is Stop, not an answer
+                self._req_answer = {"outcome": "cancelled", "answers": {}}
+                self._cancel.set(); self._req_event.set(); return
             if self._req is not None:            # blocking prompt → cancel/deny (don't deadlock the worker)
                 self._req_answer = None; self._req_event.set(); return
             if self._input is not None:
@@ -6864,6 +7058,26 @@ class TUI:
             if self._route_followup(text, queue_only=True) != "full":
                 self.input_buf.reset()
 
+        question_card = Condition(lambda: self._req is not None and self._req.get("kind") == "questions"
+                                  and self._input is None and self._overlay is not None)
+
+        @kb.add("space", filter=question_card)
+        def _(ev):
+            req = self._req
+            if self._question_keys_guarded():
+                return
+            q = req["questions"][req.get("tab", 0)]
+            sel = self._overlay.get("sel", 0)
+            if q.get("multi_select") and sel < len(q["options"]):
+                req["toggle"](sel)
+
+        for _key, _step in (("left", -1), ("right", 1)):
+            @kb.add(_key, filter=question_card & Condition(lambda: bool(self._overlay.get("tabs"))))
+            def _(ev, _step=_step):
+                ov = self._overlay
+                ov["tab"] = (ov["tab"] + _step) % len(ov["tabs"])
+                self.input_buf.reset(); self._invalidate()
+
         for i in range(1, 10):               # number keys select a blocking request's options
             @kb.add(str(i))
             def _(ev, n=i):
@@ -6871,9 +7085,15 @@ class TUI:
                     if self._req.get("kind") == "questions":
                         if self._input is not None:
                             self.input_buf.insert_text(str(n))
-                        elif self._overlay is not None and n <= len(self._overlay_rows()) - 1:
+                        elif self._question_keys_guarded():
+                            return
+                        elif self._overlay is not None and n <= len(self._overlay_rows()):
+                            q = self._req["questions"][self._req.get("tab", 0)]
                             self._overlay["sel"] = n - 1
-                            self._overlay_select()
+                            if q.get("multi_select") and n <= len(q["options"]):
+                                self._req["toggle"](n - 1)   # a digit toggles a multi-select option
+                            else:
+                                self._overlay_select()
                         return
                     opts = self._req.get("options", [])
                     if n - 1 < len(opts):

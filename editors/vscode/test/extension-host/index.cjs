@@ -198,8 +198,8 @@ async function run() {
   assert.ok(startedBeforeFolders >= 1, "backend.log records every child the extension starts");
 
   const initialCount = rootsCommands().length;
-  assert.ok(rootsCommands().some(command => command.question_forms === true),
-    "the installed host must opt into grouped question events when supported");
+  assert.ok(rootsCommands().length > 0 && rootsCommands().every(command => !("question_forms" in command)),
+    "v14: every client takes structured questions, so the installed host no longer sends question_forms");
   assert.equal(vscode.workspace.updateWorkspaceFolders(1, 1), true,
     "the installed host must allow removing the secondary workspace folder");
   await waitFor(() => (vscode.workspace.workspaceFolders || []).length === 1);
@@ -263,12 +263,15 @@ async function run() {
       && command.decision === "reject" && command.feedback === feedback));
   await waitFor(() => posted().some((item) =>
     item.type === "event" && item.eventType === "options_request" && item.id === "host-questions"));
-  const answers = { storage: "Local", accent: "Custom lavender" };
+  const answers = { storage: { selected: [0], other: "" }, accent: { selected: [], other: "Custom lavender" } };
   await testApi.testOnlyWebviewMessage(testToken,
     { type: "options_response", id: "host-questions", answers });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
-    command.type === "options_response" && command.id === "host-questions"
-      && command.answers?.storage === answers.storage && command.answers?.accent === answers.accent));
+    command.type === "options_response" && command.id === "host-questions"));
+  assert.deepEqual(backendCommands(backendLogPath).filter((command) =>
+    command.type === "options_response" && command.id === "host-questions").map((command) => ({
+    answers: command.answers, dismissed: command.dismissed, choice: command.choice })),
+  [{ answers, dismissed: undefined, choice: undefined }], "the structured answers reach the backend exactly once, as sent");
   await waitFor(() => posted().some((item) =>
     item.type === "event" && item.eventType === "turn_end"));
   assert.ok(posted().some((item) => item.eventType === "request_expired"
@@ -281,6 +284,8 @@ async function run() {
     { type: "permission_response", id: "host-permission", decision: "once" });
   await testApi.testOnlyWebviewMessage(testToken,
     { type: "plan_response", id: "host-plan", decision: "reject", feedback: "late" });
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "options_response", id: "host-questions", answers });
   await new Promise((resolve) => setTimeout(resolve, 200));
   const decisionCommands = backendCommands(backendLogPath);
   assert.equal(decisionCommands.filter((command) =>
@@ -289,6 +294,9 @@ async function run() {
   assert.equal(decisionCommands.filter((command) =>
     command.type === "plan_response" && command.id === "host-plan").length, 1,
   "one installed-host plan request must reach the backend at most once");
+  assert.equal(decisionCommands.filter((command) =>
+    command.type === "options_response" && command.id === "host-questions").length, 1,
+  "a late question answer is rejected by the correlator");
 
   const beforeWorkflow = posted().filter(item => item.eventType === "turn_end").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "/review --staged host workflow",
@@ -592,6 +600,23 @@ async function run() {
   // ---- end 0.40 images ----
 
   // ---- 0.40 options (installed-host checks) ----
+  {
+    const turnEnds = () => posted().filter((item) => item.eventType === "turn_end").length;
+    const before = turnEnds();
+    await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "installed-host question dismissal" });
+    await waitFor(() => posted().some((item) =>
+      item.type === "event" && item.eventType === "options_request" && item.id === "host-dismiss"));
+    await testApi.testOnlyWebviewMessage(testToken, { type: "options_response", id: "host-dismiss", dismissed: true });
+    await waitFor(() => turnEnds() > before);
+    await testApi.testOnlyWebviewMessage(testToken, { type: "options_response", id: "host-dismiss", dismissed: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const dismissals = backendCommands(backendLogPath).filter((command) =>
+      command.type === "options_response" && command.id === "host-dismiss");
+    assert.deepEqual(dismissals.map((command) => ({ dismissed: command.dismissed, answers: command.answers })),
+      [{ dismissed: true, answers: undefined }], "a dismissal arrives as sent, once");
+    assert.ok(posted().some((item) => item.eventType === "options_resolved" && item.id === "host-dismiss"),
+      "options_resolved reaches the webview");
+  }
   // ---- end 0.40 options ----
 
   // ---- backend exits in the installed host: every path names its cause in backend.log ----------

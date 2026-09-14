@@ -210,11 +210,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
     # v14: ``questions`` = [{id, header, question, multi_select, options: [{label, description,
-    # recommended}]}], 1-4 questions of 2-6 options; ``call_id`` is the propose_options step.
-    # TRANSITIONAL: ``question``/``options`` stay and ``questions`` is optional until options-picker
-    # emits only the v14 shape.
-    "options_request": {"id": _S(), "call_id": _NS(False), "questions": _A(False),
-                        "question": _S(False), "options": _A(False)},
+    # recommended}]}], 1-4 questions of 2-6 options; ``call_id`` is the propose_options step. The
+    # nested shape is validated by dgc/questions.py; the flattened question/options pair is gone.
+    "options_request": {"id": _S(), "call_id": _NS(False), "questions": _A()},
     # v14: how a question request ended. ``id`` is null on replay; ``answers`` =
     # {question_id: {selected: [0-based index...], other: string}} when answered.
     "options_resolved": {
@@ -462,9 +460,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     # v14: exactly one of a non-empty ``answers`` ({question_id: {selected: [0-based index...],
     # other: string}}) or ``dismissed: true``. An invalid response leaves the request pending and is
-    # answered by command_rejected. TRANSITIONAL: ``choice`` stays until options-picker removes it.
-    "options_response": {"id": _S(), "answers": _O(False), "dismissed": _B(False),
-                         "choice": _f("string", "integer", required=False)},
+    # answered by command_rejected. ``choice`` (v6) is removed.
+    "options_response": {"id": _S(), "answers": _O(False), "dismissed": _B(False)},
     "mcp_input_response": {
         "id": _S(), "action": _f("string", enum=("accept", "decline", "cancel")),
         "content": _O(False),

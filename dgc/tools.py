@@ -283,21 +283,22 @@ TOOL_SCHEMAS = [
          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
                       "description": "Concrete checks, artifacts, or observations supporting this status"}},
         ["status", "summary", "evidence"]),
-    _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
-        "(two valid approaches, an ambiguous request). Waits for an explicit answer, with Other/free text. "
-        "Use questions to group 1–6 separate decisions into tabs with one Submit. "
-        "Use question/options for a single decision. Don't use it for things you can decide yourself.",
-        {"question": {"type": "string", "description": "What you're asking them to decide"},
-         "options": {"type": "array", "items": {"type": "string"},
-                     "description": "The choices, most-recommended first; Other is added by the client"},
-         "questions": {"type": "array", "minItems": 1, "maxItems": 6,
+    _fn("propose_options", "Ask the user to pick when the decision is theirs: a trade-off with no safe "
+        "default, a requirement the request and code leave open, or they asked to choose. Not for "
+        "choices you can make (make them, say so), permission, or whether a plan is ready. Give 2-4 "
+        "options; put the one you recommend first, label ending (Recommended), saying why in its "
+        "description. Use this, not a prose list. Don't add Other; the client adds free text.",
+        {"questions": {"type": "array", "description": "1-4 separate decisions",
                        "items": {"type": "object", "properties": {
-                           "id": {"type": "string", "description": "Unique answer key"},
-                           "header": {"type": "string", "maxLength": 32, "description": "Short tab label"},
+                           "header": {"type": "string", "description": "Tab label"},
                            "question": {"type": "string"},
-                           "options": {"type": "array", "maxItems": 8, "items": {"type": "string"}}},
-                           "required": ["id", "header", "question", "options"]}}},
-        []),
+                           "multi_select": {"type": "boolean"},
+                           "options": {"type": "array", "items": {"type": "object", "properties": {
+                               "label": {"type": "string", "description": "1-5 words"},
+                               "description": {"type": "string", "description": "Consequence, one sentence"}},
+                               "required": ["label"]}}},
+                           "required": ["question", "options"]}}},
+        ["questions"]),
     _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
         "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
         "describing the page is not. First write a self-contained .html file, then call this with its "

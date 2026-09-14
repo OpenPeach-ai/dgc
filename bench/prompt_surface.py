@@ -26,6 +26,10 @@ from run_bench import PROMPT  # noqa: E402
 
 
 class _QuietUI:
+    # The probe models `dgc -p --mode auto` (run_bench.py): nobody can answer a question, so the
+    # agent never offers propose_options here, whatever auto mode itself decides.
+    non_interactive = True
+
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
 

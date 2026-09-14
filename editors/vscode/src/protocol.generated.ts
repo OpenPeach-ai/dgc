@@ -1152,19 +1152,7 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "types": [
         "array"
       ],
-      "required": false
-    },
-    "question": {
-      "types": [
-        "string"
-      ],
-      "required": false
-    },
-    "options": {
-      "types": [
-        "array"
-      ],
-      "required": false
+      "required": true
     }
   },
   "options_resolved": {
@@ -3376,13 +3364,6 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "dismissed": {
       "types": [
         "boolean"
-      ],
-      "required": false
-    },
-    "choice": {
-      "types": [
-        "string",
-        "integer"
       ],
       "required": false
     }

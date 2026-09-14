@@ -774,21 +774,40 @@ class _ACPUi:
                       "status": "completed" if accepted else "failed"})
         return choice if accepted else None
 
-    def propose_options(self, question, options):
-        res = self.s.request("session/request_permission", {
-            "sessionId": self.sid,
-            "toolCall": {"toolCallId": f"opt{next(self._tc)}", "title": question},
-            "options": [{"optionId": str(i), "name": o, "kind": "allow_once"}
-                        for i, o in enumerate(options)]}, timeout=None, cancel=self.cancelled)
-        outcome = (res or {}).get("outcome", {})
-        if outcome.get("outcome") == "selected":
+    def ask_questions(self, questions, call_id=None):
+        """One permission request per question (ACP has no form): the labels are the options, the
+        flagged one named " (recommended)", descriptions in the tool call's content. Multi-select
+        degrades to one pick and free text is unavailable. A reject or cancel closes the batch."""
+        answers = {}
+        for q in questions:
+            listing = "\n".join(
+                f"{i}. {o['label']}" + (" (recommended)" if o["recommended"] else "")
+                + (f" — {o['description']}" if o["description"] else "")
+                for i, o in enumerate(q["options"], 1))
+            res = self.s.request("session/request_permission", {
+                "sessionId": self.sid,
+                "toolCall": {"toolCallId": f"opt{next(self._tc)}", "title": q["question"],
+                             "content": [{"type": "content", "content": {"type": "text", "text": listing}}]},
+                "options": [{"optionId": str(i), "name": o["label"] + (" (recommended)" if o["recommended"] else ""),
+                             "kind": "allow_once"} for i, o in enumerate(q["options"])]
+                           + [{"optionId": "skip", "name": "Skip this question", "kind": "allow_once"},
+                              {"optionId": "dismiss", "name": "Dismiss", "kind": "reject_once"}]},
+                timeout=None, cancel=self.cancelled)
+            outcome = (res or {}).get("outcome", {})
+            option = outcome.get("optionId") if outcome.get("outcome") == "selected" else None
+            if option is None or option == "dismiss":
+                return {"outcome": "dismissed", "answers": {}}
+            if option == "skip":
+                answers[q["id"]] = {"selected": [], "other": ""}
+                continue
             try:
-                index = int(outcome.get("optionId"))
-                if 0 <= index < len(options):
-                    return options[index]
+                index = int(option)
             except (ValueError, TypeError):
-                pass
-        return ""
+                return {"outcome": "dismissed", "answers": {}}
+            if not 0 <= index < len(q["options"]):
+                return {"outcome": "dismissed", "answers": {}}
+            answers[q["id"]] = {"selected": [index], "other": ""}
+        return {"outcome": "answered", "answers": answers}
 
     def mcp_capabilities(self) -> dict:
         # ACP's portable permission request carries binary consent, not an arbitrary form editor.
