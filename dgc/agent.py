@@ -2801,6 +2801,28 @@ class Agent(GoalLifecycle):
                 return_result["ok"] = False
             return return_result
 
+    def _stitch_continuation(self, continued: tuple, assistant: dict) -> dict:
+        """Join a continuation onto the partial reply it finishes, as one assistant message.
+
+        A cut-off reply was kept as its own message, followed by DGC's "continue exactly where you
+        left off" prompt and the continuation. The final text (the -p result, a resumed chat, the
+        next request) then held only the part after the cut. Provider-state messages (Responses
+        items, Anthropic pause state) are left as they are: their stored shape is exact.
+        """
+        prompt, partial = continued
+        if (len(self.messages) >= 3 and self.messages[-1] is assistant
+                and self.messages[-2] is prompt and self.messages[-3] is partial
+                and not partial.get("tool_calls")
+                and isinstance(partial.get("content"), str)
+                and isinstance(assistant.get("content"), str)
+                and not any(key in message for message in (partial, assistant)
+                            for key in ("_responses_output", "_provider_message"))):
+            merged = dict(assistant)
+            merged["content"] = partial["content"] + assistant["content"]
+            self.messages[-3:] = [merged]
+            return merged
+        return assistant
+
     def _save_turn_progress(self) -> None:
         """Save the running turn at a step boundary: its prompt, then each completed tool batch.
 
@@ -3551,6 +3573,9 @@ class Agent(GoalLifecycle):
         finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
         paused_assistant_index: int | None = None
+        # (the synthetic "continue" prompt, the partial assistant message) after a length or stall
+        # continuation, so the continuation can be stitched onto the prose it finishes.
+        continued_prose: tuple[dict, dict] | None = None
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
         edited_targets: set[str] = set()  # distinct files make a late planning nudge truthful
@@ -3893,7 +3918,14 @@ class Agent(GoalLifecycle):
                 # This round provably continues: prose beside a tool call is commentary, and the
                 # harness knows it here for certain instead of the panel guessing it later.
                 self.ui.end_stream("commentary")
-            elif not defer_completion:
+            elif not defer_completion and not (
+                    (result.content or "").strip()
+                    and result.finish_reason in _INCOMPLETE_FINISH_REASONS
+                    and (stall_recoveries < self._stall_retry_budget() if _result_stall(result)
+                         else continues < _MAX_CONTINUE)):
+                # Prose that is about to be continued is not an answer yet: leave its block open so
+                # the continuation streams into the same block, and the answer (and Copy) holds the
+                # whole reply rather than only the part after the cut.
                 self.ui.end_stream("answer")
 
             native = (bool(result.tool_calls)
@@ -3919,6 +3951,10 @@ class Agent(GoalLifecycle):
                 self.messages[paused_assistant_index] = assistant
             else:
                 self.messages.append(assistant)
+                paused_assistant_index = len(self.messages) - 1
+            if continued_prose is not None:
+                assistant = self._stitch_continuation(continued_prose, assistant)
+                continued_prose = None
                 paused_assistant_index = len(self.messages) - 1
 
             if result.finish_reason == "pause_turn":
@@ -3992,6 +4028,7 @@ class Agent(GoalLifecycle):
                             "Your previous response was interrupted before its terminal provider "
                             "event. Continue exactly where you left off — do not repeat what you "
                             "already wrote.")})
+                        continued_prose = (self.messages[-1], assistant)
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue
@@ -4011,6 +4048,8 @@ class Agent(GoalLifecycle):
                             if interrupted else
                             "Your previous response was cut off at the length limit. Continue exactly "
                             "where you left off — do not repeat what you already wrote.")})
+                        if (result.content or "").strip():
+                            continued_prose = (self.messages[-1], assistant)
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue

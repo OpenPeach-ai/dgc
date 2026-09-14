@@ -937,6 +937,27 @@ class AgentStallTests(StallTestCase):
         self.assertTrue(any("stopped streaming" in line and "(1/1)" in line for line in ui.infos))
         self.assertEqual("".join(ui.text), "The first half and the rest.")
 
+    def test_the_answer_is_the_partial_text_and_its_continuation_in_one_block(self):
+        # The cut-off prose and its continuation used to be two blocks (the first shown as
+        # commentary) and two messages, so the answer card, Copy and `dgc -p` result.text all held
+        # only "and the rest.".
+        from dgc.cli import _last_assistant_text
+        self.server.behaviours["/chat/completions"] = sequence(
+            partial_then_silent(("The first half ",)), chat_answer("and the rest."))
+        agent, ui = self.agent()
+        timeline = []
+        ui.on_text = lambda chunk: (ui.text.append(chunk), timeline.append(("text", chunk)))
+        ui.end_stream = lambda phase="": timeline.append(("end", phase))
+        self.assertIsNot(agent.run_turn("hello", reset_cancel=False), False)
+        ends = [entry for entry in timeline if entry[0] == "end"]
+        self.assertEqual(ends, [("end", "answer")], timeline)
+        self.assertEqual(timeline[-1], ("end", "answer"), "one block, closed after the continuation")
+        assistants = [m for m in agent.messages if m.get("role") == "assistant"]
+        self.assertEqual([m["content"] for m in assistants], ["The first half and the rest."])
+        self.assertFalse(any("Continue exactly where you left off" in str(m.get("content"))
+                             for m in agent.messages), "the stitched reply needs no synthetic prompt")
+        self.assertEqual(_last_assistant_text(agent), "The first half and the rest.")
+
     def test_a_mid_stream_stall_that_repeats_fails_precisely(self):
         self.server.behaviours["/chat/completions"] = partial_then_silent(("partial ",))
         agent, ui = self.agent()
