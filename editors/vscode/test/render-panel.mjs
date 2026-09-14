@@ -7,7 +7,7 @@
 //   npm run shot -- /tmp/ask.png --permission          an open approval card
 //   npm run shot -- /tmp/tip.png --tip=#btn-add        a hover label
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
-//   npm run shot -- /tmp/tasks.png --tasks             the session checklist slot (+ -long.png)
+//   npm run shot -- /tmp/tasks.png --tasks [--light]   the Tasks rail row (+ -expanded.png, -long.png)
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -355,57 +355,115 @@ if (process.argv.includes("--steps")) {
   console.log("shot:", out); await browser.close(); process.exit(0);
 }
 if (process.argv.includes("--tasks")) {
-  // The session checklist is a fixed slot in the footer, not a card in the transcript. Check
-  // that it sits between the log and the composer, that the log itself did not grow, that
-  // Clear waits for the turn, and that a long list scrolls inside the slot instead of pushing
-  // the composer off the panel.
+  // The session checklist is a row in the composer rail, directly above the goal row, with the
+  // chat's changes above it. Check the rail order by geometry, that the collapsed row is one line,
+  // that expanding opens the list above the row inside the rail without touching the transcript or
+  // covering the composer, and that a long list scrolls inside its own panel. Writes <out>.png
+  // (collapsed), <out>-expanded.png, <out>-long.png and <out>-note.png (a refused Clear). --light
+  // paints a light host theme.
   const out = process.argv[2] || "/tmp/tasks.png";
+  if (process.argv.includes("--light")) {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
+      --vscode-input-background:#FFFFFF; --vscode-dropdown-background:#FFFFFF;
+      --vscode-textCodeBlock-background:#F3F3F3; --vscode-panel-border:#E5E5E5;
+      --vscode-widget-border:#E5E5E5; --vscode-input-border:#CECECE;
+      --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
+      --vscode-descriptionForeground:#616161; --vscode-disabledForeground:#7A7A7A;
+      --vscode-list-activeSelectionBackground:#E8E8E8; }` });
+  }
+  await page.setViewportSize({ width: 460, height: 760 });
+  // Enough transcript to scroll, so "the reader stays put" is a real claim.
+  for (let i = 0; i < 4; i++) {
+    await send({ type: "text_delta", text: "Checking the bounds on each platform before the regression test lands. ".repeat(10) + "\n\n" });
+  }
+  await page.waitForTimeout(200);
   const before = await page.evaluate(() => document.getElementById("log").scrollHeight);
   await send({ type: "todos", todos: [
     { content: "Read src/clamp.py and the existing test", status: "done" },
     { content: "Swap the min/max order in clamp()", status: "done" },
-    { content: "Add a regression test for the inverted bounds", status: "in_progress" },
-    { content: "Run the suite on Windows \u2014 no runner is available here", status: "blocked" },
+    { content: "Add a regression test for the inverted bounds on every platform we ship", status: "in_progress" },
+    { content: "Run the suite on Windows — no runner is available here", status: "blocked" },
     { content: "Update the changelog", status: "pending" },
   ] });
-  await page.waitForTimeout(300);
+  await send({ type: "goal_changed", goal: "Ship a verified bounds fix with a regression test", status: "active",
+               elapsed_seconds: 342, running: true });
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+    type: "chat_changes", total: 2, additions: 14, deletions: 1,
+    files: [{ path: "src/clamp.py", additions: 1, deletions: 1 }, { path: "tests/test_clamp.py", additions: 13, deletions: 0 }] } })));
+  await page.waitForTimeout(400);
   const probe = (before) => page.evaluate((before) => {
-    const slot = document.getElementById("tasks"), log = document.getElementById("log");
-    const s = slot.getBoundingClientRect(), l = log.getBoundingClientRect();
-    const c = document.getElementById("cbox").getBoundingClientRect();
-    return { hidden: slot.hidden, rows: slot.querySelectorAll(".t").length,
-             count: document.getElementById("tasks-count").textContent,
-             inLog: !!log.querySelector(".todos"),
-             belowLog: Math.round(s.top) >= Math.round(l.bottom), aboveComposer: Math.round(s.bottom) <= Math.round(c.top),
-             logGrew: log.scrollHeight - before, slotHeight: Math.round(s.height),
-             clearDisabled: document.getElementById("tasks-clear").disabled,
-             glyphs: [...slot.querySelectorAll(".ti")].map((g) => g.textContent).join(" ") };
+    const box = (id) => { const r = document.getElementById(id).getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) }; };
+    const log = document.getElementById("log"), panel = document.getElementById("tasks-panel");
+    const changes = box("changesbar"), tasks = box("tasksbar"), goal = box("goalbar"), cbox = box("cbox");
+    const main = box("tasks-main"), rail = box("composer-rail"), logBox = log.getBoundingClientRect();
+    return {
+      order: changes.bottom <= tasks.top + 1 && tasks.bottom <= goal.top + 1 && goal.bottom <= cbox.top + 1,
+      // The footer's own 4px gap is the only space between the rail and the prompt box.
+      railGap: cbox.top - rail.bottom, railOnPrompt: cbox.top - rail.bottom >= 0 && cbox.top - rail.bottom <= 4,
+      belowLog: rail.top >= Math.round(logBox.bottom),
+      rowHeight: main.height, tasksHeight: tasks.height, expanded: !panel.hidden,
+      panelAboveRow: panel.hidden || Math.round(panel.getBoundingClientRect().bottom) <= main.top + 1,
+      count: document.getElementById("tasks-count").textContent,
+      summary: document.getElementById("tasks-text").textContent,
+      blocked: document.getElementById("tasks-blocked").textContent,
+      label: document.getElementById("tasks-main").getAttribute("aria-label"),
+      status: document.getElementById("tasksbar").dataset.status,
+      inLog: !!log.querySelector("#tasks-list, .t"), logGrew: log.scrollHeight - before,
+      rail: document.getElementById("composer-rail").className,
+      composerVisible: cbox.bottom <= window.innerHeight,
+    };
   }, before);
-  const running = await probe(before);
-  console.log("RUNNING " + JSON.stringify(running));
-  await send({ type: "text_delta", text: "Two of five steps are done; the Windows run is blocked on a runner.\n" });
-  await send({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 240 });
-  await page.waitForTimeout(300);
-  const finished = await probe(before);
-  console.log("FINISHED " + JSON.stringify(finished));
+  const collapsed = await probe(before);
+  console.log("COLLAPSED " + JSON.stringify(collapsed));
   await page.screenshot({ path: out, fullPage: false });
-  // Sixty rows: the list scrolls inside the slot instead of pushing the composer off the panel.
+  // A reader who scrolled up to re-read must stay exactly where they are when the list opens (a
+  // reader following the tail keeps following it, as for every other rail).
+  const logTop = await page.evaluate(() => {
+    const log = document.getElementById("log");
+    log.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+    log.scrollTop = 40; log.dispatchEvent(new Event("scroll"));
+    return log.scrollTop;
+  });
+  await page.waitForTimeout(100);
+  await page.click("#tasks-toggle");
+  await page.waitForTimeout(250);
+  const expanded = { ...(await probe(before)),
+    logTopAfter: await page.evaluate(() => document.getElementById("log").scrollTop), logTopBefore: logTop };
+  console.log("EXPANDED " + JSON.stringify(expanded));
+  await page.screenshot({ path: out.replace(/\.png$/, "-expanded.png"), fullPage: false });
+  // Sixty rows: the list scrolls inside its panel instead of pushing the composer off the view.
   await send({ type: "todos", todos: Array.from({ length: 60 }, (_, i) =>
-    ({ content: `Step ${i + 1}`, status: i < 20 ? "done" : "pending" })) });
+    ({ content: `Step ${i + 1}`, status: i < 20 ? "done" : i === 20 ? "in_progress" : "pending" })) });
   await page.waitForTimeout(200);
   const long = await page.evaluate(() => {
     const list = document.getElementById("tasks-list");
     const box = document.getElementById("cbox").getBoundingClientRect();
     return { listScrolls: list.scrollHeight > list.clientHeight, listHeight: Math.round(list.getBoundingClientRect().height),
-             composerVisible: box.bottom <= window.innerHeight };
+             composerVisible: box.bottom <= window.innerHeight, logTop: document.getElementById("log").scrollTop };
   });
-  console.log("LONG " + JSON.stringify(long));
+  console.log("LONG " + JSON.stringify({ ...long, logTopBeforeExpanding: logTop }));
   await page.screenshot({ path: out.replace(/\.png$/, "-long.png"), fullPage: false });
-  // logGrew may be negative: a transcript that does not overflow reports its own box as its
-  // scrollHeight, and the slot takes viewport height from that box the way the rails do. What
-  // must never happen is the log gaining content.
-  const ok = !running.hidden && !running.inLog && running.belowLog && running.aboveComposer && running.logGrew <= 0
-    && running.rows === 5 && running.clearDisabled && !finished.clearDisabled && long.listScrolls && long.composerVisible;
+  // An older CLI refuses Clear mid-turn: the reason sits on the row, in the summary's place.
+  await page.click("#tasks-toggle");
+  await page.click("#tasks-clear");
+  await send({ type: "command_rejected", command: "clear_todos", reason: "turn_in_progress",
+               message: "'clear_todos' is unavailable while a turn is running; cancel or wait" });
+  await page.waitForTimeout(150);
+  const noted = await page.evaluate(() => ({ note: document.getElementById("tasks-note").textContent,
+    visible: !document.getElementById("tasks-note").hidden,
+    rowHeight: Math.round(document.getElementById("tasks-main").getBoundingClientRect().height) }));
+  console.log("NOTE " + JSON.stringify(noted));
+  await page.screenshot({ path: out.replace(/\.png$/, "-note.png"), fullPage: false });
+  const ok = noted.visible && noted.rowHeight <= 28 && collapsed.order && collapsed.railOnPrompt && collapsed.belowLog && !collapsed.expanded
+    && collapsed.rowHeight <= 33 && collapsed.tasksHeight <= 34 && !collapsed.inLog && collapsed.logGrew <= 0
+    && collapsed.count === "Tasks 2/5" && collapsed.status === "active" && collapsed.blocked === "1 blocked"
+    && /has-tasks/.test(collapsed.rail) && collapsed.composerVisible
+    && expanded.expanded && expanded.order && expanded.railOnPrompt && expanded.panelAboveRow
+    && expanded.belowLog && expanded.composerVisible && !expanded.inLog
+    && logTop > 0 && expanded.logTopAfter === logTop
+    && long.listScrolls && long.listHeight <= 200 && long.composerVisible && long.logTop === logTop;
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);
 }

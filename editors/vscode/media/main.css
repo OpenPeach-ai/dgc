@@ -392,24 +392,35 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 .card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
 .card.resolved .btns { display: none; }
 
-/* tasks — the session checklist. One slot in the footer, between the transcript and the
-   composer, so it neither scrolls away with the log nor lands as a card inside a turn. */
-.todos { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); background: var(--surface); color: var(--text); }
-.todos .thead { display: flex; align-items: center; gap: var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 0; }
-.todos .thead span { color: var(--muted); }
-/* A long list must not push the composer off the panel: the rows scroll, the header stays. */
-#tasks-list { max-height: min(30vh, 200px); overflow-y: auto; overscroll-behavior: contain; }
-#tasks-clear { margin-left: auto; min-height: 20px; font-size: var(--t-xs); letter-spacing: 0; text-transform: none; }
-#tasks-clear:disabled { color: var(--faint); cursor: default; }
-.todos .t { display: flex; gap: var(--sp-2); align-items: baseline; }
-.todos .t .ti { flex: none; width: 12px; text-align: center; }
-.todos .t .tc { min-width: 0; overflow-wrap: anywhere; }
-.todos .t.pend .ti { color: var(--muted); }
-.todos .t.doing { color: var(--text); font-weight: var(--w-semi); } .todos .t.doing .ti { color: #E0A24E; }
-.todos .t.done { color: var(--muted); text-decoration: line-through; } .todos .t.done .ti { color: #57C08A; }
+/* tasks — the session checklist, a row in the composer rail directly above the goal row and made
+   of the goal row's parts. Collapsed it is one line; expanded, the list opens above that line
+   inside the rail, in its own bounded scroller, so it never moves the transcript or the composer. */
+#tasksbar { flex-direction: column; align-items: stretch; gap: 0; }
+.rail-row { min-height: 33px; display: flex; min-width: 0; align-items: center; gap: var(--sp-2); }
+.tasks-panel { border-bottom: 1px solid var(--border); }
+/* A long list must not push the composer off the panel: the rows scroll, the row line stays. */
+#tasks-list { max-height: min(30vh, 200px); overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-2) var(--sp-1); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); color: var(--text); }
+#tasksbar[data-status="active"] .tasks-icon { color: var(--accent-text); }
+#tasksbar[data-status="blocked"] .tasks-icon { color: var(--err-text); }
+#tasksbar[data-status="pending"] .tasks-icon, #tasksbar[data-status="done"] .tasks-icon { color: var(--faint); }
+#tasks-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+#tasks-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+#tasks-blocked { flex: none; color: var(--err-text); font: var(--w-reg) var(--t-xs)/1 var(--sans); }
+/* Why a Clear did not happen, in the summary's place on the same line. */
+.tasks-note { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--err-text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+#tasksbar.noted #tasks-main { flex: none; }
+#tasks-clear[aria-busy="true"] { cursor: progress; }
+#tasks-list .t { display: flex; gap: var(--sp-2); align-items: baseline; }
+#tasks-list .t .ti { flex: none; width: 12px; text-align: center; }
+#tasks-list .t .tc { min-width: 0; overflow-wrap: anywhere; }
+#tasks-list .t.pend .ti { color: var(--muted); }
+#tasks-list .t.doing { color: var(--text); font-weight: var(--w-semi); } #tasks-list .t.doing .ti { color: #E0A24E; }
+#tasks-list .t.done { color: var(--muted); text-decoration: line-through; } #tasks-list .t.done .ti { color: #57C08A; }
 /* Blocked is a live state, not a finished one: plain text, and the glyph in the panel's alert hue. */
-.todos .t.block { color: var(--text); } .todos .t.block .ti { color: var(--err-text); }
-.todos .t.cancel { color: var(--faint); text-decoration: line-through; } .todos .t.cancel .ti { color: #DC5A64; }
+#tasks-list .t.block { color: var(--text); } #tasks-list .t.block .ti { color: var(--err-text); }
+#tasks-list .t.cancel { color: var(--faint); text-decoration: line-through; } #tasks-list .t.cancel .ti { color: #DC5A64; }
 
 /* system lines */
 .sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
@@ -823,7 +834,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   :where(button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid Highlight !important; outline-offset: 2px;
   }
-  .tool, .diff, .card, .todos, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
+  .tool, .diff, .card, .tasks-panel, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
   #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
   #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
     border-color: CanvasText;

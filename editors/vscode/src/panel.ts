@@ -2040,9 +2040,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.continueInterruptedTurn();
         break;
       case "clear_todos":
-        // The backend answers with an empty `todos` event, which is what empties the slot in
-        // the webview; while a turn runs it refuses, and the webview keeps the button disabled.
-        be.send({ type: "clear_todos" });
+        // The backend empties the list at once, even while a turn runs, and answers with an empty
+        // `todos` event; that is what hides the Tasks row. An older CLI that still refuses mid-turn
+        // answers with command_rejected (command "clear_todos"), which the webview shows beside
+        // the row. Correlated when the backend supports it, so the answer can be traced.
+        be.send(this.stateCommand("clear-todos", { type: "clear_todos" }));
         break;
       case "pauseGoal":
         await this.pauseGoal();
@@ -2788,6 +2790,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await this.resumeGoal();
       } else {
         await this.startGoal(rest);
+      }
+      return;
+    }
+    if (name === "todo") {
+      // The terminals' `/todo clear` works here too: the editor has no `todo` command of its own,
+      // and sending it on as a custom command only ever produced "unknown command".
+      if (rest.toLowerCase() === "clear") {
+        await this.onMessage({ type: "clear_todos" });
+      } else {
+        this.post({ type: "event", event: { type: "error", message: "usage: /todo clear" } });
       }
       return;
     }
@@ -4187,15 +4199,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
-  <section id="tasks" class="todos" role="region" aria-label="Session tasks" hidden>
-    <div class="thead">Tasks <span id="tasks-count">0/0</span><button type="button" id="tasks-clear" class="rail-text-action" title="Drop every item from this chat’s checklist">Clear</button></div>
-    <div id="tasks-list"></div>
-  </section>
   <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
       <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this chat has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
       <button type="button" id="changes-review-button" class="rail-text-action" title="Open the list of changed files">Review</button>
+    </section>
+    <section id="tasksbar" class="rail-item" aria-label="Session tasks" data-status="pending" hidden>
+      <div id="tasks-panel" class="tasks-panel" hidden><div id="tasks-list" role="list" aria-label="Checklist"></div></div>
+      <div class="rail-row">
+        <button type="button" id="tasks-main" class="rail-main" aria-expanded="false" aria-controls="tasks-panel" aria-label="Tasks" title="Show the checklist"><span class="tasks-icon codicon codicon-checklist rail-icon" aria-hidden="true"></span><span id="tasks-count">Tasks 0/0</span><span id="tasks-text"></span><span id="tasks-blocked" hidden></span></button>
+        <span id="tasks-note" class="tasks-note" role="status" hidden></span>
+        <div class="goal-actions">
+          <button type="button" id="tasks-clear" class="rail-icon-button" title="Clear the checklist" aria-label="Clear the checklist"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
+          <button type="button" id="tasks-toggle" class="rail-icon-button" aria-expanded="false" aria-controls="tasks-panel" title="Show the checklist" aria-label="Show the checklist"><span class="codicon codicon-chevron-up" aria-hidden="true"></span></button>
+        </div>
+      </div>
     </section>
     <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>
       <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal" title="Read and edit the standing objective"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>

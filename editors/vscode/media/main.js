@@ -2,7 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
-  const goalBar = $("goalbar"), changesBar = $("changesbar"), composerRail = $("composer-rail");
+  const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -287,6 +287,9 @@
   ];
 
   let streaming = false, turn = null;
+  // A custom slash command sent while idle shows Stop before its turn exists; set until that turn
+  // starts or the backend answers with an error or refusal instead.
+  let customCommandPending = false;
   const attachments = [];
   let promptSequence = 0;
   const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -299,6 +302,10 @@
   const draftEntries = new Map();
   const pendingImages = new Set();
   let draftSession = "unbound", sessionReady = !draftScope, draftTimer = null, restoringDraft = false;
+  // The Tasks row: which chats keep the checklist expanded (keyed by session id; a chat never seen
+  // starts collapsed), a Clear waiting for the backend's answer, and whether a backend is up.
+  const tasksExpanded = new Set();
+  let todoClear = null, backendLive = false;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
   function cleanDraft(value) {
@@ -361,7 +368,9 @@
       if (!draft || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
       pending.push({ id, session: request.session || draftSession, draft }); bytes += size;
     }
-    try { vscode.setState({ version: 1, scope: draftScope, active: draftSession, entries, pending }); }
+    // Which chats keep their checklist open: webview-local, like the drafts, and bounded the same way.
+    const tasksOpen = [...tasksExpanded].slice(-32);
+    try { vscode.setState({ version: 1, scope: draftScope, active: draftSession, entries, pending, tasksOpen }); }
     catch { omitted = true; }
     if (omitted && !draftWarning) {
       draftWarning = true;
@@ -378,6 +387,8 @@
     const prior = draftSession;
     draftSession = session;
     const source = adoptFrom || (prior === "unbound" ? prior : "");
+    if (source && tasksExpanded.delete(source)) tasksExpanded.add(session);
+    paintTasksExpanded();
     if (!draftEntries.has(session) && source && draftEntries.has(source)) {
       draftEntries.set(session, draftEntries.get(source)); draftEntries.delete(source);
     }
@@ -402,6 +413,10 @@
         if (typeof session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(session) && draft) draftEntries.set(session, draft);
       }
       if (typeof saved.active === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(saved.active)) draftSession = saved.active;
+      for (const session of (Array.isArray(saved.tasksOpen) ? saved.tasksOpen : []).slice(-32)) {
+        if (typeof session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(session)) tasksExpanded.add(session);
+      }
+      paintTasksExpanded();
       unconfirmedDrafts = (Array.isArray(saved.pending) ? saved.pending : []).slice(0, 17).flatMap(row => {
         const draft = cleanDraft(row?.draft);
         return draft && typeof row.id === "string" && row.id.length <= 128
@@ -1009,11 +1024,12 @@
     turn = null;
   }
   // A checklist belongs to the session, not to a single assistant bubble, so it is not a card
-  // in the transcript. It lives in the `#tasks` slot between the log and the composer, and every
-  // update — a `todos` event mid-turn, or the `history` snapshot on resume and reload — redraws
-  // that one slot without inventing a running turn or starting a timer. Nothing here scrolls the
-  // transcript or touches follow mode: the slot sits outside the scrollport, and a reader who
-  // scrolled up to check something must stay where they are while the list ticks over.
+  // in the transcript. It is a row in the composer rail, directly above the goal row and built from
+  // the same parts: collapsed it reads "Tasks 2/5 · <the step in progress>", and expanded the full
+  // list opens above the row inside the rail, scrolling within its own bounded panel. Every update
+  // — a `todos` event mid-turn, or the `history` snapshot on resume and reload — repaints that one
+  // row without inventing a running turn or starting a timer. Nothing here scrolls the transcript
+  // or touches follow mode: a reader who scrolled up must stay where they are while the list ticks.
   const TODO_GLYPHS = {
     pending:     ["□", "pend",   "pending"],
     in_progress: ["▶", "doing",  "in progress"],
@@ -1021,19 +1037,104 @@
     blocked:     ["⊘", "block",  "blocked"],
     cancelled:   ["✗", "cancel", "cancelled"],
   };
+  const TASKS_TIMEOUT_MS = 5000;
+  function tasksOpen() { return tasksExpanded.has(draftSession); }
+  function paintTasksExpanded() {
+    const open = tasksOpen(), toggle = $("tasks-toggle");
+    $("tasks-panel").hidden = !open;
+    const label = open ? "Hide the checklist" : "Show the checklist";
+    for (const button of [$("tasks-main"), toggle]) button.setAttribute("aria-expanded", String(open));
+    toggle.title = label; toggle.setAttribute("aria-label", label);
+    $("tasks-main").title = label;
+    toggle.querySelector(".codicon").className = `codicon codicon-chevron-${open ? "down" : "up"}`;
+  }
+  function toggleTasks() {
+    if (tasksOpen()) tasksExpanded.delete(draftSession); else tasksExpanded.add(draftSession);
+    paintTasksExpanded();
+    persistDraft();
+  }
+  function showTasksNote(message) {
+    const note = $("tasks-note");
+    note.textContent = message || ""; note.title = message || ""; note.hidden = !message;
+    tasksBar.classList.toggle("noted", Boolean(message));
+    $("tasks-text").hidden = Boolean(message);   // the note takes the summary's place, never both
+  }
+  function paintTodoClearBusy(busy) {
+    const button = $("tasks-clear"), icon = button.querySelector(".codicon");
+    if (busy) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
+    icon.className = busy ? "codicon codicon-loading codicon-modifier-spin" : "codicon codicon-trash";
+    const label = busy ? "Clearing the checklist" : "Clear the checklist";
+    button.title = label; button.setAttribute("aria-label", label);
+  }
+  // A clear waiting on a backend that is restarting or still handshaking is not unanswered yet:
+  // the command is held until it is back. The clock only runs against a live backend.
+  function armTodoClearTimer() {
+    if (!todoClear || todoClear.timer || !backendLive || !sessionReady) return;
+    todoClear.timer = setTimeout(() => {
+      if (todoClear) todoClear.timer = null;
+      settleTodoClear("DGC did not confirm the clear. Try again, or run DGC: Restart Backend.");
+    }, TASKS_TIMEOUT_MS);
+  }
+  function pauseTodoClearTimer() {
+    if (todoClear?.timer) { clearTimeout(todoClear.timer); todoClear.timer = null; }
+  }
+  function requestTodoClear() {
+    if (todoClear) return;                      // one clear at a time; the answer settles it
+    todoClear = { timer: null };
+    showTasksNote("");
+    paintTodoClearBusy(true);
+    vscode.postMessage({ type: "clear_todos" });
+    armTodoClearTimer();
+  }
+  // Every way a clear ends goes through here, and every one of them takes the old note down: a
+  // refusal or timeout note must never sit beside a list it was not about.
+  function settleTodoClear(message = "") {
+    pauseTodoClearTimer();
+    todoClear = null;
+    paintTodoClearBusy(false);
+    showTasksNote(message);
+  }
   function renderTodos(value) {
     const rows = (Array.isArray(value) ? value : []).filter((t) => t && typeof t.content === "string").slice(0, 100);
-    const slot = $("tasks"), list = $("tasks-list"), count = $("tasks-count");
-    if (!rows.length) { list.innerHTML = ""; count.textContent = "0/0"; slot.hidden = true; return; }
+    const list = $("tasks-list"), count = $("tasks-count");
+    if (!rows.length) {
+      const hadFocus = tasksBar.contains(document.activeElement);
+      settleTodoClear();
+      list.innerHTML = ""; count.textContent = "Tasks 0/0"; $("tasks-text").textContent = "";
+      $("tasks-blocked").hidden = true;
+      tasksBar.hidden = true;
+      syncComposerRail();
+      // Clear removed the row the focus was on: land in the composer, the next thing to use.
+      if (hadFocus) input.focus();
+      return;
+    }
+    // A fresh list is never shown beside a stale note. A pending clear stays pending: the
+    // backend's empty list or its refusal is what settles it.
+    if (!todoClear) showTasksNote("");
+    // Own keys only — a status of "constructor" must not fish a function out of the prototype.
+    const statusOf = (t) => Object.hasOwn(TODO_GLYPHS, t.status) ? t.status : "pending";
     // Blocked items are not done: the counter is the same one the backend's completion gate reads.
     const complete = rows.filter((t) => t.status === "done").length;
-    count.textContent = `${complete}/${rows.length}`;
+    const doing = rows.find((t) => statusOf(t) === "in_progress");
+    const pending = rows.filter((t) => statusOf(t) === "pending").length;
+    const blocked = rows.filter((t) => statusOf(t) === "blocked").length;
+    count.textContent = `Tasks ${complete}/${rows.length}`;
+    const summary = doing ? doing.content.replace(/\s+/g, " ").trim()
+      : pending ? `${pending} pending` : blocked ? "" : "all done";
+    $("tasks-text").textContent = summary;
+    $("tasks-blocked").textContent = `${blocked} blocked`;
+    $("tasks-blocked").hidden = blocked === 0;
+    tasksBar.dataset.status = doing ? "active" : blocked ? "blocked" : pending ? "pending" : "done";
+    $("tasks-main").setAttribute("aria-label", `Tasks, ${complete} of ${rows.length} done`
+      + (doing ? `, in progress: ${summary.slice(0, 180)}` : pending ? `, ${pending} pending` : blocked ? "" : ", all done")
+      + (blocked ? `, ${blocked} blocked` : ""));
     list.innerHTML = rows.map((t) => {
-      // Own keys only — a status of "constructor" must not fish a function out of the prototype.
-      const g = Object.hasOwn(TODO_GLYPHS, t.status) ? TODO_GLYPHS[t.status] : TODO_GLYPHS.pending;
-      return `<div class="t ${g[1]}"><span class="ti" role="img" aria-label="${g[2]}">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
+      const g = TODO_GLYPHS[statusOf(t)];
+      return `<div class="t ${g[1]}" role="listitem"><span class="ti" role="img" aria-label="${g[2]}">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
     }).join("");
-    slot.hidden = false;
+    tasksBar.hidden = false;
+    paintTasksExpanded();
+    syncComposerRail();
   }
 
   function ensureTurn() { if (!turn) startTurn(); }
@@ -1437,8 +1538,9 @@
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   function syncComposerRail() {
-    composerRail.hidden = goalBar.hidden && changesBar.hidden;
+    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden;
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
+    composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
   }
   function setChatChanges(next) {
@@ -1908,6 +2010,7 @@
     const stick = atBottom();
     switch (ev.type) {
       case "ready": {
+        backendLive = true; armTodoClearTimer();
         if (Array.isArray(ev.commands) && ev.commands.length
             && ev.commands.every((c) => c && typeof c === "object")) {
           builtinCommands = ev.commands;
@@ -1946,7 +2049,9 @@
           discardTurn(); log.innerHTML = ""; queuedCount = 0; queuedPrompts.clear(); renderQueued(); setSending(false);
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
-        // snapshot that follows, so the slot is left for that event to overwrite.
+        // snapshot that follows, so the row is left for that event to overwrite. Either way a
+        // clear that was waiting belonged to the chat being left.
+        if (["cleared", "new", "resumed"].includes(ev.kind)) settleTodoClear();
         if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
@@ -1971,6 +2076,7 @@
       case "turn_start":
         if (!replaying) removeRecoveryCards();
         startTurn(ev.prompt, ev.kind, ev.turn_id);
+        if (!replaying) customCommandPending = false;
         if (!replaying) {
           setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); }
           // A queued prompt leaves the queue when its own turn starts, matched by the request id the
@@ -2398,7 +2504,11 @@
         });
         sysLine(ev.message, ev.decision === "no"); break;
       case "command_rejected":
+        // A refused Clear says why beside the checklist, not in the transcript.
+        if (ev.command === "clear_todos") { settleTodoClear(ev.message || "DGC could not clear the checklist."); break; }
         if (ev.command === "prompt" || ev.command === "start_goal") rejectPrompt(ev.request_id);
+        // A custom slash command that was refused (busy, queue full) never started a turn.
+        if (ev.command === "slash_command") settleCustomCommand();
         sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
@@ -2418,7 +2528,11 @@
         sysLine(`${lead} · ${before} → ${after} estimated tokens`);
         break;
       }
-      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
+      case "error":
+        speak(`DGC error: ${ev.message}`); sysLine(ev.message, true);
+        if (ev.fatal) { endTurn("error"); setSending(false); }
+        else settleCustomCommand();     // "unknown command" / "custom command is empty": no turn is coming
+        break;
       case "turn_end":
         speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
@@ -2447,20 +2561,26 @@
     $("followup-hint").hidden = !streaming;
     $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
   }
+  function settleCustomCommand() {
+    if (!customCommandPending) return;
+    customCommandPending = false;
+    if (!turn) setSending(false);
+  }
   function setSending(on) {
     streaming = on; renderComposerControls();
     document.querySelectorAll("[data-skill-mutation]").forEach(button => {
       button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
     });
-    $("tasks-clear").disabled = on;
-    $("tasks-clear").title = on ? "Available after this turn finishes" : "Drop every item from this chat\u2019s checklist";
   }
   function doStop() { queuedCount = 0; queuedPrompts.clear(); renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
   $("goal-clear").onclick = () => vscode.postMessage({ type: "clearGoal" });
-  $("tasks-clear").onclick = () => vscode.postMessage({ type: "clear_todos" });
+  // Clear is never disabled: the backend empties the list even while a turn runs.
+  $("tasks-clear").onclick = requestTodoClear;
+  $("tasks-main").onclick = toggleTasks;
+  $("tasks-toggle").onclick = toggleTasks;
   $("goal-main").onclick = openGoalEditor;
   $("goal-edit").onclick = openGoalEditor;
   $("goal-review-button").onclick = openGoalReview;
@@ -2553,11 +2673,20 @@
       || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
     if (text.startsWith("/") && !attachments.length && !workflowPrompt) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
+      // The terminals' `/todo clear` does what the Tasks row's Clear does, pending state and all.
+      if (/^\/todo\s+clear$/i.test(text)) {
+        requestTodoClear();
+        input.value = ""; input.style.height = "auto"; persistDraft(); return;
+      }
       const custom = customCommands.includes(name);
       if (custom) {
           const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
           m.appendChild(el("div", "bubble", esc(text)));
-          log.appendChild(m); settleBlock(m); setSending(true);
+          log.appendChild(m); settleBlock(m);
+          // Idle, this shows Stop until the command's turn starts. If the backend answers with an
+          // error or a refusal instead, no turn is coming and the composer must come back.
+          if (!streaming) customCommandPending = true;
+          setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
       input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
@@ -3265,6 +3394,7 @@
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "session_ready") {
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
+      backendLive = true; armTodoClearTimer();
       renderUnconfirmedDrafts();
     }
     else if (msg.type === "state") {
@@ -3361,6 +3491,8 @@
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
       sessionReady = !draftScope;
+      // A Clear sent to this backend is held for the next one; do not call it unanswered meanwhile.
+      backendLive = false; pauseTodoClearTimer();
       // The extension is restarting the backend and will pick the work back up, so the turn has
       // not failed. Ending it here relabelled an already-answered turn "Failed for 41s" and took
       // its answer chrome away. Say what is happening instead — and bound it: if nothing arrives

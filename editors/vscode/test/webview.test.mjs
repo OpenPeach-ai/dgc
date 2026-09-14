@@ -117,26 +117,52 @@ function makeDom(options = {}) {
     getState: () => savedState,
     setState: (value) => { savedState = JSON.parse(JSON.stringify(value)); },
   });
+  // A manual clock: timers only fire when the test advances time, so a timeout is asserted exactly.
+  let now = 0, nextTimer = 1;
+  const timers = new Map();
+  if (options.clock) {
+    dom.window.setTimeout = (fn, ms = 0) => { const id = nextTimer++; timers.set(id, { at: now + Number(ms || 0), fn }); return id; };
+    dom.window.clearTimeout = (id) => { timers.delete(id); };
+  }
+  const advance = (ms) => {
+    const until = now + ms;
+    for (;;) {
+      const due = [...timers].filter(([, t]) => t.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      timers.delete(due[0]); now = due[1].at; due[1].fn();
+    }
+    now = until;
+  };
   dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
-  return { dom, errors, posted, send, doc: dom.window.document, savedState: () => savedState };
+  return { dom, errors, posted, send, advance, doc: dom.window.document, savedState: () => savedState };
 }
 
-// The session checklist is one fixed slot between the transcript and the composer. It is not a
+// The session checklist is one row in the composer rail, directly above the goal row. It is not a
 // card inside a turn: it updates in place across turns, restores on resume without inventing a
 // running turn, empties with the chat, and never moves a reader who has scrolled up.
-test("the session checklist lives in one slot above the composer and updates in place across turns", () => {
+test("the session checklist is a composer-rail row above the goal and updates in place across turns", () => {
   const { doc, send, errors } = makeDom();
-  const slot = doc.getElementById("tasks"), log = doc.getElementById("log");
+  const bar = doc.getElementById("tasksbar"), log = doc.getElementById("log");
+  const rail = doc.getElementById("composer-rail");
   const count = () => doc.getElementById("tasks-count").textContent;
   const tasks = [{ content: "Inspect", status: "done" }, { content: "Verify <script>", status: "pending" }];
   const event = data => send({ type: "event", event: data });
-  assert.equal(slot.hidden, true, "an empty checklist takes no room");
+  assert.equal(doc.getElementById("tasks"), null, "the old standalone slot is gone");
+  assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "exactly one task surface");
+  assert.deepEqual([...rail.children].map(node => node.id), ["changesbar", "tasksbar", "goalbar"],
+    "rail order: changes, tasks, goal — the whole rail sits on the prompt box");
+  assert.equal(rail.nextElementSibling.id, "cbox");
+  assert.equal(bar.classList.contains("rail-item"), true);
+  assert.equal(bar.hidden, true, "an empty checklist takes no room");
+  assert.equal(rail.hidden, true, "nor does the rail with nothing in it");
   event({ type: "history", items: [], todos: tasks });
-  assert.equal(slot.hidden, false);
-  assert.equal(count(), "1/2");
-  assert.equal(log.querySelector(".todos"), null, "the checklist is not a card in the transcript");
+  assert.equal(bar.hidden, false);
+  assert.equal(rail.hidden, false, "the rail shows for the tasks row alone");
+  assert.equal(rail.classList.contains("has-tasks"), true);
+  assert.equal(count(), "Tasks 1/2");
+  assert.equal(log.querySelector("#tasks-list, .t"), null, "the checklist is not a card in the transcript");
   assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0, "restoring tasks is read-only");
   event({ type: "turn_start", prompt: "Continue" });
   event({ type: "todos", todos: tasks });
@@ -144,30 +170,31 @@ test("the session checklist lives in one slot above the composer and updates in 
   event({ type: "turn_start", prompt: "Finish" });
   event({ type: "todos", todos: tasks.map(t => ({ ...t, status: "done" })) });
   event({ type: "turn_end", reason: "completed" });
-  assert.equal(doc.querySelectorAll(".todos").length, 1, "one checklist, however many turns updated it");
-  assert.equal(log.querySelector(".todos"), null, "and still none in the transcript");
-  assert.equal(count(), "2/2");
-  assert.match(slot.textContent, /Verify <script>/);
-  assert.equal(slot.querySelector("script"), null, "task text is escaped");
+  assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "one checklist, however many turns updated it");
+  assert.equal(log.querySelector(".t"), null, "and still none in the transcript");
+  assert.equal(count(), "Tasks 2/2");
+  assert.match(doc.getElementById("tasks-list").textContent, /Verify <script>/);
+  assert.equal(bar.querySelector("script"), null, "task text is escaped");
   event({ type: "session", kind: "new", session_id: "next-chat" });
-  assert.equal(slot.hidden, true, "a new chat starts with no tasks");
+  assert.equal(bar.hidden, true, "a new chat starts with no tasks");
+  assert.equal(rail.classList.contains("has-tasks"), false);
   assert.equal(doc.getElementById("tasks-list").children.length, 0);
   event({ type: "todos", todos: tasks });
-  assert.equal(slot.hidden, false);
+  assert.equal(bar.hidden, false);
   event({ type: "todos", todos: [] });
-  assert.equal(slot.hidden, true, "an empty list from the backend empties the slot");
+  assert.equal(bar.hidden, true, "an empty list from the backend removes the row");
   // Reload or resume after a rewind: the snapshot's list comes back without a phantom turn.
   event({ type: "session", kind: "resumed", session_id: "next-chat" });
   event({ type: "history", items: [{ role: "user", text: "Earlier" }], todos: tasks });
-  assert.equal(slot.hidden, false);
-  assert.equal(count(), "1/2");
+  assert.equal(bar.hidden, false);
+  assert.equal(count(), "Tasks 1/2");
   assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0);
-  // A resumed session whose checklist was cleared (or never had one) empties the slot too.
+  // A resumed session whose checklist was cleared (or never had one) removes the row too.
   event({ type: "session", kind: "resumed", session_id: "next-chat" });
   event({ type: "history", items: [], todos: [] });
-  assert.equal(slot.hidden, true, "a snapshot with no tasks empties the slot");
+  assert.equal(bar.hidden, true, "a snapshot with no tasks removes the row");
   assert.equal(doc.getElementById("tasks-list").children.length, 0);
-  assert.equal(count(), "0/0");
+  assert.equal(count(), "Tasks 0/0");
   assert.deepEqual(errors, []);
 });
 
@@ -185,31 +212,246 @@ test("blocked tasks get their own glyph and do not count as done", () => {
   assert.deepEqual(rows.map(r => r.className), ["t done", "t block", "t doing", "t cancel", "t pend", "t pend"]);
   assert.deepEqual(rows.map(r => r.querySelector(".ti").textContent), ["\u2713", "\u2298", "\u25B6", "\u2717", "\u25A1", "\u25A1"]);
   assert.equal(rows[1].querySelector(".ti").getAttribute("aria-label"), "blocked");
-  assert.equal(doc.getElementById("tasks-count").textContent, "1/6", "blocked and in-progress items are still open");
-  assert.doesNotMatch(doc.getElementById("tasks").innerHTML, /undefined/);
+  assert.ok(rows.every(r => r.getAttribute("role") === "listitem"));
+  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/6", "blocked and in-progress items are still open");
+  assert.doesNotMatch(doc.getElementById("tasksbar").innerHTML, /undefined/);
   assert.deepEqual(errors, []);
 });
 
-test("Clear asks the backend to drop the checklist and waits while a turn runs", () => {
+test("the collapsed tasks row reads like the goal row: count, the step in progress, blocked, state colour", () => {
+  const { doc, send, errors } = makeDom();
+  const event = data => send({ type: "event", event: data });
+  const bar = doc.getElementById("tasksbar"), main = doc.getElementById("tasks-main");
+  const text = () => doc.getElementById("tasks-text").textContent;
+  const blocked = doc.getElementById("tasks-blocked");
+  event({ type: "todos", todos: [
+    { content: "Read the config", status: "done" },
+    { content: "Add a regression test\n  for the   bounds", status: "in_progress" },
+    { content: "Wait for the API key", status: "blocked" },
+    { content: "Update the changelog", status: "pending" },
+    { content: "Tag the release", status: "pending" },
+  ] });
+  assert.equal(doc.getElementById("tasks-count").textContent, "Tasks 1/5");
+  assert.equal(text(), "Add a regression test for the bounds", "the in-progress step, on one line");
+  assert.equal(blocked.hidden, false);
+  assert.equal(blocked.textContent, "1 blocked");
+  assert.equal(bar.dataset.status, "active", "in progress takes the accent, like an active goal");
+  assert.equal(main.getAttribute("aria-label"),
+    "Tasks, 1 of 5 done, in progress: Add a regression test for the bounds, 1 blocked");
+  assert.match(mainCss, /#tasks-text\s*\{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    "a long step truncates on the row");
+  assert.match(mainCss, /#tasksbar\[data-status="active"\] \.tasks-icon\s*\{[^}]*--accent-text/);
+  assert.match(mainCss, /#tasksbar\[data-status="blocked"\] \.tasks-icon\s*\{[^}]*--err-text/);
+  assert.match(mainCss, /#tasksbar\[data-status="done"\] \.tasks-icon\s*\{[^}]*--faint/);
+  event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "pending" },
+    { content: "C", status: "pending" }, { content: "D", status: "pending" }] });
+  assert.equal(text(), "3 pending");
+  assert.equal(blocked.hidden, true);
+  assert.equal(bar.dataset.status, "pending");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 1 of 4 done, 3 pending");
+  event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "blocked" }] });
+  assert.equal(text(), "");
+  assert.equal(blocked.textContent, "1 blocked");
+  assert.equal(bar.dataset.status, "blocked", "nothing moving and something blocked reads as the error state");
+  event({ type: "todos", todos: [{ content: "A", status: "done" }, { content: "B", status: "done" }] });
+  assert.equal(text(), "all done");
+  assert.equal(bar.dataset.status, "done");
+  assert.equal(main.getAttribute("aria-label"), "Tasks, 2 of 2 done, all done");
+  assert.deepEqual(errors, []);
+});
+
+test("the tasks row collapses and expands like a disclosure, remembered per chat", () => {
+  const { doc, send, posted, savedState, errors } = makeDom();
+  const event = data => send({ type: "event", event: data });
+  const panel = doc.getElementById("tasks-panel"), main = doc.getElementById("tasks-main");
+  const toggle = doc.getElementById("tasks-toggle"), clear = doc.getElementById("tasks-clear");
+  const chevron = () => toggle.querySelector(".codicon").className;
+  const tasks = [{ content: "Inspect", status: "done" }, { content: "Fix", status: "in_progress" }];
+  event({ type: "ready", session_id: "chat-a", capabilities: {} });
+  event({ type: "todos", todos: tasks });
+  // Keyboard: all three are real buttons in the tab order; Enter and Space activate them natively.
+  for (const button of [main, clear, toggle]) {
+    assert.equal(button.tagName, "BUTTON");
+    assert.equal(button.getAttribute("type"), "button");
+    assert.equal(button.disabled, false);
+    assert.equal(button.getAttribute("tabindex"), null);
+  }
+  assert.equal(panel.hidden, true, "a chat starts collapsed");
+  assert.equal(main.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(main.getAttribute("aria-controls"), "tasks-panel");
+  assert.equal(chevron(), "codicon codicon-chevron-up");
+  assert.equal(toggle.getAttribute("aria-label"), "Show the checklist");
+  toggle.click();
+  assert.equal(panel.hidden, false, "the full list opens above the row");
+  assert.equal(panel.nextElementSibling.querySelector("#tasks-main"), main, "above, inside the same rail item");
+  assert.equal(main.getAttribute("aria-expanded"), "true");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(chevron(), "codicon codicon-chevron-down");
+  assert.equal(toggle.getAttribute("aria-label"), "Hide the checklist");
+  assert.deepEqual(savedState().tasksOpen, ["chat-a"]);
+  assert.equal(doc.querySelectorAll("#tasks-list .t").length, 2);
+  assert.match(mainCss, /#tasks-list\s*\{[^}]*max-height:\s*min\(30vh, 200px\)[^}]*overflow-y:\s*auto/s,
+    "expanded, the list is a bounded scroller");
+  main.click();
+  assert.equal(panel.hidden, true, "clicking the row itself toggles too");
+  assert.deepEqual(savedState().tasksOpen, []);
+  main.click();
+  // Another chat has its own state, and a new chat starts collapsed.
+  event({ type: "session", kind: "new", session_id: "chat-b" });
+  event({ type: "todos", todos: tasks });
+  assert.equal(panel.hidden, true, "a new chat starts collapsed");
+  event({ type: "session", kind: "resumed", session_id: "chat-a" });
+  event({ type: "history", items: [], todos: tasks });
+  assert.equal(panel.hidden, false, "back in the first chat, its checklist is open again");
+  assert.equal(posted.filter(m => m.type === "clear_todos").length, 0, "toggling never clears");
+  // A reloaded webview restores the choice from its saved state.
+  const reopened = makeDom({ state: savedState() });
+  reopened.send({ type: "session_ready", sessionId: "chat-a" });
+  reopened.send({ type: "event", event: { type: "todos", todos: tasks } });
+  assert.equal(reopened.doc.getElementById("tasks-panel").hidden, false);
+  reopened.send({ type: "session_ready", sessionId: "chat-b" });
+  assert.equal(reopened.doc.getElementById("tasks-panel").hidden, true);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(reopened.errors, []);
+});
+
+test("Clear is never a dead button: it posts during a turn and the row goes on the backend's answer", () => {
   const { doc, send, posted, errors } = makeDom();
   const event = data => send({ type: "event", event: data });
-  const button = doc.getElementById("tasks-clear");
+  const button = doc.getElementById("tasks-clear"), input = doc.getElementById("input");
   const cleared = () => posted.filter(m => m.type === "clear_todos");
-  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
-  assert.equal(button.disabled, false);
-  button.click();
-  assert.equal(cleared().length, 1, "the button posts the backend command itself");
-  assert.deepEqual(Object.keys(cleared()[0]), ["type"], "and nothing else rides along");
-  assert.equal(doc.getElementById("tasks").hidden, false, "the click alone does not empty the slot");
+  event({ type: "todos", todos: [{ content: "Inspect", status: "in_progress" }] });
   event({ type: "turn_start", prompt: "Go" });
-  assert.equal(button.disabled, true, "the backend refuses the command while a turn runs");
+  assert.equal(button.disabled, false, "a running turn no longer switches Clear off");
+  button.focus();
   button.click();
-  assert.equal(cleared().length, 1, "a disabled button posts nothing");
-  event({ type: "turn_end", reason: "completed" });
-  assert.equal(button.disabled, false);
-  // The backend answers with an empty `todos` event; that is what empties the slot.
+  assert.equal(cleared().length, 1, "the button posts the backend command mid-turn");
+  assert.deepEqual(Object.keys(cleared()[0]), ["type"], "and nothing else rides along");
+  assert.equal(button.getAttribute("aria-busy"), "true");
+  assert.equal(button.getAttribute("aria-label"), "Clearing the checklist");
+  assert.equal(doc.getElementById("tasksbar").hidden, false, "the click alone does not remove the row");
+  button.click();
+  assert.equal(cleared().length, 1, "a second click while waiting posts nothing more");
+  // The backend empties the list at once and says so; that is what removes the row.
   event({ type: "todos", todos: [] });
-  assert.equal(doc.getElementById("tasks").hidden, true);
+  assert.equal(doc.getElementById("tasksbar").hidden, true);
+  assert.equal(doc.getElementById("composer-rail").hidden, true);
+  assert.equal(button.getAttribute("aria-busy"), null);
+  assert.equal(button.getAttribute("aria-label"), "Clear the checklist");
+  assert.equal(doc.activeElement, input, "focus lands in the composer once the row it was on is gone");
+  event({ type: "turn_end", reason: "completed" });
+  assert.deepEqual(errors, []);
+});
+
+test("a refused Clear says why beside the checklist, and the note never outlives it", () => {
+  const { doc, send, errors } = makeDom();
+  const event = data => send({ type: "event", event: data });
+  const note = doc.getElementById("tasks-note"), button = doc.getElementById("tasks-clear");
+  const message = "'clear_todos' is unavailable while a turn is running; cancel or wait";
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  button.click();
+  // An older CLI still refuses mid-turn: the row stays and says so on its own line.
+  event({ type: "command_rejected", command: "clear_todos", reason: "turn_in_progress", message });
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, message);
+  assert.equal(note.getAttribute("role"), "status");
+  assert.equal(doc.getElementById("tasks-text").hidden, true, "the note takes the summary's place");
+  assert.equal(doc.getElementById("tasksbar").hidden, false);
+  assert.equal(button.getAttribute("aria-busy"), null, "Clear is usable again");
+  assert.equal([...doc.querySelectorAll("#log .sys.err")].some(line => line.textContent.includes(message)), false,
+    "not a red line in the transcript");
+  event({ type: "todos", todos: [{ content: "Inspect", status: "done" }, { content: "Ship", status: "pending" }] });
+  assert.equal(note.hidden, true, "a new list is never shown beside the old refusal");
+  assert.equal(doc.getElementById("tasks-text").hidden, false);
+  button.click();
+  event({ type: "command_rejected", command: "clear_todos", reason: "turn_in_progress", message });
+  event({ type: "todos", todos: [] });
+  event({ type: "todos", todos: [{ content: "Unrelated", status: "pending" }] });
+  assert.equal(note.hidden, true, "a list that came back after the row went starts without a note");
+  assert.deepEqual(errors, []);
+});
+
+test("an unanswered Clear times out with a note, but never while the backend is away", () => {
+  const { doc, send, advance, errors } = makeDom({ clock: true });
+  const event = data => send({ type: "event", event: data });
+  const note = doc.getElementById("tasks-note"), button = doc.getElementById("tasks-clear");
+  event({ type: "ready", session_id: "chat-a", capabilities: {} });
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  button.click();
+  advance(4999);
+  assert.equal(note.hidden, true);
+  advance(1);
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /^DGC did not confirm the clear/);
+  assert.equal(button.getAttribute("aria-busy"), null, "and the button is usable again");
+  // Pressed while the backend restarts: the command waits for the new backend, and so does the clock.
+  button.click();
+  assert.equal(note.hidden, true, "a new attempt takes the old note down");
+  send({ type: "backend_exit", code: 1, recovering: true, resumes: "none" });
+  advance(60000);
+  assert.equal(note.hidden, true, "no timeout against a backend that is not there");
+  assert.equal(button.getAttribute("aria-busy"), "true");
+  event({ type: "ready", session_id: "chat-a", capabilities: {} });
+  advance(4000);
+  assert.equal(note.hidden, true);
+  // The late answer lands before the clock runs out: the row goes, and no note is left behind.
+  event({ type: "todos", todos: [] });
+  advance(5000);
+  assert.equal(note.hidden, true);
+  assert.equal(doc.getElementById("tasksbar").hidden, true);
+  assert.deepEqual(errors, []);
+});
+
+test("a custom slash command that errors or is refused gives the composer back", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  const event = data => send({ type: "event", event: data });
+  const input = doc.getElementById("input"), hint = doc.getElementById("followup-hint");
+  const running = () => hint.hidden === false;     // the composer's "a run is in flight" state
+  const submit = (text) => {
+    input.value = text;
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  };
+  event({ type: "ready", session_id: "chat-a", capabilities: {}, custom_commands: ["foo"] });
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  for (const answer of [
+    { type: "error", message: "unknown command: /foo" },
+    { type: "error", message: "custom command /foo is empty" },
+    { type: "command_rejected", command: "slash_command", reason: "turn_in_progress", message: "a foreground operation is running; cancel or wait for it to finish" },
+    { type: "command_rejected", command: "slash_command", reason: "queue_full", message: "follow-up queue is full (16); cancel it or wait for a turn to finish" },
+  ]) {
+    submit("/foo");
+    assert.equal(posted.at(-1).type, "slashText");
+    assert.equal(running(), true, "the composer shows a run starting");
+    event(answer);
+    assert.equal(running(), false, `no turn is coming after ${answer.type}: the composer is back`);
+    const before = posted.filter(m => m.type === "clear_todos").length;
+    doc.getElementById("tasks-clear").click();
+    assert.equal(posted.filter(m => m.type === "clear_todos").length, before + 1, "and Clear still posts");
+    event({ type: "command_rejected", command: "clear_todos", reason: "x", message: "x" });
+  }
+  // The normal path is untouched: the command's turn keeps its Stop through an unrelated error.
+  submit("/foo");
+  event({ type: "turn_start", prompt: "rendered foo" });
+  event({ type: "error", message: "a tool failed" });
+  assert.equal(running(), true);
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(running(), false);
+  assert.deepEqual(errors, []);
+});
+
+test("typing /todo clear in the editor clears the checklist the way the row's Clear does", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  const input = doc.getElementById("input");
+  send({ type: "event", event: { type: "todos", todos: [{ content: "Inspect", status: "pending" }] } });
+  input.value = "/todo clear";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(JSON.stringify(posted.filter(m => m.type === "clear_todos")), JSON.stringify([{ type: "clear_todos" }]));
+  assert.equal(posted.some(m => m.type === "slashText"), false, "never sent on as an unknown custom command");
+  assert.equal(input.value, "");
+  assert.equal(doc.getElementById("tasks-clear").getAttribute("aria-busy"), "true");
+  assert.match(panelSrc, /if \(name === "todo"\) \{[\s\S]*?rest\.toLowerCase\(\) === "clear"[\s\S]*?type: "clear_todos"/,
+    "the host routes a /todo clear that reaches it (palette, command menu) the same way");
   assert.deepEqual(errors, []);
 });
 

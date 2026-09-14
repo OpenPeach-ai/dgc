@@ -193,6 +193,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     // turn, emits no turn_end, and the editor waits for one that never comes.
     return;
   }
+  // Clear behaves as a v12 CLI did: refused while a turn runs. The editor must still relay it,
+  // correlated, and hand the refusal to the webview, which shows it beside the Tasks row.
+  if (cmd.type === "clear_todos") {
+    if (activeGoalTurn) {
+      send({ type: "command_rejected", request_id: cmd.request_id, command: "clear_todos",
+        reason: "turn_in_progress", message: "'clear_todos' is unavailable while a turn is running; cancel or wait" });
+    } else {
+      send({ type: "todos", todos: [] });
+    }
+    return;
+  }
   if (cmd.type === "cancel" && activeGoalTurn) {
     activeGoalTurn = false;
     send({ type: "turn_end", turn_id: "goal-turn", reason: "cancelled", token_estimate: 2 });

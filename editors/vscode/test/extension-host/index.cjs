@@ -328,6 +328,16 @@ async function run() {
   assert.equal(goalStartCommands.some(command => command.type === "set_goal" && command.text === "host matrix"), false);
   await waitFor(() => posted().some((item) => item.type === "event"
     && item.eventType === "turn_start"));
+  // Clear pressed while the goal's turn runs: the webview never disables it now, so the host must
+  // relay it at once, correlated, and pass an older CLI's refusal back to the webview (which shows
+  // it beside the Tasks row -- webview.test.mjs covers that note).
+  await testApi.testOnlyWebviewMessage(testToken, { type: "clear_todos" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) => command.type === "clear_todos"));
+  const clearCommand = backendCommands(backendLogPath).find((command) => command.type === "clear_todos");
+  assert.match(String(clearCommand.request_id || ""), /^clear-todos-/,
+    "the mid-turn Clear must reach the backend with its own correlation id");
+  await waitFor(() => posted().some((item) => item.type === "event"
+    && item.eventType === "command_rejected" && item.command === "clear_todos"));
   const initialGoalPrompts = goalStartCommands.filter((command) => command.type === "prompt"
     && command.text === "host matrix").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "pauseGoal" });

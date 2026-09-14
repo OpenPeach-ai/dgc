@@ -1746,3 +1746,27 @@ test("the exit line does not promise a goal pickup the repeat-cause breaker will
   const first = interruptedProvider({ goalMark: { id: "chat-alpha", at: now - 5000 } });
   assert.equal(first.provider.markInterruptedWork("stdin closed", 1), "goal");
 });
+
+test("Clear and a typed /todo clear reach the backend as one correlated clear_todos", async () => {
+  const h = harness(), posted = [], sent = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  // The row's Clear, relayed from the webview: correlated so its answer can be traced.
+  await h.provider.onMessage({ type: "clear_todos" });
+  // A /todo clear that reaches the host (the webview intercepts the typed one itself).
+  await h.provider.slashText("/todo clear");
+  await h.provider.slashText("/TODO   Clear");
+  assert.deepEqual(sent.map(command => command.type), ["clear_todos", "clear_todos", "clear_todos"]);
+  for (const command of sent) {
+    assert.match(command.request_id, /^clear-todos-/);
+    assert.deepEqual(Object.keys(command).sort(), ["request_id", "type"]);
+  }
+  await h.provider.slashText("/todo everything");
+  assert.equal(sent.length, 3, "anything but clear is not sent on as an unknown custom command");
+  assert.equal(sent.some(command => command.type === "slash_command"), false);
+  assert.deepEqual(posted.at(-1), { type: "event", event: { type: "error", message: "usage: /todo clear" } });
+  // An older backend that never advertised correlation gets the bare command.
+  h.provider.correlatedStateRequests = false;
+  await h.provider.onMessage({ type: "clear_todos" });
+  assert.deepEqual(sent.at(-1), { type: "clear_todos" });
+});
