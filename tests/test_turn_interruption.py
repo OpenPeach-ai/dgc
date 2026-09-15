@@ -73,6 +73,16 @@ class CancelReasonTests(unittest.TestCase):
         self.assertNotIn("Stopped by user", reason)
         self.assertIn("resume", reason.lower())
 
+    def test_a_text_protocol_batch_saves_its_finished_results_without_joining_the_transcript(self):
+        self.agent.messages.append({"role": "user", "content": "run two things"})
+        self.agent.messages.append({"role": "assistant", "content": "<tool>…</tool><tool>…</tool>"})
+        partial = {"role": "user", "content": "<tool_results>\n<result tool=\"bash\">\nfirst done\n</result>\n</tool_results>"}
+        before = list(self.agent.messages)
+        self.agent._save_turn_progress([partial])
+        saved = sessions.load(self.agent.session_file, self.root)
+        self.assertEqual(saved[-1]["content"], partial["content"], "the finished call is on disk")
+        self.assertEqual(self.agent.messages, before, "the running batch still owns its results message")
+
     def test_a_goal_cancelled_by_shutdown_records_the_real_reason(self):
         self.assertTrue(self.agent.set_goal("Ship the thing"))
 
@@ -444,6 +454,145 @@ class KilledBackendResumeTests(unittest.TestCase):
         self.assertIn("q9-step-one-done", tools.get("call_step", ""))
         self.assertIn("unavailable after session interruption", tools.get("call_ask", ""),
                       "the model is told the question was never answered")
+        second.stdin.close()
+        second.wait(60)
+
+    def test_continue_after_sigkill_inside_a_batch_keeps_the_calls_that_already_finished(self):
+        # Cross-check finding: the step save ran only after a whole tool batch, so a backend killed
+        # while the second call of a batch ran lost the first call's finished result as well, and
+        # Continue asked the model to redo work that had already happened.
+        import queue
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from dgc.headless import TURN_CONTINUE_MARKER
+
+        def sse(delta, finish=None):
+            return "data: " + json.dumps({"id": "m", "object": "chat.completion.chunk", "choices": [
+                {"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n"
+        continued = []
+        batch = [("call_one", "echo b7-first-call-done"),
+                 ("call_two", "echo $$ > b7-sleep.pid; exec sleep 60")]
+
+        class Model(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                data = json.dumps({"data": [{"id": "mock-model"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                messages = body.get("messages") or []
+                if not body.get("tools"):
+                    payload = sse({"content": "Title"}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+                elif TURN_CONTINUE_MARKER in json.dumps(messages):
+                    continued.append(messages)
+                    payload = sse({"content": "Continued."}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+                elif not any(m.get("role") == "tool" for m in messages):
+                    payload = (sse({"tool_calls": [
+                        {"index": n, "id": call_id, "type": "function", "function": {
+                            "name": "bash", "arguments": json.dumps({"command": command})}}
+                        for n, (call_id, command) in enumerate(batch)]})
+                        + sse({}, finish="tool_calls") + "data: [DONE]\n\n")
+                else:
+                    payload = sse({"content": "Done."}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+                data = payload.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        home = tempfile.TemporaryDirectory(prefix="dgc-kill-batch-home-")
+        self.addCleanup(home.cleanup)
+        work = tempfile.TemporaryDirectory(prefix="dgc-kill-batch-work-")
+        self.addCleanup(work.cleanup)
+        (Path(home.name) / ".dgc").mkdir()
+        (Path(home.name) / ".dgc" / "config.json").write_text(json.dumps({
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "model": "mock-model",
+            "api_mode": "chat_completions", "suggest": False, "notes": False}))
+        env = dict(os.environ, HOME=home.name, PYTHONPATH=str(PROJECT), PYTHONDONTWRITEBYTECODE="1")
+        for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+            env[var] = home.name
+
+        def serve():
+            proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=work.name, env=env,
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+            for pipe in (proc.stdin, proc.stdout):
+                self.addCleanup(pipe.close)
+            self.addCleanup(lambda: proc.poll() is None and (proc.kill(), proc.wait(30)))
+            arrived = queue.Queue()
+
+            def read():
+                for line in proc.stdout:
+                    try:
+                        arrived.put(json.loads(line))
+                    except ValueError:
+                        pass
+            threading.Thread(target=read, daemon=True).start()
+
+            def send(command):
+                proc.stdin.write(json.dumps(command) + "\n")
+                proc.stdin.flush()
+
+            def wait(predicate, timeout=60):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    try:
+                        event = arrived.get(timeout=max(0.01, deadline - time.monotonic()))
+                    except queue.Empty:
+                        break
+                    if predicate(event):
+                        return event
+                return None
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "ready"))
+            send({"type": "set_mode", "mode": "auto", "acknowledge_workspace_trust": True,
+                  "request_id": "m"})
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "mode_changed"))
+            return proc, send, wait
+
+        first, send, wait = serve()
+        send({"type": "prompt", "text": "B7 prompt: two commands in one step", "request_id": "p1"})
+        self.assertIsNotNone(wait(lambda e: e.get("type") == "tool_result" and e.get("call_id") == "call_one"),
+                             "the first call of the batch finished")
+        pid_file = Path(work.name) / "b7-sleep.pid"
+        deadline = time.monotonic() + 60
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(pid_file.exists(), "the second call of the batch is running")
+        time.sleep(0.2)
+        try:
+            sleeper = int(pid_file.read_text().strip())
+            self.addCleanup(lambda: os.path.exists(f"/proc/{sleeper}") and os.kill(sleeper, signal.SIGKILL))
+        except ValueError:
+            pass
+        first.kill()                               # SIGKILL between two calls of one batch
+        first.wait(30)
+
+        second, send, wait = serve()
+        send({"type": "resume_session", "latest": True, "request_id": "r1"})
+        resumed = wait(lambda e: e.get("type") in ("session", "error", "command_rejected"))
+        self.assertEqual((resumed or {}).get("type"), "session", resumed)
+        send({"type": "resume_turn", "request_id": "c1"})
+        outcome = wait(lambda e: e.get("type") in ("turn_end", "command_rejected"), 90)
+        self.assertEqual((outcome or {}).get("type"), "turn_end", outcome)
+        self.assertEqual(len(continued), 1, "Continue reached the model")
+        calls = [c.get("id") for m in continued[0] if m.get("role") == "assistant"
+                 for c in (m.get("tool_calls") or [])]
+        self.assertEqual(calls, ["call_one", "call_two"], "the batch the model asked for is saved")
+        tools = {m.get("tool_call_id"): str(m.get("content")) for m in continued[0] if m.get("role") == "tool"}
+        self.assertIn("b7-first-call-done", tools.get("call_one", ""), "the finished call kept its result")
+        self.assertIn("unavailable after session interruption", tools.get("call_two", ""),
+                      "the call the kill cut off is marked, not re-run")
         second.stdin.close()
         second.wait(60)
 

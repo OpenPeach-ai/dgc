@@ -3340,22 +3340,24 @@ class Agent(GoalLifecycle):
             return merged
         return assistant
 
-    def _save_turn_progress(self) -> None:
-        """Save the running turn at a step boundary: its prompt, then each completed tool batch.
+    def _save_turn_progress(self, pending_tail: list | None = None) -> None:
+        """Save the running turn at a step boundary: its prompt, then each completed tool call.
 
         The turn's own save runs in its finally block, which a backend killed outright (SIGKILL,
         the OOM killer, a crash) never reaches. Without these saves the prompt and every completed
         step vanished with the process, so the editor's Continue resumed the previous turn instead.
-        Best effort: a failed save here is not the turn's failure, and the final save reports.
+        ``pending_tail`` is saved after the transcript without joining it: the text tool protocol's
+        results message for a batch that is still running. Best effort: a failed save here is not
+        the turn's failure, and the final save reports.
         """
         if self.depth != 0 or not self.session_file or getattr(self, "_monitor_turn", False):
             return
         try:
-            self._persist()
+            self._persist(pending_tail)
         except Exception:
             pass
 
-    def _persist(self) -> bool:
+    def _persist(self, pending_tail: list | None = None) -> bool:
         if not self.session_file:
             self._last_persist_error = ""
             return True
@@ -3389,7 +3391,9 @@ class Agent(GoalLifecycle):
                 image_index = self._image_index_for_save()
                 try:
                     saved = sessions.save(
-                        self.session_file, self.messages, self.session_root,
+                        self.session_file,
+                        [*self.messages, *pending_tail] if pending_tail else self.messages,
+                        self.session_root,
                         name=self.session_name, goal=self.goal, goal_status=self.goal_status,
                         goal_elapsed_seconds=self.goal_elapsed_seconds(),
                         goal_details=self._goal_details,
@@ -5243,13 +5247,14 @@ class Agent(GoalLifecycle):
             text_decisions: list[dict] = []     # question outcomes recorded on the results message
             self._end_turn_after_batch = ""     # a dismissed question in THIS batch ends the turn
 
+            def text_results_message() -> dict:
+                return {"role": "user",
+                        "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>",
+                        **({"_dgc_decision": list(text_decisions)} if text_decisions else {})}
+
             def flush_text_results() -> None:
                 if text_results:
-                    self.messages.append({
-                        "role": "user",
-                        "content": "<tool_results>\n" + "\n".join(text_results)
-                        + "\n</tool_results>",
-                        **({"_dgc_decision": list(text_decisions)} if text_decisions else {})})
+                    self.messages.append(text_results_message())
                     text_results.clear()
                     text_decisions.clear()
 
@@ -5420,6 +5425,12 @@ class Agent(GoalLifecycle):
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
                     if decision:
                         text_decisions.append({**decision, "call_id": None})
+                if any(later not in parallel_tasks and later not in parallel_outputs
+                       for later in range(call_index + 1, len(result.tool_calls))):
+                    # A later call of this batch still has to run, and may run for minutes. Save the
+                    # result that just landed: a backend killed meanwhile otherwise lost every
+                    # finished call of the batch, and Continue asked the model to redo them.
+                    self._save_turn_progress(None if native else [text_results_message()])
             flush_text_results()
             # A tool result is text, so an image a step just produced arrives here instead, as the
             # same user-role image part an `@file.png` attachment produces, with one line per source.
