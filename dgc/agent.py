@@ -5839,8 +5839,15 @@ class Agent(GoalLifecycle):
                     "this work cycle finishes successfully. Give the user a concise final explanation.")
 
         if name == "artifact":
+            def artifact_refused(message: str) -> str:
+                # A refusal is a step the user sees, like any other failed tool call: returning it
+                # without a card left the model reading an error the transcript never showed.
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, redact_text(message, secrets), call_id)
+                return message
             if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
-                return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
+                return artifact_refused(
+                    "error: Plan mode is read-only — don't start a preview yet. Describe it in the plan instead.")
             # Serving a page publishes files, so a user's deny rule (`Artifact`, `Artifact(docs/**)`,
             # or an ExternalDirectory deny) applies here too, even though no approval card is shown.
             with self._mode_lock:
@@ -5864,7 +5871,7 @@ class Agent(GoalLifecycle):
                                     lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"),
                                     hostname=str(self.config.get("artifact_hostname", "") or ""))
             except Exception as e:
-                return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
+                return artifact_refused(f"error: could not start the artifact preview: {type(e).__name__}: {e}")
             notify = getattr(self.ui, "artifact_ready", None)
             if notify:
                 notify(art)                          # the TUI proposes opening it in the terminal

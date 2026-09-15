@@ -496,6 +496,47 @@ class ArtifactScopeEdges(unittest.TestCase):
                     self.srv.add(path, self.proj, preferred_port=REVIEW_PORT)
         self.assertEqual(set(self.srv.artifacts), before)
 
+    def test_a_refused_artifact_call_still_shows_its_step_in_the_terminal(self):
+        # Before: the artifact branch returned its error before announcing the step, so a page in a
+        # dot folder (or plan mode) left no tool card at all: the model read a refusal the user never saw.
+        import contextlib
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.data_structures import Size
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        from dgc.agent import Agent
+        from dgc.config import Config
+        from dgc.llm import ToolCall
+        from dgc.tui import TUI
+
+        class Output(DummyOutput):
+            def get_size(self):
+                return Size(rows=30, columns=120)
+
+        _write(self.proj / ".storybook" / "index.html", "<h1>hidden</h1>")
+        config = Config(self.proj)
+        config.data.update(artifact_port=AGENT_PORT, mode="auto")
+        with contextlib.ExitStack() as stack:
+            pipe = stack.enter_context(create_pipe_input())
+            stack.enter_context(create_app_session(input=pipe, output=Output()))
+            ui = TUI(config)
+            agent = ui.agent
+            before = {a.id for a in A.registry()}
+            out = agent._handle_call(ToolCall("art-dot", "artifact", {"path": ".storybook/index.html"}))
+            self.assertTrue(out.startswith("error:"), out)
+            steps = [b for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "tool"
+                     and b.get("call_id") == "art-dot"]
+            self.assertEqual(len(steps), 1, ui.blocks)
+            self.assertFalse(steps[0]["running"])
+            self.assertTrue(steps[0]["error"], "the refusal reads as a failed step")
+            self.assertIn("private", steps[0]["out"])
+            config.data["mode"] = "plan"                 # in memory only: never saved for other tests
+            agent._handle_call(ToolCall("art-plan", "artifact", {"path": "site"}))
+            planned = [b for b in ui.blocks if isinstance(b, dict) and b.get("call_id") == "art-plan"]
+            self.assertEqual(len(planned), 1, "a plan-mode refusal shows its step too")
+            self.assertFalse(planned[0]["running"])
+            self.assertEqual({a.id for a in A.registry()}, before)
+
     def test_script_file_names_resolve_against_the_page_as_well(self):
         self.assertTrue(self.root.scoped)
         for rel, expect in (("data/sales.json", b"north"), ("js/worker.js", b"rows.json"),
