@@ -39,25 +39,57 @@ from dgc import install_layout as L  # noqa: E402
 
 # ------------------------------------------------------------------ fixtures ---
 
+def _installer_path() -> str:
+    """The PATH every scenario runs install.sh (and the installed `dgc`) with: the caller's PATH
+    without the bin directory of the interpreter running these tests, so an install never borrows
+    that interpreter's environment or the `dgc` an editable install put next to it."""
+    own_bin = str(Path(sys.prefix) / "bin")
+    return os.pathsep.join(part for part in os.environ.get("PATH", "").split(os.pathsep)
+                           if part and part != own_bin)
+
+
 def _wheelhouse() -> Path:
-    """Wheels for requirements.lock plus the build backend, downloaded once and reused."""
+    """Wheels for requirements.lock plus the build backend, downloaded once and reused.
+
+    install.sh builds every venv with the first `python3` on the scenario's PATH, which need not
+    be the interpreter running the tests: under actions/setup-python that interpreter's bin
+    directory is exactly what _installer_path() removes, so the builds use the runner image's own
+    python3 (/usr/bin/python3, 3.12, on ubuntu-24.04). Wheels resolved for sys.executable carry
+    its tags (a cp313 charset-normalizer) and that pip finds nothing it can install. So the
+    wheelhouse is downloaded by a scratch venv of that very python3 — the same version, ABI,
+    platform tags and bundled pip as the builds that install from it — and cached per interpreter.
+    """
+    installer_path = _installer_path()
+    python3 = shutil.which("python3", path=installer_path)
+    if python3 is None:
+        raise RuntimeError(f"install.sh needs python3, and there is none on PATH={installer_path}")
+    # The builds' interpreter environment (clean_env), keeping any pip index settings for the fetch.
+    fetch_env = {key: value for key, value in os.environ.items()
+                 if not key.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    fetch_env["PATH"] = installer_path
+    identity = subprocess.run(
+        [python3, "-c", "import sys, sysconfig; print(sys.version, sysconfig.get_platform())"],
+        capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL, env=fetch_env).stdout
     lock = (PROJECT / "requirements.lock").read_bytes()
-    key = hashlib.sha256(lock + b"setuptools>=68 wheel" + sys.version.encode()).hexdigest()[:16]
+    key = hashlib.sha256(lock + b"setuptools>=68 wheel" + os.path.realpath(python3).encode()
+                         + identity.encode()).hexdigest()[:16]
     target = Path(tempfile.gettempdir()) / f"dgc-installer-wheelhouse-{key}"
     if (target / ".complete").is_file():
         return target
     staging = Path(tempfile.mkdtemp(prefix="dgc-installer-wheelhouse-"))
-    base = [sys.executable, "-m", "pip", "download", "-q", "--disable-pip-version-check",
-            "-d", str(staging)]
-    subprocess.run(base + ["-r", str(PROJECT / "requirements.lock"), "setuptools>=68", "wheel"],
-                   check=True, timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL)
-    system = subprocess.run(["python3", "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
-                            capture_output=True, text=True, check=True).stdout.strip()
-    if system != "%d.%d" % sys.version_info[:2]:
-        # install.sh builds venvs with `python3`; fetch wheels for that interpreter as well.
-        subprocess.run(base + ["--only-binary=:all:", "--python-version", system,
-                               "-r", str(PROJECT / "requirements.lock"), "setuptools>=68", "wheel"],
-                       check=True, timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL)
+    scratch = Path(tempfile.mkdtemp(prefix="dgc-installer-wheelhouse-venv-"))
+    try:
+        subprocess.run([python3, "-m", "venv", str(scratch / "venv")], check=True,
+                       timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, env=fetch_env)
+        subprocess.run([str(scratch / "venv" / "bin" / "pip"), "download", "-q",
+                        "--disable-pip-version-check", "-d", str(staging),
+                        "-r", str(PROJECT / "requirements.lock"), "setuptools>=68", "wheel"],
+                       check=True, timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, env=fetch_env)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     (staging / ".complete").write_text("ok\n")
     try:
         staging.rename(target)
@@ -183,9 +215,7 @@ def new_home(tag: str) -> Path:
 def clean_env(home: Path, **extra: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("DGC_", "XDG_", "PIP_", "PYTHON", "VIRTUAL_ENV"))}
-    venv_bin = str(Path(sys.prefix) / "bin")
-    env["PATH"] = os.pathsep.join(part for part in env.get("PATH", "").split(os.pathsep)
-                                  if part and part != venv_bin)
+    env["PATH"] = _installer_path()
     env.update({
         "HOME": str(home), "USERPROFILE": str(home),
         "XDG_DATA_HOME": str(home / ".local" / "share"),
