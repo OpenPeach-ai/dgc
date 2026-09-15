@@ -16,7 +16,7 @@
       "duration_label": "0:47",
       "provenance": "Actual current DGC 0.40.2 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
-      "time_compression": 1.0,
+      "time_compression": 1,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
@@ -65,15 +65,15 @@
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.25.1",
-      "packaged_extension_source_commit": "c1bacda591784978459c2d63f52fb43a75cae483",
-      "extension_vsix_sha256": "df683963a692616f2fe5f4d8d315b673f99992f845295ba90bda111ab1b6a6a3",
+      "extension_version": "0.25.2",
+      "packaged_extension_source_commit": "17e00e9c95e559eddb6b2e57356b0aabf6716da1",
+      "extension_vsix_sha256": "709b822c3400be261d6ae94bcce040c3611ee0216e3b2fb9de60ba4d4aa72fe6",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "e063c6a0a92dbadde3537142f2f9c96f4325c387070c7d80863edfd996094f26",
-          "bytes": 1787168,
+          "sha256": "2b1cdfb5e8f31c2ed1470ba89f8d59fac00e540fbf1a4a5114546b01ee89e519",
+          "bytes": 1801717,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
@@ -81,8 +81,8 @@
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "8725a623cd738f80d4f3cd3e9df01eb84a34b1dbefc11f966b889583f9448941",
-          "bytes": 638932,
+          "sha256": "fc8970cbe907cb232fb5cac1722b189b4da28f52a3b359d99af569fdb32da80e",
+          "bytes": 637930,
           "codec": "h264",
           "width": 1440,
           "height": 900,
@@ -90,16 +90,16 @@
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "673a7a72bc70e42430aa03f7ad9550f7c01c46dcbe5e69720fccf74f1d254c96",
-          "bytes": 159642,
+          "sha256": "478aaf67fccb0ae2440a1839a79c5c3478d5f63934eb6194c6815a3c727d5a48",
+          "bytes": 159611,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "f5467c9f91d92bd3a1037932f0487e17da15a8c418620c71d256cd1689381560",
-          "bytes": 39549,
+          "sha256": "8ae070d8656188b393d0e23f82fd6215dfb4220a1c60694362ff3929814a9163",
+          "bytes": 39551,
           "codec": "mjpeg",
           "width": 720,
           "height": 450
