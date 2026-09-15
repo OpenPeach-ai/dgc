@@ -431,7 +431,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.2",
       "status": "current",
       "notes": [
-        "Requires CLI 0.40.2; editor protocol remains v14. Includes direct verified extension recovery, paired CLI recovery, checklist reminders and persisted approval cards from 0.25.1.",
+        "Requires CLI 0.40.2; editor protocol v14. Includes direct verified extension recovery, paired CLI recovery, checklist reminders and persisted approval cards from 0.25.1.",
         "The composer counts active agents rather than every agent ever started in the chat. Successful agents disappear immediately; failed or stopped agents remain for 30 seconds. Historical tool steps remain in the transcript.",
         "CLI updates show progress, reconnect on success and retain the installer’s actual failure in Output → DGC update. Supported Python discovery handles Finder-launched editor environments.",
         "Option cards recognize recommendations containing a rationale. Browser documents have a named tool step. Reasoning controls explain the selected model’s native tiers and what Ultra changes.",
