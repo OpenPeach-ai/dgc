@@ -450,19 +450,39 @@ def _history_saved_args(raw) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _history_bounded(item, depth: int = 0):
+# (string characters, list items, object keys, depth) for one replayed argument, loosest first.
+_HISTORY_ARG_TIERS = ((1000, 64, 32, 6), (200, 16, 16, 4), (40, 8, 8, 3), (12, 4, 4, 2))
+# A collection argument is re-bounded more tightly until its JSON fits this many bytes. A replayed
+# card needs no more (it shows the summary, read from the whole arguments), and the snapshot's 1 MB
+# budget is shared by every turn: a multi_edit's edits at full size would restore a few dozen calls.
+_HISTORY_COLLECTION_BYTES = 2000
+
+
+def _history_bounded(item, depth: int = 0, tier=_HISTORY_ARG_TIERS[0]):
+    text_cap, list_cap, key_cap, depth_cap = tier
     if isinstance(item, str):
-        return item[:1000] + ("…" if len(item) > 1000 else "")
+        return item[:text_cap] + ("…" if len(item) > text_cap else "")
     if isinstance(item, bool) or item is None or isinstance(item, (int, float)):
         return item
-    if depth >= 6:
+    if depth >= depth_cap:
         text = json.dumps(item, ensure_ascii=False, default=str)
-        return text[:1000] + ("…" if len(text) > 1000 else "")
+        return text[:text_cap] + ("…" if len(text) > text_cap else "")
     if isinstance(item, list):
-        return [_history_bounded(value, depth + 1) for value in item[:64]]
+        return [_history_bounded(value, depth + 1, tier) for value in item[:list_cap]]
     if isinstance(item, dict):
-        return {str(key)[:64]: _history_bounded(value, depth + 1) for key, value in list(item.items())[:32]}
-    return str(item)[:1000]
+        return {str(key)[:64]: _history_bounded(value, depth + 1, tier)
+                for key, value in list(item.items())[:key_cap]}
+    return str(item)[:text_cap]
+
+
+def _history_bounded_argument(item):
+    if not isinstance(item, (list, dict)):
+        return _history_bounded(item)
+    for tier in _HISTORY_ARG_TIERS:
+        bounded = _history_bounded(item, 0, tier)
+        if len(json.dumps(bounded, ensure_ascii=False, default=str).encode("utf-8")) <= _HISTORY_COLLECTION_BYTES:
+            break
+    return bounded
 
 
 def _history_args(raw) -> dict:
@@ -470,9 +490,9 @@ def _history_args(raw) -> dict:
 
     Live dispatch hands the UI the arguments as decoded JSON (``redact_value`` of the call's object),
     so an array argument is an array there. Replay keeps each argument's JSON type the same way,
-    bounding only size (16 keys, nested collections, 1000-character strings), instead of turning a
-    list into its JSON text."""
-    return {str(key)[:64]: _history_bounded(item)
+    bounding only size (16 keys, 1000-character top-level strings, and each array or object argument
+    tightened until its JSON is about 2 KB), instead of turning a list into its JSON text."""
+    return {str(key)[:64]: _history_bounded_argument(item)
             for key, item in list(_history_saved_args(raw).items())[:16]}
 
 

@@ -308,3 +308,22 @@ class LiveAndReplayArgsTests(unittest.TestCase):
         self.assertTrue(live["c1"]["summary"].startswith("4 questions · Q0"), live["c1"]["summary"])
         self.assertIsInstance(replay["c1"]["args"]["questions"], str, "a JSON-encoded array stays a string")
         self.assertTrue(encoded.startswith(replay["c1"]["args"]["questions"].rstrip("…")))
+
+    def test_a_large_collection_argument_is_bounded_to_keep_restore_depth(self):
+        # Types stay as live sent them, but a multi_edit's edits at full size would fill the 1 MB
+        # snapshot in a few dozen calls: each array or object argument is tightened to about 2 KB.
+        from dgc.headless import _history_args
+        edits = [{"old_string": "a" * 600, "new_string": "b" * 700} for _ in range(20)]
+        raw = json.dumps({"path": "src/" + "p" * 300 + ".py", "edits": edits,
+                          "content": "c" * 5000, "flag": True})
+        self.assertGreater(len(raw), 26000)
+        args = _history_args(raw)
+        self.assertIsInstance(args["edits"], list)
+        self.assertTrue(args["edits"] and all(isinstance(edit, dict) for edit in args["edits"]))
+        self.assertLessEqual(len(json.dumps(args["edits"], ensure_ascii=False).encode()), 2000)
+        self.assertEqual(args["path"], "src/" + "p" * 300 + ".py", "a top-level path is kept whole")
+        self.assertEqual(len(args["content"]), 1001, "a top-level string keeps its 1000-character bound")
+        self.assertIs(args["flag"], True)
+        self.assertLess(len(json.dumps(args)), 4000)
+        small = {"todos": [{"content": "write tests", "status": "in_progress"}], "nested": {"deep": [1, {"x": None}]}}
+        self.assertEqual(_history_args(json.dumps(small)), small, "a small collection is untouched")
