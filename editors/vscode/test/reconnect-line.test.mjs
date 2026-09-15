@@ -141,3 +141,37 @@ test("a replayed turn draws its recoveries in place and settles the one that nev
     await panel.page.close();
   }
 });
+
+// Below ~360 px the activity row keeps only its label: the reconnect's cause, host, backoff and count
+// (all on the reconnect line already) wrapped it to three lines. The words stay in its hover label, and
+// a wider panel keeps the whole row.
+for (const width of [300, 360, 460]) {
+  test(`at ${width} px the activity row during a reconnect is ${width <= 360 ? "just its label, on one line" : "label and detail"}`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(browser, { width, height: 600 });
+    try {
+      const detail = "connection refused · 127.0.0.1:11434 · backoff 0.5s · retry 1/3";
+      await panel.events([{ type: "turn_start", turn_id: "t1", prompt: "Add settings sync" },
+        { type: "model_retry", retry_id: "t1:retry1", state: "retrying", kind: "connect", layer: "request", attempt: 1,
+          max_attempts: 3, summary: "connection refused by 127.0.0.1:11434", endpoint: "http://127.0.0.1:11434/v1", turn_id: "t1" },
+        { type: "turn_activity", turn_id: "t1", state: "waiting", label: "Waiting to reconnect", detail }]);
+      await panel.page.waitForTimeout(300);
+      const row = await panel.page.evaluate(() => {
+        const act = document.querySelector(".msg.dgc .thinking");
+        const verb = act.querySelector(".verb");
+        const style = getComputedStyle(verb);
+        return { verb: verb.textContent, title: act.getAttribute("title"),
+          lines: Math.round(act.getBoundingClientRect().height / parseFloat(style.lineHeight)) };
+      });
+      if (width <= 360) {
+        assert.deepEqual(row, { verb: "Waiting to reconnect", title: `Waiting to reconnect · ${detail}`, lines: 1 });
+      } else {
+        assert.equal(row.verb, `Waiting to reconnect · ${detail}`);
+        assert.equal(row.title, null);
+      }
+      // Once the turn ends, the settled row carries no leftover label.
+      await panel.events([{ type: "turn_end", turn_id: "t1", reason: "cancelled", token_estimate: 0, final_message_id: null }]);
+      assert.equal(await panel.page.evaluate(() => document.querySelector(".msg.dgc .thinking").getAttribute("title")), null);
+    } finally { await panel.page.close(); }
+  });
+}

@@ -928,7 +928,13 @@
     // on screen holding it: the row says only what kind of step is running, beside the clocks and
     // tokens. Detail stays for states with no card to show it, such as a stalled model
     // ("<model> at <host> · no reply for 45s+"). Decided here, so it holds for any CLI.
-    const detail = activity && activity.state !== "tool" ? activity.detail : "";
+    // Below ~360 px the row keeps only the label: the detail (a reconnect's cause, host, backoff and
+    // count) wrapped it to three lines, and the reconnect line in the transcript already says it all.
+    const full = activity && activity.state !== "tool" ? activity.detail : "";
+    const narrow = !!full && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 360px)").matches;
+    const detail = narrow ? "" : full;
+    const shortened = narrow && !waiting && !turn.handoff ? `${activity.label} · ${full}` : "";
+    if ((turn.act.getAttribute("title") || "") !== shortened) hoverTip.retitle(turn.act, shortened);
     verb.textContent = waiting ? "waiting for your input"
       : turn.handoff ? "generating handoff…"
         : activity ? activity.label + (detail ? ` · ${detail}` : "")
@@ -999,6 +1005,7 @@
       turn.block.insertBefore(turn.act, box);
     }
     turn.act.classList.add("done");
+    turn.act.removeAttribute("title");
     const outcome = reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
     // A replayed turn has no clock — the session file never recorded when it began — so it says
     // what happened and stops there rather than printing a fabricated 0s.
