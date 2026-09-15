@@ -162,3 +162,88 @@ test("a webview reloaded with messages queued lets them run in order, each promp
     await s.close();
   }
 });
+
+// A steering message the backend acknowledged ("steered") waits for the running tool to finish
+// before it is applied. Cut off in that window it was never applied, so it is the user's again, the
+// same as a queued one. It used to come back as "delivery was not confirmed", or not at all.
+async function steeringPending(name) {
+  const s = await panelSession({ ...env, model, name });
+  await s.openWebview();
+  await s.ready();
+  await s.typePrompt("SLOW run the long command");
+  await until(() => s.events.some((e) => e.type === "tool_call"), "the long command to start");
+  await s.typePrompt("steer this please");
+  await until(() => s.events.some((e) => e.type === "prompt_accepted" && e.state === "steered"), "the steering acknowledgement");
+  assert.equal((await transcript(s.page)).at(-1), "you · steering pending: steer this please");
+  return s;
+}
+const steerNotSent = async (s) => {
+  await s.ready();
+  return until(async () => {
+    const lines = await transcript(s.page);
+    return notSent(lines).length === 1 ? lines : null;
+  }, "the steering message to come back as not sent", 20_000).catch(async () => transcript(s.page));
+};
+
+test("DGC: Restart Backend before a steering message is applied gives it back as not sent", async (t) => {
+  if (env.skipOrFail(t)) return;
+  const s = await steeringPending("steer-restart");
+  try {
+    s.provider.restart();
+    const lines = await steerNotSent(s);
+    await sleep(800);
+    const final = await transcript(s.page);
+    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
+    assert.equal(final.filter((line) => /not confirmed|steer this please/.test(line)).length, 1, final.join("\n"));
+    assert.equal(lines.filter((line) => /not confirmed/.test(line)).length, 0);
+    assert.equal(await s.page.locator("#input").inputValue(), "steer this please");
+    assert.deepEqual(s.errors, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("Developer: Reload Window before a steering message is applied gives it back as not sent", async (t) => {
+  if (env.skipOrFail(t)) return;
+  const s = await steeringPending("steer-window");
+  try {
+    await s.reloadWindow();
+    await steerNotSent(s);
+    await sleep(800);
+    const final = await transcript(s.page);
+    assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
+    assert.equal(await s.page.locator("#input").inputValue(), "steer this please");
+    assert.deepEqual(s.errors, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("a webview reloaded while steering is pending still shows it pending, and it is applied in its turn", async (t) => {
+  if (env.skipOrFail(t)) return;
+  const s = await steeringPending("steer-webview");
+  try {
+    await s.reloadWebview();
+    await s.ready();
+    const shown = await until(async () => {
+      const lines = await transcript(s.page);
+      return lines.includes("you · steering pending: steer this please") ? lines : null;
+    }, "the pending steering message after the reload", 10_000).catch(async () => transcript(s.page));
+    assert.ok(shown.includes("you · steering pending: steer this please"), shown.join("\n"));
+    assert.equal(await s.page.locator("#queued").textContent(), "", "steering is not counted as queued");
+    await until(() => s.events.some((e) => e.type === "steering_update" && e.state === "applied"), "the steering to apply", 20_000);
+    await until(() => s.events.some((e) => e.type === "turn_end"), "the turn to end", 20_000);
+    await sleep(500);
+    const lines = await transcript(s.page);
+    assert.equal(lines.filter((line) => /steer this please/.test(line)).length, 1, lines.join("\n"));
+    assert.ok(lines.some((line) => line.startsWith("you · steering: steer this please")), lines.join("\n"));
+    // Nothing is left behind as the user's to restore: a later restart hands nothing back.
+    s.provider.restart();
+    await s.ready();
+    await sleep(2000);
+    assert.deepEqual(notSent(await transcript(s.page)), []);
+    assert.deepEqual(s.errors, []);
+  } finally {
+    await s.close();
+  }
+});

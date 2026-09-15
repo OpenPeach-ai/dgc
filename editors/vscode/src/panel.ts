@@ -32,6 +32,8 @@ const QUEUED_PROMPT_DRAFT_CHARS = 256 * 1024;        // a bigger restore draft i
 type QueuedPrompt = {
   requestId: string; session: string; text: string;
   draft: { text: string; attachments: any[] }; queued: boolean;
+  /** Acknowledged as steering ("steered") and not applied yet: as unsent as a queued prompt. */
+  steering?: boolean;
 };
 const REPEAT_EXIT_WINDOW_MS = 30 * 60 * 1000;
 const REPEAT_EXIT_LIMIT = 3;
@@ -1328,10 +1330,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                            draft, queued: false });
   }
 
-  private markPromptQueued(requestId: string): void {
+  private markPromptQueued(requestId: string, steering = false): void {
     const prompt = this.unstartedPrompts.get(requestId);
-    if (!prompt || prompt.queued) { return; }
+    if (!prompt || (prompt.queued && !!prompt.steering === steering)) { return; }
     prompt.queued = true;
+    if (steering) { prompt.steering = true; } else { delete prompt.steering; }
     this.persistQueuedPrompts();
   }
 
@@ -1731,7 +1734,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "prompt_accepted":
-        if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }
+        // Steering waits for the running step to finish before it is applied; until then the backend
+        // holds it exactly as it holds a queued prompt, and loses it the same way.
+        if (ev.state === "queued" || ev.state === "steered") {
+          this.markPromptQueued(String(ev.request_id || ""), ev.state === "steered");
+        }
         break;
       case "steering_update":
         if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }

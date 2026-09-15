@@ -384,6 +384,7 @@
       entries.push([session, clean]); bytes += size;
     }
     for (const [id, request] of pendingPrompts) {
+      if (request.acknowledged) continue;      // the backend has it; the extension gives it back if lost
       const draft = cleanDraft({ text: request.text, attachments: request.attachments, start: 0, end: request.text.length });
       const size = draft ? new TextEncoder().encode(JSON.stringify(draft)).length : DRAFT_STORAGE_BYTES + 1;
       if (!draft || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
@@ -484,7 +485,8 @@
   function rejectPrompt(id, confirmed = true) {
     const pending = pendingPrompts.get(id) || queuedPrompts.get(id);
     if (!pending) return;
-    if (confirmed && queuedPrompts.has(id)) {
+    // Queued, or steering the backend acknowledged but had not applied: known unsent, not in doubt.
+    if (confirmed && (queuedPrompts.has(id) || pending.acknowledged)) {
       returnedIds.add(id);
       returnedPrompts.push({ node: pending.node, session: pending.session || "" });
       if (returnedPrompts.length > 17) returnedPrompts.shift();
@@ -532,18 +534,28 @@
   const promptId = (item) => typeof item?.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId) ? item.requestId : "";
   // After a webview reload: the messages still queued in the running backend, so turn_start, Stop and
   // a backend exit find them here as they would have before the reload.
+  // A steering message the backend acknowledged but has not applied yet comes back the same way,
+  // still pending, so its steering_update finds it.
   function adoptQueuedPrompts(items) {
+    let doubted = false;
     for (const item of Array.isArray(items) ? items.slice(0, 17) : []) {
       const id = promptId(item);
       if (!id || queuedPrompts.has(id) || returnedIds.has(id)) continue;
-      const entry = pendingPrompts.get(id) || promptEntry(item, "you · queued");
-      pendingPrompts.delete(id);
+      const steering = item.steering === true;
+      const label = steering ? "you · steering pending" : "you · queued";
+      const entry = pendingPrompts.get(id) || promptEntry(item, label);
+      // Saved before the reload as a delivery in doubt; the extension now vouches for it.
+      if (unconfirmedDrafts.some((row) => row.id === id)) {
+        unconfirmedDrafts = unconfirmedDrafts.filter((row) => row.id !== id); doubted = true;
+      }
       const role = entry.node.querySelector(".role");
-      if (role) role.textContent = "you · queued";
+      if (role) role.textContent = label;
       if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
-      queuedPrompts.set(id, entry);
+      if (steering) { entry.acknowledged = true; pendingPrompts.set(id, entry); }
+      else { pendingPrompts.delete(id); queuedPrompts.set(id, entry); }
     }
     queuedCount = Math.max(queuedCount, queuedPrompts.size); renderQueued();
+    if (doubted) { renderUnconfirmedDrafts(); persistDraft(); }
   }
   // The extension's word that a backend holding these messages is gone (a restart, a window reload,
   // an exit): they were never sent. The same give-back as Stop.
@@ -551,6 +563,7 @@
     for (const item of Array.isArray(items) ? items.slice(0, 17) : []) {
       const id = promptId(item);
       if (!id || returnedIds.has(id)) continue;
+      unconfirmedDrafts = unconfirmedDrafts.filter((row) => row.id !== id);
       const entry = queuedPrompts.get(id) || pendingPrompts.get(id) || promptEntry(item, "you");
       pendingPrompts.delete(id);
       if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
@@ -2623,6 +2636,7 @@
       case "prompt_accepted": {
         const pending = pendingPrompts.get(ev.request_id);
         if (ev.state === "steered") {
+          if (pending) pending.acknowledged = true;
           if (pending?.node) pending.node.querySelector(".role").textContent = "you · steering pending";
         } else {
           if (ev.state === "queued" && pending?.node) pending.node.querySelector(".role").textContent = "you · queued";
@@ -4427,7 +4441,10 @@
       // replays the chat: they are given back as not sent, as Stop gives them back.
       discardTurn(); log.innerHTML = ""; setSending(false);
       reconnectPending = true;
-      for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
+      for (const [id, entry] of [...pendingPrompts]) {
+        if (entry.acknowledged) { log.appendChild(entry.node); rejectPrompt(id, true); }   // unapplied steering
+        else rejectPrompt(id, false);
+      }
       for (const [id, entry] of [...queuedPrompts]) { log.appendChild(entry.node); rejectPrompt(id, true); }
       queuedCount = 0; renderQueued();
       renderUnconfirmedDrafts();
@@ -4512,7 +4529,8 @@
         }, 30000);
       } else endTurn("error");
       expireOpenRequests();
-      for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
+      // Steering the backend acknowledged but never applied is as unsent as a queued message.
+      for (const [id, entry] of [...pendingPrompts]) rejectPrompt(id, entry.acknowledged === true);
       // Accepted as queued but never started: the backend that held them is gone, so they are
       // the user's to send again (a backend that got to say so first already returned them).
       for (const id of [...queuedPrompts.keys()]) rejectPrompt(id, true);
