@@ -4424,9 +4424,12 @@ class TUI:
             # a narrower terminal may cut, and the line stays up long enough to read.
             warning = (f" · the previous agent still runs {running} monitor"
                        f"{'' if running == 1 else 's'}: Ctrl+\\ back to it, then /monitors stop")
-        self._flash(f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
-                    f" · {len(self._sessions)} agents{warning} · {place}{note}",
-                    secs=6.0 if warning else 2.2)
+        flash = (f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
+                 f" · {len(self._sessions)} agents{warning} · {place}{note}")
+        if warning:
+            self._flash(flash, secs=6.0)
+        else:
+            self._flash(flash)
         return sess
 
     def _open_saved_session(self, path) -> None:
