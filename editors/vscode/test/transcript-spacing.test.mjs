@@ -692,18 +692,36 @@ for (const [way, from, to] of resizes) {
 
 // The host changes the transcript's fonts (VS Code rewrites its --vscode-* variables on the root
 // element) without changing the width: every pin measured in the old fonts is wrong.
+// Both the old and the new fonts are faces this repository ships (qa/site/fonts, DejaVu 2.37),
+// added to the page as loaded FontFaces before the chat is drawn. Named system families are not:
+// a stock CI runner resolves 'DejaVu Serif' and the default sans to the same face, nothing
+// re-wraps, and the test could neither fail nor pass on what it is meant to prove.
+const BUNDLED_FONTS = [["DGC Test Sans", "DejaVuSans.ttf"], ["DGC Test Mono", "DejaVuSansMono.ttf"]];
 test("the page does not jump after the fonts change at the same width", async (t) => {
   if (skipOrFail(t)) return;
+  const faces = BUNDLED_FONTS.map(([family, file]) =>
+    [family, readFileSync(here + "/../../../qa/site/fonts/" + file).toString("base64")]);
   for (const settleFirst of [true, false]) {
     const panel = await openPanel(320);
     try {
+      await panel.page.evaluate(async (list) => {
+        for (const [family, base64] of list) {
+          const face = new FontFace(family, Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
+          document.fonts.add(await face.load());
+        }
+        const root = document.documentElement.style;
+        root.setProperty("--vscode-font-family", '"DGC Test Sans"');
+        root.setProperty("--vscode-editor-font-family", '"DGC Test Mono"');
+      }, faces);
+      await panel.settle(); await wait(panel, 300);
       await longChat(panel, 16);
       await panel.settle(); await wait(panel, 300);
       const before = await scrollHeightOf(panel);
       await panel.page.evaluate(() => {
+        // Prose in the monospace face and code in the proportional one: every line re-wraps.
         const root = document.documentElement.style;
-        root.setProperty("--vscode-font-family", "'DejaVu Serif', 'Liberation Serif', serif");
-        root.setProperty("--vscode-editor-font-family", "'DejaVu Sans Mono', 'Liberation Mono', monospace");
+        root.setProperty("--vscode-font-family", '"DGC Test Mono"');
+        root.setProperty("--vscode-editor-font-family", '"DGC Test Sans"');
       });
       if (settleFirst) await wait(panel, 600);
       await assertWalkIsSteady(panel, `fonts changed${settleFirst ? "" : ", walked at once"}`, "half");
