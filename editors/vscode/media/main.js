@@ -567,12 +567,23 @@
     return { show, hide, retitle, node };
   })();
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
+  // Focus DGC puts back for the reader as a dialog closes is not a request for a label: the label on
+  // the control it lands on (the agents pill) would cover what the dialog was opened over, such as a
+  // docked question's pager. Only this one programmatic focus is quiet; the next one labels as usual.
+  let quietFocusTarget = null;
+  function focusQuietly(node, options) {
+    if (!node || typeof node.focus !== "function") return;
+    quietFocusTarget = node;
+    try { node.focus(options); } finally { quietFocusTarget = null; }
+    hoverTip.hide();
+  }
   document.addEventListener("pointerover", (e) => {
     const found = tipTarget(e);
     if (found) hoverTip.show(found, false); else hoverTip.hide();
   });
   document.addEventListener("pointerdown", () => hoverTip.hide(), true);
   document.addEventListener("focusin", (e) => {
+    if (quietFocusTarget && e.target === quietFocusTarget) { hoverTip.hide(); return; }
     const found = tipTarget(e);
     // Only for keyboard focus: a label that pops up on every click is noise. A host that cannot
     // evaluate the selector should still get labels, so an unsupported pseudo-class means yes.
@@ -1908,7 +1919,7 @@
   }
   function closeGoalEditor(restoreFocus = true) {
     $("goal-editor").hidden = true;
-    if (restoreFocus && !goalBar.hidden) $("goal-main").focus();
+    if (restoreFocus && !goalBar.hidden) focusQuietly($("goal-main"));
   }
   function saveGoalEditor() {
     const text = $("goal-editor-text").value.trim();
@@ -1964,7 +1975,7 @@
   }
   function closeGoalReview(restoreFocus = true) {
     $("goal-review").hidden = true;
-    if (restoreFocus) $("goal-review-button").focus();
+    if (restoreFocus) focusQuietly($("goal-review-button"));
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
@@ -4594,7 +4605,7 @@
       // Esc in the composer is Stop: this one must never reach it.
       event.preventDefault(); event.stopPropagation();
       agentsHideMenu();
-      $("agents-pill").focus();
+      focusQuietly($("agents-pill"));
     } else if (event.key === "ArrowDown" && rows.length) { event.preventDefault(); move(at < 0 ? 0 : at + 1); }
     else if (event.key === "ArrowUp" && rows.length) { event.preventDefault(); move(at < 0 ? rows.length - 1 : at - 1); }
     else if (event.key === "Home" && rows.length) { event.preventDefault(); move(0); }
@@ -5149,7 +5160,7 @@
     const shown = records[index];
     const target = shown?.chip?.isConnected && shown.owner?.classList.contains("open") ? shown.chip
       : opener?.isConnected ? opener : input;
-    target.focus();
+    focusQuietly(target);
     target.scrollIntoView?.({ block: "nearest" });
   }
   // A request card or recovery offer arrived (or the backend stopped) while the viewer covers the panel.

@@ -164,3 +164,32 @@ test("300px: a recovering backend exit undocks the question, keeps the viewer qu
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
+
+test("300px: Escape out of the agents dialog puts focus back on the pill without a label over the docked question", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, errors } = await openCrossLane(browser, { width: 300, height: 620, scenario: "footer" });
+  try {
+    await page.focus("#agents-pill");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#agentsmenu:not([hidden])");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);                // past the label's show delay
+    const facts = await page.evaluate(() => {
+      const pager = document.querySelector("#cbox > .ask .ask-foot");
+      const box = pager.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return { menu: document.getElementById("agentsmenu").hidden, focus: document.activeElement?.id,
+               tip: !document.getElementById("hover-tip").hidden, pagerHit: pager.contains(hit),
+               docked: !!document.querySelector("#cbox > .ask") };
+    });
+    assert.deepEqual(facts, { menu: true, focus: "agents-pill", tip: false, pagerHit: true, docked: true },
+      "the dialog closed, focus is back on the pill, and no label covers the question");
+    // The quiet focus is one-shot: moving away and back with the keyboard labels the pill again.
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await page.waitForTimeout(100);
+    const again = await page.evaluate(() => ({ focus: document.activeElement?.id, tip: !document.getElementById("hover-tip").hidden }));
+    assert.deepEqual(again, { focus: "agents-pill", tip: true });
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
