@@ -108,6 +108,10 @@ class NormaliseTests(unittest.TestCase):
                          opt("npm", "Works offline", True))
         self.assertEqual(first({"label": "Recommended: pnpm", "description": "strict installs"}),
                          opt("pnpm", "strict installs", True), "a label keeps its own case, and so does an unmarked description")
+        for kept in ("iOS first", "eBPF probes", "package.json first", "\u00e9lan vital", "\ufb01le based",
+                     "\u00dftra\u00dfe", "3 servers", "(beta) path"):
+            self.assertEqual(first({"label": "Keep", "description": "Recommended: " + kept}),
+                             opt("Keep", kept, True), "a name or non-word start keeps its case")
         self.assertEqual(first({"label": "uv", "description": "fast resolver (Recommended)"}),
                          opt("uv", "fast resolver", True), "only a leading marker makes the rest a sentence")
         self.assertEqual(first({"label": "Redis (Recommended) cache", "description": "Best choice. (Recommended)"}),

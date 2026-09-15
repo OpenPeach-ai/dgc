@@ -183,6 +183,13 @@ test("the recommended option is badged and preselected wherever it sits; labels 
     opt("uv", "fast resolver")])]);
   assert.deepEqual(leading.rows().map((row) => [row.querySelector(".ask-label").textContent, row.querySelector(".ask-desc")?.textContent]),
     [["Mongo", "Flexible schema"], ["pnpm", "strict installs"], ["uv", "fast resolver"]]);
+  // Only a plain lowercase first word takes the capital: a name keeps its case (as questions._SENTENCE_WORD).
+  const names = panel();
+  names.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(names, [q("q1", "Target?", [opt("Mobile", "Recommended: iOS first"), opt("Kernel", "Recommended - eBPF probes"),
+    opt("Node", "Recommended: package.json scripts"), opt("Text", "Recommended: \ufb01le based")])]);
+  assert.deepEqual(names.rows().map((row) => row.querySelector(".ask-desc")?.textContent),
+    ["iOS first", "eBPF probes", "package.json scripts", "\ufb01le based"]);
   // Multi-select preselects nothing: row 1 holds the highlight, no box is checked.
   const m = panel();
   m.event({ type: "turn_start", turn_id: "t1", prompt: "go" });

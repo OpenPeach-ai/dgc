@@ -101,13 +101,20 @@ def _header_from(question: str) -> str:
     return (kept + "…") if kept else cut_cells(text, MAX_HEADER_CELLS)
 
 
+# The first word of a description that may take a capital: lowercase ASCII letters, then at most one
+# punctuation mark, then a space or the end. main.js askUnmark mirrors this (ASK_SENTENCE_WORD).
+_SENTENCE_WORD = re.compile(r"[a-z]+[,;:.!?]?(?=\s|$)")
+
+
 def _unmark(text: str, *, sentence: bool = False) -> tuple[str, bool]:
     """``text`` without a recommendation marker, and whether it carried one.
 
     "Easy to deploy (Recommended)", "Feature rich, (Recommended)", "(Recommended) Fast.",
     "Recommended: fast" and "Easy to set up; recommended." all mark the option; the text left reads as if the marker was never there.
     Text without a marker comes back unchanged. ``sentence`` (a description): when a leading
-    "Recommended:" was removed, the text left starts with a capital ("Recommended: fast" -> "Fast").
+    "Recommended:" was removed, the text left starts with a capital ("Recommended: fast" -> "Fast"),
+    but only when its first word is a plain lowercase ASCII word: "iOS first", "eBPF probes"
+    and "package.json" keep their case (a name is not a sentence start).
     """
     stripped = _MARK.sub(" ", text)
     found = stripped != text
@@ -124,7 +131,7 @@ def _unmark(text: str, *, sentence: bool = False) -> tuple[str, bool]:
     stripped = re.sub(r"\s+([,;.!?])", r"\1", stripped)           # "apps ." -> "apps."
     stripped = re.sub(r"([,;])(?:\s*[,;])+", r"\1", stripped)       # "rich, , good" -> "rich, good"
     stripped = " ".join(stripped.split()).strip(" ,;:\u00b7\u2013\u2014-")
-    if capital:
+    if capital and _SENTENCE_WORD.match(stripped):
         stripped = stripped[:1].upper() + stripped[1:]
     return stripped, True
 

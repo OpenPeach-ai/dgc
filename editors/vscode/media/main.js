@@ -5593,6 +5593,8 @@
   const ASK_MARK = /\(\s*recommended\s*\)/gi, ASK_LEAD_MARK = /^\s*recommended\s*(?:[:\u00b7\u2013\u2014-]\s*|\.\s+)/i;
   const ASK_TRAIL_MARK = /(?:^|[,;:\u00b7\u2013\u2014-]|\.(?=\s))\s*recommended\s*[.!]?\s*$/i;
   // `sentence` (a description): text left after a leading "Recommended:" starts with a capital.
+  // A plain lowercase word may start a sentence; "iOS", "eBPF" or "package.json" keep their case (questions._SENTENCE_WORD).
+  const ASK_SENTENCE_WORD = /^[a-z]+[,;:.!?]?(?=\s|$)/;
   function askUnmark(text, sentence = false) {
     const raw = String(text || "");
     let stripped = raw.replace(ASK_MARK, " ");
@@ -5604,7 +5606,7 @@
     if (!found) return [raw, false];
     stripped = stripped.replace(/\s+([,;.!?])/g, "$1").replace(/([,;])(?:\s*[,;])+/g, "$1")
       .split(/\s+/).filter(Boolean).join(" ").replace(/^[\s,;:\u00b7\u2013\u2014-]+|[\s,;:\u00b7\u2013\u2014-]+$/g, "");
-    if (capital) stripped = stripped.charAt(0).toUpperCase() + stripped.slice(1);
+    if (capital && ASK_SENTENCE_WORD.test(stripped)) stripped = stripped.charAt(0).toUpperCase() + stripped.slice(1);
     return [stripped, true];
   }
   function askLabel(option) { return askUnmark(option.label)[0]; }
