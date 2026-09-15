@@ -124,6 +124,61 @@ class TodoLifecycleTests(unittest.TestCase):
 
     # --- one canonical list -------------------------------------------------------------------
 
+    def test_printed_todo_json_is_repaired_by_a_real_tool_call(self):
+        import json
+        initial = [{"content": "Write fixture", "status": "in_progress"}]
+        finished = [{"content": "Write fixture", "status": "done"}]
+        chat, calls = self.script(
+            ChatResult(content=json.dumps({"todos": initial})),
+            ChatResult(tool_calls=[ToolCall("todo-start", "todo", {"todos": initial}),
+                                   ToolCall("write", "write_file", {"path": "a.txt", "content": "ok"})]),
+            ChatResult(content=json.dumps({"todos": finished})),
+            ChatResult(tool_calls=[ToolCall("todo-end", "todo", {"todos": finished})]),
+            ChatResult(content="Created the fixture."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Use the todo tool to track writing a fixture."))
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(self.ui.todo_lists, [initial, finished])
+        self.assertEqual((self.root / "a.txt").read_text(), "ok")
+        self.agent.load_session(self.agent.session_file)
+        self.assertEqual(self.agent.todos, finished)
+
+    def test_a_json_example_is_not_treated_as_an_unapplied_action(self):
+        answer = '{"todos":[{"content":"Example","status":"pending"}]}'
+        chat, calls = self.script(ChatResult(content=answer))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Show an example of the todo JSON format; do not create tasks."))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.agent.todos, [])
+
+    def test_a_request_not_to_create_todos_does_not_trigger_repair(self):
+        chat, calls = self.script(ChatResult(content='{"todos":[{"content":"Example","status":"pending"}]}'))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Do not create a todo list. Show the JSON syntax only."))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.agent.todos, [])
+
+    def test_todo_repair_is_bounded_and_never_applies_printed_json(self):
+        answer = '{"todos":[{"content":"Unfinished","status":"done"}]}'
+        chat, calls = self.script(ChatResult(content=answer))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Use the todo tool to track this task."))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.agent.todos, [], "prose must never fabricate a completed task")
+        self.assertTrue(any("checklist has not been changed" in note for note in self.ui.infos))
+
+    def test_work_after_todo_in_the_same_batch_still_gets_progress_reminder(self):
+        rows = [{"content": "Write fixture", "status": "in_progress"}]
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("todo", "todo", {"todos": rows}),
+                                   ToolCall("write", "write_file", {"path": "a.txt", "content": "ok"})]),
+            ChatResult(tool_calls=[ToolCall("done", "todo", {"todos": [{**rows[0], "status": "done"}]})]),
+            ChatResult(content="Done."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Write the fixture and track its progress."))
+        self.assertIn("Before the next step", str(calls[1]))
+        self.assertEqual(self.agent.todos[0]["status"], "done")
+
     def test_goal_and_tool_use_the_same_current_checklist(self):
         self.update([{"content": "Check the result", "status": "pending"}])
         self.assertEqual(self.agent.todos, self.agent.ctx.todos)

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
+import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, openUpdateTerminal } from "./cliupdate";
 
@@ -82,6 +83,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.handoff", () => provider.runEditorAction("handoff")),
     vscode.commands.registerCommand("dgc.retainedTasks", () => provider.runEditorAction("retainedTasks")),
     vscode.commands.registerCommand("dgc.compact", () => provider.runEditorAction("compact")),
+    vscode.commands.registerCommand("dgc.updateExtension", () => checkForExtensionUpdates(context, true)),
     vscode.commands.registerCommand("dgc.updateCli", () => {
       // parity with the CLI's /update: run `dgc update` in a terminal, then remind the user to
       // restart the backend so the panel picks up the new version.
@@ -123,7 +125,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
   );
 
-  checkForUpdates(context).catch(() => { /* never raise into activate */ });
+  checkForExtensionUpdates(context).catch(() => { /* never raise into activate */ });
   const testToken = process.env.DGC_EXTENSION_TEST_TOKEN;
   if (testToken) {
     return Object.freeze({
@@ -135,51 +137,3 @@ export function activate(context: vscode.ExtensionContext): void | object {
 }
 
 export function deactivate(): void { /* provider disposal handled by subscriptions */ }
-
-// --- self-hosted update nudge (mirrors the CLI's version.json pattern) --------
-const MANIFEST = "https://vibedgc.com/vscode/version.json";
-const DAY = 86_400_000;
-
-function newer(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) !== (pb[i] || 0)) {
-      return (pa[i] || 0) > (pb[i] || 0);
-    }
-  }
-  return false;
-}
-
-async function checkForUpdates(ctx: vscode.ExtensionContext): Promise<void> {
-  // Marketplace / Open VSX builds auto-update — only the self-hosted .vsix nags.
-  if (process.env.DGC_SELF_HOSTED !== "true") {
-    return;
-  }
-  if (!vscode.workspace.getConfiguration("dgc").get("checkForUpdates", true)) {
-    return;
-  }
-  const last = ctx.globalState.get<number>("dgc.updateCheckedAt", 0);
-  if (Date.now() - last < DAY) {
-    return;
-  }
-  await ctx.globalState.update("dgc.updateCheckedAt", Date.now());
-
-  // a real User-Agent is required — Cloudflare 403s the default fetch UA
-  const res = await fetch(MANIFEST, { signal: AbortSignal.timeout(4000), headers: { "User-Agent": "dgc-vscode" } });
-  const m: any = await res.json();
-  const current = ctx.extension.packageJSON.version as string;
-  if (!m?.version || !newer(m.version, current)) {
-    return;
-  }
-  if (ctx.globalState.get("dgc.skip") === m.version) {
-    return;
-  }
-  const pick = await vscode.window.showInformationMessage(
-    `DGC ${m.version} is available (you have ${current}).`,
-    "Get it", "Skip this version");
-  if (pick === "Get it") {
-    vscode.env.openExternal(vscode.Uri.parse(m.page || "https://vibedgc.com/vscode/"));
-  } else if (pick === "Skip this version") {
-    ctx.globalState.update("dgc.skip", m.version);
-  }
-}

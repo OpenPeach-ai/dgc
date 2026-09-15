@@ -297,10 +297,20 @@ class VersionedInstallLifecycle(unittest.TestCase):
     def test_01_fresh_install_builds_a_complete_version_and_every_editor_gets_the_extension(self):
         fake_bin = self.home / "fake-editors"
         fake_bin.mkdir()
+        # Simulate the common macOS install: Cursor.app exists but its command is not on
+        # PATH. Code is on PATH; Codium is in both locations and must be installed once.
+        uname = fake_bin / "uname"
+        uname.write_text("#!/bin/sh\nprintf 'Darwin\\n'\n")
+        uname.chmod(0o755)
         for editor in ("cursor", "code", "codium"):
-            script = fake_bin / editor
+            app = {"cursor": "Cursor", "codium": "VSCodium"}.get(editor)
+            script = (self.home / "Applications" / f"{app}.app" / "Contents" / "Resources" / "app" / "bin" / editor
+                      if app else fake_bin / editor)
+            script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{self.home}/{editor}.log"\n')
             script.chmod(0o755)
+            if editor == "codium":
+                (fake_bin / editor).symlink_to(script)
         vsix = b"not really a vsix, but checksummed"
         SITE.publish(release("0.90.1", extra={"dgc/stale_only_in_A.py": "MARKER = 'A'\n"}))
         SITE.files["/vscode/dgc.vsix"] = vsix
@@ -330,6 +340,7 @@ class VersionedInstallLifecycle(unittest.TestCase):
             log = (self.home / f"{editor}.log").read_text()
             self.assertIn("--install-extension", log, editor)
             self.assertIn("--force", log, editor)
+            self.assertEqual(len(log.splitlines()), 1, f"{editor} must not be installed twice")
 
     def test_02_dgc_update_self_locates_and_never_swaps_code_under_a_running_process(self):
         vdir_a = self.data / "versions" / "0.90.1"

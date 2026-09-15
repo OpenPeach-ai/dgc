@@ -1656,7 +1656,9 @@
     // Running, the header says what is happening in the present tense ("Running a command",
     // "Editing 2 files and running a command") and never repeats a card's argument: the card
     // below holds the command or path, and the header used to print it a second time.
-    let sentence = running.length ? toolSentence(running, "present") : toolSentence(cards, "past");
+    const executed = cards.filter(card => !["denied", "blocked"].includes(card.dataset.status));
+    let sentence = running.length ? toolSentence(running, "present")
+      : executed.length ? toolSentence(executed, "past") : "No tools ran";
     // Images a step produced, where the sentence did not already count them ("viewed 2 images").
     const viewing = cards.some((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed");
     const images = viewing ? 0 : cards.reduce((n, card) => n + (card._images?.length || 0), 0);
@@ -2768,18 +2770,31 @@
         ensureTurn();
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
-        const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
+        const c = turn._tools[key] || (turn._tools[key] = toolCard({ ...ev,
+          summary: ev.args?.path || ev.args?.command || ev.reason }));
         c.querySelector(".dot").className = "dot deny";
         setToolStatus(c, "denied");
         setToolOutput(c, String(ev.reason || "Permission denied"));
         c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         break;
       }
+      case "permission_decision": {
+        ensureTurn();
+        const detail = ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
+          : Object.keys(ev.args || {}).length ? `<pre>${esc(JSON.stringify(ev.args))}</pre>` : "";
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Permission for <b>${esc(ev.name)}</b></span></div>${detail}`, "Recorded permission decision");
+        c.dataset.historyApproval = "true";
+        // No request id, response handler or editable controls: replay is display only.
+        resolveCard(c, String(ev.message || "Recorded decision"));
+        break;
+      }
       case "permission_request": {
         if (requestShown(ev.id)) break;     // announced again after a history snapshot
         ensureTurn();
-        imageViewerAttention("permission_request");
-        speak(`Permission required to run ${ev.name}`);
+        if (!replaying) {
+          imageViewerAttention("permission_request");
+          speak(`Permission required to run ${ev.name}`);
+        }
         // v7: the step's summary and, for an edit, the diff it would apply — approve against
         // what will happen, not raw JSON. A denial can carry a note for the model.
         const detail = ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
@@ -3063,9 +3078,9 @@
       case "mode_changed": if (ev.message) sysLine(ev.message); break;
       case "permission_resolved":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
-          if (card.dataset.requestId === String(ev.id)) resolveCard(card, ev.decision === "once" ? "Allowed" : "Denied");
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card, ev.message || (ev.decision === "once" ? "Allowed once" : "Denied"));
         });
-        sysLine(ev.message, ev.decision === "no"); break;
+        if (!replaying) sysLine(ev.message, ev.decision === "no"); break;
       case "command_rejected":
         // A refused Clear says why beside the checklist, not in the transcript.
         if (ev.command === "clear_todos") { settleTodoClear(ev.message || "DGC could not clear the checklist."); break; }
@@ -4204,7 +4219,7 @@
   // Everything a saved turn is made of. Anything else in a history payload is not dispatched:
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
-  const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "thinking_end", "stream_end",
+  const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                               "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
                               "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end"]);
   function prepareCompleteHistory(items) {
@@ -4602,7 +4617,9 @@
       const status = why.slice(2, -1);
       const restated = [status, `exited with ${status}`, "killed by an unreported signal"].includes(cause);
       const detail = !cause ? why : restated ? ` (${cause})` : why + ": " + cause;
-      const exitLine = msg.recovering
+      const exitLine = cause.startsWith("protocol:")
+        ? "DGC connection needs attention. Follow the update or connection instructions above."
+        : msg.recovering
         ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
         : "dgc backend exited" + detail;
       sysLine(exitLine, true);

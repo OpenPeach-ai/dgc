@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -236,6 +236,11 @@
         "title": "Settings",
         "category": "DGC",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "dgc.updateExtension",
+        "title": "Check for Extension Updates",
+        "category": "DGC"
       }
     ],
     "menus": {
@@ -407,7 +412,8 @@
         "dgc.checkForUpdates": {
           "type": "boolean",
           "default": true,
-          "description": "For sideloaded (.vsix) installs, check vibedgc.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
+          "description": "Check the official DGC release on every installation channel, including when an editor marketplace is delayed. Updates are checksum-verified and installed through the editor.",
+          "scope": "machine"
         },
         "dgc.baseUrl": {
           "type": "string",
@@ -556,5 +562,6 @@
   },
   "overrides": {
     "lodash-es": "^4.18.1"
-  }
+  },
+  "dgcCliVersion": "0.40.1"
 }

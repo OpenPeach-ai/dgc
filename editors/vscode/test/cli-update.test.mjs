@@ -61,6 +61,15 @@ function fakeCli(name, { code = 0, stdout = "", stderr = "", sleepSeconds = 0 } 
   return path;
 }
 
+test("automatic CLI recovery targets the extension's paired version and leaves extensions alone", async () => {
+  const command = fakeCli("matching-version", { stdout: "$DGC_INSTALL_VERSION:$DGC_SKIP_EXTENSION" });
+  const result = await runCliUpdate(command, undefined, { targetVersion: "0.40.1" });
+  assert.equal(result.ok, true);
+  assert.match(result.log, /0\.40\.1:1/);
+  const invalid = await runCliUpdate(command, undefined, { targetVersion: "../elsewhere" });
+  assert.equal(invalid.ok, false);
+});
+
 test("an unset or default dgc.command is DGC's own install, not a path the user chose", () => {
   inspected["command"] = undefined;
   assert.equal(isUserChosenCommand(), false);

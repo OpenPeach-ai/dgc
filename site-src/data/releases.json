@@ -3,10 +3,21 @@
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
+      "version": "0.40.1",
+      "date": "2026-09-15",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.1",
+      "status": "current",
+      "notes": [
+        "Checklist recovery: when a model prints todo arguments instead of using the tool during tracked work, DGC asks up to twice for the actual tool call. Printed JSON never changes task state; if the model still does not comply, DGC says the checklist was not updated. Work after an earlier todo call in the same batch still gets a progress reminder.",
+        "Tool permission outcomes persist with their results. Reopened editor chats show read-only approval cards with the actual saved rule or denial note, and denied steps stay labelled denied. A later deny policy still wins over an earlier approval.",
+        "The installer finds Cursor, VS Code and VSCodium in macOS Applications folders even without their shell commands on PATH, and deduplicates editors found both ways. Pair with extension 0.25.1 for direct extension update recovery; editor protocol remains v14."
+      ]
+    },
+    {
       "version": "0.40.0",
       "date": "2026-09-15",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Security: project-local named agents load only after directory trust, so an untrusted repository cannot choose a sub-agent's host or environment key. Trust granted in an open terminal or editor takes effect without restarting. Isolated tasks and fleet workspaces use the approved source project's definitions.",
         "Sub-agents are counted and listed. The status bar shows how many sub-agents this chat has started and whether any is working (● 5 agents · 2 working, ◆ when one needs you, ○ when none is working), and /agents lists each one with its state, task, what it is doing, run time, tool calls and tokens, also while a turn runs. Counts, nested agents and measured metrics survive reopening the chat. A new chat or a clear starts the count again, and a rewind drops the agents started after that point.",
@@ -401,10 +412,21 @@
   ],
   "extension": [
     {
+      "version": "0.25.1",
+      "date": "2026-09-15",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.1",
+      "status": "current",
+      "notes": [
+        "Editor protocol v14; requires DGC CLI 0.40.1. Automatic CLI recovery installs the version required by the extension. A newer CLI offers extension recovery instead of only a protocol error.",
+        "Check for Extension Updates checks the official release directly for gallery and manual installs. A newer version offers a checksum-verified VSIX installation and optional reload, including when Cursor’s catalog is delayed. Daily background checks respect the user setting and cannot be enabled by a workspace.",
+        "Saved tool permission decisions reopen as read-only cards. Denied actions retain their denied status; custom saved rules and denial notes remain visible. Compatibility shutdowns use clearer connection guidance."
+      ]
+    },
+    {
       "version": "0.25.0",
       "date": "2026-09-15",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Editor protocol v14; requires DGC CLI 0.40.0. Adds the agents list, model reconnect lines, question cards with a recommended option, thinking labelled by source, and the images the model looked at.",
         "A pill under the prompt shows how many sub-agents the chat has started and whether any is working (● 2 agents, ◆ when one needs you). Click it for a live list with a row per agent; a row jumps to that agent's step when that step is present in the loaded transcript. The list comes back when the chat is reopened.",

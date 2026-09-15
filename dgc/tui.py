@@ -4303,13 +4303,14 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]error:[/] {_esc(msg)}"))
 
-    def add_permission_rule(self, name: str, args: dict) -> None:
+    def add_permission_rule(self, name: str, args: dict) -> str | None:
         from .permissions import Rule, rule_for
         try:
             r = str(rule_for(name, args))
             Rule.parse(r, "allow")
             self.config.permissions.setdefault("allow", []).append(r)
             self.config.save()
+            return r
         except Exception:
             pass
 

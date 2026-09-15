@@ -10,6 +10,7 @@ import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, openUpdateTerminal, runCliUpdate,
 } from "./cliupdate";
+import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -1229,7 +1230,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sessionRestoreSaved = saved?.saved !== false;
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
-    const be = new DgcBackend(this.cwd(), cmd);
+    const be = new DgcBackend(this.cwd(), cmd, this.context.extension.packageJSON.dgcCliVersion);
     // The backend's own last word ("serve loop ended: <cause>; …") arrives on stderr before the
     // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
     let serveCause = "";
@@ -1813,6 +1814,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "error" && (ev as any).cli_outdated) {
       this.promptUpdateCli();
     }
+    if (ev.type === "error" && (ev as any).extension_outdated) {
+      void checkForExtensionUpdates(this.context, true);
+    }
     if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
       this.scheduleWorkspaceChanges(ev.type === "tool_result" ? 120 : 0);
     }
@@ -1886,11 +1890,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async updateCliInPlace(executable: string): Promise<void> {
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "DGC: updating the CLI to match the extension…", cancellable: true },
-      (_progress, token) => runCliUpdate(executable, token),
+      (_progress, token) => runCliUpdate(executable, token, { targetVersion: this.context.extension.packageJSON.dgcCliVersion }),
     );
     if (result.ok) {
       this.restart("CLI updated to match the extension");
-      void vscode.window.showInformationMessage("DGC CLI updated. Reconnected.");
+      void vscode.window.showInformationMessage("DGC CLI updated. Reconnecting…");
       return;
     }
     this.cliUpdateLog(result.log);

@@ -206,6 +206,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         # instead of raw JSON, and say why it denied.
         "summary": _S(False), "diff": _NS(False),
     },
+    # Additive v14 history fragment. It has no request id and can never accept a response.
+    "permission_decision": {
+        "call_id": _NS(False), "name": _S(), "args": _O(),
+        "decision": _f("string", enum=("once", "always", "no")), "message": _S(),
+    },
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
     # v14: ``questions`` = [{id, header, question, multi_select, options: [{label, description,

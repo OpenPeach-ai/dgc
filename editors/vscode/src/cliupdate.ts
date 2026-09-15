@@ -21,7 +21,7 @@ export type UpdateResult =
   | { ok: true; log: string }
   | { ok: false; reason: string; log: string };
 
-export type UpdateOptions = { lockRetryMs?: number; maxLockRetries?: number };
+export type UpdateOptions = { lockRetryMs?: number; maxLockRetries?: number; targetVersion?: string };
 
 /** The file `command` names the way spawn() finds it: a path as given, or the first executable
  *  of that name on PATH. Undefined when there is none. */
@@ -239,7 +239,12 @@ export function runCliUpdate(
   // .vsix. Run from inside the editor, that would replace the extension that asked for this
   // update — with an OLDER build for as long as the site has not caught up. The editor owns
   // its own extensions; this update is only ever about the CLI.
-  const env = { ...process.env, DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) };
+  const target = options.targetVersion;
+  if (target !== undefined && !/^\d+\.\d+\.\d+$/.test(target)) {
+    return Promise.resolve({ ok: false, reason: "invalid matching CLI version", log: "" });
+  }
+  const env = { ...process.env, DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable),
+    ...(target ? { DGC_INSTALL_VERSION: target } : {}) };
   return new Promise<UpdateResult>((resolve) => {
     let child: ChildProcessWithoutNullStreams | undefined;
     let log = "";

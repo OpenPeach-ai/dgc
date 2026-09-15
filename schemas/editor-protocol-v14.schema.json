@@ -1277,6 +1277,55 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "permission_decision"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "call_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "once",
+                "always",
+                "no"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "name",
+            "args",
+            "decision",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "rule_added"
             },
             "seq": {

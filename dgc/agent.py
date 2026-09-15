@@ -1131,7 +1131,7 @@ class _SubUI:
         return verdict
 
     def add_permission_rule(self, name, args):
-        self._interact("add_permission_rule", None, name, args)
+        return self._interact("add_permission_rule", None, name, args)
 
     def present_plan(self, plan):
         choice, feedback = self._interact(
@@ -1392,6 +1392,7 @@ class Agent(GoalLifecycle):
         self._last_model_cause = None            # reconnecting: the cause of the last failed request
         self._reasoning_seq = 0                  # thinking: reasoning block counter
         self._turn_reasoning_pending: list = []  # thinking: blocks not yet saved on a message
+        self._approval_records: dict = {}       # explicit human decisions, persisted with results
         self._decision_records: dict = {}        # options: question outcomes by call id
         self._end_turn_after_batch = ""          # options: end the turn once this batch finishes
         # ---- end 0.40 shared plain state ----
@@ -2562,8 +2563,8 @@ class Agent(GoalLifecycle):
             "file, make them in ONE multi_edit call. Keep each old_string as SMALL as possible while "
             "still matching uniquely — don't pad it with unchanged surrounding context (padding is the "
             "#1 cause of edit-not-found). If an edit still won't match, rewrite the whole file with write_file.",
-            "- Keep a todo list for multi-step work; mark steps in_progress → done as you go, or "
-            "blocked with why.",
+            "- Multi-step: use `todo`, not JSON. Send the full list: in_progress before work, "
+            "done after verification, pending next steps, blocked with why.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
             "",
             "# Response cadence",
@@ -4560,6 +4561,8 @@ class Agent(GoalLifecycle):
         unverified_edit_nudged = False
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
+        todo_repair = 0             # bounded correction for a model printing tool args as prose
+        self._approval_records.clear()
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
@@ -4967,6 +4970,25 @@ class Agent(GoalLifecycle):
             paused_assistant_index = None
 
             if not result.tool_calls:
+                printed_todo = (not wake and not self.todo_clear_in_force()
+                                and (did_tools or re.search(
+                                    r"(?:^|[.!?;\n]\s*)(?:please\s+)?(?:use|call|maintain|update|create|keep)\b.{0,40}\b(?:todo|checklist|task list)\b",
+                                    user_text, re.I))
+                                and self._printed_todo_arguments(result.content or ""))
+                if todo_repair < 2 and printed_todo:
+                    todo_repair += 1
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nThe last response printed todo arguments as text; "
+                        "it did NOT update the checklist. Call the actual `todo` tool with the "
+                        "complete list and accurate statuses. Do not redo finished work or mark "
+                        "unfinished work done. Then continue the task or give a normal final "
+                        "answer.\n</system-reminder>"})
+                    next_request_reason = "todo_gate"
+                    self._activity("continuing", "Updating the checklist")
+                    continue
+                if printed_todo:
+                    self.ui.info("The model did not call the todo tool after two reminders; "
+                                 "the checklist has not been changed by its printed JSON.")
                 if defer_completion and not hold_final(assistant):
                     withhold_final(
                         "[Completion withheld by DGC: the deferred response exceeded its safety limit.]",
@@ -5264,19 +5286,22 @@ class Agent(GoalLifecycle):
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
+            text_approvals: list[dict] = []
             text_decisions: list[dict] = []     # question outcomes recorded on the results message
             self._end_turn_after_batch = ""     # a dismissed question in THIS batch ends the turn
 
             def text_results_message() -> dict:
                 return {"role": "user",
                         "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>",
-                        **({"_dgc_decision": list(text_decisions)} if text_decisions else {})}
+                        **({"_dgc_decision": list(text_decisions)} if text_decisions else {}),
+                        **({"_dgc_approvals": list(text_approvals)} if text_approvals else {})}
 
             def flush_text_results() -> None:
                 if text_results:
                     self.messages.append(text_results_message())
                     text_results.clear()
                     text_decisions.clear()
+                    text_approvals.clear()
 
             def unfinished_text_batch(next_index: int) -> list:
                 # Text-tool responses have no native tool_calls envelope to repair after a crash.
@@ -5450,13 +5475,17 @@ class Agent(GoalLifecycle):
                         edited_targets.add(absolute_target)
                         unverified_target_edits[absolute_target] = (
                             unverified_target_edits.get(absolute_target, 0) + 1)
+                approval = self._approval_records.pop(call.id, None)
                 decision = (self._decision_records.pop(call.id, None)
                             if call.name == "propose_options" else None)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
-                                          **({"_dgc_decision": decision} if decision else {})})
+                                          **({"_dgc_decision": decision} if decision else {}),
+                                          **({"_dgc_approval": approval} if approval else {})})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
+                    if approval:
+                        text_approvals.append(approval)
                     if decision:
                         text_decisions.append({**decision, "call_id": None})
                 if any(later not in parallel_tasks and later not in parallel_outputs
@@ -5633,9 +5662,14 @@ class Agent(GoalLifecycle):
                                  "For this multi-step task, "
                                  "use the `todo` tool to list the steps and mark each done as you go.")
             pending = self._open_todos()
-            if pending and not wake and not any(c.name == "todo" for c in result.tool_calls):
-                reminders.append("Still pending: " + "; ".join(t["content"] for t in pending[:6])
-                                 + " — advance these and mark each done with the `todo` tool.")
+            if pending and not wake and result.tool_calls[-1].name != "todo":
+                reminders.append("Checklist still open: "
+                                 + "; ".join(f"{t['status']}: {t['content']}" for t in pending[:6])
+                                 + ". Before the next step, use the actual `todo` tool to mark "
+                                 "any steps the preceding results confirm are finished as done, "
+                                 "and the next step in_progress. Keep unfinished steps pending "
+                                 "or blocked; do not repeat completed work. Printed JSON does "
+                                 "not update the checklist.")
             if deadline is not None:            # budgeted turn → nudge the model to triage as the clock runs down
                 used = 1.0 - max(0.0, (deadline - time.monotonic()) / budget)
                 if used >= 0.85 and 85 not in budget_nudged:
@@ -5732,6 +5766,27 @@ class Agent(GoalLifecycle):
         if not isinstance(result, dict) or not isinstance(result.get("text"), str):
             raise ValueError(output)
         return result
+
+    @staticmethod
+    def _printed_todo_arguments(text: str) -> bool:
+        """Recognise an unapplied tool-shaped answer, never execute prose as a tool call."""
+        text = text.strip()
+        if len(text) > 32_000:
+            return False
+        if text.startswith("```json\n") and text.endswith("```"):
+            text = text[8:-3].strip()
+        elif text.startswith("```\n") and text.endswith("```"):
+            text = text[4:-3].strip()
+        try:
+            value = json.loads(text)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(value, dict) or set(value) != {"todos"}:
+            return False
+        rows = value["todos"]
+        return (isinstance(rows, list) and 0 < len(rows) <= 40
+                and all(isinstance(row, dict) and isinstance(row.get("content"), str)
+                        and isinstance(row.get("status"), str) for row in rows))
 
     def _ask_questions(self, call_id, args, secrets) -> str:
         """The propose_options executor: normalise, ask the frontend, report the outcome.
@@ -5951,8 +6006,13 @@ class Agent(GoalLifecycle):
             finally:
                 if waiting_id:
                     self.subagents.waiting(waiting_id, None)
+            approval_note = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets) if verdict == "no" else ""
+            approval = {"name": name, "args": self._safe_value(display_args),
+                        "decision": verdict, "reason": approval_note[:2000]}
+            self._approval_records[call_id] = approval
             if verdict == "no":
-                reason = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets)
+                self.ui.tool_denied(name, display_args, approval_note or "Denied by the user", call_id)
+                reason = approval_note
                 if hasattr(self.ui, "deny_reason"):
                     self.ui.deny_reason = ""          # consume it
                 if reason:
@@ -5961,15 +6021,20 @@ class Agent(GoalLifecycle):
                 return "The user DENIED this action. Do not retry it; ask how to proceed or move on."
             if verdict == "always":
                 if contains_secret(args, secrets):
+                    approval["decision"] = "once"
                     self.ui.info("credential-bearing approvals are one-time only; no rule was saved")
-                elif external_paths:
-                    self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
                 else:
-                    self.ui.add_permission_rule(name, perms.canonical_args(name, args))
+                    saved_rule = (self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
+                                  if external_paths else self.ui.add_permission_rule(name, perms.canonical_args(name, args)))
+                    if isinstance(saved_rule, str) and saved_rule:
+                        approval["rule"] = redact_text(saved_rule, secrets)[:1000]
+                    else:
+                        approval["decision"] = "once"
 
             # A newly selected plan/deny policy still wins over an earlier approval response.
             decision, reason = current_permissions().decide(name, args)
             if decision == DENY:
+                approval["denied_reason"] = redact_text(reason, secrets)[:2000]
                 self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
                 return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
 

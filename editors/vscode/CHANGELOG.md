@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.25.1 — 2026-09-15
+
+- **Requires CLI 0.40.1; editor protocol stays v14.** Automatic CLI recovery targets the release
+  required by this extension instead of the latest potentially incompatible CLI. Compatibility
+  shutdowns show connection guidance instead of a second misleading crash message.
+- **Check for Extension Updates.** The command and daily optional checks work for every install
+  channel. If a catalog lags, install a checksum-verified official VSIX after selecting Install
+  Update, then reload when ready. A newer CLI offers the same extension recovery.
+- **Permission decisions survive chat reopen.** Saved tool approvals return as read-only cards with
+  Allowed once, the actual saved allow-rule, or Denied and its note. Denied tool results keep their
+  denied label, including older histories whose result already recorded the denial.
+- With CLI 0.40.1, printed todo JSON triggers a bounded request for an actual todo call, and work
+  after a checklist update still prompts the model to record progress. Printed JSON alone never
+  modifies the checklist; exhausted reminders are reported honestly.
+
 ## 0.25.0 — 2026-09-15
 
 - **Editor protocol v14; requires DGC CLI 0.40.0.** Adds the agents list, model reconnect lines,

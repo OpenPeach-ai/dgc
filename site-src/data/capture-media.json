@@ -14,15 +14,15 @@
       ],
       "duration_seconds": 47.5,
       "duration_label": "0:48",
-      "provenance": "Actual current DGC 0.40.0 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "provenance": "Actual current DGC 0.40.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
       "time_compression": 1.0,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "6a3038299e0e649c3ca5e9a6150ae020718203eff1be3b408ab6fb2c32440b00",
-          "bytes": 2183214,
+          "sha256": "330261a3ef7c700cf73d540ba1ef189b03eff5f7d87483a88f9b0fffc63a8315",
+          "bytes": 2312926,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
@@ -30,8 +30,8 @@
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "dcaa00c915374bd51a765a8a9cd359752347723613f1683ea69652bd9bc44173",
-          "bytes": 505715,
+          "sha256": "cb4daf96b9e2048a3108899e3b8cba9c6286be1efacdea6e1ba97d01b82a7ef5",
+          "bytes": 567251,
           "codec": "h264",
           "width": 1280,
           "height": 720,
@@ -39,8 +39,8 @@
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
-          "sha256": "ab2a7e35018cdddb204211ec61dea16ff0c2b9ee065ea29cff9a3a04c84aaa68",
-          "bytes": 120705,
+          "sha256": "5c9b418857cfc86ba96b6355d2b053e5e9b2b7ec7a4f8e80e77f0627795f588c",
+          "bytes": 123410,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720

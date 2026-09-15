@@ -643,10 +643,12 @@ class UI:
         self.console.print(
             f"[bold red]error:[/bold red] {_markup_literal(msg)}")
 
-    def add_permission_rule(self, name: str, args: dict) -> None:
+    def add_permission_rule(self, name: str, args: dict) -> str | None:
         """Persist an allow-rule for this tool call — the 'always allow' path."""
         if self._rule_hook:
-            self._rule_hook(str(rule_for(name, args)))
+            rule = str(rule_for(name, args))
+            self._rule_hook(rule)
+            return rule
 
 
 # ------------------------------------------------------------------- REPL ---

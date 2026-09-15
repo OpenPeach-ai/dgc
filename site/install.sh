@@ -160,14 +160,33 @@ fetch() {
 
 sha256_of() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | awk '{print $1}'; }
 
-# Install the editor extension into EVERY editor CLI on PATH (skip with DGC_SKIP_EXTENSION=1).
+# Install into every discovered editor, including macOS applications without a PATH command.
 install_extension() {
   if [ -n "${DGC_SKIP_EXTENSION:-}" ]; then return 0; fi
-  local editors="" e
+  local editors=() e candidate existing duplicate
   for e in cursor code codium; do
-    if command -v "$e" >/dev/null 2>&1; then editors="$editors $e"; fi
+    if command -v "$e" >/dev/null 2>&1; then editors+=("$(command -v "$e")"); fi
   done
-  if [ -z "$editors" ]; then return 0; fi
+  if [ "$(uname -s)" = Darwin ]; then
+    for candidate in "/Applications/Cursor.app/Contents/Resources/app/bin/cursor" \
+      "$HOME/Applications/Cursor.app/Contents/Resources/app/bin/cursor" \
+      "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+      "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+      "/Applications/VSCodium.app/Contents/Resources/app/bin/codium" \
+      "$HOME/Applications/VSCodium.app/Contents/Resources/app/bin/codium"; do
+      [ -x "$candidate" ] || continue
+      duplicate=0
+      # macOS still ships Bash 3.2: an empty array needs this expansion under set -u.
+      for existing in ${editors[@]+"${editors[@]}"}; do
+        if [ "$(realpath_of "$candidate")" = "$(realpath_of "$existing")" ]; then duplicate=1; break; fi
+      done
+      if [ "$duplicate" = 0 ]; then editors+=("$candidate"); fi
+    done
+  fi
+  if [ "${#editors[@]}" = 0 ]; then
+    printf '  note: no local editor found; install the matching extension from %s/vscode/\n' "$BASE"
+    return 0
+  fi
   if ! fetch "$BASE/vscode/dgc.vsix" "$TMP/dgc.vsix" 2>/dev/null; then return 0; fi
   if ! fetch "$BASE/vscode/dgc.vsix.sha256" "$TMP/dgc.vsix.sha256" 2>/dev/null; then
     printf '  note: extension checksum is unavailable — skipping automatic extension install\n'
@@ -177,7 +196,7 @@ install_extension() {
   want=$(awk '{print $1}' "$TMP/dgc.vsix.sha256")
   got=$(sha256_of "$TMP/dgc.vsix")
   [ "${#want}" -eq 64 ] && [ "$want" = "$got" ] || die "extension checksum mismatch (the CLI itself is installed)"
-  for e in $editors; do
+  for e in "${editors[@]}"; do
     if "$e" --install-extension "$TMP/dgc.vsix" --force </dev/null >/dev/null 2>&1; then
       say "editor extension installed/updated in $e (reload the window to see the DGC panel)"
     else

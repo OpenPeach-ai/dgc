@@ -2,7 +2,7 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Use DGC CLI 0.40.0 or newer; this extension requires editor protocol v14. Run `dgc setup`, then use
+> Use DGC CLI 0.40.1 or newer; this extension requires editor protocol v14. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does
@@ -33,7 +33,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.
 - **Extensibility:** Skills, MCP Servers, Documentation, Permission Rules, Memory, Lifecycle Hooks.
 - **Context notes:** Show Context Notes — what this project already learned, across sessions. The agent searches the same trace itself.
-- **Maintenance:** Settings, Update CLI to Latest. If the CLI is older than the extension, DGC offers to update it and then reconnect — the extension drives the DGC you installed rather than shipping its own copy of it.
+- **Maintenance:** Settings, Update CLI to Latest, Check for Extension Updates. If the CLI is older than the extension, DGC offers to update it and then reconnect — the extension drives the DGC you installed rather than shipping its own copy of it.
 
 The in-composer `/` menu is generated from the CLI's canonical editor command registry. Commands
 that need structured editor state are routed through protocol frames rather than sent to the model.
@@ -60,11 +60,13 @@ if the mapping changes its port or origin, DGC explains same-port forwarding and
 
 ## Updating
 
-Keep the CLI and extension current. `dgc update` updates the CLI; the editor gallery updates the
-extension. Check DGC's own **Auto Update** setting in its extension menu, especially after installing
-a VSIX manually. Cursor's catalog can lag a public registry. After an update, reload the editor if
-it still runs the old extension, and use **DGC: Restart Backend** after updating the CLI. See the
-[upgrade guide](https://github.com/OpenPeach-ai/dgc/blob/main/docs/UPGRADING.md) for protocol mismatches.
+Keep the CLI and extension current. An older CLI is updated to the version required by this
+extension when `dgc.autoUpdateCli` is enabled. If the CLI is newer, DGC offers an extension update.
+**DGC: Check for Extension Updates** checks the official release directly, including when Cursor's
+catalog lags. It offers a checksum-verified installation and then **Reload Window**. Background
+checks cover gallery and manual installs and respect `dgc.checkForUpdates`. Enable the editor's
+per-extension **Auto Update** setting if you also want gallery updates after installing a VSIX.
+See the [upgrade guide](https://github.com/OpenPeach-ai/dgc/blob/main/docs/UPGRADING.md).
 
 ## Settings
 

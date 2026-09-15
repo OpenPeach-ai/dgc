@@ -94,7 +94,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
         once: "Allowed once",
         deny: "Denied · note for the model: Use the fixture database instead",
         always: "Always allowed · Bash(npm test:*)",
-        backend: "Denied",
+        backend: "Denied by a rule",
       };
       for (const [id, words] of Object.entries(expected)) {
         const f = await s.facts(id);

@@ -749,6 +749,7 @@ class _ACPUi:
         rule = str(rule_for(name, args))
         if self._rule_hook:
             self._rule_hook(rule)
+            return rule
 
     def present_plan(self, plan):
         tcid = f"plan{next(self._tc)}"

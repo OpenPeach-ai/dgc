@@ -96,7 +96,8 @@ export class DgcBackend extends EventEmitter {
   private lastSeq = -1;
   ready = false;
 
-  constructor(private readonly cwd: string, private readonly command: string) {
+  constructor(private readonly cwd: string, private readonly command: string,
+              private readonly requiredCliVersion?: string) {
     super();
   }
 
@@ -254,9 +255,10 @@ export class DgcBackend extends EventEmitter {
     });
   }
 
-  private protocolFailure(message: string, cliOutdated = false): void {
+  private protocolFailure(message: string, cliOutdated = false, extensionOutdated = false): void {
     this.emit("event", { type: "error", message, fatal: true, protocol_error: true,
-                         ...(cliOutdated ? { cli_outdated: true } : {}) });
+                         ...(cliOutdated ? { cli_outdated: true } : {}),
+                         ...(extensionOutdated ? { extension_outdated: true } : {}) });
     this.rejectPending(message);
     this.dispose(`protocol: ${message}`);
   }
@@ -314,12 +316,23 @@ export class DgcBackend extends EventEmitter {
             // mirror that can lag a publish, and an uninstall leaves old copies on disk that the
             // scanner may prefer. vibedgc.com/vscode/dgc.vsix is always the build that matches the
             // CLI, so name it as the reliable route rather than the fallback.
-            : `This DGC CLI is newer than this extension. Update DGC in the Extensions view and reload the window — or, if no update is offered, install the matching build directly: download https://vibedgc.com/vscode/dgc.vsix and run "Extensions: Install from VSIX…".`;
+            : `The DGC CLI needs a newer extension. Run "DGC: Check for Extension Updates" to install the matching release directly, even if your editor's marketplace is delayed, then reload the window.`;
           this.protocolFailure(
             `${fix} (the extension speaks editor protocol v${DGC_PROTOCOL_VERSION}; this CLI speaks v${offered}.)`,
             offered < DGC_PROTOCOL_VERSION,
+            offered > DGC_PROTOCOL_VERSION,
           );
           return;
+        }
+        const needed = this.requiredCliVersion?.split(".").map(Number);
+        const installed = String(ev.version || "").split(".").map(Number);
+        if (needed?.length === 3 && installed.length === 3 && needed.every(Number.isFinite)
+            && installed.every(Number.isFinite)) {
+          const first = needed.findIndex((n, i) => n !== installed[i]);
+          if (first >= 0 && needed[first] > installed[first]) {
+            this.protocolFailure(`This extension requires DGC CLI ${this.requiredCliVersion} or later; installed: ${ev.version}. Updating the matching CLI is required.`, true);
+            return;
+          }
         }
         this.ready = true;
         // Notify the panel first. Its synchronous ready handler sends workspace roots and

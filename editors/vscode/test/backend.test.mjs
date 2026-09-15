@@ -453,7 +453,8 @@ test("backend rejects incompatible protocol versions and never releases queued c
   // Equality is deliberate, so the message must name the side to update: a newer CLI than the
   // extension means the EXTENSION is behind. "protocol mismatch" alone strands whoever updated
   // one half first, which is everyone for a while after a protocol bump.
-  assert.match(failure.message, /vibedgc\.com\/vscode\/dgc\.vsix/);
+  assert.match(failure.message, /DGC: Check for Extension Updates/);
+  assert.equal(failure.extension_outdated, true);
   assert.match(failure.message, new RegExp(`v${DGC_PROTOCOL_VERSION}\\b`));
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(backend.ready, false);
@@ -472,6 +473,20 @@ test("an older CLI is told to update itself, with the command that does it", asy
   assert.match(message, /dgc update/);
   assert.match(message, /Restart Backend/);
   assert.match(message, /speaks v6/);
+  backend.dispose();
+});
+
+test("a compatible protocol still requires the CLI patch this extension depends on", async () => {
+  const command = executable("old-compatible-backend", `${protocolFixture()}
+ready.version = "0.40.0";
+send(ready);
+setInterval(() => {}, 1000);`);
+  const backend = new DgcBackend(scratch, command, "0.40.1");
+  const failure = waitFor(backend, "event", e => e.cli_outdated === true);
+  backend.send({ type: "prompt", text: "must wait for update" });
+  const event = await failure;
+  assert.match(event.message, /0\.40\.1/);
+  assert.equal(backend.ready, false);
   backend.dispose();
 });
 

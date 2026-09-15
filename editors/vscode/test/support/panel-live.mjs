@@ -206,6 +206,7 @@ export async function panelSession({ browser, python, model, name, config = {}, 
   function newProvider() {
     const mine = ++generation;
     const provider = new Provider({
+      extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
       extensionUri: { fsPath: extensionRoot }, extensionPath: extensionRoot, subscriptions: [],
       globalState: { get() {}, async update() {}, keys: () => [], setKeysForSync() {} },
       secrets: { get: async () => undefined, store: async () => {}, delete: async () => {}, onDidChange: anything },

@@ -254,7 +254,7 @@ class HookPlacementTests(unittest.TestCase):
 
     def test_mid_turn_items_name_every_replayable_fragment(self):
         self.assertEqual(_MID_TURN_ITEMS, (
-            "text_delta", "thinking_delta", "thinking_end", "stream_end", "tool_call", "tool_result",
+            "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end", "tool_call", "tool_result",
             "tool_denied", "tool_images", "options_resolved", "model_retry", "monitor_event",
             "turn_activity", "turn_eta", "turn_end"))
         webview = (Path(__file__).resolve().parents[1] / "editors" / "vscode" / "media" / "main.js").read_text()

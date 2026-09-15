@@ -430,7 +430,7 @@ def _history_steering_texts(message: dict) -> list[str] | None:
     return texts
 
 
-_MID_TURN_ITEMS = ("text_delta", "thinking_delta", "thinking_end", "stream_end",
+_MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
                    "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
 
@@ -1094,11 +1094,12 @@ class HeadlessUI:
         self.deny_reason = str(payload.get("reason") or "")[:2000] if decision == "no" else ""
         return decision
 
-    def add_permission_rule(self, name: str, args: dict) -> None:
+    def add_permission_rule(self, name: str, args: dict) -> str | None:
         rule = self._rule_override.pop(name, None) or str(rule_for(name, args))
         if self._rule_hook:
             self._rule_hook(rule)
-        self.em.emit("rule_added", rule=rule)
+            self.em.emit("rule_added", rule=rule)
+            return rule
 
     def present_plan(self, plan: str):
         rid, ev = self.pending.register()
@@ -2583,6 +2584,10 @@ class Backend:
                 # is a gate continuing the SAME turn.
                 # The text tool protocol's results message carries the question outcomes of that
                 # round. Only a message that recorded one can open a turn for them.
+                if text.startswith("<tool_results>") and isinstance(m.get("_dgc_approvals"), list):
+                    ensure_turn()
+                    for record in m["_dgc_approvals"][:16]:
+                        items.extend(self._history_approval(record, None))
                 if text.startswith("<tool_results>") and m.get("_dgc_decision"):
                     items.extend(self._history_decisions_for_text_results(m, ensure_turn()))
                 if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
@@ -2636,14 +2641,25 @@ class Backend:
                 if repaired:
                     turn["interrupted"] = True
                 items.extend(self._history_before_tool_result(m, call_id, turn))
+                approval = m.get("_dgc_approval")
+                denied_result = (output.startswith(("The user DENIED this action", "PERMISSION DENIED:"))
+                                 or (isinstance(approval, dict) and
+                                     (approval.get("decision") == "no" or approval.get("denied_reason"))))
                 # A step the session stopped under remains stopped, exactly as the reconnect drew
                 # it before Continue repaired the transcript. Repair text is for the model; replay
                 # must not turn an interrupted tool into a failed command with an expanded error.
-                if not repaired:
+                if not repaired and not denied_result:
                     items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
                                   "output": output, "is_error": tool_output_is_error(output),
                                   "is_diff": is_diff, "diff": diff})
                 items.extend(self._history_after_tool_result(m, call_id, turn))
+                items.extend(self._history_approval(m.get("_dgc_approval"), call_id))
+                if denied_result and not (isinstance(approval, dict) and
+                        (approval.get("decision") == "no" or approval.get("denied_reason"))):
+                    # Older sessions did not save the decision card, but this canonical result
+                    # still establishes that the operation never ran. Do not invent an approval.
+                    items.append({"type": "tool_denied", "call_id": call_id or None,
+                                  "name": name, "args": {}, "reason": output})
         live_start = None
         if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:
             live_start, live_id = items[turn["item"]], str(live_turn.get("id") or "") or turn["id"]
@@ -4289,6 +4305,25 @@ class Backend:
                 items.append(item)
                 turn["options_dismissed"] = item["outcome"] == "dismissed"
         return items
+
+    def _history_approval(self, record, call_id) -> list:
+        """Replay a settled decision as a disabled card; it can never become a new approval."""
+        if not isinstance(record, dict) or record.get("decision") not in ("once", "always", "no"):
+            return []
+        name = str(record.get("name") or "tool")[:128]
+        args = _history_args(record.get("args") or {})
+        decision = record["decision"]
+        note = str(record.get("reason") or "")[:2000]
+        rule = str(record.get("rule") or "")[:1000]
+        label = ("Allowed once" if decision == "once" else
+                 (f"Always allowed · {rule}" if rule else "Always allowed") if decision == "always" else
+                 (f"Denied · note for the model: {note}" if note else "Denied"))
+        result = [{"type": "permission_decision", "call_id": call_id,
+                   "name": name, "args": args, "decision": decision, "message": label}]
+        if decision == "no" or record.get("denied_reason"):
+            result.append({"type": "tool_denied", "call_id": call_id, "name": name,
+                           "args": args, "reason": str(record.get("denied_reason") or note or "Denied by the user")[:2000]})
+        return result
 
     def _history_before_tool_result(self, message: dict, call_id: str, turn: dict) -> list:
         """The ``options_resolved`` item replayed just before a native tool result (may mark the

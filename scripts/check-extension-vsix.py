@@ -334,9 +334,9 @@ def validate_pair(
         name for name in EXPECTED_MEMBERS
         if registry_members[name] != selfhost_members[name]
     }
-    if changed != permitted_differences:
+    if "extension/dist/build.json" not in changed or not changed <= permitted_differences:
         raise ValidationError(
-            "registry/selfhost packages must differ only in compiled code and build provenance "
+            "registry/selfhost packages require distinct build provenance and may differ only in compiled code "
             f"(changed={sorted(changed)})"
         )
     return {

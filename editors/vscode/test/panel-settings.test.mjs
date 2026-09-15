@@ -158,7 +158,7 @@ function harness({ mode = "default", engine = "", trusted = true, rejectType = "
       return { type: responseType, seq: timeline.length, request_id: command.request_id };
     },
   };
-  const context = { secrets, subscriptions: [], globalState: { get() {}, async update() {} } };
+  const context = { extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } }, secrets, subscriptions: [], globalState: { get() {}, async update() {} } };
   const provider = new DgcViewProvider(context);
   provider.backend = backend;
   provider.correlatedStateRequests = true;
@@ -1191,6 +1191,7 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
   try {
     vs.Uri = { joinPath: (...parts) => ({ fsPath: parts.map(String).join("/") }) };
     const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
       extensionUri: { fsPath: "/ext" }, subscriptions: [],
       globalState: { get() {}, async update() {} },
       workspaceState: { get() {}, async update() {} },
@@ -1236,6 +1237,7 @@ test("a backend that dies is replaced, and the corpse is never handed out again"
   // finding "DGC: Restart Backend". dgc serve is a plain child of the extension host, so an
   // extension update or a window reload takes it down -- recovery has to be automatic.
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [],
     globalState: { get() {}, async update() {} },
     workspaceState: { get() {}, async update() {} },
@@ -1259,6 +1261,7 @@ test("a backend that dies is replaced, and the corpse is never handed out again"
 
 test("a backend that cannot stay up is not respawned forever", async () => {
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [],
     globalState: { get() {}, async update() {} },
     workspaceState: { get() {}, async update() {} },
@@ -1277,6 +1280,7 @@ test("a backend that cannot stay up is not respawned forever", async () => {
 
 test("a deliberate restart does not spend the crash-recovery budget", () => {
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [],
     globalState: { get() {}, async update() {} },
     workspaceState: { get() {}, async update() {} },
@@ -1293,6 +1297,7 @@ function recoveryProvider({ mark, goal } = {}) {
   const stored = new Map();
   const sent = [];
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [],
     globalState: { get() {}, async update() {} },
     workspaceState: {
@@ -1409,6 +1414,7 @@ test("the backend's own words are kept where they can be read", async () => {
       appendLine: (l) => lines.push(l), append() {}, show() {}, dispose() {},
     });
     const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
       extensionUri: { fsPath: "/ext" }, subscriptions: [],
       globalState: { get() {}, async update() {} },
       workspaceState: { get() {}, async update() {} },
@@ -1438,6 +1444,7 @@ test("a backend that dies unattended still leaves its traceback on disk", async 
   const { mkdtempSync, readFileSync, existsSync } = await import("node:fs");
   const logDir = mkdtempSync(join(tmpdir(), "dgc-backend-log-"));
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [],
     logUri: { fsPath: logDir },
     globalState: { get() {}, async update() {} },
@@ -1466,6 +1473,7 @@ function lifecycleProvider(extra = {}) {
   const posted = [];
   const sent = [];
   const provider = new DgcViewProvider({
+    extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [], logUri: { fsPath: logDir },
     globalState: { get() {}, async update() {} },
     workspaceState: {

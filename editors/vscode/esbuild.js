@@ -1,6 +1,6 @@
 const esbuild = require("esbuild");
 const { execFileSync } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { readFileSync, writeFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 
 const production = process.argv.includes("--production");
@@ -30,6 +30,11 @@ function sourceCommit() {
 }
 
 async function main() {
+  const coreVersion = readFileSync(resolve(__dirname, "../../dgc/__init__.py"), "utf8")
+    .match(/__version__\s*=\s*"([^"]+)"/)?.[1];
+  if (require("./package.json").dgcCliVersion !== coreVersion) {
+    throw new Error("package.json dgcCliVersion must match the reviewed CLI source version");
+  }
   await esbuild.build({
     entryPoints: ["src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", platform: "browser", target: "chrome108",
@@ -57,8 +62,7 @@ async function main() {
     sourcemap: !production,
     sourcesContent: false,
     logLevel: "info",
-    // Only the self-hosted .vsix build enables the update-check nudge; registry
-    // builds auto-update, so DGC_SELF_HOSTED=false keeps them from nagging.
+    // Keep the distribution marker for builds; update checks now cover every channel.
     define: {
       "process.env.DGC_SELF_HOSTED": JSON.stringify(selfHosted ? "true" : "false"),
     },

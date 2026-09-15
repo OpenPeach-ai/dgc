@@ -1527,6 +1527,7 @@ def check_public_tree(errors: list[str]) -> set[str]:
     vsix = SITE / "vscode" / "dgc.vsix"
     checksum = SITE / "vscode" / "dgc.vsix.sha256"
     editor_manifest = SITE / "vscode" / "version.json"
+    editor_data = {}
     try:
         editor_data = json.loads(editor_manifest.read_text(encoding="utf-8"))
         editor_version = str(editor_data["version"])
@@ -1535,6 +1536,7 @@ def check_public_tree(errors: list[str]) -> set[str]:
             errors.append("vscode/version.json: invalid version or self-hosted URL")
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         editor_version = ""
+        editor_data = {}
         errors.append(f"vscode/version.json: invalid manifest ({exc})")
     if not vsix.is_file():
         errors.append("vscode: self-hosted VSIX is missing")
@@ -1546,6 +1548,8 @@ def check_public_tree(errors: list[str]) -> set[str]:
             errors.append("vscode/dgc.vsix.sha256: expected '<sha256>  dgc.vsix'")
         elif fields[0] != hashlib.sha256(vsix.read_bytes()).hexdigest():
             errors.append("vscode/dgc.vsix.sha256: checksum does not match dgc.vsix")
+        if "sha256" in editor_data and editor_data["sha256"] != hashlib.sha256(vsix.read_bytes()).hexdigest():
+            errors.append("vscode/version.json: checksum does not match dgc.vsix")
         versioned_vsix = SITE / "vscode" / f"dgc-{editor_version}.vsix"
         if not versioned_vsix.is_file():
             errors.append(f"vscode: versioned dgc-{editor_version}.vsix is missing")

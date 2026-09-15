@@ -125,6 +125,7 @@ artifact = root / "dgc.vsix"
     f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  dgc.vsix\n", encoding="utf-8")
 (root / "version.json").write_text(json.dumps({
     "version": version, "vsix": "https://vibedgc.com/vscode/dgc.vsix",
+    "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
     "page": "https://vibedgc.com/vscode/",
     "notes": "https://vibedgc.com/changelog#extension",
 }, separators=(",", ":")) + "\n", encoding="utf-8")
