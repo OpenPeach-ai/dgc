@@ -188,5 +188,26 @@ class GitReviewTests(unittest.TestCase):
         self.assertIn("No changes", self.review())
 
 
+    def test_a_root_reached_through_a_symlinked_directory_is_reviewed_in_scope(self):
+        # Git reports the real toplevel (macOS: /private/var for a /var temp dir).
+        self.write("one.py", "before\n")
+        self.write("sub/two.py", "two\n")
+        self.commit()
+        self.write("one.py", "after\n")
+        self.write("sub/two.py", "two changed\n")
+        links = tempfile.TemporaryDirectory(prefix="dgc-git-review-link-")
+        self.addCleanup(links.cleanup)
+        linked = Path(links.name) / "project"
+        linked.symlink_to(self.root, target_is_directory=True)
+        whole = git_review.review_diff(linked, linked)
+        self.assertIn("+after", whole)
+        self.assertIn("+two changed", whole)
+        scoped = git_review.review_diff(linked, linked / "sub")
+        self.assertIn("+two changed", scoped)
+        self.assertNotIn("+after", scoped)
+        self.assertEqual(git_review.Review(linked, linked / "one.py").scope, "one.py")
+        self.assertEqual(git_review.Review(linked, linked).scope, ".")
+
+
 if __name__ == "__main__":
     unittest.main()

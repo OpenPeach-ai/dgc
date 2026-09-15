@@ -32,6 +32,21 @@ def _label(value) -> str:
     return json.dumps(str(value), ensure_ascii=True)
 
 
+def _within(target: Path, cwd: Path, repo: Path) -> Path:
+    """target relative to the canonical repository Git reported.
+
+    Git names the toplevel by its real path, so a target reached through a symlinked directory
+    (macOS's /var → /private/var, a project opened through a linked folder) is compared by the real
+    location of the directory Git ran in. A file target keeps its own name: a symlink leaf is never
+    followed out of scope.
+    """
+    try:
+        return target.relative_to(repo)
+    except ValueError:
+        anchor = Path(os.path.realpath(cwd))
+        return (anchor if cwd == target else anchor / target.name).relative_to(repo)
+
+
 class Review:
     def __init__(self, root: Path, target: Path, cancel=None, *, deadline=None):
         self.project, self.target, self.cancel = root, target, cancel
@@ -46,7 +61,7 @@ class Review:
         self.repo = Path(os.fsdecode(self.git(["rev-parse", "--show-toplevel"]))[:-1]).resolve()
         # A project may be a subdirectory of a larger repository. All enumerations and file
         # reads remain scoped to the approved target, never the rest of that parent repository.
-        self.scope = target.relative_to(self.repo).as_posix()
+        self.scope = _within(target, self.cwd, self.repo).as_posix()
         self.cwd = self.repo
 
     def check(self):

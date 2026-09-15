@@ -255,9 +255,11 @@ in_use() {  # a process still runs this version (see dgc.install_layout.hold_run
   # The rule of dgc.install_layout._lock_is_live: a live pid counts only when that process is a
   # dgc. A recycled pid belongs to something else, and a stale lock must not keep a republished
   # build that nothing runs.
+  # Without /proc (macOS, the BSDs) the command line comes from ps; DGC_NO_PROCFS=1 forces that.
   python3 - "$DATA/locks/$VER" "$VDIR" <<'PY'
 import os, re, subprocess, sys
 folder, vdir = sys.argv[1], sys.argv[2]
+procfs = os.environ.get("DGC_NO_PROCFS") != "1" and os.path.exists("/proc/self")
 try:
     names = os.listdir(folder)
 except OSError:
@@ -274,14 +276,18 @@ for name in names:
         sys.exit(0)
     except OSError:
         continue
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as handle:
-            command = handle.read().replace(b"\0", b" ").decode("utf-8", "replace")
-    except FileNotFoundError:
-        continue
-    except OSError:
+    command = None
+    if procfs:
         try:
-            done = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                command = handle.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except FileNotFoundError:
+            continue                 # /proc is there and this pid is not in it: gone
+        except OSError:
+            command = None
+    if command is None:
+        try:
+            done = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True,
                                   text=True, timeout=5, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.SubprocessError):
             sys.exit(0)

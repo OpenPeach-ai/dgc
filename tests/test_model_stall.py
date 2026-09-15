@@ -73,6 +73,12 @@ def _client_gone(handler, cap: float = 5.0) -> float | None:
     return None
 
 
+# Hosted macOS runners schedule threads late enough to push a prompt cancel or hang-up a few
+# milliseconds past a Linux-tuned bound. Every bound here is still far below the multi-second
+# timeouts it proves were not waited on. Override with DGC_TEST_TIME_SLACK.
+RUNNER_SLACK = float(os.environ.get("DGC_TEST_TIME_SLACK", "0.6" if sys.platform == "darwin" else "0"))
+
+
 class _Server:
     """ThreadingHTTPServer whose per-path behaviour is a plain function set by each test."""
 
@@ -282,13 +288,17 @@ class StallTestCase(unittest.TestCase):
         client.stall_listener = events
         return client, events
 
-    def assertDisconnected(self, record, deadline_s: float, slack: float = 0.45):
+    def assertDisconnected(self, record, deadline_s: float, slack: float = 0.45,
+                           since: float | None = None):
+        """The client hung up within deadline_s (+ slack) of the request, or of `since`: the
+        moment the deadline's clock can first start, when that is later than the request."""
         settle = time.monotonic() + 2       # the handler notices the hang-up on its own thread
         while record["gone"] is None and time.monotonic() < settle:
             time.sleep(0.02)
         self.assertIsNotNone(record["gone"], "the client never closed the stalled socket")
-        waited = record["gone"] - record["at"]
-        self.assertLess(waited, deadline_s + slack, f"closed {waited:.2f}s after the request")
+        waited = record["gone"] - (record["at"] if since is None else since)
+        start = "the request" if since is None else "its deadline's clock could start"
+        self.assertLess(waited, deadline_s + slack + RUNNER_SLACK, f"closed {waited:.2f}s after {start}")
 
 
 # ---- shapes before any real output ---------------------------------------------------------------
@@ -595,8 +605,12 @@ class OllamaLoadTests(StallTestCase):
         self.assertEqual(len(self.server.chat_posts("/api/chat")), 1)
 
     def test_a_model_that_never_loads_is_a_loading_stall(self):
-        self.server.behaviours["/api/ps"] = lambda h, r: LegitimateSilenceTests._json(
-            h, {"models": [{"name": "some-other-model"}]})
+        listed: list[float] = []
+
+        def ps(handler, record):
+            LegitimateSilenceTests._json(handler, {"models": [{"name": "some-other-model"}]})
+            listed.append(time.monotonic())
+        self.server.behaviours["/api/ps"] = ps
         self.server.behaviours["/api/chat"] = no_headers
         client, _ = self.client(path="", api_mode="ollama", first_token_timeout=0.3,
                                 load_timeout=1.0, stall_retries=0)
@@ -609,7 +623,13 @@ class OllamaLoadTests(StallTestCase):
         self.assertIn("did not finish loading", str(caught.exception))
         self.assertGreater(elapsed, 0.9, "the first-token window must not apply while loading")
         self.assertLess(elapsed, 2.5)
-        self.assertDisconnected(self.server.chat_posts("/api/chat")[0], 1.0)
+        # The load window is how long /api/ps has shown the model loading, so its clock starts once
+        # the first probe is answered, not at the request: on a busy runner (macOS CI) that probe
+        # alone took long enough to push the hang-up past a slack measured from the request. The
+        # watcher starts the clock and checks it on ticks (RequestWatch.poll_s, 0.15 s): two ticks.
+        self.assertTrue(listed, "the model was never probed")
+        self.assertDisconnected(self.server.chat_posts("/api/chat")[0], 1.0, slack=0.3 + 0.3,
+                                since=listed[0])
 
 
 # ---- partial output, then silence ----------------------------------------------------------------
@@ -689,7 +709,7 @@ class CancelInEveryPhaseTests(StallTestCase):
         started = time.monotonic()
         result = client.chat(MESSAGES, cancel=cancel, **chat_kwargs)
         self.assertEqual(result.finish_reason, "cancelled")
-        self.assertLess(time.monotonic() - started, limit)
+        self.assertLess(time.monotonic() - started, limit + RUNNER_SLACK)
         return result
 
     def test_cancel_during_header_wait_is_immediate(self):
@@ -774,11 +794,13 @@ class AttemptLifecycleTests(StallTestCase):
         self.assertNoWatchThreads()
 
     def test_a_failed_attempt_raises_no_notice_while_it_backs_off(self):
-        # The server hangs up without answering at 0.35 s; the transient retry then backs off for
+        # The server hangs up without answering at 0.1 s; the transient retry then backs off for
         # 0.5 s. The ended attempt's watch must not cross its 0.5 s notice threshold during that
-        # backoff and narrate "no response" about a request that is already over.
+        # backoff and narrate "no response" about a request that is already over. A leaked watch
+        # would cross it 0.4 s into the backoff; hanging up early leaves a slow runner room to
+        # notice the closed socket before 0.5 s.
         def hang_up(handler, record):
-            time.sleep(0.35)
+            time.sleep(0.1)
             handler.close_connection = True
             try:
                 handler.connection.shutdown(socket.SHUT_RDWR)

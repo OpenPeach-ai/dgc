@@ -10,6 +10,7 @@ import json
 import os
 import pwd
 import queue
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 _REAL_HOME = pwd.getpwuid(os.getuid()).pw_dir
 if "dgc.config" in sys.modules:                    # imported by another module first: verify, never assume
@@ -63,17 +65,26 @@ def group_alive(pgid: int) -> bool:
 
 
 def pgid_of_process_with_args(*needles: str) -> int:
-    """The process group of the process whose argv holds every needle as a whole argument."""
-    for name in os.listdir("/proc"):
-        if not name.isdigit():
-            continue
-        try:
-            argv = Path(f"/proc/{name}/cmdline").read_bytes().split(b"\0")
-            if all(needle.encode() in argv for needle in needles):
-                stat = Path(f"/proc/{name}/stat").read_text()
-                return int(stat.rsplit(")", 1)[1].split()[2])
-        except (OSError, ValueError, IndexError):
-            continue
+    """The process group of the process whose argv holds every needle as a whole argument.
+
+    /proc where there is one; ps elsewhere (macOS), or when DGC_NO_PROCFS=1 hides it."""
+    if monitors_mod._probes["procfs"]():
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            try:
+                argv = Path(f"/proc/{name}/cmdline").read_bytes().split(b"\0")
+                if all(needle.encode() in argv for needle in needles):
+                    stat = Path(f"/proc/{name}/stat").read_text()
+                    return int(stat.rsplit(")", 1)[1].split()[2])
+            except (OSError, ValueError, IndexError):
+                continue
+        return 0
+    # Needles never hold spaces, so splitting the command column recovers whole arguments.
+    for row in monitors_mod._probes["ps_rows"](["-A", "-ww", "-o", "pgid=", "-o", "command="]) or []:
+        fields = row.split()
+        if len(fields) > 1 and fields[0].isdigit() and all(needle in fields[1:] for needle in needles):
+            return int(fields[0])
     return 0
 
 
@@ -411,7 +422,14 @@ class HubTests(HubBase):
         self.assertIn("<\\/monitor-events>", note.text)
 
     def test_a_dgc_killed_by_sigkill_does_not_orphan_its_monitors(self):
-        marker = str(int(time.time() * 1000) % 100000)
+        self.assert_sigkill_leaves_no_orphan({})
+
+    def test_without_procfs_a_dgc_killed_by_sigkill_does_not_orphan_its_monitors(self):
+        """What macOS runs: the monitor's identity and the watchdog's check come from ps."""
+        self.assert_sigkill_leaves_no_orphan({"DGC_NO_PROCFS": "1"})
+
+    def assert_sigkill_leaves_no_orphan(self, extra_env):
+        marker = str(int(time.time() * 1000) % 100000 + 3 * len(extra_env))
         child = subprocess.Popen(
             [sys.executable, "-c",
              "import sys, time\n"
@@ -426,7 +444,7 @@ class HubTests(HubBase):
              "'persistent': True}, c), flush=True)\n"
              "time.sleep(600)\n", str(self.root), marker],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=dict(os.environ, PYTHONPATH=str(PROJECT)))
+            env=dict(os.environ, PYTHONPATH=str(PROJECT), **extra_env))
         self.addCleanup(lambda: child.poll() is None and child.kill())
         self.assertIn("started monitor", child.stdout.readline())
         pgid = wait_for(lambda: pgid_of_process_with_args("sleep", f"600.{marker}"), 5)
@@ -435,6 +453,67 @@ class HubTests(HubBase):
         child.wait(5)
         self.assertTrue(wait_for(lambda: not group_alive(pgid), 10),
                         "the watchdog reaps the group when its DGC dies unassisted")
+
+
+class WatchdogProbeTests(unittest.TestCase):
+    """The watchdog kills a registered group only while it is still the group DGC started. The
+    identity comes from /proc on Linux and from ps where there is no /proc (macOS); both run here,
+    the ps path forced with DGC_NO_PROCFS=1."""
+
+    @staticmethod
+    def branches():
+        """The environments to probe under: /proc (when this system has it) and ps."""
+        hidden = os.environ.get("DGC_NO_PROCFS") == "1" or not os.path.isdir("/proc")
+        return ([] if hidden else [{}]) + [{"DGC_NO_PROCFS": "1"}]
+
+    def sleeper(self):
+        proc = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait(5)))
+        return proc
+
+    def test_a_stamp_is_one_stable_word_and_a_gone_process_has_none(self):
+        for extra in self.branches():
+            with self.subTest(env=extra or "procfs"), mock.patch.dict(os.environ, extra):
+                self.assertEqual(monitors_mod._probes["procfs"](), not extra)
+                stamp = monitors_mod._Watchdog._stamp(os.getpid())
+                self.assertTrue(stamp)
+                self.assertEqual(stamp.split(), [stamp], "it travels as one word of 'add <pgid> <stamp>'")
+                self.assertEqual(monitors_mod._Watchdog._stamp(os.getpid()), stamp)
+                gone = subprocess.Popen(["true"])
+                gone.wait(5)
+                self.assertEqual(monitors_mod._Watchdog._stamp(gone.pid), "")
+
+    def test_group_membership_follows_the_group(self):
+        for extra in self.branches():
+            with self.subTest(env=extra or "procfs"), mock.patch.dict(os.environ, extra):
+                proc = self.sleeper()
+                self.assertTrue(monitors_mod._probes["members"](proc.pid))
+                proc.kill()
+                proc.wait(5)
+                self.assertFalse(monitors_mod._probes["members"](proc.pid))
+
+    def run_watchdog(self, extra, lines):
+        watchdog = subprocess.Popen([sys.executable, "-S", "-c", monitors_mod._Watchdog._SOURCE],
+                                    stdin=subprocess.PIPE, text=True, env=dict(os.environ, **extra))
+        watchdog.communicate("".join(line + "\n" for line in lines), timeout=30)   # EOF: DGC is gone
+
+    def test_the_watchdog_kills_its_group_and_spares_a_group_that_is_no_longer_its_own(self):
+        for extra in self.branches():
+            with self.subTest(env=extra or "procfs"), mock.patch.dict(os.environ, extra):
+                ours, recycled = self.sleeper(), self.sleeper()
+                stamp = monitors_mod._Watchdog._stamp(ours.pid)
+                self.run_watchdog(extra, [f"add {ours.pid} {stamp}",
+                                          f"add {recycled.pid} not_the_stamp_it_had"])
+                self.assertEqual(ours.wait(10), -signal.SIGTERM)
+                self.assertIsNone(recycled.poll(), "a leader that started at another time is not ours")
+
+    def test_an_unregistered_group_is_left_alone(self):
+        for extra in self.branches():
+            with self.subTest(env=extra or "procfs"), mock.patch.dict(os.environ, extra):
+                proc = self.sleeper()
+                self.run_watchdog(extra, [f"add {proc.pid} {monitors_mod._Watchdog._stamp(proc.pid)}",
+                                          f"del {proc.pid}"])
+                self.assertIsNone(proc.poll())
 
 
 class WakePolicyTests(unittest.TestCase):

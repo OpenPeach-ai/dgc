@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import errno
 import json
 import os
 import re
@@ -155,14 +156,42 @@ class Launcher:
     tree: Path | None = None
 
 
+#: How many times read_link looks again at a link that a flip is replacing (1 ms apart).
+LINK_READ_ATTEMPTS = 50
+
+
+def read_link(path) -> str:
+    """os.readlink for a launcher that an install in another process may be flipping right now.
+
+    The flip is one rename(2), so a lookup finds the old link or the new one, never neither. On
+    macOS (APFS) a readlink that raced the rename can still fail with EINVAL, "not a symbolic link",
+    for the link being retired: a tight flip loop on GitHub's macOS runners saw thousands of them,
+    and not one ENOENT or wrong target; Linux never reports it. A fresh lookup finds the new link,
+    so EINVAL is looked at again briefly. A path that really is not a link keeps answering EINVAL
+    and raises after LINK_READ_ATTEMPTS; every other error raises at once."""
+    attempts = LINK_READ_ATTEMPTS
+    while True:
+        try:
+            return os.readlink(str(path))
+        except OSError as exc:
+            attempts -= 1
+            if exc.errno != errno.EINVAL or attempts <= 0:
+                raise
+        time.sleep(0.001)
+
+
 def inspect_launcher(path: Path) -> Launcher:
     """What $BIN/dgc is now. install.sh applies the same rules before it downloads anything."""
     path = Path(path)
-    if not os.path.lexists(path):
-        return Launcher(path, "missing")
-    if not path.is_symlink():
+    try:
+        # The link's value is read once, and the target resolved from that value, so a launcher
+        # flipped while it is inspected reads as the old version or the new one.
+        link = read_link(path)
+    except OSError:
+        if not os.path.lexists(path):
+            return Launcher(path, "missing")
         return Launcher(path, "directory" if path.is_dir() else "foreign")
-    target = _real(path)
+    target = _real(path.parent / link)
     if not (target.name == "dgc" and target.parent.name == "bin" and target.parent.parent.name == ".venv"):
         return Launcher(path, "foreign", target)
     tree = target.parent.parent.parent
@@ -259,15 +288,19 @@ def update_lock_holder(data_dir: Path) -> str:
 
 
 def _process_command_line(pid: int) -> str | None:
-    try:
-        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
-    except FileNotFoundError:
-        if Path("/proc/self").exists():
+    """pid's command line, "" when it is gone, None when that cannot be told.
+
+    /proc on Linux; ps where there is none (macOS). DGC_NO_PROCFS=1 forces ps, so the tests run
+    what macOS runs (install.sh's in_use applies the same rule)."""
+    if os.environ.get("DGC_NO_PROCFS") != "1" and Path("/proc/self").exists():
+        try:
+            return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        except FileNotFoundError:
             return ""            # /proc exists and this pid is not in it: gone
-    except OSError:
-        return None
+        except OSError:
+            return None
     try:
-        done = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+        done = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True,
                               text=True, timeout=5, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return None

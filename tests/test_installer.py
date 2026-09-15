@@ -10,11 +10,13 @@ requirements.lock, so a scenario never touches the developer's ~/dgc, ~/.local o
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import http.server
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -660,18 +662,23 @@ class LayoutUnits(unittest.TestCase):
         reads = [0]
         stop = threading.Event()
 
-        def reader():
+        def reader(inspect: bool):
             while not stop.is_set():
                 try:
-                    seen = os.readlink(launcher)
+                    # DGC's own reads. A bare os.readlink can fail with EINVAL on macOS while the
+                    # rename retires the old link (see read_link); these ride that out.
+                    seen = L.read_link(launcher)
+                    found = L.inspect_launcher(launcher) if inspect else None
                 except OSError as exc:            # missing, even for an instant, is a failure
                     bad.append(exc)
                     continue
                 if seen not in (str(a), str(b)):
                     bad.append(seen)
+                if found is not None and (found.kind, found.target) not in (("foreign", a), ("foreign", b)):
+                    bad.append(found)
                 reads[0] += 1
 
-        threads = [threading.Thread(target=reader) for _ in range(3)]
+        threads = [threading.Thread(target=reader, args=(index == 0,)) for index in range(3)]
         for thread in threads:
             thread.start()
         try:
@@ -685,6 +692,100 @@ class LayoutUnits(unittest.TestCase):
         self.assertGreater(reads[0], 1000)
         self.assertEqual(os.readlink(launcher), str(a))
         self.assertEqual(sorted(p.name for p in launcher.parent.iterdir()), ["dgc"], "no temporary links left")
+
+    def test_read_link_waits_out_einval_and_nothing_else(self):
+        # The macOS race, reproduced on any system: EINVAL for a few looks, then the new link.
+        real = os.readlink
+        answers = [OSError(errno.EINVAL, "Invalid argument")] * 3
+
+        def flaky(path, *args, **kwargs):
+            if answers:
+                raise answers.pop(0)
+            return real(path, *args, **kwargs)
+        home = new_home("read-link")
+        link = home / "dgc"
+        link.symlink_to(home / "target")
+        with mock.patch.object(L.os, "readlink", side_effect=flaky):
+            self.assertEqual(L.read_link(link), str(home / "target"))
+            self.assertEqual(L.inspect_launcher(link).target, home / "target")
+        self.assertEqual(answers, [])
+        (home / "file").write_text("x")
+        with self.assertRaises(OSError) as caught:                 # really not a link: gives up
+            L.read_link(home / "file")
+        self.assertEqual(caught.exception.errno, errno.EINVAL)
+        calls = []
+        with mock.patch.object(L.os, "readlink", side_effect=lambda *a: calls.append(a) or real(*a)):
+            with self.assertRaises(FileNotFoundError):
+                L.read_link(home / "missing")
+        self.assertEqual(len(calls), 1, "a missing launcher is not retried")
+        self.assertEqual((L.inspect_launcher(home / "missing").kind, L.inspect_launcher(home / "file").kind,
+                          L.inspect_launcher(home).kind), ("missing", "foreign", "directory"))
+
+    #: Prepended to a Python snippet: the process sees no /proc at all, as on macOS.
+    NO_PROC = (
+        "import builtins as _b, io as _io, os as _os\n"
+        "def _hidden(path):\n"
+        "    path = _os.fspath(path) if not isinstance(path, int) else ''\n"
+        "    return path == '/proc' or str(path).startswith('/proc/')\n"
+        "def _gone(path):\n"
+        "    raise FileNotFoundError(2, 'No such file or directory', str(path))\n"
+        "_open, _exists = _io.open, _os.path.exists\n"
+        "_b.open = _io.open = lambda path, *a, **k: _gone(path) if _hidden(path) else _open(path, *a, **k)\n"
+        "_os.path.exists = lambda path: False if _hidden(path) else _exists(path)\n")
+
+    @contextlib.contextmanager
+    def without_proc(self):
+        """This process's dgc.install_layout sees no /proc at all, as on macOS."""
+        exists, read_bytes = Path.exists, Path.read_bytes
+
+        def hidden(path):
+            return str(path) == "/proc" or str(path).startswith("/proc/")
+
+        def fake_exists(path, *args, **kwargs):
+            return False if hidden(path) else exists(path, *args, **kwargs)
+
+        def fake_read_bytes(path):
+            if hidden(path):
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(path))
+            return read_bytes(path)
+        with mock.patch.object(Path, "exists", fake_exists), mock.patch.object(Path, "read_bytes", fake_read_bytes):
+            yield
+
+    def test_a_running_dgc_keeps_its_version_in_use_with_and_without_procfs(self):
+        # dgc.install_layout (retention, doctor) and install.sh's in_use() (keeping a republished
+        # build) must agree on Linux's /proc, on a system with no /proc (macOS: 0.39.0's in_use()
+        # took "no /proc/<pid>" for "gone" and rebuilt a version a running dgc was using) and with
+        # the ps path forced by DGC_NO_PROCFS=1.
+        text = INSTALLER.read_text(encoding="utf-8")
+        match = re.search(r"^in_use\(\) \{.*?<<'PY'\n(.*?)^PY$", text, re.S | re.M)
+        self.assertIsNotNone(match, "install.sh's in_use() heredoc")
+        in_use = match.group(1)
+        data = new_home("in-use") / "data"
+        vdir = fake_version(data, "1.4.2")
+        locks = data / "locks" / "1.4.2"
+        running = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                                    str(vdir / ".venv" / "bin" / "dgc"), "serve"])
+        unrelated = subprocess.Popen(["sleep", "120"])
+        gone = subprocess.Popen(["true"])
+        gone.wait(10)
+        for proc in (running, unrelated):
+            self.addCleanup(lambda proc=proc: (proc.kill(), proc.wait(10)))
+        branches = [("no /proc", {}, True), ("DGC_NO_PROCFS=1", {"DGC_NO_PROCFS": "1"}, False)]
+        if os.environ.get("DGC_NO_PROCFS") != "1" and os.path.exists("/proc/self"):
+            branches.append(("procfs", {}, False))
+        for label, extra, hide in branches:
+            for pid, live in ((running.pid, True), (unrelated.pid, False), (gone.pid, False)):
+                with self.subTest(label, live=live), mock.patch.dict(os.environ, extra), \
+                        (self.without_proc() if hide else contextlib.nullcontext()):
+                    shutil.rmtree(locks, ignore_errors=True)
+                    locks.mkdir(parents=True)
+                    (locks / str(pid)).write_text("{}\n")
+                    done = subprocess.run([sys.executable, "-", str(locks), str(vdir)],
+                                          input=(self.NO_PROC if hide else "") + in_use,
+                                          capture_output=True, text=True, timeout=60,
+                                          env=dict(os.environ, **extra))
+                    self.assertEqual(done.returncode, 0 if live else 1, done.stderr)
+                    self.assertEqual(L.live_pids(data, "1.4.2"), [pid] if live else [])
 
 
 # ---------------------------------------------------------- interrupted builds ---

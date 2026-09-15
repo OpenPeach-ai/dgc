@@ -438,7 +438,7 @@ from dgc.headless import _claim_command_pipe
 reader, note = _claim_command_pipe()
 child = subprocess.run([sys.executable, "-c",
     "import fcntl,os,sys; fcntl.fcntl(0, fcntl.F_SETFL, fcntl.fcntl(0, fcntl.F_GETFL) | os.O_NONBLOCK);"
-    "print(os.readlink('/proc/self/fd/0') if os.path.exists('/proc/self/fd/0') else 'n/a'); print(repr(sys.stdin.read()))"],
+    "print('/dev/null' if os.path.samestat(os.fstat(0), os.stat(os.devnull)) else os.fstat(0)); print(repr(sys.stdin.read()))"],
     capture_output=True, text=True)
 print(note)
 print("child:", child.stdout.replace("\n", " | "))
