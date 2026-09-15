@@ -122,6 +122,17 @@ jobs:
         working-directory: editors/vscode
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the Python backend used by live panel tests
+        working-directory: .
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+          python -m pip check
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -148,6 +159,7 @@ jobs:
           DGC_VSCODE_EXECUTABLE: ${{ runner.temp }}/dgc-vscode-host/code
           DGC_EXPECT_VSCODE_VERSION: 1.107.1
           DGC_REQUIRE_CHROMIUM: "1"
+          DGC_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
         run: xvfb-run -a bash ../../scripts/release-extension.sh --build
       - uses: actions/upload-artifact@v7
         with:
