@@ -15,7 +15,7 @@ A sub-agent is a Markdown file with frontmatter:
 
     System guidance the sub-agent follows for this kind of task...
 
-Discovery (project overrides user):
+Discovery (trusted project overrides user):
   <project>/.dgc/agents/<name>.md
   ~/.dgc/agents/<name>.md
 
@@ -64,9 +64,20 @@ def _parse_agent(path: Path) -> AgentDef | None:
     return AgentDef(body=body, **fields)
 
 
-def discover_agents(project_root) -> dict[str, AgentDef]:
+def discover_agents(project_root, *, config=None) -> dict[str, AgentDef]:
+    """Read personal definitions, and project definitions only after directory trust.
+
+    A project definition can select a model endpoint and an environment key. Even read-only
+    automation must not load it before trust; permission-gating its later tools is too late.
+    Callers without a trust-bearing config receive personal definitions only.
+    """
+    from .trust import is_trusted
+
     agents: dict[str, AgentDef] = {}
-    for base in (USER_AGENTS, Path(project_root) / ".dgc" / "agents"):
+    bases = [USER_AGENTS]
+    if config is not None and is_trusted(config, project_root):
+        bases.append(Path(project_root) / ".dgc" / "agents")
+    for base in bases:
         if base.is_dir():
             for f in sorted(base.glob("*.md")):
                 a = _parse_agent(f)

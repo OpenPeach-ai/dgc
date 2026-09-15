@@ -5167,6 +5167,7 @@ class TUI:
         try:
             session_config = _Config(root)
             agent = Agent(session_config, self)
+            agent._agent_defs_config = source_config
             agent.session_root = self._fleet_root
             if session_path:
                 agent.load_session(session_path)
@@ -7036,6 +7037,7 @@ class TUI:
         new_config = _Config(project_root)
         try:
             new_agent = Agent(new_config, self)
+            new_agent._agent_defs_config = old_agent._agent_defs_config
         except Exception as exc:
             cleanup_error = wt.remove(root, str(wt_path))
             detail = f"; checkout retained at {wt_path}: {cleanup_error}" if cleanup_error else ""

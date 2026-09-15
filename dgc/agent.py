@@ -1434,7 +1434,9 @@ class Agent(GoalLifecycle):
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.chat_changes = ChatChanges(self.config.project_root)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
-        self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
+        self._agent_defs_config = config
+        self._agent_defs_key = None
+        self._agent_defs = {}
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
         self._metrics_parent: Agent | None = None  # isolated child counters roll into the root session
         # Whether an edit must be snapshotted before it lands. True everywhere a rewind can reach:
@@ -1448,6 +1450,22 @@ class Agent(GoalLifecycle):
         self.reset()
 
     # ------------------------------------------------------------ setup ---
+    @property
+    def agent_defs(self):
+        """Load definitions after the frontend grants trust, including an already-open editor.
+
+        Managed children use the launch project's trust-bearing config, never newly written
+        definitions from their scratch checkout. A changed trust state refreshes the catalog.
+        """
+        from .trust import is_trusted
+
+        config = self._agent_defs_config
+        key = (str(config.project_root), is_trusted(config, config.project_root))
+        if key != self._agent_defs_key:
+            self._agent_defs = discover_agents(config.project_root, config=config)
+            self._agent_defs_key = key
+        return self._agent_defs
+
     def _new_client(self, base_url: str, api_key: str, model: str,
                     api_mode: str | None = None, source: str = "main") -> LLMClient:
         """Create every primary/fallback/sub-agent client with identical reliability settings."""
@@ -6579,6 +6597,7 @@ class Agent(GoalLifecycle):
                                      else child_config.get("mcp_servers"))
                     isolated_mcp.connect_all(child_servers, startup=True)
                 sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
+                sub._agent_defs_config = self._agent_defs_config
                 if registry is not None and agent_id:
                     sub.subagents = registry             # one list per chat, whatever the depth
                     sub._subagent_id = agent_id

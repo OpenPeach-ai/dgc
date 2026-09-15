@@ -120,6 +120,8 @@
       <p class="lead">every sub-agent this chat started, and what each one is doing</p>
 <div class="heading-row h1-row"><h1 id="sub-agents">Sub-agents</h1><a class="anchor" href="#sub-agents" aria-label="Link to this section">#</a></div>
 <p>The model can hand part of a job to a sub-agent with its <code>task</code> tool: a separate agent with its own context that does the work and reports back. A delegated step can take minutes, so DGC shows every sub-agent the chat has started and what each one is doing, instead of one spinner.</p>
+<div class="heading-row h2-row"><h2 id="named-agents-and-trust">Named agents and trust</h2><a class="anchor" href="#named-agents-and-trust" aria-label="Link to this section">#</a></div>
+<p>Personal definitions in <code>~/.dgc/agents/</code> are available in any workspace. A project&#x27;s <code>.dgc/agents/</code> definitions load only after you trust that project, because a definition can select its own model host and an environment key. Trusting an already-open terminal or editor loads them without a restart. Isolated tasks and fleet workspaces use the approved source project&#x27;s definitions rather than loading new definitions from their scratch checkout.</p>
 <div class="heading-row h2-row"><h2 id="the-count">The count</h2><a class="anchor" href="#the-count" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>Every sub-agent started in this chat</strong>, including the ones that finished, failed or were stopped. This is the same rule Claude Code uses. Nothing shows until the first one starts.</li>
@@ -151,7 +153,8 @@
 <a class="next" href="https://docs.vibedgc.com/training-export"><div class="k">Next →</div><div class="t">Training export</div></a>
 </nav>
   </article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#the-count" data-id="the-count" class="lvl2">The count</a>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#named-agents-and-trust" data-id="named-agents-and-trust" class="lvl2">Named agents and trust</a>
+<a href="#the-count" data-id="the-count" class="lvl2">The count</a>
 <a href="#in-the-terminal" data-id="in-the-terminal" class="lvl2">In the terminal</a>
 <a href="#in-the-editor" data-id="in-the-editor" class="lvl2">In the editor</a>
 <a href="#limits" data-id="limits" class="lvl2">Limits</a></aside>

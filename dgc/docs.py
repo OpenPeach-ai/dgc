@@ -746,6 +746,14 @@ The model can hand part of a job to a sub-agent with its `task` tool: a separate
 context that does the work and reports back. A delegated step can take minutes, so DGC shows every
 sub-agent the chat has started and what each one is doing, instead of one spinner.
 
+## Named agents and trust
+
+Personal definitions in `~/.dgc/agents/` are available in any workspace. A project's
+`.dgc/agents/` definitions load only after you trust that project, because a definition can
+select its own model host and an environment key. Trusting an already-open terminal or editor
+loads them without a restart. Isolated tasks and fleet workspaces use the approved source
+project's definitions rather than loading new definitions from their scratch checkout.
+
 ## The count
 
 - **Every sub-agent started in this chat**, including the ones that finished, failed or were

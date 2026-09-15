@@ -160,7 +160,7 @@ def trust_screen_text(project_root, cols: int, rows: int, secs: float) -> str:
     out.append(Text(""))
     out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
     out.append(_center(Text("and files here can reach the model as untrusted input.", style=th.faint), cols))
-    out.append(_center(Text("Trusting it also loads the project's own DGC rules (.dgc/permissions.json).",
+    out.append(_center(Text("Trusting it also loads the project's DGC rules and named agents.",
                             style=th.faint), cols))
     out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
                             style=th.faint), cols))
