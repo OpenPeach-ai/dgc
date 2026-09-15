@@ -236,7 +236,7 @@ def faq_html(context: dict[str, Any]) -> str:
 # a compact dated row for the rest keeps every release listed, dated, anchor-linkable
 # and linked to its own release page, while holding the page to a fixed size as the
 # release count grows.
-DETAILED_RELEASES = 8
+DETAILED_RELEASES = 7
 
 
 def _ext_notes(releases: dict) -> list[str]:
