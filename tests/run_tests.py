@@ -2491,12 +2491,12 @@ def unit_tests(tmp: Path):
     _art.STATE_FILE = tmp / "artifacts.json"        # isolate: never touch the real ~/.dgc state
     _art._SRV.artifacts.clear(); _art._SRV.port = None; _art._SRV.counter = 0
     _ad = tmp / "site"; _ad.mkdir(); (_ad / "index.html").write_text("<h1>hi</h1>")
-    _a = _art.serve("site", tmp, "demo")
+    _a = _art.serve("site", tmp, "demo", preferred_port=5031)   # test servers stay on 5031-5040
     check("artifact serves + registers", _a.id in [x.id for x in _art.registry()]
           and _art.running() and _a.entry == "" and _a.url == f"{_art.base_url()}/?a={_a.id}")
     # single shared server: a 2nd artifact reuses the SAME port; the shell lists both with a dropdown
     (tmp / "site2").mkdir(); (tmp / "site2" / "index.html").write_text("<h1>two</h1>")
-    _b = _art.serve("site2", tmp, "demo2")
+    _b = _art.serve("site2", tmp, "demo2", preferred_port=5031)
     import urllib.request as _u
     _shell = _u.urlopen(_art.base_url() + "/", timeout=3).read().decode()
     check("artifacts share one port + dropdown", _a.url.split("/?")[0] == _b.url.split("/?")[0]
@@ -2515,7 +2515,7 @@ def unit_tests(tmp: Path):
     check("plan artifact is self-contained and escaped",
           "fonts.googleapis.com" not in _plan_html and "https://" not in _plan_html
           and "&lt;tag&gt;" in _plan_html)
-    _pa = _art.serve_plan("# Private plan\n\n1. inspect", tmp, "private plan")
+    _pa = _art.serve_plan("# Private plan\n\n1. inspect", tmp, "private plan", preferred_port=5033)
     check("automatic plan artifact uses a dedicated loopback server",
           _pa.id.startswith("p") and _pa.url.startswith("http://127.0.0.1:")
           and _art._PLAN_SRV.lan is False and _pa in _art.registry())
@@ -15986,6 +15986,8 @@ def e2e_plan_reported(port: int, tmp: Path) -> bool:
     MockHandler.scenario = "plan"
     home = tmp / "home_plan_reported"; work = tmp / "work_plan_reported"
     home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    (home / ".dgc").mkdir(exist_ok=True)            # the plan preview server stays on a test port
+    (home / ".dgc" / "config.json").write_text(json.dumps({"artifact_port": 5038}))
     env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
     proc = subprocess.run(
         [sys.executable, "-m", "dgc", "-p", "create the file please",

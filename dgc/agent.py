@@ -178,6 +178,137 @@ _OPTIONAL_TOOL_INTENT = {
     "artifact": "artifact", "task": "delegate", "monitor": "monitor",
     "view_image": "image",
 }
+
+
+class _OptionsAsk:
+    """Does the user's own text ask DGC to offer them choices on this turn?
+
+    It lifts full-auto's picker removal and, where the picker cannot exist, adds the one note saying
+    why (see Agent._options_unavailable_note). Being offered never forces the picker: the model
+    still decides whether to ask, so an ask the user negates or takes back ("give me options.
+    Actually, never mind, you pick") needs no parsing here. A missed ask is the costly error (the
+    model denies the picker exists); a false one only offers a tool that goes unused.
+
+    It still has to hear an ask addressed to the agent, not a description of software being built,
+    so an ordinary coding turn in full-auto keeps its tool list: "propose me options to select from"
+    and "let me choose" count; "the popup should list the options for me to select a region", "make
+    the screen offer three choices so I can pick a plan" and "write tests for propose_options" do
+    not. A sentence counts when it has all of:
+    * the verb in an imperative position (sentence start, after a comma, "please", "and", "can
+      you", "can't you", "you to"): "the combobox should list options" describes a UI;
+    * the user as the one choosing: "me"/"us" as the recipient ("give me options to choose from",
+      "offer me alternatives"), or a first-person chooser whose object is the choice itself ("so I
+      can pick one", "let me decide which approach"), not a thing in an app ("so I can pick a
+      plan", "let me select the files", "ask me to choose later");
+    * nothing that marks a spec or code (a dropdown, a page, a function, a file path, "should",
+      "when the user ...", "in the TUI"); a file the user @mentions beside an ask is context
+      ("... based on @notes.md"), except to the picker-by-name forms, which also need a message
+      that is not a bug report.
+
+    Only what the user typed is read: attached files, editor context, ACP resources and selected
+    skill bodies arrive in DGC's frames and are cut out first, wherever they sit in the message.
+    """
+
+    _POS = (r"(?:^|(?<=[,:(])|\b(?:please|pls|kindly|just|now|then|and|so|also|first|"
+            r"(?:(?:can|could|would|will)(?:n'?t)?|can'?t|won'?t)\s+you(?:\s+(?:please|just))?|"
+            r"you\s+to)\b)\s*")
+    _DET = (r"a|an|the|some|few|several|couple(?:\s+of)?|more|other|different|your|top|best|possible|"
+            r"multiple|two|three|four|five|\d+")
+    _NOUN = r"(?:options|option|choices|choice|alternatives|alternative)\b"
+    _CHOOSE = r"(?:choose|pick|select|decide)"
+    # What the user chooses: the choice itself, never an object in an app ("which columns to export").
+    _WHICH = (r"(?:which|what)\s+(?:one|ones|option|options|choice|approach|approaches|way|path|plan|"
+              r"design|solution|fix|refactor|change|idea|step|task|next|library|framework|direction|strategy|"
+              r"alternative|of)\b")
+    _TAIL = (r"(?=\s*(?:$|[,:)(]|(?:and|then|before|first)\b|(?:between|among|from|myself|ourselves)\b|"
+             r"for\s+(?:myself|ourselves)\b|one\b(?:\s+of\s+(?:them|these|those))?\s*(?:$|[,:)(])|"
+             + _WHICH + "))")
+    _FIRST_PERSON = (r"(?:so\s+(?:that\s+)?(?:I|we)(?:\s+can|\s+could|'ll|\s+will)?|"
+                     r"(?:and|then)\s+(?:I|we)(?:'ll|\s+will|\s+can)?|(?:I|we)(?:'ll|\s+will|\s+can)|"
+                     r"(?:and|then)\s+let\s+(?:me|us)|for\s+(?:me|us)\s+to)\s+" + _CHOOSE + _TAIL)
+    _ASK = re.compile(
+        # "give me a few options to choose from", "show us some choices so we can pick one"
+        _POS + r"(?:propose|offer|give|show|present|list|suggest)\s+(?:me|us)"
+        r"(?:\s+(?:" + _DET + r"|list\s+of))*\s+" + _NOUN +
+        r".{0,40}?\b(?:to\s+" + _CHOOSE + r"\s+(?:from|between|among)\b|" + _FIRST_PERSON + ")"
+        # "propose me options", "offer us some alternatives"
+        # (not "offer me the option to export as PDF", which is a feature)
+        r"|" + _POS + r"(?:propose|offer|present)\s+(?:me|us)(?:\s+(?:" + _DET + r"))*\s+" + _NOUN +
+        r"(?!\s+to\s+(?!" + _CHOOSE + r"\b))" +
+        # "list the options for me to select", "suggest some alternatives and I'll decide"
+        r"|" + _POS + r"(?:propose|offer|give|show|present|list|suggest)(?:\s+(?:" + _DET + r"))*\s+" +
+        _NOUN + r".{0,40}?\b" + _FIRST_PERSON +
+        # "let me choose", "please ask me to pick between A and B", "ask me which approach"
+        r"|" + _POS + r"(?:let|ask)\s+(?:me|us)\s+(?:to\s+)?" + _CHOOSE + _TAIL +
+        r"|" + _POS + r"ask\s+(?:me|us)\s+(?:a\s+multiple[- ]choice\b|" + _WHICH + ")",
+        re.IGNORECASE)
+    # The picker by name: "show me the options picker", "use propose_options", or just the name.
+    _BY_NAME = re.compile(
+        _POS + r"(?:(?:show|give|bring\s+up|pop\s+up|display|open)\s+(?:me|us)|trigger|demo|try)\s+"
+        r"(?:(?:the|a|an|your|dgc'?s)\s+)?(?:options?|choices?|selection)\s+"
+        r"(?:picker|popup|pop-up|dialog|card|selector)\b"
+        r"|\b(?:use|call|invoke|try|trigger|run|demo|with|via|using|through)\s+(?:the\s+|your\s+)?"
+        r"`?propose_options\b`?(?!\s*(?:tests?|handler|schema|description|function|implementation|"
+        r"code|filter|result)\b)"
+        r"|^\s*`?propose_options`?(?:\s+tool)?\s*$",
+        re.IGNORECASE)
+    _PICKER_NAME = re.compile(r"\b(?:options?|choices?|selection)\s+(?:picker|popup|pop-up|dialog|card|"
+                              r"selector)\b|\bpropose_options\b", re.IGNORECASE)
+    # A file the user @mentions to base the choice on ("... for the title, based on @notes.md") is
+    # context, not a spec marker; "in @src/Dropdown.tsx" still places the options in code.
+    _MENTION = re.compile(r"(?<!\bin\s)(?<!\binto\s)(?<!\binside\s)(?<![\w@/])@[\w./~-]+")
+    # A spec or code being written, not a choice being asked for.
+    _SPEC = re.compile(
+        r"\b(?:drop-?downs?|combo\s?box(?:es)?|list\s?box(?:es)?|select\s+(?:elements?|box(?:es)?|"
+        r"menus?|tags?|inputs?|fields?)|components?|widgets?|modals?|pop-?ups?|dialogs?|menus?|"
+        r"screens?|pages?|(?<!in\sthe\s)forms?|buttons?|check\s?box(?:es)?|radio|wizards?|quiz(?:zes)?|"
+        r"surveys?|onboarding|toolbars?|sidebars?|nav\s?bars?|as\s+you\s+type|should|functions?|"
+        r"methods?|endpoints?|schemas?|handlers?|fixtures?|tests?\s+for|unit\s+tests?|css|html|jsx|tsx|"
+        r"click(?:s|ed|ing)?|taps?|hover(?:s|ed|ing)?|drag(?:s|ged|ging)?|"
+        r"when(?:ever)?\s+(?:I|we|the\s+user|users?|someone|they)|"
+        r"(?:in|on|from|inside)\s+the\s+(?:\w+\s+)?(?:tui|cli|gui|ui|pill|panel|webview|table|export|"
+        r"terminal|status\s?bar|header|footer|view|window|settings|tests?|specs?))\b"
+        r"|<select|<input|[\w./-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|json|md|css|html|go|rs|java|rb|ya?ml|"
+        r"toml)\b",
+        re.IGNORECASE)
+    _BUG = re.compile(
+        r"\b(?:crash(?:es|ed|ing)?|bugs?|broken|errors?|regression|exception|traceback|fix(?:es|ed)?|"
+        r"(?:does|did|is|was)n'?t|(?:does|did|is|was)\s+not|never\s+(?:shows?|opens?|appears?))\b",
+        re.IGNORECASE)
+    _SENTENCE = re.compile(r"[.!?;]+(?=\s|$)|\n+")
+    # Every form names the choosing or the picker; most sentences are dismissed on this alone.
+    _CUE = re.compile(r"option|choice|alternative|choose|pick|select|decide|popup|pop-up|dialog|card|"
+                      r"ask\s+(?:me|us)\b", re.IGNORECASE)
+
+    # DGC's frames around data the user did not type. Their contents are escaped (the JSON frames
+    # escape every angle bracket, attachments rewrite their boundary tags), so the first closing tag
+    # really ends the frame; an unclosed one runs to the end of the text.
+    _FRAME = re.compile(
+        r"<(editor-context-json|embedded-resource-json|resource-link-json|dgc-skill-instructions-json)"
+        r"\b[^>\n]*>.*?(?:</\1>|\Z)|<dgc_attachment>.*?(?:</dgc_attachment>|\Z)",
+        re.DOTALL)
+
+    def search(self, text: str) -> bool:
+        source = _trusted_intent_text(self._FRAME.sub("\n", str(text or ""))).replace("\u2019", "'")
+        if not self._CUE.search(source):
+            return False
+        bug_report = bool(self._BUG.search(source))
+        for sentence in self._SENTENCE.split(source):
+            sentence = sentence.strip()
+            if not self._CUE.search(sentence):
+                continue
+            spec = self._PICKER_NAME.sub(" ", sentence)
+            if self._SPEC.search(self._MENTION.sub(" ", spec)):
+                continue
+            if self._ASK.search(sentence):
+                return True
+            # An @mentioned file is fine beside an ask addressed to the user, never beside the
+            # picker named alone ("use propose_options in @dgc/agent.py").
+            if not bug_report and not self._SPEC.search(spec) and self._BY_NAME.search(sentence):
+                return True
+        return False
+
+
 _TOOL_INTENT_PATTERNS = {
     "git_review": re.compile(
         r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
@@ -251,6 +382,8 @@ _TOOL_INTENT_PATTERNS = {
         r"wait (?:for|until))\b|\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
         r"crash(?:es)?|appears?|prints?|logs?)\b",
         re.IGNORECASE | re.DOTALL),
+    # The user asks to be offered choices on this turn. Not a single regex: see _OptionsAsk.
+    "options": _OptionsAsk(),
 }
 
 
@@ -266,8 +399,10 @@ def _trusted_intent_text(text: str) -> str:
 
 def _tool_intents(text: str) -> set[str]:
     source = _trusted_intent_text(text)
+    # The options judge cuts DGC's reference frames out of the whole text itself (see _OptionsAsk):
+    # an ask to be offered choices must be typed by the user, not found in an attached file.
     return {intent for intent, pattern in _TOOL_INTENT_PATTERNS.items()
-            if pattern.search(source)}
+            if pattern.search(text if isinstance(pattern, _OptionsAsk) else source)}
 
 
 def _accepts_keyword(fn, keyword: str) -> bool:
@@ -784,6 +919,11 @@ class AgentContext:
     # replacing the list. Both hold this while they change the list and announce it, so the list,
     # the pushed event and the tool's own result always describe the same state.
     todo_lock: threading.RLock = field(default_factory=threading.RLock)
+    # Counts the user's clears. The agent copies it into todo_request_epoch as it sends each model
+    # request, so a `todo` call the model wrote before a clear landed can be told apart from one
+    # written after the model was told about it (tools.todo skips the former).
+    todo_clear_epoch: int = 0
+    todo_request_epoch: int | None = None
     # The agent's background monitors (dgc.monitors.MonitorHub); tools reach it through the context.
     monitors: object = None
 
@@ -1118,6 +1258,9 @@ class Agent(GoalLifecycle):
             if dropped:
                 self._todo_clear_turns = 0
                 self._todo_clear_note_pending = True
+                # Any `todo` call already in the model's current response was written before the
+                # clear; it must not repaint (and save) the list the user just dropped.
+                self.ctx.todo_clear_epoch = int(getattr(self.ctx, "todo_clear_epoch", 0) or 0) + 1
             # Always announce, even an already-empty list: a frontend showing a stale list hides it.
             if callable(self.ctx.on_todo):
                 self.ctx.on_todo(self.ctx.todos)
@@ -1236,6 +1379,9 @@ class Agent(GoalLifecycle):
                                 on_todo=safe_todo_callback, cancelled=self.cancelled,
                                 on_tool_timing=self._record_tool_timing,
                                 notes=lambda: self.notes())
+        # Only now is there a context to carry the model's image capability. Syncing it before
+        # self.ctx existed silently did nothing, so every fresh backend told a vision model it
+        # could not see its screenshots until the user happened to re-pick the model.
         self._sync_vision()
         self.monitors = MonitorHub(self.ctx.tool_owner, config, config.project_root)
         self.ctx.monitors = self.monitors
@@ -1351,8 +1497,14 @@ class Agent(GoalLifecycle):
         usage = normalize_usage(getattr(result, "usage", None))
         source = ("subagent" if int(getattr(self, "depth", 0) or 0) > 0
                   else str(getattr(client, "usage_source", "") or "main"))
+        # The transport DGC actually spoke names the provider when it is a native one: an Ollama
+        # behind a proxy or on a custom port has a URL the family heuristic reads as "compat",
+        # which is exactly the case `api_mode: ollama` exists for.
+        transport = str(getattr(client, "api_mode", "") or "")
+        provider = ({"ollama": "ollama", "anthropic": "anthropic"}.get(transport)
+                    or getattr(client, "family", "") or "unknown")
         usage_ledger.record(
-            provider=getattr(client, "family", "") or "unknown",
+            provider=provider,
             base_url=getattr(client, "base_url", ""), model=getattr(client, "model", ""),
             source=source, input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
@@ -1660,7 +1812,10 @@ class Agent(GoalLifecycle):
         """Activate optional tools from explicit turn/goal intent; return whether it changed."""
         detected = _tool_intents(text)
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
-            detected |= _tool_intents(self.goal)
+            # A goal describes the work, and it is re-read on every cycle and every later turn. An
+            # ask to be offered choices is the user's on the turn they type it, so a goal never
+            # carries one: an unattended full-auto goal run must not keep the picker open.
+            detected |= _tool_intents(self.goal) - {"options"}
         before = set(self._active_tool_intents)
         self._active_tool_intents = detected if replace else before | detected
         return self._active_tool_intents != before
@@ -1788,10 +1943,11 @@ class Agent(GoalLifecycle):
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
-            if self.mode == "auto":
+            if self.mode == "auto" and not self._options_asked_interactively():
                 # Full-auto explicitly promises autonomous execution. A blocking choice prompt in
-                # this mode adds a model/UI round-trip and contradicts that boundary; the user can
-                # switch to default/acceptEdits when they want interactive alternatives.
+                # this mode adds a model/UI round-trip and contradicts that boundary, unless the
+                # user asked on this very turn to be offered choices: then waiting is what they
+                # want, and withholding the picker only makes the model deny it exists.
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "propose_options"]
 
@@ -1830,6 +1986,70 @@ class Agent(GoalLifecycle):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
         return self._monitor_schema_filter(schemas)
+
+    def _non_interactive(self) -> bool:
+        """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
+        ``__getattr__`` (test fixtures, the prompt-surface probe) does not count."""
+        return getattr(self.ui, "non_interactive", False) is True
+
+    def _options_asked_interactively(self) -> bool:
+        """The user asked on this turn to be offered choices, and someone is there to answer.
+
+        Top-level only: a sub-agent's prompt is written by the parent model, not the user. A wake
+        turn is removed later by _monitor_schema_filter, whatever this says.
+        """
+        return ("options" in getattr(self, "_active_tool_intents", set())
+                and self.depth == 0 and not self._non_interactive())
+
+    def _picker_offered(self) -> bool:
+        return any(tool.get("function", {}).get("name") == "propose_options"
+                   for tool in self._tool_schemas())
+
+    def _options_ask_served(self) -> None:
+        """A round of questions was put to the user's UI: the ask to be offered choices is answered.
+
+        "options" in the active intents stands for an ask still open. Once a round has been shown
+        (answered, dismissed, or refused by `dgc -p`), full-auto withdraws the picker for the rest of
+        the turn, and a later wake turn is not told to list the options again. A sub-agent's round
+        answers its parent's ask too; a parent's tool list only depends on the ask in full-auto,
+        where a sub-agent is never offered the picker, so the parents need no refresh.
+        """
+        offered = self._picker_offered()
+        agent = self
+        while agent is not None:
+            getattr(agent, "_active_tool_intents", set()).discard("options")
+            agent = getattr(agent, "_metrics_parent", None)
+        if self._picker_offered() != offered:
+            self._refresh_system()      # the text tool protocol lists the tools in the prompt
+
+    def _options_unavailable_note(self) -> str:
+        """One system section, only when the user's ask to choose is open and the picker is not offered.
+
+        Without it the model can only say the tool does not exist. Gated on the explicit ask, so a
+        request that did not ask (the prompt-surface probe among them) carries nothing extra.
+        """
+        if "options" not in getattr(self, "_active_tool_intents", set()) or self._picker_offered():
+            return ""
+        if self.depth:
+            # Whatever the parent's situation, a sub-agent answers the parent, never the user.
+            reason = "you are a sub-agent"
+            how = "put them in your result for the parent agent"
+        elif getattr(self, "_monitor_turn", False):
+            reason = "this turn was started by a background event and nobody is at the keyboard"
+            how = "ask the user to reply with their choice in a normal message"
+        elif self._non_interactive():
+            reason = "this is a non-interactive `dgc -p` run"
+            how = ("tell the user the picker appears in the interactive `dgc` terminal and the "
+                   "editor panel")
+        else:
+            reason = "it is not offered in this context"
+            how = "ask the user to reply with their choice"
+        # A sub-agent's prompt is written by the parent model, so it cannot say the user asked.
+        asked = "Your task asks for a choice between options" if self.depth else \
+            "The user asked to choose from options"
+        return (f"# Options picker\n{asked}, but DGC's options picker (propose_options) is not "
+                f"available on this turn because {reason}. It does exist. List the options as a "
+                f"numbered list and {how}.")
 
     def _monitor_delivery(self) -> bool:
         """Does this agent's frontend deliver monitor events and wake on them?
@@ -2021,6 +2241,13 @@ class Agent(GoalLifecycle):
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
               defer_text: bool = False, request_reason: str = "other"):
+        ctx = getattr(self, "ctx", None)
+        if ctx is not None:
+            with _todo_lock(ctx):
+                # The tool calls this request returns were written against the checklist as it
+                # stands now; a clear that lands while the model generates or the batch runs
+                # makes them stale.
+                ctx.todo_request_epoch = int(getattr(ctx, "todo_clear_epoch", 0) or 0)
         if getattr(self, "_mode_prompt_dirty", False):
             self._refresh_system()
         repaired, changed = _repair_tool_transcript(self.messages)
@@ -2486,6 +2713,10 @@ class Agent(GoalLifecycle):
         if self._monitor_exposed():
             parts += ["", _MONITOR_GUIDANCE]
 
+        options_note = self._options_unavailable_note()
+        if options_note:
+            parts += ["", options_note]
+
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:
             parts += ["", "# Reasoning", think]
@@ -2853,6 +3084,10 @@ class Agent(GoalLifecycle):
                 self._refresh_system()
                 completed = self._run_turn(notification.text, source="monitor",
                                            notification=notification)
+                if completed is True and "options" in self._active_tool_intents:
+                    # This turn carried the options note (a wake turn never offers the picker) and
+                    # listed them: the next event must not have the model list them again.
+                    self._last_turn_tool_intents.discard("options")
             finally:
                 self._close_turn_retry_runs(completed)
                 with self._steer_lock:
@@ -2935,17 +3170,22 @@ class Agent(GoalLifecycle):
         return (text.startswith("<system-reminder>") and len(self.messages) > 1
                 and self.messages[-2].get("role") == "tool")
 
-    def _drain_monitors(self) -> bool:
+    def _drain_monitors(self, *, with_prompt: bool = False) -> bool:
         """Fold pending monitor events into the running turn, between tool rounds.
 
         Called only at the loop top right after a tool round (_after_tool_round: native tool
         results, a text-protocol <tool_results> message, or a screenshot round), so a notice never
         lands inside a final answer or ahead of the user's own prompt: events that arrive while the
         model writes its answer wait and wake the session afterwards.
+
+        ``with_prompt`` is the other delivery point: events still waiting when the user sends a
+        prompt (wake-ups off, plan mode, or an event that arrived as they typed) follow that
+        prompt, as the docs promise ("events wait for your next message"). Without it they reached
+        the model only if that turn happened to make a tool call.
         """
         hub = getattr(self, "monitors", None)
         if (hub is None or self.depth != 0 or self.cancelled.is_set() or self.stopping
-                or not hub.pending_count() or not self._after_tool_round()):
+                or not hub.pending_count() or not (with_prompt or self._after_tool_round())):
             return False
         room = _MAX_TURN_NOTICE_CHARS - self._monitor_turn_notice_chars
         if room < 1_000:
@@ -2957,7 +3197,8 @@ class Agent(GoalLifecycle):
         self._trim_session_notices(len(notification.text))
         self.messages.append(self._notice_message(notification, "inline"))
         self._monitor_turn_notice_chars += len(notification.text)
-        self._activity("continuing", "Reading monitor events")
+        if not with_prompt:
+            self._activity("continuing", "Reading monitor events")
         hub._notify("delivered", {"notification": notification, "delivery": "inline"})
         return True
 
@@ -3058,6 +3299,60 @@ class Agent(GoalLifecycle):
             if not saved:
                 return_result["ok"] = False
             return return_result
+
+    def _stitch_continuation(self, continued: tuple, assistant: dict) -> dict:
+        """Join a continuation onto the partial reply it finishes, as one assistant message.
+
+        A cut-off reply was kept as its own message, followed by DGC's "continue exactly where you
+        left off" prompt and the continuation. The final text (the -p result, a resumed chat, the
+        next request) then held only the part after the cut. Provider-state messages (Responses
+        items, Anthropic pause state) are left as they are: their stored shape is exact.
+
+        What the two private records said survives the join: both requests' reasoning blocks, and a
+        stream-recovery prompt's ``_dgc_notice`` (kept in order on ``_dgc_stream_recoveries``, so a
+        replay still draws the reconnect line that led to this answer). A continuation that embedded
+        its own ``<think>`` prefix is not joined: the display splice is only ever at the start.
+        """
+        prompt, partial = continued
+        if (len(self.messages) >= 3 and self.messages[-1] is assistant
+                and self.messages[-2] is prompt and self.messages[-3] is partial
+                and not partial.get("tool_calls")
+                and isinstance(partial.get("content"), str)
+                and isinstance(assistant.get("content"), str)
+                and not assistant.get("_dgc_think_splice")
+                and not any(key in message for message in (partial, assistant)
+                            for key in ("_responses_output", "_provider_message"))):
+            merged = dict(assistant)
+            merged["content"] = partial["content"] + assistant["content"]
+            if partial.get("_dgc_think_splice"):
+                merged["_dgc_think_splice"] = partial["_dgc_think_splice"]
+            if partial.get("_dgc_reasoning") or assistant.get("_dgc_reasoning"):
+                merged["_dgc_reasoning"] = extend_persisted_reasoning(
+                    partial.get("_dgc_reasoning"), assistant.get("_dgc_reasoning"))
+            recoveries = [notice for notice in list(partial.get("_dgc_stream_recoveries") or [])
+                          if isinstance(notice, dict)]
+            if isinstance(prompt.get("_dgc_notice"), dict):
+                recoveries.append(prompt["_dgc_notice"])
+            if recoveries:
+                merged["_dgc_stream_recoveries"] = recoveries
+            self.messages[-3:] = [merged]
+            return merged
+        return assistant
+
+    def _save_turn_progress(self) -> None:
+        """Save the running turn at a step boundary: its prompt, then each completed tool batch.
+
+        The turn's own save runs in its finally block, which a backend killed outright (SIGKILL,
+        the OOM killer, a crash) never reaches. Without these saves the prompt and every completed
+        step vanished with the process, so the editor's Continue resumed the previous turn instead.
+        Best effort: a failed save here is not the turn's failure, and the final save reports.
+        """
+        if self.depth != 0 or not self.session_file or getattr(self, "_monitor_turn", False):
+            return
+        try:
+            self._persist()
+        except Exception:
+            pass
 
     def _persist(self) -> bool:
         if not self.session_file:
@@ -4181,6 +4476,11 @@ class Agent(GoalLifecycle):
             # its first generation instead of spending a rejected model request to negotiate.
             prepare_model(cancel=self.cancelled)
             self._refresh_system()
+        # The capability a new client reports before its metadata arrives is the provider's
+        # optimistic default. Re-read it now that the model's own capabilities are known, so a
+        # screenshot tool in this turn neither promises pixels to a text-only model nor withholds
+        # them from a vision model.
+        self._sync_vision()
         if wake:
             # The user's staged images belong to their next prompt, not to command output.
             self._trim_session_notices(len(user_text))
@@ -4196,6 +4496,8 @@ class Agent(GoalLifecycle):
             else:
                 content = user_text
             self.messages.append({"role": "user", "content": content})
+            self._drain_monitors(with_prompt=True)
+            self._save_turn_progress()
             thinking = self._effective_thinking(user_text)
         # Pass the raw level; the client maps it to the right per-provider reasoning
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
@@ -4223,6 +4525,9 @@ class Agent(GoalLifecycle):
         finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
         paused_assistant_index: int | None = None
+        # (the synthetic "continue" prompt, the partial assistant message) after a length or stall
+        # continuation, so the continuation can be stitched onto the prose it finishes.
+        continued_prose: tuple[dict, dict] | None = None
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
         edited_targets: set[str] = set()  # distinct files make a late planning nudge truthful
@@ -4572,7 +4877,14 @@ class Agent(GoalLifecycle):
                 # This round provably continues: prose beside a tool call is commentary, and the
                 # harness knows it here for certain instead of the panel guessing it later.
                 self.ui.end_stream("commentary")
-            elif not defer_completion:
+            elif not defer_completion and not (
+                    (result.content or "").strip()
+                    and result.finish_reason in _INCOMPLETE_FINISH_REASONS
+                    and (stall_recoveries < self._stall_retry_budget() if _result_stall(result)
+                         else continues < _MAX_CONTINUE)):
+                # Prose that is about to be continued is not an answer yet: leave its block open so
+                # the continuation streams into the same block, and the answer (and Copy) holds the
+                # whole reply rather than only the part after the cut.
                 self.ui.end_stream("answer")
 
             native = (bool(result.tool_calls)
@@ -4606,6 +4918,10 @@ class Agent(GoalLifecycle):
                 self.messages[paused_assistant_index] = assistant
             else:
                 self.messages.append(assistant)
+                paused_assistant_index = len(self.messages) - 1
+            if continued_prose is not None:
+                assistant = self._stitch_continuation(continued_prose, assistant)
+                continued_prose = None
                 paused_assistant_index = len(self.messages) - 1
 
             if result.finish_reason == "pause_turn":
@@ -4678,6 +4994,7 @@ class Agent(GoalLifecycle):
                         stalled_cause = self._stall_notice(_result_stall(result), stall_recoveries)
                         self.messages.append({"role": "user", "content": STREAM_RECOVERY_TEXT,
                                               "_dgc_notice": stalled_cause})
+                        continued_prose = (self.messages[-1], assistant)
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue
@@ -4706,6 +5023,8 @@ class Agent(GoalLifecycle):
                             self.messages.append({"role": "user", "content": (
                                 "Your previous response was cut off at the length limit. Continue exactly "
                                 "where you left off — do not repeat what you already wrote.")})
+                        if (result.content or "").strip():
+                            continued_prose = (self.messages[-1], assistant)
                         next_request_reason = "output_continue"
                         self._activity("continuing", "Continuing the cut-off response")
                         continue
@@ -5101,15 +5420,9 @@ class Agent(GoalLifecycle):
             shots, self._turn_images = self._turn_images, []
             self._image_batch_open = False
             if shots:
-                sources = list(dict.fromkeys(shot.get("source", "browser") for shot in shots))
-                self.messages.append({"role": "user", "content": [
-                    {"type": "text", "text": (
-                        "<tool_results>\n"
-                        + " ".join(_IMAGE_BATCH_TEXT.get(source, _IMAGE_BATCH_TEXT["browser"])
-                                   for source in sources)
-                        + "\n</tool_results>")},
-                    *({"type": "image_url", "image_url": {"url": shot["uri"]}} for shot in shots)]})
+                self.messages.append({"role": "user", "content": self._screenshot_parts(shots)})
             next_request_reason = "tool_result"
+            self._save_turn_progress()
             if self._end_turn_after_batch == "dismissed":
                 # The user closed a question: the batch's results are saved (the model reads the
                 # dismissal next turn) and the turn ends here with no further model request. Not a
@@ -5162,7 +5475,7 @@ class Agent(GoalLifecycle):
                        "generation asking to run the same verifier.\n")
                     + "</system-reminder>")
                 if self.messages and self.messages[-1]["role"] == "user":
-                    self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
+                    Agent._fold_into_last_user(self, note)
                 else:
                     self.messages.append({"role": "user", "content": note})
 
@@ -5286,7 +5599,7 @@ class Agent(GoalLifecycle):
             if reminders:
                 note = "<system-reminder>\n" + "\n".join(reminders) + "\n</system-reminder>"
                 if self.messages and self.messages[-1]["role"] == "user":   # fold into <tool_results>
-                    self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
+                    Agent._fold_into_last_user(self, note)
                 else:                                                        # native: separate turn
                     self.messages.append({"role": "user", "content": note})
                 if next_request_reason == "tool_result":
@@ -5375,8 +5688,8 @@ class Agent(GoalLifecycle):
         Live order is options_resolved then tool_result. The decision is kept in
         ``_decision_records`` for the transcript sidecar; a dismissal ends the turn after this batch.
         """
-        from .questions import (UNAVAILABLE_RESULT, decision_record, format_result,
-                                normalize_questions, settle)
+        from .questions import (NON_INTERACTIVE_RESULT, UNAVAILABLE_RESULT, decision_record,
+                                format_result, normalize_questions, settle)
         # The step is a row in the transcript like any tool: "Asking 2 questions…", then its result.
         self.ui.tool_call("propose_options", redact_value(args, secrets), call_id)
 
@@ -5391,6 +5704,10 @@ class Agent(GoalLifecycle):
         if self.depth > 0 or not callable(ask):
             return finish(UNAVAILABLE_RESULT)
         decision = settle(questions, ask(questions, call_id))
+        # One round of questions answers the ask. Full-auto offered the picker only for it, so the
+        # rest of the turn (a whole goal run) goes on unattended; and a wake turn after this one
+        # must not ask the model to list the options again.
+        self._options_ask_served()
         if self.cancelled.is_set() and decision["outcome"] != "unavailable":
             decision = {"outcome": "cancelled", "answers": {}}
         record = decision_record(call_id, questions, decision)
@@ -5401,6 +5718,9 @@ class Agent(GoalLifecycle):
             self._decision_records[call_id] = record
         if record["outcome"] == "dismissed":
             self._end_turn_after_batch = "dismissed"
+        if record["outcome"] == "unavailable" and self._non_interactive():
+            # `dgc -p`: say why nobody answered, and keep the choice the user's.
+            return finish(NON_INTERACTIVE_RESULT)
         return finish(format_result(questions, decision))
 
     def _handle_call(self, call: ToolCall, *, _context_capture: dict | None = None) -> str:
@@ -5504,6 +5824,18 @@ class Agent(GoalLifecycle):
         if name == "artifact":
             if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
                 return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
+            # Serving a page publishes files, so a user's deny rule (`Artifact`, `Artifact(docs/**)`,
+            # or an ExternalDirectory deny) applies here too, even though no approval card is shown.
+            with self._mode_lock:
+                _artifact_rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                            *(getattr(self.config, "session_permissions", {})
+                                              .get(action, []) or [])]
+                                   for action in ("allow", "ask", "deny")}
+            _denied = PermissionEngine(self.mode, _artifact_rules, self.config.project_root).deny_reason(
+                name, args)
+            if _denied:
+                self.ui.tool_denied(name, display_args, redact_text(_denied, secrets), call_id)
+                return f"PERMISSION DENIED: {_denied}. Do not retry this exact action."
             from . import artifacts
             try:
                 artifact_path = str(args.get("path", ""))
@@ -5512,7 +5844,8 @@ class Agent(GoalLifecycle):
                 art = artifacts.add(artifact_path, self.config.project_root,
                                     artifact_name or "Artifact",
                                     preferred_port=int(self.config.get("artifact_port", 45000)),
-                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"))
+                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"),
+                                    hostname=str(self.config.get("artifact_hostname", "") or ""))
             except Exception as e:
                 return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
             notify = getattr(self.ui, "artifact_ready", None)
@@ -5521,7 +5854,7 @@ class Agent(GoalLifecycle):
             return (f"Artifact '{art.name}' is live at {art.url} — all artifacts share ONE local server "
                     f"({artifacts.base_url()}) with a dropdown to switch between them. Tell the user they "
                     f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
-                    f"another server yourself.")
+                    f"another server yourself." + (f" {artifacts.SCOPED_NOTE}" if art.scoped else ""))
 
         def current_permissions():
             with self._mode_lock:
@@ -5891,7 +6224,13 @@ class Agent(GoalLifecycle):
                 items.append(record.to_item())
             if (self._image_batch_open and _vision_available(self.ctx)
                     and entry["mime"] in image_views.MODEL_MIMES):
-                self._turn_images.append({"uri": uri, "source": entry["source"]})
+                # The model reads a label before each image: which page (or file, or tool) it shows.
+                label = str(entry.get("label") or "") or {
+                    "view_image": f"image file {entry['name']}", "read_file": f"image file {entry['name']}",
+                    "mcp": f"image returned by {name}"}.get(entry["source"], "")
+                label = redact_text(" ".join(label.split())[:300], self._secret_values())
+                self._turn_images.append({"uri": uri, "source": entry["source"], "label": label,
+                                          "call_id": str(call_id or "")})
         emit_images = getattr(self.ui, "tool_images", None)
         if not callable(emit_images):
             return
@@ -5905,6 +6244,53 @@ class Agent(GoalLifecycle):
             import logging
             logging.getLogger("dgc.images").debug("tool_images failed: %s", type(exc).__name__)
             self._last_image_ui_error = type(exc).__name__
+
+    def _fold_into_last_user(self, note: str) -> None:
+        """Append a reminder to the last user message without flattening image parts.
+
+        A screenshot round ends with a multipart user message; formatting it into a string turned
+        the pictures into their base64 text.
+        """
+        last = self.messages[-1]
+        content = last.get("content")
+        if isinstance(content, list):
+            last["content"] = [*content, {"type": "text", "text": note}]
+        else:
+            last["content"] = f"{content}\n{note}"
+
+    @staticmethod
+    def _screenshot_parts(shots: list) -> list:
+        """The user-role content that carries one batch's images to the model.
+
+        One line per source says what the images are and that they are untrusted; then each image
+        is preceded by its own label (which page or file, which call), so a batch that screenshots
+        several pages cannot be read as several pictures of one page. Entries are the batch's
+        ``{"uri", "source", "label", "call_id"}`` dicts; a ``(uri, label, call_id)`` tuple or a bare
+        data URI is read as a browser screenshot.
+        """
+        entries = []
+        for shot in shots:
+            if isinstance(shot, dict):
+                entries.append((str(shot.get("uri") or ""), str(shot.get("label") or ""),
+                                str(shot.get("call_id") or ""), str(shot.get("source") or "browser")))
+            elif isinstance(shot, (tuple, list)):
+                uri, label, call_id = (tuple(shot) + ("", ""))[:3]
+                entries.append((str(uri), str(label or ""), str(call_id or ""), "browser"))
+            else:
+                entries.append((str(shot), "", "", "browser"))
+        sources = list(dict.fromkeys(source for *_, source in entries))
+        parts: list = [{"type": "text", "text": (
+            "<tool_results>\n"
+            + " ".join(_IMAGE_BATCH_TEXT.get(source, _IMAGE_BATCH_TEXT["browser"]) for source in sources)
+            + "\n</tool_results>")}]
+        total = len(entries)
+        for index, (uri, label, call_id, source) in enumerate(entries, 1):
+            caption = f"Image {index} of {total}: {label or ('screenshot' if source == 'browser' else 'image')}"
+            if call_id:
+                caption += f" (tool call {call_id})"
+            parts.append({"type": "text", "text": caption})
+            parts.append({"type": "image_url", "image_url": {"url": uri}})
+        return parts
 
     # ------------------------------------------------------------ context notes ---
     def notes(self):
@@ -6509,7 +6895,8 @@ class Agent(GoalLifecycle):
         if isinstance(self.client, LLMClient):
             return self.client.estimate_input_tokens(messages, tools)
         chars = sum(len(json.dumps({k: v for k, v in m.items()
-                                    if k not in ("_dgc_reasoning", "_dgc_think_splice")}
+                                    if k not in ("_dgc_reasoning", "_dgc_think_splice",
+                                                 "_dgc_stream_recoveries")}
                                    if isinstance(m, dict) else m, default=str))
                     for m in messages)
         if tools:

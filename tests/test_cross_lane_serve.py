@@ -275,9 +275,13 @@ def run_scenario():
         check("replay: tool_images follows the view_image tool_result", vi_result >= 0 and img == vi_result + 1, t1)
         mr = [n for n, i in enumerate(t[0]) if i["type"] == "model_retry"]
         texts = [n for n, i in enumerate(t[0]) if i["type"] == "text_delta"]
-        check("replay: the stream-cut model_retry sits between the partial and the continued text",
-              len(mr) == 1 and texts and texts[0] < mr[0] < texts[-1]
-              and t[0][mr[0]]["layer"] == "continuation" and t[0][mr[0]]["retry_id"].startswith("h"), [t1, t[0][mr[0]] if mr else None])
+        # The partial answer and its continuation are one saved answer ("All do" + "ne."), and the
+        # reconnect that joined them is drawn above it, where the live panel settles it.
+        joined = [i.get("text") for i in t[0] if i["type"] == "text_delta"]
+        check("replay: the stream-cut model_retry sits above the joined answer",
+              len(mr) == 1 and texts and mr[0] < texts[0] and joined[-1:] == ["All done."]
+              and t[0][mr[0]]["layer"] == "continuation" and t[0][mr[0]]["state"] == "recovered"
+              and t[0][mr[0]]["retry_id"].startswith("h"), [t1, joined, t[0][mr[0]] if mr else None])
         t2 = [i["type"] for i in t[1]]
         opt = t2.index("options_resolved") if "options_resolved" in t2 else -1
         res = next((n for n, i in enumerate(t[1]) if i["type"] == "tool_result"), -1)

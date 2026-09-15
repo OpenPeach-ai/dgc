@@ -1507,6 +1507,34 @@ test("a silent model request shows its waiting notice, then the stream takes the
   dom.window.close();
 });
 
+test("a stall continuation's notice sits above the merged answer, not under it", () => {
+  // Before: the backend keeps the partial answer's block open across a mid-stream stall so the
+  // continuation streams into it. The "↻ … continuing" line was placed under the partial text, the
+  // continuation grew the block above it, and the finished turn showed the line BELOW the answer card.
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start", turn_id: "t1", prompt: "phase C: hello" });
+  event({ type: "text_delta", text: "Partial answer streamed" });
+  event({ type: "info", message: "↻ fake-model at 127.0.0.1:4972 stopped streaming for 15s — continuing from the partial output (1/2)" });
+  event({ type: "text_delta", text: " and the continuation" });
+  const block = doc.querySelector(".msg.dgc");
+  const kinds = () => [...block.children].filter((n) => !n.matches(".role")).map((n) => n.matches(".sys") ? "notice"
+    : n.matches(".thinking") ? "activity" : n.matches(".answer") ? "answer" : n.matches(".text") ? "text" : n.className);
+  assert.deepEqual(kinds(), ["notice", "text", "activity"], "live: the notice moves above the block the continuation grows");
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  assert.deepEqual(kinds(), ["notice", "activity", "answer"], "finished: notice, then Worked for, then the answer card");
+  assert.equal(block.querySelector(".answer .text").textContent.trim(), "Partial answer streamed and the continuation");
+  // A notice after the answer's last words, with no more text to follow, stays where it arrived.
+  event({ type: "turn_start", turn_id: "t2", prompt: "again" });
+  event({ type: "text_delta", text: "Done." });
+  event({ type: "info", message: "later note" });
+  const second = [...doc.querySelectorAll(".msg.dgc")].at(-1);
+  assert.equal(second.querySelector(".text").nextElementSibling.textContent, "later note");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("a running tool group reads as a present-tense sentence built like the finished one", () => {
   const { errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
@@ -3351,6 +3379,63 @@ test("a queued prompt leaves the restore set once its own turn starts", () => {
   assert.deepEqual(h.errors, []);
 });
 
+test("each queued message is one bubble: its queued bubble becomes its turn's prompt", () => {
+  // Before: turn_start echoed a second "you" bubble for every queued message, because echoPrompt
+  // only compared the LAST user bubble and with two or more queued that was a different message.
+  // Four prompts left seven bubbles, and a templated one showed in two different wordings.
+  const h = queuedPromptDom();
+  const queueAnother = (text) => {
+    h.input.value = text;
+    h.input.dispatchEvent(new h.dom.window.Event("input"));
+    h.input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+    const sent = h.posted.findLast((m) => m.type === "prompt");
+    h.event({ type: "prompt_accepted", request_id: sent.requestId, state: "queued" });
+    return sent;
+  };
+  const second = queueAnother("Then update the changelog");
+  const third = queueAnother("Then tag the release");
+  const log = h.doc.getElementById("log");
+  const transcript = () => [...log.children]
+    .filter((n) => n.matches(".msg.user, .msg.dgc"))
+    .map((n) => n.matches(".msg.dgc") ? "DGC"
+      : `${n.querySelector(".role").textContent}: ${n.querySelector(".bubble").textContent}`);
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC",
+    "you · queued: Then run the tests", "you · queued: Then update the changelog", "you · queued: Then tag the release"]);
+
+  h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt",
+            request_id: h.queued.requestId });
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC", "you: Then run the tests", "DGC",
+    "you · queued: Then update the changelog", "you · queued: Then tag the release"],
+    "the first queued bubble moves above its answer; the rest keep waiting below it, in order");
+
+  h.event({ type: "turn_end", turn_id: "t2", reason: "completed" });
+  // The backend's prompt for a templated message is the expanded text, not what the bubble shows.
+  h.event({ type: "turn_start", turn_id: "t3", kind: "prompt", request_id: second.requestId,
+            prompt: "Then update the changelog\n\nPrompt template /shout:\nReply with the single word charlie" });
+  h.event({ type: "turn_end", turn_id: "t3", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t4", prompt: "Then tag the release", kind: "prompt",
+            request_id: third.requestId });
+  h.event({ type: "turn_end", turn_id: "t4", reason: "completed" });
+  assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC", "you: Then run the tests", "DGC",
+    "you: Then update the changelog", "DGC", "you: Then tag the release", "DGC"],
+    "four prompts, four bubbles, each above its own answer");
+  assert.equal(h.doc.getElementById("queued").textContent, "");
+  assert.deepEqual(h.errors, []);
+});
+
+test("a turn with no request id still echoes its prompt above queued messages that keep waiting", () => {
+  const h = queuedPromptDom();
+  const log = h.doc.getElementById("log");
+  h.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  h.event({ type: "turn_start", turn_id: "t2", prompt: "/deploy", kind: "prompt" });   // a queued slash command
+  const users = [...log.querySelectorAll(".msg.user")].map((n) => n.querySelector(".bubble").textContent);
+  assert.deepEqual(users, ["Install the dependencies", "/deploy", "Then run the tests"]);
+  const last = [...log.children].filter((n) => n.matches(".msg.user, .msg.dgc")).at(-1);
+  assert.equal(last.querySelector(".role").textContent, "you · queued", "the waiting message stays last, still queued");
+  assert.deepEqual(h.errors, []);
+});
+
 test("a queued slash command that runs first does not consume the user's queued prompt", () => {
   // Before: turn_start popped the HEAD of the restore set for any kind "prompt" turn. A custom slash
   // command queued ahead of the message runs as kind "prompt" with no request id, so its turn_start
@@ -3544,9 +3629,9 @@ test("monitor_event renders a bounded card inside the current turn; the rail's c
   event({ type: "monitors", wake_paused: true, pending_events: 2, items: [] });
   assert.equal(bar.hidden, false, "paused wake-ups with events waiting stay visible");
   assert.equal(doc.getElementById("monitors-paused").hidden, false);
-  assert.equal(doc.getElementById("monitors-count").textContent, "2 events waiting");
+  assert.equal(doc.getElementById("monitors-count").textContent, "2 events waiting for your next message");
   assert.equal(doc.getElementById("monitors-count").hidden, false);
-  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 2 events waiting, wake-ups paused");
+  assert.equal(bar.getAttribute("aria-label"), "Background monitors: 2 events waiting for your next message, wake-ups paused");
   event({ type: "monitors", wake_paused: false, pending_events: 0, items: [] });
   assert.equal(bar.hidden, true);
   assert.equal(rail.hidden, true);
@@ -4053,5 +4138,214 @@ test("a new backend's request with an id the last backend already used gets its 
   const open = [...doc.querySelectorAll('.card[data-request-id="r1"]:not(.resolved)')];
   assert.equal(open.length, 1, "the new r1 is drawn");
   assert.match(open[0].textContent, /make test/);
+  assert.deepEqual(errors, []);
+});
+
+test("settings opened on Token Usage with a range asks for that range", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "30d" });
+  assert.equal(doc.getElementById("usage-range").value, "30d");
+  assert.equal(posted.findLast(m => m.type === "getUsage").range, "30d");
+  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "bogus" });
+  assert.equal(doc.getElementById("usage-range").value, "30d", "an unknown range leaves the choice alone");
+  assert.deepEqual(errors, []);
+});
+
+test("a draft with a pasted-text chip survives a reload, and so does an unconfirmed send of one", () => {
+  // Before: cleanDraft accepted only skill, template, image and resource chips, so a draft holding a
+  // pasted-text chip was dropped whole and the panel warned about storage limits for a 6 KB paste.
+  const first = makeDom({ scope: "workspace" });
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  const input = first.doc.getElementById("input");
+  input.value = "draft with a pasted chip: ";
+  const pasted = "line of pasted text\n".repeat(300);
+  const paste = new first.dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { items: [], getData: () => pasted } });
+  input.dispatchEvent(paste);
+  assert.equal(first.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
+  first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
+  assert.doesNotMatch(first.doc.getElementById("log").textContent, /exceed saved-draft storage limits/);
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.getElementById("input").value, "draft with a pasted chip: ");
+  assert.equal(reopened.doc.querySelectorAll("#attachments .pasted-chip").length, 1, "the chip is restored");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /6,000 chars/);
+  // Sent but never confirmed: the restore gives back the typed words and the chip, not the paste twice.
+  reopened.doc.getElementById("input").dispatchEvent(new reopened.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const sent = reopened.posted.findLast(message => message.type === "prompt");
+  assert.equal(sent.text, "draft with a pasted chip:\n\n" + pasted);
+  const again = makeDom({ scope: "workspace", state: reopened.savedState() });
+  again.send({ type: "session_ready", sessionId: "alpha" });
+  again.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(again.doc.getElementById("input").value, "draft with a pasted chip:");
+  assert.equal(again.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
+  assert.deepEqual([...first.errors, ...reopened.errors, ...again.errors], []);
+});
+
+test("Settings Save says it applies to every workspace, which is where it writes", () => {
+  // Before: "Save these settings for this workspace", but saving writes the user config
+  // (~/.dgc/config.json through set_config) that every workspace on the machine reads.
+  const { doc, errors } = makeDom();
+  const save = doc.getElementById("set-save");
+  assert.doesNotMatch(save.title, /this workspace/);
+  assert.match(save.title, /every workspace/);
+  assert.deepEqual(errors, []);
+});
+
+test("a backend killed without a word says 'killed by SIGKILL' once, on the line and on the Continue card", () => {
+  // Before: "dgc backend stopped (killed by SIGKILL): exited with killed by SIGKILL — reconnecting".
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { resume_turn: true } } });
+  send({ type: "session_ready", sessionId: "chat" });
+  send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true, cause: "killed by SIGKILL", resumes: "offer" });
+  const line = [...doc.querySelectorAll("#log .sys.err")].at(-1).textContent;
+  assert.match(line, /^dgc backend stopped \(killed by SIGKILL\) — reconnecting; you can continue/);
+  assert.equal(line.match(/SIGKILL/g).length, 1, line);
+  send({ type: "backend_exit", code: 3, signal: null, recovering: true, cause: "exited with code 3", resumes: "none" });
+  assert.match([...doc.querySelectorAll("#log .sys.err")].at(-1).textContent, /^dgc backend stopped \(exited with code 3\) — reconnecting$/);
+  send({ type: "backend_exit", code: 0, signal: null, recovering: true, cause: "stdin closed while the parent (7) is still alive", resumes: "none" });
+  assert.match([...doc.querySelectorAll("#log .sys.err")].at(-1).textContent,
+    /^dgc backend stopped \(code 0\): stdin closed while the parent \(7\) is still alive/, "a cause of the backend's own keeps the status beside it");
+  send({ type: "continue_offer", cause: "killed by SIGKILL", sessionId: "chat" });
+  assert.match(doc.querySelector(".recovery-card").textContent, /during your last turn \(killed by SIGKILL\)\./);
+  assert.deepEqual(errors, []);
+});
+
+test("the backend exit line is still there after the reconnect replays the chat", () => {
+  // Before: the reconnect resumed the chat, the resume cleared the transcript for the history
+  // replay, and the only line saying why the turn stopped went with it -- the turn read "Stopped".
+  const { errors, send, doc } = makeDom({ scope: "workspace" });
+  const event = ev => send({ type: "event", event: ev });
+  send({ type: "session_ready", sessionId: "chat" });
+  event({ type: "turn_start", prompt: "run the p2 sleep command", turn_id: "t1" });
+  event({ type: "turn_end", reason: "error", turn_id: "t1" });
+  send({ type: "backend_exit", code: null, signal: "SIGTERM", recovering: true, resumes: "offer",
+         cause: "SIGTERM — a stop signal from another process, not a shutdown command from the editor" });
+  const log = doc.getElementById("log");
+  event({ type: "ready", session_id: "fresh-backend", capabilities: { resume_turn: true } });
+  event({ type: "session", kind: "resumed", session_id: "chat", name: "" });
+  event({ type: "history", items: [
+    { type: "turn_start", prompt: "run the p2 sleep command", turn_id: "t1" },
+    { type: "turn_end", reason: "error", turn_id: "t1" }] });
+  send({ type: "session_ready", sessionId: "chat" });
+  const text = log.textContent;
+  assert.match(text, /dgc backend stopped \(killed by SIGTERM\): SIGTERM — a stop signal from another process/);
+  assert.ok(text.indexOf("run the p2 sleep command") < text.indexOf("dgc backend stopped"), "below the replayed turn");
+  // Once the reconnect is done it is an ordinary line: opening another chat and coming back does
+  // not keep resurrecting it.
+  event({ type: "session", kind: "new", session_id: "other" });
+  event({ type: "session", kind: "resumed", session_id: "chat", name: "" });
+  assert.doesNotMatch(log.textContent, /dgc backend stopped/);
+  assert.deepEqual(errors, []);
+});
+
+test("Stop with messages queued gives them back as not sent instead of leaving them looking sent", () => {
+  // Before: doStop emptied the restore set and the backend dropped the queue without a word, so
+  // both bubbles stayed below "Stopped" as ordinary sent messages that never ran.
+  const h = queuedPromptDom();
+  h.input.value = "And update the changelog";
+  h.input.dispatchEvent(new h.dom.window.Event("input"));
+  h.input.dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  const second = h.posted.findLast((m) => m.type === "prompt");
+  h.event({ type: "prompt_accepted", request_id: second.requestId, state: "queued" });
+  h.event({ type: "queued", count: 2, text: "And update the changelog" });
+  assert.equal(h.doc.getElementById("queued").textContent, "2 queued");
+  h.doc.getElementById("send").click();                       // empty composer while running: Stop
+  assert.equal(h.posted.at(-1).type, "cancel");
+  // What the backend answers a cancel with while messages are queued.
+  h.event({ type: "steering_update", request_id: h.queued.requestId, state: "returned",
+            message: "Stopped before 2 queued messages ran; they were not sent." });
+  h.event({ type: "steering_update", request_id: second.requestId, state: "returned" });
+  h.event({ type: "turn_end", turn_id: "t1", reason: "cancelled" });
+  const bubbles = [...h.doc.querySelectorAll(".msg.user")].filter((node) => /Then run the tests|update the changelog/.test(node.textContent));
+  assert.equal(bubbles.length, 2);
+  for (const bubble of bubbles) {
+    assert.equal(bubble.querySelector(".role").textContent, "you · not sent");
+    assert.ok([...bubble.querySelectorAll("button")].some((b) => /Restore unsent message/.test(b.textContent)));
+  }
+  assert.equal(h.input.value, "Then run the tests", "the first one is back in the empty composer");
+  assert.equal(h.doc.getElementById("queued").textContent, "");
+  assert.match(h.doc.getElementById("log").textContent, /Stopped before 2 queued messages ran; they were not sent\./);
+  assert.deepEqual(h.errors, []);
+});
+
+test("a background command's exit card is titled as a background command, not a monitor", () => {
+  // Before: every monitor_event card read "Monitor · …", including kind background_exit, although
+  // a background command is not a monitor.
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "turn_start", turn_id: "t1", prompt: "", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg1", description: "sleep 20 && echo bg-finished-ok", event_index: 0,
+          lines: ["exited 0 after 20.0s", "bg-finished-ok"], kind: "background_exit", delivery: "wake", turn_id: "t1" });
+  const card = doc.querySelector('.monitor-event[data-kind="background_exit"]');
+  assert.equal(card.querySelector(".me-title").textContent, "Background command · sleep 20 && echo bg-finished-ok");
+  assert.equal(card.getAttribute("aria-label"), "Background command sleep 20 && echo bg-finished-ok, exited");
+  event({ type: "monitor_event", id: "mon1", description: "api log", event_index: 2, lines: ["READY"], kind: "output", delivery: "wake", turn_id: "t1" });
+  assert.match([...doc.querySelectorAll(".monitor-event")].at(-1).querySelector(".me-title").textContent, /^Monitor · api log$/);
+  assert.deepEqual(errors, []);
+});
+
+test("the marker above a wake turn names a background command when one woke it", () => {
+  // Before: the card was titled "Background command" but the marker above it still read
+  // "Woke on monitor · sleep 20 && echo bg-finished-ok · exited".
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const note = () => [...doc.querySelectorAll(".resume-note.monitor-note")].at(-1);
+  event({ type: "turn_start", turn_id: "t1", prompt: "sleep 20 && echo bg-finished-ok · exited", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg1", description: "sleep 20 && echo bg-finished-ok", event_index: 0,
+          lines: ["exited 0 after 20.0s", "bg-finished-ok"], kind: "background_exit", delivery: "wake", turn_id: "t1" });
+  assert.equal(note().textContent, "Woke on background command · sleep 20 && echo bg-finished-ok · exited");
+  assert.ok(note().querySelector(".codicon-terminal"));
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  // Two background commands, then a wake that mixes a monitor's events with a background exit.
+  event({ type: "turn_start", turn_id: "t2", prompt: "2 background commands exited", kind: "monitor" });
+  for (const id of ["bg2", "bg3"]) {
+    event({ type: "monitor_event", id, description: id, event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "wake", turn_id: "t2" });
+  }
+  assert.equal(note().textContent, "Woke on background commands · 2 background commands exited");
+  event({ type: "turn_end", turn_id: "t2", reason: "completed", final_message_id: null });
+  event({ type: "turn_start", turn_id: "t3", prompt: "1 monitor · 1 event · 1 background command exited", kind: "monitor" });
+  event({ type: "monitor_event", id: "bg4", description: "bg4", event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "wake", turn_id: "t3" });
+  event({ type: "monitor_event", id: "mon1", description: "api log", event_index: 1, lines: ["READY"], kind: "output", delivery: "wake", turn_id: "t3" });
+  assert.equal(note().textContent, "Woke on monitor · 1 monitor · 1 event · 1 background command exited");
+  assert.ok(note().querySelector(".codicon-pulse"));
+  // An inline event in a turn someone typed leaves that turn's prompt alone.
+  event({ type: "turn_end", turn_id: "t3", reason: "completed", final_message_id: null });
+  event({ type: "turn_start", turn_id: "t4", prompt: "watch it", kind: "prompt" });
+  event({ type: "monitor_event", id: "bg5", description: "bg5", event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "inline", turn_id: "t4" });
+  assert.equal(doc.querySelectorAll(".resume-note.monitor-note").length, 3);
+  assert.deepEqual(errors, []);
+});
+
+test("with wake-ups off, the monitors row says events are waiting for your next message", () => {
+  // Before: the row showed only the chips; "N events waiting" was hidden whenever a chip was shown,
+  // and the paused pill reflected only the ten-wake pause, not Wake on monitor events turned off.
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const items = [{ id: "mon1", description: "ticker", command: "./tick.sh 4", state: "running", events: 75, pending_events: 40 },
+                 { id: "mon2", description: "alpha-watch", command: "./tick.sh 5", state: "running", events: 21, pending_events: 9 }];
+  const count = doc.getElementById("monitors-count"), bar = doc.getElementById("monitorsbar");
+  event({ type: "config", monitor_wake: true });
+  event({ type: "monitors", wake_paused: false, pending_events: 2, items });
+  assert.equal(count.hidden, true, "with wake-ups on, events about to wake DGC are not 'waiting'");
+  event({ type: "config", monitor_wake: false });
+  assert.equal(count.hidden, false, "turning wake-ups off repaints the row");
+  assert.equal(count.textContent, "2 waiting", "short beside the chips");
+  assert.equal(count.title, "2 events waiting for your next message");
+  event({ type: "monitors", wake_paused: false, pending_events: 49, items });
+  assert.equal(count.textContent, "49 waiting");
+  assert.equal(count.title, "49 events waiting for your next message");
+  assert.equal(doc.querySelectorAll(".monitor-chip").length, 2, "the chips stay");
+  assert.equal(doc.getElementById("monitors-paused").hidden, false);
+  assert.equal(doc.getElementById("monitors-paused").textContent, "wake off");
+  assert.match(bar.getAttribute("aria-label"), /49 events waiting for your next message/);
+  // Nothing running any more: the waiting events keep the row.
+  event({ type: "monitors", wake_paused: false, pending_events: 49, items: [] });
+  assert.equal(bar.hidden, false);
+  assert.equal(count.textContent, "49 events waiting for your next message");
+  event({ type: "config", monitor_wake: true });
+  event({ type: "monitors", wake_paused: true, pending_events: 3, items });
+  assert.equal(doc.getElementById("monitors-paused").textContent, "paused");
+  assert.equal(count.textContent, "3 waiting");
   assert.deepEqual(errors, []);
 });

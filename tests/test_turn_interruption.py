@@ -142,12 +142,152 @@ class ServeShutdownLogTests(unittest.TestCase):
         proc.send_signal(signal.SIGTERM)
         status = proc.wait(timeout=60)
         log = (Path(home.name) / ".dgc" / "logs" / "serve.log").read_text(encoding="utf-8")
-        self.assertIn("SIGTERM — the parent asked us to stop", log)
+        # Nothing tells a signal handler who sent the signal: the cause must not claim the editor did.
+        self.assertIn("SIGTERM — a stop signal from another process, not a shutdown command from the editor", log)
+        self.assertNotIn("the parent asked us to stop", log)
         self.assertIn("backend closed cleanly", log)    # the finally ran: work is saved, not lost
         # The stack dump still runs first and now chains INTO our handler instead of the kernel.
         self.assertIn("Current thread", log)
         # And we still die OF the signal — a 0 would tell a supervisor we chose to stop.
         self.assertEqual(status, -signal.SIGTERM)
+
+
+class KilledBackendResumeTests(unittest.TestCase):
+    """A backend killed outright runs no finally block. What it leaves on disk is all Continue has."""
+
+    def test_continue_after_sigkill_resumes_the_interrupted_prompt_and_its_completed_steps(self):
+        import queue
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from dgc.headless import TURN_CONTINUE_MARKER
+
+        def sse(delta, finish=None):
+            return "data: " + json.dumps({"id": "m", "object": "chat.completion.chunk", "choices": [
+                {"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n"
+
+        def bash_call(call_id, command):
+            return (sse({"tool_calls": [{"index": 0, "id": call_id, "type": "function", "function": {
+                "name": "bash", "arguments": json.dumps({"command": command})}}]})
+                + sse({}, finish="tool_calls") + "data: [DONE]\n\n")
+        continued = []
+
+        class Model(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _send(self, body, kind):
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                self._send(json.dumps({"data": [{"id": "mock-model"}]}), "application/json")
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                messages = body.get("messages") or []
+                text = json.dumps(messages)
+                tools_done = sum(1 for m in messages if m.get("role") == "tool")
+                if TURN_CONTINUE_MARKER in text:
+                    continued.append(messages)
+                    payload = sse({"content": "Continued."}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+                elif tools_done == 0:
+                    payload = bash_call("call_1", "echo s8-step-one-done > s8-step1.txt && cat s8-step1.txt")
+                elif tools_done == 1:
+                    payload = bash_call("call_2", "echo $$ > s8-sleep.pid; exec sleep 60")
+                else:
+                    payload = sse({"content": "Done."}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+                self._send(payload, "text/event-stream")
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        home = tempfile.TemporaryDirectory(prefix="dgc-kill-resume-home-")
+        self.addCleanup(home.cleanup)
+        work = tempfile.TemporaryDirectory(prefix="dgc-kill-resume-work-")
+        self.addCleanup(work.cleanup)
+        (Path(home.name) / ".dgc").mkdir()
+        (Path(home.name) / ".dgc" / "config.json").write_text(json.dumps({
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "model": "mock-model",
+            "api_mode": "chat_completions", "suggest": False, "notes": False}))
+        env = dict(os.environ, HOME=home.name, PYTHONPATH=str(PROJECT), PYTHONDONTWRITEBYTECODE="1")
+        for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+            env[var] = home.name
+
+        def serve():
+            proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=work.name, env=env,
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+            # Cleanups run last-in first-out: close the pipes only after the process is gone, or a
+            # reader thread still inside readline() holds the stream and the close blocks on it.
+            for pipe in (proc.stdin, proc.stdout):
+                self.addCleanup(pipe.close)
+            self.addCleanup(lambda: proc.poll() is None and (proc.kill(), proc.wait(30)))
+            arrived = queue.Queue()
+
+            def read():
+                for line in proc.stdout:
+                    try:
+                        arrived.put(json.loads(line))
+                    except ValueError:
+                        pass
+            threading.Thread(target=read, daemon=True).start()
+
+            def send(command):
+                proc.stdin.write(json.dumps(command) + "\n")
+                proc.stdin.flush()
+
+            def wait(predicate, timeout=60):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    try:
+                        event = arrived.get(timeout=max(0.01, deadline - time.monotonic()))
+                    except queue.Empty:
+                        break
+                    if predicate(event):
+                        return event
+                return None
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "ready"))
+            send({"type": "set_mode", "mode": "auto", "acknowledge_workspace_trust": True,
+                  "request_id": "m"})
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "mode_changed"))
+            return proc, send, wait
+
+        first, send, wait = serve()
+        send({"type": "prompt", "text": "S8 prompt: two steps please", "request_id": "p1"})
+        pid_file = Path(work.name) / "s8-sleep.pid"
+        deadline = time.monotonic() + 60
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(pid_file.exists(), "step 2 is running")
+        time.sleep(0.2)
+        try:
+            sleeper = int(pid_file.read_text().strip())
+            self.addCleanup(lambda: os.path.exists(f"/proc/{sleeper}") and os.kill(sleeper, signal.SIGKILL))
+        except ValueError:
+            pass
+        first.kill()                               # SIGKILL: no finally block, no grace path
+        first.wait(30)
+
+        second, send, wait = serve()
+        send({"type": "resume_session", "latest": True, "request_id": "r1"})
+        resumed = wait(lambda e: e.get("type") in ("session", "error", "command_rejected"))
+        self.assertEqual((resumed or {}).get("type"), "session", resumed)
+        send({"type": "resume_turn", "request_id": "c1"})
+        outcome = wait(lambda e: e.get("type") in ("turn_end", "command_rejected"), 90)
+        self.assertEqual((outcome or {}).get("type"), "turn_end", outcome)
+        self.assertEqual(len(continued), 1, "Continue reached the model")
+        users = [str(m.get("content")) for m in continued[0] if m.get("role") == "user"]
+        self.assertTrue(any("S8 prompt: two steps please" in u for u in users), users)
+        self.assertLess(next(i for i, u in enumerate(users) if "S8 prompt" in u),
+                        next(i for i, u in enumerate(users) if TURN_CONTINUE_MARKER in u))
+        tools = [str(m.get("content")) for m in continued[0] if m.get("role") == "tool"]
+        self.assertTrue(any("s8-step-one-done" in t for t in tools), "the completed step survived")
+        second.stdin.close()
+        second.wait(60)
 
 
 class PlanHandoffPromptTests(unittest.TestCase):
@@ -275,9 +415,7 @@ class PlanHandoffPromptTests(unittest.TestCase):
         self.assertNotIn("# Approved plan", resumed.system_prompt())
 
 
-class GracefulShutdownTests(unittest.TestCase):
-    """A closed pipe should cost seconds of work, not the turn."""
-
+class _HeadlessBackendFixture:
     def backend(self):
         from dgc.headless import Backend, HeadlessUI, PendingRequests
         from dgc.protocol import Emitter
@@ -301,6 +439,10 @@ class GracefulShutdownTests(unittest.TestCase):
         backend.pending = PendingRequests()
         backend._turn_state_lock = lambda: threading.RLock()
         return backend, events
+
+
+class GracefulShutdownTests(_HeadlessBackendFixture, unittest.TestCase):
+    """A closed pipe should cost seconds of work, not the turn."""
 
     def test_an_idle_backend_closes_at_once(self):
         backend, _ = self.backend()
@@ -347,6 +489,31 @@ class GracefulShutdownTests(unittest.TestCase):
         self.assertEqual(len(requests), 1, "no second model request after the pipe closed")
         self.assertIn("backend was shut down mid-turn", agent._last_turn_error)
         self.assertIn("saved", agent._last_turn_error)
+
+
+class StopWithQueuedMessagesTests(_HeadlessBackendFixture, unittest.TestCase):
+    """Stop cancels the running turn; the messages queued behind it go back to the person."""
+
+    def test_stop_hands_back_every_queued_message_by_its_id(self):
+        # Before: `cancel` cleared the queue and said nothing, so the editor kept both bubbles
+        # looking sent, neither ever ran, and there was nothing to restore.
+        backend, events = self.backend()
+        backend._queue = [("queued seven golf", None, None, "prompt", "web-7"),
+                          ("/deploy", None, None, "prompt", ""),
+                          ("queued eight hotel", None, None, "prompt", "web-8")]
+        backend.dispatch({"type": "cancel"})
+        self.assertEqual(backend._queue, [])
+        self.assertTrue(backend.agent.cancelled.is_set())
+        returned = [e for e in events if e["type"] == "steering_update"]
+        self.assertEqual([(e["request_id"], e["state"]) for e in returned],
+                         [("web-7", "returned"), ("web-8", "returned")])
+        self.assertIn("2 queued messages", returned[0]["message"])
+        self.assertNotIn("message", returned[1], "one line for the whole queue, not one per message")
+
+    def test_stop_with_nothing_queued_says_nothing_about_a_queue(self):
+        backend, events = self.backend()
+        backend.dispatch({"type": "interrupt"})
+        self.assertEqual([e for e in events if e["type"] == "steering_update"], [])
 
 
 class DelegatedEditCheckpointTests(unittest.TestCase):

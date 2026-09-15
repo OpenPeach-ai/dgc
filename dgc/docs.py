@@ -389,10 +389,46 @@ agent can also serve any page/app/chart it builds the same way.
   machine). Switch it to your **local network** (`artifact_bind: lan`, or press
   `b` in `/artifact`) and it binds `0.0.0.0` with a shareable LAN URL —
   open your artifact on your phone or another device. (LAN means anyone on the
-  network can view it — there's no auth.)
+  network can view it — there's no auth.) Every preview shares one browser
+  origin, so a page you preview can read and stop your other previews: preview
+  pages you trust.
 - **It persists.** The list is saved, so after you restart `dgc` the server
   tries to reuse the same port with your artifacts intact (set the preferred port with
-  `artifact_port`, turn off relaunch with `artifact_autostart`).
+  `artifact_port`, turn off relaunch with `artifact_autostart`). Artifacts saved by
+  an older DGC get new, unguessable ids the first time this version starts, so an
+  old `?a=a1` link opens the newest preview, and they are served in the
+  project-root way described below.
+- **What gets served.** The agent serves a page: an `.html`/`.htm` file, an
+  image, an `.svg` or a `.pdf`, or a folder holding one — not a `.md`, `.json`
+  or `.txt` file on its own, and never a page inside a dot-folder. Dot-files and
+  dot-folders (`.env`, `.git`, `.dgc`), key and credential files (`*.pem`,
+  `id_rsa`, `credentials.json`, `token.json`, data files named like `secret` or
+  `password`), and symlinks that point outside the artifact's folder are never
+  served, and there are no folder listings.
+- **A page in its own folder** (e.g. `artifacts/<name>/`) is served as a whole
+  site, except server-side source, config, databases, logs and backups (`.py`,
+  `.ts`, `.jsx`, `.yaml`, `.toml`, `.sqlite`, `.log`, `.bak`…): those load only
+  when one of its pages links to them, so a PyScript `main.py` or a sql.js
+  database works and an unlinked file does not.
+- **A page in a project root** is served with only the web files it links to
+  (HTML, CSS, JS, JSON, images, fonts, media), found through its HTML attributes,
+  its CSS, and the quoted file names in its scripts — resolved from the script and
+  from the page, as the browser does. A project root is the project folder, your
+  home folder or a personal folder in it (Downloads, Documents…), or any folder
+  holding a project file (`.git`, `package.json`, `pyproject.toml`, `Makefile`,
+  `requirements.txt`, `AGENTS.md`…); a project nested inside a site folder is
+  treated the same way. Manifests like `package.json`, build config like
+  `vite.config.js`, other file types and the rest of the project never load, and
+  neither do files whose names a script builds at runtime — put a multi-file site
+  in its own folder.
+- **Only your own addresses.** The server answers to `localhost`, `127.0.0.1`,
+  this machine's LAN address and name in LAN mode, and `artifact_hostname` —
+  any other Host is refused, so a web page cannot read artifacts through DNS
+  rebinding. If you open previews through a forwarded or proxied name (a
+  Codespaces `*.app.github.dev` URL, a reverse proxy, a MagicDNS name), set
+  `artifact_hostname` to it. Stopping a preview from the browser needs a token
+  that only the DGC artifacts page (the bar with the dropdown) carries, so another
+  website cannot stop your previews.
 
 Artifacts are built with DGC's own design language (the `dgc-design` skill) so
 the frontend looks polished by default. They stay on this machine unless you
@@ -1254,6 +1290,12 @@ questions; the classic prompt uses an arrow menu that starts on the recommended 
 and `dgc -p` runs are not offered the question tool; a sub-agent hands the decision back to the main
 agent with its recommendation.
 
+Full-auto does not stop to ask, so it offers the question card only on a turn where you ask to choose
+yourself ("propose me options to select from", "let me choose"), and withdraws it again once one round
+has been asked, so the rest of the turn runs unattended. Where nobody can answer (a turn a background
+event started, `dgc -p`, a sub-agent, a subscription CLI), asking to choose gets the options as a
+numbered list instead.
+
 ## Settings
 
 The gear opens five pages: **General** (permission mode, thinking, context size, tool profile),
@@ -1292,7 +1334,7 @@ stays out of the way the rest of the time.
 | `wait` | Blocks until text appears, capped at 30 seconds |
 | `console` | Console messages since load, with severity |
 | `requests` | Network responses: status, type, and what failed |
-| `screenshot` | A PNG saved under `.dgc/screenshots/`, shown in the chat, and to the model if it has vision |
+| `screenshot` | A PNG saved under `.dgc/screenshots/` (given a url, it opens that page first), shown in the chat, and to the model if it has vision |
 | `close` | Ends the browser session |
 
 A snapshot looks like this, and every `[e12]` is a handle the model can act on:
@@ -1414,7 +1456,8 @@ Each session keeps a private copy of its images beside its transcript, in
 `~/.dgc/sessions/<project>/<session>.images/`, readable only by you. A session's images take at most
 256 MB, oldest removed first. They are deleted with the session and copied when you branch it. The
 editor receives an image's name, size and source, never its path on disk. Screenshots are also saved
-under `.dgc/screenshots/` in the project.
+under `.dgc/screenshots/` in the project; that folder carries its own `.gitignore`, so they never show
+up in `git status` or in the chat's changed files.
 """.strip()),
     ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
 # Turn ETA & notifications
@@ -1466,6 +1509,11 @@ The agent starts one with the `monitor` tool: a shell command and a short label.
 command prints to standard output becomes an event, and lines that arrive close together are
 delivered as one event.
 
+The tool is offered when your request asks DGC to watch or wait for something ("watch the build
+log", "tell me when the tests finish", "keep an eye on the server"), or on every request when
+`tool_profile` is `full`. Plan mode never offers it, and an ordinary request such as "run the test
+suite" does not bring it up on its own.
+
 - **While a turn runs,** events reach the model between its tool calls.
 - **When the chat is idle,** an event starts a short turn so the model can read it and act. The
   transcript marks that turn as started by a monitor, never as something you typed.
@@ -1491,8 +1539,12 @@ so it does not have to keep checking.
   each event appears in the transcript as a card.
 - The model can stop one itself with `monitor_stop`.
 
-Monitors belong to one chat. They stop on `/new`, `/clear`, resuming another session, a rewind, or
-when DGC exits, including when it is killed.
+Monitors belong to one chat. They stop when that chat is replaced or closed (`/clear`, resuming
+another session, a rewind, closing an agent in the terminal's agent list) and when DGC exits,
+including when it is killed. In the editor `/new` replaces the chat, so its monitors stop too. In
+the terminal `/new` opens another agent beside the current one: the earlier chat keeps its
+monitors, and they can still wake it, until you switch back and stop them with `/monitors stop` or
+close that agent.
 
 ## Wake-ups
 
@@ -1724,7 +1776,8 @@ are counted once, as its own.
   request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in
   the totals, and the report says so when there are any.
 - **OpenAI-compatible endpoints.** DGC asks these to include usage in the stream. An endpoint that
-  rejects the request is asked again without it and is not asked again for the rest of the session.
+  rejects the request is asked again without it and is not asked again until DGC restarts (the
+  editor's backend keeps that memory across every chat it runs).
   Its requests then show as unmetered rather than as zero tokens.
 - **Not counted:** turns delegated to a subscription CLI (Claude Code, Codex and the others) run in
   the vendor's own tool, so DGC never sees their token counts.
@@ -1733,8 +1786,10 @@ are counted once, as its own.
 
 Everything stays on this machine, in `~/.dgc/usage.sqlite` (readable only by you). No prompt or
 reply text is stored, and an endpoint is recorded by host and port only, never its full address,
-path or any credential. Rows older than 400 days are removed automatically. Delete the file at any
-time to start over; DGC creates a new one.
+path or any credential. Rows older than 400 days are removed automatically. To start over, quit
+DGC and your editor first (a running DGC keeps the file open and would go on counting into the
+deleted copy), then delete `usage.sqlite` together with its `usage.sqlite-wal` and
+`usage.sqlite-shm` companions; DGC creates a new one the next time it runs.
 """.strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions
@@ -1891,8 +1946,9 @@ Useful keys:
   so treat vendor output as sensitive. Exact file rewind snapshots remain byte-for-byte unchanged
   inside the owner-private session so `/rewind` cannot corrupt a file.
 - `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
-  skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
-  `full` to expose the whole execution catalog on every model request.
+  skill-install, memory, goal, delegation and background-monitor tools from explicit
+  turn/standing-goal intent (a monitor, for example, when you ask DGC to watch or wait for
+  something). Use `full` to expose the whole execution catalog on every model request.
 - `code_action` — **off by default.** When `true`, DGC advertises a `python` power tool that runs
   code in a **persistent per-session interpreter** (variables/imports survive across calls). See the
   **Python code-action** guide. It executes arbitrary code and is gated by the same approval path as
@@ -1997,7 +2053,10 @@ when you want to override it.
 - `artifact_bind` (default `localhost`) — the bind mode. Set it to `lan` to preview
   from another device on your own network.
 - `artifact_hostname` — the hostname used when building the printed URL, if it differs from the
-  bind address.
+  bind address. The server also accepts requests addressed to this name (a reverse proxy, a
+  Codespaces or other forwarded URL, or a Tailscale MagicDNS name); requests for any other unknown
+  host are refused. A running server picks up a changed value the next time an artifact is served,
+  the bind mode is switched, or `dgc` starts.
 - `plan_artifact` (default `true`) — render proposed plans as an artifact page.
 - `artifact_in_plan` (default `false`) — also serve artifacts while in plan mode.
 

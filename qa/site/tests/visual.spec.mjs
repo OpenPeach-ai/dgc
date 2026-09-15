@@ -28,10 +28,11 @@ const FONTCONFIG_FILE = resolve(fileURLToPath(new URL("../fonts/fonts.conf", imp
 // Every glyph in a baseline comes from the site's own web fonts or from the two fallback faces in
 // qa/site/fonts. Anything else means the capture depends on the machine: a desktop drew arrows in
 // Noto Sans Math and Arial where a stock CI image has FreeSans and Unifont.
-// PostScript names: the four site/assets/fonts faces, then the two qa/site/fonts faces (DejaVu Sans
-// Mono is also the local() face behind 'JetBrains Mono Fallback').
+// PostScript names: the five site/assets/fonts faces (JetBrainsMono-ExtraBold is the wordmark subset),
+// then the two qa/site/fonts faces (DejaVu Sans Mono is also the local() face behind 'JetBrains Mono
+// Fallback').
 const PINNED_FONTS = new Set([
-  "Geist-Regular", "Geist-Medium", "JetBrainsMono-Regular", "JetBrainsMono-Medium",
+  "Geist-Regular", "Geist-Medium", "JetBrainsMono-Regular", "JetBrainsMono-Medium", "JetBrainsMono-ExtraBold",
   "DejaVuSans", "DejaVuSansMono",
 ]);
 
@@ -207,6 +208,9 @@ for (const route of REPRESENTATIVE_ROUTES) {
       await expect.soft(page, `${label}: ${band.key}`).toHaveScreenshot([label, `${band.key}.png`], {
         fullPage: true,
         clip: {x: 0, y: band.top, width: docWidth, height: band.height},
+        // The footer's build record names the commit the site was promoted from, which changes on
+        // every release build after the baselines are taken. Its geometry is still checked above.
+        mask: [page.locator(".footer-build code")],
       });
     }
 

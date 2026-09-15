@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { resolveDgcExecutable } from "./configuration";
-import { updateTerminalOptions } from "./cliupdate";
+import { heldCliTerminalOptions, openUpdateTerminal } from "./cliupdate";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -28,13 +28,18 @@ export function activate(context: vscode.ExtensionContext): void | object {
     // `update` also carries the install's own location and DGC_SKIP_EXTENSION (see
     // updateTerminalOptions): without the latter, the installer run from this terminal would
     // reinstall the published .vsix over the extension that is running it.
-    const term = vscode.window.createTerminal(subcommand === "update"
-      ? updateTerminalOptions(executable.command, "DGC update")
-      : {
-        name: subcommand === "notes" ? "DGC notes" : "DGC export-training",
-        shellPath: executable.command,
-        shellArgs: [subcommand],
-      });
+    // Every one of these prints its result and exits, and a terminal whose process has exited is
+    // closed at once: the output has to be held on screen until it has been read.
+    if (subcommand === "update") {
+      // It reports its own progress and outcome, in step with the terminal.
+      void openUpdateTerminal(executable.command, "DGC update", () => provider.restart("manual CLI update"));
+      return true;
+    }
+    const term = vscode.window.createTerminal(subcommand === "notes"
+        ? heldCliTerminalOptions(executable.command, ["notes"], "DGC notes",
+          "Those are this project's context notes.", "DGC notes failed")
+        : heldCliTerminalOptions(executable.command, ["export-training"], "DGC export-training",
+          "Export finished.", "DGC export-training failed"));
     term.show();
     return true;
   };
@@ -80,10 +85,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.updateCli", () => {
       // parity with the CLI's /update: run `dgc update` in a terminal, then remind the user to
       // restart the backend so the panel picks up the new version.
-      if (runCliInTerminal("update")) {
-        vscode.window.showInformationMessage(
-          "Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
-      }
+      runCliInTerminal("update");
     }),
     vscode.commands.registerCommand("dgc.openNotes", () => {
       // The trace is a CLI surface, so the editor shows it by running the CLI — the same shape as

@@ -14,16 +14,16 @@ section-top @0,104,1440,802.81
   button[1] 158,469.81 57x36
   button[2] 215,469.81 105x36
   button.copy-button[0] 690,521.31 44x26
-  span.stat-value[0] 100,678.81 199.84x27
-  span.stat-label[0] 100,717.81 199.84x15.94
-  span.stat-value[1] 335.84,678.81 222.17x27
-  span.stat-label[1] 335.84,717.81 222.17x15.94
-  span.stat-value[2] 594.02,678.81 222.19x27
-  span.stat-label[2] 594.02,717.81 222.19x15.94
-  span.stat-value[3] 852.2,678.81 192.42x27
-  span.stat-label[3] 852.2,717.81 192.42x15.94
-  span.stat-value[4] 1080.63,678.81 259.38x27
-  span.stat-label[4] 1080.63,717.81 259.38x15.94
+  span.stat-value[0] 100,678.81 201.33x27
+  span.stat-label[0] 100,717.81 201.33x15.94
+  span.stat-value[1] 337.33,678.81 223.67x27
+  span.stat-label[1] 337.33,717.81 223.67x15.94
+  span.stat-value[2] 597,678.81 223.67x27
+  span.stat-label[2] 597,717.81 223.67x15.94
+  span.stat-value[3] 856.67,678.81 193.91x27
+  span.stat-label[3] 856.67,717.81 193.91x15.94
+  span.stat-value[4] 1086.58,678.81 253.42x27
+  span.stat-label[4] 1086.58,717.81 253.42x15.94
 section-proof-strip-1 @0,906.81,1440,147.8
 section-cli @0,1054.61,1440,1366.94
   div.eyebrow[0] 100,101 361.58x14.84

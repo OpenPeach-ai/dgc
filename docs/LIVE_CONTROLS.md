@@ -38,6 +38,24 @@ question the goal needs answered". Stop keeps its meaning. Answered questions st
 Sub-agents and `dgc -p` are no longer offered the tool: a sub-agent returns the decision to the main
 agent with its recommendation. External subscription tools retain their own question interface.
 
+Full-auto mode does not stop to ask, so it leaves `propose_options` out, except on a turn where you
+explicitly ask to choose ("propose me options to select from", "let me choose", "ask me to pick").
+That turn gets the picker in every permission mode. In full-auto it is withdrawn again once one round
+of questions has been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text
+you type counts: attached files and editor context never ask, a goal's objective never re-opens the
+picker on later cycles or turns, and a sentence that describes software ("the dropdown should let me
+choose a region", "write tests for propose_options") is not an ask. Offering the picker never forces
+it: DGC does not parse a negated or withdrawn ask ("... actually, never mind, you pick"), the model
+reads your whole message and decides whether to call it.
+
+Some turns still have nobody to answer: a turn DGC starts on a background event, a `dgc -p` run, a
+sub-agent, and a subscription CLI turn. When you ask on one of these, the model is told why the
+picker is missing, so it lists the choices as a numbered list instead of claiming the picker does not
+exist. Once you have answered a round of questions, or a background turn has listed the choices,
+later background turns are not told again. If a model in a `dgc -p` run calls the picker anyway, a
+script still receives the structured `options_request` event (with `decision: null`); the model is
+then told that nobody can answer and gives the options in its final answer.
+
 | Action | Extension | Terminal |
 | --- | --- | --- |
 | Steer a native turn | Enter or Send with a draft | Enter |

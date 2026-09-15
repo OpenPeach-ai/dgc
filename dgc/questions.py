@@ -44,6 +44,10 @@ CANCELLED_RESULT = "No decision was submitted. Do not assume a choice or act on 
 UNAVAILABLE_RESULT = ("error: nobody can answer questions here. If a wrong guess is cheap to undo, "
                       "decide, and state the assumption in your reply; otherwise stop and report the "
                       "question.")
+# The same outcome in a non-interactive `dgc -p` run: nobody will ever answer, and the choice stays the
+# user's, so the model lists the options in its final answer instead of picking one.
+NON_INTERACTIVE_RESULT = ("No one can answer in this non-interactive `dgc -p` run, so no choice was made. "
+                          "Do not assume one: give the options as a numbered list in your final answer.")
 OWN_WORDS = ("Their written answers are their own words: follow what they say, even if it changes "
              "the task.")
 CONTINUE = "Continue with these decisions."

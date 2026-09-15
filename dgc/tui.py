@@ -285,6 +285,7 @@ class AgentSession:
         self._wake_turn = False            # this session's running turn was started by a monitor
         self._wake_yield = False           # ...and is stopping because the user sent a message
         self._after_wake_command = ""      # a command typed during that turn, run once it ends
+        self._prompt_after_wake_command = False  # a prompt typed after that command waits for it
         binder = getattr(ui, "_bind_session_monitors", None)
         if callable(binder):
             binder(self)
@@ -549,6 +550,10 @@ class TUI:
             elif typed.startswith("/") and len(typed) > 1:
                 self.input_buf.reset()
                 self._run_command(typed)
+                if len(typed[1:].split(maxsplit=1)) > 1:
+                    # `/usage today` ran to completion: whatever it opened is its result, not a
+                    # step in a menu, so Esc closes it rather than reopening this palette.
+                    return
             else:
                 return
             # if the command opened ANOTHER menu (sub-menu, model/provider/subagent picker, Skills modal…),
@@ -563,6 +568,9 @@ class TUI:
         """Reopen the `/` palette — the Esc-back target for any menu opened from it."""
         self.input_buf.reset(); self.input_buf.insert_text("/")
         self._open_command_palette()
+        # DGC typed that "/", not the user: closing this palette must not leave it behind, or the
+        # next "/usage" becomes "//usage".
+        self._overlay["drop_bare_slash"] = True
 
     # commands that take a fixed set of options → the palette opens a SUB-MENU to pick one
     _SUBMENUS = {
@@ -603,8 +611,11 @@ class TUI:
         cmd = parts[0].lower()
         # The composer refuses a mid-turn command through _handle_running_local_command, but the
         # `/` palette reaches this method directly — so a command declared unsafe during a turn
-        # (/todo clear, /rewind, /compact…) ran anyway when picked from the menu.
+        # (/rewind, /compact…) ran anyway when picked from the menu. The palette gets the same
+        # routing as the composer: a monitor wake turn yields, /todo clear clears now.
         if self._turn.is_set():
+            if self._yield_wake_turn_for(text) or self._run_mid_turn_form(text):
+                return
             spec = resolve_command(cmd, "tui")
             if spec is not None and not spec.available_while_running:
                 self._flash(f"/{spec.name} waits for this turn to finish \u00b7 Esc stops the turn")
@@ -780,6 +791,8 @@ class TUI:
     def _close_overlay(self) -> None:
         ov = self._overlay or {}
         draft = self.input_buf.document if ov.get("composer_palette") else ov.get("composer_draft")
+        if ov.get("drop_bare_slash") and draft is not None and draft.text == "/":
+            draft = None
         self._overlay = None
         self.input_buf.reset()
         if draft is not None:
@@ -1150,12 +1163,15 @@ class TUI:
             lines = lines[1:]
         else:
             summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · event {batch.event_index}'
-            if batch.omitted_lines:
-                lines.append(f"… {plural(batch.omitted_lines, 'more line')} — "
-                             f"/monitors show {batch.monitor_id}")
-        return {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
-                "call_id": None, "summary": summary[:200], "running": False, "error": False,
-                "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
+        block = {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
+                 "call_id": None, "summary": summary[:200], "running": False, "error": False,
+                 "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
+        if batch.kind == "output" and batch.omitted_lines:
+            # Kept apart from the body: counted as a body line it pushed a 40-line event past the
+            # preview budget, and the card showed two different "more lines" hints at once.
+            block["more"] = (f"{plural(batch.omitted_lines, 'more line')} — "
+                             f"/monitors show {safe(batch.monitor_id)}")
+        return block
 
     def _service_monitors(self) -> bool:
         """UI-loop tick: render queued monitor callbacks and start due wake-ups. O(sessions)."""
@@ -1198,13 +1214,27 @@ class TUI:
             deferred = getattr(sess, "_after_wake_command", "")
             if (deferred and sess is self.active and not sess._turn.is_set()
                     and not (sess._worker_thread and sess._worker_thread.is_alive())):
-                sess._after_wake_command = ""
-                self._dispatch_composer_text(deferred)
+                self._run_after_wake_command(sess)
                 changed = True
                 continue
             if self._maybe_wake_session(sess):
                 changed = True
         return changed
+
+    def _run_after_wake_command(self, sess: "AgentSession") -> None:
+        """Run the command typed during a monitor wake turn, then the prompt typed after it.
+
+        The prompt follows the command into whichever chat the command left active (after /new,
+        the new chat), because that is the order the user typed them in."""
+        deferred = getattr(sess, "_after_wake_command", "")
+        sess._after_wake_command = ""
+        if deferred:
+            self._dispatch_composer_text(deferred)
+        if getattr(sess, "_prompt_after_wake_command", False):
+            sess._prompt_after_wake_command = False
+            queued = self._pop_followup(sess)
+            if queued is not None:
+                self._dispatch_composer_text(queued[0])
 
     def _wake_blocked(self, sess: "AgentSession") -> bool:
         hub = getattr(sess.agent, "monitors", None)
@@ -1253,8 +1283,10 @@ class TUI:
         sess._cancel.clear()
         sess._tool_count = 0
         sess._wake_turn, sess._wake_yield = True, False
+        from .monitors import wake_tag
+        tag = wake_tag(notification.batches)
         sess.blocks.append({"kind": "user", "text": style_mod.terminal_safe_text(notification.label),
-                            "tag": "monitor · woke on an event"})
+                            "tag": tag})
         for batch in notification.batches:
             sess.blocks.append(self._monitor_event_block(batch))
         if sess._follow:
@@ -1263,7 +1295,8 @@ class TUI:
         sess._backend_activity = None
         sess._turn_t0 = time.monotonic()
         if sess is not self.active:
-            self._flash(f"⧉ {sess.name or 'agent'} woke on a monitor event")
+            self._flash(f"⧉ {sess.name or 'agent'} woke on "
+                        + ("a monitor event" if tag.startswith("monitor") else "a background command's exit"))
 
         def work():
             self._tls.session = sess
@@ -1299,7 +1332,12 @@ class TUI:
                     self._finalize_session_workspace(sess, "fleet session stopped")
                     sess._worker_thread = None
                     return
-                queued = self._pop_followup(sess) if (yielded or not cancelled) else None
+                self._flush_unsaved_todo_clear(sess)
+                # A command waiting for this wake turn runs first, from the UI loop; the prompt
+                # queued behind it must not jump ahead into this chat.
+                queued = (self._pop_followup(sess)
+                          if (yielded or not cancelled)
+                          and not getattr(sess, "_prompt_after_wake_command", False) else None)
                 sess._worker_thread = None
                 if queued is not None:
                     queued_text, shown = queued
@@ -1775,6 +1813,8 @@ class TUI:
         spec = resolve_command(name, "tui")
         if spec is None:
             return False                      # not a command: ordinary steering text
+        if self._run_mid_turn_form(text):
+            return True
         if not spec.available_while_running:
             # It used to fall through to steering, so "/model", "/compact" or "/help" typed during
             # a turn was silently sent to the model as a prompt. Refuse it visibly instead.
@@ -1783,12 +1823,61 @@ class TUI:
         self._run_command(text)
         return True
 
+    #: Command forms that act immediately during a turn although their command as a whole waits.
+    _MID_TURN_FORMS = ("/todo clear",)
+
+    def _run_mid_turn_form(self, text: str) -> bool:
+        """Handle a command form that is safe while a turn runs; False when `text` is not one.
+
+        `/todo clear` empties the list now, as the editor's Clear does. The running turn's worker
+        owns the session save, so the clear is written when that worker retires
+        (_flush_unsaved_todo_clear); the model is told once that the user cleared it.
+        """
+        if " ".join(text.strip().lower().split()) not in self._MID_TURN_FORMS:
+            return False
+        self.agent.clear_todos(persist=False)
+        self._todos = []
+        self._flash("todo list cleared")
+        self._invalidate()
+        return True
+
+    def _flush_unsaved_todo_clear(self, sess) -> None:
+        """Save a mid-turn /todo clear once the turn that owned the session has ended."""
+        agent = getattr(sess, "agent", None)
+        if getattr(agent, "todo_clear_unsaved", False) is not True:
+            return
+        try:
+            saved = agent._persist()
+        except Exception as exc:                  # a failed save must not take the worker down
+            saved = False
+            agent._last_persist_error = f"{type(exc).__name__}: {exc}"
+        if not saved:
+            self.error(getattr(agent, "_last_persist_error", "")
+                       or "todo list cleared, but the session could not be saved")
+
+    def _yield_wake_turn_for(self, text: str) -> bool:
+        """A command typed during a turn DGC started on a monitor event: that turn yields, and the
+        command runs from the UI loop the moment it has ended. False when no wake turn applies."""
+        if not self._turn.is_set():
+            return False
+        sess = self.active if getattr(self, "_sessions", None) else None
+        if not (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
+                and not self._runs_while_turn_runs(text)):
+            return False
+        sess._after_wake_command = text
+        sess._wake_yield = True
+        sess._cancel.set()
+        self._flash("stopping the monitor turn · your command runs next")
+        return True
+
     def _runs_while_turn_runs(self, text: str) -> bool:
         """A slash command that is handled on the spot even while a turn runs."""
         if not text.startswith("/"):
             return False
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         if text.strip().lower().startswith("/goal"):
+            return True
+        if " ".join(text.strip().lower().split()) in self._MID_TURN_FORMS:
             return True
         spec = resolve_command(name, "tui")
         return bool(spec is not None and spec.available_while_running)
@@ -1800,16 +1889,24 @@ class TUI:
         hub = getattr(getattr(self, "agent", None), "monitors", None)
         if hub is not None:
             hub.policy.note_command(self.config)       # no wake lands right on top of an action
+        sess = self.active if getattr(self, "_sessions", None) else None
+        pending_command = getattr(sess, "_after_wake_command", "")
+        if (pending_command and not self._turn.is_set()
+                and not (sess._worker_thread and sess._worker_thread.is_alive())):
+            # The wake turn has ended but the UI loop has not run the command typed during it yet:
+            # run it now, so this text lands after it rather than before it.
+            self._run_after_wake_command(sess)
         if self._turn.is_set():
             sess = self.active if getattr(self, "_sessions", None) else None
-            if (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
-                    and not self._runs_while_turn_runs(text)):
-                # A command typed during a turn DGC started on a monitor event: that turn yields,
-                # and the command runs from the UI loop the moment it has ended.
-                sess._after_wake_command = text
-                sess._wake_yield = True
-                sess._cancel.set()
-                self._flash("stopping the monitor turn · your command runs next")
+            if getattr(sess, "_after_wake_command", "") and text[:1] not in ("/", "!", "#"):
+                # A prompt sent while a command waits for the wake turn to end belongs after that
+                # command (after /new, in the new chat), not in the chat it is about to leave.
+                if not self._queue_followup(sess, text, shown=False):
+                    self._flash("follow-up queue full — wait for this turn")
+                    return "full"
+                sess._prompt_after_wake_command = True
+                return "follow-up"
+            if self._yield_wake_turn_for(text):
                 return "local-command"
             if self._handle_running_local_command(text):
                 return "local-command"
@@ -2105,7 +2202,8 @@ class TUI:
             if blk.get("running"):
                 return None
             return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
-                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "", theme_key,
+                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "",
+                    blk.get("more", ""), getattr(self, "_width", 0), theme_key,
                     len(blk.get("images") or ()), blk.get("images_omitted") or 0)   # images: rows
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
@@ -2488,6 +2586,16 @@ class TUI:
             frags.append(rail())
             frags.append((f"fg:{th.accent_dim}", label, toggle))
 
+        # The transcript window wraps long rows itself, and a wrapped continuation started at
+        # column 0 outside the card's rail. Wrap body rows here instead, each under its own rail.
+        room = max(20, int(getattr(self, "_width", 0) or 80) - 2)
+
+        def body_rows(style: str, text: str) -> None:
+            for piece in self._wrap_cells(text, room):
+                frags.append(("", "\n"))
+                frags.append(rail())
+                frags.append((style, piece))
+
         diff = self._tool_diff(b)
         if diff:                                        # rendered (coloured) diff — rail each line
             dlines = diff.split("\n")
@@ -2505,13 +2613,14 @@ class TUI:
             lines = [ln.expandtabs(4) for ln in (b.get("out") or "").splitlines()]
             budget = self._preview_budget(b)
             body = f"fg:{th.text}" if error else f"fg:{th.faint}"
+            more = str(b.get("more") or "")
             if exp or len(lines) <= budget:
                 for ln in lines:
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
                 if len(lines) > budget:
                     toggle_row("\u25be show less")
+                if more:
+                    body_rows(f"fg:{th.faint}", "\u2026 " + more)
             else:
                 # Tail-biased: a test runner prints its verdict at the END, which a head-only window
                 # hides. The elided middle is itself the expand toggle.
@@ -2519,16 +2628,16 @@ class TUI:
                 tail = budget - head
                 hidden = len(lines) - head - tail
                 for ln in lines[:head]:
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
                 lead = "\u2026 " if head else ""          # no backslash inside an f-string
-                more = "more " if head or tail else ""     # expression: Python 3.10/3.11 reject it
-                toggle_row(f"\u25b8 {lead}{hidden} {more}line{'s' if hidden != 1 else ''} \u2014 click / /expand")
+                word = "more " if head or tail else ""     # expression: Python 3.10/3.11 reject it
+                # One hint: lines the event did not carry are named in the same row as the ones
+                # this card folded away.
+                extra = f" \u00b7 {more}" if more else ""
+                toggle_row(f"\u25b8 {lead}{hidden} {word}line{'s' if hidden != 1 else ''} "
+                           f"\u2014 click / /expand{extra}")
                 for ln in (lines[-tail:] if tail else []):
-                    frags.append(("", "\n"))
-                    frags.append(rail())
-                    frags.append((body, ln))
+                    body_rows(body, ln)
         if shot_label:
             self._image_rows(b, frags, rail, th, shots, shot_omitted, exp, toggle_row, toggled[0], toggle)
         return frags
@@ -2633,6 +2742,27 @@ class TUI:
             self._flash(f"could not open {name} \u00b7 {shown}", secs=6)
             return
         self._flash(f"opened {name}")
+
+    @staticmethod
+    def _wrap_cells(text: str, width: int) -> list[str]:
+        """Split one output row into pieces of at most `width` terminal cells (wide glyphs count
+        two). A row that fits is returned whole, which is nearly every row."""
+        width = max(1, int(width))
+        if len(text) * 2 <= width:
+            return [text]
+        from prompt_toolkit.utils import get_cwidth
+        if get_cwidth(text) <= width:
+            return [text]
+        pieces, current, used = [], [], 0
+        for char in text:
+            cells = get_cwidth(char)
+            if current and used + cells > width:
+                pieces.append("".join(current))
+                current, used = [], 0
+            current.append(char)
+            used += cells
+        pieces.append("".join(current))
+        return pieces
 
     def _cursor_ft(self, text: str):
         """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept
@@ -3391,12 +3521,18 @@ class TUI:
             return ANSI(self._rich(f"[bold {th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]name this session[/] "
                                    f"[{th.faint}]· type a name then Enter (blank = unnamed) · Esc to cancel[/]"))
         if self._flash_msg and time.monotonic() < self._flash_until:
-            return ANSI(self._rich(f"[{th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]{_esc(self._flash_msg)}[/]"))
+            # One row: a flash wider than the terminal ends in an ellipsis on that row, rather than
+            # word-wrapping onto a second line the status window never shows.
+            return ANSI(self._rich(f"[{th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]{_esc(self._flash_msg)}[/]",
+                                   no_wrap=True, overflow="ellipsis"))
         if self._input is not None:             # a free-text prompt is waiting (host URL, MCP field, …)
             return ANSI(self._rich(f"[bold {th.accent_bright}]{glyphs.DIAMOND}[/] "
                                    f"[{th.text}]{_esc(self._input.get('prompt', ''))}[/] "
                                    f"[{th.faint}]· type then Enter · Esc to cancel[/]"))
         if self._req:
+            # The turn is waiting on the person, not in a phase: whatever runs after the answer
+            # starts its own clock rather than inheriting one from before the card opened.
+            self._phase_act = None
             return ANSI(self._rich(f"[bold {th.accent}]{glyphs.DIAMOND}[/] "
                                    f"[{th.text}]waiting for your answer[/] "
                                    f"[{th.faint}]· {_esc(self._req.get('hint', ''))}[/]"))
@@ -3426,7 +3562,9 @@ class TUI:
             # per-phase timer : reset whenever the activity label changes.
             if getattr(self, "_phase_act", None) != act:
                 self._phase_act, self._phase_t0 = act, time.monotonic()
-            pel = time.monotonic() - self._phase_t0
+            # A phase cannot be older than the turn it is in (a label left over from the previous
+            # turn kept its clock when the new turn began with the same label).
+            pel = max(0.0, min(time.monotonic() - self._phase_t0, el))
             pstr = f"{pel:.1f}s" if pel < 60 else f"{int(pel // 60)}m{int(pel % 60)}s"
             #  turn-status structure: spinner + activity + phase-timer (left); total-time + ⇣tokens + [stop] (right).
             tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
@@ -4102,7 +4240,8 @@ class TUI:
     def _set_artifact_bind(self, lan: bool) -> None:
         from . import artifacts
         self.config.set("artifact_bind", "lan" if lan else "localhost")
-        artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
+        artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)),
+                           hostname=str(self.config.get("artifact_hostname", "") or ""))
         if lan:
             urls = artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
                                             str(self.config.get("artifact_hostname", "")))
@@ -5024,14 +5163,30 @@ class TUI:
 
         if name:
             self._name_session(sess, name)
+        fleet, index = getattr(self, "_sessions", None) or [], getattr(self, "_active_idx", -1)
+        previous = fleet[index] if isinstance(index, int) and 0 <= index < len(fleet) else None
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
         place = (f"isolated {sess.workspace_branch}" if kind != "shared"
                  else "non-Git shared checkout · writes serialized")
         note = f" · prior workspace unavailable: {attach_error}" if attach_error else ""
-        self._flash(f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
-                    f" · {len(self._sessions)} agents · {place}{note}")
+        hub = getattr(getattr(previous, "agent", None), "monitors", None)
+        running = len(hub.running()) if hub is not None else 0
+        warning = ""
+        if running:
+            # The earlier agent stays alive beside this one, and so do its monitors: they can still
+            # wake it. Say so, rather than let a hidden chat keep spending turns on them. The status
+            # row is one line, so what to do about it comes before the branch name, which is what
+            # a narrower terminal may cut, and the line stays up long enough to read.
+            warning = (f" · the previous agent still runs {running} monitor"
+                       f"{'' if running == 1 else 's'}: Ctrl+\\ back to it, then /monitors stop")
+        flash = (f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
+                 f" · {len(self._sessions)} agents{warning} · {place}{note}")
+        if warning:
+            self._flash(flash, secs=6.0)
+        else:
+            self._flash(flash)
         return sess
 
     def _open_saved_session(self, path) -> None:
@@ -6016,8 +6171,9 @@ class TUI:
             elif who == "monitor":
                 # Command output DGC delivered: a marker, never a band that reads as typed text.
                 if row.get("delivery") == "wake":
+                    from .monitors import wake_tag
                     blocks.append({"kind": "user", "text": body[:200],
-                                   "tag": "monitor · woke on an event"})
+                                   "tag": wake_tag(row.get("items"))})
                 else:
                     blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
             elif who == "retry":
@@ -6125,7 +6281,8 @@ class TUI:
                 if notice_kind(m):
                     notice = m.get("_dgc_notice") or {}
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
-                                 "tools": "", "delivery": str(notice.get("delivery") or "")})
+                                 "tools": "", "delivery": str(notice.get("delivery") or ""),
+                                 "items": list(notice.get("items") or [])})
                     continue
                 body = display_prompt(_strip_editor_context(body))
                 if body.startswith(_COMPACT_PREFIX):
@@ -6152,6 +6309,18 @@ class TUI:
                     for pending in pending_retries:
                         pending["state"] = "recovered"
                     pending_retries.clear()
+                    # An answer joined from a cut-off partial and its continuation keeps the notices
+                    # of the recovery prompts the join dropped: their lines come back above it.
+                    for recovery in list(m.get("_dgc_stream_recoveries") or [])[:16]:
+                        if not isinstance(recovery, dict) or recovery.get("kind") != "stream_recovery":
+                            continue
+                        rows.append({"who": "retry", "body": str(recovery.get("summary") or ""), "tools": "",
+                                     "kind": str(recovery.get("cause") or "stream_cut"),
+                                     "attempt": recovery.get("attempt") if isinstance(recovery.get("attempt"), int) else 1,
+                                     "max_attempts": recovery.get("max") if isinstance(recovery.get("max"), int) else None,
+                                     "summary": str(recovery.get("summary") or ""),
+                                     "endpoint": str(recovery.get("endpoint") or ""),
+                                     "state": "recovered"})
                     rows.append({"who": "assistant", "body": body, "tools": names,
                                  "reasoning": reasoning_entries})
                 gave_up = m.get("_dgc_stream_gave_up")
@@ -6401,6 +6570,7 @@ class TUI:
         self._cancel_auxiliary()
         self._cancel.clear()
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
@@ -7491,6 +7661,7 @@ class TUI:
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()
@@ -7533,6 +7704,7 @@ class TUI:
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._model_wait, self._model_waits = None, {}
                 self._turn.clear()
+                self._flush_unsaved_todo_clear(sess)
                 if hub is not None:
                     hub.policy.note_turn_end()
                 sess.last_activity = time.monotonic()
@@ -7632,6 +7804,7 @@ class TUI:
         self._scroll_off = 0
         self._follow = True
         self._turn.set()
+        self._phase_act = None              # nor its phase clock
         self._backend_activity = None       # a new turn never inherits the last one's gate label
         self._model_wait, self._model_waits = None, {}
         self._turn_t0 = time.monotonic()

@@ -546,8 +546,13 @@ class AgentRetryRunTests(RetryTestCase):
                              [("retrying", index, _MAX_CONTINUE, "continuation"),
                               ("recovered", index, _MAX_CONTINUE, "continuation")])
         self.assertEqual(delays, [1, 2])
-        notices = [m for m in agent.messages if workflows.stream_recovery_notice(m)]
-        self.assertEqual([m["_dgc_notice"]["kind"] for m in notices], ["stream_recovery"] * 2)
+        # The continuations are joined onto the partial answer; the recovery prompts' notices stay
+        # on it, in order, so a replay still draws both reconnect lines.
+        self.assertFalse([m for m in agent.messages if workflows.stream_recovery_notice(m)])
+        answers = [m for m in agent.messages if m.get("role") == "assistant"]
+        self.assertEqual([m["content"] for m in answers], ["one two three"])
+        self.assertEqual([(n["kind"], n["attempt"]) for n in answers[0]["_dgc_stream_recoveries"]],
+                         [("stream_recovery", 1), ("stream_recovery", 2)])
         self.assertEqual("".join(ui.text), "one two three")
 
     def test_a_length_continuation_then_a_cut_says_attempt_one(self):

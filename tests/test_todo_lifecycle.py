@@ -4,6 +4,7 @@ import copy
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -243,6 +244,46 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertTrue(all("# Checklist cleared" not in request[0]["content"] for request in calls))
         # Soft, not a refusal: a later list is accepted (a refused call could trip the loop guard).
         self.assertTrue(self.update([{"content": "Inspect", "status": "pending"}]).startswith("todo list updated:"))
+
+    def test_todo_calls_queued_before_a_mid_turn_clear_do_not_bring_the_list_back(self):
+        from dgc import tools as tools_module
+        steps = ["Prepare", "Check", "Review"]
+
+        def rows(done: int, active: int | None):
+            return [{"content": name, "status": "done" if i < done else
+                     "in_progress" if i == active else "pending"} for i, name in enumerate(steps)]
+        real_bash = tools_module.EXECUTORS["bash"]
+        cleared = []
+
+        def bash(args, ctx):
+            if "step-2" in args.get("command", "") and not cleared:
+                cleared.append(self.agent.clear_todos(persist=False))   # the editor's Clear lands
+            return real_bash(args, ctx)
+        batch = []
+        for index in range(3):                  # one response carrying every step's calls
+            batch += [ToolCall(f"a{index}", "todo", {"todos": rows(index, index)}),
+                      ToolCall(f"b{index}", "bash", {"command": f"echo step-{index + 1}-done"}),
+                      ToolCall(f"c{index}", "todo", {"todos": rows(index + 1, None)})]
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("t0", "todo", {"todos": rows(0, None)})]),
+            ChatResult(tool_calls=batch),
+            ChatResult(tool_calls=[ToolCall("t9", "todo", {"todos": [
+                {"content": "Genuinely new work", "status": "pending"}]})]),
+            ChatResult(content="Done."))
+        with patch.dict(tools_module.EXECUTORS, {"bash": bash}), \
+                patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Work through the steps"),
+                            (self.agent._last_turn_error, self.ui.errors))
+        self.assertEqual(cleared, [True])
+        results = {m.get("tool_call_id"): m.get("content") for m in self.agent.messages
+                   if m.get("role") == "tool"}
+        self.assertTrue(results["a1"].startswith("todo list updated:"), "before the clear it applies")
+        for stale in ("c1", "a2", "c2"):
+            self.assertTrue(results[stale].startswith("todo not applied:"), (stale, results[stale]))
+        painted_after_clear = self.ui.todo_lists[self.ui.todo_lists.index([]) + 1:]
+        self.assertEqual(painted_after_clear, [[{"content": "Genuinely new work", "status": "pending"}]],
+                         "only the call written after the model was told repaints the list")
+        self.assertTrue(results["t9"].startswith("todo list updated:"), "soft: a later list is accepted")
 
     def test_resume_wording_drops_the_todos_while_a_clear_is_in_force(self):
         from dgc import goals
@@ -818,21 +859,39 @@ class ChecklistProtocolTests(unittest.TestCase):
         reason = self.agent._gate_completion_report(report)["summary"]
         self.assertIn("or clear the checklist to drop them.", reason)
 
-    def test_tui_todo_clear_mid_turn_is_refused_visibly_and_the_list_is_kept(self):
-        # The terminal keeps its visible refusal while a turn runs; only the editor clears mid-turn.
+    def test_tui_todo_clear_mid_turn_clears_now_and_the_turn_worker_saves_it(self):
+        # The terminal clears mid-turn like the editor: the list empties at once, from the composer
+        # and from the `/` palette alike, and the save lands when the turn's worker retires.
+        from dgc.llm import ChatResult
         ui = self.tui()
         self.update([{"content": "Stale", "status": "pending"}])
         ui._todos = list(self.agent.todos)
-        ui._turn.set()
-        try:
-            self.assertEqual(ui._dispatch_composer_text("/todo clear"), "local-command")
-            self.assertIn("/todo waits for this turn to finish", ui._flash_msg)
-            self.assertEqual(self.agent.todos, [{"content": "Stale", "status": "pending"}])
-        finally:
-            ui._turn.clear()
-        self.assertEqual(ui._dispatch_composer_text("/todo clear"), "command")
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent._persist())
+        entered, release = threading.Event(), threading.Event()
+
+        def chat(*args, **kwargs):
+            entered.set()
+            release.wait(10)
+            return ChatResult(content="Done.")
+        self.agent._chat = chat
+        ui._submit("keep working")
+        self.assertTrue(entered.wait(10))
+        self.assertEqual(ui._dispatch_composer_text("/todo clear"), "local-command")
         self.assertEqual(self.agent.todos, [])
         self.assertEqual(ui.active._todos, [])
+        self.assertEqual(ui._flash_msg, "todo list cleared")
+        self.assertIs(self.agent.todo_clear_unsaved, True, "the running turn owns the save")
+        self.update([{"content": "Again", "status": "pending"}])
+        ui._open_command_palette()
+        ui._overlay["on_submit"](None, "/todo clear")
+        self.assertEqual(self.agent.todos, [], "the palette path clears too")
+        release.set()
+        worker = ui.active._worker_thread
+        self.assertTrue(worker is None or (worker.join(10) or not worker.is_alive()))
+        self.assertIs(self.agent.todo_clear_unsaved, False)
+        self.assertNotIn('"Stale"', self.agent.session_file.read_text())
+        self.assertNotIn('"Again"', self.agent.session_file.read_text())
 
     def test_every_history_snapshot_carries_the_redacted_checklist(self):
         # The token becomes a known secret only AFTER the session was saved, so the file holds it
@@ -916,7 +975,7 @@ class ChecklistProtocolTests(unittest.TestCase):
         from dgc.commands import resolve_command
         spec = resolve_command("todo", "tui")
         self.assertEqual(spec.surfaces, {"tui", "classic"})
-        self.assertFalse(spec.available_while_running)
+        self.assertFalse(spec.available_while_running)   # only the `/todo clear` form runs mid-turn
         self.assertEqual(spec.usage, "todo clear")
         self.assertIsNone(resolve_command("todo", "editor"))
         self.update([{"content": "Stale", "status": "pending"}])

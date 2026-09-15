@@ -196,7 +196,7 @@ class AgentTests(unittest.TestCase):
         scripted = self.agent(json_ui)
         self.assertNotIn("propose_options", self.names(scripted))
         self.assertEqual(scripted._handle_call(ToolCall("c", "propose_options", copy.deepcopy(ASK))),
-                         Q.UNAVAILABLE_RESULT)
+                         Q.NON_INTERACTIVE_RESULT, "`dgc -p` says why nobody answered")
         frames = [json.loads(line) for line in sink.getvalue().splitlines()]
         request = next(frame for frame in frames if frame["type"] == "options_request")
         self.assertEqual((request["id"], request["decision"], request["reason"], request["call_id"]),

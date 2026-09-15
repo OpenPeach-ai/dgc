@@ -13,6 +13,7 @@ const bundle = join(scratch, "extension.cjs");
 const registered = new Map();
 const terminals = [];
 const warnings = [];
+const closeListeners = [];
 let inspectedCommand;
 
 globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
@@ -25,7 +26,14 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       terminals.push(terminal);
       return terminal;
     },
+    // The update terminal reports its progress and outcome (openUpdateTerminal).
+    withProgress: () => Promise.resolve(),
+    onDidCloseTerminal: (listener) => {
+      closeListeners.push(listener);
+      return { dispose() { closeListeners.splice(closeListeners.indexOf(listener), 1); } };
+    },
   },
+  ProgressLocation: { Notification: 15 },
   commands: {
     registerCommand: (name, callback) => {
       registered.set(name, callback);
@@ -108,12 +116,20 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
   registered.get("dgc.updateCli")();
   registered.get("dgc.exportTraining")();
 
-  assert.deepEqual(terminals.map((terminal) => terminal.options), [
-    { name: "DGC update", shellPath: "/opt/DGC CLI/dgc;literal", shellArgs: ["update"],
-      env: { DGC_SKIP_EXTENSION: "1" } },
-    { name: "DGC export-training", shellPath: "/opt/DGC CLI/dgc;literal",
-      shellArgs: ["export-training"] },
-  ]);
+  // The terminal holds the output open under /bin/sh, but the executable and its argv are still
+  // positional parameters after a constant script: never shell text.
+  const [update, exporting] = terminals.map((terminal) => terminal.options);
+  assert.equal(update.name, "DGC update");
+  assert.deepEqual(update.env, { DGC_SKIP_EXTENSION: "1" });
+  assert.equal(update.shellPath, "/bin/sh");
+  assert.deepEqual(update.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "update"]);
+  assert.equal(exporting.name, "DGC export-training");
+  assert.equal(exporting.shellPath, "/bin/sh");
+  assert.deepEqual(exporting.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "export-training"]);
+  for (const options of [update, exporting]) {
+    assert.equal(options.shellArgs[0], "-c");
+    assert.doesNotMatch(options.shellArgs[1], /opt\/DGC CLI|literal/, "the script never contains the configured path");
+  }
   assert.ok(warnings.every((message) => message.includes("workspace-level dgc.command")));
 
   inspectedCommand = {
@@ -121,8 +137,10 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
     workspaceFolderValue: "/tmp/folder-controlled",
   };
   registered.get("dgc.updateCli")();
-  assert.equal(terminals.at(-1).options.shellPath, "dgc",
+  assert.equal(terminals.at(-1).options.shellArgs.at(-2), "dgc",
     "a workspace-only executable override must fall back to the extension default");
+  // Close the update terminals so their status watchers stop.
+  for (const terminal of terminals) for (const listener of [...closeListeners]) listener(terminal);
 });
 
 test("activation does not construct an agent provider in an untrusted workspace", () => {
@@ -180,7 +198,7 @@ test("protocol v14: the approval card gets a summary and a diff, and a denial ca
 test("entry points: explorer and tab menus, drag-and-drop, and palette entries that need a backend are gated", () => {
   const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
   const menus = manifest.contributes.menus;
-  assert.ok(manifest.contributes.commands.some((c) => c.command === "dgc.addFile"), "DGC: Add File to Chat exists");
+  assert.ok(manifest.contributes.commands.some((c) => c.command === "dgc.addFile"), "DGC: Add File to DGC exists");
   assert.ok(menus["explorer/context"].some((m) => m.command === "dgc.addFile"), "explorer context menu");
   assert.ok(menus["editor/title/context"].some((m) => m.command === "dgc.addFile"), "editor tab context menu");
   const gated = new Map(menus.commandPalette.map((m) => [m.command, m.when]));
@@ -258,7 +276,7 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
   // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
   assert.match(panel, /runCliUpdate\(executable, token\)/, "the offer runs the CLI's update");
-  assert.match(panel, /createTerminal\(\s*updateTerminalOptions\(/, "or opens it in a terminal");
+  assert.match(panel, /openUpdateTerminal\(/, "or opens it in a terminal");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
 });
 
@@ -283,4 +301,17 @@ test("a workspace-scope dgc.command edit does not restart the backend; a user-sc
   changed(["dgc.command"]);
   assert.equal(globalThis.__DGC_PANEL_CALLS.filter((c) => c === "commandPathChanged").length, 1,
     "a repeat event for the same path does nothing");
+});
+
+test("palette titles name DGC once: the category supplies the prefix", () => {
+  // Before: every title began "DGC: " and every command also had category "DGC", which VS Code
+  // prefixes to the title, so the palette read "DGC: DGC: Focus Chat".
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  for (const command of manifest.contributes.commands) {
+    assert.equal(command.category, "DGC", `${command.command} is in the DGC category`);
+    assert.doesNotMatch(command.title, /^DGC\s*:/, `${command.command} does not repeat the category in "${command.title}"`);
+  }
+  // A context menu shows the bare title, so the one in the explorer still says whose chat it is.
+  const addFile = manifest.contributes.commands.find((c) => c.command === "dgc.addFile");
+  assert.match(addFile.title, /DGC/);
 });

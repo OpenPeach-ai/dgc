@@ -9,7 +9,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 - **Where you want it** — the chat is offered in the activity bar and in the secondary side bar; open it in either and the same conversation follows. The copy you leave behind says where it went.
 - **Chat panel** — CommonMark responses with headings, lists, quotes, tables, safe file/source links, syntax-highlighted code and exact-source copy. Reasoning and tool batches collapse into compact rows, with visible failures and a separate final response. Surfaces follow your Cursor/VS Code theme with DGC purple accents.
-- **Live controls** — browse skills and change permission mode during a turn. Enter steers native-model work at the next boundary; Alt+Enter or Queue submits a later turn. A separate Stop button remains available while drafting. Subscription CLI follow-ups queue, and their mode changes apply on the next turn. Unapplied steering can be restored after interruption.
+- **Live controls** — browse skills and change permission mode during a turn. Enter steers native-model work at the next boundary; Alt+Enter or Queue submits a later turn. A separate Stop button remains available while drafting. Subscription CLI follow-ups queue, and their mode changes apply on the next turn. Unapplied steering, and turns still queued when you press Stop, come back marked not sent and can be restored.
 - **Turn ETA and walk-away notifications** — while a native turn runs, the timer shows a calibrated range such as `~2–4 min left · 3/5 tasks`, learned from this project's own history and the turn's task list (CLI 0.30.0, additive protocol-v6 `turn_eta` event). Enable **DGC: Notify On Turn End** for a notification when a turn longer than 20 seconds finishes while the panel is hidden.
 - **Goals** — start an objective with `/goal <objective>` or `<objective> /goal`. The card supports pause, resume, edit, delete and review of evidence, work time, cycles and reported tokens. Native and subscription routes continue until completion, pause or a blocker. Optional token budgets are checked between requests or vendor turns.
 - **Changed files** — the composer card shows changes recorded during the current chat, using actual pre-run file contents. **Workspace changes** opens the separate Git review. Saved chat previews exclude pre-existing edits and later manual changes; native diffs run through bounded inspection workers without executing repository filters.
@@ -27,7 +27,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 ## Commands
 
-- **Chat:** Focus Chat (`Ctrl/Cmd+Alt+D`), Open Command Menu, Add Selection (`Ctrl/Cmd+Alt+I`), Add File to Chat (explorer and tab context menus — or drag a file into the chat), Cycle Mode (`Ctrl/Cmd+Alt+M`). Palette entries that need a running backend appear once it is connected.
+- **Chat:** Focus Chat (`Ctrl/Cmd+Alt+D`), Open Command Menu, Add Selection (`Ctrl/Cmd+Alt+I`), Add File to DGC (explorer and tab context menus — or drag a file into the chat), Cycle Mode (`Ctrl/Cmd+Alt+M`). Palette entries that need a running backend appear once it is connected.
 - **Runtime:** Select Model, Connect Provider, Set/Cycle Permission Mode, Set Thinking, Restart Backend.
 - **Sessions:** New, Resume, Rewind, Name, Compact, Generate Handoff.
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.

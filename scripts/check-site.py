@@ -64,6 +64,7 @@ STATIC_PUBLIC_FILES = {
     "assets/fonts/geist-medium-latin.woff2", "assets/fonts/geist-regular-latin.woff2",
     "assets/fonts/jetbrains-mono-medium-latin.woff2",
     "assets/fonts/jetbrains-mono-regular-latin.woff2",
+    "assets/fonts/jetbrains-mono-extrabold-wordmark.woff2",
     "version.json", "provenance.json", "dgc.cdx.json", "dgc.tar.gz", "dgc.tar.gz.sha256",
     "vscode/version.json", "vscode/dgc.vsix", "vscode/dgc.vsix.sha256",
 }
@@ -332,10 +333,20 @@ def check_stacked_table_labels(errors: list[str]) -> None:
 
 
 def check_css(errors: list[str]) -> None:
+    # The logo is the sole designed 800 face. Match its complete generated rule,
+    # including the dedicated family, local subset, and glyph range; retain the
+    # 500 cap for every other face/style (and any duplicate/unapproved rule).
+    wordmark_face = (
+        "@font-face{font-family:'DGC Wordmark';"
+        "src:url('/assets/fonts/jetbrains-mono-extrabold-wordmark.woff2') format('woff2');"
+        "font-style:normal;font-weight:800;font-display:swap;"
+        "unicode-range:U+0043-0044,U+0047}"
+    )
     for name in ("assets/tokens.css", "assets/site.css"):
         path = SITE / name
         text = path.read_text(encoding="utf-8")
-        if re.search(r"font-weight\s*:\s*(?:[6-9]00|[6-9]\d\d)", text):
+        weight_checked = text.replace(wordmark_face, "", 1) if name == "assets/tokens.css" else text
+        if re.search(r"font-weight\s*:\s*(?:[6-9]00|[6-9]\d\d)", weight_checked):
             errors.append(f"{name}: font weight above 500")
         if "fonts.googleapis" in text or "fonts.gstatic" in text:
             errors.append(f"{name}: remote font origin")

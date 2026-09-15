@@ -249,10 +249,14 @@ def _ext_notes(releases: dict) -> list[str]:
 
 
 def _ext_note_rest(releases: dict) -> str:
-    """Everything after the headline note, joined. Previously the page demanded exactly three and
-    a shorter release died on an IndexError deep inside the template context."""
+    """Everything after the headline note, one list item each. Previously the page demanded
+    exactly three and a shorter release died on an IndexError deep inside the template context;
+    joining them with spaces then ran seven notes together as one paragraph."""
     rest = _ext_notes(releases)[1:]
-    return " ".join(rest)
+    if not rest:
+        return ""
+    return ('<ul class="card-notes">'
+            + "".join(f"<li>{html.escape(note)}</li>" for note in rest) + "</ul>")
 
 
 def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:
@@ -266,7 +270,14 @@ def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:
         head = f'<div><a class="release-version" href="{url}">{html.escape(item["version"])} ↗</a><time datetime="{item["date"]}">{item["date"]}</time></div>'
         pill = f'<span class="status-pill{live}">{html.escape(item["status"])}</span>'
         if index < DETAILED_RELEASES:
-            notes = "".join(f"<li>{html.escape(note)}</li>" for note in item["notes"][:3])
+            # The current release shows every note: its headline features were being cut at three.
+            # An older row keeps three and says how many more its release page has.
+            shown = item["notes"] if item["status"] == "current" else item["notes"][:3]
+            notes = "".join(f"<li>{html.escape(note)}</li>" for note in shown)
+            hidden = len(item["notes"]) - len(shown)
+            if hidden > 0:
+                notes += (f'<li class="release-more"><a href="{url}">{hidden} more '
+                          f'note{"" if hidden == 1 else "s"} on the release page ↗</a></li>')
             rows.append(f'<article class="release reveal" id="{prefix}-{slug(item["version"])}">{head}<ul>{notes}</ul>{pill}</article>')
             continue
         if index == DETAILED_RELEASES:
@@ -430,7 +441,7 @@ def build_outputs() -> dict[str, str | bytes]:
         "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "FIG6": partial("fig6.html", ctx), "FIG7": partial("fig7.html", ctx), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
         "RELEASE_COUNT": release_count, "RELEASE_WINDOW": release_span, "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"], prefix="release-ext"),
-        "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": _ext_notes(releases)[0], "EXT_NOTE_REST": _ext_note_rest(releases),
+        "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": html.escape(_ext_notes(releases)[0]), "EXT_NOTE_REST": _ext_note_rest(releases),
     })
     pages: dict[str, tuple[str, str, str, str]] = {
         "index.html": ("Vibe DGC — a coding agent for the models you run", "A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor.", page_template("index.html", ctx), "/og-card.png"),
@@ -481,6 +492,7 @@ def build_outputs() -> dict[str, str | bytes]:
     outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
     outputs["routes.json"] = json.dumps({"html": sorted(set(public_paths + docs_paths)), "generated": "build-site.py"}, separators=(",", ":")) + "\n"
     outputs["assets/brand/dgc-brand-kit.zip"] = brand_zip()
+    outputs["assets/fonts/jetbrains-mono-extrabold-wordmark.woff2"] = (SRC / "assets/fonts/jetbrains-mono-extrabold-wordmark.woff2").read_bytes()
     for name in ("tokens.css", "site.css"):
         source = (SRC / "assets" / name).read_text(encoding="utf-8")
         if name == "site.css":

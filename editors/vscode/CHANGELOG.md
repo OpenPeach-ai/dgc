@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.24.0 — 2026-09-14
+## 0.24.0 — 2026-09-15
 
 - **Editor protocol v13; requires DGC CLI 0.39.0.** Adds background monitors, token usage reports
   and resuming a turn the backend was interrupted in. A mismatched pair says which side to update.
@@ -23,10 +23,25 @@
 - **Undo in the prompt box.** Cmd/Ctrl+Z brings back a message you just sent, text you deleted, or
   a completion you did not mean to insert.
 - The prompt box keeps its size when you come back to DGC from another view after a turn stopped.
-- Queued messages survive slash commands and backend restarts.
+- Queued messages survive slash commands, and a restart DGC holds until the turn ends.
 - The editor tabs and activity bar show the DGC mark instead of a terminal glyph.
 - An automatic CLI update runs `dgc update` in the installation it belongs to, and an older CLI's
   failed update is reported instead of passing silently.
+- **Chat history keeps its shape.** A chat rebuilt after a backend restart, a window reload or a
+  resume lost the space between prompts and answers. Queued messages were drawn twice and out of
+  order, and the view jumped after the panel was resized. All fixed.
+- **Stop never drops queued messages.** Messages waiting behind the stopped turn come back as not
+  sent, ready to restore.
+- **Continue survives a killed backend.** A running turn is saved at each step, so a backend that is
+  killed or crashes still offers Continue for the turn it was on.
+- **Security:** the artifact server never publishes dot-files, secret files or a project's source. A
+  page at a project root publishes only what it links, and the server answers only to this machine's
+  own addresses.
+- In full-auto, asking to choose between options opens the options picker.
+- Browser screenshots and images attached by @-mention, drag or Add File to Chat reach the model.
+- Undo works on whole typing runs; drafts keep pasted-text chips across a reload; `/usage` opens
+  Token Usage; the Update CLI terminal stays open with the installer's output; the prompt box shows
+  no scrollbar beside one line on HiDPI screens; command titles no longer read "DGC: DGC:".
 
 ## 0.23.1 — 2026-09-14
 

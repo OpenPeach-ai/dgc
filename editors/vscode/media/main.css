@@ -440,7 +440,8 @@ button.act:hover { border-color: var(--accent); }
 /* background monitors — a rail row of running monitors (above the others) with a Stop per chip,
    and one bounded card per event inside the turn it arrived in. */
 #monitorsbar .rail-row { flex: 1; flex-wrap: nowrap; }
-#monitorsbar .rail-row > .monitors-icon, #monitorsbar .rail-row > .monitors-paused { align-self: flex-start; margin-top: 8px; }
+#monitorsbar .rail-row > .monitors-icon, #monitorsbar .rail-row > .monitors-paused,
+#monitorsbar .rail-row > .monitors-count { align-self: flex-start; margin-top: 8px; }
 #monitorsbar .monitors-icon { color: var(--accent-text); }
 #monitorsbar[data-paused="true"] .monitors-icon { color: var(--faint); }
 .monitors-count { flex: none; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
@@ -472,7 +473,7 @@ button.act:hover { border-color: var(--accent); }
 .monitor-lines { max-height: 12em; margin: var(--sp-1) 0 0; overflow: auto; white-space: pre-wrap;
   overflow-wrap: anywhere; color: var(--text); font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
 .monitor-more { margin-top: var(--sp-1); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.monitor-list-row { align-items: center; }
+.monitor-list-row { align-items: center; padding-block: 2px; }
 .monitor-list-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .monitor-note .codicon { color: var(--accent-text); }
@@ -744,32 +745,36 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .set-title { font: var(--w-semi) var(--t-base)/1 var(--sans); color: var(--text-strong); display: inline-flex; align-items: center; gap: var(--sp-2); }
 .set-title .codicon { color: var(--accent-text); }
 .settings-nav { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); overflow-x: auto; border-bottom: 1px solid var(--border); }
-.set-tab { border: 0; border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--faint); background: transparent; cursor: pointer; font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; }
+/* Settings text a reader needs (tab names, hints, notes, headings, Close) uses --muted, never --faint:
+   --faint is VS Code's disabledForeground, rgba(97,97,97,.5) in the light themes, which reads 2.1:1. */
+.set-tab { border: 0; border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--muted); background: transparent; cursor: pointer; font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; }
 .set-tab:hover { color: var(--text); background: var(--surface2); }
 .set-tab.active { color: var(--text-strong); background: var(--sel); }
 .set-body { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-3) var(--sp-4); }
 .set-section { display: flex; flex-direction: column; gap: 0; }
-.set-group { margin-top: var(--sp-5); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border-strong); font: var(--w-bold) var(--t-xs)/1.2 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+.set-group { margin-top: var(--sp-5); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border-strong); font: var(--w-bold) var(--t-xs)/1.2 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
 .set-group:first-child { margin-top: 0; }
-.set-hint { text-transform: none; letter-spacing: 0; font-weight: var(--w-reg); color: var(--faint); }
+.set-hint { text-transform: none; letter-spacing: 0; font-weight: var(--w-reg); color: var(--muted); }
 .set-hint code, .set-body code { font-family: var(--mono); background: var(--surface2); color: var(--muted); padding: 0 var(--sp-1); border-radius: var(--r-sm); }
 #settings label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--text); }
 #settings label:last-child { border-bottom: 0; }
 #settings label > select, #settings label > input, #settings label > .set-row { margin-left: auto; flex: 0 0 min(240px, 46%); }
 /* The hint sits under the whole row: DOM order is text, hint, control, so ordering the hint
    last is what lets the control stay beside the label it belongs to. */
-#settings label > .set-hint { order: 3; flex: 1 0 100%; margin: 0; color: var(--faint); }
+#settings label > .set-hint { order: 3; flex: 1 0 100%; margin: 0; color: var(--muted); }
 #settings input, #settings select { min-height: var(--control); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: var(--sp-1) var(--sp-2); width: 100%; }
 #settings input:focus, #settings select:focus { outline: none; border-color: var(--vscode-focusBorder, var(--accent)); }
 #settings input::placeholder { color: var(--faint); }
 .set-row { display: flex; gap: var(--sp-1); min-width: 0; }
-.set-note { margin: var(--sp-1) 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.set-note { margin: var(--sp-1) 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .settings-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-2); }
 .set-foot { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3); border-top: 1px solid var(--border); }
 .set-save { width: auto; padding: 0 var(--sp-4); height: 32px; font: var(--w-semi) var(--t-sm)/1 var(--sans); }
 /* Outside the composer box, the way Codex keeps its status line clear of the controls. */
 #followup-hint { padding: var(--sp-2) var(--sp-1) 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .set-foot .fbtn { height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); }
+.set-foot .fbtn, .set-head .fbtn { color: var(--muted); }
+.set-foot .fbtn:hover, .set-head .fbtn:hover { color: var(--text); }
 
 /* Token Usage tab. It reuses the settings rows (label + select, .set-group headings, .set-note)
    and adds only what a report needs: figures, a table that scrolls inside its own box, and two
@@ -951,12 +956,14 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .artifact .alabel { font: var(--w-reg) var(--t-sm)/1 var(--sans); color: var(--muted); }
 .artifact .aurl { display: block; width: 100%; margin: var(--sp-2) 0 var(--sp-2); padding: 0; border: 0; background: transparent; text-align: left; font: var(--w-med) var(--t-sm)/1.45 var(--mono); color: var(--accent-text); cursor: pointer; word-break: break-all; }
 .artifact .aurl:hover { color: var(--lav); text-decoration: underline; }
-.artifact .abtns { display: flex; gap: var(--sp-2); }
-.artifact .abtn { cursor: pointer; font: var(--w-semi) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
-.artifact .abtn:hover { border-color: var(--accent); }
-.artifact .abtn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
-.artifact .abtn.primary:hover { background: var(--accent-hover); }
-.artifact .abtn:disabled, .artifact-list-row .abtn:disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
+/* The same buttons serve the artifact card and the /artifact and /monitors listing cards (plain
+   .card rows); scoped to .artifact alone, the listing Stop buttons fell back to the browser's own. */
+:is(.artifact, .card) .abtns { display: flex; gap: var(--sp-2); }
+:is(.artifact, .card) .abtn { cursor: pointer; font: var(--w-semi) var(--t-sm)/1 var(--sans); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+:is(.artifact, .card) .abtn:hover { border-color: var(--accent); }
+:is(.artifact, .card) .abtn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+:is(.artifact, .card) .abtn.primary:hover { background: var(--accent-hover); }
+:is(.artifact, .card) .abtn:disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
 .artifact-list-row.stopping { opacity: .72; }
 
 /* Windows High Contrast / VS Code forced-colors mode. System colors preserve the user's chosen
@@ -978,11 +985,11 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   }
   .tool, .diff, .card, .tasks-panel, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
   #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
-  #settings input, #settings select, button.act, button.link, .artifact .abtn {
+  #settings input, #settings select, button.act, button.link, :is(.artifact, .card) .abtn {
     border-color: CanvasText;
   }
   button.act.primary, .cmenu .mrow.sel, .pop .pi.sel,
-  .csend, .csend[data-mode="auto"], .artifact .abtn.primary {
+  .csend, .csend[data-mode="auto"], :is(.artifact, .card) .abtn.primary {
     forced-color-adjust: none; background: Highlight; color: HighlightText;
     border-color: Highlight; box-shadow: none;
   }

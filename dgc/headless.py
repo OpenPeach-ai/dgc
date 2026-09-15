@@ -22,7 +22,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
-from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
+from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions, validate_image_data_uris
 from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
@@ -1530,8 +1530,14 @@ class Backend:
                     close_reasoning = getattr(self.ui, "close_open_reasoning", None)
                     if callable(close_reasoning):
                         close_reasoning()       # no reasoning block outlives its turn
-                    self.em.emit("turn_end", turn_id=tid,
-                                 reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                    # A turn the backend's own shutdown cancelled was interrupted, not stopped: close()
+                    # cancels whatever outlasts its grace period, and "cancelled" is what a person
+                    # pressing Stop gets. Ending it "error" (as the agent's own landing does) is what
+                    # lets the editor offer to continue it once the backend is back.
+                    shutting_down = getattr(self.agent, "stopping", False) is True
+                    reason = ("error" if shutting_down else "cancelled") if cancelled else (
+                        "error" if failed else "completed")
+                    self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._emit_context()
@@ -2195,36 +2201,71 @@ class Backend:
             manager.stop_all()
         return outcome
 
+    def _editor_image_mentions(self, context, images):
+        """The pixels of image files mentioned in an editor prompt's context, with a notice saying
+        what was attached or skipped; None when there is nothing to do (no file mention, or a
+        subscription CLI turn, which reads the path itself)."""
+        if not isinstance(context, list) or not any(
+                isinstance(item, dict) and item.get("type") == "file_mention" for item in context):
+            return None
+        config = getattr(self, "config", getattr(self.agent, "config", None))
+        config_get = getattr(config, "get", None)
+        if config is None or (callable(config_get) and config_get("subscription_engine", "")):
+            return None
+        mentioned = editor_image_mentions(context, config.project_root, images or ())
+        if mentioned.notices:
+            self.em.emit("info", message="; ".join(mentioned.notices))
+        return mentioned
+
     def _start_eta_ticker(self, turn_id: str) -> threading.Event:
         """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
         stop = threading.Event()
-        agent = self.agent
+        state = {"label": "", "at": 0.0}
 
         def tick() -> None:
-            last_label, last_emit = "", 0.0
             while not stop.wait(1.5):
-                try:
-                    snapshot = agent.eta_snapshot()
-                except Exception:
-                    snapshot = None
-                if snapshot is None or not snapshot.visible:
-                    continue
-                now = time.monotonic()
-                if snapshot.label == last_label and now - last_emit < 15.0:
-                    continue
-                last_label, last_emit = snapshot.label, now
-                try:
-                    self.em.emit("turn_eta", turn_id=turn_id,
-                                 elapsed_seconds=round(float(snapshot.elapsed), 1),
-                                 remaining_low_seconds=round(float(snapshot.low), 1),
-                                 remaining_high_seconds=round(float(snapshot.high), 1),
-                                 confidence=round(float(snapshot.confidence), 3),
-                                 label=snapshot.label, tasks_done=int(snapshot.tasks_done),
-                                 tasks_total=int(snapshot.tasks_total))
-                except Exception:
+                if not self._publish_eta(turn_id, state):
                     return
         threading.Thread(target=tick, name="dgc-eta", daemon=True).start()
         return stop
+
+    def _publish_eta(self, turn_id: str, state: dict) -> bool:
+        """One tick of the ETA ticker; False once the event stream is gone.
+
+        While a model request is silent or being retried (a stall notice is up), the estimate is
+        withdrawn: its priors know nothing about a model that is not answering, and "~5–30 s left"
+        beside "no reply for 45s+" was a promise nothing supported. An empty label clears it; the
+        next real estimate after the model answers is published again.
+        """
+        try:
+            snapshot = self.agent.eta_snapshot()
+        except Exception:
+            snapshot = None
+        stalled = bool(getattr(getattr(self, "ui", None), "_model_waits", None))
+        if stalled:
+            if not state["label"]:
+                return True
+            label = ""
+        elif snapshot is None or not snapshot.visible:
+            return True
+        else:
+            label = snapshot.label
+        now = time.monotonic()
+        if label and label == state["label"] and now - state["at"] < 15.0:
+            return True
+        state["label"], state["at"] = label, now
+        number = lambda name, digits: round(float(getattr(snapshot, name, 0) or 0), digits)
+        try:
+            self.em.emit("turn_eta", turn_id=turn_id,
+                         elapsed_seconds=number("elapsed", 1),
+                         remaining_low_seconds=number("low", 1),
+                         remaining_high_seconds=number("high", 1),
+                         confidence=number("confidence", 3),
+                         label=label, tasks_done=int(getattr(snapshot, "tasks_done", 0) or 0),
+                         tasks_total=int(getattr(snapshot, "tasks_total", 0) or 0))
+        except Exception:
+            return False
+        return True
 
     def _emit_context(self, request_id: str | None = None) -> None:
         try:
@@ -2511,6 +2552,7 @@ class Backend:
                 text = self._history_display_text(m, text)
                 tool_calls = list(m.get("tool_calls") or [])[:16]
                 items.extend(self._history_reasoning_items(m, current, after_text=False))
+                items.extend(self._history_stitched_recoveries(m, current))
                 if text.strip():
                     # One delta per saved message: the panel's text path is the same, and a saved
                     # message has no chunk boundaries left to reproduce.
@@ -2648,6 +2690,11 @@ class Backend:
                     return
                 text = cmd["text"].strip()
                 inputs = {key: cmd[key] for key in ("skills", "templates", "images", "context") if key in cmd}
+                # A goal keeps its attached images, the ones attached by @-mention included.
+                pasted = inputs.get("images") if isinstance(inputs.get("images"), list) else []
+                mentioned = self._editor_image_mentions(inputs.get("context"), pasted)
+                if mentioned is not None and mentioned.images:
+                    inputs["images"] = [*pasted, *mentioned.images]
                 if not text or not self.agent.set_goal(text, replace=True, token_budget=cmd.get("token_budget"), inputs=inputs):
                     self.em.emit("command_rejected", command=t, reason="invalid_goal",
                                  message=self.agent._last_persist_error or "Enter a goal objective.",
@@ -2728,6 +2775,12 @@ class Backend:
                              **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
+            # An image attached by @-mention, drag or Add File to Chat arrives as a path, which a
+            # model cannot look at: attach its pixels, as the terminal's @file.png does. (A delegated
+            # CLI keeps the path, and reads the file itself.)
+            mentioned = self._editor_image_mentions(context, images)
+            if mentioned is not None:
+                images = (*images, *mentioned.images)
             if isinstance(context, list) and any(isinstance(item, dict) and item.get("type") == "mcp_context" for item in context):
                 safe = redact_value(context, secret_values(self.config))
                 formatted = _format_editor_context(safe)
@@ -3092,7 +3145,18 @@ class Backend:
         elif t in ("cancel", "interrupt"):
             with self._turn_state_lock():
                 self.agent.cancelled.set()
+                # Stop stops the queue too, but the messages in it are the person's words. Dropping
+                # them silently left their bubbles looking sent in the editor with nothing to restore;
+                # hand each one back by its id, the way close() does when the backend goes down.
+                returned = [item[4] for item in self._queue if len(item) > 4 and item[4]]
                 self._queue.clear()
+                for index, request_id in enumerate(returned):
+                    fields = {}
+                    if index == 0:
+                        many = len(returned) > 1
+                        fields["message"] = (f"Stopped before {len(returned)} queued messages ran; they were not sent."
+                                             if many else "Stopped before the queued message ran; it was not sent.")
+                    self.em.emit("steering_update", request_id=request_id, state="returned", **fields)
             hub = getattr(self.agent, "monitors", None)
             if hub is not None and hub.pending_count():
                 # Stop means stop: events keep arriving but no turn starts on them until the next
@@ -4085,6 +4149,28 @@ class Backend:
             self._history_orphan_recoveries = [item]
         return [item]
 
+    def _history_stitched_recoveries(self, message: dict, turn: dict | None) -> list:
+        """The reconnect lines of an answer DGC joined from a cut-off partial and its continuation.
+
+        The join drops the recovery prompt from the transcript and keeps its notice, in order, on
+        the answer (``_dgc_stream_recoveries``). Each replays as a recovered line drawn above the
+        answer's text, which is where the live panel settles it once the continuation arrives.
+        """
+        from .editor_protocol import MODEL_FAILURE_KINDS
+        notices = message.get("_dgc_stream_recoveries") if isinstance(message, dict) else None
+        if not isinstance(turn, dict) or not isinstance(notices, list):
+            return []
+        items = []
+        for notice in notices[:16]:
+            if not isinstance(notice, dict) or notice.get("kind") != "stream_recovery":
+                continue
+            turn["retry_n"] = int(turn.get("retry_n") or 0) + 1
+            kind = notice.get("cause") if notice.get("cause") in MODEL_FAILURE_KINDS else "other"
+            items.append(self._history_retry_item(str(turn["id"]), turn["retry_n"], "recovered", kind,
+                                                  notice.get("attempt"), notice.get("max"),
+                                                  notice.get("summary"), notice.get("endpoint")))
+        return items
+
     def _history_turn_closing_items(self, turn: dict) -> list:
         """Items a replayed turn draws last, before its ``turn_end``: the reconnect it gave up on."""
         from .editor_protocol import MODEL_FAILURE_KINDS
@@ -4516,7 +4602,10 @@ def serve(config: Config) -> None:
         end_cause = type(interrupt).__name__
         _end_line(crash_log, f"serve loop ended: {end_cause}; pipe: {pipe_watch.describe()}")
     except _Terminated as terminated:
-        end_cause = f"{_signal_name(terminated.signum)} — the parent asked us to stop"
+        # A signal carries no sender here, so do not name one. The editor stops a backend with a
+        # `shutdown` command (reported separately above); a signal came from outside that path.
+        end_cause = (f"{_signal_name(terminated.signum)} — a stop signal from another process, "
+                     "not a shutdown command from the editor")
         _end_line(crash_log,
                   f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
                   f"{commands} commands, last {last_command or 'none'!r}, turn running: "

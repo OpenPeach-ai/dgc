@@ -84,156 +84,156 @@
     "commands": [
       {
         "command": "dgc.focus",
-        "title": "DGC: Focus Chat",
+        "title": "Focus Chat",
         "category": "DGC"
       },
       {
         "command": "dgc.openCommandMenu",
-        "title": "DGC: Open Command Menu",
+        "title": "Open Command Menu",
         "category": "DGC",
         "icon": "$(terminal)"
       },
       {
         "command": "dgc.newSession",
-        "title": "DGC: New Session",
+        "title": "New Session",
         "category": "DGC",
         "icon": "$(add)"
       },
       {
         "command": "dgc.selectModel",
-        "title": "DGC: Select Model",
+        "title": "Select Model",
         "category": "DGC"
       },
       {
         "command": "dgc.connect",
-        "title": "DGC: Connect Provider",
+        "title": "Connect Provider",
         "category": "DGC"
       },
       {
         "command": "dgc.setMode",
-        "title": "DGC: Set Permission Mode",
+        "title": "Set Permission Mode",
         "category": "DGC"
       },
       {
         "command": "dgc.cycleMode",
-        "title": "DGC: Cycle Permission Mode",
+        "title": "Cycle Permission Mode",
         "category": "DGC"
       },
       {
         "command": "dgc.setThinking",
-        "title": "DGC: Set Thinking Level",
+        "title": "Set Thinking Level",
         "category": "DGC"
       },
       {
         "command": "dgc.addSelection",
-        "title": "DGC: Add Selection to DGC",
+        "title": "Add Selection to DGC",
         "category": "DGC"
       },
       {
         "command": "dgc.addFile",
-        "title": "DGC: Add File to Chat",
+        "title": "Add File to DGC",
         "category": "DGC"
       },
       {
         "command": "dgc.restart",
-        "title": "DGC: Restart Backend",
+        "title": "Restart Backend",
         "category": "DGC"
       },
       {
         "command": "dgc.resume",
-        "title": "DGC: Resume Session",
+        "title": "Resume Session",
         "category": "DGC",
         "icon": "$(history)"
       },
       {
         "command": "dgc.rewind",
-        "title": "DGC: Rewind (code + conversation)",
+        "title": "Rewind (code + conversation)",
         "category": "DGC",
         "icon": "$(discard)"
       },
       {
         "command": "dgc.nameSession",
-        "title": "DGC: Name Session",
+        "title": "Name Session",
         "category": "DGC"
       },
       {
         "command": "dgc.openSkills",
-        "title": "DGC: Skills",
+        "title": "Skills",
         "category": "DGC"
       },
       {
         "command": "dgc.openMcp",
-        "title": "DGC: MCP Servers",
+        "title": "MCP Servers",
         "category": "DGC"
       },
       {
         "command": "dgc.openDocs",
-        "title": "DGC: Documentation",
+        "title": "Documentation",
         "category": "DGC"
       },
       {
         "command": "dgc.openPermissions",
-        "title": "DGC: Permission Rules",
+        "title": "Permission Rules",
         "category": "DGC"
       },
       {
         "command": "dgc.openMemory",
-        "title": "DGC: Memory",
+        "title": "Memory",
         "category": "DGC"
       },
       {
         "command": "dgc.openHooks",
-        "title": "DGC: Lifecycle Hooks",
+        "title": "Lifecycle Hooks",
         "category": "DGC"
       },
       {
         "command": "dgc.viewPlan",
-        "title": "DGC: View Saved Plan",
+        "title": "View Saved Plan",
         "category": "DGC"
       },
       {
         "command": "dgc.artifacts",
-        "title": "DGC: Artifact Previews",
+        "title": "Artifact Previews",
         "category": "DGC"
       },
       {
         "command": "dgc.goal",
-        "title": "DGC: Show Goal",
+        "title": "Show Goal",
         "category": "DGC"
       },
       {
         "command": "dgc.handoff",
-        "title": "DGC: Generate Handoff",
+        "title": "Generate Handoff",
         "category": "DGC"
       },
       {
         "command": "dgc.retainedTasks",
-        "title": "DGC: Retained Sub-agent Tasks",
+        "title": "Retained Sub-agent Tasks",
         "category": "DGC"
       },
       {
         "command": "dgc.compact",
-        "title": "DGC: Compact Context",
+        "title": "Compact Context",
         "category": "DGC"
       },
       {
         "command": "dgc.updateCli",
-        "title": "DGC: Update CLI to Latest",
+        "title": "Update CLI to Latest",
         "category": "DGC"
       },
       {
         "command": "dgc.openNotes",
-        "title": "DGC: Show Context Notes",
+        "title": "Show Context Notes",
         "category": "DGC"
       },
       {
         "command": "dgc.exportTraining",
-        "title": "DGC: Export Training Data",
+        "title": "Export Training Data",
         "category": "DGC"
       },
       {
         "command": "dgc.settings",
-        "title": "DGC: Settings",
+        "title": "Settings",
         "category": "DGC",
         "icon": "$(settings-gear)"
       }

@@ -41,7 +41,11 @@ def _names(root, deadline):
     else:
         names = set(review.entries())
         raw = review.git(["ls-files", "--others", "--exclude-standard", "-z", "--", review.scope])
-        names.update(review.path(item) for item in raw.rstrip(b"\0").split(b"\0") if item)
+        # Untracked files in DGC's own folder (browser screenshots, locks) or in dependency and
+        # cache folders are not the chat's edits, exactly as the non-Git scan below treats them.
+        names.update(name for name in (review.path(item) for item in raw.rstrip(b"\0").split(b"\0")
+                                       if item)
+                     if not any(part in _IGNORED for part in str(name).split("/")))
         return [(review.repo / name).relative_to(root).as_posix() for name in sorted(names)
                 if name not in review.skip_worktree]
     # Non-Git folders still support chat reviews. Descriptor-based enumeration refuses parent
