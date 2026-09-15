@@ -34,15 +34,18 @@
   open, the viewer says so and **Show** takes you there. Images come back after a reload or when the
   chat is reopened.
 - **Queued messages are no longer lost.** After **DGC: Restart Backend**, a window reload or a
-  backend exit, messages that were waiting behind a turn come back as not sent, ready to restore; a
-  reloaded panel still shows them queued.
+  backend exit, messages that were waiting behind a turn, and steering the backend had not applied
+  yet, come back as not sent, ready to restore. Reloading only the DGC panel keeps them waiting.
 - **Reloading the panel mid-turn keeps the turn running**, with Stop, one card per open permission,
   plan or question, and a streaming answer continuing in the same turn.
 - A steered turn reopens as the finished turn it was, with one bubble per steering message.
-- An answered approval card ends with what was decided (Allowed once, Always allowed with its rule,
-  Denied with your note) and drops the deny-note box.
+- An answered permission, plan or MCP card ends with what was decided (Allowed once, Always allowed
+  with its rule, Denied with your note, Approved · acceptEdits mode, Kept planning, Declined) and
+  drops its note box.
 - A refused artifact preview shows as a failed step; in a narrow panel the goal row leaves out an
   objective it has no room for.
+
+## 0.24.0 — 2026-09-15
 
 - **Editor protocol v13; requires DGC CLI 0.39.0.** Adds background monitors, token usage reports
   and resuming a turn the backend was interrupted in. A mismatched pair says which side to update.

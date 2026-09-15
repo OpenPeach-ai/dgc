@@ -123,7 +123,7 @@
 <div class="heading-row h2-row"><h2 id="what-dgc-tries-again">What DGC tries again</h2><a class="anchor" href="#what-dgc-tries-again" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>The connection failed</strong>: refused, a name that does not resolve, TLS, a proxy, a reset, or a timeout while connecting.</li>
-<li><strong>The server is busy or failed</strong>: 429 and overloaded answers, and 5xx errors. A <code>Retry-After</code> the server sends is respected.</li>
+<li><strong>The server is busy or failed</strong>: 429 and overloaded answers, and 5xx errors. A <code>Retry-After</code> the server sends is respected, up to 10 seconds.</li>
 </ul>
 <p>These are sent again up to three more times, with a short backoff between tries.</p>
 <ul>

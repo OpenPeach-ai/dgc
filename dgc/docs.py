@@ -1267,7 +1267,8 @@ permission rule) or **Deny**, and a denial can carry a note that reaches the mod
 
 Some choices are yours: a trade-off with no safe default, or a requirement the request leaves open.
 The model asks with a question card instead of a list of options in prose. It can ask up to four
-questions at once, each with two to six options, and it puts the option it recommends first.
+questions at once, each with two to four options (six at most), and it puts the option it recommends
+first.
 
 - **The card docks in the prompt box** in place of the text box. **Stop**, the mode and model pickers
   and the context meter stay where they are, and anything you had typed comes back when the question
@@ -1624,7 +1625,7 @@ wrong and whether trying again worked.
 - **The connection failed**: refused, a name that does not resolve, TLS, a proxy, a reset, or a
   timeout while connecting.
 - **The server is busy or failed**: 429 and overloaded answers, and 5xx errors. A `Retry-After` the
-  server sends is respected.
+  server sends is respected, up to 10 seconds.
 
 These are sent again up to three more times, with a short backoff between tries.
 
