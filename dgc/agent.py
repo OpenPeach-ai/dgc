@@ -886,7 +886,11 @@ class _SubUI:
 
     def on_text(self, chunk):
         self._buf.append(chunk)
-        self._emit("on_text", chunk)
+        # A parallel child's prose is its task result, and the task card already carries that. Its
+        # replay reached the parent as unlabelled main-transcript text that the saved transcript (so
+        # every history replay) never has; only a serial child's prose streams live.
+        if not self._buffered:
+            self._emit("on_text", chunk)
 
     def on_thinking(self, chunk, block=None):
         # A copy per forward (subagent_block): a buffered child replays exactly what it saw, and
@@ -907,7 +911,8 @@ class _SubUI:
         # A delegated child's prose is commentary to the PARENT turn, whatever the child's own loop
         # called it — including the UNPHASED closes its cancel, error, timeout and overflow paths
         # use, which the compatibility rule would otherwise let designate the parent's answer.
-        self._emit("end_stream", "commentary")
+        if not self._buffered:          # a parallel child's prose is not replayed (see on_text)
+            self._emit("end_stream", "commentary")
 
     def turn_activity(self, state, label, detail=""):
         self._emit("turn_activity", state, label, detail)

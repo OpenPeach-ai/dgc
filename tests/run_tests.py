@@ -9996,9 +9996,10 @@ def test_isolated_subagents():
 
     class ParallelUI(UI):
         def __init__(self):
-            super().__init__(); self.stream_events = []
-        def on_text(self, chunk): self.stream_events.append(str(chunk))
-        def end_stream(self, phase=""): self.stream_events.append("<end>")
+            super().__init__(); self.stream_events = []; self.prose = []
+        def on_text(self, chunk): self.prose.append(str(chunk))
+        def end_stream(self, phase=""): self.prose.append("<end>")
+        def turn_activity(self, state, label, detail=""): self.stream_events.append(str(label))
 
     class ParallelTaskClient:
         tools_supported = True
@@ -10031,12 +10032,13 @@ def test_isolated_subagents():
         with parallel_lock:
             parallel_state["active"] += 1
             parallel_state["peak"] = max(parallel_state["peak"], parallel_state["active"])
-        self.ui.on_text(f"{child_prompt}:one")
+        self.ui.turn_activity("tool", f"{child_prompt}:one")
+        self.ui.on_text(f"{child_prompt}:prose")
         try:
             parallel_barrier.wait(timeout=2)
             _time.sleep(0.02 if child_prompt.endswith("a") else 0.01)
             (self.config.project_root / f"{child_prompt}.txt").write_text(child_prompt + "\n")
-            self.ui.on_text(f"{child_prompt}:two")
+            self.ui.turn_activity("tool", f"{child_prompt}:two")
             self.ui.end_stream()
         finally:
             with parallel_lock:
@@ -10061,9 +10063,12 @@ def test_isolated_subagents():
           and parallel.activity_totals["tool_calls"] == 2,
           detail=f"tools={parallel_tools!r}; activity={parallel.activity_totals!r}")
     check("parallel child streams replay as atomic per-task groups",
-          all(parallel_ui.stream_events.index(f"parallel-{name}:two")
+          all(f"parallel-{name}:one" in parallel_ui.stream_events
+              and parallel_ui.stream_events.index(f"parallel-{name}:two")
                   == parallel_ui.stream_events.index(f"parallel-{name}:one") + 1
               for name in ("a", "b")), detail=repr(parallel_ui.stream_events))
+    check("a parallel child's prose is its task result, never replayed as parent prose",
+          not any(":prose" in chunk for chunk in parallel_ui.prose), detail=repr(parallel_ui.prose))
     parallel_rewind = parallel.checkpoints.rewind(0)
     check("parallel integrations share the normal parent rewind checkpoint",
           parallel_rewind[1] == 2 and not (repo / "parallel-a.txt").exists()

@@ -546,6 +546,26 @@ class SerialAndParallelTests(HarnessCase):
         self.assertTrue(all(t < first_result for t in ends.values()))
         self.assertEqual({f["state"] for f in h.of("agent_ended")}, {"finished"})
 
+    def test_parallel_child_prose_is_not_replayed_into_the_parent_transcript(self):
+        h = self.make(git=True, max_parallel_tasks=2)
+        calls = [ToolCall(f"p{n}", "task", {"description": f"part {n}", "prompt": f"CHILD{n} work"})
+                 for n in range(2)]
+        h.run("split", [("CHILD0", child(summary="summary from part zero")),
+                        ("CHILD1", child(summary="summary from part one")),
+                        ("split", calls_then(calls, final="Both parts are done."))])
+        self.assertFramesValid(h)
+        live = "".join(f["text"] for f in h.of("text_delta"))
+        self.assertNotIn("summary from part", live, "a parallel child's prose is not main-transcript text")
+        self.assertIn("Both parts are done.", live)
+        results = [f["output"] for f in h.of("tool_result") if f["name"] == "task"]
+        self.assertTrue(any("summary from part zero" in out for out in results), results)
+        self.assertTrue(any("summary from part one" in out for out in results), results)
+        replayed = "".join(i.get("text", "") for i in h.backend._history() if i.get("type") == "text_delta")
+        self.assertEqual(replayed, live, "live and replay show the same prose")
+        # The child's other trace (its tool rows) still replays into the parent.
+        self.assertTrue(any(f["type"] == "tool_call" and str(f.get("call_id", "")).startswith("sub-")
+                            for f in h.stream.frames()))
+
     def test_accept_edits_runs_tasks_serially(self):
         h = self.make(mode="acceptEdits")
         h.answer("permission_request", {"decision": "once"})
