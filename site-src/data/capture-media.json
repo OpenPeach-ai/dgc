@@ -12,35 +12,35 @@
         "edit_file",
         "bash"
       ],
-      "duration_seconds": 47.5,
-      "duration_label": "0:48",
-      "provenance": "Actual current DGC 0.40.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "duration_seconds": 47.433,
+      "duration_label": "0:47",
+      "provenance": "Actual current DGC 0.40.2 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
-      "time_compression": 1,
+      "time_compression": 1.0,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "330261a3ef7c700cf73d540ba1ef189b03eff5f7d87483a88f9b0fffc63a8315",
-          "bytes": 2312926,
+          "sha256": "73963f5747b7e91a7ef6b82efea0e32d316d6cdf15c1bbffd0c1dd91e48368f6",
+          "bytes": 2009662,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.433
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "cb4daf96b9e2048a3108899e3b8cba9c6286be1efacdea6e1ba97d01b82a7ef5",
-          "bytes": 567251,
+          "sha256": "7724a613662d6c13c4c35ec4ec3e09314cc7b67dcce26e528dfce8e440fef079",
+          "bytes": 483310,
           "codec": "h264",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.433333
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
-          "sha256": "5c9b418857cfc86ba96b6355d2b053e5e9b2b7ec7a4f8e80e77f0627795f588c",
-          "bytes": 123410,
+          "sha256": "84a8fef5abc852dbb6be350f092cf70cfbe069b8464ff5849514a7fe7283b1ba",
+          "bytes": 106559,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720

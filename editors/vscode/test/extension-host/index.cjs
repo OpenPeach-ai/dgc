@@ -500,7 +500,7 @@ async function run() {
     assert.ok(agentFrames.filter((item) => item.eventType === "agent_ended").length >= 2, "agent_ended reaches the webview");
     assert.equal(protocolStops(), stopsBefore, "the extension accepts every agents frame");
     const idleProbe = await probe();
-    assert.deepEqual([idleProbe.state, idleProbe.label], ["idle", "2 agents"], "two finished agents: the idle ring");
+    assert.equal(idleProbe.state, "hidden", "successful agents leave the composer when they finish");
 
     // A reloaded webview asks the backend for the list again.
     const restores = () => backendCommands(backendLogPath).filter((command) => command.type === "list_agents"
@@ -510,7 +510,7 @@ async function run() {
     await waitFor(() => restores() > restoresBefore);
     await waitFor(() => posted().some((item) => item.eventType === "agents"));
     const restoredProbe = await probe();
-    assert.deepEqual([restoredProbe.state, restoredProbe.label], ["idle", "2 agents"], "the restored list keeps the pill");
+    assert.equal(restoredProbe.state, "hidden", "restoring finished history does not revive the composer count");
 
     // A new chat hides it.
     await testApi.testOnlyWebviewMessage(testToken, { type: "slash", action: "new" });
