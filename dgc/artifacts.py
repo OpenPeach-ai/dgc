@@ -56,7 +56,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from .config import USER_HOME, _write_private_json
 
@@ -142,6 +142,12 @@ _SHELL_CSP = ("default-src 'none'; script-src 'nonce-{n}'; style-src 'nonce-{n}'
 _PLAN_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; "
              "form-action 'none'; frame-ancestors 'self'")
 _FILE_CSP = "frame-ancestors 'self'"
+# The DGC mark as the pages' icon: declared inline (both page CSPs allow data: images) and served at
+# /favicon.ico for an artifact page opened on its own. Without it every open logged a favicon 404.
+_ICON_SVG = ('<svg viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" fill="#7C5CFF">'
+             '<path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/>'
+             '<path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>')
+_ICON_LINK = f'<link rel="icon" href="data:image/svg+xml,{quote(_ICON_SVG, safe="")}">'
 _PLAIN_CSP = "default-src 'none'; frame-ancestors 'self'"
 _UNSAFE_ENTRY_CHARS = frozenset('"\'<>`')
 
@@ -897,6 +903,7 @@ def render_plan_html(md: str, title: str = "Plan") -> str:
     body = _md_to_html(md)
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>{_esc(title)}</title>
+{_ICON_LINK}
 <style>
   :root{{--bg:#0B0B0C;--surface:#141416;--surface2:#1A1A1D;--code:#0E0E10;--border:#232326;--border-strong:#303034;
     --text:#F5F5F5;--text-strong:#FFFFFF;--muted:#9A9A9E;--faint:#6A6A6E;--accent:#7C5CFF;--lav:#A78BFA;
@@ -1146,6 +1153,9 @@ def _make_handler(server: "_Server"):
                 self._send(200, _shell_html(server, sel, nonce).encode("utf-8"),
                            csp=_SHELL_CSP.format(n=nonce))
                 return
+            if path == "/favicon.ico":
+                self._send(200, _ICON_SVG.encode("utf-8"), "image/svg+xml")
+                return
             if path == "/_list":
                 items = [{"id": a.id, "name": a.name, "path": a.path, "uptime": a.uptime}
                          for a in server.list()]
@@ -1210,6 +1220,7 @@ def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DGC Artifacts</title>
+{_ICON_LINK}
 <style{na}>
   :root{{--bg:#0B0B0C;--surface:#141416;--surface-2:#1A1A1D;--border:#232326;--border-strong:#303034;
     --text:#F5F5F5;--muted:#9A9A9E;--faint:#6A6A6E;--accent:#7C5CFF;--accent-hover:#6A4BF0;

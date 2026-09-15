@@ -275,6 +275,24 @@ class ArtifactServerSecurity(unittest.TestCase):
         self.assertEqual(file_headers.get("referrer-policy"), "no-referrer")
         self.assertIn("frame-ancestors 'self'", file_headers.get("content-security-policy", ""))
 
+    def test_the_shell_and_plan_pages_declare_an_icon_and_no_favicon_request_404s(self):
+        # Before: neither page declared an icon, so the browser fetched /favicon.ico and logged a 404
+        # on every open of the shell (and of an artifact page opened on its own).
+        _, headers, body = self.get("/")
+        icon = re.search(rb'<link rel="icon" href="(data:image/svg\+xml,[^"]+)"', body)
+        self.assertIsNotNone(icon, "the shell declares an inline icon")
+        self.assertIn("img-src 'self' data:", headers.get("content-security-policy", ""),
+                      "the shell's CSP allows the data: icon it declares")
+        _, plan_headers, plan = request(self.plan_port, "GET", f"/a/{self.plan.id}/")
+        self.assertRegex(plan, rb'<link rel="icon" href="data:image/svg\+xml,')
+        self.assertIn("img-src data:", plan_headers.get("content-security-policy", ""))
+        for port in (self.port, self.plan_port):
+            status, favicon_headers, favicon = request(port, "GET", "/favicon.ico")
+            self.assertEqual(status, 200, port)
+            self.assertEqual(favicon_headers.get("content-type"), "image/svg+xml")
+            self.assertTrue(favicon.startswith(b"<svg"), favicon[:40])
+        self.assertEqual(request(self.port, "GET", "/favicon.ico", host="evil.example.com")[0], 421)
+
     def test_plan_pages_forbid_scripts_and_loads(self):
         status, headers, body = request(self.plan_port, "GET", f"/a/{self.plan.id}/")
         self.assertEqual(status, 200)
