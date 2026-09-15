@@ -17,15 +17,26 @@ die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 say "DGC installer"
 
-command -v python3 >/dev/null 2>&1 || die "python3 (3.10+) is required — install it and re-run."
-PYV=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-python3 - <<'PY' || die "Python $PYV found, but DGC needs 3.10 or newer."
-import sys
-sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)
-PY
+# Finder-launched editors often see Apple's older system Python before a newer installation.
+# Updates pass the interpreter of the already working DGC; fresh installs search supported ones.
+PYTHON=""
+if [ -n "${DGC_PYTHON:-}" ]; then
+  "$DGC_PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null \
+    || die "DGC_PYTHON must name a working Python 3.10+ executable"
+  PYTHON="$DGC_PYTHON"
+else
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10 \
+    /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+      PYTHON=$(command -v "$candidate")
+      break
+    fi
+  done
+fi
+[ -n "$PYTHON" ] || die "Python 3.10+ is required — install it or set DGC_PYTHON to its executable"
 
-realpath_of() { python3 -c 'import os, sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"; }
-abspath_of() { python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$1"; }
+realpath_of() { "$PYTHON" -c 'import os, sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"; }
+abspath_of() { "$PYTHON" -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$1"; }
 
 # With no location given, update the install the user's `dgc` actually runs. A 0.38 `dgc update`
 # pipes this script into bash without saying where it lives, so a custom location would otherwise
@@ -33,7 +44,7 @@ abspath_of() { python3 -c 'import os, sys; print(os.path.abspath(os.path.expandu
 # $HOME is adopted: a source checkout, a foreign script or another account's install never is.
 ADOPTED=""
 if [ -z "${DGC_DATA_DIR:-}${DGC_DIR:-}${DGC_BIN:-}" ]; then
-  ADOPTED=$(python3 - "$HOME" <<'PY' || true
+  ADOPTED=$("$PYTHON" - "$HOME" <<'PY' || true
 import os, sys
 home = os.path.realpath(os.path.expanduser(sys.argv[1]))
 found = None
@@ -220,7 +231,7 @@ TMP=$(mktemp -d)
 # it when this script ends, however it ends, so there is no stale lock to reason about.
 mkdir -p "$DATA/versions"
 exec 9>>"$DATA/update.lock"
-if ! python3 -c 'import fcntl, sys
+if ! "$PYTHON" -c 'import fcntl, sys
 try:
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
@@ -275,7 +286,7 @@ in_use() {  # a process still runs this version (see dgc.install_layout.hold_run
   # dgc. A recycled pid belongs to something else, and a stale lock must not keep a republished
   # build that nothing runs.
   # Without /proc (macOS, the BSDs) the command line comes from ps; DGC_NO_PROCFS=1 forces that.
-  python3 - "$DATA/locks/$VER" "$VDIR" <<'PY'
+  "$PYTHON" - "$DATA/locks/$VER" "$VDIR" <<'PY'
 import os, re, subprocess, sys
 folder, vdir = sys.argv[1], sys.argv[2]
 procfs = os.environ.get("DGC_NO_PROCFS") != "1" and os.path.exists("/proc/self")
@@ -361,7 +372,7 @@ if [ ! -f "$VDIR/.complete" ]; then
   [ -f "$VDIR/requirements.lock" ] || die "release is missing requirements.lock"
 
   say "building DGC $VER in its own virtualenv (self-contained, no system changes)"
-  python3 -m venv "$VDIR/.venv" \
+  "$PYTHON" -m venv "$VDIR/.venv" \
     || die "could not create a virtualenv (on Debian/Ubuntu: sudo apt install python3-venv)"
   "$VDIR/.venv/bin/pip" install -q -r "$VDIR/requirements.lock" >/dev/null \
     || die "could not install DGC's dependencies — the previous version is still active"

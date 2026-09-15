@@ -4,9 +4,9 @@ One record per sub-agent that actually started, at any depth. The editor pill, t
 segment and `/agents` all read it; `dgc serve` publishes every change as `agent_started` /
 `agent_updated` / `agent_ended` frames and answers `list_agents` with a snapshot.
 
-Counting follows Claude Code's rule: ``total`` is every sub-agent started in this chat (finished,
-failed and stopped included) and it only resets when the chat changes; ``active`` is how many are
-queued, running or waiting on the user right now.
+``total`` retains this chat's history; ``active`` counts agents queued, running or waiting on the
+user right now. The composer displays active work and briefly retains failed/stopped rows, rather
+than presenting the historical total as ongoing work.
 """
 from __future__ import annotations
 
@@ -625,6 +625,8 @@ def classify_result(description: str, content: str | None) -> tuple[str, str] | 
     if content is None:
         return "stopped", ""
     text = str(content).lstrip()
+    if text.startswith("error: Sub-task "):
+        text = text[len("error: "):]
     head = f"Sub-task '{description}' "
     if text.startswith(head):
         rest = text[len(head):]

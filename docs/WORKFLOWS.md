@@ -22,6 +22,14 @@ plan remains available through `/view-plan`. Execution uses DGC's existing plan-
 selector to leave plan mode deliberately. Selecting a workflow in the composer does not change
 permissions until its complete prompt has passed validation and can start.
 
+## Read a document in the browser
+
+Ask DGC to show a Markdown plan or report in your browser, from any permission mode.
+`present_document` creates a light page with section links, tables, a Markdown download and a
+print layout. Use the browser’s Print → Save as PDF to export it. The links are local to the
+computer running DGC and remain available while that process runs. This tool does not request
+execution approval or switch modes; general interactive HTML previews still use `artifact`.
+
 ## Review
 
 ```text

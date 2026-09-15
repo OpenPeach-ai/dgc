@@ -126,8 +126,10 @@
 <li><strong>Approve</strong> — DGC drops back to your previous edit mode and executes the plan.</li>
 <li><strong>Keep planning</strong> — give feedback, stay read-only, and receive a revised plan.</li>
 </ul>
+<div class="heading-row h2-row"><h2 id="read-a-plan-in-your-browser-from-any-mode">Read a plan in your browser, from any mode</h2><a class="anchor" href="#read-a-plan-in-your-browser-from-any-mode" aria-label="Link to this section">#</a></div>
+<p>Ask &quot;Show this Markdown plan in my browser.&quot; The native <code>present_document</code> tool creates a light page with section links, tables and a Markdown download. It works in Auto and other modes, without an execution-approval dialog. Use browser Print → Save as PDF to export a PDF. Links are local to the machine running DGC and last while that process runs. General interactive HTML previews use <code>artifact</code>; approving a plan to execute still uses <code>present_plan</code> in Plan mode.</p>
 <div class="heading-row h2-row"><h2 id="what-read-only-means">What read-only means</h2><a class="anchor" href="#what-read-only-means" aria-label="Link to this section">#</a></div>
-<p>Plan mode is enforced in the permission layer, not by instruction. While it is active the agent may use only the read-only tools — reading files, <code>grep</code>, <code>glob</code>, code intelligence, web search — plus the one tool that presents a plan. Every model-requested mutation tool is denied outright: no file writes, no edits, no shell commands. Two further limits apply only in this mode: paths outside the project are refused, and MCP discovery and execution are not exposed at all.</p>
+<p>Plan mode is enforced in the permission layer, not by instruction. While it is active the agent may use only the read-only tools — reading files, <code>grep</code>, <code>glob</code>, code intelligence, web search — plus planning, checklist and document controls. Every model-requested mutation tool is denied outright: no file writes, no edits, no shell commands. Two further limits apply only in this mode: paths outside the project are refused, and MCP discovery and execution are not exposed at all.</p>
 <p>Plan mode therefore prevents model-requested project mutations before you have read what the agent intends to do. Configured lifecycle hooks still run at their normal events, DGC still writes private session and plan state, and the selected model or remote integrations may receive inspected content, so review those settings before opening unfamiliar or sensitive code.</p>
 <p>DGC keeps the plan inline in the transcript, saves a <code>plan.md</code> beside the session, and (by default) renders a self-contained preview on loopback. <code>/view-plan</code> reopens the saved copy. The preview never inherits LAN sharing; arbitrary project previews remain disabled in plan mode unless <code>artifact_in_plan</code> is explicitly enabled.</p>
 <div class="heading-row h2-row"><h2 id="workflow-commands">Workflow commands</h2><a class="anchor" href="#workflow-commands" aria-label="Link to this section">#</a></div>
@@ -140,7 +142,8 @@
 <a class="next" href="https://docs.vibedgc.com/sessions-rewind"><div class="k">Next →</div><div class="t">Sessions &amp; rewind</div></a>
 </nav>
   </article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#what-read-only-means" data-id="what-read-only-means" class="lvl2">What read-only means</a>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#read-a-plan-in-your-browser-from-any-mode" data-id="read-a-plan-in-your-browser-from-any-mode" class="lvl2">Read a plan in your browser, from any mode</a>
+<a href="#what-read-only-means" data-id="what-read-only-means" class="lvl2">What read-only means</a>
 <a href="#workflow-commands" data-id="workflow-commands" class="lvl2">Workflow commands</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><label class="docs-search"><span class="sr-only">Search documentation</span><input data-docsearch type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><nav><div class="grp">

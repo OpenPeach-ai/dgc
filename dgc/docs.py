@@ -326,11 +326,19 @@ When the plan lands you get an approval prompt:
 - **Approve** — DGC drops back to your previous edit mode and executes the plan.
 - **Keep planning** — give feedback, stay read-only, and receive a revised plan.
 
+## Read a plan in your browser, from any mode
+
+Ask "Show this Markdown plan in my browser." The native `present_document` tool creates a light
+page with section links, tables and a Markdown download. It works in Auto and other modes, without
+an execution-approval dialog. Use browser Print → Save as PDF to export a PDF. Links are local to
+the machine running DGC and last while that process runs. General interactive HTML previews use
+`artifact`; approving a plan to execute still uses `present_plan` in Plan mode.
+
 ## What read-only means
 
 Plan mode is enforced in the permission layer, not by instruction. While it is
 active the agent may use only the read-only tools — reading files, `grep`,
-`glob`, code intelligence, web search — plus the one tool that presents a plan.
+`glob`, code intelligence, web search — plus planning, checklist and document controls.
 Every model-requested mutation tool is denied outright: no file writes, no edits,
 no shell commands.
 Two further limits apply only in this mode: paths outside the project are
@@ -756,22 +764,22 @@ project's definitions rather than loading new definitions from their scratch che
 
 ## The count
 
-- **Every sub-agent started in this chat**, including the ones that finished, failed or were
-  stopped. This is the same rule Claude Code uses. Nothing shows until the first one starts.
-- **The mark says whether any is working.** A diamond (◆) means an agent is waiting for you: a
-  permission, or a plan to review. A filled dot (●) means at least one is queued or running. An empty
-  ring (○) means none is working any more.
-- **How many are working right now** is next to the count: `● 5 agents · 2 working`.
-- The count starts again when you start a new chat, clear it, or resume another session. A rewind
-  drops the agents that were started after the point you go back to.
+The prompt area counts agents that are queued, running or waiting for you. Successfully completed
+agents disappear immediately. In the editor, failed or stopped rows remain for 30 seconds so you
+can inspect the failure. Completed work stays in the transcript; it does not inflate the active
+count as a chat gets longer.
+
+A diamond (◆) means an agent needs you; a filled dot (●) means work is queued or running.
+The editor uses an empty ring (○) when only a recently failed/stopped row remains. Reopening a chat
+does not start a new visibility window for old failures. Rewinding drops agents started later.
 
 ## In the terminal
 
-The status bar shows the count after the shortcut hints:
+The status bar shows active work after the shortcut hints:
 
-    ● 2 agents        ● 5 agents · 2 working        ◆ 5 agents · 1 needs you        ○ 5 agents
+    ● 2 agents        ◆ 2 agents · 1 needs you
 
-Under 80 columns it shortens to `●2`, `●2/5`, `◆5` or `○5` and moves to the front of the bar.
+Under 80 columns it shortens to `●2` or `◆2`. With no active agents, the shortcut bar hides the count.
 
 `/agents` lists the agents in this chat above the sub-agent settings, and works while a turn is
 running. Each row has the agent's state, its task description, and what DGC knows about it: what it is
@@ -785,14 +793,14 @@ colour.
 A pill at the start of the controls under the prompt shows `● 2 agents` (only the number in a narrow
 panel). Hover it to read how many are working. Click it for the list:
 
-- a summary such as **5 agents · 2 working · 3 finished**;
-- one row per agent with the same facts the terminal shows, updated as it works;
+- a summary such as **2 agents · 2 working**;
+- one row per visible agent with the same facts the terminal shows, updated as it works;
 - click a row to jump to that agent's step in the conversation;
 - **Sub-agent settings** opens Settings ▸ Agents, where the sub-agent model and host are chosen.
 
 The list is for looking. **Stop** ends the whole turn, including every agent. When the chat is
-reopened, the list comes back from the saved session and shows each earlier agent's final state. If
-DGC's backend stops, the agents that were still running are marked stopped.
+reopened, saved tool steps retain earlier results without repopulating the prompt area with completed
+work. If DGC's backend stops, the agents that were still running are marked stopped.
 
 ## Limits
 
@@ -1690,15 +1698,26 @@ DGC exposes one thinking dial, mapped to the correct wire format **per provider*
 ## Levels
 
 `off` · `low` · `medium` · `high` · `xhigh`. `off` is the default — a coding agent
-should act, not deliberate at length. `xhigh` is the deepest budget, for genuinely
-hard problems on reasoning-capable models.
+uses model-specific controls and adds instructions appropriate to each profile. `xhigh` requests
+the strongest supported tier; it cannot add a native tier a model does not offer.
 
 - `/think` — cycle, or `/think high` to set a level (persisted across restarts).
 - `--think <level>` — set it for one `dgc -p` run.
 - TUI: `/think` opens a picker; **Settings → Model & sampling → Thinking effort**.
 
-Reasoning models (o-series, DeepSeek-R1, qwen-thinking) tend to do better on hard
-tasks with `/think high` (or `xhigh`); non-reasoning models often ignore the dial.
+Native controls differ:
+
+- Most Ollama thinking models accept **on/off**: all non-off profiles turn thinking on. Low through
+  Extra High still change DGC's instructions, but are not separate native reasoning budgets.
+- **GPT-OSS on Ollama:** Low, Medium and High; Off uses Low and Extra High uses High.
+- **GLM 5.3 Flash on Ollama:** reasoning is always on. Off/Low use Low, Medium/High use High,
+  and Extra High/Ultra use Max, on both native and compatible transports.
+- Other providers use their supported effort fields or budgets. Unsupported controls are negotiated
+  away after a precise rejection; a model without reasoning support gets DGC instructions only.
+
+Ultra adds guidance for deeper work and bounded parallel agents. Permission mode still governs
+what can run. A stronger profile can take longer and use more tokens; it does not guarantee better
+answers. The editor's picker and General settings explain the native control for the selected model.
 
 ## Showing thinking
 
@@ -1786,6 +1805,9 @@ are counted once, as its own.
   (you cancelled it, the stream broke, or a stalled attempt was retried) is still counted as a
   request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in
   the totals, and the report says so when there are any.
+- **Reported zero.** An explicit zero-token report is metered; it is distinct from a missing report.
+- **Consistent views.** Totals, the top 100 model rows and daily bars use one database snapshot, even
+  when another DGC process records usage at the same time.
 - **OpenAI-compatible endpoints.** DGC asks these to include usage in the stream. An endpoint that
   rejects the request is asked again without it and is not asked again until DGC restarts (the
   editor's backend keeps that memory across every chat it runs).

@@ -237,7 +237,8 @@ def _set_aside(path: Path, exc: BaseException) -> bool:
 
 
 def record(*, provider, base_url, model, source="main", input_tokens=0, output_tokens=0,
-           cached_input_tokens=0, now: float | None = None, path: Path | None = None) -> bool:
+           cached_input_tokens=0, metered: bool | None = None,
+           now: float | None = None, path: Path | None = None) -> bool:
     """Append one finished request. Returns False (and never raises) when it could not be kept."""
     global _last_error, _locked_until
     stamp = time.time() if now is None else float(now)
@@ -245,7 +246,7 @@ def record(*, provider, base_url, model, source="main", input_tokens=0, output_t
     row = (int(stamp), _text(provider, _MAX_TEXT["provider"]) or "unknown",
            endpoint_host(base_url), _text(model, _MAX_TEXT["model"]) or "unknown", source,
            _count(input_tokens), _count(output_tokens), _count(cached_input_tokens))
-    metered = 1 if (row[5] or row[6]) else 0
+    metered = int(metered) if isinstance(metered, bool) else (1 if (row[5] or row[6]) else 0)
     target = Path(path) if path is not None else ledger_path()
     try:
         with _lock:
@@ -333,20 +334,26 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
             db = _open(Path(path) if path is not None else ledger_path(), create=False)
             if db is not None:
                 db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")   # a write may have shortened it
-                total = db.execute(
-                    "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
-                    "COALESCE(SUM(cached_input_tokens),0), COUNT(*), "
-                    f"COALESCE(SUM(1 - metered),0) FROM requests {where}", args).fetchone()
-                models = db.execute(
-                    "SELECT model, provider, host, COUNT(*), COALESCE(SUM(1 - metered),0), "
-                    "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens) "
-                    f"FROM requests {where} GROUP BY model, provider, host "
-                    "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, COUNT(*) DESC, model "
-                    f"LIMIT {_MAX_BY_MODEL}", args).fetchall()
-                by_day = db.execute(
-                    "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day, "
-                    "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), COUNT(*) "
-                    f"FROM requests {where} GROUP BY day", args).fetchall()
+                # All three views must describe the same point in time, even while another
+                # editor process records requests through its own SQLite connection.
+                db.execute("BEGIN")
+                try:
+                    total = db.execute(
+                        "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
+                        "COALESCE(SUM(cached_input_tokens),0), COUNT(*), "
+                        f"COALESCE(SUM(1 - metered),0) FROM requests {where}", args).fetchone()
+                    models = db.execute(
+                        "SELECT model, provider, host, COUNT(*), COALESCE(SUM(1 - metered),0), "
+                        "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens) "
+                        f"FROM requests {where} GROUP BY model, provider, host "
+                        "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, COUNT(*) DESC, model "
+                        f"LIMIT {_MAX_BY_MODEL}", args).fetchall()
+                    by_day = db.execute(
+                        "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day, "
+                        "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), COUNT(*) "
+                        f"FROM requests {where} GROUP BY day", args).fetchall()
+                finally:
+                    db.execute("ROLLBACK")
             else:
                 total, models, by_day = (0, 0, 0, 0, 0), [], []
     except Exception as exc:

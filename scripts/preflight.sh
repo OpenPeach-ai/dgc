@@ -14,6 +14,7 @@ fi
 
 for script in scripts/*.sh bench/*.sh install.sh site/install.sh; do bash -n "$script"; done
 cmp -s install.sh site/install.sh || { echo "root and site installers differ" >&2; exit 1; }
+"$PYTHON" scripts/check-public-content.py
 
 # The redaction suite must contain synthetic credentials by construction — that is exactly what it
 # asserts on. Exclude only that fixture-bearing test path; every other tracked path is still scanned.

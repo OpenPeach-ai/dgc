@@ -15,7 +15,7 @@ const scratch = realpathSync(mkdtempSync(join(tmpdir(), "dgc-cli-update-")));
 // of the editor API this module touches besides CancellationToken.
 let inspected = {};
 // The update terminal's notifications (openUpdateTerminal) use window.* and ProgressLocation.
-const shown = { terminals: [], progress: [], info: [], warnings: [], closeListeners: [], choice: undefined };
+const shown = { terminals: [], progress: [], info: [], errors: [], outputs: [], warnings: [], closeListeners: [], choice: undefined };
 globalThis.__DGC_UPDATE_VSCODE = {
   workspace: { getConfiguration: () => ({ inspect: (name) => inspected[name] }) },
   ProgressLocation: { Notification: 15 },
@@ -25,6 +25,10 @@ globalThis.__DGC_UPDATE_VSCODE = {
       shown.progress.push(row); done.then(() => { row.over = true; }); return done; },
     showInformationMessage: (message, ...items) => { shown.info.push({ message, items }); return Promise.resolve(shown.choice); },
     showWarningMessage: (message) => { shown.warnings.push(message); return Promise.resolve(undefined); },
+    showErrorMessage: (message) => { shown.errors.push(message); return Promise.resolve(undefined); },
+    createOutputChannel: (name) => { const out = { name, lines: [], visible: false,
+      appendLine(line) { this.lines.push(line); }, show() { this.visible = true; } };
+      shown.outputs.push(out); return out; },
     onDidCloseTerminal: (listener) => { shown.closeListeners.push(listener);
       return { dispose: () => { shown.closeListeners = shown.closeListeners.filter((l) => l !== listener); } }; },
   },
@@ -41,7 +45,8 @@ await build({
   } }],
 });
 const { autoUpdateEnabled, cliUpdateEnvironment, failureHeadline, INSTALL_COMMAND, installTerminalOptions,
-  isUserChosenCommand, openUpdateTerminal, runCliUpdate, swallowedInstallerExit, updateTerminalOptions } = createRequire(import.meta.url)(outfile);
+  isUserChosenCommand, openUpdateTerminal, runCliUpdate, swallowedInstallerExit, updateTerminalOptions,
+  updateCliWithProgress } = createRequire(import.meta.url)(outfile);
 
 after(() => { delete globalThis.__DGC_UPDATE_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 beforeEach(() => { inspected = {}; });
@@ -109,6 +114,28 @@ test("the update runs the CLI's own update subcommand and reports success", asyn
   assert.equal(result.ok, true);
   assert.match(result.log, /argv:update/);
   assert.match(result.log, /fetching the latest/);
+});
+
+test("manual update restarts only on success and retains a refusal in Output", async () => {
+  let restarts = 0;
+  await updateCliWithProgress(fakeCli("manual-ok"), () => { restarts++; });
+  assert.equal(restarts, 1);
+  assert.match(shown.info.at(-1).message, /Reconnecting/);
+  await updateCliWithProgress(fakeCli("manual-no", { code: 1, stderr: "Python 3.10+ required" }), () => { restarts++; });
+  assert.equal(restarts, 1);
+  assert.equal(shown.outputs.at(-1).name, "DGC update");
+  assert.equal(shown.outputs.at(-1).visible, true);
+  assert.match(shown.outputs.at(-1).lines.join("\n"), /Python 3.10\+ required/);
+  assert.match(shown.errors.at(-1), /Python 3.10\+ required/);
+});
+
+test("a checkout refusal headline explains the cause instead of suggesting force overwrite", () => {
+  const log = 'this dgc runs from /tmp/project, a git checkout — `dgc update` will not repoint it.\n'
+    + '  Update the checkout with git, or install elsewhere.\n'
+    + '  Or repoint the launcher anyway: DGC_FORCE_OVERWRITE=1 dgc update';
+  assert.match(failureHeadline(log), /runs from a Git checkout/);
+  assert.doesNotMatch(failureHeadline(log), /DGC_FORCE_OVERWRITE/);
+  assert.match(failureHeadline('update failed — download refused\nNothing was changed.'), /download refused/);
 });
 
 test("a refusal is reported with the installer's own last line, not a bare exit code", async () => {
@@ -279,10 +306,10 @@ test("every manual update terminal runs the exact executable with the install's 
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   const manual = panel.slice(panel.indexOf("private offerManualCliUpdate("));
   const manualBody = manual.slice(0, manual.indexOf("\n  }\n"));
-  assert.match(manualBody, /openUpdateTerminal\(resolveDgcExecutable\(\)\.command, "Update DGC",/);
+  assert.match(manualBody, /updateCliWithProgress\(resolveDgcExecutable\(\)\.command,/);
   assert.doesNotMatch(manualBody, /sendText\(|curl -fsSL/);
   const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
-  assert.match(extension, /openUpdateTerminal\(executable\.command, "DGC update",/);
+  assert.match(extension, /updateCliWithProgress\(executable\.command,/);
 });
 
 test("a dgc.command set by hand to a versioned install is still DGC's to update", () => {

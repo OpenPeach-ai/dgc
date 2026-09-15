@@ -38,7 +38,7 @@ DISPLAY = {
     "browser": "Browser",
     "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
-    "present_plan": "PresentPlan", "propose_options": "ProposeOptions", "artifact": "Artifact",
+    "present_plan": "PresentPlan", "present_document": "PresentDocument", "propose_options": "ProposeOptions", "artifact": "Artifact",
     "task": "Task", "external_directory": "ExternalDirectory",
 }
 DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
@@ -57,7 +57,7 @@ RULE_ARG = {
 }
 
 READ_ONLY_TOOLS = {"read_file", "view_image", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
-                   "bash_output", "propose_options", "mcp_search", "update_goal"}
+                   "bash_output", "propose_options", "present_document", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.

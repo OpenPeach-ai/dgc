@@ -745,6 +745,27 @@ class ChatResult:
     reasoning: list = field(default_factory=list)
 
 
+def usage_reported(usage) -> bool:
+    """Whether a provider supplied a valid token counter, including an explicit zero.
+
+    Check before normalization supplies default zeros for absent fields.
+    """
+    if not isinstance(usage, dict):
+        return False
+    for key in ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens",
+                "cache_read_input_tokens", "cache_creation_input_tokens", "cached_input_tokens"):
+        value = usage.get(key)
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            parsed = int(value)
+            if 0 <= parsed <= 1_000_000_000 and (not isinstance(value, float) or value == parsed):
+                return True
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return False
+
+
 def normalize_usage(usage: dict | None) -> dict[str, int]:
     """Normalize Chat, Responses, and common compatible-provider usage shapes."""
     raw = usage if isinstance(usage, dict) else {}
@@ -1269,6 +1290,11 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
     this provider. `{}` means 'let the model's own default stand'."""
     off = level in _REASONING_OFF
     if family == "ollama":                              # omitting forces thinking ON → always send
+        if "glm-5.3-flash" in model.lower():
+            return {"reasoning_effort": "low" if off or level == "low" else
+                    "max" if level in ("xhigh", "max") else "high"}
+        if "gpt-oss" in model.lower() and off:
+            return {"reasoning_effort": "low"}
         if off:
             return {"reasoning_effort": "none"}
         return {"reasoning_effort": "high" if str(level).lower() == "xhigh" else level}
@@ -1627,6 +1653,13 @@ class LLMClient:
             snapshot["sampling"] = False
         _, metadata = self._cached_model_metadata()
         result: dict[str, bool | str | int | list] = {"provider": self.family, **snapshot}
+        if not snapshot["reasoning"]:
+            result["reasoning_control"] = "instructions"
+        elif self.api_mode == "ollama":
+            result["reasoning_control"] = ("glm-flash-levels" if "glm-5.3-flash" in self.model.lower()
+                                           else "levels" if "gpt-oss" in self.model.lower() else "toggle")
+        else:
+            result["reasoning_control"] = "provider"
         if metadata.get("source") in ("ollama_show", "anthropic_models"):
             result["discovery"] = str(metadata["source"])
             result["model_capabilities"] = list(metadata.get("capabilities") or ())
@@ -2197,6 +2230,8 @@ class LLMClient:
     @staticmethod
     def _anthropic_usage(usage: dict | None) -> dict:
         raw = dict(usage) if isinstance(usage, dict) else {}
+        if not usage_reported(raw):
+            return {}
         def count(key: str) -> int:
             try:
                 return max(0, int(raw.get(key, 0) or 0))
@@ -2867,6 +2902,11 @@ class LLMClient:
         return out
 
     def _ollama_think(self, level):
+        # This model always reasons and has three native tiers, rather than an off switch.
+        if "glm-5.3-flash" in self.model.lower():
+            if level in _REASONING_OFF or level == "low":
+                return "low"
+            return "max" if level in ("xhigh", "max") else "high"
         # GPT-OSS does not accept booleans and cannot fully disable reasoning. Honor an off request
         # with its lowest supported level rather than sending false, which that model ignores.
         if "gpt-oss" in self.model.lower():
@@ -2876,10 +2916,9 @@ class LLMClient:
             return value if value in ("low", "medium", "high") else "high"
         if level in _REASONING_OFF:
             return False
-        value = str(level).lower()
-        if value == "xhigh":                 # Ollama accepts low|medium|high|max — clamp the extra tier
-            return "high"
-        return value if value in ("low", "medium", "high", "max") else True
+        # Most thinking models accept a boolean, not graded effort strings. A string can cause
+        # Ollama to reject the entire control and retry with the model's default, even for "low".
+        return True
 
     def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
                         think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
@@ -2973,11 +3012,10 @@ class LLMClient:
             if done is True:
                 terminal_done = True
                 result.finish_reason = str(obj.get("done_reason") or result.finish_reason)
-                result.usage = normalize_usage({
-                    "prompt_tokens": obj.get("prompt_eval_count", 0),
-                    "completion_tokens": obj.get("eval_count", 0),
-                    "cached_input_tokens": obj.get("prompt_eval_cached_count", 0),
-                })
+                raw_usage = {key: obj[source] for key, source in (
+                    ("prompt_tokens", "prompt_eval_count"), ("completion_tokens", "eval_count"),
+                    ("cached_input_tokens", "prompt_eval_cached_count")) if source in obj}
+                result.usage = normalize_usage(raw_usage) if usage_reported(raw_usage) else {}
 
         watch, owned_watch = _own_watch(r, cancel, watch)
 
@@ -4445,7 +4483,8 @@ class LLMClient:
                 if obj.get("usage") is not None:
                     if not isinstance(obj.get("usage"), dict):
                         raise LLMError("Chat Completions emitted malformed usage")
-                    result.usage = normalize_usage(obj.get("usage"))
+                    if usage_reported(obj["usage"]):
+                        result.usage = normalize_usage(obj["usage"])
                 choices = obj.get("choices")
                 if choices is None and isinstance(obj.get("usage"), dict):
                     choices = []        # a usage-only chunk from a gateway that omits the array
@@ -4664,7 +4703,7 @@ class LLMClient:
         usage = obj.get("usage")
         if usage is not None and not isinstance(usage, dict):
             raise LLMError("Chat Completions emitted malformed usage")
-        result.usage = normalize_usage(usage)
+        result.usage = normalize_usage(usage) if usage_reported(usage) else {}
         # A whole, valid JSON body can still omit the required finish reason on a compatible
         # gateway. Preserve its partial display/calls only for bounded non-executable reissue.
         result.finish_reason = finish_reason or "incomplete"

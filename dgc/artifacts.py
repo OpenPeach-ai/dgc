@@ -864,6 +864,7 @@ def _md_to_html(md: str) -> str:
     """A small, dependency-free markdown → HTML pass covering what a plan.md uses:
     headings, ordered/unordered lists, fenced code, and inline code/bold/italic."""
     out, i, lines = [], 0, md.replace("\r\n", "\n").split("\n")
+    heading = 0
     import html as _html
     while i < len(lines):
         ln = lines[i]
@@ -875,8 +876,23 @@ def _md_to_html(md: str) -> str:
             out.append("<pre><code>" + "\n".join(buf) + "</code></pre>"); continue
         m_h = len(ln) - len(ln.lstrip("#"))
         if 1 <= m_h <= 4 and ln[m_h:m_h + 1] == " ":            # heading
-            out.append(f"<h{m_h}>{_md_inline(ln[m_h + 1:].strip())}</h{m_h}>"); i += 1; continue
+            heading += 1
+            out.append(f'<h{m_h} id="section-{heading}">{_md_inline(ln[m_h + 1:].strip())}</h{m_h}>'); i += 1; continue
         import re
+        if ("|" in ln and i + 1 < len(lines)
+                and re.fullmatch(r"\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*", lines[i + 1])):
+            cells = lambda row: [cell.strip() for cell in row.strip().strip("|").split("|")]
+            headers = cells(ln)
+            table = '<div class="table-wrap"><table><thead><tr>' + ''.join(
+                '<th scope="col">' + _md_inline(cell) + '</th>' for cell in headers) + '</tr></thead><tbody>'
+            i += 2
+            while i < len(lines) and lines[i].strip() and "|" in lines[i]:
+                row = cells(lines[i])
+                table += '<tr>' + ''.join('<td>' + _md_inline(cell) + '</td>'
+                                         for cell in (row + [''] * len(headers))[:len(headers)]) + '</tr>'
+                i += 1
+            out.append(table + '</tbody></table></div>')
+            continue
         if re.match(r"^\s*\d+\.\s+", ln):                        # ordered list
             items = []
             while i < len(lines) and re.match(r"^\s*\d+\.\s+", lines[i]):
@@ -898,15 +914,19 @@ def _md_to_html(md: str) -> str:
     return "\n".join(out)
 
 
-def render_plan_html(md: str, title: str = "Plan") -> str:
+def render_plan_html(md: str, title: str = "Plan", *, document: bool = False) -> str:
     """The plan as a clean, dgc-design page (the same look as vibedgc.com)."""
     body = _md_to_html(md)
+    import re
+    sections = re.findall(r'<h2 id="(section-\d+)">(.*?)</h2>', body)
+    outline = ('<nav class="outline" aria-label="Document sections">' + ''.join(
+        f'<a href="#{anchor}">{label}</a>' for anchor, label in sections) + '</nav>') if sections else ''
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>{_esc(title)}</title>
 {_ICON_LINK}
 <style>
-  :root{{--bg:#0B0B0C;--surface:#141416;--surface2:#1A1A1D;--code:#0E0E10;--border:#232326;--border-strong:#303034;
-    --text:#F5F5F5;--text-strong:#FFFFFF;--muted:#9A9A9E;--faint:#6A6A6E;--accent:#7C5CFF;--lav:#A78BFA;
+  :root{{color-scheme:light;--bg:#FFFFFF;--surface:#F8F7FC;--surface2:#F2EFFA;--code:#FAF9FC;--border:#E6E2EF;--border-strong:#D5CDE6;
+    --text:#292631;--text-strong:#18151F;--muted:#625B70;--faint:#70677E;--accent:#7047EB;--lav:#613CC6;
     --ui:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;--mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,monospace;}}
   *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);line-height:1.65;
     -webkit-font-smoothing:antialiased}}
@@ -930,12 +950,22 @@ def render_plan_html(md: str, title: str = "Plan") -> str:
   pre code{{background:none;color:var(--text);padding:0;font-size:13px;line-height:1.6}}
   strong{{color:var(--text-strong)}} em{{color:var(--muted)}}
   .foot{{margin-top:44px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font:400 13px/1.5 var(--ui)}}
+  a{{color:var(--accent);text-underline-offset:3px}} .document-actions{{display:flex;gap:20px;flex-wrap:wrap;margin:22px 0}}
+  .outline{{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 36px;padding:16px 0;border-block:1px solid var(--border)}}
+  .outline a{{padding:6px 10px;border-radius:6px;text-decoration:none;background:var(--surface)}}
+  .outline a:hover,.outline a:focus-visible{{background:var(--surface2);outline:1px solid var(--accent)}}
+  h2,h3,h4{{scroll-margin-top:24px}} .table-wrap{{overflow-x:auto;margin:20px 0}}
+  table{{width:100%;border-collapse:collapse;font-size:14px}} th,td{{border-bottom:1px solid var(--border);padding:10px 12px;text-align:left;vertical-align:top}}
+  th{{background:var(--surface);color:var(--text-strong)}}
+  @media print{{.wrap{{max-width:none;padding:0}} .document-actions,.outline,.foot{{display:none}} pre,tr,li{{break-inside:avoid}}}}
 </style></head>
 <body><div class="wrap">
   <div class="mark">///</div>
-  <div class="eyebrow">PROPOSED PLAN</div>
+  <div class="eyebrow">{'DGC DOCUMENT' if document else 'PROPOSED PLAN'}</div>
+  {'<nav class="document-actions"><a href="document.md" download>Download Markdown</a><span>Print → Save as PDF</span></nav>' if document else ''}
+  {outline}
   {body}
-  <div class="foot">Proposed by DGC. Approve it in your terminal, or keep planning.</div>
+  <div class="foot">{'Created with DGC. This document does not grant permission to execute its plan.' if document else 'Proposed by DGC. Approve it in DGC, or keep planning.'}</div>
 </div></body></html>"""
 
 
@@ -948,6 +978,24 @@ def serve_plan(md: str, project_root, name: str = "Plan", preferred_port: int | 
     art = _PLAN_SRV.add("index.html", d, name, preferred_port, False)
     art.temporary = True
     return art
+
+
+def serve_document(md: str, title: str) -> tuple[str, str]:
+    """Static Markdown and HTML only, isolated from arbitrary artifact previews and LAN settings."""
+    import tempfile
+    import shutil
+    directory = Path(tempfile.mkdtemp(prefix="dgc-plan-document-"))
+    try:
+        (directory / "document.md").write_text(md, encoding="utf-8")
+        (directory / "index.html").write_text(render_plan_html(md, title, document=True), encoding="utf-8")
+        art = _PLAN_SRV.add("index.html", directory, title, lan=False)
+        art.temporary = True
+        art._document_source = True
+        base = f"http://{_PLAN_SRV.host}:{_PLAN_SRV.port}/a/{art.id}/"
+        return base + "index.html", base + "document.md"
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
 
 
 
@@ -1069,6 +1117,11 @@ def resolve_request(art: Artifact, sub: str) -> tuple[Path | None, int, bytes]:
         real_rel = target.relative_to(base).as_posix()
     except (OSError, ValueError):
         return not_found
+    # Only this generated source is downloadable. This flag is never persisted or accepted from
+    # project artifacts; arbitrary Markdown in a workspace remains outside the web allowlist.
+    if (rel == real_rel == "document.md" and getattr(art, "_document_source", False)
+            and getattr(art, "_owner", None) is _PLAN_SRV and art.temporary):
+        return target, 200, b""
     entry = art.entry or "index.html"
     if (art.scoped or is_workspace_root(base) or _nested_workspace(base, rel)
             or (real_rel != rel and _nested_workspace(base, real_rel))):
@@ -1196,7 +1249,11 @@ def _make_handler(server: "_Server"):
                 self._text(status, why)
                 return
             try:
-                self._send(200, target.read_bytes(), _guess_type(target), csp=server.file_csp)
+                download = (server is _PLAN_SRV and getattr(art, "_document_source", False)
+                            and sub == "document.md")
+                self._send(200, target.read_bytes(), "text/markdown; charset=utf-8" if download else _guess_type(target),
+                           csp=server.file_csp, headers={"Content-Disposition": 'attachment; filename="document.md"'}
+                           if download else None)
             except OSError:
                 self._text(500, b"read error")
 

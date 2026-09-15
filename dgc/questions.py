@@ -120,7 +120,10 @@ def _unmark(text: str, *, sentence: bool = False) -> tuple[str, bool]:
     but only when its first word is a plain lowercase ASCII word: "iOS first", "eBPF probes"
     and "package.json" keep their case (a name is not a sentence start).
     """
-    stripped = _MARK.sub(" ", text)
+    # Some models put the rationale inside the marker: "(Recommended: quick and safe)".
+    # Keep that rationale and recognize only an explicit, affirmative recommendation.
+    stripped = re.sub(r"\(\s*recommended\s*:\s*([^()]*)\)", r"(\1)", text, flags=re.I)
+    stripped = _MARK.sub(" ", stripped)
     found = stripped != text
     capital = False
     lead = _LEAD_MARK.match(stripped)
@@ -152,7 +155,7 @@ def _option(raw) -> dict | None:
             raise ValueError("give every option a label.")
         description = raw.get("description")
         description = description.strip() if isinstance(description, str) else ""
-        flagged = bool(raw.get("recommended", False))
+        flagged = raw.get("recommended") is True or str(raw.get("recommended", "")).lower() == "true"
     else:
         raise ValueError("give every option a label.")
     label = label.strip()
@@ -184,6 +187,16 @@ def normalize_questions(args) -> list[dict]:
             raw = json.loads(raw)
         except ValueError:
             raise ValueError(ERR_SHAPE) from None
+    # A bounded list of labelled choices sharing one explicit header is unambiguous even when
+    # a model places it one level too high. Preserve those choices as one question under that
+    # header; never guess a question from mixed headers or arbitrary malformed objects.
+    if (isinstance(raw, list) and MIN_OPTIONS <= len(raw) <= MAX_OPTIONS
+            and all(isinstance(item, dict) and isinstance(item.get("label"), str)
+                    and isinstance(item.get("header"), str) and item["header"].strip()
+                    and set(item) <= {"label", "description", "recommended", "header"}
+                    for item in raw)
+            and len({item["header"].strip() for item in raw}) == 1):
+        raw = [{"header": raw[0]["header"], "question": raw[0]["header"], "options": raw}]
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_QUESTIONS:
         raise ValueError(ERR_QUESTIONS)
     result = []
@@ -201,6 +214,13 @@ def normalize_questions(args) -> list[dict]:
             raise ValueError(ERR_MANY)
         if len({o["label"].casefold() for o in options}) != len(options):
             raise ValueError(ERR_DUPLICATE)
+        # Some models attach the chosen label and flag to the question itself. Transfer it
+        # only when that label identifies exactly one option; do not invent a recommendation.
+        if item.get("recommended") is True and isinstance(item.get("label"), str):
+            chosen = _unmark(item["label"].strip())[0]
+            matches = [o for o in options if o["label"] == chosen]
+            if len(matches) == 1:
+                matches[0]["recommended"] = True
         multi = item.get("multi_select", item.get("multiSelect", False))
         multi = bool(multi) if not isinstance(multi, str) else multi.strip().lower() in ("true", "1", "yes")
         if not multi and sum(o["recommended"] for o in options) > 1:

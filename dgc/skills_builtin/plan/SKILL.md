@@ -19,6 +19,12 @@ transition. Do not edit files or bypass the mode through shell commands. Outside
 already requested implementation has authorized ordinary work; planning alone adds no new approval gate.
 Use todo for substantial execution when available. A normal plan is not an instruction to create a goal.
 
+When the user asks to read a plan or report in a browser, use present_document with its complete
+Markdown and a title, in any mode. Return the actual browser and Markdown-download links. The page
+has section navigation, tables and a print layout for the browser's Save as PDF action; its local
+links last while DGC is running. This publishes a readable document, not an approval request, and
+does not require switching to plan mode or creating a general-purpose HTML artifact.
+
 When evidence changes the approach, update the relevant steps and explain the consequence. Continue
 within the authorized outcome; obtain a decision only for a material scope or authority change. Mark
 steps complete on observed results and retain unresolved checks instead of silently dropping them.

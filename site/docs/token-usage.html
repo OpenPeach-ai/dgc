@@ -130,6 +130,8 @@
 <p>One row is recorded for each model request that finished, with the numbers the provider itself reported: input tokens, output tokens and cached input tokens. Each row notes which route sent it: your conversation, a sub-agent, the fallback model, or context compaction. A sub-agent&#x27;s requests are counted once, as its own.</p>
 <ul>
 <li><strong>Unmetered requests.</strong> A request the provider accepted but that ended without a usage report (you cancelled it, the stream broke, or a stalled attempt was retried) is still counted as a request, marked unmetered, because it may have cost tokens nobody reported. Its tokens are not in the totals, and the report says so when there are any.</li>
+<li><strong>Reported zero.</strong> An explicit zero-token report is metered; it is distinct from a missing report.</li>
+<li><strong>Consistent views.</strong> Totals, the top 100 model rows and daily bars use one database snapshot, even when another DGC process records usage at the same time.</li>
 <li><strong>OpenAI-compatible endpoints.</strong> DGC asks these to include usage in the stream. An endpoint that rejects the request is asked again without it and is not asked again until DGC restarts (the editor&#x27;s backend keeps that memory across every chat it runs). Its requests then show as unmetered rather than as zero tokens.</li>
 <li><strong>Not counted:</strong> turns delegated to a subscription CLI (Claude Code, Codex and the others) run in the vendor&#x27;s own tool, so DGC never sees their token counts.</li>
 </ul>

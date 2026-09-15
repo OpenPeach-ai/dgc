@@ -3,6 +3,11 @@
 Production releases are projections of reviewed Git commits. They are never assembled from an
 uncommitted working tree and `main` is never force-pushed.
 
+Keep maintainer session exports, private audit notes, handoffs and machine-specific evidence outside
+the tracked repository. `scripts/check-public-content.py` runs in preflight; runtime and website
+allowlists separately reject undeclared files. Public provider integrations and technical
+documentation remain part of the source.
+
 The CLI/core and editor extension intentionally have independent version streams. Core metadata is
 derived from `dgc.__version__` and projected into the core release/site manifest; editor metadata is
 derived from `editors/vscode/package.json` and must agree with its package lock and editor manifest.
@@ -48,7 +53,7 @@ checksum binding. Record the current CLI capture before A as well. This preserve
 and extension provenance without permitting non-site changes after the core source tag.
 
 1. Make version and release-note changes in a pull request. Never reuse a published CLI or extension
-   version. Ensure required CI and CodeQL checks are green and the source branch is clean. Commit the
+version. Ensure required CI and CodeQL checks are green and the source branch is clean. Commit the
    reviewed release sources as commit A and create annotated tag `vX.Y.Z` at A.
 2. At A, run `scripts/preflight.sh`, `scripts/build-release.sh`, and (when applicable)
    `scripts/release-extension.sh --build` (or reuse the verified captured precursor bundle). Stage the extension first with

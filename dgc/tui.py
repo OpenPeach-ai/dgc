@@ -597,7 +597,7 @@ class TUI:
         "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
                    ("Extra-high", "xhigh")],
                   lambda s: s.config.get("thinking", "off")),
-        "ultra": ([("On — deepest reasoning + bounded parallel agents", "on"),
+        "ultra": ([("On — extended reasoning guidance + bounded parallel agents", "on"),
                     ("Off — use the selected thinking level", "off")],
                    lambda s: "on" if s.config.get("ultra_mode", False) else "off"),
         "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
@@ -2945,10 +2945,8 @@ class TUI:
 
     @staticmethod
     def _agents_count(active: int, total: int) -> int:
-        """The number the agents segment shows (the editor's agentsLabelCount is the same switch).
-        Claude Code's rule: every sub-agent started in this chat. "Working while any work, else
-        all" would be `return active or total`."""
-        return total
+        """Count current work; historical agents remain available through /agents."""
+        return active
 
     def _agents_segment(self) -> str:
         """``● 2 agents`` / ``● 5 agents · 2 working`` / ``◆ 5 agents · 1 needs you`` / ``○ 5 agents``,
@@ -2959,7 +2957,7 @@ class TUI:
             return ""
         c = counts()
         total, active, waiting = int(c.get("total", 0)), int(c.get("active", 0)), int(c.get("waiting", 0))
-        if total <= 0:
+        if active <= 0:
             return ""
         th = style_mod.theme()
         n = self._agents_count(active, total)
@@ -7977,7 +7975,7 @@ def _tui_help() -> str:
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
                           ("/subagent", "sub-agent model + host + API transport"),
                           ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max"),
-                          ("/ultra on|off", "deepest reasoning + bounded parallel agents")]),
+                          ("/ultra on|off", "extended reasoning guidance + bounded parallel agents")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|light|inherit", "terminal background; restored on exit"),
                       ("/theme auto|dark|light", "colour theme"),

@@ -27,7 +27,7 @@ globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
       return terminal;
     },
     // The update terminal reports its progress and outcome (openUpdateTerminal).
-    withProgress: () => Promise.resolve(),
+    withProgress: () => Promise.resolve({ ok: true, log: "" }),
     onDidCloseTerminal: (listener) => {
       closeListeners.push(listener);
       return { dispose() { closeListeners.splice(closeListeners.indexOf(listener), 1); } };
@@ -113,20 +113,15 @@ beforeEach(() => {
 
 test("CLI terminal actions ignore workspace executables and pass argv without shell interpolation", () => {
   extension.activate(context);
-  registered.get("dgc.updateCli")();
   registered.get("dgc.exportTraining")();
 
   // The terminal holds the output open under /bin/sh, but the executable and its argv are still
   // positional parameters after a constant script: never shell text.
-  const [update, exporting] = terminals.map((terminal) => terminal.options);
-  assert.equal(update.name, "DGC update");
-  assert.deepEqual(update.env, { DGC_SKIP_EXTENSION: "1" });
-  assert.equal(update.shellPath, "/bin/sh");
-  assert.deepEqual(update.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "update"]);
+  const [exporting] = terminals.map((terminal) => terminal.options);
   assert.equal(exporting.name, "DGC export-training");
   assert.equal(exporting.shellPath, "/bin/sh");
   assert.deepEqual(exporting.shellArgs.slice(-2), ["/opt/DGC CLI/dgc;literal", "export-training"]);
-  for (const options of [update, exporting]) {
+  for (const options of [exporting]) {
     assert.equal(options.shellArgs[0], "-c");
     assert.doesNotMatch(options.shellArgs[1], /opt\/DGC CLI|literal/, "the script never contains the configured path");
   }
@@ -136,7 +131,7 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
     defaultValue: "dgc",
     workspaceFolderValue: "/tmp/folder-controlled",
   };
-  registered.get("dgc.updateCli")();
+  registered.get("dgc.exportTraining")();
   assert.equal(terminals.at(-1).options.shellArgs.at(-2), "dgc",
     "a workspace-only executable override must fall back to the extension default");
   // Close the update terminals so their status watchers stop.
@@ -276,7 +271,7 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
   // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
   assert.match(panel, /runCliUpdate\(executable, token, \{ targetVersion: this\.context\.extension\.packageJSON\.dgcCliVersion \}\)/, "the offer runs the CLI's update");
-  assert.match(panel, /openUpdateTerminal\(/, "or opens it in a terminal");
+  assert.match(panel, /updateCliWithProgress\(/, "manual recovery also captures the actual installer error");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
 });
 

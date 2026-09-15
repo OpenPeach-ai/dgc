@@ -197,6 +197,11 @@ def tool_output_is_error(out: str) -> bool:
     low = text.lower()
     if low.startswith(("error", "permission denied", "blocked by")):
         return True
+    if text.startswith("Sub-task "):
+        from .subagents import classify_result
+        outcome = classify_result("", text)
+        if outcome and outcome[0] in ("failed", "stopped"):
+            return True
     if low.startswith("exit code:"):
         first = low.splitlines()[0].partition(":")[2].strip()
         try:

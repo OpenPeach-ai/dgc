@@ -244,6 +244,8 @@ def run_update(args: list[str] | None = None) -> int:
     env["DGC_DATA_DIR"] = str(location.data_dir)
     env["DGC_BIN"] = str(location.bin_dir)
     env.pop("DGC_DIR", None)
+    # Use the interpreter already running DGC, even when a GUI editor has an older Python on PATH.
+    env.setdefault("DGC_PYTHON", getattr(sys, "_base_executable", None) or sys.executable)
     if action == "version":
         env["DGC_INSTALL_VERSION"] = str(requested)
     launcher = location.bin_dir / "dgc"

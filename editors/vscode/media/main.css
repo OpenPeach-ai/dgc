@@ -689,6 +689,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 }
 .effort-labels { display: flex; justify-content: space-between; margin-top: var(--sp-2); color: var(--muted); font-size: var(--t-xs); }
 .effort-labels output { color: var(--text); }
+.reasoning-note { margin: 10px 14px 14px; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: normal; }
 .reasoning-card.is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
 @keyframes effort-shimmer { to { background-position: 200% 0; } }
 @media (prefers-reduced-motion: reduce) { .reasoning-card.is-ultra .effort-slider { animation: none; } }
@@ -1093,7 +1094,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
    ================================================================================================== */
 
 /* ---- 0.40 agents ------------------------------------------------------------------------------ */
-/* The "● 2 agents" pill and its list. Green, blue and a grey ring, the way Claude marks working,
+/* The "● 2 agents" pill and its list. Green, blue and a grey ring distinguish working,
    waiting and idle agents; the light theme takes darker steps (Claude's #89D185 is 1.8:1 on white).
    Shape and a visible "needs you" carry the state too, so it never rests on hue alone. */
 :root { --agent-run:#89D185; --agent-wait:#3B82F6; --agent-idle:var(--faint); }

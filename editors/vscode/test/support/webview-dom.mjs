@@ -69,6 +69,7 @@ export function makeDom(options = {}) {
   let now = 0, nextTimer = 1;
   const timers = new Map();
   if (options.clock) {
+    Object.defineProperty(dom.window.performance, "now", { value: () => now });
     dom.window.setTimeout = (fn, ms = 0) => { const id = nextTimer++; timers.set(id, { at: now + Number(ms || 0), fn }); return id; };
     dom.window.clearTimeout = (id) => { timers.delete(id); };
   }

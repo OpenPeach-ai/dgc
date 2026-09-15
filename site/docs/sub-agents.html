@@ -123,26 +123,22 @@
 <div class="heading-row h2-row"><h2 id="named-agents-and-trust">Named agents and trust</h2><a class="anchor" href="#named-agents-and-trust" aria-label="Link to this section">#</a></div>
 <p>Personal definitions in <code>~/.dgc/agents/</code> are available in any workspace. A project&#x27;s <code>.dgc/agents/</code> definitions load only after you trust that project, because a definition can select its own model host and an environment key. Trusting an already-open terminal or editor loads them without a restart. Isolated tasks and fleet workspaces use the approved source project&#x27;s definitions rather than loading new definitions from their scratch checkout.</p>
 <div class="heading-row h2-row"><h2 id="the-count">The count</h2><a class="anchor" href="#the-count" aria-label="Link to this section">#</a></div>
-<ul>
-<li><strong>Every sub-agent started in this chat</strong>, including the ones that finished, failed or were stopped. This is the same rule Claude Code uses. Nothing shows until the first one starts.</li>
-<li><strong>The mark says whether any is working.</strong> A diamond (◆) means an agent is waiting for you: a permission, or a plan to review. A filled dot (●) means at least one is queued or running. An empty ring (○) means none is working any more.</li>
-<li><strong>How many are working right now</strong> is next to the count: <code>● 5 agents · 2 working</code>.</li>
-<li>The count starts again when you start a new chat, clear it, or resume another session. A rewind drops the agents that were started after the point you go back to.</li>
-</ul>
+<p>The prompt area counts agents that are queued, running or waiting for you. Successfully completed agents disappear immediately. In the editor, failed or stopped rows remain for 30 seconds so you can inspect the failure. Completed work stays in the transcript; it does not inflate the active count as a chat gets longer.</p>
+<p>A diamond (◆) means an agent needs you; a filled dot (●) means work is queued or running. The editor uses an empty ring (○) when only a recently failed/stopped row remains. Reopening a chat does not start a new visibility window for old failures. Rewinding drops agents started later.</p>
 <div class="heading-row h2-row"><h2 id="in-the-terminal">In the terminal</h2><a class="anchor" href="#in-the-terminal" aria-label="Link to this section">#</a></div>
-<p>The status bar shows the count after the shortcut hints:</p>
-<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>● 2 agents        ● 5 agents · 2 working        ◆ 5 agents · 1 needs you        ○ 5 agents</code></pre></div>
-<p>Under 80 columns it shortens to <code>●2</code>, <code>●2/5</code>, <code>◆5</code> or <code>○5</code> and moves to the front of the bar.</p>
+<p>The status bar shows active work after the shortcut hints:</p>
+<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>● 2 agents        ◆ 2 agents · 1 needs you</code></pre></div>
+<p>Under 80 columns it shortens to <code>●2</code> or <code>◆2</code>. With no active agents, the shortcut bar hides the count.</p>
 <p><code>/agents</code> lists the agents in this chat above the sub-agent settings, and works while a turn is running. Each row has the agent&#x27;s state, its task description, and what DGC knows about it: what it is doing now, the agent type, the model when it is not the chat&#x27;s own, how long it ran, its tool calls and its tokens. An agent started by another agent is indented under it. The <code>/dashboard</code> entry of a busy chat says how many of its agents are working. The classic <code>dgc</code> prompt prints the same list without colour.</p>
 <div class="heading-row h2-row"><h2 id="in-the-editor">In the editor</h2><a class="anchor" href="#in-the-editor" aria-label="Link to this section">#</a></div>
 <p>A pill at the start of the controls under the prompt shows <code>● 2 agents</code> (only the number in a narrow panel). Hover it to read how many are working. Click it for the list:</p>
 <ul>
-<li>a summary such as <strong>5 agents · 2 working · 3 finished</strong>;</li>
-<li>one row per agent with the same facts the terminal shows, updated as it works;</li>
+<li>a summary such as <strong>2 agents · 2 working</strong>;</li>
+<li>one row per visible agent with the same facts the terminal shows, updated as it works;</li>
 <li>click a row to jump to that agent&#x27;s step in the conversation;</li>
 <li><strong>Sub-agent settings</strong> opens Settings ▸ Agents, where the sub-agent model and host are chosen.</li>
 </ul>
-<p>The list is for looking. <strong>Stop</strong> ends the whole turn, including every agent. When the chat is reopened, the list comes back from the saved session and shows each earlier agent&#x27;s final state. If DGC&#x27;s backend stops, the agents that were still running are marked stopped.</p>
+<p>The list is for looking. <strong>Stop</strong> ends the whole turn, including every agent. When the chat is reopened, saved tool steps retain earlier results without repopulating the prompt area with completed work. If DGC&#x27;s backend stops, the agents that were still running are marked stopped.</p>
 <div class="heading-row h2-row"><h2 id="limits">Limits</h2><a class="anchor" href="#limits" aria-label="Link to this section">#</a></div>
 <ul>
 <li>The list shows up to 64 agents, the working ones first; the count stays exact beyond that.</li>

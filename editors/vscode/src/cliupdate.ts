@@ -23,6 +23,22 @@ export type UpdateResult =
 
 export type UpdateOptions = { lockRetryMs?: number; maxLockRetries?: number; targetVersion?: string };
 
+/** Manual and notification-triggered updates retain the actual installer output, including a
+ *  readable refusal. A shell terminal's process-exit message only exposed its wrapper command. */
+export async function updateCliWithProgress(executable: string, restart: () => void): Promise<void> {
+  const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+    title: "Updating the DGC CLI…", cancellable: true }, (_progress, token) => runCliUpdate(executable, token));
+  if (result.ok) {
+    restart();
+    void vscode.window.showInformationMessage("DGC CLI updated. Reconnecting…");
+    return;
+  }
+  const output = vscode.window.createOutputChannel("DGC update");
+  output.appendLine(result.log || result.reason);
+  output.show(true);
+  void vscode.window.showErrorMessage(`DGC CLI update failed: ${result.reason}. See DGC update in Output.`);
+}
+
 /** The file `command` names the way spawn() finds it: a path as given, or the first executable
  *  of that name on PATH. Undefined when there is none. */
 export function resolveCommandPath(command: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -79,6 +95,10 @@ export function cliUpdateEnvironment(command: string, env: NodeJS.ProcessEnv = p
   const install = installTreeOf(real);
   if (!install) { return {}; }
   const result: Record<string, string> = { DGC_DIR: install.dataDir };
+  // Old DGC versions do not pass their own interpreter to the installer. A managed venv already
+  // has a supported Python even when macOS Finder's PATH starts with Apple's older python3.
+  const python = join(dirname(real), "python");
+  if (resolveCommandPath(python, env)) { result.DGC_PYTHON = python; }
   try {
     if (lstatSync(found).isSymbolicLink()) { result.DGC_BIN = dirname(found); }
   } catch { /* the launcher vanished between the two looks: pass the directory only */ }
@@ -343,6 +363,11 @@ export function failureHeadline(log: string): string {
     .filter(Boolean);
   const refusal = lines.find((line) => line.startsWith("\u2717"));
   if (refusal) { return refusal.replace(/^\u2717\s*/, ""); }
+  if (lines.some((line) => /^this dgc runs from .*a git checkout/i.test(line))) {
+    return "This CLI runs from a Git checkout; update it with Git or choose a managed install";
+  }
+  const failed = lines.find((line) => /^update failed\s*[—–:]/i.test(line));
+  if (failed) { return failed; }
   // An old CLI's own summary ("update failed (exit 1). Run manually: curl … | bash") repeats the
   // status and suggests the pipeline the editor no longer uses; the line before it says more.
   const informative = lines.filter((line) => !/^update failed \(exit \d+\)/.test(line));

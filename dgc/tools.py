@@ -278,6 +278,13 @@ TOOL_SCHEMAS = [
          "scope": {"type": "string", "enum": ["project", "user"], "default": "project"}}, ["memory"]),
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
+    _fn("present_document", "Show a Markdown plan, research report or document as a readable browser "
+        "page with a downloadable .md source. Available in every mode, including Auto; this does "
+        "not request approval or change modes. Pass the complete Markdown, then include the "
+        "returned links in your answer. Use this for browser-readable plans, not artifact or "
+        "present_plan. The URL stays local and works while this DGC process is running.",
+        {"markdown": {"type": "string", "description": "Complete document in Markdown, up to 200,000 characters"},
+         "title": {"type": "string", "description": "Short document title"}}, ["markdown", "title"]),
     _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked. Use only when the whole goal, not merely this turn, reached that state.",
         {"status": {"type": "string", "enum": ["completed", "blocked"]},
          "summary": {"type": "string", "description": "Outcome or observed external blocker for the entire goal"},
@@ -296,7 +303,8 @@ TOOL_SCHEMAS = [
                            "multi_select": {"type": "boolean"},
                            "options": {"type": "array", "items": {"type": "object", "properties": {
                                "label": {"type": "string", "description": "1-5 words"},
-                               "description": {"type": "string", "description": "Consequence, one sentence"}},
+                               "description": {"type": "string", "description": "Consequence, one sentence"},
+                               "recommended": {"type": "boolean"}},
                                "required": ["label"]}}},
                            "required": ["question", "options"]}}},
         ["questions"]),
@@ -3582,7 +3590,23 @@ def _view_image_bytes(p: Path, data: bytes, ctx, *, source: str) -> str:
             "The image follows this batch, so you can look at it directly.")
 
 
+def present_document(args: dict, ctx) -> str:
+    """Render only supplied text, in a private directory; never expose a project folder."""
+    from .artifacts import serve_document
+    md, title = args.get("markdown"), args.get("title")
+    if not isinstance(md, str) or not md.strip() or len(md) > 200_000:
+        return "error: markdown must be nonempty and at most 200,000 characters"
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        return "error: title must be nonempty and at most 200 characters"
+    page, source = serve_document(_safe_output(md, ctx), _safe_output(title, ctx))
+    return (f"Document ready.\n[Read the document]({page})\n"
+            f"[Download Markdown]({source})\n"
+            "Local to this machine; available while DGC is running. "
+            "Use the browser's Print → Save as PDF to export a PDF. No execution approval was requested.")
+
+
 EXECUTORS = {
+    "present_document": present_document,
     "read_file": read_file, "view_image": view_image, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,

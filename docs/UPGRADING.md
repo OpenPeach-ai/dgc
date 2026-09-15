@@ -1,7 +1,7 @@
 # Updating DGC and resolving protocol mismatches
 
 The CLI and editor extension are separate installations with independent version numbers. Update
-both for the current feature set: CLI 0.40.1 and extension 0.25.1 use editor protocol v14 (CLI 0.39.0
+both for the current feature set: CLI 0.40.2 and extension 0.25.2 use editor protocol v14 (CLI 0.39.0
 and extension 0.24.0 use editor protocol v13). Additive
 capabilities let the extension explain a missing backend feature instead of sending unsupported
 commands to an older CLI.
@@ -16,7 +16,10 @@ See [Controls during a turn](LIVE_CONTROLS.md) for live skills, permission chang
    only once the new build is complete. `dgc update --list` shows the kept versions,
    `dgc update --rollback` returns to the version that was active before the last switch, and
    `dgc update --version X` switches to a kept version. An install in a custom location is updated
-   where it is.
+   where it is. Editor updates show notification progress and reconnect on success. On failure,
+   **Output → DGC update** retains the installer’s explanation. Updates reuse DGC’s supported
+   Python interpreter; fresh installs search for Python 3.10+ even when an older system Python
+   appears first on PATH.
 3. Update DGC from your editor's extension catalog, or run **DGC: Check for Extension Updates**
    (extension 0.25.1+). The command checks vibedgc.com directly and offers a checksum-verified VSIX
    when a newer version is published. Installation requires your **Install Update** selection;
@@ -43,7 +46,7 @@ and [Cursor extension guide](https://prod.cursor.com/help/customization/extensio
 ## How paired updates work
 
 DGC currently uses the CLI installed on your machine; it does not bundle a private runtime inside
-its extension. Extension 0.25.1 records its minimum CLI version, 0.40.1. If the connected CLI is too
+its extension. Extension 0.25.2 records its minimum CLI version, 0.40.2. If the connected CLI is too
 old, the existing automatic CLI recovery installs that specific release, then reconnects. The user
 setting `dgc.autoUpdateCli` controls this. A custom executable or unsupported install still needs
 its own installation method; DGC never overwrites an arbitrary checkout.

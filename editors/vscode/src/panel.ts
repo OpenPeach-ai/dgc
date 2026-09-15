@@ -8,7 +8,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
-  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, openUpdateTerminal, runCliUpdate,
+  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
 } from "./cliupdate";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile } from "./navigation";
@@ -1921,7 +1921,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // The exact executable with `update`, not `curl | bash` typed into a shell: an old CLI then
         // still updates the install it belongs to (DGC_DIR/DGC_BIN), and DGC_SKIP_EXTENSION keeps
         // the installer from replacing this running extension with the published .vsix.
-        void openUpdateTerminal(resolveDgcExecutable().command, "Update DGC", () => this.restart("manual CLI update"));
+        void updateCliWithProgress(resolveDgcExecutable().command, () => this.restart("manual CLI update"));
       } else if (choice === SETPATH) {
         void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
@@ -4285,7 +4285,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       : this.routeState.subscriptionEngine ? [THINK[0]] : THINK;
     const profiles = [...available, {
       id: "ultra",
-      detail: "deepest reasoning plus proactive bounded sub-agents; permissions stay unchanged",
+      detail: "extended reasoning guidance plus proactive bounded sub-agents; permissions stay unchanged",
     }];
     const pick = await vscode.window.showQuickPick(
       profiles.map((t) => ({ label: t.id === "ultra" ? "Ultra"
@@ -4559,12 +4559,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <p class="usage-empty-title">No model requests counted in this range yet</p>
       <p>Each request DGC finishes (chats, goals, sub-agents, fallbacks, compaction) will appear here with the input, output and cached tokens its provider reported, totalled by model and by day.</p>
       <p id="usage-empty-all" class="usage-empty-all" hidden>Earlier requests may be in a longer range. <button type="button" id="usage-show-all" class="link" title="Count every request the ledger keeps (up to 400 days)">Show all time</button></p>
-      <p>Turns delegated to a subscription CLI (Claude Code, Codex, &hellip;) are counted by that CLI, not here.</p>
     </div>
+    <p class="set-note">Local provider reports only; missing usage is marked unmetered. Subscription CLI turns are counted by that CLI. Up to 400 days are retained; this is not your provider account quota or bill.</p>
     <div id="usage-content" hidden>
       <div id="usage-figures" class="usage-figures"></div>
       <p id="usage-unmetered" class="usage-unmetered" hidden></p>
-      <div class="set-group">By model <span class="set-hint">sorted by total tokens</span></div>
+      <div class="set-group">By model <span class="set-hint">top 100, sorted by total tokens</span></div>
       <div class="usage-table-wrap" role="region" aria-label="Token usage by model" tabindex="0">
         <table class="usage-table">
           <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cached</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
@@ -4590,7 +4590,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
     <label>Thinking
       <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
-    <label>DGC Ultra <span class="set-hint">deepest reasoning + proactive bounded sub-agents; never changes permissions</span>
+    <p id="s-reasoning-note" class="set-hint"></p>
+    <label>DGC Ultra <span class="set-hint">extended reasoning guidance + proactive bounded sub-agents; never changes permissions</span>
       <select id="s-ultra_mode"><option value="false">off</option><option value="true">on</option></select></label>
     <label>Context size (tokens) <span class="set-hint">DGC uses the smaller of this and the model\u2019s own maximum, and compacts near 85% of it. Ollama cloud models ignore the request server-side, so this governs when DGC compacts rather than what the server accepts.</span>
       <div class="set-row">

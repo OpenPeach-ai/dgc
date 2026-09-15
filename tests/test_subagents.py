@@ -1354,18 +1354,17 @@ class TuiTests(unittest.TestCase):
         self.assertEqual(plain(two), f"{glyphs.AGENT_RUN} 2 agents")
         self.assertIn(f"[{th.ok}]{glyphs.AGENT_RUN}[/]", two)
         self.assertEqual(plain(self.segment(registry_with(running=2, finished=3))),
-                         f"{glyphs.AGENT_RUN} 5 agents · 2 working")
+                         f"{glyphs.AGENT_RUN} 2 agents")
         waiting = self.segment(registry_with(running=1, waiting=1, finished=3))
-        self.assertEqual(plain(waiting), f"{glyphs.AGENT_WAIT} 5 agents · 1 needs you")
+        self.assertEqual(plain(waiting), f"{glyphs.AGENT_WAIT} 2 agents · 1 needs you")
         self.assertIn(f"[bold {th.err}]", waiting)
         idle = self.segment(registry_with(finished=4, failed=1))
-        self.assertEqual(plain(idle), f"{glyphs.AGENT_IDLE} 5 agents")
-        self.assertIn(f"[{th.faint}]", idle)
+        self.assertEqual(plain(idle), "")
         self.assertEqual(plain(self.segment(registry_with(running=2), width=60)), f"{glyphs.AGENT_RUN}2")
         self.assertEqual(plain(self.segment(registry_with(running=2, finished=3), width=60)),
-                         f"{glyphs.AGENT_RUN}2/5")
+                         f"{glyphs.AGENT_RUN}2")
         self.assertEqual(plain(self.segment(registry_with(running=1, waiting=1, finished=3), width=60)),
-                         f"{glyphs.AGENT_WAIT}5")
+                         f"{glyphs.AGENT_WAIT}2")
         with patch.multiple(glyphs, AGENT_RUN="*", AGENT_WAIT="!", AGENT_IDLE="o"):
             self.assertEqual(plain(self.segment(registry_with(running=2), width=60)), "*2")
             self.assertEqual(plain(self.segment(registry_with(running=2))), "* 2 agents")
@@ -1411,8 +1410,8 @@ class TuiTests(unittest.TestCase):
         tui._active_idx = 0
         tui._tls = threading.local()
         tui._width = 60
-        for reg, segment in ((registry_with(finished=3), f"{glyphs.AGENT_IDLE}3"),
-                             (registry_with(running=2, finished=1), f"{glyphs.AGENT_RUN}2/3"),
+        for reg, segment in ((registry_with(finished=3), ""),
+                             (registry_with(running=2, finished=1), f"{glyphs.AGENT_RUN}2"),
                              (registry_with(running=1, waiting=1), f"{glyphs.AGENT_WAIT}2")):
             with self.subTest(segment=segment):
                 tui.agent = SimpleNamespace(subagents=reg)

@@ -34,6 +34,19 @@
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
   const THINK = ["off", "low", "medium", "high", "xhigh"];
+  let reasoningControl = "provider";
+  function reasoningNote() {
+    const detail = reasoningControl === "glm-flash-levels"
+      ? "GLM Flash always reasons: Off/Low send Low, Medium/High send High, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+      : reasoningControl === "toggle"
+      ? "This model accepts thinking on/off. Low–Extra high change DGC’s instructions, not native reasoning levels."
+      : reasoningControl === "levels"
+      ? "This model accepts Low, Medium and High. Off uses Low; Extra high uses High with deeper DGC instructions."
+      : reasoningControl === "instructions"
+      ? "This model has no supported reasoning control. These profiles change DGC’s instructions only."
+      : "Native reasoning support depends on the model and provider.";
+    return detail + " Ultra adds guidance for deeper work and bounded parallel agents; it cannot guarantee better answers.";
+  }
   let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
   let curWorkers = 4;
   let lastConfig = null, settingsProviders = [];
@@ -147,7 +160,7 @@
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : curThink;
     const index = Math.max(0, profiles.indexOf(selected));
-    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div></section>`;
+    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p></section>`;
   }
   function bindProfiles(mm) {
     const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
@@ -266,6 +279,7 @@
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
     view_image: ["Viewing image", "Viewed image"], browser: ["Using browser", "Used browser"],
     present_plan: ["Preparing plan", "Prepared plan"],
+    present_document: ["Preparing document", "Prepared document"],
     propose_options: ["Asking", "Asked"],
     task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
   };
@@ -2542,6 +2556,7 @@
           : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
         skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
+        reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         skillManagement = ev.capabilities?.skill_management === true;
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
@@ -2601,6 +2616,7 @@
         break;
       case "session_named": setThreadTitle(ev.name); break;
       case "config":
+        reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         lastConfig = ev;
         nativeSteering = liveSteering && !ev.subscription_engine;
         renderComposerControls();
@@ -3755,6 +3771,8 @@
     "monitor_wake"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
+    reasoningControl = cfg.provider_capabilities?.reasoning_control || reasoningControl;
+    $("s-reasoning-note").textContent = reasoningNote();
     const map = {
       base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
       subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
@@ -4652,8 +4670,8 @@
   // With a click event: hide only when the click fell outside the pill and its menu.
   function hideAgentsMenu(event) {}
 
-  // The "● 2 agents" pill and its list: every task sub-agent started in this chat (Claude Code's
-  // rule), a dot for whether any is working or waiting on you, and a read-only list whose rows jump
+  // The "● 2 agents" pill shows current work and briefly retains failures; completed work stays
+  // in the transcript. A dot for whether any is working or waiting on you, and a read-only list whose rows jump
   // to each agent's task card. State comes from agent_started/agent_updated/agent_ended frames and
   // `agents` snapshots; a backend that exits marks the active ones stopped until the new backend's
   // snapshot says otherwise.
@@ -4670,9 +4688,12 @@
   // the rewind is about to prune (call_0 repeats in every turn of a provider that sends no ids).
   let agentsHoldClaims = false;
 
-  // The one place that picks the number (the TUI's _agents_count is the same switch). Claude Code's
-  // rule: every sub-agent started in this chat. "Working while any work, else all": `active || total`.
   function agentsLabelCount(active, total) { return total; }
+  let agentsExpiryTimer = null;
+  function agentVisible(record) {
+    return AGENT_ACTIVE.has(record.state) || ((record.state === "failed" || record.state === "stopped")
+      && Number.isFinite(record.endedAt) && agentNow() - record.endedAt < 30000);
+  }
 
   function agentNow() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
   function agentPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
@@ -4686,17 +4707,18 @@
   function agentLiveMs(record) {
     return Number(record.elapsed_ms || 0) + Math.max(0, agentNow() - Number(record.receivedAt || agentNow()));
   }
-  function agentCounts() {
+  function agentCounts(visibleOnly = false) {
     const c = { queued: 0, running: 0, waiting: 0, waitingPermission: 0, waitingAnswer: 0,
       finished: 0, failed: 0, stopped: 0 };
     for (const record of agentRecords.values()) {
+      if (visibleOnly && !agentVisible(record)) continue;
       if (record.state in c) c[record.state] += 1;
       if (record.state === "waiting") {
         if (record.waiting_for === "answer") c.waitingAnswer += 1; else c.waitingPermission += 1;
       }
     }
     c.active = c.queued + c.running + c.waiting + agentActiveExtra;
-    c.total = agentRecords.size + agentTotalExtra;
+    c.total = visibleOnly ? c.active + c.failed + c.stopped : agentRecords.size + agentTotalExtra;
     return c;
   }
 
@@ -4730,6 +4752,7 @@
       if (!record) { if (agentActiveExtra > 0) agentActiveExtra -= 1; renderAgents(); return; }
       if (!AGENT_ACTIVE.has(record.state)) return;
       record.state = String(ev.state || "finished");
+      record.endedAt = now;
       for (const key of ["duration_ms", "tool_calls", "tokens", "message"]) if (key in ev) record[key] = ev[key];
       delete record.waiting_for; delete record.activity;
     }
@@ -4740,10 +4763,13 @@
   function renderAgentsSnapshot(ev) {
     const items = Array.isArray(ev.items) ? ev.items : [];
     const now = agentNow();
+    const previous = new Map(agentRecords);
     agentRecords.clear();
     for (const item of items) {
       if (item && typeof item === "object" && item.id && !agentRecords.has(String(item.id))) {
-        agentRecords.set(String(item.id), agentRecordFrom(item, now));
+        const record = agentRecordFrom(item, now);
+        record.endedAt = previous.get(String(item.id))?.endedAt;
+        agentRecords.set(String(item.id), record);
       }
     }
     const listedActive = [...agentRecords.values()].filter((r) => AGENT_ACTIVE.has(r.state)).length;
@@ -4803,14 +4829,19 @@
 
   // ---- the pill ----
   function renderAgents() {
+    clearTimeout(agentsExpiryTimer);
+    const expiry = [...agentRecords.values()].filter((r) => !AGENT_ACTIVE.has(r.state) && agentVisible(r))
+      .map((r) => Math.max(1, 30001 - (agentNow() - r.endedAt)));
+    if (expiry.length) agentsExpiryTimer = setTimeout(renderAgents, Math.min(...expiry));
     renderAgentsPill();
     scheduleAgentsMenuRender();
   }
   function renderAgentsPill() {
     const picker = $("agents-picker"), pill = $("agents-pill");
     if (!picker || !pill) return;
-    const c = agentCounts();
+    const c = agentCounts(true);
     if (c.total <= 0) {
+      hoverTip.hide();
       agentsHideMenu();
       picker.hidden = true;
       return;
@@ -4882,7 +4913,7 @@
   }
   function agentTree() {
     const children = new Map();
-    const records = [...agentRecords.values()];
+    const records = [...agentRecords.values()].filter(agentVisible);
     const ids = new Set(records.map((r) => r.id));
     // By start, children under their parent. A restored record has no start time: it began before
     // anything this backend saw, so it sorts first.
@@ -4942,7 +4973,7 @@
     const menu = $("agentsmenu");
     if (!menu) return;
     claimAgentAnchors();
-    const c = agentCounts();
+    const c = agentCounts(true);
     agentsSetText($("agents-summary"), agentSummary(c));
     const tree = $("agents-tree");
     const active = document.activeElement;
@@ -4973,8 +5004,8 @@
     // Focus is put back only when this render took it: a focused row that moved, or one whose
     // agent a snapshot dropped (then the list keeps it, on the row that is now tabbable).
     if (focusedRow && document.activeElement !== focusedRow) (kept || tabbable || $("agents-settings")).focus();
-    $("agents-more").hidden = agentTotalExtra <= 0;
-    agentsSetText($("agents-more"), agentTotalExtra > 0 ? `+${agentTotalExtra} more not listed` : "");
+    $("agents-more").hidden = agentActiveExtra <= 0;
+    agentsSetText($("agents-more"), agentActiveExtra > 0 ? `+${agentActiveExtra} active agents not listed` : "");
     $("agents-stop-note").hidden = c.active <= 0;
     if (c.active > 0 && !agentsTick) agentsTick = setInterval(() => { if (agentsMenuOpen()) renderAgentsMenu(); }, 1000);
     if (c.active <= 0 && agentsTick) { clearInterval(agentsTick); agentsTick = null; }
@@ -5084,6 +5115,7 @@
     }
     const wasOpen = agentsMenuOpen();
     agentsHoldClaims = false;
+    clearTimeout(agentsExpiryTimer); agentsExpiryTimer = null;
     agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); agentRowNodes.clear();
     $("agents-tree")?.replaceChildren();
     agentTotalExtra = 0; agentActiveExtra = 0;
@@ -5095,13 +5127,14 @@
     for (const record of agentRecords.values()) {
       if (!AGENT_ACTIVE.has(record.state)) continue;
       record.state = "stopped";
+      record.endedAt = agentNow();
       record.message = "DGC's backend stopped";
       delete record.waiting_for; delete record.activity; delete record.duration_ms;
     }
     agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false; agentsBatch.clear();
     agentsHideMenu();
-    renderAgentsPill();
+    renderAgents();
   }
 
   // Installed-host tests (extension-host/index.cjs) ask what the pill shows. Only the host's test
@@ -5995,7 +6028,7 @@
   const ASK_SENTENCE_WORD = /^[a-z]+[,;:.!?]?(?=\s|$)/;
   function askUnmark(text, sentence = false) {
     const raw = String(text || "");
-    let stripped = raw.replace(ASK_MARK, " ");
+    let stripped = raw.replace(/\(\s*recommended\s*:\s*([^()]*)\)/gi, "($1)").replace(ASK_MARK, " ");
     let found = stripped !== raw, capital = false;
     const lead = stripped.match(ASK_LEAD_MARK);
     if (lead) { stripped = stripped.slice(lead[0].length); found = true; capital = sentence; }

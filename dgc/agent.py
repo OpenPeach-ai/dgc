@@ -21,7 +21,7 @@ from .chat_changes import ChatChanges
 from .config import Config
 from .hooks import run_hooks
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
-                  normalize_usage)
+                  normalize_usage, usage_reported)
 from .memory import load_instruction_file, load_memories, project_memory_path
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
@@ -97,7 +97,7 @@ _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legiti
 _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: finish the work that does "
                            "not depend on it, then end your result with the question and the option "
                            "you recommend.")
-_PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options", "update_goal",
+_PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "present_document", "propose_options", "update_goal",
                                  "monitor_stop"}
 # Monitor notices are command output delivered in the user role. They are bounded per turn and per
 # session so a chatty monitor cannot fill the window between compactions: past the session budget
@@ -176,7 +176,7 @@ _OPTIONAL_TOOL_INTENT = {
     "git_diff": "git_review",
     "web_fetch": "web", "web_search": "web", "browser": "browser",
     "add_skill": "skill_install", "save_memory": "memory",
-    "artifact": "artifact", "task": "delegate", "monitor": "monitor",
+    "artifact": "artifact", "present_document": "document", "task": "delegate", "monitor": "monitor",
     "view_image": "image",
 }
 
@@ -214,7 +214,7 @@ class _OptionsAsk:
             r"(?:(?:can|could|would|will)(?:n'?t)?|can'?t|won'?t)\s+you(?:\s+(?:please|just))?|"
             r"you\s+to)\b)\s*")
     _DET = (r"a|an|the|some|few|several|couple(?:\s+of)?|more|other|different|your|top|best|possible|"
-            r"multiple|two|three|four|five|\d+")
+            r"multiple|test|testing|sample|example|demo|two|three|four|five|\d+")
     _NOUN = r"(?:options|option|choices|choice|alternatives|alternative)\b"
     _CHOOSE = r"(?:choose|pick|select|decide)"
     # What the user chooses: the choice itself, never an object in an app ("which columns to export").
@@ -311,6 +311,9 @@ class _OptionsAsk:
 
 
 _TOOL_INTENT_PATTERNS = {
+    "document": re.compile(
+        r"\bpresent_document\b|(?=.*\b(?:plans?|reports?|documents?|research|markdown|\.md)\b)"
+        r"(?=.*\b(?:browser|url|links?|html|pdf|web|download|readable)\b)", re.I | re.S),
     "git_review": re.compile(
         r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
         r"\b(?:inspect|check|audit)\b.{0,32}\bchanges?\b", re.IGNORECASE | re.DOTALL),
@@ -712,7 +715,7 @@ THINK_INSTRUCTIONS = {
     "high": ("Engage maximum reasoning depth (ultrathink). Analyze the problem thoroughly, "
              "explore alternative approaches, verify assumptions against the actual code, "
              "and double-check every action before taking it."),
-    "xhigh": ("Engage the deepest reasoning budget. Exhaustively analyze the problem, enumerate "
+    "xhigh": ("Analyze complex work in depth. Enumerate "
               "and weigh alternative approaches, verify every assumption against the actual code, "
               "and re-check each action before and after taking it."),
 }
@@ -1507,7 +1510,8 @@ class Agent(GoalLifecycle):
         _record_usage, which deliberately never writes the ledger.
         """
         from . import usage_ledger
-        usage = normalize_usage(getattr(result, "usage", None))
+        raw_usage = getattr(result, "usage", None)
+        usage = normalize_usage(raw_usage)
         source = ("subagent" if int(getattr(self, "depth", 0) or 0) > 0
                   else str(getattr(client, "usage_source", "") or "main"))
         # The transport DGC actually spoke names the provider when it is a native one: an Ollama
@@ -1521,7 +1525,8 @@ class Agent(GoalLifecycle):
             base_url=getattr(client, "base_url", ""), model=getattr(client, "model", ""),
             source=source, input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
-            cached_input_tokens=usage["cached_input_tokens"])
+            cached_input_tokens=usage["cached_input_tokens"],
+            metered=usage_reported(raw_usage))
 
     def refresh_client(self) -> None:
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
@@ -1824,6 +1829,10 @@ class Agent(GoalLifecycle):
     def _activate_tool_intents(self, text: str, *, replace: bool = False) -> bool:
         """Activate optional tools from explicit turn/goal intent; return whether it changed."""
         detected = _tool_intents(text)
+        recommendation = bool("options" in detected and re.search(
+            r"\brecomm?end(?:ation|ations|ed|s)?\b", _trusted_intent_text(text), re.I))
+        self._options_recommendation_requested = (recommendation if replace else
+            recommendation or getattr(self, "_options_recommendation_requested", False))
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
             # A goal describes the work, and it is re-read on every cycle and every later turn. An
             # ask to be offered choices is the user's on the turn they type it, so a goal never
@@ -2041,8 +2050,14 @@ class Agent(GoalLifecycle):
         Without it the model can only say the tool does not exist. Gated on the explicit ask, so a
         request that did not ask (the prompt-surface probe among them) carries nothing extra.
         """
-        if "options" not in getattr(self, "_active_tool_intents", set()) or self._picker_offered():
+        if "options" not in getattr(self, "_active_tool_intents", set()):
             return ""
+        if self._picker_offered():
+            return ("# Requested options picker\nThe user explicitly asked to choose. Call "
+                    "propose_options to display the interactive selector, including for a demo "
+                    "or test. Put your recommendation first and explain it. A prose list does "
+                    "not open the selector. After the user answers or dismisses it, continue "
+                    "without asking again. If the user withdraws the request, follow that instead.")
         if self.depth:
             # Whatever the parent's situation, a sub-agent answers the parent, never the user.
             reason = "you are a sub-agent"
@@ -2730,6 +2745,12 @@ class Agent(GoalLifecycle):
         options_note = self._options_unavailable_note()
         if options_note:
             parts += ["", options_note]
+        if "document" in getattr(self, "_active_tool_intents", set()):
+            parts += ["", "# Browser document\nUse present_document with the complete Markdown "
+                      "to provide the requested readable plan/report URL and .md download. It "
+                      "works in Auto and other modes without changing permissions. Include its "
+                      "returned links in your answer. present_plan is only for execution approval; "
+                      "artifact is for custom HTML/apps. Never invent a URL."]
 
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:
@@ -4562,6 +4583,7 @@ class Agent(GoalLifecycle):
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
         todo_repair = 0             # bounded correction for a model printing tool args as prose
+        options_repair = 0
         self._approval_records.clear()
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
@@ -4970,6 +4992,23 @@ class Agent(GoalLifecycle):
             paused_assistant_index = None
 
             if not result.tool_calls:
+                if (self._options_asked_interactively() and self._picker_offered()
+                        and not wake and not self.cancelled.is_set()
+                        and result.finish_reason not in _INCOMPLETE_FINISH_REASONS
+                        and not re.search(r"\b(?:never\s*mind|don'?t ask|do not ask|you (?:pick|choose|decide))\b",
+                                          user_text, re.I)):
+                    if options_repair < 2:
+                        options_repair += 1
+                        self.messages.append({"role": "user", "content":
+                            "<system-reminder>\nThe requested interactive options have not been "
+                            "shown. `propose_options` is available in this session. Call it now "
+                            "with a recommended option; writing choices in chat does not open "
+                            "the selector. Do not repeat completed work.\n</system-reminder>"})
+                        next_request_reason = "options_gate"
+                        self._activity("continuing", "Opening the requested options")
+                        continue
+                    self.ui.info("The model did not open the requested options picker after two reminders. "
+                                 "The selector is available; try a model that follows tool requests.")
                 printed_todo = (not wake and not self.todo_clear_in_force()
                                 and (did_tools or re.search(
                                     r"(?:^|[.!?;\n]\s*)(?:please\s+)?(?:use|call|maintain|update|create|keep)\b.{0,40}\b(?:todo|checklist|task list)\b",
@@ -5806,6 +5845,12 @@ class Agent(GoalLifecycle):
             questions = normalize_questions(redact_value(args, secrets))
         except ValueError as exc:
             return finish(f"error: {exc}")
+        if (self._options_asked_interactively()
+                and getattr(self, "_options_recommendation_requested", False)
+                and not any(o["recommended"] for q in questions for o in q["options"])):
+            return finish("error: the user requested your recommendation. Mark the option you "
+                          "recommend with recommended: true, put it first and explain why in its "
+                          "description. The recommendation belongs on the option, not the question.")
         ask = getattr(self.ui, "ask_questions", None)
         if self.depth > 0 or not callable(ask):
             return finish(UNAVAILABLE_RESULT)
@@ -6758,15 +6803,16 @@ class Agent(GoalLifecycle):
             cleanup = (f" Cleanup warning for {workspace.path} on {workspace.branch}: "
                        f"{cleanup_error}." if workspace is not None and cleanup_error else "")
             return _TaskOutcome(
-                f"Sub-task '{description}' was not started because its isolated configuration "
+                f"error: Sub-task '{description}' was not started because its isolated configuration "
                 f"could not be created: {start_error}.{cleanup}")
         if failure:
             kept = self._preserve_task_workspace(workspace, failure)
             shared = " Partial changes may remain in the shared checkout." if not isolated else ""
-            return _TaskOutcome(f"Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
+            return _TaskOutcome(f"error: Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
         if workspace is None:
             return _TaskOutcome(
-                f"Sub-task '{description}' completed in the shared checkout. Summary:\n{result}")
+                f"Sub-task '{description}' completed in the shared checkout. "
+                f"This task ran sequentially because an isolated Git checkout was unavailable. Summary:\n{result}")
 
         lease = workspace_mutation_lock(self.config.project_root)
         if not acquire_cancellable(lease, self.cancelled):

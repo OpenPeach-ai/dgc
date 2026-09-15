@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.25.2 — 2026-09-16
+
+- Requires CLI 0.40.2; editor protocol remains v14. Includes direct verified extension recovery, paired CLI recovery, checklist reminders and persisted approval cards from 0.25.1.
+- The composer counts active agents rather than every agent ever started in the chat. Successful agents disappear immediately; failed or stopped agents remain for 30 seconds. Historical tool steps remain in the transcript; failed steps keep their failed status.
+- CLI updates show progress, reconnect on success and retain the installer’s actual failure in Output → DGC update. Supported Python discovery handles Finder-launched editor environments.
+- Option cards recognize recommendations containing a rationale. Browser documents have a named tool step. Reasoning controls explain the selected model’s native tiers and what Ultra changes.
+- Token Usage consistently explains local counts, missing reports, subscription CLI accounting and retention, and identifies its top-100 model table.
+
 ## 0.25.1 — 2026-09-15
 
 - **Requires CLI 0.40.1; editor protocol stays v14.** Automatic CLI recovery targets the release

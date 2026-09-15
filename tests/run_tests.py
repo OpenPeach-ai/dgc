@@ -11413,7 +11413,8 @@ def test_benchmark_integrity():
         check("propose_options schema stays slim",
               len(_options_text) <= 1063 and len(_options_description) <= 430
               and not any(key in _options_text for key in ('"minItems"', '"maxItems"', '"maxLength"'))
-              and '"recommended"' not in _options_text, (len(_options_text), len(_options_description)))
+              and '"recommended":{"type":"boolean"}' in _options_text,
+              (len(_options_text), len(_options_description)))
         check("propose_options description keeps its boundaries",
               all(part in _options_description for part in (
                   "permission", "plan is ready", "recommend", "first", "(Recommended)", "Don't add Other",
@@ -16029,7 +16030,7 @@ def e2e_native_ollama(port: int, tmp: Path) -> bool:
     assistant = next((m for m in followup if m.get("role") == "assistant"
                       and m.get("tool_calls")), {})
     tool_result = next((m for m in followup if m.get("role") == "tool"), {})
-    return (requests_seen[0].get("think") == "high"
+    return (requests_seen[0].get("think") is True
             and assistant.get("thinking") == "native thought "
             and assistant.get("content") == ""
             and "I’ve got" not in str(assistant)
@@ -16192,8 +16193,8 @@ def test_reasoning_payload():
     # Native Ollama think field only accepts low|medium|high|max → xhigh clamps to high, never crashes
     from dgc.llm import LLMClient
     _oc = LLMClient("http://localhost:11434/v1", "ollama", "qwen3")
-    check("_ollama_think xhigh → high", _oc._ollama_think("xhigh") == "high")
-    check("_ollama_think high → high", _oc._ollama_think("high") == "high")
+    check("_ollama_think xhigh enables boolean thinking", _oc._ollama_think("xhigh") is True)
+    check("_ollama_think high enables boolean thinking", _oc._ollama_think("high") is True)
     check("_ollama_think off → False", _oc._ollama_think("off") is False)
     _gpt = LLMClient("http://localhost:11434/v1", "ollama", "gpt-oss:120b")
     check("_ollama_think gpt-oss xhigh → high", _gpt._ollama_think("xhigh") == "high")
@@ -17631,7 +17632,7 @@ def test_ollama_adapter():
     finally:
         _llm.requests.post = original_post
     check("native Ollama negotiates a rejected thinking field without abandoning native chat",
-          len(negotiation_posts) == 2 and negotiation_posts[0]["think"] == "high"
+          len(negotiation_posts) == 2 and negotiation_posts[0]["think"] is True
           and "think" not in negotiation_posts[1] and negotiated.api_mode == "ollama"
           and not negotiated.reasoning_supported and len(negotiated_result.tool_calls) == 2)
 

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
-import { heldCliTerminalOptions, openUpdateTerminal } from "./cliupdate";
+import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -33,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     // closed at once: the output has to be held on screen until it has been read.
     if (subcommand === "update") {
       // It reports its own progress and outcome, in step with the terminal.
-      void openUpdateTerminal(executable.command, "DGC update", () => provider.restart("manual CLI update"));
+      void updateCliWithProgress(executable.command, () => provider.restart("manual CLI update"));
       return true;
     }
     const term = vscode.window.createTerminal(subcommand === "notes"
@@ -85,8 +85,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.compact", () => provider.runEditorAction("compact")),
     vscode.commands.registerCommand("dgc.updateExtension", () => checkForExtensionUpdates(context, true)),
     vscode.commands.registerCommand("dgc.updateCli", () => {
-      // parity with the CLI's /update: run `dgc update` in a terminal, then remind the user to
-      // restart the backend so the panel picks up the new version.
+      // Keep installer failures readable and reconnect after a successful CLI update.
       runCliInTerminal("update");
     }),
     vscode.commands.registerCommand("dgc.openNotes", () => {

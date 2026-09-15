@@ -121,13 +121,20 @@
 <div class="heading-row h1-row"><h1 id="thinking-reasoning">Thinking &amp; reasoning</h1><a class="anchor" href="#thinking-reasoning" aria-label="Link to this section">#</a></div>
 <p>DGC exposes one thinking dial, mapped to the correct wire format <strong>per provider</strong>.</p>
 <div class="heading-row h2-row"><h2 id="levels">Levels</h2><a class="anchor" href="#levels" aria-label="Link to this section">#</a></div>
-<p><code>off</code> · <code>low</code> · <code>medium</code> · <code>high</code> · <code>xhigh</code>. <code>off</code> is the default — a coding agent should act, not deliberate at length. <code>xhigh</code> is the deepest budget, for genuinely hard problems on reasoning-capable models.</p>
+<p><code>off</code> · <code>low</code> · <code>medium</code> · <code>high</code> · <code>xhigh</code>. <code>off</code> is the default — a coding agent uses model-specific controls and adds instructions appropriate to each profile. <code>xhigh</code> requests the strongest supported tier; it cannot add a native tier a model does not offer.</p>
 <ul>
 <li><code>/think</code> — cycle, or <code>/think high</code> to set a level (persisted across restarts).</li>
 <li><code>--think &lt;level&gt;</code> — set it for one <code>dgc -p</code> run.</li>
 <li>TUI: <code>/think</code> opens a picker; <strong>Settings → Model &amp; sampling → Thinking effort</strong>.</li>
 </ul>
-<p>Reasoning models (o-series, DeepSeek-R1, qwen-thinking) tend to do better on hard tasks with <code>/think high</code> (or <code>xhigh</code>); non-reasoning models often ignore the dial.</p>
+<p>Native controls differ:</p>
+<ul>
+<li>Most Ollama thinking models accept <strong>on/off</strong>: all non-off profiles turn thinking on. Low through Extra High still change DGC&#x27;s instructions, but are not separate native reasoning budgets.</li>
+<li><strong>GPT-OSS on Ollama:</strong> Low, Medium and High; Off uses Low and Extra High uses High.</li>
+<li><strong>GLM 5.3 Flash on Ollama:</strong> reasoning is always on. Off/Low use Low, Medium/High use High, and Extra High/Ultra use Max, on both native and compatible transports.</li>
+<li>Other providers use their supported effort fields or budgets. Unsupported controls are negotiated away after a precise rejection; a model without reasoning support gets DGC instructions only.</li>
+</ul>
+<p>Ultra adds guidance for deeper work and bounded parallel agents. Permission mode still governs what can run. A stronger profile can take longer and use more tokens; it does not guarantee better answers. The editor&#x27;s picker and General settings explain the native control for the selected model.</p>
 <div class="heading-row h2-row"><h2 id="showing-thinking">Showing thinking</h2><a class="anchor" href="#showing-thinking" aria-label="Link to this section">#</a></div>
 <p><code>show_reasoning</code> (<code>/thoughts show|hide</code>) controls whether the model&#x27;s thinking is shown, muted, in the transcript. It does <strong>not</strong> change how hard the model reasons — that is <code>/think</code>.</p>
 <div class="heading-row h2-row"><h2 id="where-thinking-came-from">Where thinking came from</h2><a class="anchor" href="#where-thinking-came-from" aria-label="Link to this section">#</a></div>

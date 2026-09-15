@@ -65,7 +65,7 @@ if (process.argv.includes("--usage")) {
     const ids = [["qwen3.8:27b-q4km", "ollama", "localhost:11434", 844, 32110799, 1203825, 13486702],
       ["hf.co/unsloth/Qwen3.8-27B-Instruct-GGUF:UD-Q4_K_XL", "ollama", "localhost:11434", 221, 7545460, 248382, 3018549],
       ["claude-sonnet-4-5-20250929", "anthropic", "api.anthropic.com", 96, 4028466, 184045, 1744089],
-      ["Qwen/Qwen3.5-122B-A10B-FP8", "openai", "192.168.1.111:8000", 148, 3982064, 153601, 0],
+      ["Qwen/Qwen3.5-122B-A10B-FP8", "openai", "192.0.2.10:8000", 148, 3982064, 153601, 0],
       ["gpt-oss:120b-32k", "ollama", "localhost:11434", 128, 2801552, 101812, 1066018],
       ["deepseek/deepseek-v4-pro", "openai", "openrouter.ai", 70, 2048087, 90883, 878839],
       ["claude-opus-4-1", "anthropic", "api.anthropic.com", 9, 337793, 26223, 132152],

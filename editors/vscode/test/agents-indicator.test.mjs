@@ -29,7 +29,7 @@ function view(options = {}) {
 
 const sid = (n) => `sub-${String(n).padStart(12, "0")}`;
 
-test("the pill counts every agent of the chat and its dot says whether any is working", () => {
+test("the pill counts current agents and successful work leaves the composer immediately", () => {
   const { start, update, end, pill, errors } = view();
   assert.equal(pill().hidden, true, "hidden while the chat has no agents");
   start(sid(1));
@@ -44,12 +44,11 @@ test("the pill counts every agent of the chat and its dot says whether any is wo
   assert.equal(pill().aria, `2 agents · An agent is waiting for your permission · ${PILL_HINT}`);
   update(sid(2), { state: "running" });
   end(sid(1)); end(sid(2));
-  assert.deepEqual(pill(), { hidden: false, state: "idle", label: "2 agents", need: false,
-    title: `No agents working · ${PILL_HINT}`, aria: `2 agents · No agents working · ${PILL_HINT}` });
+  assert.equal(pill().hidden, true, "finished agents remain in the transcript, not the prompt count");
   start(sid(3));
-  assert.equal(pill().label, "3 agents");
+  assert.equal(pill().label, "1 agent");
   assert.equal(pill().state, "running");
-  assert.equal(pill().title, `Agents are working (1 of 3 working) · ${PILL_HINT}`);
+  assert.equal(pill().title, `Agents are working · ${PILL_HINT}`);
   assert.deepEqual(errors, []);
 });
 
@@ -80,12 +79,13 @@ test("a new chat hides the pill and closes its dialog; a fork keeps it; a big sn
     description: `a${i}`, depth: 1, state: "finished", tool_calls: 1, isolated: false, parallel: false,
     restored: false, duration_ms: 1000 }));
   event({ type: "agents", items, total: 70, active: 0 });
-  assert.equal(pill().label, "70 agents");
-  $("agents-pill").click();
-  assert.equal($("agents-more").hidden, false);
-  assert.equal($("agents-more").textContent, "+6 more not listed");
+  assert.equal(pill().hidden, true, "finished snapshot totals never resurrect the count");
   event({ type: "session", kind: "forked", message_count: 3, session_id: "s3" });
-  assert.equal(pill().label, "70 agents", "a branch is the same conversation");
+  assert.equal(pill().hidden, true);
+  event({ type: "agents", items, total: 73, active: 3 });
+  assert.equal(pill().label, "3 agents", "active agents omitted from a bounded snapshot still count");
+  $("agents-pill").click();
+  assert.equal($("agents-more").textContent, "+3 active agents not listed");
   event({ type: "session", kind: "cleared", message_count: 0, session_id: "s4" });
   assert.equal(pill().hidden, true);
   assert.deepEqual(errors, []);
@@ -247,11 +247,7 @@ test("restored records claim replayed cards newest to newest; history alone neve
     total: 2, active: 0 });
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
-  assert.equal(pill().label, "2 agents");
-  assert.equal(pill().state, "idle");
-  doc.getElementById("agents-pill").click();
-  assert.deepEqual([...doc.querySelectorAll(".agent-meta")].map((node) => node.textContent), ["Finished", "Failed"],
-    "restored rows show only their state");
+  assert.equal(pill().hidden, true, "restored finished/failed records do not restart the 30-second timer");
   assert.deepEqual(errors, []);
 });
 
@@ -400,12 +396,10 @@ test("after a rewind in a chat whose task calls all share call_0, each row jumps
   const cards = [...doc.querySelectorAll('.tool[data-tool-name="task"]')];
   assert.equal(cards.length, 2);
   assert.deepEqual(cards.map((card) => card.dataset.agentId), [sid(1), sid(2)]);
+  assert.equal($("agents-picker").hidden, true);
   for (const [index, card] of cards.entries()) {
-    $("agents-pill").click();
-    doc.querySelector(`.agent-row[data-agent-id="${sid(index + 1)}"]`).click();
-    assert.ok(card.classList.contains("flash"), `row turn${index} flashes its own card`);
+    card.querySelector(".tool-toggle").click();
     assert.match(card.textContent, new RegExp(`turn${index}`));
-    card.classList.remove("flash");
   }
   assert.deepEqual(errors, []);
 });
@@ -507,5 +501,19 @@ test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps 
   const reply = panelSrc.slice(panelSrc.indexOf("private testOnlyWebviewReply("));
   assert.match(reply.slice(0, reply.indexOf("\n  }\n")), /if \(!process\.env\.DGC_EXTENSION_TEST_TOKEN \|\| msg\?\.type !== "agentsProbeResult"\) return false;/);
   assert.match(panelSrc, /onDidReceiveMessage\(\(msg\) => \{\s*if \(this\.testOnlyWebviewReply\(msg\)\) return;/);
+  assert.deepEqual(errors, []);
+});
+
+
+test("failures leave after 30 seconds and do not accumulate across batches", () => {
+  const { start, end, advance, pill, errors } = view({ clock: true });
+  start(sid(1)); start(sid(2)); end(sid(1)); end(sid(2), "failed");
+  assert.equal(pill().label, "1 agent");
+  advance(29900);
+  assert.equal(pill().hidden, false);
+  advance(200);
+  assert.equal(pill().hidden, true);
+  start(sid(3));
+  assert.equal(pill().label, "1 agent");
   assert.deepEqual(errors, []);
 });

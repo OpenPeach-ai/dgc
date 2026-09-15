@@ -352,6 +352,25 @@ class UsageChunkParsingTests(unittest.TestCase):
                 + "data: [DONE]\n\n")
         self.assertEqual(self.consume(text).usage, {})
 
+    def test_absent_empty_and_zero_reports_stay_distinct_across_transports(self):
+        from dgc.llm import usage_reported
+        for raw in (None, {}, {'prompt_tokens': 0, 'completion_tokens': 0}):
+            expected = raw is not None and 'prompt_tokens' in raw
+            stream = (_chunk({'content': 'ok'}) + _chunk({}, 'stop')
+                      + _chunk(usage=raw, choices=False) + 'data: [DONE]\n\n')
+            self.assertEqual(usage_reported(self.consume(stream).usage), expected)
+            self.assertEqual(usage_reported(LLMClient._anthropic_usage(raw)), expected)
+            # A terminal Ollama frame may omit its counts entirely; completion alone is not usage.
+            frame = {'message': {'role': 'assistant', 'content': 'ok'}, 'done': True}
+            if expected:
+                frame.update(prompt_eval_count=0, eval_count=0)
+            client = LLMClient('http://127.0.0.1:11434/v1', 'k', 'm')
+            result = client._consume_ollama(self._Response(json.dumps(frame), 'application/x-ndjson'), None, None)
+            self.assertEqual(usage_reported(result.usage), expected)
+        text = (_chunk({'content': 'ok'}) + _chunk({}, 'stop') + _chunk(usage=USAGE, choices=False)
+                + _chunk(usage={}, choices=False) + 'data: [DONE]\n\n')
+        self.assertEqual(self.consume(text).usage['input_tokens'], 50)
+
     def test_cached_input_fields_from_every_provider_shape(self):
         from dgc.llm import normalize_usage
         for raw in ({"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": 4}},

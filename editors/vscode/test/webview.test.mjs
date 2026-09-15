@@ -3922,7 +3922,7 @@ test("an empty range explains what will appear, and errors or an old CLI say so 
   assert.equal(doc.getElementById("usage-content").hidden, true);
   assert.match(empty.textContent, /No model requests counted in this range yet/);
   assert.match(empty.textContent, /Each request DGC finishes \(chats, goals, sub-agents, fallbacks, compaction\) will appear here/);
-  assert.match(empty.textContent, /subscription CLI/);
+  assert.match(doc.querySelector('.set-section[data-section="usage"]').textContent, /Subscription CLI/);
   assert.equal(doc.getElementById("usage-empty-all").hidden, false, "a short empty range points at All time");
   doc.getElementById("usage-show-all").click();
   assert.equal(doc.getElementById("usage-range").value, "all");
@@ -3969,7 +3969,7 @@ test("one day draws no strip, a singular unmetered request reads right, and long
     range: "today",
     totals: { input_tokens: 500, output_tokens: 40, cached_input_tokens: 0, requests: 3, unmetered_requests: 1 },
     by_model: [
-      { model: "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M", provider: "openai", host: "192.168.1.111:8000",
+      { model: "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M", provider: "openai", host: "192.0.2.10:8000",
         requests: 2, unmetered_requests: 0, input_tokens: 400, output_tokens: 30, cached_input_tokens: 0 },
       { model: "Qwen/Qwen3.5-122B-A10B-FP8", provider: "openai", host: "openrouter.ai",
         requests: 1, unmetered_requests: 1, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0 },
@@ -3985,7 +3985,7 @@ test("one day draws no strip, a singular unmetered request reads right, and long
   assert.equal(first.querySelector(".usage-where .usage-tail").textContent, ":8000");
   assert.equal(second.querySelector(".usage-name .usage-tail").textContent, "-FP8");
   assert.equal(second.querySelector(".usage-where .usage-tail"), null, "a host without a port is not split");
-  assert.match(first.querySelector(".usage-model").title, /^hf\.co\/unsloth\/Qwen3\.5-27B-GGUF:Q4_K_M\nopenai · 192\.168\.1\.111:8000$/);
+  assert.match(first.querySelector(".usage-model").title, /^hf\.co\/unsloth\/Qwen3\.5-27B-GGUF:Q4_K_M\nopenai · 192\.0\.2\.10:8000$/);
   assert.deepEqual(errors, []);
 });
 

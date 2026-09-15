@@ -68,7 +68,7 @@ async function panel(width, { light = false, state = "running" } = {}) {
       event({ type: "agent_updated", id: "sub-000000000002", state: "waiting", waiting_for: "permission" });
     }
     if (agentState === "idle") {
-      for (const n of [1, 2]) event({ type: "agent_ended", id: `sub-00000000000${n}`, state: "finished", duration_ms: 900, tool_calls: 1 });
+      for (const n of [1, 2]) event({ type: "agent_ended", id: `sub-00000000000${n}`, state: "failed", duration_ms: 900, tool_calls: 1 });
     }
     const input = document.getElementById("input");
     input.value = "and then the docs";
@@ -270,23 +270,9 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       for (const id of ["sub-000000000001", "sub-000000000002"]) window.__event({ type: "agent_ended", id, state: "finished", duration_ms: 1000, tool_calls: 1 });
     });
     await page.waitForTimeout(60);
-    const ended = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
-      title: document.getElementById("agents-pill").getAttribute("title") }));
-    assert.deepEqual(ended, { tip: "No agents working · Click to see the agents", title: null },
-      "the label on screen changes and the native title stays lifted (one tooltip)");
-    await page.mouse.move(5, 5);
-    await page.waitForTimeout(60);
-    const left = await page.evaluate(() => ({ title: document.getElementById("agents-pill").getAttribute("title"),
-      aria: document.getElementById("agents-pill").getAttribute("aria-label"), state: document.getElementById("agents-pill").dataset.state }));
-    assert.deepEqual(left, { title: "No agents working · Click to see the agents",
-      aria: "2 agents · No agents working · Click to see the agents", state: "idle" });
-
-    // A state change inside the label's show delay is not undone when the label paints.
-    await page.hover("#agents-pill");
-    await startAgent(page, 3);
-    await page.waitForTimeout(500);
-    const late = await page.evaluate(() => document.getElementById("hover-tip").textContent);
-    assert.equal(late, "Agents are working (1 of 3 working) · Click to see the agents");
+    const ended = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
+      tipHidden: document.getElementById("hover-tip").hidden }));
+    assert.deepEqual(ended, { hidden: true, tipHidden: true }, "successful agents and their tooltip leave together");
   } finally { await page.close(); }
 });
 
