@@ -2552,14 +2552,24 @@ class TUI:
                 b["exp"] = not b.get("exp")
                 self._invalidate()
 
-        frags = [rail(), (f"bold fg:{th.accent}", f"{glyphs.tool_icon(name)} {verb}")]
+        # The transcript window wraps long rows itself, and a wrapped continuation started at
+        # column 0 outside the card's rail, cut mid-word. Every row of the card, the header
+        # included, is wrapped here at word boundaries, each under its own rail.
+        room = max(20, int(getattr(self, "_width", 0) or 80) - 2)
+        header = [(f"bold fg:{th.accent}", f"{glyphs.tool_icon(name)} {verb}")]
         if summary:
-            frags.append((f"fg:{th.faint}", f" {summary.expandtabs(4)}"))
+            header.append((f"fg:{th.faint}", f" {summary.expandtabs(4)}"))
         outcome = self._tool_outcome(b)
         if outcome:
-            frags.append((f"fg:{th.err if error else th.faint}", f"  \u00b7 {outcome}"))
+            header.append((f"fg:{th.err if error else th.faint}", f"  \u00b7 {outcome}"))
         if running:                                     # a live marker on the header while it works
-            frags.append((f"fg:{th.accent}", f"  {self._live_marker()}"))
+            header.append((f"fg:{th.accent}", f"  {self._live_marker()}"))
+        frags = []
+        for n, line in enumerate(self._wrap_frags(header, room)):
+            if n:
+                frags.append(("", "\n"))
+            frags.append(rail())
+            frags.extend(line)
 
         progress = b.get("progress") if running else None
         if isinstance(progress, dict):
@@ -2594,10 +2604,6 @@ class TUI:
             frags.append(("", "\n"))
             frags.append(rail())
             frags.append((f"fg:{th.accent_dim}", label, toggle))
-
-        # The transcript window wraps long rows itself, and a wrapped continuation started at
-        # column 0 outside the card's rail. Wrap body rows here instead, each under its own rail.
-        room = max(20, int(getattr(self, "_width", 0) or 80) - 2)
 
         def body_rows(style: str, text: str) -> None:
             for piece in self._wrap_cells(text, room):
@@ -2755,23 +2761,52 @@ class TUI:
     @staticmethod
     def _wrap_cells(text: str, width: int) -> list[str]:
         """Split one output row into pieces of at most `width` terminal cells (wide glyphs count
-        two). A row that fits is returned whole, which is nearly every row."""
+        two), breaking between words. A row that fits is returned whole, which is nearly every row."""
         width = max(1, int(width))
         if len(text) * 2 <= width:
             return [text]
         from prompt_toolkit.utils import get_cwidth
         if get_cwidth(text) <= width:
             return [text]
-        pieces, current, used = [], [], 0
-        for char in text:
-            cells = get_cwidth(char)
-            if current and used + cells > width:
-                pieces.append("".join(current))
-                current, used = [], 0
-            current.append(char)
-            used += cells
-        pieces.append("".join(current))
-        return pieces
+        return ["".join(piece for _style, piece in row) for row in TUI._wrap_frags([("", text)], width)]
+
+    @staticmethod
+    def _wrap_frags(parts, width: int) -> list[list]:
+        """Word-wrap styled ``(style, text)`` fragments into rows of at most ``width`` cells.
+
+        A break goes between words: the space that ends a row is dropped, and a row's leading
+        indentation stays on its first row. Only a word longer than a whole row is cut, at the cell.
+        """
+        from prompt_toolkit.utils import get_cwidth
+        width = max(1, int(width))
+        rows, row, used = [], [], 0
+        for style, text in parts:
+            for token in re.findall(r"\s*\S+", text):
+                cells = get_cwidth(token)
+                if used and used + cells > width:
+                    rows.append(row)
+                    row, used = [], 0
+                    token = token.lstrip()
+                    cells = get_cwidth(token)
+                while cells > width - used:
+                    head, taken = "", 0
+                    for char in token:
+                        step = get_cwidth(char)
+                        if head and taken + step > width - used:
+                            break
+                        head += char
+                        taken += step
+                    row.append((style, head))
+                    rows.append(row)
+                    row, used = [], 0
+                    token = token[len(head):]
+                    cells = get_cwidth(token)
+                if token:
+                    row.append((style, token))
+                    used += cells
+        if row or not rows:
+            rows.append(row)
+        return rows
 
     def _cursor_ft(self, text: str):
         """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept

@@ -388,6 +388,40 @@ class TuiMonitorTests(unittest.TestCase):
         self.assertIn("line 39", expanded)
         self.assertEqual(expanded.count("/monitors show mon1"), 1, expanded)
 
+    def test_monitor_and_background_cards_wrap_at_word_boundaries_inside_the_rail(self):
+        # Before: body rows were cut at exactly the room left beside the rail, mid-word, and a long
+        # header ran past the terminal edge, where the window wrapped it mid-word at column 0.
+        from dgc.monitors import Batch
+        from dgc import glyphs
+        from prompt_toolkit.utils import get_cwidth
+        ui = self.tui()
+        ui._width = 64
+        prose = ("the deployment finished uploading every bundle and invalidated the content "
+                 "delivery cache for production")
+        cards = [
+            ui._monitor_event_block(Batch("mon7", "watch the deployment pipeline for the release branch",
+                                          "output", lines=[prose, "short"], event_index=3)),
+            ui._monitor_event_block(Batch(
+                "b2", "npm run build && npm run test -- --reporter=dot", "background_exit",
+                lines=["background task b2 exited 0 after 41s", prose])),
+        ]
+        for card in cards:
+            text = self.plain(ui._tool_frags(card))
+            rows = text.split("\n")
+            for row in rows:
+                self.assertTrue(row.startswith(glyphs.RAIL), repr(row))
+                self.assertLessEqual(get_cwidth(row), 64, repr(row))
+            words = [word for row in rows for word in row[len(glyphs.RAIL):].split()]
+            for word in prose.split() + card["summary"].split():
+                self.assertIn(word, words, f"{word!r} was cut across rows:\n{text}")
+        # A token longer than the room still has to be cut somewhere, and stays inside the rail.
+        long_token = {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event", "call_id": None,
+                      "summary": "x", "running": False, "error": False, "diff": None, "exp": False,
+                      "out": "https://example.test/" + "a" * 150, "lines": 1}
+        for row in self.plain(ui._tool_frags(long_token)).split("\n"):
+            self.assertTrue(row.startswith(glyphs.RAIL), repr(row))
+            self.assertLessEqual(get_cwidth(row), 64, repr(row))
+
     def test_the_phase_clock_never_exceeds_the_turn_or_survives_an_approval(self):
         ui = self.tui()
         now = time.monotonic()
