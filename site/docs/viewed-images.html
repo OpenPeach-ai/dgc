@@ -123,7 +123,7 @@
 <div class="heading-row h2-row"><h2 id="where-they-come-from">Where they come from</h2><a class="anchor" href="#where-they-come-from" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>Screenshots.</strong> The <code>browser</code> tool&#x27;s <code>screenshot</code> (see <em>Looking at a page</em>).</li>
-<li><strong>Image files.</strong> With a model that accepts images, the agent can use <code>view_image</code> on a PNG, JPEG, GIF or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about something only a picture shows, and when <code>read_file</code> runs into an image. A BMP is shown to you but never sent to the model; convert it to PNG if the model needs to look at it.</li>
+<li><strong>Image files.</strong> With a model that accepts images, the agent can use <code>view_image</code> on a PNG, JPEG, GIF or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about something only a picture shows. <code>read_file</code> on an image file views it the same way, in the read step; with a model that cannot read images it says so instead. A BMP is shown to you but never sent to the model; convert it to PNG if the model needs to look at it.</li>
 <li><strong>MCP tools</strong> that return images.</li>
 </ul>
 <p>A step keeps up to eight images. More than that are counted, not kept.</p>

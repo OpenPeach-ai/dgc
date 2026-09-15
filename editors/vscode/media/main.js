@@ -4697,7 +4697,7 @@
   const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   const IMAGE_HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
   const IMAGE_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
-  const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", mcp: "MCP image" };
+  const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", read_file: "Workspace image", mcp: "MCP image" };
   const IMAGE_FAILURES = {
     not_found: ["warning", "Unavailable", "DGC no longer has this image."],
     changed: ["warning", "Unavailable", "The stored copy changed after the model viewed it."],

@@ -1367,8 +1367,9 @@ covers a browser screenshot, an image file from your workspace, and an image an 
 - **Screenshots.** The `browser` tool's `screenshot` (see *Looking at a page*).
 - **Image files.** With a model that accepts images, the agent can use `view_image` on a PNG, JPEG, GIF
   or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about
-  something only a picture shows, and when `read_file` runs into an image. A BMP is shown to you but
-  never sent to the model; convert it to PNG if the model needs to look at it.
+  something only a picture shows. `read_file` on an image file views it the same way, in the read
+  step; with a model that cannot read images it says so instead. A BMP is shown to you but never
+  sent to the model; convert it to PNG if the model needs to look at it.
 - **MCP tools** that return images.
 
 A step keeps up to eight images. More than that are counted, not kept.

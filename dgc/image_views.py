@@ -37,8 +37,9 @@ MAX_INDEX = 512                              # records a session index keeps, ol
 STORE_BUDGET_BYTES = 256 * 1024 * 1024       # per-session sidecar; oldest files pruned on save
 MAX_NAME_CHARS = 128
 MAX_DIMENSION = 1_000_000
-SOURCES = ("browser", "view_image", "mcp")
-SOURCE_LABELS = {"browser": "Browser screenshot", "view_image": "Workspace image", "mcp": "MCP image"}
+SOURCES = ("browser", "view_image", "read_file", "mcp")
+SOURCE_LABELS = {"browser": "Browser screenshot", "view_image": "Workspace image", "read_file": "Workspace image",
+                 "mcp": "MCP image"}
 REF_RE = re.compile(r"img_[0-9a-f]{32}\Z")
 _STORE_FILE_RE = re.compile(r"([0-9a-f]{32})\.(png|jpg|gif|webp|bmp)\Z")
 _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")

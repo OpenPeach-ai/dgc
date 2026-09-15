@@ -492,6 +492,49 @@ class ModelFormatTests(unittest.TestCase):
                 agent.mcp.stop_all()
                 server.close()
 
+    def test_read_file_on_an_image_is_a_viewing_step(self):
+        """Founder decision 4: with vision, read_file on an image shows it (chat and model, source
+        read_file) instead of an error; without vision the error stays and nothing is shown."""
+        for vision in (True, False):
+            with self.subTest(vision=vision), tempfile.TemporaryDirectory(prefix="dgc-images-read-") as directory:
+                root = Path(directory)
+                (root / "shapes.png").write_bytes(png(32, 24))
+                calls = {"n": 0}
+
+                def script(path, request, n):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        return 200, chat_answer("", [{"id": "call_read", "type": "function", "function": {
+                            "name": "read_file", "arguments": json.dumps({"path": "shapes.png"})}}])
+                    return 200, chat_answer("A red circle.")
+
+                server = FakeModel(script)
+                ui = RecordingUI()
+                agent = Agent(fixture_config(root, base_url=server.base_url, model="vision-model", mode="auto",
+                                             api_mode="chat_completions",
+                                             provider_capabilities={"vision": vision}), ui)
+                agent.session_file = sessions.new_path(root)
+                try:
+                    self.assertTrue(agent.run_turn("read shapes.png and tell me what is on it"))
+                    result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
+                    images = ui.named("tool_images")
+                    if vision:
+                        self.assertTrue(result.startswith("viewed shapes.png (image/png, 32×24, "), result)
+                        self.assertEqual(len(images), 1)
+                        self.assertEqual(images[0][1][0], "call_read", "the image sits under the read_file step")
+                        self.assertEqual([m["source"] for m in images[0][2]["meta"]], ["read_file"])
+                        self.assertEqual([i["source"] for i in images[0][2]["items"] or []], ["read_file"])
+                        self.assertEqual(sum(server.image_parts(i) for i in range(len(server.requests))), 1,
+                                         "the model got the picture after the batch")
+                        self.assertEqual([r.source for r in agent.image_views], ["read_file"])
+                    else:
+                        self.assertEqual(result, f"error: {root / 'shapes.png'} is an image, and this model cannot read images")
+                        self.assertEqual(images, [])
+                        self.assertFalse(any(server.image_parts(i) for i in range(len(server.requests))))
+                finally:
+                    agent.mcp.stop_all()
+                    server.close()
+
     def test_mcp_words_follow_what_really_happens(self):
         with tempfile.TemporaryDirectory(prefix="dgc-images-mcp-words-") as directory:
             root = Path(directory)
@@ -902,15 +945,29 @@ class ViewImageToolTests(unittest.TestCase):
                          "error: this model does not accept images, so view_image cannot show it one")
         self.assertEqual(tools.take_pending_images("view-image-test", ""), [])
 
-    def test_read_file_names_view_image(self):
-        (self.root / "logo.png").write_bytes(png())
+    def test_read_file_views_an_image_when_the_model_can_see(self):
+        data = png(64, 48)
+        (self.root / "logo.png").write_bytes(data)
+        size = image_views.human_size(len(data))
         self.assertEqual(execute("read_file", {"path": "logo.png"}, self.ctx),
-                         f"error: {self.root / 'logo.png'} is an image; use view_image to look at it")
+                         f"viewed logo.png (image/png, 64×48, {size}). "
+                         "The image follows this batch, so you can look at it directly.")
+        queued = tools.take_pending_images("view-image-test", "")
+        self.assertEqual([(q["name"], q["source"], q["width"], q["height"]) for q in queued],
+                         [("logo.png", "read_file", 64, 48)], "queued exactly as view_image queues it")
+        (self.root / "icon.bmp").write_bytes(bmp(16, 16))
+        self.assertIn("BMP cannot be sent to the model", execute("read_file", {"path": "icon.bmp"}, self.ctx))
+        self.assertEqual([q["source"] for q in tools.take_pending_images("view-image-test", "")], ["read_file"])
+        (self.root / "huge.png").write_bytes(png(extra=b"\0" * image_views.MAX_VIEW_BYTES))
+        self.assertEqual(execute("read_file", {"path": "huge.png"}, self.ctx),
+                         f"error: {self.root / 'huge.png'} is an image of 8.0 MB; images up to 8 MB can be viewed")
+        self.assertEqual(tools.take_pending_images("view-image-test", ""), [])
         self.ctx.vision = False
         self.assertEqual(execute("read_file", {"path": "logo.png"}, self.ctx),
                          f"error: {self.root / 'logo.png'} is an image, and this model cannot read images")
         (self.root / "bmw.txt").write_text("BMW service notes " * 4)
         self.assertIn("BMW service notes", execute("read_file", {"path": "bmw.txt"}, self.ctx))
+        self.assertEqual(tools.take_pending_images("view-image-test", ""), [], "a text-only model gets nothing queued")
 
     def test_offered_only_with_vision_and_intent(self):
         (self.root / "logo.png").write_bytes(png())
@@ -929,7 +986,7 @@ class ViewImageToolTests(unittest.TestCase):
             agent._activate_tool_intents("fix the header", replace=True)
             agent._handle_call(ToolCall("r1", "read_file", {"path": "logo.png"}))
             self.assertIn("image", agent._active_tool_intents)
-            self.assertIn("view_image", names(agent), "the tool the error names is really offered")
+            self.assertIn("view_image", names(agent), "an image read turns view_image on for the turn")
         finally:
             agent.mcp.stop_all()
             text_only.mcp.stop_all()

@@ -152,7 +152,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # A tool result is text. A browser screenshot is not, so it rides its own event, correlated by
     # call_id, and the panel renders it under the step that produced it.
     # v14: images the model viewed. ``items[i]`` = {ref "img_"+32 hex, name, mime, width, height,
-    # bytes, source browser|view_image|mcp, host} (never a path) describes ``images[i]``; an entry
+    # bytes, source browser|view_image|read_file|mcp, host} (never a path) describes ``images[i]``; an entry
     # over the frame budget is "" with its item kept and fetched later with get_image. ``omitted``
     # counts images past the per-step cap of 8.
     "tool_images": {

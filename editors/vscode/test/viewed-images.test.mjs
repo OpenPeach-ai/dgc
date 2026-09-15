@@ -373,3 +373,17 @@ test("no hover label covers the viewer: not on the focus it places, not over the
   assert.ok(tip.hidden, "the notice's Show button is not covered");
   assert.deepEqual(p.errors, []);
 });
+
+test("an image read_file viewed sits in the read step and reads as a workspace image", () => {
+  const p = panel();
+  p.step("r1", "read_file", "viewed logo.png (image/png, 64×48, 1 KB). The image follows this batch, so you can look at it directly.");
+  p.event({ type: "tool_images", call_id: "r1", images: [PNG], caption: "viewed image",
+            items: [item(4, { name: "logo.png", width: 64, height: 48, bytes: 1024, source: "read_file", host: "" })] });
+  const card = p.card("r1");
+  assert.equal(card.querySelector(".tool-image-count .n").textContent, "1");
+  p.open("r1");
+  card.querySelector(".image-chip").click();
+  assert.equal(p.doc.getElementById("iv-title").textContent, "logo.png");
+  assert.equal(p.doc.getElementById("iv-meta").textContent, "64×48 · 1 KB · Workspace image");
+  assert.deepEqual(p.errors, []);
+});
