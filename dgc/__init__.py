@@ -1,3 +1,3 @@
 """dgc — an interactive coding-agent CLI harness for local LLMs."""
 
-__version__ = "0.39.0"
+__version__ = "0.40.0"

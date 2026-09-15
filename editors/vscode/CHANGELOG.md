@@ -1,6 +1,48 @@
 # Changelog
 
-## 0.24.0 — 2026-09-15
+## 0.25.0 — 2026-09-15
+
+- **Editor protocol v14; requires DGC CLI 0.40.0.** Adds the agents list, model reconnect lines,
+  question cards with a recommended option, thinking labelled by source, and the images the model
+  looked at. A mismatched pair says which side to update.
+- **Agents pill.** A pill under the prompt shows how many sub-agents the chat has started and
+  whether any is working: `● 2 agents`, `◆` when one needs you, `○` when none is working any more.
+  Hover it for how many are working; click it for the list, with a summary, one row per agent
+  (state, task, what it is doing, run time, tool calls and tokens) updated as it works, and
+  **Sub-agent settings**. Click a row to jump to that agent's step. The list comes back when the
+  chat is reopened.
+- **Reconnect lines.** A failed model request shows a muted line in the turn that changes in place:
+  `Reconnecting 1/3 · connection refused by 127.0.0.1:11434`, `Server is busy, retrying 2/3`, then
+  `Reconnected after 1 retry` or `Gave up after 3 retries`. Click it for the cause, model, endpoint,
+  HTTP status, each attempt and a hint, with **Copy details**. When DGC gives up, the error leads
+  with what failed and shows the hint underneath. Restarting DGC's own backend reads
+  `Restarting the DGC backend`, so it is never mistaken for a model reconnect.
+- **Questions dock in the prompt box.** When a choice is yours, the model's questions replace the
+  text box while Stop and the pickers stay put. The recommended option carries a **Recommended**
+  badge and starts checked, options show their descriptions, and **Something else…** takes your own
+  words. Arrow keys move, digits and Enter pick, **Skip** leaves a question unanswered, and **×**
+  closes the card without answering, which ends the turn. Nothing is sent until you act, what you
+  had typed comes back, and answered questions stay in their step, after a reload too.
+- **Thinking is labelled by source:** `Thought for 4s · raw`, `· summarized by Anthropic`,
+  `· hidden by OpenAI`, or no label when DGC cannot tell, with a hover label that explains each.
+  Short provider summaries between tool calls read inline and muted. Settings → General → **Show
+  model thinking** offers inline, collapsed or hidden.
+- **Images the model looked at.** A step that produced images (a browser screenshot, a workspace
+  image, an MCP tool's image) shows a count; open it for thumbnails, and click one for a viewer with
+  the image's name, size and source, ←/→ and Home/End between images, Z for actual size,
+  **Open file** for DGC's stored copy, and **Stop** while a turn runs. If DGC needs you while it is
+  open, the viewer says so and **Show** takes you there. Images come back after a reload or when the
+  chat is reopened.
+- **Queued messages are no longer lost.** After **DGC: Restart Backend**, a window reload or a
+  backend exit, messages that were waiting behind a turn come back as not sent, ready to restore; a
+  reloaded panel still shows them queued.
+- **Reloading the panel mid-turn keeps the turn running**, with Stop, one card per open permission,
+  plan or question, and a streaming answer continuing in the same turn.
+- A steered turn reopens as the finished turn it was, with one bubble per steering message.
+- An answered approval card ends with what was decided (Allowed once, Always allowed with its rule,
+  Denied with your note) and drops the deny-note box.
+- A refused artifact preview shows as a failed step; in a narrow panel the goal row leaves out an
+  objective it has no room for.
 
 - **Editor protocol v13; requires DGC CLI 0.39.0.** Adds background monitors, token usage reports
   and resuming a turn the backend was interrupted in. A mismatched pair says which side to update.

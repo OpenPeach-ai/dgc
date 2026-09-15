@@ -3,10 +3,27 @@
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
+      "version": "0.40.0",
+      "date": "2026-09-15",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.0",
+      "status": "current",
+      "notes": [
+        "Sub-agents are counted and listed. The status bar shows how many sub-agents this chat has started and whether any is working (● 5 agents · 2 working, ◆ when one needs you, ○ when none is), and /agents lists each one with its state, task, what it is doing, run time, tool calls and tokens, also while a turn runs. A new chat or a clear starts the count again, and a rewind drops the agents started after that point.",
+        "When a model request fails, DGC says why. A refused or dropped connection, a busy server (429 or an overloaded answer) or a 5xx error is tried again up to three more times, respecting Retry-After, and one line follows the tries in place: Reconnecting 1/3 · connection refused by 127.0.0.1:11434, then Reconnected after 1 retry or Gave up after 3 retries. In the terminal the line opens to the cause, model, endpoint, each attempt and a hint; dgc -p prints one line per try. A wrong key or a missing model is not retried, and the error says what to check.",
+        "An answer cut off mid-stream is continued from what already arrived, after a backoff that starts at 0.25 seconds and doubles up to 8 seconds, and its line reads Reconnected · continued from the partial answer. Causes, endpoints and errors never show a URL's user:password@ part, query string or fragment.",
+        "Questions come with a recommendation. When a choice is yours, the model asks up to four questions with two to six options each, and it is asked to describe each option in a sentence and put the one it recommends first. The full-screen terminal starts on the recommended option: digits pick, Space toggles a multi-choice option, ←/→ move between questions, and Esc closes the questions without an answer, which ends the turn and pauses a standing goal instead of letting the model choose. Answered questions stay in their step and come back in a resumed session. Sub-agents and dgc -p are not offered questions, and full-auto still asks only when you ask to choose.",
+        "Thinking says where it came from: raw from a runtime serving open weights such as Ollama, summarized by Anthropic or OpenAI when the provider sent a summary, hidden by the provider when it sent nothing readable, and no label when DGC cannot tell. The label follows the endpoint's host, API and model, and a local or private host is never labelled summarized or hidden. Short provider summaries between tool calls show inline and muted (/thoughts inline, the default, or /thoughts collapsed), and thinking is saved with the session, so a resumed chat shows the same blocks and labels.",
+        "The model can look at images, and you see what it saw. With a model that accepts images, view_image looks at a PNG, JPEG, GIF or WebP file in the workspace of up to 8 MB, read_file on an image does the same, and images from MCP tools reach the model too, up to eight per step. A model without vision is told an image exists and never receives it, and an endpoint that refuses an image gets no more images that session. Each session keeps a private copy of its images beside its transcript, at most 256 MB, deleted with the session and copied when you branch it, and the terminal opens an image in your system's viewer.",
+        "Continue after a killed backend no longer redoes finished tool calls: each call of a batch is saved as it finishes, and a question or plan review that was open when the backend died is kept and handed to the model as unanswered.",
+        "A refused artifact preview (a page in a dot folder, or plan mode) shows as a failed step instead of nothing, and artifact pages no longer log a missing favicon.",
+        "In the full-screen terminal, tool cards wrap between words under their rail, header included, and the slash menu still shows /todo once you type /todo clear. A parallel sub-agent's own text no longer appears in the main transcript (its result stays on its task card), and Ollama models whose template wraps native thinking in literal <think> tags no longer show the tags."
+      ]
+    },
+    {
       "version": "0.39.0",
       "date": "2026-09-15",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.39.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "The backend no longer stops mid-turn on its own. Commands the agent ran shared dgc serve's command pipe; a Node tool such as npm switched that pipe to non-blocking, the next read came back empty, and serve took it for the editor closing and ended the turn as Stopped. dgc serve now keeps a private copy of its pipe and every command it runs reads from an empty input. If the backend ever does stop during a turn, the editor names the cause and offers Continue.",
         "Model requests that hang are noticed. After 45 seconds without progress DGC says it is still waiting, a request that stays silent is retried, and a request that never recovers fails with the model and endpoint named, instead of waiting out a 30-minute socket timeout. Long silent reasoning and a local model that is still loading are not mistaken for a stall.",
@@ -382,10 +399,27 @@
   ],
   "extension": [
     {
+      "version": "0.25.0",
+      "date": "2026-09-15",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.0",
+      "status": "current",
+      "notes": [
+        "Editor protocol v14; requires DGC CLI 0.40.0. Adds the agents list, model reconnect lines, question cards with a recommended option, thinking labelled by source, and the images the model looked at.",
+        "A pill under the prompt shows how many sub-agents the chat has started and whether any is working (● 2 agents, ◆ when one needs you). Click it for a live list with a row per agent; a row jumps to that agent's step. The list comes back when the chat is reopened.",
+        "A failed model request shows a muted line in the turn that changes in place, such as Reconnecting 1/3 · connection refused by 127.0.0.1:11434, then Reconnected after 1 retry. Click it for the cause, endpoint, HTTP status, each attempt and a hint, with Copy details. When DGC gives up, the error leads with what failed and shows the hint; restarting DGC's own backend reads Restarting the DGC backend.",
+        "Questions dock in the prompt box. The recommended option carries a Recommended badge and starts checked, options show their descriptions, and Something else… takes your own words. Arrow keys move, digits and Enter pick, Skip leaves a question unanswered, and × closes the card without answering. Nothing is sent until you act, what you had typed comes back, and answered questions stay in their step after a reload.",
+        "Thinking is labelled by source, as in Thought for 4s · raw or · summarized by Anthropic, with a hover label that explains it. Short provider summaries between tool calls read inline, muted, and Settings → General → Show model thinking offers inline, collapsed or hidden.",
+        "A step that produced images shows a count; open it for thumbnails, and click one for a viewer with the image's name, size and source, ←/→ between images, Z for actual size, Open file for DGC's stored copy, and Stop while a turn runs. If DGC needs you meanwhile, the viewer says so and Show takes you there. Images come back after a reload.",
+        "Messages queued behind a running turn are no longer lost. After DGC: Restart Backend, a window reload or a backend exit they come back as not sent, ready to restore, and a reloaded panel still shows them queued.",
+        "Reloading the panel while a turn runs or waits on an approval keeps the turn running, with Stop, one card per open request, and a streaming answer continuing in the same turn. A steered turn reopens as the finished turn it was, with one bubble per steering message.",
+        "An answered approval card ends with what was decided (Allowed once, Always allowed with its rule, Denied with your note) and drops the deny-note box. A refused artifact preview shows as a failed step, and in a narrow panel the goal row leaves out an objective it has no room for."
+      ]
+    },
+    {
       "version": "0.24.0",
       "date": "2026-09-15",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.39.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Editor protocol v13; requires DGC CLI 0.39.0. Adds background monitors, token usage reports and resuming a turn the backend was interrupted in.",
         "Tasks become a row in the bar above the prompt, like the goal: collapsed to Tasks 2/5 with the step in progress, expandable to the full list, remembered per chat, and Clear works while a turn runs.",
