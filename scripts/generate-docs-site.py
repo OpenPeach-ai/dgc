@@ -57,6 +57,10 @@ MARK_SVG = ('<svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true">'
             '<path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>')
 
 
+def _strip_backticks(text: str) -> str:
+    return re.sub(r"`([^`]+)`", r"\1", text)
+
+
 def slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return re.sub(r"-{2,}", "-", s)
@@ -290,9 +294,10 @@ def build() -> dict[str, str]:
         pager = ('      <nav class="pager" aria-label="Pagination">\n'
                  + prev_link + ("\n" + next_link if next_link else "") + "\n</nav>")
 
+        # The heading renders its backticks as <code>; the TOC entry must not print them. (Outside the
+        # f-string: Python before 3.12 refuses a backslash inside an f-string expression.)
         toc_html = "\n".join(
-            # The heading renders its backticks as <code>; the TOC entry must not print them.
-            f'<a href="#{hid}" data-id="{hid}" class="lvl2">{html.escape(re.sub(r"`([^`]+)`", r"\1", text))}</a>'
+            f'<a href="#{hid}" data-id="{hid}" class="lvl2">{html.escape(_strip_backticks(text))}</a>'
             for hid, text in toc
         ) or '<a href="#content" data-id="content" class="lvl2">Top</a>'
 
