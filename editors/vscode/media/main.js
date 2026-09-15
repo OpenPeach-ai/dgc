@@ -844,11 +844,14 @@
     // A claimed queued prompt: the turn goes at the end like any other, so whatever the log said
     // between that prompt being sent and its turn starting (a compaction, a notice, an error) stays
     // above the turn, where it happened. The prompts still waiting are the ones that move: back
-    // below the running turn, in their order.
-    if (promptNode) {
+    // below the running turn, in their order. A turn with no bubble of its own (a queued slash
+    // command, echoed above) moves every waiting prompt the same way.
+    if (!replaying) {
+      const anchor = promptNode || block;
       const waiting = [...queuedPrompts.values(), ...pendingPrompts.values()].map((entry) => entry?.node)
         .filter((node) => node && node !== promptNode && node.isConnected && node.parentElement === log
-          && (promptNode.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
+          && (promptNode ? (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+            : (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)));
       waiting.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       for (const node of new Set(waiting)) log.appendChild(node);
     }
