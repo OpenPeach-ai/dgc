@@ -2412,6 +2412,7 @@ class Backend:
         self._history_begin_reasoning()
         items: list = []
         calls: dict = {}                # saved tool_call id -> the name its result belongs to
+        asked: dict = {}                # saved propose_options call id -> its saved arguments
         turn_n = 0
         turn: dict | None = None
         # Compaction rewrites the transcript as a user message carrying the summary followed by an
@@ -2430,6 +2431,9 @@ class Backend:
             items.extend(self._history_turn_closing_items(turn))
             if calls:                       # tool calls still waiting for a result when the turn ended
                 turn["interrupted"] = True
+                # A question the backend stopped under before anyone answered (the step is saved
+                # before it waits): replayed as never answered, like one a resume already repaired.
+                items.extend(self._history_unanswered_questions(calls, asked))
             # The turn reason is not persisted, but two things the file does support are whether
             # the turn produced an answer and whether its work finished: a call with no result, or
             # a result that says the session was interrupted, is a turn that did not complete —
@@ -2575,6 +2579,8 @@ class Backend:
                                   "args": args, "summary": arg_summary(name, saved)})
                     if call_id:
                         calls[call_id] = name
+                        if name == "propose_options":
+                            asked[call_id] = saved
             elif role == "tool":
                 call_id = str(m.get("tool_call_id") or "")
                 name = calls.pop(call_id, None)
@@ -4276,6 +4282,25 @@ class Backend:
             return []
         turn["options_dismissed"] = item["outcome"] == "dismissed"
         return [item]
+
+    @staticmethod
+    def _history_unanswered_questions(calls: dict, asked: dict) -> list:
+        """``options_resolved`` (cancelled) items for the questions of a closed turn that never got a
+        result: the backend stopped while they were open."""
+        from .questions import normalize_questions
+        items = []
+        for call_id, name in calls.items():
+            if name != "propose_options" or call_id not in asked:
+                continue
+            try:
+                questions = normalize_questions(asked.pop(call_id))
+            except ValueError:
+                questions = []
+            item = _options_resolved_item({"outcome": "cancelled", "questions": questions}, call_id or None,
+                                          allow_empty=True)
+            if item is not None:
+                items.append(item)
+        return items
 
     def _history_turn_finished(self, turn: dict, finished: bool) -> bool:
         """Whether a replayed turn counts as finished; a dismissed question may end a turn."""

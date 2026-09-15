@@ -289,6 +289,164 @@ class KilledBackendResumeTests(unittest.TestCase):
         second.stdin.close()
         second.wait(60)
 
+    def test_continue_after_sigkill_with_a_question_open_keeps_the_turn_and_its_question(self):
+        # Cross-check finding: a backend killed while a question card was open lost the whole turn
+        # (the prompt, its completed step and the question), so Continue resumed the turn before it.
+        import queue
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from dgc.editor_protocol import event_error
+        from dgc.headless import TURN_CONTINUE_MARKER
+
+        def sse(delta, finish=None):
+            return "data: " + json.dumps({"id": "m", "object": "chat.completion.chunk", "choices": [
+                {"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n"
+
+        def call(call_id, name, arguments):
+            return (sse({"tool_calls": [{"index": 0, "id": call_id, "type": "function", "function": {
+                "name": name, "arguments": json.dumps(arguments)}}]})
+                + sse({}, finish="tool_calls") + "data: [DONE]\n\n")
+
+        def answer(text):
+            return sse({"content": text}) + sse({}, finish="stop") + "data: [DONE]\n\n"
+        continued = []
+        question = {"questions": [{"header": "Database", "question": "Which database?", "options": [
+            {"label": "SQLite (Recommended)", "description": "One file."},
+            {"label": "Postgres", "description": "A server to run."}]}]}
+
+        class Model(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _send(self, body, kind):
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                self._send(json.dumps({"data": [{"id": "mock-model"}]}), "application/json")
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                messages = body.get("messages") or []
+                users = [str(m.get("content")) for m in messages if m.get("role") == "user"]
+                last = users[-1] if users else ""
+                since = 0
+                for m in reversed(messages):
+                    if m.get("role") == "user":
+                        break
+                    since += m.get("role") == "tool"
+                if not body.get("tools"):
+                    payload = answer("Title")
+                elif TURN_CONTINUE_MARKER in last:
+                    continued.append(messages)
+                    payload = answer("Continued.")
+                elif "Q9 first" in last:
+                    payload = answer("First turn done.")
+                elif since == 0:
+                    payload = call("call_step", "bash", {"command": "echo q9-step-one-done"})
+                elif since == 1:
+                    payload = call("call_ask", "propose_options", question)
+                else:
+                    payload = answer("Done.")
+                self._send(payload, "text/event-stream")
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        home = tempfile.TemporaryDirectory(prefix="dgc-kill-question-home-")
+        self.addCleanup(home.cleanup)
+        work = tempfile.TemporaryDirectory(prefix="dgc-kill-question-work-")
+        self.addCleanup(work.cleanup)
+        (Path(home.name) / ".dgc").mkdir()
+        (Path(home.name) / ".dgc" / "config.json").write_text(json.dumps({
+            "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1", "model": "mock-model",
+            "api_mode": "chat_completions", "suggest": False, "notes": False}))
+        env = dict(os.environ, HOME=home.name, PYTHONPATH=str(PROJECT), PYTHONDONTWRITEBYTECODE="1")
+        for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+            env[var] = home.name
+
+        def serve():
+            proc = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], cwd=work.name, env=env,
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+            for pipe in (proc.stdin, proc.stdout):
+                self.addCleanup(pipe.close)
+            self.addCleanup(lambda: proc.poll() is None and (proc.kill(), proc.wait(30)))
+            arrived = queue.Queue()
+
+            def read():
+                for line in proc.stdout:
+                    try:
+                        arrived.put(json.loads(line))
+                    except ValueError:
+                        pass
+            threading.Thread(target=read, daemon=True).start()
+
+            def send(command):
+                proc.stdin.write(json.dumps(command) + "\n")
+                proc.stdin.flush()
+
+            def wait(predicate, timeout=60):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    try:
+                        event = arrived.get(timeout=max(0.01, deadline - time.monotonic()))
+                    except queue.Empty:
+                        break
+                    if predicate(event):
+                        return event
+                return None
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "ready"))
+            send({"type": "set_mode", "mode": "auto", "acknowledge_workspace_trust": True,
+                  "request_id": "m"})
+            self.assertIsNotNone(wait(lambda e: e.get("type") == "mode_changed"))
+            return proc, send, wait
+
+        first, send, wait = serve()
+        send({"type": "prompt", "text": "Q9 first turn", "request_id": "p1"})
+        self.assertIsNotNone(wait(lambda e: e.get("type") == "turn_end"))
+        send({"type": "prompt", "text": "Q9 second: one step, then ask me", "request_id": "p2"})
+        self.assertIsNotNone(wait(lambda e: e.get("type") == "options_request"), "the question is open")
+        first.kill()                               # SIGKILL while the card waits for an answer
+        first.wait(30)
+
+        second, send, wait = serve()
+        send({"type": "resume_session", "latest": True, "request_id": "r1"})
+        history = wait(lambda e: e.get("type") == "history")
+        self.assertIsNotNone(history)
+        items = history.get("items") or []
+        for item in items:
+            if isinstance(item, dict) and item.get("type"):
+                self.assertIsNone(event_error({**item, "seq": 0}), item)
+        prompts = [item.get("prompt") for item in items if item.get("type") == "turn_start"]
+        self.assertEqual(prompts, ["Q9 first turn", "Q9 second: one step, then ask me"])
+        self.assertEqual([(item.get("call_id"), item.get("outcome")) for item in items
+                          if item.get("type") == "options_resolved"], [("call_ask", "cancelled")],
+                         "the open question replays as never answered")
+        self.assertEqual([item.get("reason") for item in items if item.get("type") == "turn_end"][-1],
+                         "cancelled")
+        send({"type": "resume_turn", "request_id": "c1"})
+        outcome = wait(lambda e: e.get("type") in ("turn_end", "command_rejected"), 90)
+        self.assertEqual((outcome or {}).get("type"), "turn_end", outcome)
+        self.assertEqual(len(continued), 1, "Continue reached the model")
+        users = [str(m.get("content")) for m in continued[0] if m.get("role") == "user"]
+        self.assertLess(next(i for i, u in enumerate(users) if "Q9 second" in u),
+                        next(i for i, u in enumerate(users) if TURN_CONTINUE_MARKER in u),
+                        "Continue follows the interrupted turn, not the one before it")
+        calls = [c["function"]["name"] for m in continued[0] if m.get("role") == "assistant"
+                 for c in (m.get("tool_calls") or [])]
+        self.assertEqual(calls, ["bash", "propose_options"])
+        tools = {m.get("tool_call_id"): str(m.get("content")) for m in continued[0] if m.get("role") == "tool"}
+        self.assertIn("q9-step-one-done", tools.get("call_step", ""))
+        self.assertIn("unavailable after session interruption", tools.get("call_ask", ""),
+                      "the model is told the question was never answered")
+        second.stdin.close()
+        second.wait(60)
+
 
 class PlanHandoffPromptTests(unittest.TestCase):
     """After an approved plan the answer contract changes — but only where that is true.

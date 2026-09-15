@@ -91,6 +91,7 @@ _IMAGE_BATCH_TEXT = {
 }
 _IMAGE_INDEX_LOCK = threading.Lock()     # parallel sub-agents record into one root index
 _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel", "git_diff"}
+_WAITS_ON_USER_CALLS = {"propose_options", "present_plan"}   # saved before they wait (see run loop)
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 # Sub-agents are not offered propose_options; this tells a child what to do with a user's decision.
 _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: finish the work that does "
@@ -5255,6 +5256,11 @@ class Agent(GoalLifecycle):
             batch_verified = False          # is the checkout verified at the END of this batch?
             batch_landed_edits = 0          # successful file/task mutations, not merely attempted calls
             self._image_batch_open = True   # images: pixels a step returns now reach the model after it
+            if any(call.name in _WAITS_ON_USER_CALLS for call in result.tool_calls):
+                # A question or a plan can wait for the person indefinitely. Save the step that asks
+                # before it waits: a backend killed meanwhile otherwise lost the question, and
+                # Continue saw a turn that had never asked (a resume repairs the missing result).
+                self._save_turn_progress()
             parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
             parallel_outputs = ({} if parallel_tasks else
                                 self._parallel_read_outputs(result.tool_calls, sig_count))
