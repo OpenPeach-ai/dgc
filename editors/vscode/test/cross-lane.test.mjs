@@ -232,3 +232,32 @@ for (const theme of ["dark-modern", "light-modern"]) {
     } finally { await page.close(); }
   });
 }
+
+test("the goal rail leaves out an objective it has no room for, and brings it back when the panel widens", async (t) => {
+  if (skipOrFail(t)) return;
+  const { page, errors } = await openCrossLane(browser, { width: 460, height: 620, scenario: "footer" });
+  try {
+    const facts = () => page.evaluate(() => {
+      const text = document.getElementById("goal-text"), main = document.getElementById("goal-main");
+      const rect = text.getBoundingClientRect();
+      return { shown: !text.hidden && rect.width > 0, width: Math.round(rect.width), title: main.getAttribute("title"),
+        label: main.getAttribute("aria-label"), overflow: main.scrollWidth > main.clientWidth + 1 };
+    });
+    const wide = await facts();
+    assert.ok(wide.shown && wide.width >= 48, `460 px shows the objective (${JSON.stringify(wide)})`);
+    for (const width of [340, 320, 300]) {
+      await page.setViewportSize({ width, height: 620 });
+      await page.waitForTimeout(120);
+      const narrow = await facts();
+      assert.equal(narrow.shown, false, `${width} px: no one-letter stub (${JSON.stringify(narrow)})`);
+      assert.equal(narrow.title, "Ship settings sync with tests", "the row's tooltip keeps the objective");
+      assert.match(narrow.label, /Ship settings sync with tests/);
+      assert.equal(narrow.overflow, false);
+    }
+    if (process.env.DGC_CROSS_LANE_SHOTS) await page.locator("#goalbar").screenshot({ path: `${process.env.DGC_CROSS_LANE_SHOTS}/goal-300.png` });
+    await page.setViewportSize({ width: 460, height: 620 });
+    await page.waitForTimeout(120);
+    assert.equal((await facts()).shown, true, "widening the panel brings it back");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});

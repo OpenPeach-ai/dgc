@@ -1885,7 +1885,28 @@
     return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
       : `${minutes}:${String(secs).padStart(2, "0")}`;
   }
-  function paintGoalClock() { if (!goalBar.hidden) $("goal-time").textContent = formatDuration(currentGoalElapsed()); }
+  function paintGoalClock() {
+    if (goalBar.hidden) return;
+    const clock = $("goal-time"), before = clock.textContent;
+    clock.textContent = formatDuration(currentGoalElapsed());
+    if (clock.textContent.length !== before.length) fitGoalText();   // "9:59" -> "10:00" takes room
+  }
+  // The objective shares the rail with the status, the clock and four buttons. In a narrow sidebar the
+  // room left for it is a letter or two ("S…"), which says nothing: below about four characters it is
+  // left out, and the row's tooltip and label still carry the whole objective.
+  function fitGoalText() {
+    const main = $("goal-main"), text = $("goal-text");
+    if (goalBar.hidden || !main.isConnected) return;
+    const style = getComputedStyle(main);
+    const gap = parseFloat(style.columnGap) || 0;
+    const others = [...main.children].filter((child) => child !== text && getComputedStyle(child).display !== "none");
+    const room = main.clientWidth - others.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+      - gap * others.length;
+    const useful = 4 * (parseFloat(getComputedStyle(text).fontSize) || 12);
+    const hide = main.clientWidth > 0 && room < useful;
+    if (text.hidden !== hide) text.hidden = hide;
+  }
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => fitGoalText()).observe($("goal-main"));
   function setGoalState(next) {
     const text = String(next?.text ?? next?.goal ?? "");
     const status = text ? String(next?.status || "active") : "none";
@@ -1914,6 +1935,7 @@
     $("goal-main").title = text;
     $("goal-main").setAttribute("aria-label", `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
+    fitGoalText();
     if (!$("goal-review").hidden) renderGoalReview();
   }
   function openGoalEditor() {
