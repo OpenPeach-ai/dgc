@@ -291,7 +291,7 @@ TOOL_SCHEMAS = [
          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
                       "description": "Concrete checks, artifacts, or observations supporting this status"}},
         ["status", "summary", "evidence"]),
-    _fn("propose_options", "Ask the user to pick when the decision is theirs: a trade-off with no safe "
+    _fn("propose_options", "Ask for the user's decision: a trade-off with no safe "
         "default, a requirement the request and code leave open, or they asked to choose. Not for "
         "choices you can make (make them, say so), permission, or whether a plan is ready. Give 2-4 "
         "options; put the one you recommend first, label ending (Recommended), saying why in its "

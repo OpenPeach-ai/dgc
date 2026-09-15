@@ -17531,9 +17531,19 @@ def test_ollama_adapter():
 
     bounded_json_response = _BoundedJSONResponse()
     bounded_json_result = native._consume_ollama(bounded_json_response, None, None)
-    check("native Ollama bounds JSON fallback and normalizes malformed usage counters",
+    check("native Ollama bounds JSON fallback and leaves malformed usage unmetered",
           bounded_json_response.closed and bounded_json_result.content == "json result"
-          and bounded_json_result.usage == {
+          and bounded_json_result.usage == {})
+
+    class _ZeroNativeJSON(_BoundedJSONResponse):
+        def json(self):
+            return {"message": {"role": "assistant", "content": "json result"},
+                    "done": True, "done_reason": "stop", "prompt_eval_count": 0, "eval_count": 0}
+
+    zero_json_response = _ZeroNativeJSON()
+    zero_json_result = native._consume_ollama(zero_json_response, None, None)
+    check("native Ollama JSON fallback preserves an explicitly reported zero",
+          zero_json_response.closed and zero_json_result.usage == {
               "input_tokens": 0, "output_tokens": 0,
               "cached_input_tokens": 0, "reasoning_tokens": 0})
 
