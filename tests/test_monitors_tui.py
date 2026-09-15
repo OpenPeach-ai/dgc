@@ -55,6 +55,10 @@ def group_alive(pgid: int) -> bool:
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # macOS answers EPERM, not ESRCH, while the group's only member is a zombie its reader
+        # thread has not reaped yet: still there, so poll again (as tests/test_monitors.py does).
+        return True
 
 
 def wait_for(predicate, timeout=10.0):

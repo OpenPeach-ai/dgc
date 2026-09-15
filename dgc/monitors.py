@@ -290,6 +290,64 @@ class _Ring:
         return "".join(self.parts)
 
 
+#: Process identity, shared verbatim by this process and the watchdog (which runs it as source),
+#: so a stamp taken when a monitor starts compares equal to the one the watchdog takes at EOF.
+#: Linux reads /proc. Without it (macOS, the BSDs) the same facts come from ps(1), whose `lstart`
+#: and `pgid` columns procps and BSD ps both print; DGC_NO_PROCFS=1 forces that path on Linux so
+#: the tests can exercise what macOS runs.
+_PROCESS_PROBES = r'''
+import os, subprocess
+def procfs():
+    return os.environ.get("DGC_NO_PROCFS") != "1" and os.path.isdir("/proc")
+def ps_rows(args):
+    """ps output lines ([] when nothing matched), or None when ps could not run."""
+    try:
+        done = subprocess.run(["ps", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=5,
+                              env=dict(os.environ, LC_ALL="C"))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    rows = done.stdout.decode("utf-8", "replace").splitlines()
+    if done.returncode != 0 and not rows:
+        return [] if done.returncode == 1 else None
+    return rows
+def starttime(pid):
+    """When pid started, as an opaque stamp; "" when it is gone or cannot be read."""
+    if procfs():
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as handle:
+                data = handle.read().decode("utf-8", "replace")
+            return data.rsplit(")", 1)[1].split()[19]
+        except Exception:
+            return ""
+    rows = ps_rows(["-o", "lstart=", "-p", str(int(pid))])
+    return "_".join(rows[0].split()) if rows else ""     # one word: it travels in "add <pgid> <stamp>"
+def members(pgid):
+    """Does any process still belong to group pgid? True when that cannot be told."""
+    if procfs():
+        try:
+            for name in os.listdir("/proc"):
+                if not name.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{name}/stat", "rb") as handle:
+                        fields = handle.read().decode("utf-8", "replace").rsplit(")", 1)[1].split()
+                except Exception:
+                    continue
+                if int(fields[2]) == pgid and int(fields[3]) == pgid:
+                    return True
+        except Exception:
+            return True
+        return False
+    rows = ps_rows(["-A", "-o", "pgid="])
+    if rows is None:
+        return True
+    return any(row.strip() == str(int(pgid)) for row in rows)
+'''
+_probes: dict = {}
+exec(compile(_PROCESS_PROBES, "<dgc.monitors process probes>", "exec"), _probes)   # the constant above
+
+
 class _Watchdog:
     """One helper process that reaps registered process groups if this process dies unassisted.
 
@@ -298,33 +356,9 @@ class _Watchdog:
     died -- and the helper kills what is still registered. A normal stop unregisters first.
     """
 
-    _SOURCE = r'''
-import os, signal, sys, time
+    _SOURCE = _PROCESS_PROBES + r'''
+import signal, sys, time
 groups = {}
-def starttime(pid):
-    try:
-        with open(f"/proc/{pid}/stat", "rb") as handle:
-            data = handle.read().decode("utf-8", "replace")
-        return data.rsplit(")", 1)[1].split()[19]
-    except Exception:
-        return ""
-def members(pgid):
-    if not os.path.isdir("/proc"):
-        return True
-    try:
-        for name in os.listdir("/proc"):
-            if not name.isdigit():
-                continue
-            try:
-                with open(f"/proc/{name}/stat", "rb") as handle:
-                    fields = handle.read().decode("utf-8", "replace").rsplit(")", 1)[1].split()
-            except Exception:
-                continue
-            if int(fields[2]) == pgid and int(fields[3]) == pgid:
-                return True
-    except Exception:
-        return True
-    return False
 def safe(pgid, stamp):
     leader = starttime(pgid)
     if leader:
@@ -354,11 +388,7 @@ for sig in (signal.SIGTERM, signal.SIGKILL):
 
     @staticmethod
     def _stamp(pid: int) -> str:
-        try:
-            with open(f"/proc/{pid}/stat", "rb") as handle:
-                return handle.read().decode("utf-8", "replace").rsplit(")", 1)[1].split()[19]
-        except Exception:
-            return ""
+        return _probes["starttime"](pid)
 
     def _ensure(self) -> subprocess.Popen | None:
         if os.name != "posix":
