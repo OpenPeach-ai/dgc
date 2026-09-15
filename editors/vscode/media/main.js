@@ -823,14 +823,43 @@
   // on and its turn_end all land in it. With no snapshot coming, or none that holds the turn yet,
   // the turn starts here from what its turn_start said.
   let liveTurnHint = null;
+  // Until the snapshot turn_active announced lands, the running turn's live events are held and
+  // then applied to the turn the snapshot leaves open: applied at once, the first of them started a
+  // second, promptless turn above which the snapshot's own turn was settled as finished.
+  let heldForSnapshot = null, heldTimer = null;
+  let hostSessionSeen = false;       // set by the first session_ready: before it no turn is known here
   function noteLiveTurn(msg) {
     liveTurnHint = {
       id: String(msg.turnId || "").slice(0, 128), kind: ["resume", "continue", "monitor"].includes(msg.kind) ? msg.kind : "prompt",
       prompt: String(msg.prompt || ""), handoff: msg.handoff === true,
       startedAt: Number.isFinite(msg.startedAt) && msg.startedAt > 0 ? Math.min(Date.now(), msg.startedAt) : Date.now(),
     };
+    if (msg.history === true) {
+      // Events the extension forwarded before this webview said it was ready drew a promptless
+      // block; everything they showed that was saved is in the snapshot on its way, so that block
+      // goes (a step waiting on a decision is announced again after the snapshot).
+      if (turn && turn.beforeSession) dropTurnBlock();
+      if (!turn) {
+        heldForSnapshot = heldForSnapshot || [];
+        clearTimeout(heldTimer);
+        heldTimer = setTimeout(releaseHeldEvents, 10000);   // a snapshot that never comes holds nothing for long
+      }
+    }
     setSending(true);
     if (msg.history !== true) startHintedTurn();
+  }
+  function releaseHeldEvents() {
+    clearTimeout(heldTimer); heldTimer = null;
+    const held = heldForSnapshot;
+    heldForSnapshot = null;
+    if (held) for (const ev of held) onEvent(ev);
+  }
+  function dropTurnBlock() {
+    clearInterval(turn.timer);
+    clearTimeout(turn.renderTimer);
+    turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
+    turn.block.remove();
+    turn = null;
   }
   function startHintedTurn() {
     const hint = liveTurnHint;
@@ -1239,6 +1268,7 @@
   }
   function discardTurn() {
     liveTurnHint = null;
+    heldForSnapshot = null; clearTimeout(heldTimer); heldTimer = null;
     if (turn) {
       clearInterval(turn.timer);
       clearTimeout(turn.renderTimer);
@@ -1385,7 +1415,11 @@
     syncComposerRail();
   }
 
-  function ensureTurn() { if (!turn) startTurn(); }
+  function ensureTurn() {
+    if (turn) return;
+    startTurn();
+    if (!hostSessionSeen && !replaying) turn.beforeSession = true;
+  }
   // Keep the live activity row at the visual edge of the active turn. New response text,
   // tool cards, diffs and decisions are inserted immediately before it, so a user following
   // the stream always sees that DGC is still running beneath the newest content.
@@ -1545,6 +1579,14 @@
     refreshToolGroup(card.closest(".tool-group"));
   }
 
+  function startToolClock(c) {
+    if (c._timer) return;
+    const elapsed = c.querySelector(".tool-time");
+    c._timer = setInterval(() => {
+      const seconds = (Date.now() - c._startedAt) / 1000;
+      if (elapsed) elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
+    }, 200);
+  }
   function toolCard(ev) {
     const c = el("div", "tool");
     c.dataset.toolName = String(ev.name || "");
@@ -1571,11 +1613,8 @@
     const dot = el("span", replaying ? "dot" : "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
-    const elapsed = el("span", "tool-time", ""); head.appendChild(elapsed);
-    if (!replaying) c._timer = setInterval(() => {
-      const seconds = (Date.now() - c._startedAt) / 1000;
-      elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
-    }, 200);
+    head.appendChild(el("span", "tool-time", ""));
+    if (!replaying) startToolClock(c);
     setToolStatus(c, "running");
     appendTool(c); breakText(); agentsOnToolCard(c, ev); return c;
   }
@@ -2302,6 +2341,11 @@
   });
 
   function onEvent(ev) {
+    if (heldForSnapshot && !replaying) {
+      // A new chat, a rewind or a new backend ends the wait: what was held is applied first, in order.
+      if (["session", "rewound", "ready"].includes(ev.type)) releaseHeldEvents();
+      else if (ev.type !== "history") { if (heldForSnapshot.length < 5000) heldForSnapshot.push(ev); return; }
+    }
     if (ev.type === "session" || ev.type === "ready") {
       setChatChanges({ files: [], total: 0 });
       $("changes-review").hidden = true;
@@ -2338,6 +2382,7 @@
       case "history":
         renderHistory(ev.items || []);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
+        if (!replaying) releaseHeldEvents();       // the running turn is adopted: its held events land in it
         break;
       case "recall": renderHistory._absorbRecall?.(ev); break;
       case "rewound":
@@ -2469,7 +2514,13 @@
       case "tool_call": {
         ensureTurn(); finishReasoning();
         turn._tools = turn._tools || Object.create(null);
-        turn._tools[ev.call_id || ev.name] = toolCard(ev);
+        // One step, one row. A turn adopted from a reload snapshot can already hold this step, still
+        // running, when its live tool_call arrives; a finished row whose id comes back is a new call.
+        const same = ev.call_id ? turn._tools[ev.call_id] : null;
+        if (same && same.isConnected && same.dataset.status === "running" && same.dataset.toolName === String(ev.name || "")) {
+          same.querySelector(".dot")?.classList.add("run");
+          if (!replaying) startToolClock(same);
+        } else turn._tools[ev.call_id || ev.name] = toolCard(ev);
         // Remember the path an edit tool was called with, so a result that carries no diff
         // (a brand-new file, a binary write) still reaches the end-of-turn summary.
         turn._paths = turn._paths || Object.create(null);
@@ -2500,7 +2551,11 @@
         }
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
+        // A step whose result the reload snapshot already showed is not finished a second time
+        // (a diff drawn twice, its lines counted twice).
+        if (!replaying && ev.call_id && turn._tools[key]?._resultFromSnapshot) break;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
+        if (replaying && ev.call_id) c._resultFromSnapshot = true;
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
         if (askedResultShown(c, ev)) { breakText(); break; }   // the answered questions are the body
         // (status is refined just below; a blocked repeat is not an error of the command)
@@ -4084,6 +4139,7 @@
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "session_ready") {
+      hostSessionSeen = true;
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       backendLive = true; backendDown = false; armTodoClearTimer();
       renderUnconfirmedDrafts();
@@ -4185,6 +4241,7 @@
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
+      releaseHeldEvents();
       requestEpoch += 1;
       backendExitHooks(msg);
       sessionReady = !draftScope;

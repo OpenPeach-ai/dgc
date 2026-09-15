@@ -846,8 +846,28 @@ class HeadlessUI:
         self._close_reasoning_fallback()
         summary = arg_summary(name, args)
         self.turn_activity("tool", activity_verb(name), summary)
+        self._note_shown_call(call_id)
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
                      summary=summary)
+
+    # A history snapshot taken while a turn runs replays only the steps that turn has already put on
+    # screen (see Backend._history): a call the model issued that is still waiting on its permission
+    # card has no row live, so it must not get one on reload. Ids only, for the current turn.
+    def _note_shown_call(self, call_id) -> None:
+        if not isinstance(call_id, str) or not call_id:
+            return
+        turn_id = str(getattr(self, "turn_id", "") or "")
+        with self._requests_lock():
+            shown = self.__dict__.get("_shown_calls")
+            if shown is None or shown[0] != turn_id:
+                shown = self.__dict__["_shown_calls"] = (turn_id, set())
+            shown[1].add(call_id)
+
+    def shown_calls(self, turn_id: str) -> frozenset:
+        """The call ids the turn ``turn_id`` has shown a row for (tool_call or tool_denied)."""
+        with self._requests_lock():
+            shown = self.__dict__.get("_shown_calls")
+            return frozenset(shown[1]) if shown is not None and shown[0] == turn_id else frozenset()
 
     def tool_progress(self, name: str, message: str, *, progress=None, total=None,
                       level: str = "", call_id: str | None = None) -> None:
@@ -926,6 +946,7 @@ class HeadlessUI:
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         self.turn_activity("waiting", "Waiting for the model")
+        self._note_shown_call(call_id)
         self.em.emit("tool_denied", call_id=call_id, name=name, args=args, reason=reason)
 
     def on_todo(self, todos: list) -> None:
@@ -2319,6 +2340,9 @@ class Backend:
         # (and the snapshot closes it) or after the re-announced requests, never in between.
         with self._turn_state_lock():
             live = getattr(self, "_live_turn", None) if getattr(self, "_running_turn_kind", "") else None
+            shown_calls = getattr(getattr(self, "ui", None), "shown_calls", None)
+            if isinstance(live, dict) and callable(shown_calls):
+                live = {**live, "shown": shown_calls(str(live.get("id") or ""))}
             self.em.emit("history", items=self._history(live_turn=live),
                          todos=redact_value(list(todos), secret_values(self.config)),
                          **_request_fields(request_id))
@@ -2540,6 +2564,19 @@ class Backend:
             for item in items[first:]:
                 if isinstance(item, dict) and item.get("turn_id") == hid:
                     item["turn_id"] = live_id
+            # The model's message names every call of its batch before any of them runs, but live
+            # a step appears only once it starts: a call still waiting on its permission (or plan)
+            # card, or not reached yet, has no row. Replaying one would show "Running" for a step
+            # that is not running, and its live tool_call would then draw it a second time. Keep
+            # the calls the running turn has already shown, and every call with a saved result.
+            shown = live_turn.get("shown")
+            if isinstance(shown, (set, frozenset)):
+                resulted = {item.get("call_id") for item in items[first:]
+                            if isinstance(item, dict) and item.get("type") == "tool_result"}
+                items[first:] = [item for item in items[first:]
+                                 if not (isinstance(item, dict) and item.get("type") == "tool_call"
+                                         and item.get("call_id") and item["call_id"] not in resulted
+                                         and item["call_id"] not in shown)]
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
         # history remains intact; this limit applies only to the restored webview payload.
         retained, size = [], 0

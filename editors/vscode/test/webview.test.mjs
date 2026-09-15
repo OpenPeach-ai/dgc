@@ -3944,11 +3944,16 @@ test("a reloaded webview keeps the running turn from its snapshot and draws a re
   assert.match(live.querySelector(".thinking .verb").textContent, /waiting for your input/);
   live.querySelector('.card[data-request-id="r4"] button[data-d="once"]').click();
   assert.deepEqual(posted.filter((m) => m.type === "permission_response").map((m) => [m.id, m.decision]), [["r4", "once"]]);
+  // An older backend's snapshot can still hold the approved step: its live tool_call is the same row.
+  event({ type: "tool_call", call_id: "call_1", name: "bash", args: { command: "npm test" }, summary: "npm test" });
+  assert.equal(live.querySelectorAll('.tool[data-tool-name="bash"]').length, 1, "the approved step is not drawn twice");
   event({ type: "tool_result", call_id: "call_1", name: "bash", output: "ok", is_error: false, is_diff: false, diff: "" });
   event({ type: "text_delta", text: "Tests pass." });
   event({ type: "stream_end", message_id: "t3:1", phase: "answer" });
   event({ type: "turn_end", turn_id: "t3", reason: "completed", token_estimate: 0, final_message_id: "t3:1" });
   assert.match(live.querySelector(".thinking").textContent, /^Worked for \d+s$/, "the live turn_end settles it, with its clock");
+  assert.deepEqual([...live.querySelectorAll(".tool")].map((t) => t.dataset.status), ["completed"]);
+  assert.doesNotMatch(live.textContent, /stopped|issue/i);
   assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
   assert.deepEqual(errors, []);
 });
@@ -3970,6 +3975,60 @@ test("a turn_active with no snapshot coming starts the running turn at once, and
   const replayed = [...doc.querySelectorAll("#log .msg.dgc.hist")];
   assert.equal(replayed.length, 1);
   assert.ok(replayed[0].querySelector(".thinking.done"), "settled");
+  assert.deepEqual(errors, []);
+});
+
+// The live events around a reload: some reach the new webview before it knows a turn is running (they
+// drew a promptless block), some between turn_active and the snapshot. The first go (the snapshot
+// holds what they showed), the second are applied to the adopted turn after the snapshot, and a step
+// the snapshot already shows is neither drawn again when its live tool_call arrives nor finished twice.
+test("a reload mid-turn keeps one block: early events go, held ones land in the adopted turn, a step is drawn once", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const diff = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n";
+  // Before session_ready: forwarded while the page loaded.
+  event({ type: "text_delta", text: "early words " });
+  event({ type: "tool_call", call_id: "c1", name: "edit_file", args: { path: "app.py" }, summary: "app.py" });
+  assert.equal(doc.querySelectorAll("#log .msg.dgc").length, 1, "the early events drew a promptless block");
+  send({ type: "session_ready", sessionId: "s1" });
+  send({ type: "turn_active", turnId: "t3", kind: "prompt", prompt: "fix the app", startedAt: Date.now() - 4000, handoff: false, history: true });
+  assert.equal(doc.querySelectorAll("#log .msg.dgc").length, 0, "that block goes: the snapshot holds what it showed");
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Stop generation");
+  // Between turn_active and the snapshot: held.
+  event({ type: "tool_result", call_id: "c1", name: "edit_file", output: diff, is_error: false, is_diff: true, diff });
+  event({ type: "text_delta", text: "Now running the tests. " });
+  event({ type: "turn_activity", turn_id: "t3", state: "responding", label: "Responding" });
+  assert.equal(doc.querySelectorAll("#log .msg.dgc").length, 0, "held until the snapshot lands");
+  event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "hello", kind: "prompt" },
+    { type: "text_delta", text: "Hi." }, { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+    { type: "turn_start", turn_id: "t3", prompt: "fix the app", kind: "prompt" },
+    { type: "tool_call", call_id: "c1", name: "edit_file", args: { path: "app.py" }, summary: "app.py" },
+    { type: "tool_result", call_id: "c1", name: "edit_file", output: diff, is_error: false, is_diff: true, diff },
+    { type: "tool_call", call_id: "c2", name: "bash", args: { command: "pytest" }, summary: "pytest" },
+  ], todos: [] });
+  const blocks = [...doc.querySelectorAll("#log .msg.dgc")];
+  assert.equal(blocks.length, 2, blocks.map((b) => b.textContent.slice(0, 60)).join(" | "));
+  assert.deepEqual([...doc.querySelectorAll("#log .msg.user .bubble")].map((b) => b.textContent), ["hello", "fix the app"]);
+  const live = blocks[1];
+  assert.equal(live.querySelectorAll('.tool[data-call-id="c1"]').length, 1);
+  assert.equal(live.querySelectorAll(".diff").length, 1, "the diff is drawn once");
+  assert.match(live.textContent, /Now running the tests\./, "the held text lands in the adopted turn");
+  assert.doesNotMatch(live.textContent, /early words/);
+  assert.match(live.querySelector(".thinking .verb").textContent, /Responding/);
+  // The live tool_call of the step the snapshot shows running: the same row.
+  event({ type: "tool_call", call_id: "c2", name: "bash", args: { command: "pytest" }, summary: "pytest" });
+  assert.equal(live.querySelectorAll('.tool[data-call-id="c2"]').length, 1, "one row per step");
+  event({ type: "tool_result", call_id: "c2", name: "bash", output: "exit code: 0\n3 passed", is_error: false, is_diff: false, diff: "" });
+  event({ type: "text_delta", text: "All green." });
+  event({ type: "stream_end", message_id: "t3:2", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t3", reason: "completed", token_estimate: 0, final_message_id: "t3:2" });
+  assert.deepEqual([...live.querySelectorAll(".tool")].map((t) => `${t.dataset.toolName}:${t.dataset.status}`),
+    ["edit_file:completed", "bash:completed"]);
+  assert.doesNotMatch(live.textContent, /stopped|issue/i);
+  assert.match(live.querySelector(".thinking").textContent, /^Worked for \d+s$/);
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
   assert.deepEqual(errors, []);
 });
 

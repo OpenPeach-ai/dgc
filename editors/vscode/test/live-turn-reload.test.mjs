@@ -95,6 +95,24 @@ function modelServer() {
       const answered = prompt >= 0 && msgs.slice(prompt + 1).some((m) => m.role === "tool");
       res.writeHead(200, { "Content-Type": "text/event-stream", Connection: "close" });
       if (!body.tools || prompt < 0) { res.end(chunk({ content: "Title" }) + chunk({}, "stop") + "data: [DONE]\n\n"); return; }
+      const text = msgs.filter((m) => m.role === "user" && typeof m.content === "string").at(-1)?.content.trimStart() || "";
+      if (text.startsWith("TURN_BATCH")) {
+        if (answered && msgs.slice(prompt + 1).filter((m) => m.role === "tool").length >= 2) {
+          res.end(chunk({ content: "Checked and ran." }) + chunk({}, "stop") + "data: [DONE]\n\n"); return;
+        }
+        res.end(chunk({ tool_calls: [
+          { index: 0, id: "call_read_1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "README.md" }) } },
+          { index: 1, id: "call_bash_2", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "echo verified > proof.txt" }) } }] })
+          + chunk({}, "tool_calls") + "data: [DONE]\n\n");
+        return;
+      }
+      if (text.startsWith("TURN_STREAM")) {
+        (async () => {
+          for (let i = 0; i < 30; i++) { res.write(chunk({ content: `word${i} ` })); await sleep(80); }
+          res.end(chunk({}, "stop") + "data: [DONE]\n\n");
+        })();
+        return;
+      }
       if (answered) { res.end(chunk({ content: "SQLite it is." }) + chunk({}, "stop") + "data: [DONE]\n\n"); return; }
       res.end(chunk({ tool_calls: [{ index: 0, id: "call_ask_1", type: "function",
         function: { name: "propose_options", arguments: JSON.stringify(QUESTION) } }] })
@@ -249,5 +267,160 @@ test("a webview reloaded while a question is docked shows the running turn, and 
     backend.dispose("test finished");
     await sleep(300);
     model.close();
+  }
+});
+
+// The same reload for a step waiting on its permission card, and for an answer still streaming. Each
+// runs a real `dgc serve`; the reloaded webview is sent live events from the moment it opens, before it
+// has said it is ready, the way the extension forwards them.
+async function liveSession(name, onEvent = () => {}) {
+  const model = await modelServer();
+  const base = join(scratch, name), home = join(base, "home"), work = join(base, "work");
+  mkdirSync(join(home, ".dgc"), { recursive: true }); mkdirSync(work, { recursive: true });
+  writeFileSync(join(work, "README.md"), "fixture\n");
+  writeFileSync(join(home, ".dgc", "config.json"), JSON.stringify({
+    base_url: `http://127.0.0.1:${model.address().port}/v1`, model: "mock-model", api_key: "sk-fixture-0123456789abcdef",
+    api_mode: "chat_completions", suggest: false, notes: false, mode: "default", artifact_autostart: false, eta: false }));
+  const wrapper = join(base, "dgc-real");
+  const q = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
+  writeFileSync(wrapper, ["#!/bin/sh", `export HOME=${q(home)} XDG_CONFIG_HOME=${q(home)} XDG_DATA_HOME=${q(home)} XDG_STATE_HOME=${q(home)} XDG_CACHE_HOME=${q(home)}`,
+    `export PYTHONPATH=${q(repoRoot)} PYTHONDONTWRITEBYTECODE=1 NO_COLOR=1`, "unset OPENAI_API_KEY ANTHROPIC_API_KEY",
+    `exec ${q(python)} -m dgc "$@"`].join("\n") + "\n");
+  chmodSync(wrapper, 0o700);
+  const backend = new DgcBackend(work, wrapper);
+  const s = { backend, work, events: [], failures: [], views: [], ready: null, liveTurn: null, model };
+  backend.on("event", (ev) => {
+    s.events.push(ev);
+    if (ev.type === "ready") s.ready = ev;
+    if (ev.type === "turn_start") s.liveTurn = { turnId: ev.turn_id, kind: ev.kind || "prompt", prompt: ev.prompt || "", startedAt: Date.now(), handoff: false };
+    if (ev.type === "turn_end") s.liveTurn = null;
+    if ((ev.type === "error" && ev.protocol_error) || (ev.type === "command_rejected" && !ev.command)) s.failures.push(ev.message);
+    onEvent(ev);
+    for (const view of s.views) view.post({ type: "event", event: ev }).catch(() => {});
+  });
+  s.host = (msg) => {
+    if (msg?.type === "permission_response") backend.send({ type: "permission_response", id: msg.id, decision: msg.decision });
+    else if (msg?.type === "cancel") backend.send({ type: "cancel" });
+    else if (msg?.type === "getRecall") backend.send({ type: "get_recall", limit: 50 });
+  };
+  backend.start();
+  await until(() => s.ready, "ready");
+  backend.completeHandshake();
+  s.open = async () => {
+    const view = await openWebview(s.host);
+    await view.post({ type: "event", event: s.ready });
+    await view.post({ type: "session_ready", sessionId: s.ready.session_id });
+    s.views = [view];
+    return view;
+  };
+  // What panel.ts does for a webview that loads while a turn runs: events flow from the start, then
+  // on webviewReady it posts ready and session_ready, asks for the snapshot and says a turn is running.
+  s.reload = async (old, beforeReady = 0) => {
+    s.views = [];
+    await old.page.close();
+    const view = await openWebview(s.host);
+    s.views = [view];
+    if (beforeReady) await sleep(beforeReady);
+    await view.post({ type: "event", event: s.ready });
+    await view.post({ type: "session_ready", sessionId: s.ready.session_id });
+    const seen = s.events.length;
+    assert.equal(backend.send({ type: "get_history", request_id: `restore-history-${seen}` }), true);
+    if (s.liveTurn) await view.post({ type: "turn_active", ...s.liveTurn, history: true });
+    return { view, seen };
+  };
+  s.close = async () => {
+    for (const view of s.views) await view.page.close().catch(() => {});
+    s.views = [];
+    backend.dispose("test finished");
+    await sleep(300);
+    model.close();
+  };
+  return s;
+}
+
+const turnFacts = (page) => page.evaluate(() => {
+  const blocks = [...document.querySelectorAll("#log .msg.dgc")];
+  const last = blocks.at(-1);
+  return {
+    send: document.getElementById("send").getAttribute("aria-label"),
+    blocks: blocks.length, users: [...document.querySelectorAll("#log .msg.user .bubble")].map((b) => b.textContent),
+    act: last?.querySelector(".thinking")?.textContent.trim() || "",
+    done: !!last?.querySelector(".thinking.done"),
+    tools: [...(last?.querySelectorAll(".tool") || [])].map((node) => `${node.dataset.toolName}:${node.dataset.status}`),
+    cards: [...document.querySelectorAll(".card[data-request-id]:not(.resolved)")].map((card) => card.dataset.requestId),
+    text: (last?.innerText || "").replace(/\s+/g, " "),
+  };
+});
+
+test("a webview reloaded while a step waits on its permission card draws that step once, and approving it finishes cleanly", async (t) => {
+  if (skipOrFail(t)) return;
+  const shots = process.env.DGC_LIVE_RELOAD_SHOTS;
+  if (shots) mkdirSync(shots, { recursive: true });
+  const s = await liveSession("permission");
+  try {
+    const first = await s.open();
+    assert.equal(s.backend.send({ type: "prompt", text: "TURN_BATCH read then write", request_id: "p1" }), true);
+    const asked = await until(() => s.events.find((e) => e.type === "permission_request"), "the permission request");
+    const before = await until(async () => { const f = await turnFacts(first.page); return f.cards.length ? f : null; }, "the card");
+    assert.deepEqual(before.tools, ["read_file:completed"], "live: the waiting step has no row");
+    const { view, seen } = await s.reload(first, 150);
+    await until(() => s.events.slice(seen).some((e) => e.type === "permission_request"), "the re-announced permission");
+    const reloaded = await until(async () => { const f = await turnFacts(view.page); return f.cards.length ? f : null; }, "the card after the reload");
+    await sleep(300);
+    const settledView = await turnFacts(view.page);
+    if (shots) await view.page.screenshot({ path: join(shots, "permission-after-reload.png") });
+    assert.deepEqual(s.failures, []);
+    assert.deepEqual(reloaded.cards, [String(asked.id)]);
+    assert.deepEqual(settledView.tools, before.tools, "the reloaded turn shows the rows the live one did");
+    assert.equal(settledView.send, "Stop generation");
+    assert.equal(settledView.blocks, 1);
+    assert.doesNotMatch(settledView.text, /stopped/i);
+    await view.page.locator(`.card[data-request-id="${asked.id}"] button[data-d="once"]`).click();
+    const ended = await until(() => s.events.find((e) => e.type === "turn_end"), "turn_end");
+    assert.equal(ended.reason, "completed");
+    const done = await until(async () => { const f = await turnFacts(view.page); return f.done ? f : null; }, "the turn settles");
+    if (shots) await view.page.screenshot({ path: join(shots, "permission-approved.png") });
+    assert.deepEqual(done.tools, ["read_file:completed", "bash:completed"], "one row per step, none stopped");
+    assert.doesNotMatch(done.text, /stopped|issue/i, done.text);
+    assert.match(done.act, /^Worked for \d+s$/);
+    assert.equal(done.send, "Send message");
+    assert.equal(readFileSync(join(s.work, "proof.txt"), "utf8").trim(), "verified");
+    assert.deepEqual([...view.errors], []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("a webview reloaded while the answer streams keeps one turn, and the rest of the answer lands in it", async (t) => {
+  if (skipOrFail(t)) return;
+  const shots = process.env.DGC_LIVE_RELOAD_SHOTS;
+  if (shots) mkdirSync(shots, { recursive: true });
+  const s = await liveSession("stream");
+  try {
+    const first = await s.open();
+    assert.equal(s.backend.send({ type: "prompt", text: "TURN_STREAM tell me", request_id: "p1" }), true);
+    await until(() => s.events.filter((e) => e.type === "text_delta").length >= 4, "the answer streaming");
+    // Live events reach the new webview for a moment before it says it is ready.
+    const { view } = await s.reload(first, 250);
+    await sleep(600);
+    const mid = await turnFacts(view.page);
+    if (shots) await view.page.screenshot({ path: join(shots, "stream-after-reload.png") });
+    assert.equal(mid.blocks, 1, JSON.stringify(mid));
+    assert.deepEqual(mid.users, ["TURN_STREAM tell me"]);
+    assert.equal(mid.send, "Stop generation");
+    assert.equal(mid.done, false);
+    const ended = await until(() => s.events.find((e) => e.type === "turn_end"), "turn_end");
+    assert.equal(ended.reason, "completed");
+    const done = await until(async () => { const f = await turnFacts(view.page); return f.done ? f : null; }, "the turn settles");
+    if (shots) await view.page.screenshot({ path: join(shots, "stream-finished.png") });
+    assert.equal(done.blocks, 1, JSON.stringify(done));
+    assert.match(done.text, /word29/);
+    const words = done.text.match(/word\d+/g) || [];
+    assert.equal(new Set(words).size, words.length, "no word is shown twice");
+    assert.match(done.act, /^Worked for \d+s$/);
+    assert.equal(done.send, "Send message");
+    assert.deepEqual([...view.errors], []);
+  } finally {
+    await s.close();
   }
 });

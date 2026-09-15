@@ -80,6 +80,15 @@ class Model(BaseHTTPRequestHandler):
             return self._send(call("propose_options", QUESTION, "call_ask_1"))
         if last.startswith("TURN_RUN"):
             return self._send(call("bash", {"command": "echo reload-probe"}, "call_bash_1"))
+        if last.startswith("TURN_BATCH"):
+            batch = [("read_file", {"path": "README.md"}, "call_read_1"),
+                     ("bash", {"command": "echo batch-probe"}, "call_bash_2"),
+                     ("glob", {"pattern": "*.md"}, "call_glob_3")]
+            return self._send(sse({"tool_calls": [
+                {"index": n, "id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+                for n, (name, args, cid) in enumerate(batch)]}) + sse({}, "tool_calls") + "data: [DONE]\n\n")
+        if last.startswith("TURN_PLAN"):
+            return self._send(call("present_plan", {"plan": "1. Add the cache\n2. Test it"}, "call_plan_1"))
         return self._send(text("Hello."))
 
 
@@ -236,6 +245,49 @@ class LiveTurnReloadTests(unittest.TestCase):
         results = [e for e in self.events if e.get("type") == "tool_result" and e.get("name") == "bash"]
         self.assertTrue(results and "reload-probe" in results[-1]["output"], results)
         self.assert_frames_valid(history)
+
+    def test_a_step_still_waiting_on_its_card_gets_no_row_on_reload(self):
+        # The model's message names every call of its batch up front, but live a step appears only
+        # when it starts. A snapshot of the running turn replays the calls that have shown a row
+        # (with or without a result) and leaves out the one waiting on its permission card and the
+        # one after it, so the live tool_call that follows approval is the only row for that step.
+        self.send({"type": "prompt", "text": "TURN_BATCH read then run"})
+        live_start = self.wait(lambda e: e.get("type") == "turn_start")
+        requested = self.wait(lambda e: e.get("type") == "permission_request")
+        self.assertEqual(requested["call_id"], "call_bash_2")
+        shown_before = [e["call_id"] for e in self.events if e.get("type") == "tool_call"]
+        self.assertEqual(shown_before, ["call_read_1"], "live: only the read has a row while bash waits")
+        history, after, _ = self.snapshot("reload-batch")
+        running = self.turns(self.assert_frames_valid(history))[-1]
+        self.assertEqual(running[0]["turn_id"], live_start["turn_id"])
+        self.assertEqual([i["call_id"] for i in running if i["type"] == "tool_call"], ["call_read_1"])
+        self.assertEqual([i["call_id"] for i in running if i["type"] == "tool_result"], ["call_read_1"])
+        self.assertEqual([e["id"] for e in after if e.get("type") == "permission_request"], [requested["id"]])
+        self.send({"type": "permission_response", "id": requested["id"], "decision": "once"})
+        ended = self.wait(lambda e: e.get("type") == "turn_end")
+        self.assertEqual((ended["turn_id"], ended["reason"]), (live_start["turn_id"], "completed"))
+        live_calls = [e["call_id"] for e in self.events[self.events.index(live_start):] if e.get("type") == "tool_call"]
+        self.assertEqual(live_calls, ["call_read_1", "call_bash_2", "call_glob_3"], "one live row per step")
+        # Once the turn is over, replay and live agree on the rows.
+        history, _, _ = self.snapshot("idle-batch")
+        finished = self.turns(self.assert_frames_valid(history))[-1]
+        self.assertEqual([i["call_id"] for i in finished if i["type"] == "tool_call"], live_calls)
+        self.assertEqual(finished[-1]["type"], "turn_end")
+
+        # A plan waiting on review: live shows no step row for present_plan, and neither does the reload.
+        self.send({"type": "set_mode", "mode": "plan"})
+        self.send({"type": "prompt", "text": "TURN_PLAN make a plan"})
+        live_start = self.wait(lambda e: e.get("type") == "turn_start" and e.get("prompt", "").startswith("TURN_PLAN"))
+        proposal = self.wait(lambda e: e.get("type") == "plan_proposal")
+        history, after, _ = self.snapshot("reload-plan")
+        running = self.turns(self.assert_frames_valid(history))[-1]
+        self.assertEqual(running[0]["turn_id"], live_start["turn_id"])
+        self.assertNotIn("turn_end", [i["type"] for i in running])
+        self.assertEqual([i for i in running if i["type"] in ("tool_call", "tool_result")], [])
+        self.assertEqual([e["id"] for e in after if e.get("type") == "plan_proposal"], [proposal["id"]])
+        self.send({"type": "plan_response", "id": proposal["id"], "decision": "default"})
+        ended = self.wait(lambda e: e.get("type") == "turn_end")
+        self.assertEqual((ended["turn_id"], ended["reason"]), (live_start["turn_id"], "completed"))
 
 
 if __name__ == "__main__":
