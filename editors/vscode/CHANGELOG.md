@@ -23,7 +23,7 @@
 - **Undo in the prompt box.** Cmd/Ctrl+Z brings back a message you just sent, text you deleted, or
   a completion you did not mean to insert.
 - The prompt box keeps its size when you come back to DGC from another view after a turn stopped.
-- Queued messages survive slash commands and backend restarts.
+- Queued messages survive slash commands, and a restart DGC holds until the turn ends.
 - The editor tabs and activity bar show the DGC mark instead of a terminal glyph.
 - An automatic CLI update runs `dgc update` in the installation it belongs to, and an older CLI's
   failed update is reported instead of passing silently.
@@ -34,8 +34,9 @@
   sent, ready to restore.
 - **Continue survives a killed backend.** A running turn is saved at each step, so a backend that is
   killed or crashes still offers Continue for the turn it was on.
-- **Security:** the artifact server publishes only the page and what it links, never dot-files or a
-  project's secrets and source, and answers only to this machine's own addresses.
+- **Security:** the artifact server never publishes dot-files, secret files or a project's source. A
+  page at a project root publishes only what it links, and the server answers only to this machine's
+  own addresses.
 - In full-auto, asking to choose between options opens the options picker.
 - Browser screenshots and images attached by @-mention, drag or Add File to Chat reach the model.
 - Undo works on whole typing runs; drafts keep pasted-text chips across a reload; `/usage` opens
