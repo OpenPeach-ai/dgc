@@ -497,7 +497,7 @@ class ModelFormatTests(unittest.TestCase):
         read_file) instead of an error; without vision the error stays and nothing is shown."""
         for vision in (True, False):
             with self.subTest(vision=vision), tempfile.TemporaryDirectory(prefix="dgc-images-read-") as directory:
-                root = Path(directory)
+                root = Path(directory).resolve()
                 (root / "shapes.png").write_bytes(png(32, 24))
                 calls = {"n": 0}
 
@@ -910,7 +910,7 @@ class LifecycleTests(unittest.TestCase):
 class ViewImageToolTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="dgc-view-image-")
-        self.root = Path(self.tmp.name) / "project"
+        self.root = Path(self.tmp.name).resolve() / "project"
         self.root.mkdir()
         self.ctx = types.SimpleNamespace(project_root=self.root, config=fixture_config(self.root),
                                          vision=True, tool_owner="view-image-test")
