@@ -1535,6 +1535,38 @@ test("a stall continuation's notice sits above the merged answer, not under it",
   dom.window.close();
 });
 
+test("a reconnect line of a joined answer sits above it, live and on replay", () => {
+  // v14: a stream cut's continuation streams into the partial answer's open block, as a stall's does.
+  // Its model_retry line was left under the partial text and ended up below the joined answer card.
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  const retry = (state) => ({ type: "model_retry", retry_id: "t1:retry1", state, kind: "stream_cut", layer: "continuation",
+    attempt: 1, max_attempts: 8, summary: "stream from 127.0.0.1:5230 ended before [DONE]", turn_id: "t1" });
+  const order = (block) => [...block.children].filter((n) => !n.matches(".role, .thinking"))
+    .map((n) => n.matches(".model-retry") ? "retry" : n.matches(".answer") ? "answer" : n.matches(".text") ? "text" : n.className);
+  event({ type: "turn_start", turn_id: "t1", prompt: "cut me" });
+  event({ type: "text_delta", text: "All do" });
+  event(retry("retrying"));
+  event({ type: "text_delta", text: "ne." });
+  event(retry("recovered"));
+  const live = doc.querySelector(".msg.dgc");
+  assert.deepEqual(order(live), ["retry", "text"], "live: the line moves above the block the continuation grows");
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  assert.deepEqual(order(live), ["retry", "answer"]);
+  assert.equal(live.querySelector(".answer .text").textContent.trim(), "All done.");
+  event({ type: "session", kind: "resumed", session_id: "s1", name: "" });
+  event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "cut me", kind: "prompt" },
+    { ...retry("recovered"), retry_id: "h1:retry1", turn_id: "h1" },
+    { type: "text_delta", text: "All done." },
+    { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" }] });
+  assert.deepEqual(order(doc.querySelector(".msg.dgc")), ["retry", "answer"], "replay draws the same order");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("a running tool group reads as a present-tense sentence built like the finished one", () => {
   const { errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
