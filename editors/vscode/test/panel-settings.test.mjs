@@ -1807,3 +1807,73 @@ test("the Token Usage tab's request reaches get_usage, and an older CLI is told 
   assert.equal(posted.at(-1).type, "usage_unavailable");
   assert.equal(posted.at(-1).requestId, "usage-full");
 });
+
+test("/usage typed in the editor opens Token Usage, with the range it names", async () => {
+  // Before: slashText had no /usage route, so the command the slash menu offers went on as a
+  // custom command and the backend answered "unknown command: /usage".
+  const h = harness(), posted = [], sent = [], opened = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  h.provider.openSettings = (section, range) => opened.push([section, range]);
+  await h.provider.slashText("/usage");
+  await h.provider.slashText("/usage 30d");
+  await h.provider.slashText("/USAGE  all-time");
+  await h.provider.slashText("/usage week");
+  assert.deepEqual(opened, [["usage", undefined], ["usage", "30d"], ["usage", "all"], ["usage", "7d"]]);
+  await h.provider.slashText("/usage fortnight");
+  assert.equal(opened.length, 4, "an unknown range opens nothing");
+  assert.deepEqual(posted.at(-1), { type: "event", event: { type: "error",
+    message: "usage: /usage [today|7d|30d|month|all]" } });
+  assert.equal(sent.some(command => command.type === "slash_command"), false,
+    "never sent on as an unknown custom command");
+});
+
+test("an exit with no word from the backend names its signal or status once", async () => {
+  // Before: with no "serve loop ended" line the cause fell back to `exited with ${how}`, and how was
+  // already "killed by SIGKILL": the Continue card read "(exited with killed by SIGKILL)".
+  const counter = join(scratch, "panel-silent-generation");
+  writeFileSync(counter, "0");
+  const fixture = nodeFixture("panel-dies-silently", `
+const fs = require("node:fs");
+const generation = Number(fs.readFileSync(${JSON.stringify(counter)}, "utf8")) + 1;
+fs.writeFileSync(${JSON.stringify(counter)}, String(generation));
+setTimeout(() => { if (generation === 1) process.kill(process.pid, "SIGKILL"); else process.exit(3); }, 100);`);
+  configurationInspections = { command: { defaultValue: "dgc", globalValue: fixture } };
+  const h = lifecycleProvider();
+  h.provider.ensureBackend();
+  assert.ok(await until(() => h.posted.filter((m) => m.type === "backend_exit").length >= 2, 8000));
+  const [killed, failed] = h.posted.filter((m) => m.type === "backend_exit");
+  assert.equal(killed.cause, "killed by SIGKILL");
+  assert.equal(failed.cause, "exited with code 3");
+  h.provider.dispose();
+});
+
+test("a chat that never had a message is not restored on reopen, and nothing says it is unavailable", async () => {
+  // Before: the ready event's session id was remembered even though the backend writes a session
+  // file only once the chat has content, so reopening VS Code asked to resume a file that never
+  // existed and showed "no such session" and "The previous chat is unavailable".
+  const fresh = restorationHarness();
+  fresh.provider.currentSessionSaved = false;
+  fresh.provider.rememberSession();
+  assert.deepEqual(fresh.saved.get("dgc.activeSession.v1"), { scope: fresh.provider.draftScope(), id: "new-chat", saved: false });
+  // The next window: the remembered chat was never saved.
+  const reopened = restorationHarness();
+  reopened.saved.set("dgc.activeSession.v1", { scope: reopened.provider.draftScope(), id: "saved-chat", saved: false });
+  reopened.provider.sessionRestoreSaved = false;
+  reopened.provider.maybeCompleteHandshake(reopened.backend);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reopened.calls.length, 0, "no resume_session for a chat with no file");
+  assert.equal(reopened.released(), 1);
+  assert.equal(reopened.posted.some(message => message.type === "event"), false, "no error and no 'unavailable' notice");
+  assert.ok(reopened.posted.some(message => message.type === "session_ready"
+    && message.sessionId === "new-chat" && message.adoptDraftFrom === "saved-chat"), "its unsent draft still comes along");
+  // A chat becomes worth restoring as soon as it has a turn, a name or a resumed file.
+  const used = restorationHarness();
+  used.provider.currentSessionSaved = false;
+  used.provider.onEvent({ type: "turn_start", turn_id: "t1", prompt: "hello", kind: "prompt" });
+  assert.equal(used.saved.get("dgc.activeSession.v1").saved, true);
+  const named = restorationHarness();
+  named.provider.currentSessionSaved = false;
+  named.provider.onEvent({ type: "session_named", name: "Kiwi" });
+  assert.equal(named.saved.get("dgc.activeSession.v1").saved, true);
+});

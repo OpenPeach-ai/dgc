@@ -937,6 +937,27 @@ class AgentStallTests(StallTestCase):
         self.assertTrue(any("stopped streaming" in line and "(1/1)" in line for line in ui.infos))
         self.assertEqual("".join(ui.text), "The first half and the rest.")
 
+    def test_the_answer_is_the_partial_text_and_its_continuation_in_one_block(self):
+        # The cut-off prose and its continuation used to be two blocks (the first shown as
+        # commentary) and two messages, so the answer card, Copy and `dgc -p` result.text all held
+        # only "and the rest.".
+        from dgc.cli import _last_assistant_text
+        self.server.behaviours["/chat/completions"] = sequence(
+            partial_then_silent(("The first half ",)), chat_answer("and the rest."))
+        agent, ui = self.agent()
+        timeline = []
+        ui.on_text = lambda chunk: (ui.text.append(chunk), timeline.append(("text", chunk)))
+        ui.end_stream = lambda phase="": timeline.append(("end", phase))
+        self.assertIsNot(agent.run_turn("hello", reset_cancel=False), False)
+        ends = [entry for entry in timeline if entry[0] == "end"]
+        self.assertEqual(ends, [("end", "answer")], timeline)
+        self.assertEqual(timeline[-1], ("end", "answer"), "one block, closed after the continuation")
+        assistants = [m for m in agent.messages if m.get("role") == "assistant"]
+        self.assertEqual([m["content"] for m in assistants], ["The first half and the rest."])
+        self.assertFalse(any("Continue exactly where you left off" in str(m.get("content"))
+                             for m in agent.messages), "the stitched reply needs no synthetic prompt")
+        self.assertEqual(_last_assistant_text(agent), "The first half and the rest.")
+
     def test_a_mid_stream_stall_that_repeats_fails_precisely(self):
         self.server.behaviours["/chat/completions"] = partial_then_silent(("partial ",))
         agent, ui = self.agent()
@@ -1274,3 +1295,40 @@ class ServeEmitsTheWaitingNotice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EtaDuringStallTests(unittest.TestCase):
+    """The editor's time-left estimate is withdrawn while the model is not answering."""
+
+    def test_the_estimate_is_cleared_while_a_stall_notice_is_up_and_returns_after(self):
+        # Before: the ticker kept publishing the prior-based range, so the activity row read
+        # "No response from the model … no reply for 45s+ (3s · 48s · ~5–30 s left · ↓ 0 tok)".
+        from dgc.headless import Backend, HeadlessUI, PendingRequests
+        events = []
+        emitter = SimpleNamespace(emit=lambda t, **d: events.append({"type": t, **d}))
+        ui = HeadlessUI(emitter, PendingRequests(), 300.0)
+        ui.turn_id = "t1"
+        backend = object.__new__(Backend)
+        backend.em, backend.ui = emitter, ui
+        snapshot = SimpleNamespace(visible=True, label="~5–30 s left", elapsed=21.0, low=5.0, high=30.0,
+                                   confidence=0.25, tasks_done=0, tasks_total=0)
+        backend.agent = SimpleNamespace(eta_snapshot=lambda: snapshot)
+        labels = lambda: [e["label"] for e in events if e["type"] == "turn_eta"]
+        stop = backend._start_eta_ticker("t1")
+        self.addCleanup(stop.set)
+        deadline = time.monotonic() + 5
+        while not labels() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(labels(), ["~5–30 s left"])
+        ui.model_wait("No response from the model", "fixture at 127.0.0.1:4911 · no reply for 45s+")
+        deadline = time.monotonic() + 5
+        while len(labels()) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(1.7)                                  # another tick while still stalled
+        self.assertEqual(labels(), ["~5–30 s left", ""], "cleared once, and nothing new while stalled")
+        ui.model_wait(None)
+        snapshot.label = "~5–25 s left"
+        deadline = time.monotonic() + 5
+        while len(labels()) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(labels()[-1], "~5–25 s left", "the estimate comes back once the model answers")

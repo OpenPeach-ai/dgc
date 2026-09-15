@@ -84,3 +84,53 @@ test("typing still grows the box up to its 160px cap", async (t) => {
   assert.equal(await height(), 160);
   await page.evaluate(() => { const box = document.getElementById("input"); box.select(); document.execCommand("delete"); });
 });
+
+// On a HiDPI screen a line of 14px/1.45 text is 20.3px tall, but scrollHeight is a whole number, so
+// a box sized to it was 0.3px short and drew a scrollbar with arrow buttons beside a single line. Only
+// a browser really rendering at scale 2 lays out in device pixels (an emulated scale factor does not
+// show the overflow), so this one starts its own Chromium with --force-device-scale-factor=2.
+test("the one-line prompt box shows no scrollbar at device scale 2", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  const hidpiBrowser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-device-scale-factor=2"],
+    ignoreDefaultArgs: ["--hide-scrollbars"] });   // headless hides scrollbars unless told otherwise
+  try {
+    const hidpi = await hidpiBrowser.newPage({ viewport: { width: WIDTH, height: 800 } });
+    const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
+    const css = readFileSync(here + "/../media/main.css", "utf8");
+    const mainJs = readFileSync(here + "/../media/main.js", "utf8");
+    const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0])
+      .find(c => c.includes('id="input"')).replace(/\$\{[^}]*\}/g, "");
+    await hidpi.setContent(skeleton.replace("</head>", `<style>${css}</style></head>`), { waitUntil: "load" });
+    await hidpi.evaluate((mjs) => {
+      window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+      window.DgcMarkdown = { render: (s) => String(s), linkTarget: () => null };
+      eval(mjs);
+      window.postMessage({ type: "session_ready", sessionId: "s1" }, "*");
+    }, mainJs);
+    await hidpi.waitForTimeout(200);
+    const measure = () => hidpi.evaluate(() => {
+      const box = document.getElementById("input");
+      return { scrollbar: box.offsetWidth - box.clientWidth, height: box.getBoundingClientRect().height };
+    });
+    const shot = async (name) => {
+      if (!process.env.DGC_SHOT_DIR) return;
+      const clip = await hidpi.evaluate(() => { const r = document.getElementById("cbox").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+      await hidpi.screenshot({ path: `${process.env.DGC_SHOT_DIR}/${name}.png`, clip });
+    };
+    const empty = await measure();
+    await shot("hidpi-composer-empty");
+    await hidpi.click("#input");
+    await hidpi.keyboard.type("hello");
+    await hidpi.waitForTimeout(250);
+    const typed = await measure();
+    await shot("hidpi-composer-typed");
+    assert.equal(empty.scrollbar, 0, `no scrollbar in the empty box (${JSON.stringify(empty)})`);
+    assert.equal(typed.scrollbar, 0, `no scrollbar beside one typed line (${JSON.stringify(typed)})`);
+    assert.ok(typed.height < 40, "still one line tall");
+    for (let i = 0; i < 14; i += 1) { await hidpi.keyboard.press("Shift+Enter"); await hidpi.keyboard.type(`row ${i}`); }
+    await hidpi.waitForTimeout(250);
+    const tall = await measure();
+    assert.equal(tall.height, 160, "the cap still holds");
+    assert.ok(tall.scrollbar > 0, "and past it the box scrolls with a scrollbar");
+  } finally { await hidpiBrowser.close(); }
+});

@@ -419,6 +419,14 @@ class LedgerRecordingTests(_LedgerCase):
         self.assertFalse(blind.goal_snapshot()["usage_known"])
         self.assertIn("did not report usage", blind.goal_snapshot()["reason"])
 
+    def test_a_native_ollama_transport_is_recorded_as_ollama_whatever_its_url(self):
+        agent = self.agent(base_url="http://127.0.0.1:4943", api_mode="ollama")
+        self.assertEqual(agent.client.family, "compat", "the URL alone cannot say Ollama")
+        from dgc.llm import ChatResult
+        agent._ledger_usage(agent.client, ChatResult(content="x", usage={"prompt_tokens": 3,
+                                                                          "completion_tokens": 1}))
+        self.assertEqual([row[:2] for row in self.rows()], [("ollama", "127.0.0.1:4943")])
+
     def test_every_finished_request_is_one_row_with_host_only(self):
         agent = self.agent(base_url=f"http://user:secret@127.0.0.1:{self.port}/v1?token=abc")
         agent.client.chat([{"role": "user", "content": "hi"}])
@@ -679,6 +687,36 @@ class LedgerAggregationTests(_LedgerCase):
                              env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(bad.returncode, 2)
         self.assertIn("range must be one of", bad.stderr)
+
+    def test_the_shell_command_hints_its_own_flag_and_the_totals_table_has_a_header(self):
+        empty = usage_ledger.empty_report("7d")
+        shell = usage_ledger.format_report(empty, shell=True)
+        self.assertIn("`dgc usage --range all`", shell)
+        self.assertIn("`dgc usage --range today|7d|30d|month|all`", shell)
+        self.assertNotIn("/usage", shell, "a shell cannot run a slash command")
+        self.assertIn("`/usage all`", usage_ledger.format_report(empty), "the TUI keeps its own")
+        env = dict(os.environ, PYTHONPATH=str(PROJECT), HOME=str(self.home),
+                   PYTHONDONTWRITEBYTECODE="1", COLUMNS="200")
+        done = subprocess.run([sys.executable, "-m", "dgc", "usage"], env=env, capture_output=True,
+                              text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("dgc usage --range all", done.stdout)
+        self.assertNotIn("/usage", done.stdout)
+        now = time.time()
+        usage_ledger.record(provider="ollama", base_url="http://localhost:11434", model="m",
+                            input_tokens=7, output_tokens=1, now=now)
+        text = usage_ledger.format_report(usage_ledger.report("today", now=now))
+        self.assertNotIn("| | |", text, "no empty header row above the totals")
+        self.assertIn("| Total | Count |", text)
+        self.assertNotIn("day(s)", text)
+
+    def test_the_privacy_note_says_to_quit_dgc_before_deleting_the_ledger(self):
+        # A running DGC keeps its connection to the deleted file and goes on counting into it.
+        from dgc import docs
+        page = next(body for title, _summary, body in docs.DOCS if title == "Token usage")
+        self.assertNotIn("Delete the file at any\ntime to start over", page)
+        self.assertIn("quit\nDGC and your editor first", page)
+        self.assertIn("usage.sqlite-wal", page)
 
     def test_tui_usage_opens_the_same_report(self):
         from dgc.tui import TUI

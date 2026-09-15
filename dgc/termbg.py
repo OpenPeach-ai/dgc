@@ -205,6 +205,13 @@ def resend(signum, previous: dict) -> None:
     prior = previous.get(signum, _signal.SIG_DFL)
     restore_stop_handlers(previous)          # our other handler must not swallow the re-raise
     try:
+        # Dying of the signal runs no atexit handler, so the "this process runs version X" lock
+        # would outlive the process and hold a republished build in place.
+        from .install_layout import release_runtime_lock
+        release_runtime_lock()
+    except Exception:
+        pass
+    try:
         os.kill(os.getpid(), signum)
     except (OSError, ValueError):
         pass

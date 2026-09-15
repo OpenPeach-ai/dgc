@@ -99,6 +99,36 @@ class TurnOutcomeTests(unittest.TestCase):
         self.assertEqual(terminal[0]["reason"], "error")
         self.assertIsNone(backend._worker)
 
+    def run_one_queued_turn(self, during_turn):
+        backend = object.__new__(Backend)
+        backend.agent, backend.config, backend.ui = self.agent, self.agent.config, self.agent.ui
+        backend._queue, backend._turn_n = [("Run the long command", None, [])], 0
+        backend._worker = threading.current_thread()
+        backend._emit_context = lambda: None
+        captured = []
+        backend.em = types.SimpleNamespace(emit=lambda event_type, **fields:
+                                           captured.append({"type": event_type, **fields}))
+
+        def turn(*args, **kwargs):
+            during_turn()
+            return False
+        with patch.object(self.agent, "run_turn", side_effect=turn):
+            backend._run_turn_queue()
+        return [event["reason"] for event in captured if event["type"] == "turn_end"]
+
+    def test_a_turn_cut_off_by_the_backend_stopping_ends_as_an_error_not_a_stop(self):
+        # Before: close() waits out the grace period and then cancels the turn, which ended it
+        # "cancelled" -- the reason a person pressing Stop gets. The editor forgets an interrupted
+        # turn that ended "cancelled", so a SIGTERM mid-turn was never offered a Continue.
+        def shutdown():
+            self.agent.stopping = True              # what close() sets first
+            self.agent.cancelled.set()              # and what it does once the grace runs out
+        self.assertEqual(self.run_one_queued_turn(shutdown), ["error"])
+
+    def test_a_person_pressing_stop_still_ends_the_turn_cancelled(self):
+        self.agent.stopping = False
+        self.assertEqual(self.run_one_queued_turn(self.agent.cancelled.set), ["cancelled"])
+
     def test_user_stop_and_provider_cancelled_response_are_not_success(self):
         for user_stop in (False, True):
             with self.subTest(user_stop=user_stop):

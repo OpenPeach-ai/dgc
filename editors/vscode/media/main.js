@@ -60,6 +60,7 @@
     $("modeicon").className = "codicon codicon-" + MODES[m].icon; $("modelabel").textContent = m;
     $("btn-mode").title = MODES[m].desc + " — Shift+Tab to cycle";
     $("btn-mode").setAttribute("aria-label", `Permission mode: ${m}. ${MODES[m].desc}`);
+    paintMonitorsRow();                  // plan mode holds monitor events for the next message
   }
   // The extension host owns the auto-mode confirmation. Update only when the backend
   // echoes mode_changed/state so cancelling the modal cannot leave a false "auto" badge.
@@ -308,6 +309,9 @@
   const tasksExpanded = new Set();
   // `backendDown`: the backend exited and the extension is not bringing it back on its own.
   let todoClear = null, backendLive = false, backendDown = false;
+  // The exit line of a backend that is being brought back, kept until the reconnect has replayed
+  // the chat it belongs to (see the "session" event).
+  let backendExitNotice = null;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
   function cleanDraft(value) {
@@ -328,6 +332,9 @@
           item.img = true; item.data = source.data; item.bytes = Math.max(0, Number(source.bytes) || 0);
         } else if (source.resource && typeof source.resource === "object") {
           item.resource = JSON.parse(JSON.stringify(source.resource));
+        } else if (typeof source.pasted === "string" && source.pasted.length <= 1_000_000) {
+          // A long paste folded into a chip is part of the draft; dropping it lost the whole draft.
+          item.pasted = source.pasted; item.chars = source.pasted.length;
         } else return null;
         items.push(item);
       }
@@ -398,6 +405,16 @@
     if (source) for (const image of pendingImages) if (image.session === source) image.session = session;
     const draft = cleanDraft(draftEntries.get(session)) || { text: "", attachments: [], start: 0, end: 0 };
     restoringDraft = true;
+    // Another chat gets its own undo history. Assigning a new value does not reliably drop the old
+    // chat's steps: going from an empty composer to an empty chat changed nothing, and Ctrl+Z then
+    // brought back the prompt sent in the chat that was left. Chromium does drop every undo step of
+    // an element that leaves the document, so take the box out and put the same node straight back.
+    if (session !== prior && input.parentNode) {
+      const focused = document.activeElement === input, parent = input.parentNode, next = input.nextSibling;
+      input.remove(); parent.insertBefore(input, next);
+      if (focused) input.focus({ preventScroll: true });
+      shownPastes.length = 0;
+    }
     input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
     input.selectionStart = draft.start; input.selectionEnd = draft.end;
     renderAtts(); autosizeComposer();
@@ -456,6 +473,9 @@
     if (!pending) return;
     pendingPrompts.delete(id); queuedPrompts.delete(id);
     pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
+    // A bubble that still said "you" or "you · queued" read as a message that went through.
+    const role = pending.node.querySelector(".role");
+    if (role && role.textContent.startsWith("you")) role.textContent = confirmed ? "you · not sent" : "you · delivery unconfirmed";
     const restore = () => {
       if (pending.session && pending.session !== draftSession) {
         sysLine("Reopen this message's original chat to restore its draft."); return;
@@ -792,6 +812,7 @@
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
+    let wakeNote = null;
     // A resumed goal is not something the user just typed. Show it as what it is instead of
     // echoing the objective back into the chat as a fresh prompt. The same holds for a turn the
     // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
@@ -808,6 +829,7 @@
       note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
         + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
+      wakeNote = note;
     } else if (!promptNode) {
       echoPrompt(prompt);
     }
@@ -836,6 +858,7 @@
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
+    if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set() };
     if (!replaying) {
       turn.timer = setInterval(renderTurnMeta, 200);
       renderTurnMeta();
@@ -845,6 +868,17 @@
       // the "New" pill, like every other event.
       if (following || (kind === "prompt" && !promptNode)) scroll(); else noteNewContent();
     }
+  }
+  // The marker above a wake turn names what woke it. It is drawn from turn_start, which carries
+  // only the label, so it said "Woke on monitor" even when the only thing that woke the turn was a
+  // background command exiting, right above a card titled "Background command". The wake's own
+  // events arrive next and say which it was.
+  function paintWakeNote(wake, ev) {
+    wake.kinds.push(String(ev.kind || "output")); wake.ids.add(String(ev.id || ""));
+    const background = wake.kinds.every((k) => k === "background_exit");
+    const icon = wake.note.querySelector(".codicon"), text = wake.note.querySelector(".codicon + span");
+    if (icon) icon.className = `codicon codicon-${background ? "terminal" : "pulse"}`;
+    if (text) text.textContent = `Woke on ${background ? (wake.ids.size > 1 ? "background commands" : "background command") : "monitor"} · ${wake.label}`;
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
   // panel's own open request card, the handoff this panel asked for, or the backend's
@@ -1330,6 +1364,17 @@
   function appendText(value) {
     turn._buf = (turn._buf || "") + value;
     const node = textBlock(); node._markdown = turn._buf;
+    // A block the backend left open across a stall or length continuation keeps growing after the
+    // "↻ … continuing from the partial output" line (and any reasoning of the continuation) was
+    // placed under it. Left there, that line ended up below the whole merged answer card, reading
+    // as if the continuation came after the answer. It is part of the work that led to the answer,
+    // so it moves above the block the moment the continuation's text arrives.
+    let after = node.nextElementSibling;
+    const passed = [];
+    while (after && after !== turn.act && after.matches(".sys, .disclosure, .reasoning")) {
+      passed.push(after); after = after.nextElementSibling;
+    }
+    if (passed.length && after === turn.act) for (const moved of passed) node.before(moved);
     // Replay renders inline: a batch timer would hand the fragment back to the pager half empty.
     if (replaying || !turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
@@ -1538,19 +1583,30 @@
 
   function openLightbox(src, caption) {
     document.getElementById("lightbox")?.remove();
+    // A modal dialog has to behave like one for a keyboard: it takes focus (a div needs a tabindex
+    // for that), Tab cannot leave it for the buttons hidden under the overlay, and closing it puts
+    // focus back where it was.
+    const opener = document.activeElement;
     const box = el("div"); box.id = "lightbox";
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.setAttribute("aria-label", caption || "Screenshot");
+    box.tabIndex = -1;
     const img = el("img"); img.src = src; img.alt = caption || "Screenshot";
     box.appendChild(img);
     if (caption) { const cap = el("div", "lb-cap"); cap.textContent = caption; box.appendChild(cap); }
-    const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
-    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    const close = () => {
+      box.remove(); document.removeEventListener("keydown", onKey, true);
+      if (opener && opener !== document.body && opener.isConnected && typeof opener.focus === "function") opener.focus();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === "Tab") { e.preventDefault(); box.focus(); }   // nothing else to reach while it is open
+    };
     box.addEventListener("click", close);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     document.body.appendChild(box);
-    box.focus?.();
+    box.focus();
   }
 
   function shotStrip(images, caption) {
@@ -1729,14 +1785,17 @@
     card.dataset.monitorId = String(ev.id || "");
     card.dataset.kind = String(ev.kind || "output");
     card.setAttribute("role", "group");
-    const ended = ev.kind === "ended" || ev.kind === "background_exit";
+    const background = ev.kind === "background_exit";
+    const ended = ev.kind === "ended" || background;
     const lines = (Array.isArray(ev.lines) ? ev.lines : []).map((line) => String(line)).slice(0, 40);
     const head = el("div", "monitor-event-head");
-    head.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
-      + `<span class="me-title">Monitor · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
-      + `<span class="me-meta">${ended ? esc(ev.kind === "background_exit" ? "exited" : "ended")
-        : `event ${Math.max(0, Number(ev.event_index) || 0)}`}</span>`;
-    card.setAttribute("aria-label", `Monitor ${String(ev.description || ev.id || "")}, ${ended ? "ended" : `event ${Number(ev.event_index) || 0}`}`);
+    // A command run with `bash` in background mode is not a monitor; its card says what it is.
+    const kind = background ? "Background command" : "Monitor";
+    const state = background ? "exited" : ended ? "ended" : `event ${Math.max(0, Number(ev.event_index) || 0)}`;
+    head.innerHTML = `<span class="codicon codicon-${background ? "terminal" : "pulse"}" aria-hidden="true"></span>`
+      + `<span class="me-title">${kind} · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
+      + `<span class="me-meta">${esc(state)}</span>`;
+    card.setAttribute("aria-label", `${kind} ${String(ev.description || ev.id || "")}, ${state}`);
     card.appendChild(head);
     const body = ended ? lines.slice(1) : lines;
     if (ended && lines[0]) {
@@ -1761,7 +1820,7 @@
   // began. A new chat, clear or resume empties it, so the end of a monitor from the chat that was
   // left (it can reach the webview after the new chat's acknowledgement) is not shown in this one.
   const eventCount = (value) => { const n = Math.max(0, Number(value) || 0); return `${n} event${n === 1 ? "" : "s"}`; };
-  let monitorItems = [], monitorsPaused = false;
+  let monitorItems = [], monitorsPaused = false, monitorsPending = 0;
   const knownMonitorIds = new Set();
   function renderMonitors(ev) {
     monitorItems = (Array.isArray(ev?.items) ? ev.items : [])
@@ -1769,8 +1828,18 @@
     if (ev?.reset) knownMonitorIds.clear();
     monitorItems.forEach((item) => knownMonitorIds.add(item.id));
     monitorsPaused = ev?.wake_paused === true;
+    monitorsPending = Math.max(0, Number(ev?.pending_events) || 0);
+    paintMonitorsRow();
+    if (String(ev?.request_id || "").startsWith("monitors-list")) renderMonitorsList();
+  }
+  // The row above the prompt: a chip per running monitor, and, whenever events are held back for
+  // the person rather than about to wake DGC (wake-ups paused, Wake on monitor events off, plan
+  // mode), how many are waiting for their next message. Repainted when the config or mode changes.
+  function paintMonitorsRow() {
     const live = monitorItems.filter((item) => item.state === "running" || item.state === "stopping");
-    const pending = Math.max(0, Number(ev?.pending_events) || 0);
+    const pending = monitorsPending;
+    const wakeOff = lastConfig?.monitor_wake === false;
+    const held = monitorsPaused || wakeOff || curMode === "plan";
     const chips = $("monitor-chips");
     chips.innerHTML = "";
     live.forEach((item) => {
@@ -1792,35 +1861,44 @@
       chip.appendChild(stop);
       chips.appendChild(chip);
     });
-    const summary = live.length
+    const waiting = held && pending ? `${eventCount(pending)} waiting for your next message` : "";
+    const summary = waiting || (live.length
       ? `${live.length} monitor${live.length === 1 ? "" : "s"}`
-      : `${pending} event${pending === 1 ? "" : "s"} waiting`;
-    // With chips on the row they are the count; the words only fill a row that has none.
-    $("monitors-count").textContent = summary;
-    $("monitors-count").hidden = live.length > 0;
-    monitorsBar.setAttribute("aria-label", `Background monitors: ${summary}${monitorsPaused ? ", wake-ups paused" : ""}`);
-    $("monitors-paused").hidden = !monitorsPaused;
-    monitorsBar.dataset.paused = String(monitorsPaused);
-    monitorsBar.hidden = !live.length && !(monitorsPaused && pending);
+      : `${eventCount(pending)} waiting`);
+    // With chips on the row they are the count; the words fill a row that has none. Events held for
+    // you are counted even beside the chips, in two words there so the chips keep their room.
+    $("monitors-count").textContent = live.length && waiting ? `${pending} waiting` : summary;
+    $("monitors-count").title = waiting;
+    $("monitors-count").hidden = live.length > 0 && !waiting;
+    const pausedLabel = monitorsPaused ? "paused" : wakeOff ? "wake off" : "";
+    monitorsBar.setAttribute("aria-label", `Background monitors: ${summary}`
+      + (monitorsPaused ? ", wake-ups paused" : wakeOff ? ", wake-ups off" : ""));
+    $("monitors-paused").hidden = !pausedLabel;
+    $("monitors-paused").textContent = pausedLabel || "paused";
+    $("monitors-paused").title = wakeOff && !monitorsPaused
+      ? "Wake on monitor events is off: new events wait for your next message"
+      : "Wake-ups are paused: new events wait for your next message";
+    monitorsBar.dataset.paused = String(Boolean(pausedLabel));
+    monitorsBar.hidden = !live.length && !(held && pending);
     syncComposerRail();
-    if (String(ev?.request_id || "").startsWith("monitors-list")) {
-      if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
-      const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
-      const list = c.querySelector(".monitor-list");
-      monitorItems.forEach((item) => {
-        const row = el("div", "abtns monitor-list-row");
-        const text = el("span", "monitor-list-text");
-        text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
-          + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${eventCount(item.events)}`;
-        row.appendChild(text);
-        if (item.state === "running") {
-          const stop = el("button", "abtn", "Stop"); stop.type = "button";
-          stop.onclick = () => { stop.disabled = true; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
-          row.appendChild(stop);
-        }
-        list.appendChild(row);
-      });
-    }
+  }
+  function renderMonitorsList() {
+    if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
+    const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
+    const list = c.querySelector(".monitor-list");
+    monitorItems.forEach((item) => {
+      const row = el("div", "abtns monitor-list-row");
+      const text = el("span", "monitor-list-text");
+      text.textContent = `${item.id} · ${String(item.description || "")} · ${item.state}`
+        + `${item.end_reason ? ` (${item.end_reason})` : ""} · ${eventCount(item.events)}`;
+      row.appendChild(text);
+      if (item.state === "running") {
+        const stop = el("button", "abtn", "Stop"); stop.type = "button";
+        stop.onclick = () => { stop.disabled = true; vscode.postMessage({ type: "stopMonitor", id: item.id }); };
+        row.appendChild(stop);
+      }
+      list.appendChild(row);
+    });
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
@@ -2338,6 +2416,12 @@
       case "session":
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; queuedPrompts.clear(); renderQueued(); setSending(false);
+          // The reconnect after a backend exit resumes this chat, and resuming clears the transcript
+          // for the replay. The line saying why the backend stopped is not in the saved history, so
+          // it would go too and leave the turn reading only "Stopped" or "Failed". Put it back.
+          const notice = backendExitNotice;
+          backendExitNotice = null;
+          if (notice && ev.kind === "resumed" && ev.session_id === notice.session) sysLine(notice.text, true);
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
@@ -2358,6 +2442,7 @@
         lastConfig = ev;
         nativeSteering = liveSteering && !ev.subscription_engine;
         renderComposerControls();
+        paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"
         curUltra = ev.ultra_mode === true;
         curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
         updateModelControl();
@@ -2682,6 +2767,7 @@
       case "monitor_event": {
         ensureTurn();
         appendTurnContent(monitorEventCard(ev)); breakText();
+        if (ev.delivery === "wake" && turn.wake) paintWakeNote(turn.wake, ev);
         break;
       }
       case "monitor_started":
@@ -2861,8 +2947,14 @@
   function renderComposerControls() {
     const hasDraft = hasComposerInput(), stop = streaming && !hasDraft;
     const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
-    send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
-    send.title = label; send.setAttribute("aria-label", label);
+    // This runs on every keystroke. Replacing a node's children while typing closes Chromium's open
+    // typing step, which made each Ctrl+Z take back one character, so write only what changed.
+    const icon = stop ? "debug-stop" : "arrow-up";
+    if (send._icon !== icon) {
+      send.innerHTML = `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
+      send._icon = icon;
+    }
+    if (send.getAttribute("aria-label") !== label) { send.title = label; send.setAttribute("aria-label", label); }
     // Filled (DGC purple) only when the button will actually do something: text to send, or a
     // run to stop. Empty composer leaves it a quiet surface, so the accent stays meaningful.
     send.classList.toggle("ready", hasDraft || streaming);
@@ -2870,7 +2962,8 @@
     $("queue-send").disabled = !hasDraft;
     $("stop-run").hidden = !streaming || !hasDraft;
     $("followup-hint").hidden = !streaming;
-    $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+    const hint = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+    if ($("followup-hint").textContent !== hint) $("followup-hint").textContent = hint;
   }
   function settleCustomCommand() {
     if (!customCommandPending) return;
@@ -2893,7 +2986,9 @@
       button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
     });
   }
-  function doStop() { queuedCount = 0; queuedPrompts.clear(); renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  // The messages queued behind the run stay in the restore set: the backend answers a cancel by
+  // handing each one back ("returned"), and that is what marks them not sent and restorable.
+  function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
@@ -3015,7 +3110,9 @@
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
-    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
+    // What a restore puts back: the typed words and the chips. The pastes are already chips, so
+    // restoring `text` (which has them appended) as well would put every paste back twice.
+    pendingPrompts.set(requestId, { text: pastes.length ? typed : text, attachments: [...attachments], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
       delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
@@ -3039,8 +3136,13 @@
         show.title = "Put this text back into the composer";
         show.onclick = () => {
           const at = input.selectionStart ?? input.value.length;
+          const before = input.value;
           editComposer(at, at, a.pasted);
           input.selectionStart = input.selectionEnd = at + a.pasted.length;
+          // The insert is in the textarea's undo history; the chip leaving is not. Remember both
+          // sides so Ctrl+Z folds the text back into its chip instead of deleting the paste.
+          shownPastes.push({ before, after: input.value, item: a, index: i });
+          if (shownPastes.length > 8) shownPastes.shift();
           attachments.splice(i, 1);
           renderAtts();
           input.focus();
@@ -3093,8 +3195,9 @@
       replacePopToken();
     } else if (popMode === "/") {
       if (it.action?.startsWith("workflow:")) {
-        replacePopToken();
-        prepareWorkflowDraft(it.action.slice("workflow:".length));
+        // One edit, so one Ctrl+Z returns to what was typed: removing the token and adding the
+        // prefix as two edits left a blank box between them in the undo history.
+        prepareWorkflowDraft(it.action.slice("workflow:".length), popStart, popEnd);
         hidePop(); input.focus(); return;
       }
       if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
@@ -3118,13 +3221,24 @@
     }
     hidePop(); input.focus();
   }
-  function prepareWorkflowDraft(name) {
+  // `tokenStart`/`tokenEnd`: the slash-menu token this replaces, removed in the same edit.
+  function prepareWorkflowDraft(name, tokenStart = 0, tokenEnd = tokenStart) {
     if (!["plan", "review", "init"].includes(name)) return;
     const prefix = `/${name} `;
-    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(input.value);
+    const value = input.value;
+    const token = tokenEnd > tokenStart;
+    const without = token ? value.slice(0, tokenStart) + value.slice(tokenEnd) : value;
+    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(without);
     const removed = current ? current[0].length : 0;
-    const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
-    editComposer(0, removed, prefix);
+    const caret = Math.max(0, (token ? tokenStart : input.selectionStart) - removed) + prefix.length;
+    const next = prefix + without.slice(removed);
+    // The smallest single replacement that turns the box into `next`.
+    let head = 0;
+    while (head < value.length && head < next.length && value[head] === next[head]) head++;
+    let tail = 0;
+    while (tail < value.length - head && tail < next.length - head
+      && value[value.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+    editComposer(head, value.length - tail, next.slice(head, next.length - tail));
     input.selectionStart = input.selectionEnd = caret;
     autosizeComposer();
     persistDraft(); input.focus();
@@ -3142,7 +3256,12 @@
     if (!input.isConnected || width < 40 || document.hidden) { composerSizedWidth = -1; return; }
     composerSizedWidth = width;
     input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    // scrollHeight is a whole number of pixels, and a 14px/1.45 line is 20.3px: a box sized to it
+    // was a fraction short, which on a HiDPI screen drew a scrollbar beside a single line. Leave a
+    // pixel over, and scroll only once the text really is taller than the cap.
+    const content = input.scrollHeight, capped = content >= 160;
+    input.style.overflowY = capped ? "auto" : "hidden";
+    input.style.height = (capped ? 160 : content + 1) + "px";
   }
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => { if (input.clientWidth !== composerSizedWidth) autosizeComposer(); })
@@ -3152,11 +3271,13 @@
   window.addEventListener("focus", autosizeComposer);
 
   // ---- composer edits that Cmd/Ctrl+Z can take back ----
-  // A textarea keeps its own undo history, which is what makes Cmd+Z (and Edit → Undo) work in
-  // Claude's and Codex's composers. Assigning .value wipes that history, so undo did nothing here
-  // after a send, a completion or an inserted command. Edits made through the browser's own editing
-  // command stay in the history instead: undo after sending brings the prompt back. Where that
-  // command is unavailable (a test DOM), the edit still happens, just without history.
+  // A textarea keeps its own undo history, which is what makes Cmd+Z and Ctrl+Z work in Claude's
+  // and Codex's composers. (VS Code's Edit → Undo menu item does not reach it: the workbench sends
+  // that command to the active editor, and opening the menu takes focus out of this view.)
+  // Assigning .value wipes that history, so undo did nothing here after a send, a completion or an
+  // inserted command. Edits made through the browser's own editing command stay in the history
+  // instead: undo after sending brings the prompt back. Where that command is unavailable (a test
+  // DOM), the edit still happens, just without history.
   let composerEditing = false;
   function editComposer(start, end, text) {
     start = Math.max(0, Math.min(start, input.value.length));
@@ -3181,6 +3302,24 @@
   function setComposerText(text) { editComposer(0, input.value.length, String(text ?? "")); }
   function clearComposer() { setComposerText(""); autosizeComposer(); }
 
+  // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
+  // either side of that edit, put the chip back or take it away again to match.
+  const shownPastes = [];
+  function syncShownPaste(event) {
+    if (!shownPastes.length || (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")) return;
+    for (const entry of [...shownPastes].reverse()) {
+      const attached = attachments.includes(entry.item);
+      if (event.inputType === "historyUndo" && !attached && input.value === entry.before) {
+        attachments.splice(Math.min(entry.index, attachments.length), 0, entry.item);
+        renderAtts(); return;
+      }
+      if (event.inputType === "historyRedo" && attached && input.value === entry.after) {
+        attachments.splice(attachments.indexOf(entry.item), 1);
+        renderAtts(); return;
+      }
+    }
+  }
+  input.addEventListener("input", syncShownPaste);
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     scheduleDraftSave();
@@ -3768,7 +3907,7 @@
     usageEdges(settingsNav);
     usageEdges(document.querySelector(".usage-table-wrap"));
   });
-  function openSettings(providers, models, section) {
+  function openSettings(providers, models, section, range) {
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
@@ -3779,6 +3918,8 @@
     }
     $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
     if (lastConfig) fillSettings(lastConfig);
+    // `/usage 30d` opens the tab on the range it named; anything else keeps the last choice.
+    if (USAGE_RANGES.includes(range)) $("usage-range").value = range;
     settingsReturnFocus = document.activeElement;
     $("settings").hidden = false;
     showSettingsSection(section || "general");
@@ -4050,6 +4191,7 @@
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "session_ready") {
+      backendExitNotice = null;          // the reconnect has finished; the line is in the transcript
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       backendLive = true; backendDown = false; armTodoClearTimer();
       renderUnconfirmedDrafts();
@@ -4068,7 +4210,7 @@
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
-    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
+    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section, msg.range); }
     else if (msg.type === "usage_unavailable") { usageUnavailable(msg); }
     else if (msg.type === "mcp_command_started") {
       mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");
@@ -4189,10 +4331,17 @@
         : msg.resumes === "held" ? "reconnecting; the goal will not resume by itself after repeated backend exits"
         : msg.resumes === "none" ? "reconnecting"
         : "reconnecting and picking the work back up";
-      const cause = typeof msg.cause === "string" && msg.cause ? ": " + msg.cause.slice(0, 300) : "";
-      sysLine(msg.recovering
-        ? "dgc backend stopped" + why + cause + "\u2009\u2014\u2009" + next
-        : "dgc backend exited" + why + cause, true);
+      const cause = typeof msg.cause === "string" ? msg.cause.slice(0, 300) : "";
+      // When the backend said nothing, the extension's cause is the exit status itself ("killed by
+      // SIGKILL", "exited with code 1"): say it once instead of "(killed by SIGKILL): killed by SIGKILL".
+      const status = why.slice(2, -1);
+      const restated = [status, `exited with ${status}`, "killed by an unreported signal"].includes(cause);
+      const detail = !cause ? why : restated ? ` (${cause})` : why + ": " + cause;
+      const exitLine = msg.recovering
+        ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
+        : "dgc backend exited" + detail;
+      sysLine(exitLine, true);
+      backendExitNotice = msg.recovering ? { text: exitLine, session: draftSession } : null;
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
   });

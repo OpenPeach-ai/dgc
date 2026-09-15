@@ -320,3 +320,83 @@ def expand_attachments(prompt: str, project_root: Path | str, *, sanitizer=None,
         expanded = original
     return AttachmentExpansion(
         expanded, tuple(images), tuple(notices), text_files, image_files)
+
+
+def editor_image_mentions(context, project_root: Path | str, images=(), *,
+                          maximum_files: int = MAX_IMAGE_FILES,
+                          maximum_total_bytes: int = MAX_EDITOR_IMAGE_TOTAL_BYTES) -> AttachmentExpansion:
+    """The pixels of the image files an editor attached as ``file_mention`` resources.
+
+    An @-mention, a drag from the explorer and Add File to Chat all send a typed path. That is all a
+    text file needs, because the model can read it; a model cannot see an image through its path,
+    so, like the terminal's ``@file.png``, the image itself is attached. The editor's own bounds
+    apply (the count and the total bytes, images already on the prompt included), a symlinked or
+    non-regular path is refused the same way, and every image that is not attached says why.
+    """
+    if not isinstance(context, list):
+        return AttachmentExpansion("")
+    count = len(images or ())
+    total = 0
+    for value in images or ():
+        match = _DATA_IMAGE_RE.fullmatch(value) if isinstance(value, str) else None
+        if match is not None:
+            total += len(match.group(2)) * 3 // 4 - match.group(2).count("=")
+    found: list[str] = []
+    notices: list[str] = []
+    seen: set[str] = set()
+    limit_mib = maximum_total_bytes // 1_048_576
+    for item in context[:64]:
+        if not isinstance(item, dict) or item.get("type") != "file_mention":
+            continue
+        raw_path = item.get("path")
+        if not isinstance(raw_path, str):
+            continue
+        mime = _IMAGE_TYPES.get(Path(raw_path).suffix.lower())
+        if not mime:
+            continue
+        shown = item.get("relative_path") if isinstance(item.get("relative_path"), str) else raw_path
+        label = _display_label(shown, None)
+        try:
+            path = _explicit_path(raw_path, project_root)
+        except (OSError, ValueError):
+            notices.append(f"attachment skipped ({label}): invalid path")
+            continue
+        key = os.path.normcase(os.path.normpath(str(path)))
+        if key in seen:
+            continue
+        seen.add(key)
+        if count >= maximum_files:
+            notices.append(f"attachment skipped ({label}): image count limit reached")
+            continue
+        remaining = maximum_total_bytes - total
+        try:
+            if remaining <= 0:
+                raise OSError("exceeds")
+            captured = read_regular_bytes(path, maximum=remaining)
+            assert captured is not None
+            raw = captured[0]
+        except FileNotFoundError:
+            notices.append(f"attachment skipped ({label}): file not found")
+            continue
+        except PermissionError:
+            notices.append(f"attachment skipped ({label}): file is not readable")
+            continue
+        except WorkspaceBoundaryError:
+            notices.append(f"attachment skipped ({label}): linked or non-regular paths are not allowed")
+            continue
+        except OSError as exc:
+            if "exceed" in str(exc).lower() or "beyond" in str(exc).lower():
+                notices.append(f"attachment skipped ({label}): the editor's images are limited to "
+                               f"{limit_mib} MiB in total")
+            else:
+                notices.append(f"attachment skipped ({label}): linked, non-regular, or changed path")
+            continue
+        if not _image_matches(raw, mime):
+            notices.append(f"attachment skipped ({label}): extension does not match image data")
+            continue
+        found.append(f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
+        total += len(raw)
+        count += 1
+    if found:
+        notices.insert(0, f"attached {len(found)} image" + ("s" if len(found) != 1 else ""))
+    return AttachmentExpansion("", tuple(found), tuple(notices), 0, len(found))

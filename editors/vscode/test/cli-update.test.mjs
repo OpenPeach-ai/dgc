@@ -1,6 +1,7 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,8 +14,20 @@ const scratch = realpathSync(mkdtempSync(join(tmpdir(), "dgc-cli-update-")));
 // The setting lookups go through workspace.getConfiguration(...).inspect(), which is the only part
 // of the editor API this module touches besides CancellationToken.
 let inspected = {};
+// The update terminal's notifications (openUpdateTerminal) use window.* and ProgressLocation.
+const shown = { terminals: [], progress: [], info: [], warnings: [], closeListeners: [], choice: undefined };
 globalThis.__DGC_UPDATE_VSCODE = {
   workspace: { getConfiguration: () => ({ inspect: (name) => inspected[name] }) },
+  ProgressLocation: { Notification: 15 },
+  window: {
+    createTerminal: (options) => { const t = { options, show() {} }; shown.terminals.push(t); return t; },
+    withProgress: (options, task) => { const done = Promise.resolve(task()); const row = { title: options.title, over: false };
+      shown.progress.push(row); done.then(() => { row.over = true; }); return done; },
+    showInformationMessage: (message, ...items) => { shown.info.push({ message, items }); return Promise.resolve(shown.choice); },
+    showWarningMessage: (message) => { shown.warnings.push(message); return Promise.resolve(undefined); },
+    onDidCloseTerminal: (listener) => { shown.closeListeners.push(listener);
+      return { dispose: () => { shown.closeListeners = shown.closeListeners.filter((l) => l !== listener); } }; },
+  },
 };
 
 const outfile = join(scratch, "cliupdate.cjs");
@@ -28,7 +41,7 @@ await build({
   } }],
 });
 const { autoUpdateEnabled, cliUpdateEnvironment, failureHeadline, INSTALL_COMMAND, installTerminalOptions,
-  isUserChosenCommand, runCliUpdate, swallowedInstallerExit, updateTerminalOptions } = createRequire(import.meta.url)(outfile);
+  isUserChosenCommand, openUpdateTerminal, runCliUpdate, swallowedInstallerExit, updateTerminalOptions } = createRequire(import.meta.url)(outfile);
 
 after(() => { delete globalThis.__DGC_UPDATE_VSCODE; rmSync(scratch, { recursive: true, force: true }); });
 beforeEach(() => { inspected = {}; });
@@ -247,18 +260,20 @@ test("every manual update terminal runs the exact executable with the install's 
   const tree = join(scratch, "terminal", "custom-dgc");
   const bin = join(scratch, "terminal", "bin");
   const launcher = launcherTo(bin, installTree(tree));
-  assert.deepEqual(updateTerminalOptions(launcher, "Update DGC"), {
-    name: "Update DGC", shellPath: launcher, shellArgs: ["update"],
-    env: { DGC_SKIP_EXTENSION: "1", DGC_DIR: tree, DGC_BIN: bin },
-  });
+  const options = updateTerminalOptions(launcher, "Update DGC");
+  assert.equal(options.name, "Update DGC");
+  assert.deepEqual(options.env, { DGC_SKIP_EXTENSION: "1", DGC_DIR: tree, DGC_BIN: bin });
+  assert.equal(options.shellPath, "/bin/sh");
+  assert.deepEqual(options.shellArgs.slice(-2), [launcher, "update"], "the executable and its argv are data, never shell text");
+  assert.doesNotMatch(options.shellArgs[1], new RegExp(launcher.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   // Both entry points use it, and neither types an installer pipeline into a shell any more.
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   const manual = panel.slice(panel.indexOf("private offerManualCliUpdate("));
   const manualBody = manual.slice(0, manual.indexOf("\n  }\n"));
-  assert.match(manualBody, /createTerminal\(\s*updateTerminalOptions\(resolveDgcExecutable\(\)\.command, "Update DGC"\)\)/);
+  assert.match(manualBody, /openUpdateTerminal\(resolveDgcExecutable\(\)\.command, "Update DGC",/);
   assert.doesNotMatch(manualBody, /sendText\(|curl -fsSL/);
   const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
-  assert.match(extension, /updateTerminalOptions\(executable\.command, "DGC update"\)/);
+  assert.match(extension, /openUpdateTerminal\(executable\.command, "DGC update",/);
 });
 
 test("a dgc.command set by hand to a versioned install is still DGC's to update", () => {
@@ -359,4 +374,72 @@ test("the first-install terminal keeps the installer away from the running exten
   assert.match(body, /sendText\(INSTALL_COMMAND\)/);
   assert.doesNotMatch(body, /createTerminal\("/);
   assert.equal(INSTALL_COMMAND, "curl -fsSL https://vibedgc.com/install.sh | bash");
+});
+
+
+test("the update terminal keeps the installer's output on screen and says how it ended", () => {
+  // Before: the terminal's own process was dgc, and VS Code disposes such a terminal the moment it
+  // exits, so the output and any refusal were gone in about two seconds, leaving only a generic
+  // "terminal process terminated with exit code: 1" toast.
+  const odd = join(scratch, "odd path; touch INJECTED", "dgc");
+  mkdirSync(dirname(odd), { recursive: true });
+  writeFileSync(odd, '#!/usr/bin/env bash\necho "argv:$*"\necho "✗ this dgc runs from a git checkout"\nexit 1\n');
+  chmodSync(odd, 0o700);
+  const run = (options) => spawnSync(options.shellPath, options.shellArgs, {
+    cwd: scratch, input: "\n", encoding: "utf8", env: { ...process.env, ...options.env } });
+  const failed = run(updateTerminalOptions(odd));
+  assert.equal(failed.status, 1, "the terminal ends with the update's own status");
+  assert.match(failed.stdout, /argv:update\n✗ this dgc runs from a git checkout/, "the installer's words stay");
+  assert.match(failed.stdout, /DGC CLI update failed \(exit 1\)\. The output above says why\./);
+  assert.match(failed.stdout, /Press Enter to close this terminal/, "and it waits to be read");
+  assert.equal(existsSync(join(scratch, "INJECTED")), false, "a path with shell syntax in it is only a path");
+  const ok = run(updateTerminalOptions(fakeCli("dgc-ok", { stdout: "installed 0.39.0" })));
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /installed 0\.39\.0[\s\S]*DGC CLI update finished\. Run DGC: Restart Backend to use it\./);
+});
+
+test("the update's notifications follow the terminal: progress while it runs, then how it ended", async () => {
+  // Before: "Updating the DGC CLI — run DGC: Restart Backend when it finishes." was shown up front
+  // and stayed beside a terminal that said the update had failed.
+  const drive = async (cli, choice) => {
+    Object.assign(shown, { terminals: [], progress: [], info: [], warnings: [], choice });
+    let restarted = 0;
+    const ended = openUpdateTerminal(cli, "DGC update", () => { restarted++; }, 20);
+    assert.equal(shown.progress.length, 1);
+    assert.equal(shown.progress[0].title, "Updating the DGC CLI in the terminal…");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(shown.progress[0].over, false, "the progress lasts while dgc update has not ended");
+    assert.deepEqual(shown.info, [], "and nothing claims it finished");
+    const { options } = shown.terminals[0];
+    const statusFile = options.shellArgs[5];
+    assert.ok(statusFile.startsWith(tmpdir()), statusFile);
+    // The terminal runs; the user has not pressed Enter yet, but the command has ended.
+    const run = spawnSync(options.shellPath, options.shellArgs, { cwd: scratch, input: "", encoding: "utf8",
+      env: { ...process.env, ...options.env } });
+    const code = await ended;
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(shown.progress[0].over, true, "the progress notification is gone once it ended");
+    assert.equal(existsSync(statusFile), false, "the status file is cleaned up");
+    return { code, run, restarted };
+  };
+  const failed = await drive(fakeCli("dgc-update-fails", { code: 1, stdout: "this dgc runs from a git checkout" }));
+  assert.equal(failed.code, 1);
+  assert.match(failed.run.stdout, /DGC CLI update failed \(exit 1\)/);
+  assert.deepEqual(shown.info, [], "a failed update offers no restart");
+  assert.equal(shown.warnings.length, 1);
+  assert.equal(shown.warnings[0], "DGC CLI update failed (exit 1) — the terminal says why.");
+  const worked = await drive(fakeCli("dgc-update-works", { stdout: "installed 0.39.1" }), "Restart Backend");
+  assert.equal(worked.code, 0);
+  assert.deepEqual(shown.warnings, []);
+  assert.deepEqual(shown.info.map((row) => row.items), [["Restart Backend"]]);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(worked.restarted, 1, "Restart Backend restarts it");
+  // Closed before it wrote a status (or on Windows): the terminal's own exit status decides.
+  Object.assign(shown, { terminals: [], progress: [], info: [], warnings: [] });
+  const closedEarly = openUpdateTerminal(fakeCli("dgc-update-closed"), "DGC update", () => {}, 20);
+  const terminal = shown.terminals[0];
+  terminal.exitStatus = { code: 130 };
+  for (const listener of [...shown.closeListeners]) listener(terminal);
+  assert.equal(await closedEarly, 130);
+  assert.equal(shown.closeListeners.length, 0, "the close listener is disposed");
 });

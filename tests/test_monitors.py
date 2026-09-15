@@ -170,6 +170,8 @@ class HubTests(HubBase):
         self.assertIn("err-line", ended.lines)            # the stderr tail explains a failure
         self.assertEqual(self.hub.get(mid).exit_code, 3)
         shown = tools.bash_output({"id": mid}, self.ctx)
+        self.assertIn("3 retained lines]", shown)
+        self.assertNotIn("line(s)", shown, "/monitors show prints this text to the user")
         self.assertIn("[stderr]", shown)
         self.assertIn("err-line", shown)
         self.assertIn("exited 3", shown)
@@ -692,6 +694,24 @@ class AgentDeliveryTests(unittest.TestCase):
         self.assertTrue(agent.run_turn("watch for the late line"))
         self.assertFalse(any("withheld" in str(m.get("content")) for m in agent.messages))
         self.assertTrue(wait_for(lambda: agent.monitors.pending_count() >= 1, 3))
+
+    def test_events_waiting_for_the_next_message_reach_the_model_with_it_without_a_tool_call(self):
+        # Wake-ups off (or plan mode): "events wait for your next message". A reply that makes no
+        # tool call used to leave them queued, and the status line kept saying they were waiting.
+        from dgc.workflows import notice_kind
+        agent = self.agent(mode="auto")
+        hub = agent.monitors
+        hub.queue_background_exit("bg7", "make build", 0, 2.0, "built ok", hub.epoch)
+        self.assertEqual(hub.pending_count(), 1)
+        calls = scripted(agent, [ChatResult(content="Hello.")])
+        self.assertTrue(agent.run_turn("hello after the burst"))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["reason"], "user_turn")
+        self.assertTrue(notice_kind(calls[0]["last"]), "the waiting events follow the prompt")
+        index = next(i for i, m in enumerate(agent.messages) if notice_kind(m))
+        self.assertEqual(agent.messages[index - 1]["content"], "hello after the burst")
+        self.assertEqual(agent.messages[index]["_dgc_notice"]["delivery"], "inline")
+        self.assertEqual(hub.pending_count(), 0)
 
     def test_a_wake_turn_skips_every_user_intent_side_effect(self):
         seen = Path(tempfile.mkdtemp(prefix="dgc-monitor-hook-")) / "hook.json"
@@ -1781,3 +1801,25 @@ class ServeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotificationLabelTests(unittest.TestCase):
+    """A background command is not a monitor, so a wake that names several does not call them that."""
+
+    def batch(self, monitor_id, kind, description="job"):
+        return monitors_mod.Batch(monitor_id=monitor_id, description=description, kind=kind, lines=["x"])
+
+    def test_several_background_exits_are_named_as_background_commands(self):
+        # Before: "2 monitors · 0 events" for two background commands that exited.
+        label = monitors_mod.notification_label([self.batch("bg1", "background_exit"),
+                                                 self.batch("bg2", "background_exit")])
+        self.assertEqual(label, "2 background commands exited")
+
+    def test_a_mix_counts_monitors_and_background_commands_apart(self):
+        label = monitors_mod.notification_label([self.batch("mon1", "output"), self.batch("mon1", "output"),
+                                                 self.batch("bg1", "background_exit")])
+        self.assertEqual(label, "1 monitor · 2 events · 1 background command exited")
+
+    def test_several_monitors_keep_their_label(self):
+        label = monitors_mod.notification_label([self.batch("mon1", "output"), self.batch("mon2", "output")])
+        self.assertEqual(label, "2 monitors · 2 events")

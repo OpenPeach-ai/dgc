@@ -7,7 +7,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
-  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, runCliUpdate, updateTerminalOptions,
+  autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, openUpdateTerminal, runCliUpdate,
 } from "./cliupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
@@ -25,6 +25,14 @@ const EXIT_AFTER_ERROR_MS = 30 * 1000;
 const UNASSISTED_EXITS_KEY = "dgc.unassistedExits.v1";
 const REPEAT_EXIT_WINDOW_MS = 30 * 60 * 1000;
 const REPEAT_EXIT_LIMIT = 3;
+/** The `/usage` range spellings, exactly as dgc/usage_ledger.py `_RANGE_ALIASES` reads them. */
+const USAGE_RANGE_ALIASES: Record<string, string> = {
+  today: "today", day: "today", "1d": "today",
+  "7d": "7d", "7": "7d", week: "7d", "7days": "7d",
+  "30d": "30d", "30": "30d", "30days": "30d",
+  month: "month", "this-month": "month", thismonth: "month",
+  all: "all", "all-time": "all", alltime: "all", ever: "all",
+};
 const PANEL_DISPOSED_CAUSE = "panel disposed (window reload, close or extension update)";
 
 interface InterruptedTurnMark {
@@ -128,6 +136,16 @@ const MCP_SENSITIVE_NAME_SUFFIXES = [
   "apikey", "token", "secret", "password", "passwd", "credential", "credentials",
   "authorization", "bearer", "auth",
 ];
+
+/** The file of the focused editor tab, whatever kind of editor shows it (text, diff, notebook,
+ * or a custom editor such as the image preview). */
+function activeTabUri(): vscode.Uri | undefined {
+  const input = vscode.window.tabGroups?.activeTabGroup?.activeTab?.input;
+  if (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom
+    || input instanceof vscode.TabInputNotebook) { return input.uri; }
+  if (input instanceof vscode.TabInputTextDiff || input instanceof vscode.TabInputNotebookDiff) { return input.modified; }
+  return undefined;
+}
 
 function mcpSensitiveName(value: string): boolean {
   const lower = value.toLowerCase();
@@ -262,7 +280,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private lastReadyEvent?: DgcEvent;
   private currentSessionId = "";
   private currentSessionName = "";
+  /** Whether the current chat has a session file: the backend writes one only once the chat has
+   *  content (a turn, a name) or when it was resumed or branched from one. */
+  private currentSessionSaved = false;
   private sessionRestoreCandidate = "";
+  /** The remembered chat had a file when it was remembered (older records say nothing: assume so). */
+  private sessionRestoreSaved = true;
   /** Automatic backend restarts in the recent past, so a crash loop cannot spin forever. */
   private backendRecoveries: number[] = [];
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -327,7 +350,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private rememberSession(): void {
     if (!this.currentSessionId) { return; }
     void this.context.workspaceState.update("dgc.activeSession.v1", {
-      scope: this.draftScope(), id: this.currentSessionId,
+      scope: this.draftScope(), id: this.currentSessionId, saved: this.currentSessionSaved,
     }).then(undefined, () => this.post({ type: "event", event: { type: "error",
       message: "DGC could not remember this chat for window reload. The saved conversation remains available under Resume." } }));
   }
@@ -845,6 +868,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.finishSessionHandshake(be);
       return;
     }
+    if (!this.sessionRestoreSaved) {
+      // The remembered chat never had a message, so there is no file to resume: asking for it only
+      // produced "no such session" and a notice that the chat was unavailable. Its draft still moves
+      // to the new chat, exactly as when a saved chat has gone missing.
+      this.sessionRestoreFinished = true;
+      this.sessionDraftSource = previous;
+      this.finishSessionHandshake(be, previous);
+      return;
+    }
     const command = this.stateCommand("restore-session", { type: "resume_session", path: `${previous}.json` });
     this.sessionRestoreRequestId = command.request_id;
     void be.request(command, "session", 10000, true)
@@ -1159,9 +1191,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
     }
     const cmd = executable.command;
-    const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+    const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
     this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
       ? saved.id! : "";
+    this.sessionRestoreSaved = saved?.saved !== false;
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
@@ -1199,7 +1232,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
       this.mcpUrls.clear();
       if (facts.cause) { return; }             // our own teardown: logged above and already handled
-      const cause = serveCause || `exited with ${how}`;
+      // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
+      // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
+      const cause = serveCause || (signal || code === null ? how : `exited with ${how}`);
       serveCause = "";
       const recentExits = this.recordUnassistedExit(cause, facts.lastFrame || "");
       const resumes = this.markInterruptedWork(cause, recentExits);
@@ -1418,13 +1453,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.sessionDraftSource = "";
         this.sessionHandshakeGeneration++;
         {
-          const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+          const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
           this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
             ? saved.id! : "";
+          this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
+        this.currentSessionSaved = false;           // a fresh backend's chat has no file yet
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
@@ -1487,11 +1524,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.currentSessionId = ev.session_id;
           this.post({ type: "chat_changes", sessionId: this.currentSessionId, files: [], total: 0 });
           this.currentSessionName = String(ev.name || "");
+          this.currentSessionSaved = ev.kind === "resumed" || ev.kind === "forked"
+            || (ev.kind !== "new" && ev.kind !== "cleared" && this.currentSessionSaved);
           this.rememberSession();
         }
         break;
       case "session_named":
         this.currentSessionName = String(ev.name || "");
+        if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // naming saves it
         break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
@@ -1574,6 +1614,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "turn_start":
+        if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // it has content now
         this.turnActive = this.confirmedTurnActive = true;
         this.monitorTurnActive = ev.kind === "monitor";
         this.turnStartedAt = Date.now();
@@ -1732,13 +1773,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // The exact executable with `update`, not `curl | bash` typed into a shell: an old CLI then
         // still updates the install it belongs to (DGC_DIR/DGC_BIN), and DGC_SKIP_EXTENSION keeps
         // the installer from replacing this running extension with the published .vsix.
-        const term = vscode.window.createTerminal(
-          updateTerminalOptions(resolveDgcExecutable().command, "Update DGC"));
-        term.show();
-        void vscode.window.showInformationMessage(
-          "Updating the DGC CLI in the terminal. When it finishes, run “DGC: Restart Backend”.",
-          "Restart Backend",
-        ).then((next) => { if (next === "Restart Backend") { this.restart("manual CLI update"); } });
+        void openUpdateTerminal(resolveDgcExecutable().command, "Update DGC", () => this.restart("manual CLI update"));
       } else if (choice === SETPATH) {
         void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
@@ -1765,6 +1800,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.testPostedMessages.push({
         type: String(msg?.type || ""),
         ...(["workspace_changes", "chat_changes"].includes(msg?.type) ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
+        ...(msg?.type === "attach" ? { label: String(msg.label || "").slice(0, 200) } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }),
@@ -2858,6 +2894,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (name === "usage") {
+      // The terminals print the ledger; the editor has the Token Usage tab for it. The ranges and
+      // their spellings are the CLI's (usage_ledger.normalize_range), so `/usage 30d` means the same.
+      const range = USAGE_RANGE_ALIASES[rest.toLowerCase().replace(/\s+/g, "")];
+      if (!rest) { this.openSettings("usage"); }
+      else if (range) { this.openSettings("usage", range); }
+      else {
+        this.post({ type: "event", event: { type: "error", message: "usage: /usage [today|7d|30d|month|all]" } });
+      }
+      return;
+    }
     if (name === "todo") {
       // The terminals' `/todo clear` works here too: the editor has no `todo` command of its own,
       // and sending it on as a custom command only ever produced "unknown command".
@@ -3448,11 +3495,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- in-webview settings page --------------------------------------------
-  openSettings(section = "general"): void {
-    this.inVisiblePanel(() => { void this.loadSettings(section); });
+  openSettings(section = "general", usageRange?: string): void {
+    this.inVisiblePanel(() => { void this.loadSettings(section, usageRange); });
   }
 
-  private async loadSettings(section: string): Promise<void> {
+  private async loadSettings(section: string, usageRange?: string): Promise<void> {
     const be = this.ensureBackend();
     const configReady = this.requestState(
       be, "config-read", { type: "get_config" }, "config", 5000);
@@ -3467,7 +3514,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         err?.message || "DGC could not read its current settings.");
     }
     await modelReady;
-    this.post({ type: "settings_open", providers, models, section });
+    this.post({ type: "settings_open", providers, models, section, ...(usageRange ? { range: usageRange } : {}) });
   }
 
   async saveSettings(v: any): Promise<void> {
@@ -4025,11 +4072,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } }));
   }
 
-  /** DGC: Add File to Chat — from the explorer, a tab, the palette, or a drop. */
+  /** DGC: Add File to DGC — from the explorer, a tab, the palette, or a drop. From the palette
+   * it adds the file in front of you, which is not always a text editor: an image in VS Code's
+   * image preview, a PDF or notebook in a custom editor has no activeTextEditor, and the command
+   * used to answer "Open or select a file" with the image open. */
   addFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): void {
     const picked = (Array.isArray(uris) && uris.length ? uris : uri ? [uri] : [])
       .filter((u): u is vscode.Uri => !!u && u.scheme === "file");
-    const active = vscode.window.activeTextEditor?.document.uri;
+    const active = vscode.window.activeTextEditor?.document.uri ?? activeTabUri();
     const list = picked.length ? picked : active && active.scheme === "file" ? [active] : [];
     if (!list.length) {
       void vscode.window.showInformationMessage("Open or select a file to add it to DGC.");
@@ -4299,7 +4349,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </section>
   </div>
   <div class="set-foot">
-    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for this workspace">Save</button>
+    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for every workspace on this computer">Save</button>
     <button type="button" id="set-cancel" class="fbtn" title="Close without saving">Close</button>
   </div>
 </div>

@@ -76,7 +76,7 @@ def _mark_current_nav(nav: str, path: str, context: dict[str, Any]) -> str:
     if path.startswith("docs/"):
         href = context["DOCS_URL"].rstrip("/") + "/"
     elif path == "vscode/index.html":
-        href = f'{context["SITE_URL"]}/vscode'
+        href = f'{context["SITE_URL"]}/vscode/'
     elif path == "benchmark.html":
         href = f'{context["SITE_URL"]}/benchmark'
     else:
@@ -239,7 +239,10 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
          preload_image: str | None = None,
          preload_mobile_image: str | None = None) -> str:
     ctx = site_context()
-    canonical = canonical_url or (ctx["SITE_URL"] + canonical_path(path))
+    # A directory index (vscode/index.html) is served at its trailing-slash URL; Cloudflare Pages
+    # answers the slashless form with a 308, so the canonical and the sitemap name the final URL.
+    canonical = canonical_url or (ctx["SITE_URL"] + canonical_path(path)
+                                  + ("/" if path.endswith("/index.html") else ""))
     critical_css = critical_css_for(path)
     # The docs pages are prose whose largest paint IS text, and they carry inline code in almost
     # every paragraph: without this the monospace face lands after first paint and its swap

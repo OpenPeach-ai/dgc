@@ -66,11 +66,26 @@ THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
 DELEGATED_THINK_LEVELS = [*THINK_LEVELS, "max"]
 
 
+# What a shell reports for a process a closed pipe (SIGPIPE, 13) ended: 128 + 13.
+EXIT_READER_GONE = 141
+
+
+class _StdoutConsole(Console):
+    """The terminal's console. Rich answers a closed stdout with SystemExit(1) from inside whatever
+    was printing, so `dgc -p … --output-format text | head -1` exited 1, the code of a failed turn,
+    while the same run with --output-format json (its writes raise BrokenPipeError) exited 141."""
+
+    def on_broken_pipe(self) -> None:
+        self.quiet = True
+        _silence_stdout()               # the interpreter's own last flush must not print a traceback
+        raise SystemExit(EXIT_READER_GONE)
+
+
 class UI:
     """All user-facing rendering + interaction. The agent calls back into this."""
 
     def __init__(self):
-        self.console = Console(theme=render.markdown_theme(), highlight=False)
+        self.console = _StdoutConsole(theme=render.markdown_theme(), highlight=False)
         self._theme_pushed = False   # did refresh_theme() already stack a palette on this console?
         self._thinking = False
         self._streamed = False
@@ -2090,7 +2105,7 @@ def run_usage(argv: list[str]) -> int:
     if args.json:
         print(json.dumps(report, indent=2))
     else:
-        Console().print(render.render_markdown(usage_ledger.format_report(report)))
+        Console().print(render.render_markdown(usage_ledger.format_report(report, shell=True)))
     return 1 if report.get("error") else 0
 
 
@@ -2117,13 +2132,16 @@ def _subcommand_help(name: str) -> int:
     """`--help` on a subcommand prints its usage and exits; it never runs the subcommand."""
     print("usage: " + SUBCOMMAND_USAGE[name])
     if name == "update":
-        print("  Downloads https://vibedgc.com/install.sh to a temporary file and runs it with bash.\n"
-              "  The new version is built in its own directory; the dgc launcher switches to it only\n"
-              "  once it is complete, so a failed update leaves the current version running.\n"
-              "  --rollback     switch back to the newest kept version older than the active one\n"
+        print("  Downloads install.sh from $DGC_BASE_URL (default https://vibedgc.com) to a temporary\n"
+              "  file and runs it with bash. The new version is built in its own directory; the dgc\n"
+              "  launcher switches to it only once it is complete, so a failed update leaves the\n"
+              "  current version running.\n"
+              "  --rollback     switch back to the version that was active before the last switch\n"
+              "                 (when none is recorded, the newest kept version older than the active one)\n"
               "  --version X    switch to kept version X, or install X if it is the published release\n"
               "  --list         show the kept versions and which one is active\n"
-              "  Exit status: 0 done, 1 failed (previous version still active), 3 another update is running.")
+              "  Exit status: 0 done, 1 failed (previous version still active), 2 usage error,\n"
+              "  3 another update is running.")
     return 0
 
 
@@ -2384,7 +2402,15 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
-        return _run_oneshot(cli, config, args, parser, _oneshot_engine)
+        try:
+            code = _run_oneshot(cli, config, args, parser, _oneshot_engine)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            # The reader went away (`dgc -p ... | head -1`). Say nothing more: point stdout at
+            # /dev/null so the interpreter's own final flush cannot print a traceback and exit 120.
+            _silence_stdout()
+            return EXIT_READER_GONE
+        return code
     else:
         import atexit
 
@@ -2528,6 +2554,15 @@ def _oneshot_prompt(prompt: str) -> str:
     if prompt == "-":
         return data + note
     return f"{prompt}\n\n<input from stdin>\n{data}{note}\n</input>"
+
+
+def _silence_stdout() -> None:
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def _last_assistant_text(agent) -> str:
