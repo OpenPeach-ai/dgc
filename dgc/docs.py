@@ -1908,14 +1908,12 @@ Useful keys:
 - `base_url`, `model` — the endpoint and model (`/connect`, `/model`). Credentials live in
   owner-only `~/.dgc/secrets.json`, VS Code SecretStorage, or `DGC_API_KEY` / the other
   `DGC_*_API_KEY` environment references; they are not written into normal config.
-- `mode`, `thinking` — permission mode and reasoning effort. `thinking` is **`off`
-  by default** (a coding agent should act, not deliberate at length) and accepts
-  `off · low · medium · high · xhigh`. DGC maps the requested level to each provider's
-  supported control. Some reasoning-only models translate `off` to their minimum effort,
-  and endpoints that do not expose a compatible control may ignore it; a set level reaches
-  Qwen3-family llama.cpp/unsloth templates through `chat_template_kwargs`. **Reasoning models (o-series,
-  DeepSeek-R1, qwen-thinking) may do better on hard tasks with `/think high`.** See the
-  **Thinking & reasoning** guide.
+- `mode`, `thinking` — permission mode and reasoning effort. Thinking is **`off` by default**;
+  accepts `off · low · medium · high · xhigh`. DGC maps levels to provider controls:
+  reasoning-only models may use minimum effort for `off`, unsupported endpoints may ignore it,
+  and Qwen3-family llama.cpp/unsloth templates receive `chat_template_kwargs`.
+  **Reasoning models (o-series, DeepSeek-R1, qwen-thinking) may benefit from `/think high`
+  on hard tasks.** See **Thinking & reasoning**.
 - `show_reasoning`, `preserve_thinking` — `show_reasoning` (`/thoughts show|hide`)
   shows the model's thinking, muted, in the transcript. `preserve_thinking`
   (`/preserve-thinking on|off`, default off) re-embeds the prior turn's reasoning in
@@ -1941,30 +1939,26 @@ Useful keys:
   response storage is acceptable.
 - `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
   interval before DGC retries a capability that an endpoint/model rejected.
-- `context_size` — the requested operating window. Known model selections apply a
-  memory-conscious recommendation; authoritative provider metadata clamps impossible values but
-  never silently expands a local Ollama allocation. Long sessions compact at
-  `compact_threshold` of the effective value. It is one of the settings that may change while a
-  turn is running, because it only shapes the next request: an editor saving the whole settings
-  form does not have to wait for the turn to end unless a value that moves the execution route —
-  the provider, the model, the sandbox, a delegation engine — actually changed.
+- `context_size` — requested operating window. Known models receive memory-conscious defaults;
+  provider metadata clamps impossible values without silently expanding local Ollama allocations.
+  Sessions compact at `compact_threshold` of the effective window. Changes apply to the next
+  request, even during a turn. Editor settings saves wait only when changing an execution route:
+  provider, model, sandbox, or delegation engine.
 - `search_timeout` — bounded 1–60 second lifetime for internal `grep`/`glob` discovery. DGC uses
   ripgrep without a shell when available and a link-safe bounded fallback otherwise.
-- `session_redaction` — on by default. Durable transcripts, checkpoint conversation blobs, goals,
-  titles, and plans receive an additional credential-redaction pass. Live native-provider/tool and
-  editor/headless/ACP masking remains enforced. Delegated vendor-CLI streams in the full-screen TUI
-  or subscription one-shot CLI are shown as the vendor emits them after terminal-control cleanup,
-  so treat vendor output as sensitive. Exact file rewind snapshots remain byte-for-byte unchanged
-  inside the owner-private session so `/rewind` cannot corrupt a file.
-- `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
-  skill-install, memory, goal, delegation and background-monitor tools from explicit
-  turn/standing-goal intent (a monitor, for example, when you ask DGC to watch or wait for
-  something). Use `full` to expose the whole execution catalog on every model request.
-- `code_action` — **off by default.** When `true`, DGC advertises a `python` power tool that runs
-  code in a **persistent per-session interpreter** (variables/imports survive across calls). See the
-  **Python code-action** guide. It executes arbitrary code and is gated by the same approval path as
-  `bash` (asked in default/acceptEdits, denied in plan), but is not wrapped by `/sandbox`,
-  checkpointed, or mutation-tracked for verifier reuse. It is never shown until you opt in.
+- `session_redaction` — on by default. Adds credential redaction to saved transcripts, checkpoint
+  conversations, goals, titles, and plans. Live native-provider/tool and editor/headless/ACP
+  masking is always enforced. TUI and one-shot subscription streams retain vendor output after
+  terminal-control cleanup; treat it as sensitive. File rewind snapshots stay byte-for-byte
+  intact in the owner-private session, preserving exact `/rewind` restoration.
+- `tool_profile` — `adaptive` (default) always offers core coding tools; explicit turn or standing-goal
+  intent activates web, artifact, skill-install, memory, goal, delegation, and background-monitor
+  tools (for example, asking DGC to watch something enables monitors). `full` offers every tool
+  on every model request.
+- `code_action` — **off by default.** Opt in to the `python` tool: arbitrary code in a
+  **persistent per-session interpreter**, retaining variables/imports across calls. Approval follows
+  `bash` (asked in default/acceptEdits, denied in plan). It has no `/sandbox`, checkpoints, or
+  mutation tracking for verifier reuse. See **Python code-action**.
 - `theme`, `background` — appearance. `background` defaults to **inherit**, keeping
   your terminal's own canvas. `/bg light` (also `/bg white`) sets a white canvas with
   dark text; `/bg dark` sets a dark canvas with light text. Both apply immediately
@@ -1990,15 +1984,13 @@ Useful keys:
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
   from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive
   permission modes, mixed tool batches, and non-Git projects keep the normal serial path.
-- `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP
-  commands for richer definitions,
-  references, symbols, and diagnostics. Keys may be a language (`python`) or extension (`.py`):
+- `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP commands
+  for definitions, references, symbols, and diagnostics. Key by language (`python`) or extension (`.py`):
   `{"language_servers":{"python":{"command":"pyright-langserver","args":["--stdio"]}}}`.
-  Without one, the bounded dependency-free static analyzer remains available. Configured servers
-  receive a minimal environment, run without a shell, and are serialized per project/server spec.
-  DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle,
-  and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set
-  `code_intel_lsp_idle_s` to `0` for one-shot isolation everywhere.
+  The bounded dependency-free static analyzer works without LSP. Servers use a minimal environment,
+  no shell, and serialized requests per project/server spec. At most four sessions stay warm
+  (default 120 seconds); idle and failed sessions retire. Approved external-file queries always
+  run one-shot. Set `code_intel_lsp_idle_s` to `0` for one-shot isolation everywhere.
 
 ## Credentials
 
