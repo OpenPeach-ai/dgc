@@ -1419,10 +1419,10 @@ body.ask-docked #tasks-panel { display: none; }
 .reasoning .thought-cut { display: block; margin-top: var(--sp-1); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); white-space: normal; }
 .reasoning .thought-cut.alone { margin-top: 0; }
 .thought-static { margin-top: var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); cursor: default; }
-.thought-note { margin: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+.thought-note { margin: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); color: var(--thought-muted, var(--muted)); overflow-wrap: anywhere; }
 .thought-note > p { margin: 0 0 var(--sp-1); }
 .thought-note > p:last-of-type { display: inline; margin: 0; }
-.thought-hint { font-size: var(--t-xs); white-space: nowrap; user-select: none; }
+.thought-hint { font-size: var(--t-xs); white-space: nowrap; user-select: none; color: var(--thought-muted, var(--muted)); }
 body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display: none !important; }
 @media (max-width: 360px) {
   .thought-by { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;

@@ -204,3 +204,56 @@ test("the settings select hint and hide-reasoning render as designed", async (t)
     await page.close();
   }
 });
+
+// Light Modern's descriptionForeground is its foreground (#3B3B3B): an inline summary drawn in
+// --muted would read exactly like the answer beside it. The note and its hint take a derived tone
+// that is visibly lighter than the text and still clears 4.5:1; Dark Modern keeps its own muted
+// colour; a theme switch while the panel is open measures again.
+for (const theme of ["light-modern", "dark-modern"]) {
+  test(`the inline summary and its hint stay muted in ${theme}`, async (t) => {
+    if (skipOrFail(t)) return;
+    const page = await openThinkingPage(browser, { width: 460, theme, height: 1400, events: SCENARIOS.all });
+    try {
+      const facts = await page.evaluate((contrastSource) => {
+        const contrast = eval(contrastSource);
+        const note = document.querySelector(".thought-note"), hint = note.querySelector(".thought-hint");
+        const answer = document.querySelector("#log .text:not(.thought-note)") || document.body;
+        return { note: getComputedStyle(note.querySelector("p")).color, hint: getComputedStyle(hint).color,
+                 text: getComputedStyle(answer).color, noteContrast: contrast(note.querySelector("p")),
+                 hintContrast: contrast(hint), muted: getComputedStyle(document.body).getPropertyValue("--vscode-descriptionForeground").trim() };
+      }, CONTRAST_SOURCE);
+      assert.notEqual(facts.note, facts.text, `the note is not drawn in the text colour (${facts.note})`);
+      assert.notEqual(facts.hint, facts.text, "nor is its hint");
+      assert.ok(facts.noteContrast >= 4.5 && facts.hintContrast >= 4.5,
+        `still readable: ${facts.noteContrast.toFixed(2)} / ${facts.hintContrast.toFixed(2)}`);
+      if (theme === "dark-modern") assert.equal(facts.note, "rgb(157, 157, 157)", "a theme with its own muted colour keeps it");
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+test("switching from Dark Modern to Light Modern with the panel open re-derives the muted tone", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await openThinkingPage(browser, { width: 460, theme: "dark-modern", height: 1400, events: SCENARIOS.all });
+  try {
+    const light = { "--vscode-sideBar-background": "#F8F8F8", "--vscode-editor-background": "#FFFFFF",
+      "--vscode-foreground": "#3B3B3B", "--vscode-editor-foreground": "#3B3B3B", "--vscode-descriptionForeground": "#3B3B3B" };
+    // What VS Code does on a theme change: new variables on <html> and a new body theme class.
+    await page.evaluate((vars) => {
+      for (const [name, value] of Object.entries(vars)) document.documentElement.style.setProperty(name, value);
+      document.body.classList.replace("vscode-dark", "vscode-light");
+    }, light);
+    await page.waitForTimeout(100);
+    const facts = await page.evaluate((contrastSource) => {
+      const contrast = eval(contrastSource);
+      const p = document.querySelector(".thought-note p");
+      return { note: getComputedStyle(p).color, text: getComputedStyle(document.body).color, contrast: contrast(p) };
+    }, CONTRAST_SOURCE);
+    assert.equal(facts.text, "rgb(59, 59, 59)");
+    assert.notEqual(facts.note, facts.text);
+    assert.ok(facts.contrast >= 4.5, facts.contrast.toFixed(2));
+  } finally {
+    await page.close();
+  }
+});

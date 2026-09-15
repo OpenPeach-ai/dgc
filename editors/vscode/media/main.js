@@ -6354,6 +6354,72 @@
       : truncated ? "The text of this reasoning was not kept." : "The text of this reasoning is not in this view.";
     entry.part.appendChild(cut);
   }
+  // Muted must stay muted. Light Modern (and any theme whose descriptionForeground is its foreground)
+  // would draw an inline summary exactly like the answer beside it, so for such a theme the note and
+  // its hint take a tone derived from the text and the panel background, as far toward the
+  // background as still reads at 4.5:1 on every surface a note sits on. A theme with its own muted
+  // colour keeps it; high-contrast themes and forced colours are never softened.
+  function thoughtToneRgb(css) {
+    const m = String(css || "").match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    const [r, g, b, a = 1] = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+    return [r, g, b].every(Number.isFinite) && a > 0.99 ? [r, g, b] : null;
+  }
+  function thoughtToneContrast(one, two) {
+    const lum = (rgb) => rgb.map((c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; })
+      .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+    const [hi, lo] = [lum(one), lum(two)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  function syncThoughtTone() {
+    const high = document.body.classList.contains("vscode-high-contrast")
+      || document.body.classList.contains("vscode-high-contrast-light")
+      || (typeof window.matchMedia === "function" && window.matchMedia("(forced-colors: active)").matches);
+    const probe = (token) => {
+      const node = document.createElement("span");
+      node.style.cssText = `position:absolute;visibility:hidden;color:var(${token});background-color:var(${token})`;
+      document.body.appendChild(node);
+      const style = getComputedStyle(node);
+      const value = { color: thoughtToneRgb(style.color), fill: thoughtToneRgb(style.backgroundColor) };
+      node.remove();
+      return value;
+    };
+    const text = probe("--text").color, muted = probe("--muted").color;
+    const grounds = [probe("--bg").fill, probe("--surface").fill].filter(Boolean);
+    let tone = "";
+    if (!high && text && muted && grounds.length
+        && text.reduce((sum, c, i) => sum + Math.abs(c - muted[i]), 0) <= 6) {
+      const ground = grounds[0];
+      for (let p = 0.6; p >= 0.1; p -= 0.02) {
+        const mix = text.map((c, i) => Math.round(c * (1 - p) + ground[i] * p));
+        if (grounds.every((g) => thoughtToneContrast(mix, g) >= 4.6)) { tone = `rgb(${mix.join(", ")})`; break; }
+      }
+    }
+    if (tone) log.style.setProperty("--thought-muted", tone); else log.style.removeProperty("--thought-muted");
+  }
+  let thoughtToneQueued = false, thoughtToneKey = "";
+  // What a theme change rewrites: the host's colour variables and the body's vscode-* theme class
+  // (the panel's own body classes, such as ask-docked, are not a reason to measure again).
+  const thoughtToneTheme = () => [...document.body.classList].filter((c) => c.startsWith("vscode")).join(" ")
+    + "|" + (document.documentElement.getAttribute("style") || "") + "|" + (document.body.getAttribute("style") || "");
+  function queueThoughtTone(force) {
+    const key = thoughtToneTheme();
+    if ((force !== true && key === thoughtToneKey) || thoughtToneQueued) return;
+    thoughtToneKey = key;
+    thoughtToneQueued = true;
+    const run = () => { thoughtToneQueued = false; syncThoughtTone(); };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else setTimeout(run, 0);
+  }
+  thoughtToneKey = thoughtToneTheme();
+  syncThoughtTone();
+  if (typeof MutationObserver === "function") {
+    const toneWatch = new MutationObserver(() => queueThoughtTone());
+    toneWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    toneWatch.observe(document.body, { attributes: true, attributeFilter: ["style", "class"] });
+  }
+  if (typeof window.matchMedia === "function") {
+    window.matchMedia("(forced-colors: active)").addEventListener?.("change", () => queueThoughtTone(true));
+  }
   // ---- end 0.40 thinking --------------------------------------------------------------------------
 
 
