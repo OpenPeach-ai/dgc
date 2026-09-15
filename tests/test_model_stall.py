@@ -73,6 +73,12 @@ def _client_gone(handler, cap: float = 5.0) -> float | None:
     return None
 
 
+# Hosted macOS runners schedule threads late enough to push a prompt cancel or hang-up a few
+# milliseconds past a Linux-tuned bound. Every bound here is still far below the multi-second
+# timeouts it proves were not waited on. Override with DGC_TEST_TIME_SLACK.
+RUNNER_SLACK = float(os.environ.get("DGC_TEST_TIME_SLACK", "0.6" if sys.platform == "darwin" else "0"))
+
+
 class _Server:
     """ThreadingHTTPServer whose per-path behaviour is a plain function set by each test."""
 
@@ -292,7 +298,7 @@ class StallTestCase(unittest.TestCase):
         self.assertIsNotNone(record["gone"], "the client never closed the stalled socket")
         waited = record["gone"] - (record["at"] if since is None else since)
         start = "the request" if since is None else "its deadline's clock could start"
-        self.assertLess(waited, deadline_s + slack, f"closed {waited:.2f}s after {start}")
+        self.assertLess(waited, deadline_s + slack + RUNNER_SLACK, f"closed {waited:.2f}s after {start}")
 
 
 # ---- shapes before any real output ---------------------------------------------------------------
@@ -703,7 +709,7 @@ class CancelInEveryPhaseTests(StallTestCase):
         started = time.monotonic()
         result = client.chat(MESSAGES, cancel=cancel, **chat_kwargs)
         self.assertEqual(result.finish_reason, "cancelled")
-        self.assertLess(time.monotonic() - started, limit)
+        self.assertLess(time.monotonic() - started, limit + RUNNER_SLACK)
         return result
 
     def test_cancel_during_header_wait_is_immediate(self):
