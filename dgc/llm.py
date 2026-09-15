@@ -3268,13 +3268,13 @@ class LLMClient:
                     continue
                 transient += 1
                 last_err = f"HTTP {status}: {body[:300]}"
-                last_cause = self._status_cause(status, body, r.headers, self._ollama_url,
-                                                0.5 * transient)
+                delay = _retry_delay(r.headers, 0.5 * transient)     # a busy 503 may say how long
+                last_cause = self._status_cause(status, body, r.headers, self._ollama_url, delay)
                 if transient < 4:
                     if transient >= 2 and not repaired:
                         payload["messages"] = self._ollama_messages(_repair_for_retry(messages))
                         repaired = True
-                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise _with_cause(LLMError(
@@ -3506,7 +3506,8 @@ class LLMClient:
                     continue
                 last_err = f"HTTP {status}: {body[:300]}"
                 transient += 1
-                last_cause = self._status_cause(status, body, r.headers, self._url, 0.5 * transient)
+                delay = _retry_delay(r.headers, 0.5 * transient)     # a busy 503 may say how long
+                last_cause = self._status_cause(status, body, r.headers, self._url, delay)
                 if transient < 4:
                     # After a plain retry fails, also repair the message SHAPE — collapse
                     # native tool-calls/results into plain user/assistant text that even a
@@ -3515,7 +3516,7 @@ class LLMClient:
                     if transient >= 2 and not repaired:
                         payload["messages"] = _repair_for_retry(messages)
                         repaired = True
-                    if not self._retry_transport(last_cause, transient, 0.5 * transient, cancel):
+                    if not self._retry_transport(last_cause, transient, delay, cancel):
                         return ChatResult(finish_reason="cancelled")
                     continue
                 raise _with_cause(LLMError(

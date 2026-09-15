@@ -440,6 +440,19 @@ class TransportRetryTests(RetryTestCase):
                     self.assertRecovered(transport, events, kind)
                     self.assertEqual([e for e in events.items if e.kind == "retry"][0].http_status, code)
 
+    def test_a_busy_5xx_respects_retry_after_on_every_transport(self):
+        # The notes and the Reconnecting page promise it for 5xx too. Chat Completions and native
+        # Ollama waited their fixed backoff on a 503 and ignored the server's Retry-After.
+        for transport in PATHS:
+            with self.subTest(transport=transport):
+                self.fast.delays.clear()
+                self.server.behaviours = {PATHS[transport][1]: stall.sequence(
+                    status(503, headers={"Retry-After": "3"}), answer(transport))}
+                client, events = self.client(transport)
+                self.assertEqual(client.chat(MESSAGES).content, "done")
+                self.assertEqual(self.fast.delays, [3.0], transport)
+                self.assertEqual([e.kind for e in events.items], ["retry", "cleared"], transport)
+
     def test_503_forever_raises_with_the_cause_and_todays_message(self):
         expected = {
             "chat_completions": lambda s: f"HTTP 503 from http://127.0.0.1:{s.port}/v1/chat/completions after 4 tries: ",
