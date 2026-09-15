@@ -265,3 +265,46 @@ class HookPlacementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveAndReplayArgsTests(unittest.TestCase):
+    """A replayed tool card gets the arguments a live one got: the JSON type of every argument (an
+    array stays an array, a JSON-encoded array stays that string) and the summary live computed."""
+
+    def test_tool_call_args_and_summary_match_live(self):
+        import tempfile
+        from test_subagents import Harness
+        from dgc.llm import ChatResult, ToolCall
+        questions = [{"header": f"Q{n}", "question": f"Which option for part {n}?" + " Context." * 20,
+                      "options": [{"label": "Alpha", "description": "The first choice, explained at length."},
+                                  {"label": "Beta", "description": "The second choice, explained at length."}]}
+                     for n in range(4)]
+        encoded = json.dumps(questions)
+        self.assertGreater(len(encoded), 1000, "long enough to be bounded on replay")
+        calls = [ToolCall("c1", "propose_options", {"questions": encoded}),
+                 ToolCall("c2", "todo", {"todos": [{"content": "Pick storage", "status": "in_progress"},
+                                                   {"content": "Write sync", "status": "pending"}]}),
+                 ToolCall("c3", "multi_edit", {"path": "a.py", "edits": [{"old_string": "a", "new_string": "b"}],
+                                               "nested": {"deep": [1, 2, {"x": True, "y": None}]}})]
+
+        def route(messages, results, cancel):
+            return ChatResult(content="done") if results else ChatResult(tool_calls=calls)
+
+        with tempfile.TemporaryDirectory(prefix="dgc-history-args-") as directory:
+            harness = Harness(Path(directory))
+            try:
+                harness.answer("options_request", {"answers": {"q1": {"selected": [0], "other": ""}}})
+                harness.run("go", [("go", route)])
+                live = {f["call_id"]: f for f in harness.of("tool_call")}
+                replay = {i["call_id"]: i for i in harness.backend._history() if i.get("type") == "tool_call"}
+            finally:
+                harness.close()
+        self.assertEqual(set(live), {"c1", "c2", "c3"})
+        for call_id in ("c2", "c3"):
+            self.assertEqual(replay[call_id]["args"], live[call_id]["args"], call_id)
+            self.assertEqual(replay[call_id]["summary"], live[call_id]["summary"], call_id)
+        self.assertIsInstance(replay["c2"]["args"]["todos"], list, "an array argument replays as an array")
+        self.assertEqual(replay["c1"]["summary"], live["c1"]["summary"])
+        self.assertTrue(live["c1"]["summary"].startswith("4 questions · Q0"), live["c1"]["summary"])
+        self.assertIsInstance(replay["c1"]["args"]["questions"], str, "a JSON-encoded array stays a string")
+        self.assertTrue(encoded.startswith(replay["c1"]["args"]["questions"].rstrip("…")))

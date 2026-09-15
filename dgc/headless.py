@@ -438,26 +438,42 @@ def _goal_scaffold(content: str) -> str:
     return ""
 
 
-def _history_args(raw) -> dict:
-    """The saved tool arguments as a bounded object, so a replayed card shows what a live one did."""
+def _history_saved_args(raw) -> dict:
+    """The saved tool arguments decoded to the object live dispatch handed the UI (every argument in
+    its own JSON type: an array stays an array, a JSON-encoded string stays that string), or {}."""
     value = raw
     if not isinstance(value, dict):
         try:
             value = json.loads(str(raw or "") or "{}")
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
             return {}
-    if not isinstance(value, dict):
-        return {}
-    args: dict = {}
-    for key, item in list(value.items())[:16]:
-        name = str(key)[:64]
-        if isinstance(item, str):
-            args[name] = item[:1000] + ("…" if len(item) > 1000 else "")
-        elif isinstance(item, bool) or item is None or isinstance(item, (int, float)):
-            args[name] = item
-        else:
-            args[name] = json.dumps(item, ensure_ascii=False)[:1000]
-    return args
+    return value if isinstance(value, dict) else {}
+
+
+def _history_bounded(item, depth: int = 0):
+    if isinstance(item, str):
+        return item[:1000] + ("…" if len(item) > 1000 else "")
+    if isinstance(item, bool) or item is None or isinstance(item, (int, float)):
+        return item
+    if depth >= 6:
+        text = json.dumps(item, ensure_ascii=False, default=str)
+        return text[:1000] + ("…" if len(text) > 1000 else "")
+    if isinstance(item, list):
+        return [_history_bounded(value, depth + 1) for value in item[:64]]
+    if isinstance(item, dict):
+        return {str(key)[:64]: _history_bounded(value, depth + 1) for key, value in list(item.items())[:32]}
+    return str(item)[:1000]
+
+
+def _history_args(raw) -> dict:
+    """The saved tool arguments as a bounded object, so a replayed card shows what a live one did.
+
+    Live dispatch hands the UI the arguments as decoded JSON (``redact_value`` of the call's object),
+    so an array argument is an array there. Replay keeps each argument's JSON type the same way,
+    bounding only size (16 keys, nested collections, 1000-character strings), instead of turning a
+    list into its JSON text."""
+    return {str(key)[:64]: _history_bounded(item)
+            for key, item in list(_history_saved_args(raw).items())[:16]}
 
 
 def _options_resolved_item(record, call_id, *, allow_empty: bool = False) -> dict | None:
@@ -2465,10 +2481,12 @@ class Backend:
                 for tc in tool_calls:
                     function = tc.get("function") or {}
                     name = str(function.get("name") or "tool")[:128]
-                    args = _history_args(function.get("arguments"))
+                    saved = _history_saved_args(function.get("arguments"))
+                    args = _history_args(saved)
                     call_id = str(tc.get("id") or "") or None
+                    # The summary is read from the whole arguments, as live: a bound must not change it.
                     items.append({"type": "tool_call", "call_id": call_id, "name": name,
-                                  "args": args, "summary": arg_summary(name, args)})
+                                  "args": args, "summary": arg_summary(name, saved)})
                     if call_id:
                         calls[call_id] = name
             elif role == "tool":
@@ -4096,7 +4114,7 @@ class Backend:
                 for tc in prior.get("tool_calls") or [] if prior.get("role") == "assistant" else []:
                     if str(tc.get("id") or "") == call_id:
                         name = (tc.get("function") or {}).get("name")
-                        args = _history_args((tc.get("function") or {}).get("arguments"))
+                        args = _history_saved_args((tc.get("function") or {}).get("arguments"))
                         break
                 if name is not None:
                     break
