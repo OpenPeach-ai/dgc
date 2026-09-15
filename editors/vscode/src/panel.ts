@@ -24,6 +24,15 @@ const EXIT_AFTER_ERROR_MS = 30 * 1000;
 /** Backend deaths nobody asked for, kept across hosts: a cause that repeats every few minutes
  *  never trips the three-in-two-minutes crash budget, and each resumed goal would feed it again. */
 const UNASSISTED_EXITS_KEY = "dgc.unassistedExits.v1";
+/** Messages the backend accepted as queued and has not started, kept across hosts: a window reload
+ *  kills the backend that held them, and the next host hands them back to the webview as not sent. */
+const QUEUED_PROMPTS_KEY = "dgc.queuedPrompts.v1";
+const QUEUED_PROMPTS_LIMIT = 17;                     // the webview's own bound on unanswered prompts
+const QUEUED_PROMPT_DRAFT_CHARS = 256 * 1024;        // a bigger restore draft is kept as its text only
+type QueuedPrompt = {
+  requestId: string; session: string; text: string;
+  draft: { text: string; attachments: any[] }; queued: boolean;
+};
 const REPEAT_EXIT_WINDOW_MS = 30 * 60 * 1000;
 const REPEAT_EXIT_LIMIT = 3;
 /** The `/usage` range spellings, exactly as dgc/usage_ledger.py `_RANGE_ALIASES` reads them. */
@@ -310,6 +319,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionDraftSource = "";
   private sessionHandshakeGeneration = 0;
   private sessionReady = false;
+  /** Prompts sent to the backend whose turn has not started, by request id, in send order. The
+   *  webview's own copy dies with a reload, so this is what brings a queued message back. */
+  private unstartedPrompts = new Map<string, QueuedPrompt>();
+  /** Queued prompts whose backend is gone, waiting for a ready webview and session to take them. */
+  private unsentPrompts: QueuedPrompt[] = [];
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
   private testProbeNonce = "";
@@ -326,6 +340,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.adoptQueuedPromptsFromPreviousHost();
     // one status-bar item: `model · mode` (click to change model)
     this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     this.sb.command = "dgc.selectModel";
@@ -381,6 +396,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.setReadyContext(true);                                             // gates palette entries
     this.rememberSession();
     this.post({ type: "session_ready", sessionId: this.currentSessionId, adoptDraftFrom });
+    this.surfaceUnsentPrompts();
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
     be.completeHandshake();
@@ -1229,6 +1245,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
       // send() start a child on it, whose own later death was then mislabelled and never recovered.
       if (cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE || this.backend !== be) { return; }
+      this.queuedPromptsLost();
       this.retireBackend();
       this.post({ type: "backend_exit", code: null, signal: null, recovering: false, cause, resumes: "none" });
     });
@@ -1254,6 +1271,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const resumes = this.markInterruptedWork(cause, recentExits);
       this.pendingCommandRestart = false;       // the replacement starts from the new path anyway
       if (this.backend !== be) { return; }
+      this.queuedPromptsLost();
       if (be.childPid !== undefined) {
         // A command already started a new child on this instance; that child is the recovery.
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
@@ -1286,6 +1304,88 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // closed pipe and the panel could never recover on its own -- the user had to find
     // "DGC: Restart Backend" or reload the window.
     this.backend = undefined;
+  }
+
+  // ---- messages queued behind a running turn ---------------------------------------------------------
+  // A queued message is the user's until its own turn starts. The webview keeps one copy, but that
+  // copy dies with a webview or window reload, and restarting the backend cleared the transcript
+  // without giving anything back. The host keeps the request id, the words and the restore draft
+  // from send until turn_start (or the backend's own "returned"), persists the queued ones, and
+  // hands them back as not sent once a backend that held them is gone.
+
+  private trackPrompt(requestId: string, text: string, restore: any, images: any): void {
+    if (!requestId || this.unstartedPrompts.size >= 64) { return; }
+    const pictures = Array.isArray(images) ? images.filter((image: any) => typeof image === "string") : [];
+    let draft: QueuedPrompt["draft"] = { text: text.slice(0, 1_000_000), attachments: [] };
+    if (restore && typeof restore === "object" && typeof restore.text === "string" && Array.isArray(restore.attachments)) {
+      let picture = 0;
+      // The webview leaves each image's bytes out of the restore draft: they are already in `images`.
+      const attachments = restore.attachments.slice(0, 64).map((item: any) => item && typeof item === "object" && item.img
+        ? { ...item, data: pictures[picture++] } : item);
+      draft = { text: restore.text.slice(0, 1_000_000), attachments };
+    }
+    this.unstartedPrompts.set(requestId, { requestId, session: this.currentSessionId, text: text.slice(0, 1_000_000),
+                                           draft, queued: false });
+  }
+
+  private markPromptQueued(requestId: string): void {
+    const prompt = this.unstartedPrompts.get(requestId);
+    if (!prompt || prompt.queued) { return; }
+    prompt.queued = true;
+    this.persistQueuedPrompts();
+  }
+
+  private forgetPrompt(requestId: string): void {
+    const prompt = requestId ? this.unstartedPrompts.get(requestId) : undefined;
+    if (!prompt) { return; }
+    this.unstartedPrompts.delete(requestId);
+    if (prompt.queued) { this.persistQueuedPrompts(); }
+  }
+
+  /** The backend that held the queued prompts is gone: they were not sent. Unacknowledged ones are
+   *  the webview's to report ("delivery unconfirmed"); only an acknowledged queue is certain. */
+  private queuedPromptsLost(): void {
+    const lost = [...this.unstartedPrompts.values()].filter((prompt) => prompt.queued);
+    this.unstartedPrompts.clear();
+    for (const prompt of lost) {
+      if (!this.unsentPrompts.some((known) => known.requestId === prompt.requestId)) { this.unsentPrompts.push(prompt); }
+    }
+    this.unsentPrompts = this.unsentPrompts.slice(-QUEUED_PROMPTS_LIMIT);
+    this.persistQueuedPrompts();
+  }
+
+  /** Hand the not-sent prompts to the webview once its chat is ready (the reconnect's history is then
+   *  already on its way, and nothing clears the transcript under them). The webview ignores any it
+   *  already gave back itself. */
+  private surfaceUnsentPrompts(): void {
+    if (!this.unsentPrompts.length || !this.webviewReady || !this.sessionReady) { return; }
+    const items = this.unsentPrompts.splice(0);
+    this.post({ type: "prompts_unsent", items });
+    this.persistQueuedPrompts();
+  }
+
+  private persistQueuedPrompts(): void {
+    const items = [...this.unsentPrompts, ...[...this.unstartedPrompts.values()].filter((prompt) => prompt.queued)]
+      .slice(-QUEUED_PROMPTS_LIMIT)
+      .map((prompt) => JSON.stringify(prompt.draft).length > QUEUED_PROMPT_DRAFT_CHARS
+        ? { ...prompt, draft: { text: prompt.draft.text.slice(0, QUEUED_PROMPT_DRAFT_CHARS), attachments: [] } } : prompt);
+    try {
+      void Promise.resolve(this.context.workspaceState.update(QUEUED_PROMPTS_KEY,
+        items.length ? { scope: this.draftScope(), items } : undefined)).catch(() => { /* only a reload's restore is lost */ });
+    } catch { /* only a reload's restore is lost */ }
+  }
+
+  /** What a host that died (a window reload) had queued: its backend died with it, so none of it ran. */
+  private adoptQueuedPromptsFromPreviousHost(): void {
+    let saved: { scope?: string; items?: any[] } | undefined;
+    try { saved = this.context.workspaceState.get(QUEUED_PROMPTS_KEY); } catch { return; }
+    if (!saved || saved.scope !== this.draftScope() || !Array.isArray(saved.items)) { return; }
+    this.unsentPrompts = saved.items.slice(-QUEUED_PROMPTS_LIMIT).filter((item: any) => item && typeof item === "object"
+      && typeof item.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId)
+      && typeof item.text === "string" && item.draft && typeof item.draft.text === "string"
+      && Array.isArray(item.draft.attachments))
+      .map((item: any) => ({ requestId: item.requestId, session: typeof item.session === "string" ? item.session : "",
+                             text: item.text, draft: item.draft, queued: true }));
   }
 
   /**
@@ -1435,6 +1535,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backendRecoveries = [];
     // Restarting is the user's (or the updater's) decision, so a turn it cuts off is not offered back.
     this.noteInterruptedTurn(undefined);
+    this.queuedPromptsLost();                          // the backend holding them is going away
     this.backend?.dispose(`restart: ${reason}`);
     this.backend = undefined;
     this.intentionalShutdown = false;
@@ -1629,7 +1730,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.scheduleWorkspaceChanges(0);
         break;
       }
+      case "prompt_accepted":
+        if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }
+        break;
+      case "steering_update":
+        if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }
+        else { this.forgetPrompt(String(ev.request_id || "")); }   // applied, or handed back to the webview
+        break;
       case "turn_start":
+        this.forgetPrompt(String(ev.request_id || ""));
         if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // it has content now
         this.turnActive = this.confirmedTurnActive = true;
         this.monitorTurnActive = ev.kind === "monitor";
@@ -1654,6 +1763,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.runPendingCommandRestart();
         break;
       case "command_rejected":
+        if (ev.command === "prompt") { this.forgetPrompt(String(ev.request_id || "")); }
         if (ev.command === "prompt" || ev.command === "start_goal" || ev.command === "resume_turn") {
           this.turnActive = this.confirmedTurnActive;
           this.syncWorkspaceRoots();
@@ -2056,6 +2166,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (this.lastReadyEvent?.capabilities?.agents) {
             be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
           }
+          // Nor the messages queued behind the running turn: without them a Stop (or the backend
+          // going away) had nothing to hand back, and the user's words were lost.
+          const queued = [...this.unstartedPrompts.values()].filter((prompt) => prompt.queued);
+          if (queued.length) { this.post({ type: "prompts_queued", items: queued }); }
+          this.surfaceUnsentPrompts();
         }
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
@@ -2110,6 +2225,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           // Close the small command/turn_start race so a simultaneous folder removal
           // cannot send a mutation that the backend must reject as newly busy.
           this.turnActive = true;
+          this.trackPrompt(requestId, String(msg.text ?? ""), msg.restore, msg.images);
         }
         break;
       }

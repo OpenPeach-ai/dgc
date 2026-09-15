@@ -304,6 +304,14 @@
   // dropped from pendingPrompts on that acknowledgement, so a backend that stopped before running
   // them lost the user's words with no way to restore them.
   const queuedPrompts = new Map();
+  // Queued prompts given back as not sent (Stop, a backend exit, DGC: Restart Backend). A backend
+  // being brought back clears the transcript to replay the chat, which took their bubbles with it;
+  // they are kept until that reconnect is done and put back under the replay. The ids also stop the
+  // extension, which hands back what a dead backend held, from giving the same message back twice.
+  const returnedPrompts = [];            // { node, session }
+  const returnedIds = new Set();
+  const returnedNodes = new Map();       // id -> its bubble, whose own Restore makes a second notice redundant
+  let reconnectPending = false;
   const draftScope = document.documentElement.dataset.draftScope || "";
   const draftEntries = new Map();
   const pendingImages = new Set();
@@ -459,6 +467,7 @@
   function renderUnconfirmedDrafts() {
     log.querySelectorAll(".draft-delivery-notice").forEach(node => node.remove());
     for (const row of unconfirmedDrafts.filter(row => row.session === draftSession)) {
+      if (returnedNodes.get(row.id)?.isConnected) continue;     // its not-sent bubble offers the restore
       const node = el("div", "sys draft-delivery-notice");
       node.textContent = row.rejected ? "A rejected message is available to restore."
         : "Delivery of a message from the previous connection was not confirmed. Check the chat before retrying.";
@@ -475,6 +484,13 @@
   function rejectPrompt(id, confirmed = true) {
     const pending = pendingPrompts.get(id) || queuedPrompts.get(id);
     if (!pending) return;
+    if (confirmed && queuedPrompts.has(id)) {
+      returnedIds.add(id);
+      returnedPrompts.push({ node: pending.node, session: pending.session || "" });
+      if (returnedPrompts.length > 17) returnedPrompts.shift();
+      returnedNodes.set(id, pending.node);
+      if (returnedNodes.size > 17) returnedNodes.delete(returnedNodes.keys().next().value);
+    }
     pendingPrompts.delete(id); queuedPrompts.delete(id);
     pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
     // A bubble that still said "you" or "you · queued" read as a message that went through.
@@ -501,6 +517,52 @@
       persistDraft();
     }
     if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
+  }
+  // A message the extension knows about but this webview does not (it was reloaded since): the same
+  // bubble submit() drew, and the same restore entry.
+  function promptEntry(item, label) {
+    const draft = cleanDraft({ ...(item?.draft || {}), start: 0, end: 0 })
+      || { text: String(item?.text || "").slice(0, 1_000_000), attachments: [] };
+    const node = el("div", "msg user"); node.appendChild(el("div", "role", label));
+    node.appendChild(el("div", "bubble", esc(String(item?.text || "").slice(0, 1_000_000))
+      + draft.attachments.filter((a) => a.label).map((a) => `\n[${esc(a.label)}]`).join("")));
+    return { text: draft.text, attachments: draft.attachments, node,
+             session: typeof item?.session === "string" ? item.session : "" };
+  }
+  const promptId = (item) => typeof item?.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId) ? item.requestId : "";
+  // After a webview reload: the messages still queued in the running backend, so turn_start, Stop and
+  // a backend exit find them here as they would have before the reload.
+  function adoptQueuedPrompts(items) {
+    for (const item of Array.isArray(items) ? items.slice(0, 17) : []) {
+      const id = promptId(item);
+      if (!id || queuedPrompts.has(id) || returnedIds.has(id)) continue;
+      const entry = pendingPrompts.get(id) || promptEntry(item, "you · queued");
+      pendingPrompts.delete(id);
+      const role = entry.node.querySelector(".role");
+      if (role) role.textContent = "you · queued";
+      if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
+      queuedPrompts.set(id, entry);
+    }
+    queuedCount = Math.max(queuedCount, queuedPrompts.size); renderQueued();
+  }
+  // The extension's word that a backend holding these messages is gone (a restart, a window reload,
+  // an exit): they were never sent. The same give-back as Stop.
+  function adoptUnsentPrompts(items) {
+    for (const item of Array.isArray(items) ? items.slice(0, 17) : []) {
+      const id = promptId(item);
+      if (!id || returnedIds.has(id)) continue;
+      const entry = queuedPrompts.get(id) || pendingPrompts.get(id) || promptEntry(item, "you");
+      pendingPrompts.delete(id);
+      if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
+      queuedPrompts.set(id, entry);
+      rejectPrompt(id, true);
+    }
+    queuedCount = queuedPrompts.size; renderQueued();
+  }
+  function putBackReturnedPrompts(session) {
+    for (const { node, session: owner } of returnedPrompts) {
+      if (!owner || !session || owner === session) log.appendChild(node);
+    }
   }
   let files = [];              // workspace files for @-mentions
   let popMode = null, popItems = [], popIdx = 0, popStart = 0, popEnd = 0;
@@ -2473,6 +2535,9 @@
           const notice = backendExitNotice;
           backendExitNotice = null;
           if (notice && ev.kind === "resumed" && ev.session_id === notice.session) sysLine(notice.text, true);
+          // So are the messages that backend never ran, handed back as not sent.
+          if (reconnectPending && ev.kind === "resumed") putBackReturnedPrompts(ev.session_id);
+          else returnedPrompts.length = 0;
         }
         // A fresh chat has no checklist. A resumed one gets its list from the `history`
         // snapshot that follows, so the row is left for that event to overwrite. Either way a
@@ -2505,6 +2570,7 @@
         startTurn(ev.prompt, ev.kind, ev.turn_id,
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id));
         if (!replaying) customCommandPending = "";
+        if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
           setSending(true); if (queuedCount > 0 && ev.kind !== "monitor") { queuedCount--; renderQueued(); }
@@ -3181,7 +3247,11 @@
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
     pendingPrompts.set(requestId, { text: pastes.length ? typed : text, attachments: [...attachments], node: m, session: draftSession });
-    vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
+    // The restore draft rides along for the extension, which keeps it while the message is queued (a
+    // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
+    const restore = { text: pastes.length ? typed : text,
+      attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
+    vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });
@@ -4276,6 +4346,7 @@
     else if (msg.type === "session_ready") {
       hostSessionSeen = true;
       backendExitNotice = null;          // the reconnect has finished; the line is in the transcript
+      reconnectPending = false; returnedPrompts.length = 0;
       selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
       backendLive = true; backendDown = false; armTodoClearTimer();
       renderUnconfirmedDrafts();
@@ -4321,7 +4392,18 @@
       input.focus(); onInput();
     }
     else if (msg.type === "turn_active") noteLiveTurn(msg);
-    else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
+    else if (msg.type === "cleared") {
+      // DGC: Restart Backend. The backend holding the queued messages is going away and the new one
+      // replays the chat: they are given back as not sent, as Stop gives them back.
+      discardTurn(); log.innerHTML = ""; setSending(false);
+      reconnectPending = true;
+      for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
+      for (const [id, entry] of [...queuedPrompts]) { log.appendChild(entry.node); rejectPrompt(id, true); }
+      queuedCount = 0; renderQueued();
+      renderUnconfirmedDrafts();
+    }
+    else if (msg.type === "prompts_queued") adoptQueuedPrompts(msg.items);
+    else if (msg.type === "prompts_unsent") adoptUnsentPrompts(msg.items);
     else if (msg.type === "prompt_rejected") { rejectPrompt(msg.requestId); if (!turn) setSending(false); }
     else if (msg.type === "goal_start_state") {
       if (msg.state === "error") {
@@ -4384,6 +4466,7 @@
       // A Clear sent to a recovering backend is held for the next one, so it is not unanswered
       // yet; with no recovery coming, the row says so at once instead of spinning.
       backendLive = false; backendDown = !msg.recovering; pauseTodoClearTimer(Boolean(msg.recovering));
+      reconnectPending = Boolean(msg.recovering);
       // The extension is restarting the backend and will pick the work back up, so the turn has
       // not failed. Ending it here relabelled an already-answered turn "Failed for 41s" and took
       // its answer chrome away. Say what is happening instead — and bound it: if nothing arrives
