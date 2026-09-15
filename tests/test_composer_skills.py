@@ -125,6 +125,22 @@ class ComposerTests(SkillFixture):
         self.assertEqual(tui.input_buf.text, "Review $fixture after")
         self.assertIsNone(tui._overlay)
 
+    def test_terminal_palette_keeps_matching_a_command_once_its_argument_is_typed(self):
+        # Before: "/todo clear" (or "/todo " with the caret after the space) left no token at the
+        # caret, so the palette said "(no matches)" for a command that exists and runs.
+        for text in ("/todo clear", "/todo ", "/TODO   clear"):
+            tui = self.tui(text)
+            tui._open_command_palette()
+            self.assertEqual([row["value"] for row in tui._overlay_rows()], ["todo"], text)
+            ran = []
+            tui._run_command = ran.append
+            tui._overlay_select()
+            self.assertEqual(ran, [text.strip()], "Enter still runs what was typed, argument and all")
+        for text in ("/nosuchcommand clear", "Review this /todo clear"):
+            tui = self.tui(text)
+            tui._open_command_palette()
+            self.assertEqual(tui._overlay_rows(), [], text)
+
     def test_terminal_picker_cancel_and_management_action_preserve_draft(self):
         tui = self.tui("Review this /model later", 18)
         tui._open_command_palette()

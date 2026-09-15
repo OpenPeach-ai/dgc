@@ -515,10 +515,19 @@ class TUI:
         from prompt_toolkit.document import Document
 
         def rebuild(ov):
+            skills = getattr(getattr(self, "agent", None), "skills", {})
             token = composer_token(self.input_buf.text, self.input_buf.cursor_position)
             if token is None:
-                return []
-            return completion_rows("tui", self.config.project_root, skills=getattr(getattr(self, "agent", None), "skills", {}),
+                # A command with its argument typed ("/todo clear") has no token at the caret, and
+                # the palette said "(no matches)" for a command that runs. It still names one.
+                named = re.match(r"/([^\s/]+)\s", self.input_buf.text)
+                if not named:
+                    return []
+                name = named[1].casefold()
+                return [row for row in completion_rows("tui", self.config.project_root, skills=skills,
+                                                       trigger="/", query=name)
+                        if row["kind"] in ("command", "template") and row["value"].casefold() == name]
+            return completion_rows("tui", self.config.project_root, skills=skills,
                                    trigger=token[0], query=token[1])
 
         def submit(row, typed):
@@ -7156,7 +7165,8 @@ class TUI:
         def _(ev):
             self.input_buf.delete_before_cursor()
             from .composer import composer_token
-            if not composer_token(self.input_buf.text, self.input_buf.cursor_position):
+            if (not composer_token(self.input_buf.text, self.input_buf.cursor_position)
+                    and not re.match(r"/[^\s/]+\s", self.input_buf.text)):   # "/todo clea" still names /todo
                 self._close_overlay()
 
         @kb.add("up", filter=ov_open)
