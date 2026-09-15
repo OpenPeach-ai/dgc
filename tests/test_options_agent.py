@@ -469,7 +469,12 @@ class HistoryShapeTests(unittest.TestCase):
                               {"role": "user", "content": "Now ask"}, self.call("call_0"),
                               {"role": "tool", "tool_call_id": "call_0", "content": "The user answered your question: ..."}])
         self.assertEqual([i["type"] for i in items if i["type"] in ("tool_call", "tool_result", "options_resolved")],
-                         ["tool_call", "tool_result", "tool_call", "tool_result"])
+                         ["tool_call", "tool_call", "tool_result"])
+        # The interrupted read is a stopped card; its model-only repair text is not a result.
+        self.assertEqual(next(i["reason"] for i in items if i["type"] == "turn_end"),
+                         "cancelled")
+        self.assertEqual([i["name"] for i in items if i["type"] == "tool_result"],
+                         ["propose_options"])
         # ...and an interrupted question followed by a read_file with the same id still replays as cancelled
         items = self.history([{"role": "user", "content": "Ask"}, self.call("call_0"), self.interrupted(),
                               {"role": "user", "content": "Read it"}, self.read_call(),
