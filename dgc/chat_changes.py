@@ -46,7 +46,9 @@ def _names(root, deadline):
         names.update(name for name in (review.path(item) for item in raw.rstrip(b"\0").split(b"\0")
                                        if item)
                      if not any(part in _IGNORED for part in str(name).split("/")))
-        return [(review.repo / name).relative_to(root).as_posix() for name in sorted(names)
+        # Names relative to the root as Git sees it: its real path (see git_review._within).
+        base = review.repo / review.scope if review.scope != "." else review.repo
+        return [(review.repo / name).relative_to(base).as_posix() for name in sorted(names)
                 if name not in review.skip_worktree]
     # Non-Git folders still support chat reviews. Descriptor-based enumeration refuses parent
     # symlink races, just like the exact-path reads below.

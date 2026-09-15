@@ -103,6 +103,26 @@ class ChatChangesTests(unittest.TestCase):
         self.assertFalse(self.journal.report()["complete"])
         self.assertNotIn("large.py", self.journal.state()["files"])
 
+    def test_a_root_reached_through_a_symlinked_directory_lists_its_files(self):
+        # macOS temp directories live under /var, a link to /private/var, and Git reports the real
+        # toplevel. Any project opened through a linked folder is the same case on every system.
+        self.git("init", "-q")
+        self.write("app.py", "print('hi')\n")
+        self.write("pkg/mod.py", "x = 1\n")
+        links = tempfile.TemporaryDirectory(prefix="dgc-chat-changes-link-")
+        self.addCleanup(links.cleanup)
+        linked = Path(links.name) / "project"
+        linked.symlink_to(self.root, target_is_directory=True)
+        import time
+        self.assertEqual(sorted(chat_changes._names(linked, time.monotonic() + 5)), ["app.py", "pkg/mod.py"])
+        self.git("add", "app.py")
+        self.assertEqual(sorted(chat_changes._names(linked / "pkg", time.monotonic() + 5)), ["mod.py"])
+        journal = ChatChanges(linked)
+        before = journal.begin()
+        self.write("app.py", "print('hi')\nprint('there')\n")
+        journal.finish(before)
+        self.assertEqual([row["path"] for row in journal.report()["files"]], ["app.py"])
+
     def test_parent_symlinks_limits_and_untrusted_saved_paths_fail_closed(self):
         outside = tempfile.TemporaryDirectory(prefix="dgc-chat-outside-")
         self.addCleanup(outside.cleanup)
