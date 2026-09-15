@@ -1825,16 +1825,29 @@
     return [...document.querySelectorAll(".card[data-request-id]")]
       .some((card) => card.dataset.requestId === String(id) && card._requestEpoch === requestEpoch);
   }
-  function resolveCard(c) {
+  // `decision`: what settled the card, in words ("Allowed once"). An answered card used to keep only
+  // its question, so one answered "Allow once" read like one still waiting.
+  function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
     c.querySelectorAll("button, input, select, textarea")
       .forEach((control) => { control.disabled = true; });
+    if (decision) {
+      const line = el("div", "decision");
+      line.textContent = String(decision).slice(0, 2400);
+      c.appendChild(line);
+    }
     renderTurnMeta();
     return true;
   }
   function expireOpenRequests() {
-    document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
+    document.querySelectorAll(".card[data-request-id]:not(.resolved)")
+      .forEach((card) => resolveCard(card, "Not answered: DGC's backend stopped"));
+  }
+  function permissionDecision(decision, rule, note) {
+    if (decision === "once") return "Allowed once";
+    if (decision === "always") return rule ? `Always allowed · ${rule}` : "Always allowed";
+    return note ? `Denied · note for the model: ${note}` : "Denied";
   }
   // The two cards a backend death can leave: Continue for an ordinary turn it cut off, and Resume
   // goal when the same death kept repeating and automatic resume stood down. Each is a DGC marker
@@ -2741,11 +2754,11 @@
           : ev.diff ? "" : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c)) return;
+          if (!resolveCard(c, permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
             rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
             reason: b.dataset.d === "deny" && note ? note : undefined });
@@ -3018,7 +3031,7 @@
       case "mode_changed": if (ev.message) sysLine(ev.message); break;
       case "permission_resolved":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
-          if (card.dataset.requestId === String(ev.id)) resolveCard(card);
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card, ev.decision === "once" ? "Allowed" : "Denied");
         });
         sysLine(ev.message, ev.decision === "no"); break;
       case "command_rejected":
@@ -3032,7 +3045,7 @@
         sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
-          if (card.dataset.requestId === String(ev.id)) resolveCard(card);
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card, "Closed without a decision");
         });
         askExpired(ev);
         sysLine("Input request closed. No unanswered choice was selected."); break;

@@ -404,8 +404,11 @@ button.act { min-height: var(--control); display: inline-flex; align-items: cent
 button.act.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; font-weight: var(--w-semi); }
 button.act.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.act:hover { border-color: var(--accent); }
-.card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
-.card.resolved .btns { display: none; }
+.card.resolved { box-shadow: none; border-color: var(--border-strong); }
+/* The question fades once it is settled; the line saying how it was settled does not. */
+.card.resolved > :not(.decision) { opacity: .5; }
+.card.resolved .btns, .card.resolved .deny-note { display: none; }
+.card .decision { margin-top: var(--sp-1); color: var(--text); font: var(--w-med) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
 
 /* tasks — the session checklist, a row in the composer rail directly above the goal row and made
    of the goal row's parts. Collapsed it is one line; expanded, the list opens above that line
@@ -1014,6 +1017,8 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   .sys.err, #btn-ctx.warn { color: CanvasText; font-weight: var(--w-bold); text-decoration: underline; }
   #cbox[data-mode="auto"] { border: 2px double CanvasText; }
   .card.resolved { opacity: 1; border-style: dashed; color: GrayText; }
+  .card.resolved > :not(.decision) { opacity: 1; }
+  .card .decision { color: CanvasText; }
   .card.resolved::after { content: "Resolved"; display: block; margin-top: var(--sp-1);
     color: GrayText; font: var(--w-semi) var(--t-xs)/1.2 var(--sans); }
   .disclosure, button.link, .artifact .aurl { color: LinkText; text-decoration: underline; }
