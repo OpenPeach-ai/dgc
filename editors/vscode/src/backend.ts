@@ -345,9 +345,17 @@ export class DgcBackend extends EventEmitter {
     const expectedResponse = REQUEST_RESPONSES.get(ev.type);
     const requestId = "id" in ev ? String((ev as any).id ?? "") : "";
     if (expectedResponse) {
-      if (!requestId || this.activeRequests.has(requestId)) {
+      const active = requestId ? this.activeRequests.get(requestId) : undefined;
+      if (!requestId || (active !== undefined && active !== expectedResponse)) {
         this.protocolFailure("dgc backend reused an active approval request ID");
         return false;
+      }
+      if (active !== undefined) {
+        // The same open decision announced again (a history snapshot re-sends what the turn is still
+        // waiting on, for a reloaded webview). Show it again unless it has already been answered.
+        if (this.respondedRequests.has(requestId)) {
+          return true;
+        }
       }
       this.activeRequests.set(requestId, expectedResponse);
     } else if (ev.type === "request_expired") {

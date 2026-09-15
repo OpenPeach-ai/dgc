@@ -929,6 +929,44 @@ class HeadlessUI:
             self.em.emit("error", message=message, cause=payload)
 
     # blocking decisions -------------------------------------------------------
+    # A human decision has no timeout, so the request a webview showed outlives that webview: a panel
+    # reloaded while DGC waits on a question must be able to show it again. Each open decision keeps
+    # the frame it was announced with until it settles; ``reannounce_open_requests`` sends them again
+    # (same ids) after a history snapshot. One lock orders announcement against re-announcement, so
+    # a request is either in the snapshot or emitted after it, never lost between the two.
+    def _requests_lock(self) -> threading.Lock:
+        lock = self.__dict__.get("_open_requests_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_open_requests_lock", threading.Lock())
+        return lock
+
+    def _announce_request(self, rid: str, event: str, fields: dict) -> None:
+        with self._requests_lock():
+            self.__dict__.setdefault("_open_requests", {})[rid] = (event, fields)
+            self.em.emit(event, id=rid, **fields)
+
+    def _settle_request(self, rid: str) -> None:
+        with self._requests_lock():
+            self.__dict__.setdefault("_open_requests", {}).pop(rid, None)
+
+    def reannounce_open_requests(self) -> int:
+        """Emit every still-open permission, plan and question request again, oldest first, followed
+        by the live turn's current activity. Returns how many requests were sent."""
+        sent = 0
+        with self._requests_lock():
+            for rid, (event, fields) in list(self.__dict__.get("_open_requests", {}).items()):
+                if self.pending.is_open(rid):
+                    self.em.emit(event, id=rid, **fields)
+                    sent += 1
+            turn_id = getattr(self, "turn_id", "")
+            key = getattr(self, "_activity_key", None) if turn_id else None
+            if key:
+                activity = {"turn_id": turn_id, "state": key[0], "label": key[1]}
+                if key[2]:
+                    activity["detail"] = key[2]
+                self.em.emit("turn_activity", **activity)
+        return sent
+
     def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
         # Reviewing a plan or deciding between options is not an abandoned network request.
         # Only an explicit reply, Stop, or disconnection ends a native human decision.
@@ -958,12 +996,16 @@ class HeadlessUI:
     def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
         preview = edit_preview(name, args, self.preview_root) if self.preview_root else ""
-        self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
-                     command=(args.get("command") if name in ("bash", "monitor") else None),
-                     summary=arg_summary(name, args), diff=preview or None,
-                     suggested_rule=str(rule_for(name, args)),
-                     choices=["once", "always", "deny"])
-        payload = self._await(rid, ev, recheck=recheck, human=True) or {}
+        try:
+            self._announce_request(rid, "permission_request", dict(
+                call_id=call_id, name=name, args=args,
+                command=(args.get("command") if name in ("bash", "monitor") else None),
+                summary=arg_summary(name, args), diff=preview or None,
+                suggested_rule=str(rule_for(name, args)),
+                choices=["once", "always", "deny"]))
+            payload = self._await(rid, ev, recheck=recheck, human=True) or {}
+        finally:
+            self._settle_request(rid)
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
         decision = {"once": "once", "always": "always",
@@ -980,9 +1022,12 @@ class HeadlessUI:
 
     def present_plan(self, plan: str):
         rid, ev = self.pending.register()
-        self.em.emit("plan_proposal", id=rid, plan=plan,
-                     choices=["auto", "acceptEdits", "default", "reject"])
-        payload = self._await(rid, ev, human=True) or {}
+        try:
+            self._announce_request(rid, "plan_proposal", dict(
+                plan=plan, choices=["auto", "acceptEdits", "default", "reject"]))
+            payload = self._await(rid, ev, human=True) or {}
+        finally:
+            self._settle_request(rid)
         self.plan_feedback = str(payload.get("feedback") or "").strip()
         decision = payload.get("decision")
         if decision in _PLAN_MODES:
@@ -1000,12 +1045,13 @@ class HeadlessUI:
         open_questions[rid] = questions
         self.__dict__.setdefault("_question_rids", {})[call_id if isinstance(call_id, str) else None] = rid
         try:
-            self.em.emit("options_request", id=rid, call_id=call_id if isinstance(call_id, str) else None,
-                         questions=questions)
+            self._announce_request(rid, "options_request", dict(
+                call_id=call_id if isinstance(call_id, str) else None, questions=questions))
             self.turn_activity("waiting", "Waiting for your answer")
             payload = self._await(rid, ev, human=True)
         finally:
             open_questions.pop(rid, None)
+            self._settle_request(rid)
         decision = validate_response(questions, payload)
         return decision if decision is not None else {"outcome": "cancelled", "answers": {}}
 
@@ -1315,6 +1361,10 @@ class Backend:
                     self._wake_yield = False
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
+                    # What a history snapshot taken during this turn needs to leave it open: its id,
+                    # and the last message before it (everything after that belongs to this turn).
+                    before = list(getattr(self.agent, "messages", None) or [])
+                    self._live_turn = {"id": tid, "anchor": before[-1] if before else None}
                     # Clear only stale cancellation while dequeue is serialized. A concurrent
                     # cancel that wins this lock either removes this item first, or sets the Event
                     # after this clear; Agent must not clear it again at entry.
@@ -1404,6 +1454,7 @@ class Backend:
                     self._maybe_auto_resume_goal(failed, cancelled)
                 with self._turn_state_lock():
                     self._running_turn_kind = ""
+                    self._live_turn = None
                     idle = not self._queue
                     if idle and self._worker is current:
                         self._worker = None
@@ -1435,6 +1486,7 @@ class Backend:
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
             with self._turn_state_lock():
                 self._running_turn_kind = ""
+                self._live_turn = None
                 if self._worker is current:
                     self._worker = None
                     self._flush_unsaved_todo_clear()
@@ -2225,11 +2277,20 @@ class Backend:
         left the panel blank while the backend still reminded the model about the items.
         """
         todos = getattr(self.agent, "todos", None) or []
-        self.em.emit("history", items=self._history(),
-                     todos=redact_value(list(todos), secret_values(self.config)),
-                     **_request_fields(request_id))
+        # A snapshot taken while a turn runs (a reloaded panel) leaves that turn open, and the
+        # decisions it is waiting on are announced again right after it. Held under the turn-state
+        # lock, which the worker takes to publish turn_end: the turn either ends before this snapshot
+        # (and the snapshot closes it) or after the re-announced requests, never in between.
+        with self._turn_state_lock():
+            live = getattr(self, "_live_turn", None) if getattr(self, "_running_turn_kind", "") else None
+            self.em.emit("history", items=self._history(live_turn=live),
+                         todos=redact_value(list(todos), secret_values(self.config)),
+                         **_request_fields(request_id))
+            reannounce = getattr(getattr(self, "ui", None), "reannounce_open_requests", None)
+            if callable(reannounce):
+                reannounce()
 
-    def _history(self) -> list:
+    def _history(self, live_turn: dict | None = None) -> list:
         """A replayable event log of the current conversation (for resuming in a UI).
 
         Restored history used to be a flat message projection with its own idea of what an answer
@@ -2239,6 +2300,10 @@ class Backend:
         one designated answer. Turns are derived, not persisted -- a turn opens at every message
         the user actually sent and at every resume marker, which is exactly what the scaffolding
         filter below already identifies, so no session file has to change.
+
+        ``live_turn`` (``{"id", "anchor"}``, set only while a turn runs) names the running turn and
+        the last message saved before it. The replayed turn that opened after that message is still
+        running: it gets no ``turn_end`` (the live one arrives later) and carries the live turn id.
         """
         # 0.40 lanes keep their per-call replay state behind these hooks (see the marked sections at
         # the end of this class); each one is a no-op until its lane lands.
@@ -2281,7 +2346,8 @@ class Backend:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
-            turn = {"id": f"h{turn_n}", "n": 0, "r": 0, "final": None, "interrupted": False}
+            turn = {"id": f"h{turn_n}", "n": 0, "r": 0, "final": None, "interrupted": False,
+                    "at": position, "item": len(items)}
             items.append({"type": "turn_start", "turn_id": turn["id"],
                           "prompt": prompt, "kind": kind})
 
@@ -2292,7 +2358,16 @@ class Backend:
 
         from .workflows import notice_kind
         skip_next_ack = False
+        position = -1
+        # Where the running turn's own messages start: after its anchor, found by identity. With no
+        # anchor (an empty chat) or one compaction has since rewritten away, the open turn at the end
+        # is the running one.
+        live_after = -1
+        if isinstance(live_turn, dict) and live_turn.get("anchor") is not None:
+            anchor = live_turn["anchor"]
+            live_after = next((i for i, m in enumerate(self.agent.messages) if m is anchor), -1)
         for index, m in enumerate(self.agent.messages):
+            position = index
             # Before any `continue`: images anchored at or before this message join the open turn.
             items.extend(self._history_before_message(index, turn))
             role = m.get("role")
@@ -2414,9 +2489,19 @@ class Backend:
                               "output": output, "is_error": tool_output_is_error(output),
                               "is_diff": is_diff, "diff": diff})
                 items.extend(self._history_after_tool_result(m, call_id, turn))
+        live_start = None
+        if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:
+            live_start, live_id = items[turn["item"]], str(live_turn.get("id") or "") or turn["id"]
+            turn = None                 # still running: its turn_end is the live one
         close_turn()
-        self._history_finish_reasoning(items)
+        self._history_finish_reasoning(items)   # (may drop items: find the live turn again after)
         self._history_finish_images(items)
+        if live_start is not None:
+            first = next(i for i, item in enumerate(items) if item is live_start)
+            hid = live_start.get("turn_id")
+            for item in items[first:]:
+                if isinstance(item, dict) and item.get("turn_id") == hid:
+                    item["turn_id"] = live_id
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
         # history remains intact; this limit applies only to the restored webview payload.
         retained, size = [], 0
@@ -3860,6 +3945,11 @@ class Backend:
         orphans = self._history_orphans(state, left)
         last_end = next((i for i in range(len(items) - 1, -1, -1)
                          if isinstance(items[i], dict) and items[i].get("type") == "turn_end"), None)
+        last_start = next((i for i in range(len(items) - 1, -1, -1)
+                           if isinstance(items[i], dict) and items[i].get("type") == "turn_start"), None)
+        if last_start is not None and (last_end is None or last_start > last_end):
+            items.extend(orphans)       # the last turn is still running: they belong to it
+            return
         if last_end is not None:
             items[last_end:last_end] = orphans
             return

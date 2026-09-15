@@ -258,6 +258,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // guards let actions through, and it never raises a walk-away notification.
   private monitorTurnActive = false;
   private confirmedTurnActive = false;
+  // The running turn as its turn_start (or handoff_started) described it, so a webview reloaded
+  // mid-turn can be told a turn is running: its Stop, its clock and the turn a history snapshot
+  // leaves open. Meaningful only while confirmedTurnActive.
+  private liveTurn: { turnId: string; kind: string; prompt: string; startedAt: number; handoff: boolean } | undefined;
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
   private workspaceRootsInFlight: { revision: number; requestId?: string } | undefined;
@@ -1589,6 +1593,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.turnActive = this.confirmedTurnActive = true;
         this.monitorTurnActive = ev.kind === "monitor";
         this.turnStartedAt = Date.now();
+        this.liveTurn = { turnId: String(ev.turn_id || ""), kind: String(ev.kind || "prompt"),
+                          prompt: String(ev.prompt || ""), startedAt: this.turnStartedAt, handoff: false };
         // Goal cycles ("resume") are the goal's to pick back up; only an ordinary turn, or a
         // continuation of one, is offered a Continue after a backend death. A monitor turn is
         // DGC's own and simply wakes again on the next event.
@@ -1599,6 +1605,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "handoff_started":
         this.turnActive = this.confirmedTurnActive = true;
+        this.liveTurn = { turnId: "", kind: "prompt", prompt: "", startedAt: Date.now(), handoff: true };
         break;
       case "handoff":
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
@@ -1996,6 +2003,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "session_ready", sessionId: this.currentSessionId });
           if (this.lastReadyEvent?.capabilities?.history_snapshot) {
             be.send({ type: "get_history", request_id: this.nextRequestId("restore-history") });
+          }
+          // A webview reloaded while a turn runs knows nothing of that turn: say so before the
+          // snapshot lands, so Stop shows and the snapshot's unfinished last turn stays the live one
+          // (the backend re-sends the question or approval it is waiting on right after it).
+          if (this.confirmedTurnActive && this.liveTurn) {
+            this.post({ type: "turn_active", ...this.liveTurn,
+                        history: this.lastReadyEvent?.capabilities?.history_snapshot === true });
           }
           // A reloaded webview starts with an empty monitors rail and knows no monitor ids, so
           // it would drop the end of one that is still running. The backend's list restores both.

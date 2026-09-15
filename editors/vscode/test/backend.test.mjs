@@ -196,6 +196,44 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   active.dispose();
 });
 
+// A history snapshot taken for a reloaded webview is followed by the decisions the turn still waits
+// on, with their original ids. The transport shows such a request again until it is answered, and
+// still fails closed when an active id comes back as a different kind of request.
+test("backend forwards a re-announced open decision until it is answered, and fails closed on a changed kind", async () => {
+  const command = executable("reannounce-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+const request = { type: "permission_request", id: "r1", name: "bash", args: { command: "npm test" },
+  command: "npm test", suggested_rule: "bash(npm test)", choices: ["once", "always", "deny"] };
+send(ready);
+send(request);
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  if (cmd.type === "get_history") { send({ type: "history", items: [], request_id: cmd.request_id }); send(request); }
+  if (cmd.type === "permission_response") { send(request); send({ type: "info", message: "after-response" }); }
+  if (cmd.type === "status") send({ type: "plan_proposal", id: "r1", plan: "x", choices: ["auto", "acceptEdits", "default", "reject"] });
+});`);
+  const backend = new DgcBackend(scratch, command);
+  const requests = [];
+  backend.on("event", (event) => { if (event.type === "permission_request") requests.push(event.id); });
+  backend.on("ready", () => backend.completeHandshake());
+  const first = waitFor(backend, "permission_request");
+  backend.start();
+  await first;
+  const again = waitFor(backend, "event", (event) => event.type === "permission_request" && requests.length === 2);
+  assert.equal(backend.send({ type: "get_history", request_id: "h1" }), true);
+  await again;
+  const after = waitFor(backend, "info", (event) => event.message === "after-response");
+  assert.equal(backend.send({ type: "permission_response", id: "r1", decision: "once" }), true);
+  await after;
+  assert.deepEqual(requests, ["r1", "r1"], "an answered request is not shown a third time");
+  const failure = waitFor(backend, "event", (event) => event.type === "error" && event.protocol_error === true);
+  backend.send({ type: "status", request_id: "s1" });
+  assert.match((await failure).message, /reused an active approval request ID/);
+  backend.dispose();
+});
+
 test("backend query requests ignore crossed replies and release listeners on every terminal path", async () => {
   const command = executable("correlated-query-backend", `
 const readline = require("node:readline");

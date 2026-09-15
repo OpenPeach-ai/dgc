@@ -805,6 +805,44 @@
     if (role && role.textContent.startsWith("you")) role.textContent = "you";
     return node;
   }
+  // A webview (re)loaded while a turn runs is told so by the extension before the history snapshot
+  // arrives (`turn_active`). The snapshot then ends with that turn still open, and it becomes the
+  // live turn instead of being settled as "Stopped": its later events, the question it is waiting
+  // on and its turn_end all land in it. With no snapshot coming, or none that holds the turn yet,
+  // the turn starts here from what its turn_start said.
+  let liveTurnHint = null;
+  function noteLiveTurn(msg) {
+    liveTurnHint = {
+      id: String(msg.turnId || "").slice(0, 128), kind: ["resume", "continue", "monitor"].includes(msg.kind) ? msg.kind : "prompt",
+      prompt: String(msg.prompt || ""), handoff: msg.handoff === true,
+      startedAt: Number.isFinite(msg.startedAt) && msg.startedAt > 0 ? Math.min(Date.now(), msg.startedAt) : Date.now(),
+    };
+    setSending(true);
+    if (msg.history !== true) startHintedTurn();
+  }
+  function startHintedTurn() {
+    const hint = liveTurnHint;
+    liveTurnHint = null;
+    if (!hint || turn) return;
+    startTurn(hint.prompt, hint.kind, hint.id);
+    resumeLiveTurn(turn, hint);
+  }
+  function adoptLiveTurn(replayed) {
+    const hint = liveTurnHint;
+    liveTurnHint = null;
+    turn = replayed;
+    turn.block.classList.remove("hist");
+    turn.block.querySelectorAll('.tool[data-status="running"] .dot').forEach((dot) => dot.classList.add("run"));
+    if (hint.id) turn.id = hint.id;
+    turn.timer = setInterval(renderTurnMeta, 200);
+    resumeLiveTurn(turn, hint);
+  }
+  function resumeLiveTurn(t, hint) {
+    if (!t) return;
+    t.t0 = t.phaseT0 = hint.startedAt;
+    t.handoff = hint.handoff;
+    renderTurnMeta();
+  }
   function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
@@ -1181,6 +1219,7 @@
     if (input.value === "" && draft) { setComposerText(draft); onInput(); }
   }
   function discardTurn() {
+    liveTurnHint = null;
     if (turn) {
       clearInterval(turn.timer);
       clearTimeout(turn.renderTimer);
@@ -1608,6 +1647,10 @@
     }
   }
   function requestCard(c, id) { c.dataset.requestId = String(id); renderTurnMeta(); return c; }
+  // The backend announces an open decision again after a history snapshot; one card per request.
+  function requestShown(id) {
+    return [...document.querySelectorAll(".card[data-request-id]")].some((card) => card.dataset.requestId === String(id));
+  }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
@@ -2288,7 +2331,7 @@
         if (!$("settings").hidden) fillSettings(ev);
         break;
       case "turn_start":
-        if (!replaying) removeRecoveryCards();
+        if (!replaying) { removeRecoveryCards(); liveTurnHint = null; }
         startTurn(ev.prompt, ev.kind, ev.turn_id,
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id));
         if (!replaying) customCommandPending = "";
@@ -2447,6 +2490,7 @@
         break;
       }
       case "permission_request": {
+        if (requestShown(ev.id)) break;     // announced again after a history snapshot
         ensureTurn();
         imageViewerAttention("permission_request");
         speak(`Permission required to run ${ev.name}`);
@@ -2468,6 +2512,7 @@
         break;
       }
       case "plan_proposal": {
+        if (requestShown(ev.id)) break;
         ensureTurn();
         imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
@@ -2480,6 +2525,7 @@
         break;
       }
       case "options_request": {
+        if (ask && !ask.retired && String(ask.ev.id) === String(ev.id)) break;   // already docked
         ensureTurn();
         imageViewerAttention("options_request");
         showAskCard(ev);
@@ -2771,7 +2817,7 @@
       case "turn_end":
         speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
-        if (!replaying) setSending(false);
+        if (!replaying) { setSending(false); liveTurnHint = null; }
         break;
     }
     // A replayed page anchors its own scroll position and is not news: no jump to the bottom, and
@@ -3836,18 +3882,23 @@
   // Drive the live reducer with saved events, into a detached fragment. The live turn is set
   // aside first: a history page can arrive while a turn is streaming, and the replay must not
   // adopt, finish or otherwise touch it.
-  function replayInto(list, frag) {
+  function replayInto(list, frag, newest = false) {
     const live = turn, wasFollowing = following;
+    let running = null;
     turn = null; replaying = true; appendTarget = frag;
     try {
       for (const it of list) {
         if (it && typeof it.type === "string") { if (REPLAYABLE.has(it.type)) onEvent(it); }
         else legacyItem(it);
       }
-      if (turn) endTurn("completed");        // a page that ends mid-turn still settles its block
+      // The newest page may end inside the turn that is still running (see noteLiveTurn); any
+      // other page that ends mid-turn still settles its block.
+      if (turn && newest && liveTurnHint && !live) { running = turn; turn = null; }
+      else if (turn) endTurn("completed");
     } finally {
       replaying = false; appendTarget = log; turn = live; following = wasFollowing;
     }
+    if (running) adoptLiveTurn(running);
   }
   // Items the backend still sends in their own shape because they are not turn events, plus the
   // flat projection an older backend sends — translated into events rather than given a second
@@ -3896,7 +3947,7 @@
       // Take whole turns until the page is about fifty events deep, and never fewer than one.
       let start = cursor, count = 0;
       while (start > 0 && count < 50) { start--; count += units[start].length; }
-      replayInto(units.slice(start, cursor).flat(), frag);
+      replayInto(units.slice(start, cursor).flat(), frag, cursor === units.length);
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
       const landed = [...frag.children];
       older.after(frag); cursor = start;
@@ -3956,6 +4007,7 @@
     older.onclick = () => { if (cursor > 0) page(); else askForRecall(); };
     log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
     page();
+    startHintedTurn();                // a running turn the snapshot does not hold yet
     scroll();
   }
   // User clicks are the only route out of model-generated content. Never navigate a webview.
@@ -4030,6 +4082,7 @@
       }
       input.focus(); onInput();
     }
+    else if (msg.type === "turn_active") noteLiveTurn(msg);
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { rejectPrompt(msg.requestId); if (!turn) setSending(false); }
     else if (msg.type === "goal_start_state") {

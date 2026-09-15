@@ -3911,3 +3911,64 @@ test("the typed /usage command opens the Token Usage tab through the extension h
   assert.doesNotMatch(mainCss, /\.usage-clip \{[^}]*max-width: 140px/, "ids are not cut at a fixed 140px");
   assert.match(mainCss, /\.usage-table-wrap\.more-right \{[^}]*mask-image/, "a table with hidden columns says so");
 });
+
+// A webview reloaded while a turn runs: the extension says a turn is running (turn_active) before the
+// history snapshot, the snapshot's unfinished last turn becomes the live turn, and the approval the
+// backend announces again after it is drawn once, however often it is announced.
+test("a reloaded webview keeps the running turn from its snapshot and draws a re-announced approval once", () => {
+  const { doc, send, posted, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  send({ type: "session_ready", sessionId: "s1" });
+  send({ type: "turn_active", turnId: "t3", kind: "prompt", prompt: "run the tests", startedAt: Date.now() - 5000,
+         handoff: false, history: true });
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Stop generation", "Stop shows before the snapshot");
+  event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "hello", kind: "prompt" },
+    { type: "text_delta", text: "Hi." }, { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+    { type: "turn_start", turn_id: "t3", prompt: "run the tests", kind: "prompt" },
+    { type: "tool_call", call_id: "call_1", name: "bash", args: { command: "npm test" }, summary: "npm test" },
+  ], todos: [] });
+  const permission = { type: "permission_request", id: "r4", call_id: "call_1", name: "bash", command: "npm test",
+    args: { command: "npm test" }, summary: "npm test", suggested_rule: "Bash(npm test)", choices: ["once", "always", "deny"] };
+  event(permission);
+  event({ ...permission });
+  const blocks = [...doc.querySelectorAll("#log .msg.dgc")];
+  assert.equal(blocks.length, 2);
+  assert.match(blocks[0].querySelector(".thinking").textContent, /^Worked$/, "the finished turn settles as before");
+  const live = blocks[1];
+  assert.equal(live.querySelector(".thinking.done"), null, "the running turn is not settled");
+  assert.doesNotMatch(live.textContent, /Stopped/);
+  assert.equal(live.querySelector('.tool[data-tool-name="bash"]').dataset.status, "running");
+  assert.equal(doc.querySelectorAll('.card[data-request-id="r4"]').length, 1, "one card per request");
+  assert.match(live.querySelector(".thinking .verb").textContent, /waiting for your input/);
+  live.querySelector('.card[data-request-id="r4"] button[data-d="once"]').click();
+  assert.deepEqual(posted.filter((m) => m.type === "permission_response").map((m) => [m.id, m.decision]), [["r4", "once"]]);
+  event({ type: "tool_result", call_id: "call_1", name: "bash", output: "ok", is_error: false, is_diff: false, diff: "" });
+  event({ type: "text_delta", text: "Tests pass." });
+  event({ type: "stream_end", message_id: "t3:1", phase: "answer" });
+  event({ type: "turn_end", turn_id: "t3", reason: "completed", token_estimate: 0, final_message_id: "t3:1" });
+  assert.match(live.querySelector(".thinking").textContent, /^Worked for \d+s$/, "the live turn_end settles it, with its clock");
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
+test("a turn_active with no snapshot coming starts the running turn at once, and a later snapshot never adopts a finished one", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  send({ type: "session_ready", sessionId: "s1" });
+  send({ type: "turn_active", turnId: "t9", kind: "prompt", prompt: "summarise the repo", startedAt: Date.now(), handoff: false, history: false });
+  assert.deepEqual([...doc.querySelectorAll("#log .msg.user .bubble")].map((b) => b.textContent), ["summarise the repo"]);
+  assert.equal(doc.querySelectorAll("#log .msg.dgc").length, 1);
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Stop generation");
+  event({ type: "turn_activity", turn_id: "t9", state: "responding", label: "Responding" });
+  assert.match(doc.querySelector("#log .msg.dgc .thinking .verb").textContent, /Responding/, "the live turn takes its own activity");
+  event({ type: "turn_end", turn_id: "t9", reason: "cancelled", token_estimate: 0, final_message_id: null });
+  // No hint now: an unfinished snapshot turn settles as history always did.
+  event({ type: "history", items: [{ type: "turn_start", turn_id: "h1", prompt: "old", kind: "prompt" },
+    { type: "tool_call", call_id: "c", name: "read_file", args: {}, summary: "a.py" }], todos: [] });
+  const replayed = [...doc.querySelectorAll("#log .msg.dgc.hist")];
+  assert.equal(replayed.length, 1);
+  assert.ok(replayed[0].querySelector(".thinking.done"), "settled");
+  assert.deepEqual(errors, []);
+});

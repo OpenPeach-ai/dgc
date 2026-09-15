@@ -1331,6 +1331,30 @@ test("a reloaded webview asks for the monitors list, so its rail and monitor ids
   }
 });
 
+test("a webview reloaded while a turn runs is told about that turn before its history arrives", async () => {
+  for (const running of [true, false]) {
+    const h = recoveryProvider();
+    const posts = [];
+    h.provider.post = (m) => posts.push(m);
+    h.provider.sessionReady = true;
+    h.provider.scheduleWorkspaceChanges = () => {};
+    h.provider.lastReadyEvent = { type: "ready", capabilities: { history_snapshot: true } };
+    h.provider.onEvent({ type: "turn_start", turn_id: "t7", prompt: "pick a database", kind: "prompt" });
+    if (!running) h.provider.onEvent({ type: "turn_end", turn_id: "t7", reason: "completed" });
+    posts.length = 0;
+    await h.provider.onMessage({ type: "webviewReady" });
+    const told = posts.filter((m) => m.type === "turn_active");
+    if (!running) { assert.deepEqual(told, [], "a finished turn is not announced"); continue; }
+    assert.equal(told.length, 1);
+    assert.deepEqual({ ...told[0], startedAt: typeof told[0].startedAt },
+      { type: "turn_active", turnId: "t7", kind: "prompt", prompt: "pick a database", startedAt: "number",
+        handoff: false, history: true });
+    assert.ok(h.sent.some((c) => c.type === "get_history"), "the snapshot is still requested");
+    assert.ok(posts.findIndex((m) => m.type === "session_ready") < posts.indexOf(told[0]),
+      "after session_ready, so the webview's reset does not undo it");
+  }
+});
+
 test("a goal interrupted by a dead backend picks itself back up", async () => {
   // load_session demotes a restored active goal to paused, which is right when a person opens an
   // old chat and wrong when the runner was killed under it seconds ago. The marker tells the two
