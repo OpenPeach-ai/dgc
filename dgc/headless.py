@@ -2621,12 +2621,17 @@ class Backend:
                 # Both of these are pure functions of the saved output string, so a reviewed patch
                 # comes back as a diff card and a failed command comes back red, with no migration.
                 is_diff, diff = split_diff(output)
-                if "tool result unavailable after session interruption" in output:
+                repaired = "tool result unavailable after session interruption" in output
+                if repaired:
                     turn["interrupted"] = True
                 items.extend(self._history_before_tool_result(m, call_id, turn))
-                items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
-                              "output": output, "is_error": tool_output_is_error(output),
-                              "is_diff": is_diff, "diff": diff})
+                # A question the session stopped under replays as never answered (the item above) on a
+                # step that stopped, exactly as the reconnect drew it before Continue repaired the
+                # transcript. The repair text is for the model; replayed, it turned the step "failed".
+                if not (repaired and name == "propose_options"):
+                    items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
+                                  "output": output, "is_error": tool_output_is_error(output),
+                                  "is_diff": is_diff, "diff": diff})
                 items.extend(self._history_after_tool_result(m, call_id, turn))
         live_start = None
         if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:

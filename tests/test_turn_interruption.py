@@ -454,6 +454,22 @@ class KilledBackendResumeTests(unittest.TestCase):
         self.assertIn("q9-step-one-done", tools.get("call_step", ""))
         self.assertIn("unavailable after session interruption", tools.get("call_ask", ""),
                       "the model is told the question was never answered")
+        # After Continue the transcript holds the repaired result. A reload replays the question the
+        # way the reconnect did: never answered, with the step stopped, not a failed tool result.
+        send({"type": "get_history", "request_id": "h2"})
+        reloaded = wait(lambda e: e.get("type") == "history" and e.get("request_id") == "h2")
+        self.assertIsNotNone(reloaded)
+        later = reloaded.get("items") or []
+        self.assertEqual([(item.get("call_id"), item.get("outcome")) for item in later
+                          if item.get("type") == "options_resolved"], [("call_ask", "cancelled")])
+        self.assertEqual([item for item in later if item.get("type") == "tool_result"
+                          and item.get("call_id") == "call_ask"], [],
+                         "the repair text the model read is not replayed as the step's output")
+        ask_at = next(i for i, item in enumerate(later) if item.get("type") == "tool_call"
+                      and item.get("call_id") == "call_ask")
+        ask_turn = [item for item in later[:ask_at] if item.get("type") == "turn_start"][-1]["turn_id"]
+        self.assertEqual([item.get("reason") for item in later if item.get("type") == "turn_end"
+                          and item.get("turn_id") == ask_turn], ["cancelled"])
         second.stdin.close()
         second.wait(60)
 

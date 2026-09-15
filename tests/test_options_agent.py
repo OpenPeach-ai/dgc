@@ -475,8 +475,9 @@ class HistoryShapeTests(unittest.TestCase):
                               {"role": "user", "content": "Read it"}, self.read_call(),
                               {"role": "tool", "tool_call_id": "call_0", "content": "hello"}])
         kinds = [(i["type"], i.get("name")) for i in items if i["type"] in ("tool_call", "tool_result", "options_resolved")]
+        # (the repair text is the model's; the replayed question is a stopped step, as the reconnect drew it)
         self.assertEqual(kinds, [("tool_call", "propose_options"), ("options_resolved", None),
-                                 ("tool_result", "propose_options"), ("tool_call", "read_file"), ("tool_result", "read_file")])
+                                 ("tool_call", "read_file"), ("tool_result", "read_file")])
         self.assertEqual(next(i for i in items if i["type"] == "options_resolved")["outcome"], "cancelled")
 
     def test_dismissed_turn_replays_as_completed(self):
