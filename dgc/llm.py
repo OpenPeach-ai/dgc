@@ -861,6 +861,51 @@ class _ThinkingParts:
         result.thinking += chunk
 
 
+class _NativeThinkTags:
+    """Native Ollama ``thinking`` text from some templates (qwen3-vl) is wrapped in a literal
+    ``<think>`` ... ``</think>``: markup, not reasoning. Strips one leading ``<think>`` (with the
+    whitespace after it) and one trailing ``</think>``, either possibly split across chunks. Text is
+    held back only while it could still be one of those tags."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self):
+        self.head = ""          # the start, while it could still be "<think>"
+        self.started = False
+        self.skip_space = False  # whitespace right after a stripped "<think>"
+        self.tail = ""          # the end, while it could still be "</think>"
+
+    def feed(self, chunk: str) -> str:
+        if not self.started:
+            self.head += chunk
+            probe = self.head.lstrip()
+            if len(probe) < len(self.OPEN) and self.OPEN.startswith(probe):
+                return ""
+            self.started = True
+            chunk, self.head = self.head, ""
+            if probe.startswith(self.OPEN):
+                chunk, self.skip_space = probe[len(self.OPEN):], True
+        if self.skip_space:
+            chunk = chunk.lstrip()
+            if not chunk:
+                return ""
+            self.skip_space = False
+        text = self.tail + chunk
+        body = text.rstrip()
+        keep = next((k for k in range(min(len(body), len(self.CLOSE)), 0, -1)
+                     if self.CLOSE.startswith(body[-k:])), 0)
+        self.tail = text[len(body) - keep:] if keep else ""
+        return text[:len(text) - len(self.tail)]
+
+    def finish(self) -> str:
+        """The held text once the thinking channel has stopped (content, a call, or the end)."""
+        held = self.head if not self.started else ""
+        tail, self.tail, self.head = self.tail, "", ""
+        if not self.started:
+            return "" if held.strip() == self.OPEN else held
+        return "" if tail.strip() == self.CLOSE else tail
+
+
 class _ThinkFilter:
     """Incrementally split a token stream into ('text'|'think', chunk) events, tolerating
     tags split across chunks. Recognises several reasoning-marker pairs, because local
@@ -2843,11 +2888,17 @@ class LLMClient:
         result = ChatResult()
         filt = _ThinkFilter()
         thinking_parts = _ThinkingParts()
+        native_tags = _NativeThinkTags()
 
         def think(channel: str, local: str, chunk: str) -> None:
             thinking_parts.add(result, local, chunk)
             if on_thinking:
                 on_thinking(chunk, self._reasoning_origin(channel, local, api_mode="ollama"))
+
+        def native_think_end() -> None:
+            held = native_tags.finish()
+            if held:
+                think("ollama.thinking", "ol", held)
 
         produced = False
         native_content = ""
@@ -2875,8 +2926,12 @@ class LLMClient:
                     watch.noise()
             reasoning = str(message.get("thinking") or "")
             if reasoning:
-                native_thinking += reasoning
-                think("ollama.thinking", "ol", reasoning)
+                native_thinking += reasoning            # the provider's own text, for continuation
+                shown = native_tags.feed(reasoning)
+                if shown:
+                    think("ollama.thinking", "ol", shown)
+            if message.get("content") or message.get("tool_calls") or done is True:
+                native_think_end()
             content = str(message.get("content") or "")
             if content:
                 native_content += content
@@ -3022,6 +3077,7 @@ class LLMClient:
             result.finish_reason = "incomplete"
             result.stall = _stall_of(watch, result.finish_reason)
             result.interruption = _interruption_of(watch, result.finish_reason, "ollama")
+        native_think_end()
         for kind, chunk in filt.flush():
             if kind == "think":
                 think("tags", "tags", chunk)

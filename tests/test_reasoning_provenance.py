@@ -342,6 +342,62 @@ class ResolverTableTests(unittest.TestCase):
 
 # ---- placement and the tracker -----------------------------------------------------------------------
 
+class NativeOllamaThinkTagTests(unittest.TestCase):
+    """Native Ollama reasoning some templates wrap in a literal <think> ... </think> (qwen3-vl)."""
+
+    class _Response:
+        def __init__(self, frames):
+            self.headers = {"Content-Type": "application/x-ndjson"}
+            self.status_code = 200
+            self.encoding = None
+            self._text = "".join(json.dumps(frame) + "\n" for frame in frames)
+
+        def iter_content(self, chunk_size=1, decode_unicode=False):
+            yield self._text.encode()
+
+        def close(self):
+            pass
+
+    @staticmethod
+    def frames(thinking, content="Answer", done=True):
+        out = [{"message": {"role": "assistant", "thinking": piece}, "done": False} for piece in thinking]
+        out.append({"message": {"role": "assistant", "content": content}, "done": False})
+        if done:
+            out.append({"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop"})
+        return out
+
+    def consume(self, frames):
+        from dgc.llm import LLMClient
+        client = LLMClient("http://127.0.0.1:11434", "k", "qwen3-vl:30b", api_mode="ollama")
+        seen = []
+        result = client._consume_ollama(self._Response(frames), None, lambda chunk, origin=None: seen.append(chunk))
+        return result, seen
+
+    def test_a_tag_split_across_chunks_is_stripped_before_the_ui_and_the_saved_thinking(self):
+        result, seen = self.consume(self.frames(["<th", "ink>\n", "Plan it.", "\n</thi", "nk>"]))
+        self.assertEqual("".join(seen), "Plan it.\n")
+        self.assertEqual(result.thinking, "Plan it.\n")
+        self.assertNotIn("<", "".join(seen))
+        self.assertEqual(result.content, "Answer")
+        self.assertEqual(result.provider_message["thinking"], "<think>\nPlan it.\n</think>",
+                         "the provider's own text is what continuation sends back")
+
+    def test_whole_tags_in_one_chunk_and_text_that_only_looks_like_a_tag(self):
+        result, _ = self.consume(self.frames(["<think>Checking the file.</think>"]))
+        self.assertEqual(result.thinking, "Checking the file.")
+        result, _ = self.consume(self.frames(["<thinking about it", " carefully"]))
+        self.assertEqual(result.thinking, "<thinking about it carefully", "not the tag: kept")
+        result, _ = self.consume(self.frames(["a </think> b"]))
+        self.assertEqual(result.thinking, "a </think> b", "a closing tag mid-text is text")
+        result, _ = self.consume(self.frames(["Plain reasoning, no tags."]))
+        self.assertEqual(result.thinking, "Plain reasoning, no tags.")
+
+    def test_a_stream_that_ends_inside_the_thinking_keeps_what_it_held(self):
+        result, seen = self.consume(self.frames(["<think>", "partial </th"], content="", done=False))
+        self.assertEqual("".join(seen), "partial </th")
+        self.assertEqual(result.finish_reason, "incomplete")
+
+
 class PlacementTests(unittest.TestCase):
     def place(self, source, text, tools=True, **kwargs):
         options = {"inline_enabled": True, "max_chars": 280, "from_subagent": False, **kwargs}
