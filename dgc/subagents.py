@@ -444,6 +444,71 @@ class SubagentRegistry:
                     self._ended_counts[record.state] += 1
                 self._total = len(restored)
 
+    def saved_state(self) -> dict:
+        """Keep nested records and measured metrics; neither is recoverable from parent prose."""
+        with self._publish:
+            with self._lock:
+                now = time.monotonic()
+                records = sorted(self._records.values(), key=lambda r: r.order)
+                return {"version": 1, "items": [r.item(now) for r in records[:MAX_RECORDS]],
+                        "counts": self._counts_locked()}
+
+    def restore_state(self, value, *, redact: Callable[[str], str] | None = None) -> bool:
+        """Load bounded metadata, settling in-flight agents as stopped after a process exit.
+
+        Older sessions have no metadata and are still reconstructed from their task calls.
+        Saved state is display data only: it cannot restart an agent or authorize a tool.
+        """
+        if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("items"), list):
+            return False
+        redact = redact or (lambda text: text)
+        records, seen = [], set()
+        for item in value["items"][:MAX_RECORDS]:
+            if not isinstance(item, dict):
+                continue
+            identity = item.get("id")
+            if not isinstance(identity, str) or not re.fullmatch(r"sub-[0-9a-f]{12}", identity) or identity in seen:
+                continue
+            state = item.get("state")
+            if state not in (*ACTIVE, *ENDED):
+                continue
+            parent = item.get("parent_id")
+            fields = {"id": identity, "parent_id": parent if isinstance(parent, str) and parent in seen else None,
+                      "depth": max(1, min(3, _int(item.get("depth")))),
+                      "state": "stopped" if state in ACTIVE else state,
+                      "restored": True, "listed": True,
+                      "isolated": item.get("isolated") is True, "parallel": item.get("parallel") is True,
+                      "tool_calls": _int(item.get("tool_calls"))}
+            for key, limit in (("description", MAX_DESCRIPTION), ("message", MAX_MESSAGE),
+                               ("model", MAX_MODEL), ("agent_type", MAX_AGENT_TYPE),
+                               ("call_id", MAX_CALL_ID), ("turn_id", 128)):
+                raw = item.get(key)
+                fields[key] = clip(scrub_urls(redact(raw)), limit) if isinstance(raw, str) else ""
+            for key in ("started_at", "duration_ms", "tokens"):
+                if isinstance(item.get(key), (int, float)) and not isinstance(item[key], bool):
+                    fields[key] = _int(item[key])
+            if state in ACTIVE:
+                fields["duration_ms"] = _int(item.get("elapsed_ms"))
+                fields["message"] = "the backend stopped before this agent reported"
+            records.append(fields)
+            seen.add(identity)
+        if value["items"] and not records:
+            return False
+        counts = value.get("counts") if isinstance(value.get("counts"), dict) else {}
+        ended = {state: max(sum(r["state"] == state for r in records), _int(counts.get(state))) for state in ENDED}
+        ended["stopped"] = max(ended["stopped"], _int(counts.get("stopped"))
+                               + sum(_int(counts.get(state)) for state in ACTIVE))
+        with self._publish:
+            with self._lock:
+                self._clear_locked()
+                for fields in records:
+                    record = _Record(order=self._order, **fields)
+                    self._order += 1
+                    self._records[record.id] = record
+                self._ended_counts.update(ended)
+                self._total = max(sum(ended.values()), _int(counts.get("total")), len(records))
+        return True
+
     def prune_to(self, messages: list) -> None:
         """A rewind: keep records whose `task` call is still in the transcript, drop the rest.
 
@@ -700,7 +765,7 @@ def meta_text(item: dict, *, main_model: str = "", fmt_tokens: Callable[[int], s
         parts.append(str(item["activity"]))
     if state in ENDED and item.get("message"):
         parts.append(first_line(item["message"]))
-    if item.get("restored"):
+    if item.get("restored") and item.get("duration_ms") is None and item.get("tokens") is None:
         return " · ".join(parts)
     if item.get("agent_type"):
         parts.append(str(item["agent_type"]))

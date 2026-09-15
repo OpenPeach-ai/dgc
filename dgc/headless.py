@@ -17,6 +17,7 @@ import signal
 import threading
 import os
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from . import __version__
@@ -33,6 +34,7 @@ from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEG
 from .permissions import Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
+from .history_stream import HistoryEmitter
 from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
@@ -430,7 +432,7 @@ def _history_steering_texts(message: dict) -> list[str] | None:
 
 _MID_TURN_ITEMS = ("text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                   "model_retry", "monitor_event", "turn_end")
+                   "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
 
 
 def _safe_busy(backend) -> bool:
@@ -1164,7 +1166,7 @@ class Backend:
         if not self.workspace_trusted and config.mode in ("acceptEdits", "auto"):
             config.data["mode"] = "default"  # do not persist a downgrade of the user's global preference
         self.config = config
-        self.em = Emitter(
+        self.em = HistoryEmitter(
             sys.stdout, validator=event_error,
             sanitizer=lambda event: redact_value(event, secret_values(self.config)))
         self.pending = PendingRequests()
@@ -1358,7 +1360,11 @@ class Backend:
 
     def _steering_applied(self, request_id: str) -> None:
         with self._turn_state_lock():
-            if getattr(self, "_steer_payloads", {}).pop(request_id, None) is not None:
+            payload = getattr(self, "_steer_payloads", {}).pop(request_id, None)
+            if payload is not None:
+                remember = getattr(self.em, "remember_steering", None)
+                if callable(remember):
+                    remember(payload[0])
                 self.em.emit("steering_update", request_id=request_id, state="applied")
 
     def _finish_steering(self, cancelled: bool, failed: bool) -> None:
@@ -2400,12 +2406,17 @@ class Backend:
         # decisions it is waiting on are announced again right after it. Held under the turn-state
         # lock, which the worker takes to publish turn_end: the turn either ends before this snapshot
         # (and the snapshot closes it) or after the re-announced requests, never in between.
-        with self._turn_state_lock():
+        with self._turn_state_lock(), getattr(self.em, "history_lock", nullcontext()):
             live = getattr(self, "_live_turn", None) if getattr(self, "_running_turn_kind", "") else None
             shown_calls = getattr(getattr(self, "ui", None), "shown_calls", None)
             if isinstance(live, dict) and callable(shown_calls):
                 live = {**live, "shown": shown_calls(str(live.get("id") or ""))}
-            self.em.emit("history", items=self._history(live_turn=live),
+            items = self._history(live_turn=live)
+            include_live = getattr(self.em, "include_live", None)
+            complete = False
+            if callable(include_live):
+                items, complete = include_live(items, live)
+            self.em.emit("history", items=items, complete=complete,
                          todos=redact_value(list(todos), secret_values(self.config)),
                          **_request_fields(request_id))
             reannounce = getattr(getattr(self, "ui", None), "reannounce_open_requests", None)
@@ -2625,10 +2636,10 @@ class Backend:
                 if repaired:
                     turn["interrupted"] = True
                 items.extend(self._history_before_tool_result(m, call_id, turn))
-                # A question the session stopped under replays as never answered (the item above) on a
-                # step that stopped, exactly as the reconnect drew it before Continue repaired the
-                # transcript. The repair text is for the model; replayed, it turned the step "failed".
-                if not (repaired and name == "propose_options"):
+                # A step the session stopped under remains stopped, exactly as the reconnect drew
+                # it before Continue repaired the transcript. Repair text is for the model; replay
+                # must not turn an interrupted tool into a failed command with an expanded error.
+                if not repaired:
                     items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
                                   "output": output, "is_error": tool_output_is_error(output),
                                   "is_diff": is_diff, "diff": diff})

@@ -99,6 +99,31 @@ class CancelReasonTests(unittest.TestCase):
         self.assertTrue(any("backend stopped" in str(h.get("reason", "")) for h in history))
         self.assertFalse(any(str(h.get("reason", "")) == "Stopped by user" for h in history))
 
+    def test_text_batch_crash_snapshot_names_only_unconfirmed_calls(self):
+        from unittest.mock import patch
+        from dgc.llm import LLMClient, ChatResult, ToolCall
+        calls = [ToolCall("textcall_1", "read_file", {"path": "first.txt"}),
+                 ToolCall("textcall_2", "read_file", {"path": "second.txt"})]
+        snapshots = []
+        def handle(call):
+            snapshots.append(sessions.load(self.agent.session_file, self.root))
+            return "completed " + call.arguments["path"]
+        with patch.object(LLMClient, "chat", side_effect=[ChatResult(content="", tool_calls=calls),
+                                                        ChatResult(content="Done.")]), \
+                patch.object(self.agent, "_parallel_read_outputs", return_value={}), \
+                patch.object(self.agent, "_handle_call", side_effect=handle):
+            self.agent.run_turn("Read both files")
+        self.assertEqual(len(snapshots), 2, getattr(self.agent, "_last_turn_error", ""))
+        self.assertIn("first.txt", snapshots[0][-1]["content"])
+        self.assertIn("second.txt", snapshots[0][-1]["content"])
+        self.assertIn("completed first.txt", snapshots[1][-2]["content"])
+        pending = snapshots[1][-1]["content"]
+        self.assertIn("no recorded results", pending)
+        self.assertIn("second.txt", pending)
+        self.assertNotIn("first.txt", pending)
+        saved = sessions.load(self.agent.session_file, self.root)
+        self.assertNotIn("interrupted text-tool batch", json.dumps(saved))
+
 
 class ServeShutdownLogTests(unittest.TestCase):
     """`serve.log` has to answer, days later, which of three shutdowns happened."""
@@ -922,7 +947,7 @@ class AuditRegressionTests(unittest.TestCase):
         sub.end_stream("answer")
         sub.end_stream()                       # the cancel/error/timeout paths close unphased
         sub.end_stream("commentary")
-        self.assertEqual(seen, ["commentary", "commentary", "commentary"])
+        self.assertEqual(seen, [], "a child's private prose never opens or closes a parent stream")
 
     def test_a_childs_checklist_never_repaints_the_sessions_rail(self):
         from dgc.agent import _SubUI

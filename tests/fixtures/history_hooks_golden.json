@@ -225,15 +225,6 @@
    "summary": "make"
   },
   {
-   "type": "tool_result",
-   "call_id": "call_4",
-   "name": "bash",
-   "output": "error: tool result unavailable after session interruption",
-   "is_error": true,
-   "is_diff": false,
-   "diff": ""
-  },
-  {
    "type": "turn_end",
    "turn_id": "h5",
    "reason": "cancelled",

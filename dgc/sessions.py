@@ -400,6 +400,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          subscription_sessions: dict | None = None,
          chat_changes: dict | None = None,
          images: list | None = None,
+         agents: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -459,6 +460,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             }
         if timing is not None:
             data["timing"] = _timing_values(timing)
+        if agents is not None:
+            from .redaction import redact_value
+            data["agents"] = redact_value(agents, redact_secrets or ())
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
         if chat_changes is not None:

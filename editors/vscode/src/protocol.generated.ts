@@ -2588,6 +2588,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": false
+    },
+    "complete": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "recall": {

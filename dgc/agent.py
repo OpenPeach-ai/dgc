@@ -1028,11 +1028,8 @@ class _SubUI:
 
     def on_text(self, chunk):
         self._buf.append(chunk)
-        # A parallel child's prose is its task result, and the task card already carries that. Its
-        # replay reached the parent as unlabelled main-transcript text that the saved transcript (so
-        # every history replay) never has; only a serial child's prose streams live.
-        if not self._buffered:
-            self._emit("on_text", chunk)
+        # A child's prose is its task result; the labelled task card carries it. Forwarding it
+        # into the parent's prose also made it disappear on history reload, for serial tasks too.
 
     def on_thinking(self, chunk, block=None):
         # A copy per forward (subagent_block): a buffered child replays exactly what it saw, and
@@ -1050,11 +1047,7 @@ class _SubUI:
         if self._buf:
             self._last = "".join(self._buf)
             self._buf = []
-        # A delegated child's prose is commentary to the PARENT turn, whatever the child's own loop
-        # called it — including the UNPHASED closes its cancel, error, timeout and overflow paths
-        # use, which the compatibility rule would otherwise let designate the parent's answer.
-        if not self._buffered:          # a parallel child's prose is not replayed (see on_text)
-            self._emit("end_stream", "commentary")
+        # No parent prose was opened, so there is no parent stream to close or designate.
 
     def turn_activity(self, state, label, detail=""):
         self._emit("turn_activity", state, label, detail)
@@ -2236,8 +2229,9 @@ class Agent(GoalLifecycle):
         the last one (bounded; placement is recomputed on replay, never stored)."""
         pending = getattr(self, "_turn_reasoning_pending", None)
         self._turn_reasoning_pending = []
-        if isinstance(pending, list) and pending:
-            message["_dgc_reasoning"] = persisted_reasoning(pending)
+        # Empty is meaningful: this message went through the provenance tracker and exposed no
+        # reasoning. Omitting the key made replay treat provider-only wrappers as legacy thoughts.
+        message["_dgc_reasoning"] = persisted_reasoning(pending) if isinstance(pending, list) else []
         return message
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
@@ -3408,6 +3402,7 @@ class Agent(GoalLifecycle):
                         checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
                         subscription_sessions=self.subscription_sessions,
                         images=image_index,
+                        agents=self.subagents.saved_state(),
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists,
                         redact_secrets=redact_secrets)
@@ -3772,7 +3767,8 @@ class Agent(GoalLifecycle):
             self.image_views = image_views.load_index(record.get("images"))   # images: its index
             self._image_folded = None
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
-            self.subagents.rebuild(self.messages, path.stem, redact=self._safe_text)
+            if not self.subagents.restore_state(record.get("agents"), redact=self._safe_text):
+                self.subagents.rebuild(self.messages, path.stem, redact=self._safe_text)
             checkpoint_state = record.get("checkpoints")
             self.checkpoints = CheckpointManager.from_state(
                 checkpoint_state if isinstance(checkpoint_state, dict) else {},
@@ -5264,14 +5260,28 @@ class Agent(GoalLifecycle):
                     text_results.clear()
                     text_decisions.clear()
 
+            def unfinished_text_batch(next_index: int) -> list:
+                # Text-tool responses have no native tool_calls envelope to repair after a crash.
+                # Persist the pending calls with the completed results, without adding this recovery
+                # note to the running transcript. The next successful save replaces the snapshot.
+                remaining = [{"name": c.name, "arguments": self._safe_value(c.arguments)}
+                             for c in result.tool_calls[next_index:]]
+                tail = [text_results_message()] if text_results else []
+                if remaining:
+                    tail.append({"role": "user", "content":
+                        "<system-reminder>\nThe interrupted text-tool batch has no recorded results "
+                        "for the following calls. Do not assume they ran. Check their effects before "
+                        "retrying them; the results above are already completed.\n"
+                        + json.dumps(remaining, ensure_ascii=False)
+                        + "\n</system-reminder>"})
+                return tail
+
             batch_verified = False          # is the checkout verified at the END of this batch?
             batch_landed_edits = 0          # successful file/task mutations, not merely attempted calls
             self._image_batch_open = True   # images: pixels a step returns now reach the model after it
-            if any(call.name in _WAITS_ON_USER_CALLS for call in result.tool_calls):
-                # A question or a plan can wait for the person indefinitely. Save the step that asks
-                # before it waits: a backend killed meanwhile otherwise lost the question, and
-                # Continue saw a turn that had never asked (a resume repairs the missing result).
-                self._save_turn_progress()
+            # Save before the first call too: a process can die inside it, including while a
+            # question or approval waits. Recovery must know which actions have no confirmed result.
+            self._save_turn_progress(None if native else unfinished_text_batch(0))
             parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
             parallel_outputs = ({} if parallel_tasks else
                                 self._parallel_read_outputs(result.tool_calls, sig_count))
@@ -5436,7 +5446,7 @@ class Agent(GoalLifecycle):
                     # A later call of this batch still has to run, and may run for minutes. Save the
                     # result that just landed: a backend killed meanwhile otherwise lost every
                     # finished call of the batch, and Continue asked the model to redo them.
-                    self._save_turn_progress(None if native else [text_results_message()])
+                    self._save_turn_progress(None if native else unfinished_text_batch(call_index + 1))
             flush_text_results()
             # A tool result is text, so an image a step just produced arrives here instead, as the
             # same user-role image part an `@file.png` attachment produces, with one line per source.

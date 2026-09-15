@@ -2145,7 +2145,9 @@ def unit_tests(tmp: Path):
     _bg_secret_deadline = _time_tools.monotonic() + 30.0
     while _time_tools.monotonic() < _bg_secret_deadline:
         _bg_secret_out = execute("bash_output", {"id": _bg_secret_id}, _output_ctx)
-        if "exited 0" in _bg_secret_out and "[REDACTED]" in _bg_secret_out:
+        # "finishing (leader exited 0)" still has a drain thread or descendant alive.
+        # Wait for the terminal status field, not that substring of the intermediate status.
+        if " · exited 0 · " in _bg_secret_out.split("\n", 1)[0] and "[REDACTED]" in _bg_secret_out:
             break
         _time_tools.sleep(0.02)
     _bg_secret_finished_kill = execute("bash_kill", {"id": _bg_secret_id}, _output_ctx)

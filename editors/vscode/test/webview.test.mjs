@@ -4150,6 +4150,53 @@ test("a reload mid-turn keeps one block: early events go, held ones land in the 
 });
 
 // Request ids restart with every backend process: the re-announcement guard is per backend.
+test("a complete reload snapshot replaces provisional queued turns and overlapping stream bytes", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  event({ type: "text_delta", text: "tail from first" , seq: 10 });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, seq: 11 });
+  event({ type: "turn_start", turn_id: "t2", prompt: "second", kind: "prompt", seq: 12 });
+  send({ type: "session_ready", sessionId: "s1" });
+  // The turn can advance between the host's hint and the snapshot. Identity comes from the snapshot.
+  send({ type: "turn_active", turnId: "t1", prompt: "first", kind: "prompt", history: true });
+  event({ type: "text_delta", text: "second prefix ", seq: 13 });
+  event({ type: "history", complete: true, seq: 14, items: [
+    { type: "turn_start", turn_id: "h1", prompt: "first", kind: "prompt" },
+    { type: "text_delta", text: "whole first answer" },
+    { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", final_message_id: "h1:1", token_estimate: 0 },
+    { type: "turn_start", turn_id: "t2", prompt: "second", kind: "prompt" },
+    { type: "text_delta", text: "second prefix " },
+  ] });
+  event({ type: "text_delta", text: "and end", seq: 15 });
+  event({ type: "stream_end", message_id: "t2:1", phase: "answer", seq: 16 });
+  event({ type: "turn_end", turn_id: "t2", reason: "completed", final_message_id: "t2:1", token_estimate: 0, seq: 17 });
+  assert.deepEqual([...doc.querySelectorAll("#log .msg.user .bubble")].map((n) => n.textContent), ["first", "second"]);
+  assert.equal(doc.querySelectorAll("#log .msg.dgc").length, 2);
+  const text = [...doc.querySelectorAll("#log .msg.dgc .text")].map((n) => n.textContent).join("\n");
+  assert.equal((text.match(/second prefix/g) || []).length, 1);
+  assert.match(text, /second prefix and end/);
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
+test("a queued start covered by a complete snapshot is retired from the pending queue", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  send({ type: "session_ready", sessionId: "s1" });
+  send({ type: "prompts_queued", items: [{ requestId: "p2", text: "second", session: "s1" }] });
+  send({ type: "turn_active", turnId: "t1", prompt: "first", kind: "prompt", history: true });
+  event({ type: "turn_start", turn_id: "t2", request_id: "p2", prompt: "second", kind: "prompt", seq: 12 });
+  event({ type: "history", complete: true, seq: 14, items: [
+    { type: "turn_start", turn_id: "t2", request_id: "p2", prompt: "second", kind: "prompt" },
+    { type: "text_delta", text: "answer" },
+  ] });
+  assert.deepEqual([...doc.querySelectorAll("#log .msg.user .bubble")].map((n) => n.textContent), ["second"]);
+  event({ type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 0, seq: 15 });
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
 test("a new backend's request with an id the last backend already used gets its own card", () => {
   const { doc, send, errors } = makeDom();
   const event = (data) => send({ type: "event", event: data });

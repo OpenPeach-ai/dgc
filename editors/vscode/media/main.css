@@ -1434,7 +1434,7 @@ body.ask-docked #tasks-panel { display: none; }
 .thought-prov, .thought-agent { white-space: nowrap; }
 .reasoning .thought-cut { display: block; margin-top: var(--sp-1); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); white-space: normal; }
 .reasoning .thought-cut.alone { margin-top: 0; }
-.thought-static { margin-top: var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); cursor: default; }
+.thought-static { margin-top: var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--thought-muted, var(--muted)); cursor: default; }
 .thought-note { margin: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.55 var(--sans); color: var(--thought-muted, var(--muted)); overflow-wrap: anywhere; }
 .thought-note > p { margin: 0 0 var(--sp-1); }
 .thought-note > p:last-of-type { display: inline; margin: 0; }

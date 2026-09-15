@@ -142,7 +142,7 @@ def trust_screen_text(project_root, cols: int, rows: int, secs: float) -> str:
         return Align.center(text, width=width)
 
     c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
-                width=cols, highlight=False)
+                width=cols, height=rows, highlight=False)
     out = []
     top = max(1, (rows - 16) // 2)                # vertical centering
     out += [Text("")] * top

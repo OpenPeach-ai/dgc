@@ -144,7 +144,7 @@
 <ul>
 <li>A model that accepts images gets them after the batch of tool calls that produced them. Text inside an image is treated as data, never as instructions.</li>
 <li>A model without vision is told that an image exists and never receives it, and <code>view_image</code> is not offered to it.</li>
-<li>If an endpoint refuses an image, DGC sends the request again without it and stops sending images to that endpoint for the rest of the session.</li>
+<li>If an endpoint refuses an image, DGC sends the request again without it and stops sending images to that endpoint/model pair until the rejection cache expires (up to one hour) or DGC restarts. The cache is shared across chats in the same process.</li>
 </ul>
 <div class="heading-row h2-row"><h2 id="where-they-are-kept">Where they are kept</h2><a class="anchor" href="#where-they-are-kept" aria-label="Link to this section">#</a></div>
 <p>Each session keeps a private copy of its images beside its transcript, in <code>~/.dgc/sessions/&lt;project&gt;/&lt;session&gt;.images/</code>, readable only by you. A session&#x27;s images take at most 256 MB, oldest removed first. They are deleted with the session and copied when you branch it. The editor receives an image&#x27;s name, size and source, never its path on disk. Screenshots are also saved under <code>.dgc/screenshots/</code> in the project; that folder carries its own <code>.gitignore</code>, so they never show up in <code>git status</code> or in the chat&#x27;s changed files.</p>

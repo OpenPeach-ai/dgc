@@ -2601,11 +2601,12 @@ def _run_search_process(argv: list[str], on_stdout, ctx, *,
         _terminate_background(proc, sweep_exited_group=True)
     stdout_reader.join(timeout=1); stderr_reader.join(timeout=1)
     for stream, reader in ((proc.stdout, stdout_reader), (proc.stderr, stderr_reader)):
-        if reader.is_alive() and stream is not None:
+        if stream is not None:
             try:
                 stream.close()
             except OSError:
                 pass
+        if reader.is_alive():
             reader.join(timeout=1)
     if not reason:
         if capped.is_set():

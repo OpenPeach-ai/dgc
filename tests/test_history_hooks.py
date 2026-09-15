@@ -256,15 +256,13 @@ class HookPlacementTests(unittest.TestCase):
         self.assertEqual(_MID_TURN_ITEMS, (
             "text_delta", "thinking_delta", "thinking_end", "stream_end", "tool_call", "tool_result",
             "tool_denied", "tool_images", "options_resolved", "model_retry", "monitor_event",
-            "turn_end"))
+            "turn_activity", "turn_eta", "turn_end"))
         webview = (Path(__file__).resolve().parents[1] / "editors" / "vscode" / "media" / "main.js").read_text()
         replayable = webview.split("const REPLAYABLE = new Set([", 1)[1].split("]);", 1)[0]
         self.assertEqual([part.strip().strip('"') for part in replayable.split(",")],
                          ["turn_start", *_MID_TURN_ITEMS])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LiveAndReplayArgsTests(unittest.TestCase):
@@ -327,3 +325,7 @@ class LiveAndReplayArgsTests(unittest.TestCase):
         self.assertLess(len(json.dumps(args)), 4000)
         small = {"todos": [{"content": "write tests", "status": "in_progress"}], "nested": {"deep": [1, {"x": None}]}}
         self.assertEqual(_history_args(json.dumps(small)), small, "a small collection is untouched")
+
+
+if __name__ == "__main__":
+    unittest.main()

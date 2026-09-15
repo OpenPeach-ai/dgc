@@ -566,6 +566,21 @@ class SerialAndParallelTests(HarnessCase):
         self.assertTrue(any(f["type"] == "tool_call" and str(f.get("call_id", "")).startswith("sub-")
                             for f in h.stream.frames()))
 
+    def test_serial_child_prose_stays_in_its_labelled_task_result_after_reload(self):
+        h = self.make(mode="acceptEdits")
+        h.answer("permission_request", {"decision": "once"})
+        call = ToolCall("p0", "task", {"description": "Read the file", "prompt": "CHILD0 work"})
+        h.run("delegate", [("CHILD0", child(summary="child's distinct answer")),
+                           ("delegate", calls_then([call], final="Parent answer."))])
+        self.assertFramesValid(h)
+        live = "".join(f["text"] for f in h.of("text_delta"))
+        self.assertNotIn("child's distinct answer", live)
+        self.assertIn("Parent answer.", live)
+        self.assertTrue(any("child's distinct answer" in f["output"] for f in h.of("tool_result")
+                            if f["name"] == "task"))
+        replayed = "".join(i.get("text", "") for i in h.backend._history() if i.get("type") == "text_delta")
+        self.assertEqual(replayed, live)
+
     def test_accept_edits_runs_tasks_serially(self):
         h = self.make(mode="acceptEdits")
         h.answer("permission_request", {"decision": "once"})
@@ -577,6 +592,41 @@ class SerialAndParallelTests(HarnessCase):
 
 
 class TerminalStateTests(HarnessCase):
+    def test_nested_agents_and_metrics_survive_save_and_resume(self):
+        h = self.make()
+        # Use the normal session location, so the same path validation as production applies.
+        from dgc import sessions
+        h.agent.session_file = sessions.new_path(h.config.project_root)
+        h.run("delegate", [
+            ("GRANDCHILD", child(summary="nested answer")),
+            ("CHILD", calls_then([ToolCall("n1", "task", {"description": "nested helper", "prompt": "GRANDCHILD"})])),
+            ("delegate", calls_then([ToolCall("p1", "task", {"description": "parent helper", "prompt": "CHILD"})])),
+        ])
+        before = h.agent.subagents.snapshot()
+        self.assertEqual(before["total"], 2)
+        other = Agent(h.config, HeadlessUI(Emitter(_Stream(), validator=ep.event_error), PendingRequests()))
+        self.addCleanup(other.mcp.stop_all)
+        other.load_session(h.agent.session_file)
+        after = other.subagents.snapshot()
+        self.assertEqual(after["total"], before["total"])
+        keys = ("id", "parent_id", "description", "state", "tool_calls", "tokens", "duration_ms")
+        self.assertEqual([{k: i.get(k) for k in keys} for i in after["items"]],
+                         [{k: i.get(k) for k in keys} for i in before["items"]])
+        self.assertIsNone(ep.event_error({"type": "agents", "seq": 0, **after}))
+
+    def test_saved_running_agents_restore_stopped_without_losing_their_parent(self):
+        reg = SubagentRegistry()
+        reg.start(id="sub-111111111111", description="parent", depth=1, call_id="p")
+        reg.start(id="sub-222222222222", description="child", depth=2, parent_id="sub-111111111111", call_id="c")
+        reg.progress("sub-222222222222", tool_calls=2, tokens=99)
+        other = SubagentRegistry()
+        self.assertTrue(other.restore_state(reg.saved_state()))
+        snap = other.snapshot()
+        self.assertEqual((snap["total"], snap["active"]), (2, 0))
+        self.assertTrue(all(i["state"] == "stopped" for i in snap["items"]))
+        self.assertEqual(snap["items"][1]["parent_id"], snap["items"][0]["id"])
+        self.assertEqual(snap["items"][1]["tokens"], 99)
+
     def ended(self, h):
         return {f["id"]: f for f in h.of("agent_ended")}
 

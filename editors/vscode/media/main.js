@@ -934,20 +934,31 @@
       // block; everything they showed that was saved is in the snapshot on its way, so that block
       // goes (a step waiting on a decision is announced again after the snapshot).
       if (turn && turn.beforeSession) dropTurnBlock();
-      if (!turn) {
-        heldForSnapshot = heldForSnapshot || [];
-        clearTimeout(heldTimer);
-        heldTimer = setTimeout(releaseHeldEvents, 10000);   // a snapshot that never comes holds nothing for long
-      }
+      heldForSnapshot = heldForSnapshot || [];
+      clearTimeout(heldTimer);
+      heldTimer = setTimeout(releaseHeldEvents, 10000);   // a snapshot that never comes holds nothing for long
     }
     setSending(true);
     if (msg.history !== true) startHintedTurn();
   }
-  function releaseHeldEvents() {
+  function releaseHeldEvents(throughSeq = -1) {
     clearTimeout(heldTimer); heldTimer = null;
     const held = heldForSnapshot;
     heldForSnapshot = null;
-    if (held) for (const ev of held) onEvent(ev);
+    if (held) for (const ev of held) {
+      // A complete snapshot includes the running round, even the text not saved to disk yet.
+      // Its wire sequence is the boundary: playing those same bytes again duplicates the answer.
+      if (Number.isFinite(ev.seq) && ev.seq <= throughSeq) {
+        if (REPLAYABLE.has(ev.type)) continue;
+        if (ev.type === "steering_update" && ev.state === "applied") {
+          const entry = queuedPrompts.get(ev.request_id) || pendingPrompts.get(ev.request_id);
+          entry?.node?.remove();
+          queuedPrompts.delete(ev.request_id); pendingPrompts.delete(ev.request_id);
+          continue;
+        }
+      }
+      onEvent(ev);
+    }
   }
   function dropTurnBlock() {
     clearInterval(turn.timer);
@@ -2546,9 +2557,10 @@
         break;
       }
       case "history":
+        if (ev.complete === true) prepareCompleteHistory(ev.items || []);
         renderHistory(ev.items || []);
         if (Array.isArray(ev.todos)) renderTodos(ev.todos);
-        if (!replaying) releaseHeldEvents();       // the running turn is adopted: its held events land in it
+        if (!replaying) releaseHeldEvents(ev.complete === true ? ev.seq : -1);
         break;
       case "recall": renderHistory._absorbRecall?.(ev); break;
       case "rewound":
@@ -4194,7 +4206,39 @@
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                               "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                              "model_retry", "monitor_event", "turn_end"]);
+                              "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end"]);
+  function prepareCompleteHistory(items) {
+    // The host may have forwarded the end of A and start of queued B while this webview was
+    // loading. Those provisional blocks must be replaced together, not adopted as one turn.
+    // Starts covered by the snapshot must also retire their delivery bookkeeping. A queued start
+    // can be among the held events; discarding only its rendering left a second queued bubble.
+    for (const item of items) {
+      if (item?.type !== "turn_start" || !item.request_id) continue;
+      const id = item.request_id;
+      const entry = queuedPrompts.get(id) || pendingPrompts.get(id);
+      entry?.node?.remove();
+      if (queuedPrompts.has(id)) queuedCount = Math.max(0, queuedCount - 1);
+      queuedPrompts.delete(id); pendingPrompts.delete(id);
+    }
+    renderQueued();
+    const pending = new Set([...queuedPrompts.values(), ...pendingPrompts.values()].map((e) => e?.node));
+    if (turn) dropTurnBlock();
+    for (const node of [...log.children]) {
+      if (node.matches(".msg, .resume-note, .compaction") && !pending.has(node)
+          && !node.matches(".rejected, .unconfirmed")) node.remove();
+    }
+    let open = null;
+    for (const item of items) {
+      if (item?.type === "turn_start") open = item;
+      else if (item?.type === "turn_end") open = null;
+    }
+    const previous = liveTurnHint;
+    liveTurnHint = open ? {
+      id: String(open.turn_id || ""), prompt: String(open.prompt || ""), kind: open.kind || "prompt",
+      startedAt: previous?.id === open.turn_id ? previous.startedAt : Date.now(), handoff: false,
+    } : null;
+    setSending(!!open);
+  }
   // One whole turn, or one standalone marker. Paging cuts between units, never inside one.
   function historyUnits(items) {
     const units = [];
@@ -4227,7 +4271,7 @@
       }
       // The newest page may end inside the turn that is still running (see noteLiveTurn); any
       // other page that ends mid-turn still settles its block.
-      if (turn && newest && liveTurnHint && !live) { running = turn; turn = null; }
+      if (turn && newest && liveTurnHint && !live && turn.id === liveTurnHint.id) { running = turn; turn = null; }
       else if (turn) endTurn("completed");
     } finally {
       replaying = false; appendTarget = log; turn = live; following = wasFollowing;
@@ -4798,7 +4842,7 @@
     // An ended row's reason goes last: the meta is clamped to two lines, and what gets cut should be
     // the tail of a long provider message (the row's label has all of it), never the stats.
     const why = AGENT_ENDED_WORD[state] && record.message ? agentFirstLine(record.message) : "";
-    if (record.restored) return [...parts, ...(why ? [why] : [])].join(" · ");
+    if (record.restored && record.duration_ms == null && record.tokens == null) return [...parts, ...(why ? [why] : [])].join(" · ");
     if (record.agent_type) parts.push(String(record.agent_type));
     if (record.model && record.model !== curModel) parts.push(String(record.model));
     if (state === "running" || state === "waiting") parts.push(agentElapsed(agentLiveMs(record)));

@@ -1358,7 +1358,8 @@ viewer. *Viewed images* has the details.
 Whether the *model* can see it is a separate question, and DGC checks rather than guesses. With a
 vision model the picture is attached for it to read. A model without vision is told the image exists
 and never receives it, with a nudge to use `snapshot` instead, which is more precise anyway. If an
-endpoint turns out not to accept images, DGC stops sending them for the rest of the session. Check
+endpoint turns out not to accept images, DGC caches the rejection for that endpoint/model pair
+for up to one hour, shared across chats in the same process. Restarting DGC clears it. Check
 with `ollama show <model>` — look for `vision` under Capabilities.
 
 ## Which browser
@@ -1449,7 +1450,8 @@ this; without a display it shows where the file is instead. The classic `dgc` pr
 - A model without vision is told that an image exists and never receives it, and `view_image` is not
   offered to it.
 - If an endpoint refuses an image, DGC sends the request again without it and stops sending images to
-  that endpoint for the rest of the session.
+  that endpoint/model pair until the rejection cache expires (up to one hour) or DGC restarts.
+  The cache is shared across chats in the same process.
 
 ## Where they are kept
 
