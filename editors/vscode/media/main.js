@@ -5355,8 +5355,16 @@
       dl.appendChild(el("dd", "", "")).textContent = value;
     }
   }
+  // Which sub-agent a line belongs to, by its task description from the agents list: parallel
+  // sub-agents reconnecting at once otherwise draw identical lines.
+  function retryAgentDescription(line) {
+    if (line.origin !== "subagent" || !line.agent) return "";
+    const record = agentRecords.get(line.agent);
+    return record ? String(record.description || "").replace(/\s+/g, " ").trim().slice(0, 120) : "";
+  }
   function retryFactRows(line) {
-    return [["Cause", line.summary], ["Model", [line.model, line.apiMode].filter(Boolean).join(" · ")],
+    return [["Sub-agent", retryAgentDescription(line)],
+      ["Cause", line.summary], ["Model", [line.model, line.apiMode].filter(Boolean).join(" · ")],
       ["Endpoint", line.endpoint], ["Engine", line.origin === "engine" ? line.engine : ""],
       ["HTTP status", line.httpStatus ? String(line.httpStatus) : ""]];
   }
@@ -5376,6 +5384,11 @@
     node.querySelector(".model-retry-count").textContent = count ? ` ${count}` : "";
     const cause = state === "recovered" ? (retryHost(line.endpoint) || line.summary) : line.summary;
     node.querySelector(".model-retry-cause").textContent = cause;
+    const who = retryAgentDescription(line);
+    const toggle = node.querySelector(".model-retry-toggle");
+    const title = who ? `Sub-agent “${who}” · ${words}${count ? ` ${count}` : ""}${cause ? `\n${cause}` : ""}` : "";
+    if (title) hoverTip.retitle(toggle, title);
+    else if (toggle.hasAttribute("title")) hoverTip.retitle(toggle, "");
     const icon = node.querySelector(".model-retry-icon");
     icon.className = "codicon model-retry-icon codicon-" + (state === "recovered" ? "plug"
       : state === "cancelled" || state === "unfinished" ? "circle-slash" : "debug-disconnect");

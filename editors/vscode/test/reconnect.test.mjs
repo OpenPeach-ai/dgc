@@ -129,6 +129,38 @@ test("interleaved runs keep separate lines, and a sub-agent's line says whose it
   assert.equal(label(lines()[1]), "Sub-agent · Reconnected after 1 retry");
 });
 
+test("parallel sub-agents' reconnect lines name their task in the title, the detail and the copied text", () => {
+  const { event, lines, label, posted, errors } = setup();
+  event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
+  for (const [n, description] of [[1, "survey the README"], [2, "survey the tests"]]) {
+    event({ type: "tool_call", call_id: `call_task_${n}`, name: "task", args: { description }, summary: description });
+    event({ type: "agent_started", id: `sub-00000000000${n}`, parent_id: null, call_id: `call_task_${n}`, description,
+            depth: 1, state: "running", started_at: n, isolated: true, parallel: true, turn_id: "t1" });
+  }
+  for (const n of [1, 2]) {
+    event(retry({ retry_id: `t1:sub-00000000000${n}:retry1`, origin: "subagent", agent: `sub-00000000000${n}` }));
+  }
+  const [one, two] = lines();
+  assert.deepEqual([label(one), label(two)], ["Sub-agent · Reconnecting 1/3", "Sub-agent · Reconnecting 1/3"],
+    "the visible label stays short");
+  const title = (line) => line.querySelector(".model-retry-toggle").getAttribute("title");
+  assert.equal(title(one), `Sub-agent “survey the README” · Reconnecting 1/3\nconnection refused by ${HOST}`);
+  assert.equal(title(two), `Sub-agent “survey the tests” · Reconnecting 1/3\nconnection refused by ${HOST}`);
+  const facts = (line) => Object.fromEntries([...line.querySelectorAll(".model-retry-facts dt")]
+    .map((dt) => [dt.textContent, dt.nextElementSibling.textContent]));
+  assert.equal(facts(one)["Sub-agent"], "survey the README");
+  assert.equal(facts(two)["Sub-agent"], "survey the tests");
+  two.querySelector(".model-retry-copy").click();
+  assert.match(posted.filter((m) => m.type === "copy").at(-1).text, /^Sub-agent: survey the tests$/m);
+  event(retry({ retry_id: "t1:sub-000000000002:retry1", state: "recovered", origin: "subagent", agent: "sub-000000000002" }));
+  assert.equal(title(two), `Sub-agent “survey the tests” · Reconnected after 1 retry\n${HOST}`);
+  // The main agent's own line has no sub-agent row and no title.
+  event(retry({ retry_id: "t1:retry9" }));
+  assert.equal(title(lines()[2]), null);
+  assert.equal(facts(lines()[2])["Sub-agent"], undefined);
+  assert.deepEqual(errors, []);
+});
+
 test("tools after a reconnect land in a second tool group below its line", () => {
   const { event, doc, lines } = setup();
   event({ type: "turn_start", turn_id: "t1", prompt: "Go" });
