@@ -91,6 +91,15 @@ npm run qa:site:release
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 python3 "$ROOT/scripts/check-site.py" --require-public-release --stage "$STAGE"
+# Acceptance can take long enough for another release to reach public main.
+# Recheck immediately before upload so this snapshot cannot roll that release back.
+git fetch --quiet origin main
+[ "$(git rev-parse HEAD)" = "$COMMIT_HASH" ] \
+  && [ "$(git rev-parse origin/main)" = "$COMMIT_HASH" ] \
+  && [ -z "$(git status --porcelain --untracked-files=normal)" ] || {
+  echo "source or public main changed during acceptance; prepare the latest snapshot before deploying" >&2
+  exit 1
+}
 CLOUDFLARE_API_TOKEN="$DEPLOY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DEPLOY_ACCOUNT" \
   npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$STAGE" \
   --project-name="$PROJECT" --branch="$BRANCH" \

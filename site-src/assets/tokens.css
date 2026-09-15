@@ -19,3 +19,5 @@
 @media(max-width:1040px){:root{--section:80px}}
 @media(max-width:760px){:root{--section:64px;--gutter:20px}}
 @media(prefers-reduced-motion:reduce){:root{--t-fast:0ms;--t-med:0ms;--t-slow:0ms}}
+
+@font-face{font-family:'DGC Wordmark';src:url('/assets/fonts/jetbrains-mono-extrabold-wordmark.woff2') format('woff2');font-style:normal;font-weight:800;font-display:swap;unicode-range:U+0043-0044,U+0047}
