@@ -2621,12 +2621,7 @@
         } else {
           if (pending?.node) {
             pending.node.querySelector(".role").textContent = ev.state === "applied" ? "you · steering" : "you · queued";
-            if (ev.state === "applied" && turn) {
-              flushText(); finishReasoning();
-              if (turn.textEl) turn.textEl.classList.add("commentary");
-              turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
-              appendTurnContent(pending.node);
-            }
+            if (ev.state === "applied" && turn) placeSteering(pending.node);
           }
           // Unconsumed steering is spliced back in at the HEAD of the backend's queue.
           if (ev.state === "queued" && pending) {
@@ -4209,8 +4204,24 @@
   // Items the backend still sends in their own shape because they are not turn events, plus the
   // flat projection an older backend sends — translated into events rather than given a second
   // renderer of their own.
+  // A message the user sent while the turn ran, placed where the model read it: what streamed before
+  // it becomes commentary and the turn carries on below it. The live acknowledgement and a restored
+  // chat's steering rows both come here, so a reload draws the turn the live one drew.
+  function placeSteering(node) {
+    flushText(); finishReasoning();
+    if (turn.textEl) turn.textEl.classList.add("commentary");
+    turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
+    appendTurnContent(node);
+  }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
+    if (it.role === "steering") {
+      ensureTurn();
+      const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
+      node.appendChild(el("div", "bubble", esc(String(it.text || "").slice(0, 50000))));
+      placeSteering(node);
+      return;
+    }
     if (it.role === "compaction") {
       // Earlier turns were summarised so the run could keep going. Say so plainly; the summary
       // is the model's own context, available on request rather than pasted into the chat.

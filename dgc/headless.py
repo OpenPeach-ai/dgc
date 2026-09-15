@@ -407,6 +407,27 @@ def _command_lines(stream, watch: _PipeWatch | None = None):
 # A restored turn must be built by the same code that builds a live one, so history is not a
 # second projection with its own rules -- it is the live event vocabulary, replayed. Anything in
 # this set is a turn fragment: it is meaningless without the ``turn_start`` above it.
+def _history_steering_texts(message: dict) -> list[str] | None:
+    """The messages a saved ``<user-interjection>`` folded together, as the user wrote them, or None
+    when ``message`` is not one. Each keeps its own bubble on replay (``_dgc_steering`` records where
+    one ends; an older save without it is one message)."""
+    from .workflows import STEERING_PREFIX, STEERING_SUFFIX, display_prompt
+    content = message.get("content")
+    parts = content if isinstance(content, list) else [{"type": "text", "text": content}]
+    text = "".join(str(part.get("text") or "") for part in parts
+                   if isinstance(part, dict) and part.get("type") == "text")
+    if not (text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX)):
+        return None
+    recorded = message.get("_dgc_steering")
+    pieces = ([str(piece) for piece in recorded[:32] if isinstance(piece, str)]
+              if isinstance(recorded, list) and recorded else [text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]])
+    texts = [display_prompt(_strip_editor_context(piece)).strip()[:50_000] for piece in pieces]
+    texts = [piece for piece in texts if piece] or [""]
+    if isinstance(content, list) and any(isinstance(part, dict) and part.get("type") == "image_url" for part in content):
+        texts[-1] = (texts[-1] + " 📷").strip()
+    return texts
+
+
 _MID_TURN_ITEMS = ("text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
                    "model_retry", "monitor_event", "turn_end")
@@ -2520,6 +2541,14 @@ class Backend:
             if role == "user" and isinstance(content, str) and _goal_scaffold(content):
                 open_turn(_goal_scaffold(content), "resume")
                 continue
+            steering = _history_steering_texts(m) if role == "user" else None
+            if steering is not None:
+                # Messages the user sent WHILE a turn ran were folded into that turn: they are not a
+                # turn of their own. Opening one here closed the steered turn with no answer, so it
+                # replayed as "Stopped", and every folded message shared a single bubble.
+                ensure_turn()
+                items.extend({"role": "steering", "text": text} for text in steering)
+                continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",
                               "text": content[len(_COMPACT_PREFIX):].strip()[:20_000]})
@@ -2641,7 +2670,7 @@ class Backend:
         retained.reverse()
         # Never hand the panel a turn that begins in the middle. Trimming from the front is the
         # honest cut: the dropped fragments are the oldest, and the notice below says so.
-        while retained and retained[0].get("type") in _MID_TURN_ITEMS:
+        while retained and (retained[0].get("type") in _MID_TURN_ITEMS or retained[0].get("role") == "steering"):
             retained.pop(0)
         if len(retained) < len(items):
             retained.insert(0, {"role": "notice", "text": "Showing the most recent saved context. Earlier messages remain in the session file."})

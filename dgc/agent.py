@@ -2837,14 +2837,20 @@ class Agent(GoalLifecycle):
             self.messages.append({"role": "user", "content": (
                 [{"type": "text", "text": content},
                  *({"type": "image_url", "image_url": {"url": image}} for image in images)]
-                if images else content)})
+                if images else content),
+                # Where one message ends and the next begins: the model reads them joined, but each
+                # was its own bubble live, and a restored chat shows them the same way.
+                "_dgc_steering": [m["text"] for m in msgs if m["text"].strip()]})
             self.steer_queue.clear()
         applied = getattr(self.ui, "steering_applied", None)
         if callable(applied):
             for item in msgs:
                 if item["request_id"]:
                     applied(item["request_id"])
-        self.ui.info(f"↳ steering: {joined[:80]}")
+        if not (callable(applied) and all(item["request_id"] for item in msgs)):
+            # A frontend that was told which messages landed shows each as its own bubble at this
+            # point; the joined line repeated them, and a restored chat never had it.
+            self.ui.info(f"↳ steering: {joined[:80]}")
         return True
 
     def take_deferred_steers(self) -> list[str]:

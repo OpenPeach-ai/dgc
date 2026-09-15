@@ -112,9 +112,46 @@ class LiveControlTests(unittest.TestCase):
         self.wait("steering_update", request_id="follow", state="applied")
         self.assertFalse(self.backend._steer_payloads)
         history = self.backend._history()
-        followup = next(row for row in history if row.get("type") == "turn_start"
-                        and "Check this image" in row["prompt"])
-        self.assertNotIn("user-interjection", followup["prompt"])
+        self.assertEqual([row["prompt"] for row in history if row.get("type") == "turn_start"], ["Inspect"],
+                         "steering is part of the turn it steered, not a turn of its own")
+        followup = next(row for row in history if row.get("role") == "steering")
+        self.assertIn("Check this image", followup["text"])
+        self.assertNotIn("user-interjection", followup["text"])
+        self.assertNotIn("REFERENCE-MARKER", followup["text"], "the attached context is not the user's words")
+
+    def test_a_steered_turn_replays_as_one_finished_turn_with_one_bubble_per_message(self):
+        # Before: the saved interjection opened a turn of its own, so the steered turn replayed as
+        # "Stopped" (no answer of its own), and every message folded into one interjection shared a bubble.
+        entered, requests = threading.Event(), []
+        def chat(messages, **kwargs):
+            requests.append(copy.deepcopy(messages))
+            if len(requests) == 1:
+                entered.set()
+                self.assertTrue(self.release.wait(5))
+                return ChatResult(content="Looking at the parser first.")
+            return ChatResult(content="Refactored, with the docs updated and the API kept.")
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.backend.dispatch({"type": "prompt", "text": "Refactor the parser", "request_id": "first"})
+            self.assertTrue(entered.wait(5))
+            for n, text in enumerate(("also update the docs", "and keep the public API\nexactly as it is")):
+                self.backend.dispatch({"type": "prompt", "text": text, "delivery": "steer", "request_id": f"steer{n}"})
+                self.wait("prompt_accepted", request_id=f"steer{n}", state="steered")
+            self.release.set()
+            self.wait("turn_end", reason="completed")
+        self.assertEqual(len(requests), 2, "both messages reached the model in one interjection")
+        history = self.backend._history()
+        for row in history:
+            if row.get("type"):
+                self.assertIsNone(event_error({"seq": 0, **row}), row)
+        shape = [row.get("type") or row.get("role") for row in history]
+        self.assertEqual(shape.count("turn_start"), 1, shape)
+        self.assertEqual([row["text"] for row in history if row.get("role") == "steering"],
+                         ["also update the docs", "and keep the public API\nexactly as it is"])
+        end = next(row for row in history if row.get("type") == "turn_end")
+        self.assertEqual(end["reason"], "completed", history)
+        self.assertLess(shape.index("steering"), shape.index("turn_end"))
+        answer = [row for row in history if row.get("type") == "stream_end"]
+        self.assertEqual(end["final_message_id"], answer[-1]["message_id"])
 
     def test_cancel_and_preparation_error_return_unconsumed_steering(self):
         for failed in (False, True):

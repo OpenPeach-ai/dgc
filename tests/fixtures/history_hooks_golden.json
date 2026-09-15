@@ -1,5 +1,5 @@
 {
- "source": "Backend._history at 65cd0251 (before the 0.40 hooks)",
+ "source": "Backend._history at 65cd0251 (before the 0.40 hooks); steering replays inside the turn it steered (not a turn of its own) since 0.40",
  "rich": [
   {
    "type": "turn_start",
@@ -176,17 +176,8 @@
    "summary": "sleep 100"
   },
   {
-   "type": "turn_end",
-   "turn_id": "h4",
-   "reason": "cancelled",
-   "token_estimate": 0,
-   "final_message_id": null
-  },
-  {
-   "type": "turn_start",
-   "turn_id": "h5",
-   "prompt": "stop that and summarise",
-   "kind": "prompt"
+   "role": "steering",
+   "text": "stop that and summarise"
   },
   {
    "type": "text_delta",
@@ -194,7 +185,7 @@
   },
   {
    "type": "stream_end",
-   "message_id": "h5:1",
+   "message_id": "h4:1",
    "phase": "commentary"
   },
   {
@@ -213,14 +204,14 @@
   },
   {
    "type": "turn_end",
-   "turn_id": "h5",
+   "turn_id": "h4",
    "reason": "cancelled",
    "token_estimate": 0,
    "final_message_id": null
   },
   {
    "type": "turn_start",
-   "turn_id": "h6",
+   "turn_id": "h5",
    "prompt": "Continued the interrupted turn",
    "kind": "continue"
   },
@@ -244,14 +235,14 @@
   },
   {
    "type": "turn_end",
-   "turn_id": "h6",
+   "turn_id": "h5",
    "reason": "cancelled",
    "token_estimate": 0,
    "final_message_id": null
   },
   {
    "type": "turn_start",
-   "turn_id": "h7",
+   "turn_id": "h6",
    "prompt": "Continued the standing goal",
    "kind": "resume"
   },
@@ -281,7 +272,7 @@
   },
   {
    "type": "stream_end",
-   "message_id": "h7:1",
+   "message_id": "h6:1",
    "phase": "commentary"
   },
   {
@@ -434,7 +425,7 @@
   },
   {
    "type": "stream_end",
-   "message_id": "h7:2",
+   "message_id": "h6:2",
    "phase": "answer"
   },
   {
@@ -447,12 +438,12 @@
   },
   {
    "type": "stream_end",
-   "message_id": "h7:3",
+   "message_id": "h6:3",
    "phase": "answer"
   },
   {
    "type": "turn_end",
-   "turn_id": "h7",
+   "turn_id": "h6",
    "reason": "cancelled",
    "token_estimate": 0,
    "final_message_id": null
