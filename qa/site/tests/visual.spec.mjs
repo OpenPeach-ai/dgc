@@ -208,6 +208,9 @@ for (const route of REPRESENTATIVE_ROUTES) {
       await expect.soft(page, `${label}: ${band.key}`).toHaveScreenshot([label, `${band.key}.png`], {
         fullPage: true,
         clip: {x: 0, y: band.top, width: docWidth, height: band.height},
+        // The footer's build record names the commit the site was promoted from, which changes on
+        // every release build after the baselines are taken. Its geometry is still checked above.
+        mask: [page.locator(".footer-build code")],
       });
     }
 
