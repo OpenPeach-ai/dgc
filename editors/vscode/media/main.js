@@ -1849,6 +1849,12 @@
     if (decision === "always") return rule ? `Always allowed · ${rule}` : "Always allowed";
     return note ? `Denied · note for the model: ${note}` : "Denied";
   }
+  // A plan review keeps its feedback only when planning goes on (the backend drops it on approval).
+  function planDecision(decision, feedback) {
+    if (decision !== "reject") return `Approved · ${decision} mode`;
+    return feedback ? `Kept planning · feedback: ${feedback}` : "Kept planning";
+  }
+  const MCP_DECISIONS = { accept: "Approved once", decline: "Declined", cancel: "Cancelled" };
   // The two cards a backend death can leave: Continue for an ordinary turn it cut off, and Resume
   // goal when the same death kept repeating and automatic resume stood down. Each is a DGC marker
   // with buttons — clicking Continue sends no words on the user's behalf.
@@ -2773,7 +2779,7 @@
         const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
-          if (!resolveCard(c)) return;
+          if (!resolveCard(c, planDecision(b.dataset.d, feedback))) return;
           vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback });
         });
         break;
@@ -2804,7 +2810,7 @@
           const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-            if (!resolveCard(c)) return;
+            if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
           break;
@@ -2816,7 +2822,7 @@
           const c = decisionCard(`<div class="q"><span class="codicon codicon-link-external" aria-hidden="true"></span> Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-            if (!resolveCard(c)) return;
+            if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
           break;
@@ -2883,11 +2889,11 @@
               f.type === "integer" ? Number.parseInt(control.value, 10)
               : f.type === "number" ? Number(control.value) : control.value;
           });
-          if (!resolveCard(c)) return;
+          if (!resolveCard(c, "Submitted")) return;
           vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: "accept", content });
         };
         c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
-          if (!resolveCard(c)) return;
+          if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
           vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
         });
         break;

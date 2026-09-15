@@ -407,7 +407,7 @@ button.act:hover { border-color: var(--accent); }
 .card.resolved { box-shadow: none; border-color: var(--border-strong); }
 /* The question fades once it is settled; the line saying how it was settled does not. */
 .card.resolved > :not(.decision) { opacity: .5; }
-.card.resolved .btns, .card.resolved .deny-note { display: none; }
+.card.resolved .btns, .card.resolved .feedback { display: none; }
 .card .decision { margin-top: var(--sp-1); color: var(--text); font: var(--w-med) var(--t-sm)/1.45 var(--sans); overflow-wrap: anywhere; }
 
 /* tasks — the session checklist, a row in the composer rail directly above the goal row and made

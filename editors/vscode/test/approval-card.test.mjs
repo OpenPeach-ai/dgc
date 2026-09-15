@@ -109,4 +109,57 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await s.page.close();
     }
   });
+
+  // The plan review and the MCP cards settle the same way: they used to keep only their question
+  // (and the plan card its disabled "Optional feedback" box), saying nothing about what was decided.
+  test(`an answered plan or MCP card shows the decision too (${theme})`, async (t) => {
+    if (skipOrFail(t)) return;
+    const s = await scene(theme);
+    try {
+      const cards = [];
+      for (const [id, d] of [["plan-approve", "acceptEdits"], ["plan-auto", "auto"], ["plan-keep", "reject"], ["plan-keep-bare", "reject"]]) {
+        await s.send({ type: "plan_proposal", id: `req-${id}`, plan: "1. Change it\n2. Verify it",
+          choices: ["auto", "acceptEdits", "default", "reject"] });
+        cards.push([id, d]);
+      }
+      await s.card("plan-keep").locator(".feedback").fill("Cover the migration first");
+      await s.card("plan-approve").locator(".feedback").fill("typed, then approved");
+      for (const [id, d] of cards) await s.card(id).locator(`button[data-d="${d}"]`).click();
+      await s.send({ type: "mcp_input_request", id: "req-sampling", server: "fixture", kind: "sampling_request", payload: { messages: [] } });
+      await s.send({ type: "mcp_input_request", id: "req-url", server: "fixture", kind: "elicitation",
+        payload: { mode: "url", message: "Sign in", url: "https://example.com/login", host: "example.com" } });
+      await s.send({ type: "mcp_input_request", id: "req-form", server: "fixture", kind: "elicitation",
+        payload: { message: "Your name", requestedSchema: { type: "object", properties: { name: { type: "string" } } } } });
+      await s.send({ type: "mcp_input_request", id: "req-cancel", server: "fixture", kind: "sampling_response", payload: {} });
+      await s.card("sampling").locator('button[data-a="accept"]').click();
+      await s.card("url").locator('button[data-a="decline"]').click();
+      await s.card("form").locator("input").fill("Ada");
+      await s.card("form").locator('button[type="submit"]').click();
+      await s.card("cancel").locator('button[data-a="cancel"]').click();
+
+      const plans = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "plan_response").map((m) => [m.id, m.decision]));
+      assert.deepEqual(plans, cards.map(([id, d]) => [`req-${id}`, d]));
+      const expected = {
+        "plan-approve": "Approved · acceptEdits mode",
+        "plan-auto": "Approved · auto mode",
+        "plan-keep": "Kept planning · feedback: Cover the migration first",
+        "plan-keep-bare": "Kept planning",
+        sampling: "Approved once",
+        url: "Declined",
+        form: "Submitted",
+        cancel: "Cancelled",
+      };
+      for (const [id, words] of Object.entries(expected)) {
+        const f = await s.facts(id);
+        assert.equal(f.decision, words, id);
+        assert.equal(f.feedbackShown, false, `${id}: no feedback box is left on a settled card`);
+        assert.equal(f.buttonsShown, 0, id);
+        assert.equal(f.opacity, 1, `${id}: the decision is not faded with the rest of the card`);
+        assert.ok(f.contrast >= 4.5, `${id}: decision contrast ${f.contrast.toFixed(2)}`);
+      }
+      assert.deepEqual(s.errors, []);
+    } finally {
+      await s.page.close();
+    }
+  });
 }
