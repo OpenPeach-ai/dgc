@@ -101,7 +101,15 @@ class NormaliseTests(unittest.TestCase):
         self.assertEqual(first({"label": "JSON", "description": "(Recommended) Fast to read."}),
                          opt("JSON", "Fast to read.", True))
         self.assertEqual(first({"label": "Mongo", "description": "Recommended: flexible schema"}),
-                         opt("Mongo", "flexible schema", True))
+                         opt("Mongo", "Flexible schema", True), "a description left after the marker starts a sentence")
+        self.assertEqual(first({"label": "Redis", "description": "recommended - fast to set up"}),
+                         opt("Redis", "Fast to set up", True))
+        self.assertEqual(first({"label": "npm", "description": "Recommended. works offline"}),
+                         opt("npm", "Works offline", True))
+        self.assertEqual(first({"label": "Recommended: pnpm", "description": "strict installs"}),
+                         opt("pnpm", "strict installs", True), "a label keeps its own case, and so does an unmarked description")
+        self.assertEqual(first({"label": "uv", "description": "fast resolver (Recommended)"}),
+                         opt("uv", "fast resolver", True), "only a leading marker makes the rest a sentence")
         self.assertEqual(first({"label": "Redis (Recommended) cache", "description": "Best choice. (Recommended)"}),
                          opt("Redis cache", "Best choice.", True))
         self.assertEqual(first({"label": "SQLite", "description": "Easy to set up; recommended."}),

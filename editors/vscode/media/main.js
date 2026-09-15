@@ -5526,21 +5526,23 @@
   // ending "(Recommended)", or "Recommended: …". The badge says it instead (mirrors questions._unmark).
   const ASK_MARK = /\(\s*recommended\s*\)/gi, ASK_LEAD_MARK = /^\s*recommended\s*(?:[:\u00b7\u2013\u2014-]\s*|\.\s+)/i;
   const ASK_TRAIL_MARK = /(?:^|[,;:\u00b7\u2013\u2014-]|\.(?=\s))\s*recommended\s*[.!]?\s*$/i;
-  function askUnmark(text) {
+  // `sentence` (a description): text left after a leading "Recommended:" starts with a capital.
+  function askUnmark(text, sentence = false) {
     const raw = String(text || "");
     let stripped = raw.replace(ASK_MARK, " ");
-    let found = stripped !== raw;
+    let found = stripped !== raw, capital = false;
     const lead = stripped.match(ASK_LEAD_MARK);
-    if (lead) { stripped = stripped.slice(lead[0].length); found = true; }
+    if (lead) { stripped = stripped.slice(lead[0].length); found = true; capital = sentence; }
     const trail = stripped.match(ASK_TRAIL_MARK);
     if (trail) { stripped = stripped.slice(0, trail.index); found = true; }
     if (!found) return [raw, false];
     stripped = stripped.replace(/\s+([,;.!?])/g, "$1").replace(/([,;])(?:\s*[,;])+/g, "$1")
       .split(/\s+/).filter(Boolean).join(" ").replace(/^[\s,;:\u00b7\u2013\u2014-]+|[\s,;:\u00b7\u2013\u2014-]+$/g, "");
+    if (capital) stripped = stripped.charAt(0).toUpperCase() + stripped.slice(1);
     return [stripped, true];
   }
   function askLabel(option) { return askUnmark(option.label)[0]; }
-  function askDesc(option) { return askUnmark(option.description)[0]; }
+  function askDesc(option) { return askUnmark(option.description, true)[0]; }
   function askFlagged(option) {
     return option.recommended === true || askUnmark(option.label)[1] || askUnmark(option.description)[1];
   }

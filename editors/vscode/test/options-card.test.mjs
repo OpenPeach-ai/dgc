@@ -176,6 +176,13 @@ test("the recommended option is badged and preselected wherever it sits; labels 
   ask(trailing, [q("q1", "Database?", [opt("SQLite", "Easy to set up; recommended."), opt("JSON", "Quick to try, not recommended")])]);
   assert.equal(trailing.rows()[0].querySelector(".ask-desc").textContent, "Easy to set up");
   assert.deepEqual(trailing.rows().map((row) => !!row.querySelector(".ask-badge")), [true, false]);
+  // A leading "Recommended:" goes, and the description left starts with a capital (as questions._unmark).
+  const leading = panel();
+  leading.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  ask(leading, [q("q1", "Database?", [opt("Mongo", "Recommended: flexible schema"), opt("Recommended: pnpm", "strict installs"),
+    opt("uv", "fast resolver")])]);
+  assert.deepEqual(leading.rows().map((row) => [row.querySelector(".ask-label").textContent, row.querySelector(".ask-desc")?.textContent]),
+    [["Mongo", "Flexible schema"], ["pnpm", "strict installs"], ["uv", "fast resolver"]]);
   // Multi-select preselects nothing: row 1 holds the highlight, no box is checked.
   const m = panel();
   m.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
