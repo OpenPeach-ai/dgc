@@ -193,3 +193,42 @@ test("300px: Escape out of the agents dialog puts focus back on the pill without
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
+
+for (const theme of ["dark-modern", "light-modern"]) {
+  test(`300px ${theme}: the image viewer offers Stop while the turn runs, inside its Tab loop, and drops it when the turn ends`, async (t) => {
+    if (skipOrFail(t)) return;
+    const { page, send, errors } = await openCrossLane(browser, { width: 300, height: 760, theme, scenario: "transcript" });
+    try {
+      await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());
+      await page.waitForSelector(".image-chip[data-state=ready]");
+      await page.click(".image-chip");
+      await page.waitForSelector("#image-viewer");
+      const bar = await page.evaluate(() => {
+        const viewer = document.getElementById("image-viewer");
+        const stop = viewer.querySelector(".iv-stop"), close = viewer.querySelector(".iv-close");
+        const s = stop.getBoundingClientRect(), b = viewer.querySelector(".iv-bar").getBoundingClientRect();
+        const hit = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
+        return { visible: !stop.hidden && s.width > 20, label: stop.getAttribute("aria-label"), hit: stop.contains(hit),
+                 inBar: s.left >= b.left && s.right <= b.right && s.top >= b.top && s.bottom <= b.bottom,
+                 beforeClose: !!(stop.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING),
+                 overflow: document.documentElement.scrollWidth > innerWidth };
+      });
+      assert.deepEqual(bar, { visible: true, label: "Stop generation", hit: true, inBar: true, beforeClose: true, overflow: false });
+      if (process.env.DGC_CROSS_LANE_SHOTS) await page.screenshot({ path: `${process.env.DGC_CROSS_LANE_SHOTS}/viewer-stop-${theme}.png` });
+      // Tab from Close wraps to the first control and Shift+Tab walks back through Stop.
+      await page.focus("#image-viewer .iv-close");
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("iv-stop")), true, "Stop is in the dialog's Tab order");
+      const before = await page.evaluate(() => window.__posted.length);
+      await page.keyboard.press("Enter");
+      const posted = await page.evaluate((n) => window.__posted.slice(n).map((m) => m.type), before);
+      assert.deepEqual(posted, ["cancel"], "Stop stops the turn");
+      assert.equal(await page.evaluate(() => !!document.getElementById("image-viewer")), true, "and leaves the viewer open");
+      await send({ type: "turn_end", turn_id: "t1", reason: "cancelled", token_estimate: 0, final_message_id: null });
+      const ended = await page.evaluate(() => ({ stop: document.querySelector("#image-viewer .iv-stop").hidden,
+        focus: document.activeElement?.getAttribute("aria-label") }));
+      assert.deepEqual(ended, { stop: true, focus: "Close image preview" }, "no Stop without a turn; focus stays in the dialog");
+      assert.deepEqual(errors, []);
+    } finally { await page.close(); }
+  });
+}

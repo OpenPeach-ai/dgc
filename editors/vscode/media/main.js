@@ -291,6 +291,7 @@
   ];
 
   let streaming = false, turn = null;
+  let viewerStreaming = null;          // set by the image viewer: keeps its Stop in step with the turn
   // A custom slash command sent while idle shows Stop before its turn exists. Holds the command's
   // name until that turn starts or the backend answers that command with an error or refusal.
   let customCommandPending = "";
@@ -2872,7 +2873,7 @@
       || text === `unknown command: /${name}` || text.startsWith(`unknown command: /${name} `);
   }
   function setSending(on) {
-    streaming = on; renderComposerControls();
+    streaming = on; renderComposerControls(); viewerStreaming?.();
     document.querySelectorAll("[data-skill-mutation]").forEach(button => {
       button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
     });
@@ -5018,7 +5019,7 @@
     const viewer = el("div");
     viewer.id = "image-viewer";
     viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-labelledby", "iv-title");
-    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
+    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
     const inert = [...document.body.children]
       .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
       .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
@@ -5032,6 +5033,9 @@
     q(".iv-next").onclick = () => moveViewer(1);
     q(".iv-zoom").onclick = () => toggleViewerZoom();
     q(".iv-close").onclick = () => closeImageViewer(true);
+    // The viewer covers the composer, and with it Stop: while a turn runs, Stop is in the viewer too.
+    q(".iv-stop").onclick = () => doStop();
+    q(".iv-stop").hidden = !streaming;
     q(".iv-open").onclick = () => {
       const current = imageViewer?.records[imageViewer.index];
       if (current?.ref) vscode.postMessage({ type: "openImage", ref: current.ref });
@@ -5163,6 +5167,15 @@
     focusQuietly(target);
     target.scrollIntoView?.({ block: "nearest" });
   }
+  // Stop shows in the viewer exactly while the composer's Send is a Stop. Focus on a Stop that goes
+  // away (the turn ended) moves to Close, inside the dialog.
+  viewerStreaming = () => {
+    if (!imageViewer) return;
+    const stop = imageViewer.el.querySelector(".iv-stop");
+    const hadFocus = document.activeElement === stop;
+    stop.hidden = !streaming;
+    if (hadFocus && stop.hidden) imageViewer.el.querySelector(".iv-close").focus();
+  };
   // A request card or recovery offer arrived (or the backend stopped) while the viewer covers the panel.
   function imageViewerAttention(kind) {
     if (!imageViewer) return;

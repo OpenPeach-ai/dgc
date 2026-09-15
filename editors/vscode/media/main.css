@@ -1200,6 +1200,9 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 #image-viewer .iv-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text-strong); }
 #image-viewer .iv-btn:disabled { color: var(--faint); cursor: default; }
 #image-viewer .iv-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+#image-viewer .iv-btn.iv-stop { margin-left: var(--sp-1); background: var(--accent-fill); color: #fff; }
+#image-viewer .iv-btn.iv-stop:hover { background: var(--accent-hover); color: #fff; }
+#image-viewer .iv-btn.iv-stop:focus-visible { outline-offset: 1px; }
 #image-viewer .iv-notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
   border-color: var(--border-strong); color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
 #image-viewer .iv-notice[hidden] { display: none; }
@@ -1231,6 +1234,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   #image-viewer { background: Canvas; }
   .image-chip:focus-visible, #image-viewer .iv-btn:focus-visible { outline: 2px solid Highlight !important; }
   #image-viewer .iv-btn:disabled { color: GrayText; }
+  #image-viewer .iv-btn.iv-stop { forced-color-adjust: none; background: ButtonText; color: ButtonFace; }
 }
 /* ---- end 0.40 images -------------------------------------------------------------------------- */
 

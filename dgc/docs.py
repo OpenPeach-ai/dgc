@@ -1384,6 +1384,7 @@ its output as thumbnails. Click one to open the viewer over the panel:
 - **Z** switches between fitting the panel and actual size, and **Shift+arrows** move around a large
   image;
 - **Open file** opens DGC's stored copy in the editor;
+- **Stop** (while DGC is working) stops the turn, since the viewer covers the prompt box's own Stop;
 - **Esc** or **×** closes it and puts the focus back where you were.
 
 If DGC needs you while the viewer is open (a permission, a plan, a question), the viewer says so and
