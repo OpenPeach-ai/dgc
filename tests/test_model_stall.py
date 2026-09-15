@@ -788,11 +788,13 @@ class AttemptLifecycleTests(StallTestCase):
         self.assertNoWatchThreads()
 
     def test_a_failed_attempt_raises_no_notice_while_it_backs_off(self):
-        # The server hangs up without answering at 0.35 s; the transient retry then backs off for
+        # The server hangs up without answering at 0.1 s; the transient retry then backs off for
         # 0.5 s. The ended attempt's watch must not cross its 0.5 s notice threshold during that
-        # backoff and narrate "no response" about a request that is already over.
+        # backoff and narrate "no response" about a request that is already over. A leaked watch
+        # would cross it 0.4 s into the backoff; hanging up early leaves a slow runner room to
+        # notice the closed socket before 0.5 s.
         def hang_up(handler, record):
-            time.sleep(0.35)
+            time.sleep(0.1)
             handler.close_connection = True
             try:
                 handler.connection.shutdown(socket.SHUT_RDWR)
