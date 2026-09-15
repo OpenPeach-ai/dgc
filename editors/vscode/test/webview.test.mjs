@@ -3972,3 +3972,27 @@ test("a turn_active with no snapshot coming starts the running turn at once, and
   assert.ok(replayed[0].querySelector(".thinking.done"), "settled");
   assert.deepEqual(errors, []);
 });
+
+// Request ids restart with every backend process: the re-announcement guard is per backend.
+test("a new backend's request with an id the last backend already used gets its own card", () => {
+  const { doc, send, errors } = makeDom();
+  const event = (data) => send({ type: "event", event: data });
+  const permission = (command) => ({ type: "permission_request", id: "r1", call_id: "c1", name: "bash", command,
+    args: { command }, summary: command, suggested_rule: `Bash(${command})`, choices: ["once", "always", "deny"] });
+  send({ type: "session_ready", sessionId: "s1" });
+  event({ type: "turn_start", turn_id: "t1", prompt: "one", kind: "prompt" });
+  event(permission("make build"));
+  doc.querySelector('.card[data-request-id="r1"] button[data-d="once"]').click();
+  event({ ...permission("make build") });
+  assert.equal(doc.querySelectorAll('.card[data-request-id="r1"]').length, 1, "the same backend's re-announcement draws nothing");
+  send({ type: "backend_exit", code: 1, recovering: true });
+  event({ type: "ready", capabilities: {} });
+  send({ type: "session_ready", sessionId: "s2" });
+  event({ type: "info", message: "The previous chat is unavailable" });
+  event({ type: "turn_start", turn_id: "t1", prompt: "two", kind: "prompt" });
+  event(permission("make test"));
+  const open = [...doc.querySelectorAll('.card[data-request-id="r1"]:not(.resolved)')];
+  assert.equal(open.length, 1, "the new r1 is drawn");
+  assert.match(open[0].textContent, /make test/);
+  assert.deepEqual(errors, []);
+});

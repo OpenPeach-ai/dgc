@@ -1665,10 +1665,14 @@
       sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
     }
   }
-  function requestCard(c, id) { c.dataset.requestId = String(id); renderTurnMeta(); return c; }
+  // Request ids restart with every backend process (r1, r2, ...), so a card remembers which backend
+  // asked: a new backend's r1 is a new request even while the last one's answered r1 is on screen.
+  let requestEpoch = 0;
+  function requestCard(c, id) { c.dataset.requestId = String(id); c._requestEpoch = requestEpoch; renderTurnMeta(); return c; }
   // The backend announces an open decision again after a history snapshot; one card per request.
   function requestShown(id) {
-    return [...document.querySelectorAll(".card[data-request-id]")].some((card) => card.dataset.requestId === String(id));
+    return [...document.querySelectorAll(".card[data-request-id]")]
+      .some((card) => card.dataset.requestId === String(id) && card._requestEpoch === requestEpoch);
   }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
@@ -2305,6 +2309,7 @@
     const stick = atBottom();
     switch (ev.type) {
       case "ready": {
+        requestEpoch += 1;             // a backend (re)started: its request ids start again
         backendLive = true; backendDown = false; armTodoClearTimer();
         if (Array.isArray(ev.commands) && ev.commands.length
             && ev.commands.every((c) => c && typeof c === "object")) {
@@ -4180,6 +4185,7 @@
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") {
+      requestEpoch += 1;
       backendExitHooks(msg);
       sessionReady = !draftScope;
       // A Clear sent to a recovering backend is held for the next one, so it is not unanswered
