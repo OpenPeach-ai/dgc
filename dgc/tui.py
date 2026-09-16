@@ -6107,6 +6107,7 @@ class TUI:
             self.config.set("subagent_model", model)
             self._flash(f"sub-agent model → {model}")
             return
+        previous = str(self.config.model or "")
         self.config.set("model", model)
         self.agent.refresh_client()
         ctx = self.agent.recommended_context_size(model)
@@ -6115,6 +6116,9 @@ class TUI:
             self._flash(f"model → {model}  ·  context {ctx // 1024}k")
         else:
             self._flash(f"model → {model}")
+        if model and model != previous:
+            th = style_mod.theme()
+            self._append(self._rich(f"[{th.muted}]Switched to {_esc(model)}[/]"))
 
     def _list_models(self, base_url=None, api_key=None):
         from .llm import LLMClient

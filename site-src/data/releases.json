@@ -3,10 +3,22 @@
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
+      "version": "0.40.3",
+      "date": "2026-09-16",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.3",
+      "status": "current",
+      "notes": [
+        "You can change the model while a turn is running. The round already on the wire keeps its client; the next model round uses the new one. The chat records Switched to <model>.",
+        "Viewed images always appear as a chip on the tool step that produced them. Click the chip to open the image, even when the current model cannot see it. After switching to a vision-capable model, the next turn can send the pixels.",
+        "The prompt area lists every sub-agent from the current turn until that turn ends, then the count clears. History stays in the transcript.",
+        "Pair with extension 0.25.3; editor protocol remains v14."
+      ]
+    },
+    {
       "version": "0.40.2",
       "date": "2026-09-16",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.2",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Explicit requests to choose from test or example options now expose the selector in Auto mode. If the model prints a menu instead, DGC gives at most two tool-use reminders. Common flat option shapes and recommendations with a rationale are normalized without inventing a user choice.",
         "Browser documents work in any mode: present_document renders Markdown as a light page with section navigation, tables and a Markdown download. Use browser Print → Save as PDF for a PDF. URLs are loopback-only and last while the DGC process runs; displaying a document never approves execution.",
@@ -426,10 +438,23 @@
   ],
   "extension": [
     {
+      "version": "0.25.3",
+      "date": "2026-09-16",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.3",
+      "status": "current",
+      "notes": [
+        "Requires CLI 0.40.3; editor protocol v14.",
+        "Stacked option cards: each choice is its own rounded tile with a radio, a quiet Recommended tag, and Continue instead of Submit.",
+        "The agents pill keeps every agent from the current turn, then clears when the turn ends.",
+        "The model picker works while a turn runs. A Switched to … line lands in the chat. The next model round uses the new client.",
+        "Viewed images stay on the tool card as a clickable chip even when the model cannot see them."
+      ]
+    },
+    {
       "version": "0.25.2",
       "date": "2026-09-16",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.2",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Requires CLI 0.40.2; editor protocol v14. Includes direct verified extension recovery, paired CLI recovery, checklist reminders and persisted approval cards from 0.25.1.",
         "The composer counts active agents rather than every agent ever started in the chat. Successful agents disappear immediately; failed or stopped agents remain for 30 seconds. Historical tool steps remain in the transcript.",

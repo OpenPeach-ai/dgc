@@ -126,7 +126,7 @@ test("the recommended option is badged and preselected wherever it sits; labels 
   assert.deepEqual(rows.map((row) => row.getAttribute("aria-checked")), ["false", "true", "false"], "the recommendation is preselected");
   assert.ok(rows[1].classList.contains("checked"));
   assert.equal(p.doc.activeElement, rows[1]);
-  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "the pill takes the preselected pick");
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Continue", "the pill takes the preselected pick");
   assert.ok(p.card().querySelector(".ask-act").classList.contains("primary"));
   assert.equal(p.card().querySelector(".ask-skip").hidden, false, "Skip stays, as its own button");
   assert.deepEqual(p.responses(), [], "nothing is sent until the reader acts");
@@ -309,7 +309,7 @@ test("free text, multi-select with a note, Enter submits", () => {
   assert.equal(p.card().querySelector(".ask-act").textContent, "Skip");
   second.value = "On the NAS, not the laptop";
   second.dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
-  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "text flips Skip to Submit on the last question");
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Continue", "text flips Skip to Continue on the last question");
   p.key(second, "Enter", { shiftKey: true });
   assert.deepEqual(p.responses(), [], "Shift+Enter is a newline");
   p.key(second, "Enter");
@@ -348,7 +348,7 @@ test("Sending… keeps the card; a rejection re-enables it; options_resolved rem
   assert.equal(p.doc.querySelectorAll("#log .sys.err").length, transcriptErrors, "the reason shows on the card, not in the transcript");
   assert.equal(p.rows()[0].getAttribute("aria-checked"), "true", "the answer is kept");
   assert.equal(p.doc.activeElement, p.rows()[0]);
-  assert.equal(p.card().querySelector(".ask-act").textContent, "Submit", "one click resends");
+  assert.equal(p.card().querySelector(".ask-act").textContent, "Continue", "one click resends");
   p.advance(400);
   p.click(p.rows()[1]);
   p.advance(150);
@@ -495,15 +495,16 @@ test("answered variants: one question, skipped, dismissed, cancelled, text proto
   assert.deepEqual(p.errors, []);
 });
 
-test("the card's CSS: neutral badge, muted pager, forced colours for the highlight, badge and circle", () => {
+test("the card's CSS: stacked tiles, quiet recommended badge, forced colours for the highlight, badge and radio", () => {
   const section = mainCss.slice(mainCss.indexOf("/* ---- 0.40 options -"), mainCss.indexOf("/* ---- end 0.40 options -"));
   const rule = (selector) => section.match(new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] || "";
-  assert.match(rule(".ask-badge"), /color: var\(--text\)/);
-  assert.match(rule(".ask-badge"), /color-mix\(in srgb, var\(--text\) 11%, transparent\)/);
+  assert.match(rule(".ask-badge"), /color: var\(--text-strong\)/);
+  assert.match(rule(".ask-badge"), /color-mix\(in srgb, var\(--accent-fill\) 14%, transparent\)/);
   assert.match(rule(".ask-foot"), /color: var\(--muted\)/);
   assert.doesNotMatch(section.match(/\.ask-foot[^{]*\{[^}]*\}/g).join(""), /--faint/);
-  assert.match(section, /\.ask-opt:hover, \.ask-opt\.hot \{ background: color-mix\(in srgb, var\(--text\) 7%, transparent\); \}/);
-  assert.match(rule(".ask-n"), /border: 1px solid color-mix\(in srgb, var\(--text\) 35%, transparent\)/);
+  assert.match(section, /\.ask-opt:hover, \.ask-opt\.hot \{ background: color-mix\(in srgb, var\(--text\) 6%, transparent\);/);
+  assert.match(rule(".ask-n"), /border: 1\.5px solid color-mix\(in srgb, var\(--text\) 40%, transparent\)/);
+  assert.match(rule(".ask-opts"), /gap: 6px/);
   assert.match(rule(".ask-act"), /min-height: var\(--control\)/);
   const forced = section.slice(section.indexOf("@media (forced-colors: active)"));
   for (const selector of [".ask-opt.hot", ".ask-badge", ".ask-n"]) assert.ok(forced.includes(selector), selector);

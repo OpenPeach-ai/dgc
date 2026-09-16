@@ -119,6 +119,27 @@ class LiveControlTests(unittest.TestCase):
         self.assertNotIn("user-interjection", followup["text"])
         self.assertNotIn("REFERENCE-MARKER", followup["text"], "the attached context is not the user's words")
 
+    def test_set_model_applies_while_a_turn_runs_and_announces_the_switch(self):
+        entered = threading.Event()
+        def chat(messages, **kwargs):
+            if not entered.is_set():
+                entered.set()
+                self.assertTrue(self.release.wait(5))
+            return ChatResult(content="done")
+        self.backend._emit_context = lambda *a, **k: None
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.backend.dispatch({"type": "prompt", "text": "Keep going", "request_id": "first"})
+            self.assertTrue(entered.wait(5))
+            self.backend.dispatch({"type": "set_model", "route": "native", "model": "vision-model",
+                                    "request_id": "model"})
+            self.wait("model_changed", request_id="model", model="vision-model")
+            self.wait("info", message="Switched to vision-model")
+            self.assertEqual(self.agent.config.model, "vision-model")
+            self.release.set()
+            self.wait("turn_end", reason="completed")
+        self.assertFalse(any(e.get("type") == "command_rejected" and e.get("command") == "set_model"
+                             for e in self.events))
+
     def test_a_steered_turn_replays_as_one_finished_turn_with_one_bubble_per_message(self):
         # Before: the saved interjection opened a turn of its own, so the steered turn replayed as
         # "Stopped" (no answer of its own), and every message folded into one interjection shared a bubble.

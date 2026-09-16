@@ -764,14 +764,20 @@ project's definitions rather than loading new definitions from their scratch che
 
 ## The count
 
-The prompt area counts agents that are queued, running or waiting for you. Successfully completed
-agents disappear immediately. In the editor, failed or stopped rows remain for 30 seconds so you
-can inspect the failure. Completed work stays in the transcript; it does not inflate the active
+The prompt area lists every sub-agent started in the current turn — queued, running, waiting,
+finished, failed or stopped — so you can see the whole batch while work is happening. When the
+turn ends the count clears. Completed work stays in the transcript; it does not inflate the
 count as a chat gets longer.
 
+You can change the model while a turn is running. The round already on the wire keeps its
+client; the next model round uses the new one. The chat records `Switched to <model>`. If you
+stop a turn and pick a vision-capable model, the next turn can view images. Viewed images
+always appear as a chip on the tool step that produced them — click the chip to open the
+image, even when the model itself cannot see it.
+
 A diamond (◆) means an agent needs you; a filled dot (●) means work is queued or running.
-The editor uses an empty ring (○) when only a recently failed/stopped row remains. Reopening a chat
-does not start a new visibility window for old failures. Rewinding drops agents started later.
+The editor uses an empty ring (○) when the turn still has agents but none is working any more.
+Reopening a chat does not show old failures. Rewinding drops agents started later.
 
 ## In the terminal
 

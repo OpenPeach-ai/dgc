@@ -484,6 +484,7 @@ button.act:hover { border-color: var(--accent); }
 /* system lines */
 .sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sys.err { color: var(--err-text); }
+.sys.model-switch { color: var(--muted); }
 
 /* composer */
 footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direction: column; gap: var(--sp-1);
@@ -1330,29 +1331,31 @@ body.ask-docked #tasks-panel { display: none; }
 .ask-hint { margin: 0 0 var(--sp-1) var(--sp-2); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); }
 /* The list scrolls (whole rows snap) when the panel is short; script caps its height so the
    transcript keeps max(96px, 20vh). */
-.ask-opts { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  scroll-snap-type: y proximity; }
-.ask-opt { flex: none; display: grid; grid-template-columns: 22px minmax(0, 1fr) 14px; gap: var(--sp-2); align-items: start; width: 100%;
-  min-height: var(--control); padding: 6px var(--sp-2); border: 0; border-radius: var(--r-lg); background: transparent;
+.ask-opts { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 6px; scroll-snap-type: y proximity; }
+.ask-opt { flex: none; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--sp-2); align-items: start; width: 100%;
+  min-height: var(--control); padding: 10px 12px; border: 1px solid transparent; border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   color: var(--text); text-align: left; cursor: pointer; font: inherit; scroll-snap-align: start; }
-.ask-opt:hover, .ask-opt.hot { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ask-opt:hover, .ask-opt.hot { background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text) 8%, transparent); }
 .ask-opt:focus-visible { outline-offset: -1px; }
-.ask-n { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
-  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
-  font: var(--w-med) var(--t-xs)/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
-/* On the highlight the circle needs a firmer edge to stay visible (3:1 against the tint). */
-.ask-opt.hot .ask-n { border-color: color-mix(in srgb, var(--text) 60%, transparent); }
+.ask-n { width: 14px; height: 14px; margin-top: 4px; display: grid; place-items: center; border-radius: var(--r-full);
+  border: 1.5px solid color-mix(in srgb, var(--text) 40%, transparent);
+  background: transparent; color: transparent; font: var(--w-med) 0/1 var(--sans); }
+.ask-opt.hot .ask-n, .ask-opt.checked .ask-n {
+  border-color: var(--text-strong); background: var(--text-strong);
+  box-shadow: inset 0 0 0 3px var(--surface2); }
 .ask-multi .ask-n { border-radius: var(--r-sm); }
-.ask-opt.checked .ask-n { background: var(--text-strong); border-color: var(--text-strong); color: var(--surface2); }
-.ask-body { min-width: 0; padding-top: 2px; }
+.ask-multi .ask-opt.checked .ask-n { color: var(--surface2); font-size: var(--t-xs); box-shadow: none; }
+.ask-body { min-width: 0; padding-top: 0; }
 .ask-label { font: var(--w-med) var(--t-base)/1.35 var(--sans); color: var(--text-strong); overflow-wrap: anywhere; }
 .ask-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: var(--r-full); vertical-align: 1px;
-  font: var(--w-med) var(--t-xs)/1.45 var(--sans); color: var(--text); background: color-mix(in srgb, var(--text) 11%, transparent);
-  white-space: nowrap; }
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); color: var(--text-strong);
+  background: color-mix(in srgb, var(--accent-fill) 14%, transparent); white-space: nowrap; }
 .ask-desc { display: block; margin-top: 2px; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
 .ask-opt.hot .ask-desc { color: color-mix(in srgb, var(--muted) 80%, var(--text)); }
-.ask-arrow { padding-top: 4px; color: var(--muted); font-size: 14px; visibility: hidden; }
-.ask-opt.hot .ask-arrow, .ask-opt:hover .ask-arrow { visibility: visible; }
+.ask-arrow { display: none !important; }
 .ask-other { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-1) 2px var(--sp-2); }
 .ask-pencil { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
   border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--muted); font-size: 12px; }
@@ -1416,6 +1419,7 @@ body.ask-docked #tasks-panel { display: none; }
   .ask-opt.hot .ask-n { border-color: HighlightText; }
   .ask-badge { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
   .ask-opt.hot .ask-badge { background: HighlightText; color: Highlight; border-color: HighlightText; }
+  .ask-opt.hot .ask-n, .ask-opt.checked .ask-n { box-shadow: inset 0 0 0 3px Highlight; }
   .ask-n, .ask-pencil { border-color: CanvasText; }
   .ask-opt.checked .ask-n { forced-color-adjust: none; background: CanvasText; color: Canvas; border-color: CanvasText; }
   .ask-opt.hot.checked .ask-n { background: HighlightText; color: Highlight; border-color: HighlightText; }

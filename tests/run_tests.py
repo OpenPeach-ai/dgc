@@ -1866,7 +1866,8 @@ def unit_tests(tmp: Path):
     # set_config is deliberately absent: it is gated per key instead, so a setting that only
     # shapes the next request can change without abandoning the turn. See the live-safe check.
     check("the commands that really cannot run mid-turn still cannot",
-          {"rewind", "compact", "resume_session", "set_model"} <= _BUSY
+          {"rewind", "compact", "resume_session"} <= _BUSY
+          and "set_model" not in _BUSY
           and "set_config" not in _BUSY)
 
     from dgc import sessions as _sessions

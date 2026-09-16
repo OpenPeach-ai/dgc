@@ -2628,7 +2628,7 @@
         if (!$("settings").hidden) fillSettings(ev);
         break;
       case "turn_start":
-        if (!replaying) { removeRecoveryCards(); liveTurnHint = null; }
+        if (!replaying) { removeRecoveryCards(); liveTurnHint = null; agentsTurnBegin(); }
         startTurn(ev.prompt, ev.kind, ev.turn_id,
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id));
         if (!replaying) customCommandPending = "";
@@ -3090,7 +3090,13 @@
           + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
         break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
-      case "info": sysLine(ev.message); break;
+      case "info":
+        if (String(ev.message || "").startsWith("Switched to ")) {
+          const line = el("div", "sys model-switch", esc(ev.message));
+          appendConversationContent(line);
+          break;
+        }
+        sysLine(ev.message); break;
       case "mode_changed": if (ev.message) sysLine(ev.message); break;
       case "permission_resolved":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
@@ -3135,7 +3141,7 @@
       case "turn_end":
         speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
-        if (!replaying) { setSending(false); liveTurnHint = null; }
+        if (!replaying) { setSending(false); liveTurnHint = null; agentsTurnEnd(); }
         break;
     }
     // A replayed page anchors its own scroll position and is not news: no jump to the bottom, and
@@ -4670,11 +4676,10 @@
   // With a click event: hide only when the click fell outside the pill and its menu.
   function hideAgentsMenu(event) {}
 
-  // The "● 2 agents" pill shows current work and briefly retains failures; completed work stays
-  // in the transcript. A dot for whether any is working or waiting on you, and a read-only list whose rows jump
-  // to each agent's task card. State comes from agent_started/agent_updated/agent_ended frames and
-  // `agents` snapshots; a backend that exits marks the active ones stopped until the new backend's
-  // snapshot says otherwise.
+  // The "● 2 agents" pill lists every sub-agent in the current turn — running, finished, failed or
+  // stopped — so you can see the whole batch while work is happening. When the turn ends the pill
+  // clears. History stays in the transcript. A backend that exits marks the active ones stopped
+  // until the turn ends or the new backend's snapshot says otherwise.
   const AGENT_ACTIVE = new Set(["queued", "running", "waiting"]);
   const AGENT_ENDED_WORD = { finished: "Finished", failed: "Failed", stopped: "Stopped" };
   const agentRecords = new Map();          // id -> record (the frame's fields + receivedAt, order)
@@ -4682,6 +4687,7 @@
   let agentTotalExtra = 0, agentActiveExtra = 0;   // a snapshot's records it did not itemise
   let agentOrder = 0, agentsRenderQueued = false, agentsTick = null;
   let agentsAnnounceTimer = null, agentsSpokenActive = false;
+  let agentsTurnLive = false, agentsEpoch = 0;   // pill belongs to the live turn; turn_end advances the epoch
   const agentsBatch = new Set();           // ids active since the last "working" announcement
   const agentRowNodes = new Map();         // id -> that record's dialog row, kept across renders
   // Set by a rewind until its snapshot arrives: the replayed cards must not be claimed by records
@@ -4689,10 +4695,19 @@
   let agentsHoldClaims = false;
 
   function agentsLabelCount(active, total) { return total; }
-  let agentsExpiryTimer = null;
   function agentVisible(record) {
-    return AGENT_ACTIVE.has(record.state) || ((record.state === "failed" || record.state === "stopped")
-      && Number.isFinite(record.endedAt) && agentNow() - record.endedAt < 30000);
+    if (!agentsTurnLive || record.epoch !== agentsEpoch) return false;
+    if (AGENT_ACTIVE.has(record.state)) return true;
+    return record.seenLive === true;
+  }
+  function agentsTurnBegin() {
+    agentsTurnLive = true;
+    renderAgents();
+  }
+  function agentsTurnEnd() {
+    agentsTurnLive = false;
+    agentsEpoch += 1;
+    renderAgents();
   }
 
   function agentNow() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
@@ -4718,12 +4733,13 @@
       }
     }
     c.active = c.queued + c.running + c.waiting + agentActiveExtra;
-    c.total = visibleOnly ? c.active + c.failed + c.stopped : agentRecords.size + agentTotalExtra;
+    c.total = visibleOnly ? c.active + c.finished + c.failed + c.stopped : agentRecords.size + agentTotalExtra;
     return c;
   }
 
   function agentRecordFrom(fields, receivedAt) {
-    const record = { ...fields, receivedAt, order: agentOrder++ };
+    const record = { ...fields, receivedAt, order: agentOrder++, epoch: agentsEpoch,
+      seenLive: fields.seenLive === true };
     delete record.type; delete record.seq; delete record.request_id;
     record.description = String(record.description || "");
     record.tool_calls = Number(record.tool_calls || 0);
@@ -4739,7 +4755,8 @@
     if (ev.type === "agent_started") {
       if (record) return;
       agentsHoldClaims = false;
-      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0 }, now));
+      agentsTurnLive = true;
+      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0, seenLive: true }, now));
       agentsBatch.add(id);
       claimAgentAnchors();
     } else if (ev.type === "agent_updated") {
@@ -4752,6 +4769,7 @@
       if (!record) { if (agentActiveExtra > 0) agentActiveExtra -= 1; renderAgents(); return; }
       if (!AGENT_ACTIVE.has(record.state)) return;
       record.state = String(ev.state || "finished");
+      record.seenLive = true;
       record.endedAt = now;
       for (const key of ["duration_ms", "tool_calls", "tokens", "message"]) if (key in ev) record[key] = ev[key];
       delete record.waiting_for; delete record.activity;
@@ -4768,13 +4786,17 @@
     for (const item of items) {
       if (item && typeof item === "object" && item.id && !agentRecords.has(String(item.id))) {
         const record = agentRecordFrom(item, now);
-        record.endedAt = previous.get(String(item.id))?.endedAt;
+        const prior = previous.get(String(item.id));
+        record.endedAt = prior?.endedAt;
+        record.seenLive = prior?.seenLive === true && prior.epoch === agentsEpoch;
+        if (prior?.epoch === agentsEpoch) record.epoch = prior.epoch;
         agentRecords.set(String(item.id), record);
       }
     }
     const listedActive = [...agentRecords.values()].filter((r) => AGENT_ACTIVE.has(r.state)).length;
     agentTotalExtra = Math.max(0, Number(ev.total || 0) - agentRecords.size);
     agentActiveExtra = Math.max(0, Number(ev.active || 0) - listedActive);
+    if (listedActive > 0 || agentActiveExtra > 0) agentsTurnLive = true;
     for (const [id, card] of [...agentAnchors]) {
       if (!agentRecords.has(id) || !card.isConnected) agentAnchors.delete(id);
     }
@@ -4829,10 +4851,6 @@
 
   // ---- the pill ----
   function renderAgents() {
-    clearTimeout(agentsExpiryTimer);
-    const expiry = [...agentRecords.values()].filter((r) => !AGENT_ACTIVE.has(r.state) && agentVisible(r))
-      .map((r) => Math.max(1, 30001 - (agentNow() - r.endedAt)));
-    if (expiry.length) agentsExpiryTimer = setTimeout(renderAgents, Math.min(...expiry));
     renderAgentsPill();
     scheduleAgentsMenuRender();
   }
@@ -5115,7 +5133,8 @@
     }
     const wasOpen = agentsMenuOpen();
     agentsHoldClaims = false;
-    clearTimeout(agentsExpiryTimer); agentsExpiryTimer = null;
+    agentsTurnLive = false;
+    agentsEpoch += 1;
     agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); agentRowNodes.clear();
     $("agents-tree")?.replaceChildren();
     agentTotalExtra = 0; agentActiveExtra = 0;
@@ -6133,7 +6152,7 @@
         + `<span class="ask-n" aria-hidden="true">${checked && multi ? "✓" : k + 1}</span>`
         + `<span class="ask-body"><span class="ask-label">${esc(label)}</span>${flagged ? '<span class="ask-badge">Recommended</span>' : ""}`
         + (desc ? `<span class="ask-desc" id="ask-d-${n}-${k}">${esc(desc)}</span>` : "") + `</span>`
-        + `<span class="ask-arrow codicon codicon-arrow-right" aria-hidden="true"></span></button>`;
+        + `</button>`;
     }).join("");
     const last = state.answers.filter((a, k) => k !== i && !a.settled).length === 0;
     const pager = questions.length > 1
@@ -6177,7 +6196,7 @@
     fitAskCard();
   }
 
-  // The pill: Next or Submit (primary) once the question has a pick or words, which it takes; Skip
+  // The pill: Next or Continue (primary) once the question has a pick or words, which it takes; Skip
   // while it has neither. With a pick, Skip is its own quieter button beside the pill. After a
   // rejection, a question already settled resends as it is.
   function paintAskAction(state, lastKnown) {
@@ -6188,7 +6207,7 @@
     const has = !!answer.other.trim() || askPicked(q, answer).length > 0;
     const last = lastKnown ?? state.answers.every((a, k) => k === i || a.settled);
     const resend = !has && last && answer.settled;
-    button.textContent = has || resend ? (last ? "Submit" : "Next") : "Skip";
+    button.textContent = has || resend ? (last ? "Continue" : "Next") : "Skip";
     button.classList.toggle("primary", has || resend);
     button.title = has || resend ? (last ? "Send your answers" : "Go to the next question") : "Skip this question";
     if (skip) skip.hidden = !has;
@@ -6259,7 +6278,7 @@
       if (key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         if (!state.armed) return;
-        // Enter does what the pill says when it is Next or Submit; skipping stays explicit.
+        // Enter does what the pill says when it is Next or Continue; skipping stays explicit.
         if (target.value.trim() || askPicked(q, state.answers[state.index]).length) askAction(state);
         return;
       }

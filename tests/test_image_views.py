@@ -528,8 +528,9 @@ class ModelFormatTests(unittest.TestCase):
                                          "the model got the picture after the batch")
                         self.assertEqual([r.source for r in agent.image_views], ["read_file"])
                     else:
-                        self.assertEqual(result, f"error: {root / 'shapes.png'} is an image, and this model cannot read images")
-                        self.assertEqual(images, [])
+                        self.assertIn("cannot read images", result)
+                        self.assertEqual(len(images), 1, "the chat still gets a clickable chip")
+                        self.assertEqual(images[0][1][0], "call_read")
                         self.assertFalse(any(server.image_parts(i) for i in range(len(server.requests))))
                 finally:
                     agent.mcp.stop_all()
@@ -941,9 +942,9 @@ class ViewImageToolTests(unittest.TestCase):
         self.assertRegex(execute("view_image", {"path": str(outside)}, self.ctx),
                          r"^error: path is outside the project: ")
         self.ctx.vision = lambda: False
-        self.assertEqual(execute("view_image", {"path": "logo.png"}, self.ctx),
-                         "error: this model does not accept images, so view_image cannot show it one")
-        self.assertEqual(tools.take_pending_images("view-image-test", ""), [])
+        self.assertIn("does not accept images", execute("view_image", {"path": "logo.png"}, self.ctx))
+        self.assertEqual(len(tools.take_pending_images("view-image-test", "")), 1,
+                         "the chat still gets the chip when the model cannot see")
 
     def test_read_file_views_an_image_when_the_model_can_see(self):
         data = png(64, 48)
@@ -963,11 +964,12 @@ class ViewImageToolTests(unittest.TestCase):
                          f"error: {self.root / 'huge.png'} is an image of 8.0 MB; images up to 8 MB can be viewed")
         self.assertEqual(tools.take_pending_images("view-image-test", ""), [])
         self.ctx.vision = False
-        self.assertEqual(execute("read_file", {"path": "logo.png"}, self.ctx),
-                         f"error: {self.root / 'logo.png'} is an image, and this model cannot read images")
+        self.assertIn("cannot read images", execute("read_file", {"path": "logo.png"}, self.ctx))
+        self.assertEqual(len(tools.take_pending_images("view-image-test", "")), 1,
+                         "the chat still gets the chip when the model cannot see")
         (self.root / "bmw.txt").write_text("BMW service notes " * 4)
         self.assertIn("BMW service notes", execute("read_file", {"path": "bmw.txt"}, self.ctx))
-        self.assertEqual(tools.take_pending_images("view-image-test", ""), [], "a text-only model gets nothing queued")
+        self.assertEqual(tools.take_pending_images("view-image-test", ""), [], "a text file is not queued as an image")
 
     def test_offered_only_with_vision_and_intent(self):
         (self.root / "logo.png").write_bytes(png())

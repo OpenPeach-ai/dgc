@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.25.3 — 2026-09-16
+
+- Requires CLI 0.40.3; editor protocol remains v14.
+- **Stacked option cards.** Each choice is its own rounded tile with a radio, a quiet Recommended tag, and Continue instead of Submit. Keyboard 1–4, Skip and free text stay.
+- **Agents pill lasts the turn.** Finished, failed and stopped agents stay visible in the composer until the turn ends, then the pill clears. Transcript history is unchanged.
+- **Switch models mid-turn.** The picker is no longer blocked while a turn runs. The in-flight generation keeps its client; the next model round uses the new one. A "Switched to …" line lands in the chat.
+- **Viewed images stay on the tool card** even when the model cannot see them. Click the chip to open the image. After switching to a vision model, the next turn can send the pixels.
+
 ## 0.25.2 — 2026-09-16
 
 - Requires CLI 0.40.2; editor protocol remains v14. Includes direct verified extension recovery, paired CLI recovery, checklist reminders and persisted approval cards from 0.25.1.

@@ -83,7 +83,10 @@ _BUSY_MUTATIONS = {
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
     # `clear_todos` is not here either: Clear empties the list at once, even mid-turn, and the
     # worker that owns the session saves it as it retires.
-    "set_model", "set_think", "clear_session", "resume_session",
+    # set_model is allowed mid-turn: the in-flight generation keeps its client, and the next
+    # model round in this turn (or the next prompt) uses the new one. set_think stays gated
+    # because thinking is baked into the request already on the wire.
+    "set_think", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
@@ -3307,9 +3310,12 @@ class Backend:
                                  message="subscription model must be a bounded plain string",
                                  **_request_fields(request_id))
                     return
+                previous = str(config_get("subscription_model", "") if callable(config_get) else "").strip()
                 self.config.set("subscription_model", model)
                 self.em.emit("model_changed", model=model, base_url=self.config.base_url,
                              **_request_fields(request_id))
+                if model and model != previous:
+                    self.em.emit("info", message=f"Switched to {model}")
                 return
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
@@ -3337,6 +3343,7 @@ class Backend:
                 else:
                     self.config.data["api_key"] = str(cmd.get("api_key") or "")
                     self.config._env_secret_keys.add("api_key")
+            previous = str(self.config.model or "")
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
@@ -3352,6 +3359,8 @@ class Backend:
                            if active_engine and callable(config_get) else self.config.model)
             self.em.emit("model_changed", model=shown_model, base_url=self.config.base_url,
                          **_request_fields(request_id))
+            if shown_model and shown_model != previous:
+                self.em.emit("info", message=f"Switched to {shown_model}")
             # A model refresh can change the provider-advertised effective limit even when the
             # configured recommendation happens to be identical. Never leave the editor meter on
             # the prior model's window.

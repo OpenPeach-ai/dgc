@@ -255,7 +255,7 @@ test("with the dialog open and an agent working, the 1 s tick keeps the focused 
   } finally { await page.close(); }
 });
 
-test("the pill's hover label follows its state: agents ending under the pointer leave the idle sentence", async (t) => {
+test("the pill's hover label follows its state: agents ending under the pointer keep the idle sentence until the turn ends", async (t) => {
   if (skipOrFail(t)) return;
   const page = await blank(460);
   try {
@@ -271,8 +271,15 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     });
     await page.waitForTimeout(60);
     const ended = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
+      tip: document.getElementById("hover-tip").textContent,
+      state: document.getElementById("agents-pill").dataset.state }));
+    assert.deepEqual(ended, { hidden: false, tip: "No agents working · Click to see the agents", state: "idle" },
+      "finished rows stay on the pill until the turn ends");
+    await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
+    await page.waitForTimeout(60);
+    const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tipHidden: document.getElementById("hover-tip").hidden }));
-    assert.deepEqual(ended, { hidden: true, tipHidden: true }, "successful agents and their tooltip leave together");
+    assert.deepEqual(after, { hidden: true, tipHidden: true }, "the pill and tooltip clear when the turn ends");
   } finally { await page.close(); }
 });
 

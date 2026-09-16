@@ -2095,7 +2095,7 @@ test("question tabs retain custom answers and submit exactly one complete respon
   assert.equal(card.querySelector(".ask-field").value, "Lavender <script>alert(1)</script>", "drafts are kept per question");
   assert.equal(card.querySelector("script"), null);
   const action = card.querySelector(".ask-act");
-  assert.equal(action.textContent, "Submit");
+  assert.equal(action.textContent, "Continue");
   pointer(dom, action); pointer(dom, action);
   const responses = posted.filter((m) => m.type === "options_response");
   assert.equal(responses.length, 1);
@@ -2117,7 +2117,7 @@ test("single question offers free text and cancellation never submits a default"
   field.value = " "; field.dispatchEvent(new dom.window.Event("input"));
   assert.equal(card.querySelector(".ask-act").textContent, "Skip");
   field.value = "Use both approaches"; field.dispatchEvent(new dom.window.Event("input"));
-  assert.equal(card.querySelector(".ask-act").textContent, "Submit");
+  assert.equal(card.querySelector(".ask-act").textContent, "Continue");
   send({ type: "event", event: { type: "request_expired", id: "single" } });
   assert.equal(card.isConnected, false, "an expired request leaves the composer");
   assert.equal(field.disabled, true);

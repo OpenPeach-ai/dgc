@@ -399,14 +399,16 @@ def read_file(args: dict, ctx) -> str:
         return f"error: no such file: {p}"
     raw, _version = captured
     if image_views.sniff(raw) and image_views.parse_dimensions(raw):
-        # images: an image is not text. A model that can see reads it by looking at it, exactly as
-        # view_image would show it; one that cannot is told so.
-        if not _vision_available(ctx):
-            return f"error: {p} is an image, and this model cannot read images"
+        # images: an image is not text. The chat still gets a clickable chip. A model that can
+        # see also receives the pixels; one that cannot is told so.
         if len(raw) > image_views.MAX_VIEW_BYTES:
             return (f"error: {p} is an image of {image_views.human_size(len(raw))}; "
                     "images up to 8 MB can be viewed")
-        return _view_image_bytes(p, raw, ctx, source="read_file")
+        viewed = _view_image_bytes(p, raw, ctx, source="read_file")
+        if _vision_available(ctx):
+            return viewed
+        where = "; the user can see it in the chat" if _shows_images(ctx) else ""
+        return f"error: {p} is an image, and this model cannot read images{where}"
     if b"\x00" in raw[:8192]:
         return f"error: {p} looks like a binary file"
     lines = raw.decode("utf-8", errors="replace").splitlines()
@@ -3542,9 +3544,7 @@ def monitor_stop_tool(args: dict, ctx) -> str:
 
 
 def view_image(args: dict, ctx) -> str:
-    """Show the model an image file from the workspace. The image rides after the batch."""
-    if not _vision_available(ctx):
-        return "error: this model does not accept images, so view_image cannot show it one"
+    """Show the user (and, when it can see, the model) an image file from the workspace."""
     p = _resolve(str(args.get("path", "")), ctx.project_root, allow_external=_allow_external(args))
     try:
         info = os.lstat(p)
@@ -3566,7 +3566,12 @@ def view_image(args: dict, ctx) -> str:
     data, _version = captured
     if image_views.sniff(data) is None:
         return f"error: {p} is not an image DGC can show (PNG, JPEG, GIF, WebP or BMP)"
-    return _view_image_bytes(p, data, ctx, source="view_image")
+    viewed = _view_image_bytes(p, data, ctx, source="view_image")
+    if _vision_available(ctx):
+        return viewed
+    where = "; the user can see it in the chat" if _shows_images(ctx) else ""
+    return ("error: this model does not accept images, so it was not sent to the model"
+            + where)
 
 
 def _view_image_bytes(p: Path, data: bytes, ctx, *, source: str) -> str:

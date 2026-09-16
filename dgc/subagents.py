@@ -5,7 +5,7 @@ segment and `/agents` all read it; `dgc serve` publishes every change as `agent_
 `agent_updated` / `agent_ended` frames and answers `list_agents` with a snapshot.
 
 ``total`` retains this chat's history; ``active`` counts agents queued, running or waiting on the
-user right now. The composer displays active work and briefly retains failed/stopped rows, rather
+user right now. The composer lists every agent in the current turn until that turn ends, rather
 than presenting the historical total as ongoing work.
 """
 from __future__ import annotations

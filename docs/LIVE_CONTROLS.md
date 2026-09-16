@@ -15,10 +15,11 @@ marker into data (also when a model writes it into the description instead) and 
 
 - **Extension.** The question docks inside the composer frame in place of the text box; Stop, the mode
   and model pickers and the context meter stay, and the unsent draft comes back when the question closes.
-  The recommended option shows a neutral "Recommended" badge and is preselected: it is checked and holds
-  the highlight and the focus, so Enter, a click on it or Next takes it, and Skip sits beside Next as its
-  own button. Nothing is sent without your action. A pick advances to the
-  next question and the answers are sent once every question is answered or skipped; Skip is explicit.
+  Each option is its own stacked card with a radio. The recommended option shows a quiet "Recommended"
+  badge and is preselected: it is checked and holds the highlight and the focus, so Enter, a click on it
+  or Continue takes it, and Skip sits beside Continue as its own button. Nothing is sent without your
+  action. A pick advances to the next question and the answers are sent once every question is answered
+  or skipped; Skip is explicit.
   Keys that arrive within 400 ms of the question opening are ignored, and the question takes focus only
   when the composer is empty or unfocused (otherwise it says "Press Tab to answer").
 - **Full-screen terminal.** One line per option, the focused option's description under the question, the
@@ -62,6 +63,7 @@ then told that nobody can answer and gives the options in its final answer.
 | Queue a separate turn | Alt+Enter or Queue | Tab outside menus and completion |
 | Browse skills | Skills, View instructions, Use skill | `/skills`, `/skills show NAME` |
 | Change permission mode | Mode selector | `/mode MODE` or the full-screen mode selector |
+| Change model | Model picker | `/model NAME` or the full-screen model selector |
 | Stop work | Stop, including the separate button while drafting or while a question is open | Esc or Ctrl+C (Ctrl+C on an open question) |
 | Close a question | × or Esc (with its text field empty) | Esc |
 
@@ -82,6 +84,11 @@ deny and ask rules take precedence over Auto. Workspace trust and the existing A
 remain required. An action already dispatched may finish under its previously granted permission.
 Mode changes update permission state immediately; the turn worker refreshes its model instructions
 before the next request, avoiding concurrent transcript writes.
+
+From CLI 0.40.3 and extension 0.25.3, the model picker works while a turn runs. The in-flight
+generation keeps its client; the next model round uses the new one. The chat records
+`Switched to <model>`. Viewed images still appear as a clickable chip on the tool step even when
+the current model cannot see them.
 
 Skills browsing uses the current catalog during a turn. Installation, deletion, enablement and
 reload remain unavailable until the turn finishes. Viewing the library never sends `/skills` to
