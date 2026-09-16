@@ -315,7 +315,16 @@ class VersionedInstallLifecycle(unittest.TestCase):
         SITE.publish(release("0.90.1", extra={"dgc/stale_only_in_A.py": "MARKER = 'A'\n"}))
         SITE.files["/vscode/dgc.vsix"] = vsix
         SITE.files["/vscode/dgc.vsix.sha256"] = (hashlib.sha256(vsix).hexdigest() + "  dgc.vsix\n").encode()
-        env = dict(self.env, PATH=str(fake_bin) + os.pathsep + self.env["PATH"])
+        path_parts = [str(fake_bin)]
+        for part in self.env["PATH"].split(os.pathsep):
+            if not part:
+                continue
+            # This scenario is Cursor.app without `cursor` on PATH. A real Cursor CLI later
+            # in PATH would be invoked and can hang on the live marketplace.
+            if (Path(part) / "cursor").exists():
+                continue
+            path_parts.append(part)
+        env = dict(self.env, PATH=os.pathsep.join(path_parts))
         env.pop("DGC_SKIP_EXTENSION")
         done = run_installer(env)
         self.assertEqual(done.returncode, 0, output(done)[-3000:])
