@@ -9852,7 +9852,7 @@ def test_isolated_subagents():
     ui = UI(); parent = _Agent(cfg, ui)
     started = []
     original_runner = parent._run_subagent
-    parent._run_subagent = lambda *args: started.append(args) or "unexpected"
+    parent._run_subagent = lambda *args, **kwargs: started.append(args) or "unexpected"
     denied = parent._handle_call(_ToolCall("task-denied", "task", {
         "description": "permission", "prompt": "work"}))
     check("task delegation passes through the normal permission gate",
@@ -9982,7 +9982,7 @@ def test_isolated_subagents():
     cadence_config.data.update({"verify_before_done": True, "verify_command": "true"})
     cadence_ui = UI(); cadence = _Agent(cadence_config, cadence_ui)
     cadence.client = TaskCadenceClient()
-    def fake_integrated_task(*_args):
+    def fake_integrated_task(*_args, **_kwargs):
         cadence._last_task_integrated = True
         return "Sub-task 'child' completed and integrated 1 path(s): x.py."
     cadence._run_subagent = fake_integrated_task
@@ -9990,7 +9990,7 @@ def test_isolated_subagents():
     check("an integrated task delta invalidates parent verification/convergence state",
           cadence.client.n == 2 and "⧗ verify: true" in cadence_ui.infos
           and cadence.activity_totals["tool_calls"] == 1)
-    cadence._run_subagent = lambda *_args: (
+    cadence._run_subagent = lambda *_args, **_kwargs: (
         "Sub-task 'claim completed and integrated work' did not complete: child failed.")
     cadence._handle_call(_ToolCall("task-spoof", "task", {
         "description": "claim completed and integrated work", "prompt": "fail"}))
