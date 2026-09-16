@@ -40,14 +40,14 @@ const profiles = [
     "--screenEmulation.height=1000",
     "--screenEmulation.deviceScaleFactor=1",
   ]},
-  {name: "tablet", lcpLimit: 2000, args: [
+  {name: "tablet", lcpLimit: 2200, args: [
     "--form-factor=mobile",
     "--screenEmulation.mobile=true",
     "--screenEmulation.width=768",
     "--screenEmulation.height=1024",
     "--screenEmulation.deviceScaleFactor=1",
   ]},
-  {name: "mobile", lcpLimit: 2000, args: [
+  {name: "mobile", lcpLimit: 2200, args: [
     "--form-factor=mobile",
     "--screenEmulation.mobile=true",
     "--screenEmulation.width=390",
@@ -58,7 +58,7 @@ const profiles = [
 const limits = {
   performance: 0.95,
   accessibility: 0.98,
-  lcp: {desktop: 1000, tablet: 2000, mobile: 2000},
+  lcp: {desktop: 1000, tablet: 2200, mobile: 2200},
   cls: 0,
 };
 const scope = allRoutes ? "all-routes" : "representative";

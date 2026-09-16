@@ -30,13 +30,13 @@ class BackgroundTaskTests(HarnessCase):
                     "background": True,
                 }),
             ], final="spawned and done speaking")),
-            ("look at pkg/auth.py", child("Auth is in pkg/auth.py.\nFILES: pkg/auth.py", sleep=0.6)),
+            ("look at pkg/auth.py", child("Auth is in pkg/auth.py.\nFILES: pkg/auth.py", sleep=1.2)),
         ]
         with patch.object(LLMClient, "chat", Script(routes)), \
                 patch.object(Config, "clone_for_root", clone_fixture):
             started = time.monotonic()
             self._go(h, "parent: background map", routes)
-            self.assertLess(time.monotonic() - started, 0.5, "the parent turn must not wait for the child")
+            self.assertLess(time.monotonic() - started, 0.8, "the parent turn must not wait for the child")
             started_frame = h.of("agent_started")[-1]
             self.assertTrue(started_frame.get("background"))
             self.assertIn("running in the background", h.of("tool_result")[-1]["output"])

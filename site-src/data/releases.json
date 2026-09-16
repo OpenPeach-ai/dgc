@@ -3,10 +3,19 @@
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
+      "version": "0.41.1",
+      "date": "2026-09-17",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.41.1",
+      "status": "current",
+      "notes": [
+        "Same specialists, chips, and background wake as 0.41.0. Pair with extension 0.26.0; editor protocol remains v14."
+      ]
+    },
+    {
       "version": "0.41.0",
       "date": "2026-09-17",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.41.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Named specialists on the task tool: explorer maps the tree read-only, researcher writes one findings file, critic reviews that file, and worker implements. After research, the main agent should spawn critic on the findings path unless you asked it to skip review.",
         "A task with background true keeps working after the turn ends. The composer stays free. When the child lands, DGC starts a wake turn with its summary so you are not stuck in a blocked turn polling it.",
