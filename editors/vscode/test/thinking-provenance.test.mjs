@@ -119,25 +119,37 @@ for (const width of [300, 460]) {
     if (skipOrFail(t)) return;
     const page = await openThinkingPage(browser, { width, theme: "light-modern", height: 1000, events: SCENARIOS.subagent });
     try {
+      const parentHidden = await page.evaluate(() => {
+        const owned = [...document.querySelectorAll("#log [data-agent]")];
+        return {
+          owned: owned.length,
+          visible: owned.filter((node) => getComputedStyle(node).display !== "none").length,
+        };
+      });
+      assert.ok(parentHidden.owned >= 1, "child thinking stays in the DOM for the inner page");
+      assert.equal(parentHidden.visible, 0, "child thinking does not dump into the parent transcript");
+      await page.click('.agent-chip[data-agent-id="sub-e051bf6ba1c3"]');
+      await page.waitForSelector("#agent-page:not([hidden])");
       const facts = await page.evaluate(() => {
-        const labels = [...document.querySelectorAll(".disclosure .thought-agent, .disclosure .thought-label:first-of-type")];
-        const rows = [...document.querySelectorAll(".disclosure, .thought-static")];
+        const root = document.getElementById("agent-log");
+        const labels = [...root.querySelectorAll(".disclosure .thought-agent, .disclosure .thought-label:first-of-type")];
+        const rows = [...root.querySelectorAll(".disclosure, .thought-static")];
         const start = (row) => (row.querySelector(".thought-agent") || row.querySelector(".thought-label")).getBoundingClientRect().left;
-        const prefix = document.querySelector(".disclosure[data-agent] .thought-agent");
+        const prefix = root.querySelector(".disclosure[data-agent] .thought-agent");
         return {
           starts: rows.map(start),
           prefixVisible: !!prefix && prefix.getBoundingClientRect().width > 30,
           prefixes: rows.map((row) => !!row.querySelector(".thought-agent")),
-          headerLines: [...document.querySelectorAll(".disclosure")].map((node) =>
+          headerLines: [...root.querySelectorAll(".disclosure")].map((node) =>
             Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight))),
           labels: labels.length,
         };
       });
-      assert.deepEqual(facts.prefixes, [false, true, true, false]);
-      assert.ok(facts.prefixVisible, "the Sub-agent prefix is visible");
+      assert.ok(facts.prefixes.some(Boolean), "the inner page keeps the Sub-agent thinking rows");
+      assert.ok(facts.prefixVisible, "the Sub-agent prefix is visible on the inner page");
       for (const x of facts.starts) assert.ok(Math.abs(x - facts.starts[0]) <= 1, `label starts ${facts.starts.join(", ")}`);
       for (const count of facts.headerLines) assert.ok(width >= 460 ? count === 1 : count <= 2, `header spans ${count} lines`);
-      const snapshot = await page.locator(".disclosure[data-agent]").ariaSnapshot();
+      const snapshot = await page.locator("#agent-log .disclosure[data-agent]").ariaSnapshot();
       assert.match(snapshot, /Sub-agent ?, Thought for 2s ?, raw/, "Chromium joins the parts with a space before each comma");
     } finally {
       await page.close();

@@ -108,6 +108,10 @@ change either at any time:
 Type a request and press **Enter**. DGC plans, reads files, runs tools, edits
 code, and streams its thinking and its answer back live. Press **Esc** to stop
 the current turn; press **Enter** again on a new prompt to queue it.
+
+`/docs` opens this library in the terminal (searchable; the same pages as
+docs.vibedgc.com). `#a fact` appends to project memory — see **Memory**. `@path`
+attaches one file; `$skill` applies a workflow.
 """.strip()),
 
     ("Keyboard shortcuts", "essential key bindings in the composer + transcript", """
@@ -225,6 +229,8 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
   everything under it — including every future clone.
 - `--engine NAME` — with `dgc -p`, delegate that one-shot turn to a subscription
   CLI instead of the configured endpoint. See **Subscriptions**.
+- `--ultra` / `--no-ultra` — turn the Ultra execution profile on or off for this
+  session (extended reasoning plus bounded parallel agents). See **Thinking & reasoning**.
 
 ## Model and endpoint
 
@@ -259,7 +265,15 @@ API-key environment reference is process-only:
 - `dgc protocol describe` — print the installed headless/editor contract as JSON.
 - `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
   protocol-only.
-- `dgc acp` — the agent-client-protocol surface.
+- `dgc acp` — Agent Client Protocol JSON-RPC over stdio (Zed, Neovim, and other ACP
+  clients). Prompt blocks, text and images are bounded; embedded resources are untrusted data.
+- `dgc mcp ...` — the same MCP catalog as `/mcp`, outside a chat. See **MCP servers**.
+- `dgc skills ...` — list, create, install, enable, disable, or show a skill package.
+  See **Skills**.
+- `dgc notes [QUERY]` — search this project's context notes. See **Context notes**.
+- `dgc trust` — list workspace-trust grants; `dgc trust revoke N|PATH|here` forgets one.
+- `dgc export [ID] [FILE]` — save a session as Markdown (default: most recent, to
+  `~/.dgc/exports`).
 - `dgc bug` — print the issue tracker URL.
 - `dgc help`, `dgc --version`.
 
@@ -300,6 +314,7 @@ reads outside the project and host writes except the project and shared system
 temporary paths; its temporary and process namespaces are not private. Network is
 blocked by default on both. Unsupported platforms fail closed instead of running a
 requested sandbox without confinement. Use `/sandbox network on` only when needed.
+The **Sandbox** page covers backends, what is confined, and what is not.
 
 ## In VS Code and Cursor
 
@@ -740,6 +755,8 @@ completed child's conflict-free delta; it never overwrites paths that were alrea
 retains conflicting or incomplete work with a visible worktree path and branch. Integrated edits
 remain part of the parent turn's `/rewind` checkpoint and usage/edit totals.
 
+The three checkout kinds — fleet, named `/worktree`, and delegated `task` — are on **Worktrees**.
+
 Use `/tasks` to inspect retained work. `/tasks apply ID` recomputes its delta, rejects paths that were
 dirty before delegation or changed in the parent, and adds an applied result to `/rewind`. `/tasks
 drop ID --confirm` permanently removes the isolated checkout. Older recovery records created before
@@ -756,18 +773,41 @@ sub-agent the chat has started and what each one is doing, instead of one spinne
 
 ## Named agents and trust
 
-Personal definitions in `~/.dgc/agents/` are available in any workspace. A project's
-`.dgc/agents/` definitions load only after you trust that project, because a definition can
-select its own model host and an environment key. Trusting an already-open terminal or editor
-loads them without a restart. Isolated tasks and fleet workspaces use the approved source
-project's definitions rather than loading new definitions from their scratch checkout.
+Four specialists are always available as the `task` tool's `agent` argument:
+
+- **explorer** — read-only map of the codebase (no writes).
+- **researcher** — investigate and write one findings file, then stop.
+- **critic** — review a named artifact; correct it or list blocking issues.
+- **worker** — implement a bounded change (the default when `agent` is omitted).
+
+After a researcher writes a design or plan file, the main agent should spawn critic on that
+path before implementing, unless you asked it to skip review. When a child finishes, the
+main agent reports in one or two sentences and names the files; the child's logs stay on
+that agent. In the editor each specialist is a coloured identity chip in the thread: the
+mark moves while it works and stills when it finishes. Click the chip (or its row in the
+agents list) for that agent's own page — duration, answer, and files. Child greps and
+edits do not dump into the parent chat.
+
+`task` accepts `background: true` so the child keeps working after the current turn ends.
+The composer stays free. The agents pill remains while that specialist runs. When it
+lands, DGC starts a wake turn with the child's summary; you do not sit in a blocked turn
+polling it. Foreground `task` (the default) still waits.
+
+Personal definitions in `~/.dgc/agents/` are available in any workspace and override a
+built-in of the same name. A project's `.dgc/agents/` definitions load only after you trust
+that project, because a definition can select its own model host and an environment key.
+Trusting an already-open terminal or editor loads them without a restart. Isolated tasks and
+fleet workspaces use the approved source project's definitions rather than loading new
+definitions from their scratch checkout. An optional `tools:` frontmatter line is an
+allow-list of built-in tool names.
 
 ## The count
 
 The prompt area lists every sub-agent started in the current turn — queued, running, waiting,
 finished, failed or stopped — so you can see the whole batch while work is happening. When the
-turn ends the count clears. Completed work stays in the transcript; it does not inflate the
-count as a chat gets longer.
+turn ends the count clears, unless a specialist was started with `background` true: that one
+stays in the prompt until it finishes, and DGC starts a new turn when it lands. Completed work
+stays in the transcript; it does not inflate the count as a chat gets longer.
 
 You can change the model while a turn is running. The round already on the wire keeps its
 client; the next model round uses the new one. The chat records `Switched to <model>`. If you
@@ -801,7 +841,7 @@ panel). Hover it to read how many are working. Click it for the list:
 
 - a summary such as **2 agents · 2 working**;
 - one row per visible agent with the same facts the terminal shows, updated as it works;
-- click a row to jump to that agent's step in the conversation;
+- click a row or a coloured chip in the transcript to open that agent's page;
 - **Sub-agent settings** opens Settings ▸ Agents, where the sub-agent model and host are chosen.
 
 The list is for looking. **Stop** ends the whole turn, including every agent. When the chat is
@@ -813,6 +853,121 @@ work. If DGC's backend stops, the agents that were still running are marked stop
 - The list shows up to 64 agents, the working ones first; the count stays exact beyond that.
 - Descriptions and failure messages are redacted the same way the transcript is. A row shows the first
   line of a failure message.
+""".strip()),
+
+    ("Handoff", "a continuation document from this session, for the next one", """
+# Handoff
+
+`/handoff` snapshots one generation-stable session, asks the configured model for a bounded
+self-contained continuation document, redacts it, and saves a new owner-private `HANDOFF-*.md`
+through the workspace mutation lease. Use it when you want the next session — or another person —
+to pick up without rereading the whole transcript.
+
+The file is a new write, not an overwrite of an existing handoff. An overlapping turn is rejected
+instead of mixed into the file. If another process changed the saved session under you, DGC asks
+you to resume it first.
+
+## Surfaces
+
+- Terminal and classic: `/handoff`.
+- Editor: **DGC: Generate Handoff**, or `/handoff` in the composer.
+- Headless: `generate_handoff` with `save: true` (atomic write) or `save: false` (markdown only).
+
+The `$handoff` skill is the instruction package for *how* to write one when you ask the agent
+to; `/handoff` is the command that always produces the file.
+
+## What it holds
+
+Objective, current work, checks already run, remaining steps. Credentials are redacted. It is
+not a full transcript (`/export`) and not project memory (`DGC.md`).
+""".strip()),
+
+    ("Code intelligence", "symbols, definitions, references, and a repo map", """
+# Code intelligence
+
+Two native tools help the agent find its way around a project without a lock-in to one editor
+language server.
+
+## `repo_map`
+
+A compact inventory: tracked and source files, sizes, SHA-256 prefixes, and language-aware
+symbol definitions. The agent uses it near the start of unfamiliar multi-file work. Optional
+`path` narrows the tree; `max_files` defaults to 300 (at most 1,000).
+
+## `code_intel`
+
+Find symbols, exact definitions or references, or syntax diagnostics.
+
+- `operation`: `symbols` · `definition` · `references` · `diagnostics`
+- `path`: file or directory (default: project root)
+- `symbol`, or `line` / `column` (1-based) when the symbol is omitted
+
+A bounded built-in static analyzer is always available. Configure a stdio language server for
+richer results; DGC confines returned paths to the project and reuses up to four project/spec
+sessions with serialized queries and idle cleanup.
+
+```
+{
+  "language_servers": {
+    "python": {"command": "pyright-langserver", "args": ["--stdio"]}
+  }
+}
+```
+
+Key by language (`python`) or extension (`.py`). Servers get a minimal environment, no shell.
+Default idle is 120 seconds; set `code_intel_lsp_idle_s` to `0` for one-shot isolation.
+`code_intel_timeout` bounds a query. Approved external-file queries always run one-shot.
+
+Prefer `code_intel` over a broad `grep` for navigation. Returned locations never escape the
+project.
+""".strip()),
+
+    ("Built-in tools", "what the native agent can call", """
+# Built-in tools
+
+On native local/API routes the model calls DGC's own tools. Subscription turns use the vendor
+CLI's tools instead. Adaptive `tool_profile` (the default) always offers the core read / edit /
+search / shell surface; web, artifact, skill-install, memory, goal, delegation, and monitor
+tools appear when the request needs them. `tool_profile: full` offers every tool allowed by the
+current permission mode. Plan mode denies mutations. Full-auto omits the blocking options prompt
+unless you asked to choose.
+
+## Files and code
+
+- `read_file` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` — read, overwrite,
+  exact-string edit, several edits to one file, or an atomic unified diff.
+- `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**).
+- `glob` · `grep` — find files; search contents.
+- `repo_map` · `code_intel` — inventory and symbols (see **Code intelligence**).
+- `git_diff` — local Git without a shell (see **Git changes**).
+
+## Shell and Python
+
+- `bash` — a command; `background: true` returns a task id at once (dev servers, watchers). It
+  holds the workspace lease only while it starts. Do not use a background command to change files.
+- `bash_output` · `bash_kill` — page or search retained output; stop a background task. Handles
+  belong to the originating agent and expire after 30 minutes.
+- `python` — persistent interpreter, off until `/code-action on` (see **Python code-action**).
+- `!cmd` in the composer uses the same sandbox, bounds, cancellation, and lease without asking
+  the model to interpret the command.
+
+## Web, browser, artifacts
+
+- `web_search` · `web_fetch` — search, then read a URL as text (see **Web search**).
+- `browser` — a real page: open, snapshot, click, type (see **Looking at a page**).
+- `artifact` · `present_document` — serve a page, or show Markdown in the browser
+  (see **Artifacts** and **Plan mode**).
+
+## Agent, memory, and control
+
+- `task` — a sub-agent: `agent` picks explorer / researcher / critic / worker (or a named
+  definition); `background: true` outlives the turn (see **Sub-agents**).
+- `todo` · `skill` · `add_skill` · `save_memory` · `update_goal` · `notes`
+- `present_plan` — plan mode only, for approval.
+- `propose_options` — ask you to decide (see **Questions**).
+- `monitor` · `monitor_stop` — watch a long-running command (see **Background monitors**).
+
+MCP tools join this catalog as `mcp__<server>__<tool>` when a server is connected.
 """.strip()),
 
     ("Context notes", "what the project already learned, across context windows", """
@@ -856,6 +1011,45 @@ most recent `notes_max_rows` entries, and is never sent anywhere.
 This is not the `/recall` archive. That is your raw scrollback, kept for you to read and never
 put back into the model's context. Notes are a small curated projection that deliberately can
 be — which is why they are bounded and redacted.
+
+This is also not **Memory** (`DGC.md` / `#a fact` / `/memory`) — that file is guidance you write,
+loaded into the native prompt every session.
+""".strip()),
+
+    ("Memory", "DGC.md, #fact, and /memory — guidance that loads every session", """
+# Memory
+
+Memory is a Markdown file the native agent reads at the start of a session: project conventions,
+commands that actually work here, facts you asked it to keep. It is not the context-notes trace
+(those are written from tool results — see **Context notes**), and delegated subscription turns
+do not receive this DGC injection.
+
+## Where it lives
+
+- **Project** — `DGC.md` at the project root. Loaded into every native session in that repo.
+- **Personal** — `~/.dgc/DGC.md`. Loaded in every project, after the project file.
+
+Both are bounded (about 32k characters of prompt view, 1 MiB on disk) and redacted the same way
+saved sessions are. Missing files are simply empty.
+
+## Writing it
+
+- **`#a fact`** in the composer — appends that line to project `DGC.md` atomically.
+- **`/memory add TEXT`** — the same, for project memory.
+- **`/memory add user TEXT`** — appends to personal `~/.dgc/DGC.md`.
+- **`/memory`** — show what is loaded.
+- The model's `save_memory` tool does the same write, with `scope` `project` (default) or `user`.
+- **`/init`** inspects the repo and prepares or updates `DGC.md` using ordinary edit permissions.
+  In plan mode it proposes the guide first. See **Plan mode**.
+
+A `#` line is memory, not a comment: it is written to the file, then the prompt is not sent as a
+normal question.
+
+## What belongs in it
+
+Stack, layout, build/test/lint commands, house style, durable facts. Not credentials, personal
+details, private absolute paths, or a dump of the last session — use **Handoff** for a continuation
+document, and `/export` for a transcript.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """
@@ -884,6 +1078,7 @@ Every conversation is a session, saved as you go.
 - **/handoff** — create a bounded, redacted continuation document from one stable
   session generation. DGC saves it as a new private `HANDOFF-*.md` through the
   workspace lease; an overlapping turn is rejected instead of mixed into the file.
+  The **Handoff** page covers the editor command, headless save, and what the file holds.
 ## Your earlier conversation after a compaction
 
 When a session grows past `compact_threshold` of the context window, DGC replaces the older
@@ -1215,6 +1410,54 @@ lines of context, new-side line numbers in the gutter, and hunk headers you can 
 - It is not the review: `/review` and the editor's **Changes** view stay the place to approve or
   undo a turn. `/diff` is for looking and asking while the work is still moving.
 """.strip()),
+
+    ("Git changes", "git_diff, Changes in this chat, and Workspace changes", """
+# Git changes
+
+DGC inspects Git without running `git diff` through a shell, without clean/smudge filters, and
+without talking to a remote. Three surfaces share that reader.
+
+## The `git_diff` tool
+
+Available in every permission mode, including plan. `/review` uses it. `GitDiff` permission rules
+use the same deny → ask → allow policy as other tools.
+
+| View | Comparison |
+| --- | --- |
+| `uncommitted` (default) | HEAD → index, then index → working files, including untracked files |
+| `staged` | HEAD → index; also works before the first commit |
+| `working` | Index → working files, including non-ignored untracked files |
+| `base`, with `ref` | Merge base of a local branch/tag/commit and HEAD → HEAD |
+| `commit`, optional `ref` | First parent → one commit (default HEAD); root commits use an empty tree |
+
+`{"view":"base","ref":"main","path":"src"}` reviews committed branch changes under `src`. Base and
+commit views do not include uncommitted edits. No view fetches. Working files are compared as raw
+bytes, so checkout line-ending conversion can differ from the ordinary Git UI. Renames appear as
+delete plus add. Symlinks, submodule contents, and conflicts need a separate look.
+
+Inspection has a 20-second deadline, a 4,096-file cap, 1 MiB per file/list, a 64 MiB aggregate
+read budget, and a 24,000-character diff budget. Partial coverage is explicit. "No changes" is
+returned only when the selected scope was inspected completely and had none.
+
+## In the editor: Changes in this chat
+
+The composer card **Changes in this chat** records deltas observed while *this* chat ran, using
+the actual file state before each run — even when the file was already dirty. A fresh chat starts
+empty. Opening a chat and finishing a read-only turn produce no card. Saved previews survive
+reload; later manual edits do not rewrite them. Older sessions have no retroactive baseline.
+
+Snapshots are private session data. They never enter model context.
+
+## In the editor: Workspace changes
+
+**Workspace changes** is the separate Git review: HEAD against working files, plus staged-only
+entries, including work that predates the chat. Tracking covers the currently acknowledged editor
+folders. Line totals are the displayed working-file differences, so a staged-only entry can show
+zero net lines; opening it previews the index as **DGC staged review**. Binary, conflict,
+submodule, and oversized previews send you to Source Control.
+
+The terminal's `/diff` pane is the live working-tree view while a turn runs; see **Diff pane**.
+""".strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
 # In your editor
 
@@ -1288,9 +1531,8 @@ permission rule) or **Deny**, and a denial can carry a note that reaches the mod
 ## When DGC asks you to decide
 
 Some choices are yours: a trade-off with no safe default, or a requirement the request leaves open.
-The model asks with a question card instead of a list of options in prose. It can ask up to four
-questions at once, each with two to four options (six at most), and it puts the option it recommends
-first.
+The model asks with a question card instead of a list of options in prose. The **Questions** page
+covers the terminal, classic prompt, ACP, full-auto, and who cannot be asked. In the editor:
 
 - **The card docks in the prompt box** in place of the text box. **Stop**, the mode and model pickers
   and the context meter stay where they are, and anything you had typed comes back when the question
@@ -1330,9 +1572,61 @@ Everything is a row: what it is on the left, the control on the right, the expla
 ## What the editor adds
 
 - Files DGC changed carry a mark in the explorer, and the diff opens in your editor's own viewer.
+- **Changes in this chat** on the composer is this chat's own deltas, not pending Git from before
+  you opened it. **Workspace changes** is the separate repository review. See **Git changes**.
 - **Add to DGC** in the explorer and editor-tab context menus attaches a file to the composer.
 - The panel reads your selection and the file you are in as typed context, not as text glued into
   the prompt.
+""".strip()),
+
+    ("Questions", "when the model needs you to pick, not guess", """
+# Questions
+
+Some choices have no safe default: a trade-off, or a requirement the request leaves open. The
+model asks with `propose_options` instead of a numbered list in prose. It can ask 1–4 questions
+at once, each with 2–6 options (2–4 is advised). The option it recommends comes first, with its
+label ending `(Recommended)` and a one-sentence description. DGC never reorders the list. Every
+client adds free text ("Something else…"); an "Other" option the model adds is dropped. Custom
+answers are bounded to 4,096 characters.
+
+Closing a question (× or Esc) is its own outcome: DGC saves whatever you already answered, ends
+the turn with no further model request, keeps queued prompts and monitors, and pauses a standing
+goal that was waiting on the answer. Stop still means stop. Answered questions stay in the
+transcript as **Asked 2 questions** (or **Asked · SQLite file**) inside the step, after a reload
+or resume as well.
+
+## In the editor
+
+The question docks inside the composer in place of the text box. Stop, the mode and model pickers
+and the context meter stay; the unsent draft comes back when the question closes. Each option is
+a stacked card. The recommended option is preselected — checked, highlighted, focused — so Enter,
+a click on it, or Continue takes it. Skip sits beside Continue. Nothing is sent without your
+action. Keys that arrive within 400 ms of the question opening are ignored. If the composer still
+has focus on a draft, it says "Press Tab to answer" instead of stealing focus.
+
+## In the terminal
+
+The full-screen app shows one line per option, the focused option's description under the
+question, and the cursor on the recommended option. Digits pick, Space toggles a multi-select
+option, "Skip this question" skips, ←/→ or Tab change question.
+
+The classic prompt uses an arrow menu per question starting on the recommended option, with
+"Something else…" and "Skip this question" rows. Multi-select takes comma-separated numbers.
+Several questions get a review list whose Submit skips anything unanswered.
+
+## Who is not asked
+
+Sub-agents and `dgc -p` are not offered the picker: a sub-agent returns the decision to the main
+agent with its recommendation. Subscription CLI turns keep the vendor's own question interface.
+A turn a background event started, and later wake turns after you have already answered a round,
+are told to list the choices as a numbered list instead of claiming the picker is missing.
+
+Full-auto does not stop to ask, so it leaves `propose_options` out, except on a turn where you
+explicitly ask to choose ("propose me options", "let me choose", "ask me to pick"). That turn
+gets the picker in every permission mode. In full-auto it is withdrawn again once one round has
+been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text you type
+counts: attached files, editor context, and a goal's objective never re-open the picker. A
+sentence that describes software ("the dropdown should let me choose a region") is not an ask.
 """.strip()),
     ("Looking at a page", "drive a real browser to see a deployed or local site", """
 # Looking at a page
@@ -1598,6 +1892,81 @@ close that agent.
   starts, so it never blocks edits or other commands. That also means it is not a way to change
   files: use it to watch, not to edit.
 """.strip()),
+
+    ("Sandbox", "confine native shell commands to the project", """
+# Sandbox
+
+`/sandbox on` runs native-loop spawned shell commands and lifecycle hooks inside the strongest
+supported host boundary. It does **not** skip permission prompts, does not wrap structured file
+tools (`read_file`, `edit_file`, …), and does not wrap a delegated subscription CLI.
+
+- `/sandbox` — report the backend and whether it is on.
+- `/sandbox on` · `/sandbox off`
+- `/sandbox read-only` — the project is mounted read-only inside the sandbox and every file edit
+  is denied (for review runs). `--sandbox on|off|read-only` sets it for one `dgc` launch.
+- `/sandbox network on` — allow network from sandboxed commands. Off by default.
+
+## Backends
+
+- **Linux** — bubblewrap (`bwrap`). The project is the only persistent writable host path for
+  those commands. Ambient user state is masked. Home, temporary, runtime, process, and network
+  namespaces are private.
+- **macOS** — `sandbox-exec`. Ambient-home reads outside the project are denied; host writes
+  except the project and shared system temporary paths are denied. Temporary and process
+  namespaces are not private.
+- **Anything else** — fail closed. DGC will not pretend a requested sandbox is on.
+
+`sandbox_env_allow` in `config.json` is the list of extra environment variable names to pass
+through. Other non-baseline host variables are withheld; DGC still supplies a small safe
+baseline plus sandbox-specific home, temporary, and runtime paths.
+
+The Python code-action is not covered by `/sandbox`. MCP server processes start unsandboxed in
+the workspace — treat a configured server command as a trusted executable.
+""".strip()),
+
+    ("Worktrees", "fleet, named, and delegated checkouts", """
+# Worktrees
+
+In a Git project DGC can isolate concurrent work so two agents do not fight over the same files.
+There are three kinds.
+
+## Fleet
+
+The launch agent stays in the checkout you selected. Every additional interactive agent
+(Ctrl+N) gets an owner-private `dgc/fleet-*` worktree with the source checkout's exact tracked
+and non-ignored untracked baseline. Each checkout has its own crash-safe mutation lease, so
+fleet writes can proceed concurrently.
+
+Closing an untouched managed checkout removes it. Changed, committed, uncertain, or still-running
+work is retained with its visible branch and path. Reopening that saved conversation validates
+and reattaches to the same checkout. Non-Git projects say when they fall back to serialized
+shared-checkout writes.
+
+`fleet_worktree_root` (empty = `~/.dgc/fleet-worktrees`) must sit outside the source repository.
+
+## Named
+
+`/worktree <name>` creates or switches to a deliberately named long-lived branch. Use it when
+you want a checkout you will keep, not an automatic fleet one. `/worktree` with no name lists
+them.
+
+## Delegated `task`
+
+A sub-agent in a Git project gets its own short-lived private checkout, populated with the
+caller's tracked and non-ignored untracked state. DGC applies only a completed child's
+conflict-free delta. It never auto-overwrites a path that was already dirty. Conflicting or
+incomplete work is retained with a visible path and branch.
+
+`/tasks` lists retained work. `/tasks apply ID` recomputes the delta, rejects paths that were
+dirty before delegation or changed in the parent, and adds an applied result to `/rewind`.
+`/tasks drop ID --confirm` permanently removes the isolated checkout. The editor's command
+palette exposes the same typed recovery.
+
+`subagent_worktree_root` (empty = `~/.dgc/worktrees`) must sit outside the source repository.
+
+See **Multiple agents** for the dashboard, and **Sub-agents** for named specialists and
+background tasks.
+""".strip()),
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
 # Connect your model
 
@@ -1721,9 +2090,23 @@ Native controls differ:
 - Other providers use their supported effort fields or budgets. Unsupported controls are negotiated
   away after a precise rejection; a model without reasoning support gets DGC instructions only.
 
-Ultra adds guidance for deeper work and bounded parallel agents. Permission mode still governs
-what can run. A stronger profile can take longer and use more tokens; it does not guarantee better
-answers. The editor's picker and General settings explain the native control for the selected model.
+## Ultra
+
+`/ultra on` is an orchestration profile, not a sixth thinking level. It raises native effort to
+`xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
+effort, and asks the model to split genuinely independent work into parallel sub-agents — up to
+`max_parallel_tasks` (default 4, at most 8). Long work that does not block the rest of the turn
+can use `task` with `background: true`; DGC starts a wake turn when that child lands.
+
+- `/ultra` · `/ultra on|off` — toggle; the status line shows the profile while it is on.
+- `--ultra` / `--no-ultra` — the same for one `dgc` launch.
+- Settings → Behaviour (terminal) or General (editor).
+
+Permission mode is unchanged: Ultra does not grant extra filesystem, shell, or network authority.
+It does not invent a vendor enum named "ultra". Coupled edits stay serial; the parent still has
+to reconcile child results. A stronger profile can take longer and use more tokens; it does not
+guarantee better answers. The editor's picker and General settings explain the native control for
+the selected model.
 
 ## Showing thinking
 
@@ -1829,6 +2212,29 @@ path or any credential. Rows older than 400 days are removed automatically. To s
 DGC and your editor first (a running DGC keeps the file open and would go on counting into the
 deleted copy), then delete `usage.sqlite` together with its `usage.sqlite-wal` and
 `usage.sqlite-shm` companions; DGC creates a new one the next time it runs.
+""".strip()),
+
+    ("Web search", "DuckDuckGo by default; Brave, Tavily, or SearXNG if you set them", """
+# Web search
+
+The native agent gets a `web_search` tool when the request needs current information (versions,
+docs, news, facts). It returns titles, URLs and snippets; `web_fetch` then reads a result URL as
+text. A live page that has to run JavaScript is **Looking at a page**, not this.
+
+DuckDuckGo is the keyless default. `dgc setup` or `/search` picks another backend.
+
+- `/search` — show the current provider.
+- `/search duckduckgo` — keyless HTML search.
+- `/search brave` · `/search tavily` — prompts for an API key (masked). The value lives in
+  `~/.dgc/secrets.json` or `DGC_SEARCH_API_KEY`, never in `config.json`.
+- `/search searxng <url>` — a self-hosted instance. `search_url` in config is that base URL.
+
+`search_timeout` bounds the request (1–60 seconds). Queries leave this machine for the chosen
+provider; treat that like any other web request.
+
+Adaptive `tool_profile` offers `web_search` when the prompt is about looking something up.
+`tool_profile: full` offers it every turn. Plan mode allows it. Subscription CLIs use their own
+search, not DGC's.
 """.strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions

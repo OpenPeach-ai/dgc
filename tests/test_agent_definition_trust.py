@@ -48,7 +48,7 @@ class AgentDefinitionTrustTests(unittest.TestCase):
     def test_trust_is_canonical_and_does_not_cover_a_similarly_named_sibling(self):
         self.write_definition(self.definitions, "Project reviewer")
         config = SimpleNamespace(data={"trusted_dirs": [str(self.root / "pro")]})
-        self.assertEqual(agents.discover_agents(self.project, config=config), {})
+        self.assertNotIn("reviewer", agents.discover_agents(self.project, config=config))
         alias = self.root / "alias"
         alias.symlink_to(self.project, target_is_directory=True)
         config.data["trusted_dirs"] = [str(alias)]

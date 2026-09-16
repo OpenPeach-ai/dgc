@@ -1018,12 +1018,13 @@
         + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
-    } else if (kind === "monitor") {
-      // DGC started this turn because a background monitor printed something. The label is
-      // command-derived text the backend wrote, so it is a marker, never a "you" bubble.
+    } else if (kind === "monitor" || kind === "wake") {
+      // DGC started this turn because a background monitor printed something, or a detached
+      // specialist finished. The label is backend-written, never a "you" bubble.
       const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
+      const lead = kind === "wake" ? "Woke on agent" : "Woke on monitor";
       note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
-        + `<span>Woke on monitor · ${esc(String(prompt || "").slice(0, 200))}</span>`;
+        + `<span>${lead} · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
       wakeNote = note;
     } else if (!promptNode) {
@@ -1662,7 +1663,14 @@
   }
   function refreshToolGroup(group) {
     if (!group) return;
-    const cards = [...group.querySelectorAll(".tool")];
+    const all = [...group.querySelectorAll(":scope > .tool")];
+    const cards = all.filter((card) => !card.classList.contains("agent-owned"));
+    if (!cards.length) {
+      if (all.length) group.classList.add("agent-owned");
+      if (turn && turn.toolGroup === group) turn.toolGroup = null;
+      return;
+    }
+    group.classList.remove("agent-owned");
     const running = cards.filter(card => card.dataset.status === "running");
     const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status));
     const summary = group.querySelector(".tool-group-label");
@@ -1684,6 +1692,7 @@
     if (failures.length) group.open = true;
   }
   function appendTool(card) {
+    if (!turn) return;
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
       turn.toolGroup.innerHTML = '<summary><span class="codicon codicon-tools" aria-hidden="true"></span><span class="tool-group-label">Working</span></summary>';
@@ -1699,6 +1708,8 @@
 
   function openFileBtn(path, line) {
     const b = el("button", "link open-file", "⤢ open"); b.type = "button";
+    b.dataset.path = path;
+    if (line) b.dataset.line = String(line);
     b.setAttribute("aria-label", `Open ${path}${line ? ` at line ${line}` : ""}`);
     b.title = `Open ${path}${line ? ` at line ${line}` : ""} in the editor`;
     b.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "openFile", path, line }); };
@@ -2698,6 +2709,7 @@
       }
       case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
+        if (!turn && (ev.agent || agentIdFromCall(ev.call_id))) break;
         ensureTurn(); turn.chars += String(ev.text || "").length;
         reasoningDelta(ev); break;
       case "thinking_end": ensureTurn(); reasoningEnd(ev); break;
@@ -2715,6 +2727,22 @@
         break;
       }
       case "tool_call": {
+        const childId = agentIdFromCall(ev.call_id);
+        if (childId && !turn) {
+          finishReasoning();
+          const store = childToolBucket(childId);
+          const same = ev.call_id ? store[ev.call_id] : null;
+          if (same && same.isConnected && same.dataset.status === "running" && same.dataset.toolName === String(ev.name || "")) {
+            same.querySelector(".dot")?.classList.add("run");
+            if (!replaying) startToolClock(same);
+          } else {
+            const card = toolCard(ev);
+            store[ev.call_id || ev.name] = card;
+            placeChildTool(childId, card);
+            agentsOnToolCard(card, ev);
+          }
+          break;
+        }
         ensureTurn(); finishReasoning();
         turn._tools = turn._tools || Object.create(null);
         // One step, one row. A turn adopted from a reload snapshot can already hold this step, still
@@ -2732,6 +2760,7 @@
         break;
       }
       case "tool_progress": {
+        if (agentIdFromCall(ev.call_id) && !turn) break;
         ensureTurn();
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
@@ -2748,6 +2777,21 @@
       case "tool_images": imagesOnToolImages(ev); break;
       case "image": imagesOnAnswer(ev); break;     // a getImage answer (the host answers for a backend without one)
       case "tool_result": {
+        const childId = agentIdFromCall(ev.call_id);
+        if (childId && !turn) {
+          const store = childToolBucket(childId);
+          const key = ev.call_id || ev.name;
+          const c = store[key] || (store[key] = toolCard({ name: ev.name, call_id: ev.call_id }));
+          if (!c.isConnected) placeChildTool(childId, c);
+          const blocked = ev.is_error && String(ev.output || "").startsWith("error: repeated tool call blocked");
+          setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : "completed"));
+          if (ev.is_diff && ev.diff) {
+            c.classList.add("no-body");
+            const rendered = renderDiff(ev.diff); c.after(rendered);
+            rendered.dataset.agentId = childId; rendered.classList.add("agent-owned");
+          } else setToolOutput(c, String(ev.output || "").slice(0, 4000));
+          break;
+        }
         ensureTurn();
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
           recordEdit(turn._paths?.[ev.call_id || ev.name]);
@@ -2774,6 +2818,10 @@
         if (ev.is_diff && ev.diff) {
           c.classList.add("no-body");           // the diff below is this step's detail
           const rendered = renderDiff(ev.diff); c.after(rendered);
+          if (c.dataset.agentId) {
+            rendered.dataset.agentId = c.dataset.agentId;
+            rendered.classList.add("agent-owned");
+          }
           if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del);
         }
         else {
@@ -3755,7 +3803,10 @@
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
-  $("thread-title").onclick = () => vscode.postMessage({ type: "slashText", text: "/name" });
+  $("thread-title").onclick = () => {
+    if (agentPageId) return;
+    vscode.postMessage({ type: "slashText", text: "/name" });
+  };
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
@@ -4683,6 +4734,255 @@
   const AGENT_ACTIVE = new Set(["queued", "running", "waiting"]);
   const AGENT_ENDED_WORD = { finished: "Finished", failed: "Failed", stopped: "Stopped" };
   const agentRecords = new Map();          // id -> record (the frame's fields + receivedAt, order)
+  let agentPageId = "";
+  let agentPageParentTitle = "";
+  let agentPageScroll = 0;
+  let agentPageTick = null;
+  // Pack B identity marks in media/agents/. Same file on light and dark (they hold on #141414).
+  // Working agents load the -animated.svg (2s swirl); finished agents load the still frame.
+  const AGENT_MARK_NAMES = ["seafoam", "lagoon", "coral", "violet", "amber", "slate", "lime", "rose"];
+  function cssEscape(value) {
+    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+  }
+  function agentIdFromCall(callId) {
+    const match = String(callId || "").match(/^(sub-[0-9a-f]{12})(?::|$)/i);
+    return match ? match[1] : "";
+  }
+  function agentMarkIndex(id) {
+    let hash = 0;
+    for (let i = 0; i < String(id).length; i++) hash = (Math.imul(hash, 33) + String(id).charCodeAt(i)) >>> 0;
+    return hash % 8;
+  }
+  function agentMarkMotionOk() {
+    return !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+  function agentMarkSrc(index, live) {
+    const base = (document.body.dataset.agentMarks || "").replace(/\/$/, "");
+    if (!base) return "";
+    const name = AGENT_MARK_NAMES[index];
+    const file = `agent-${String(index + 1).padStart(2, "0")}-${name}${live ? "-animated" : ""}.svg`;
+    return `${base}/${file}`;
+  }
+  function paintAgentMark(node, id, live) {
+    if (!node) return;
+    const index = agentMarkIndex(id);
+    const animate = live === true && agentMarkMotionOk();
+    node.dataset.mark = String(index);
+    node.dataset.face = AGENT_MARK_NAMES[index];
+    node.classList.toggle("is-live", animate);
+    const src = agentMarkSrc(index, animate);
+    let img = node.querySelector("img");
+    if (!src) { if (img) img.remove(); return; }
+    if (!img) {
+      img = document.createElement("img");
+      img.alt = "";
+      img.draggable = false;
+      node.appendChild(img);
+    }
+    if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+  }
+  function agentStatusWord(record) {
+    if (record.state === "finished" || record.state === "failed" || record.state === "stopped") return record.state;
+    if (record.state === "waiting") return "waiting";
+    if (record.state === "queued") return "queued";
+    return "working";
+  }
+  function agentChipOf(id) {
+    const sel = `.agent-chip[data-agent-id="${cssEscape(id)}"]`;
+    return (appendTarget && appendTarget.querySelector ? appendTarget.querySelector(sel) : null) || log.querySelector(sel);
+  }
+  const childToolStores = new Map();
+  function childToolBucket(id) {
+    if (!childToolStores.has(id)) childToolStores.set(id, Object.create(null));
+    return childToolStores.get(id);
+  }
+  function placeChildTool(id, card) {
+    card.dataset.agentId = id;
+    card.classList.add("agent-owned");
+    const chip = agentChipOf(id);
+    const host = (chip && chip.closest(".msg")) || log;
+    host.appendChild(card);
+  }
+  function placeAgentChip(chip, id) {
+    const anchor = agentAnchor(id);
+    if (anchor && anchor.isConnected) {
+      const group = anchor.closest(".tool-group") || anchor;
+      group.after(chip);
+      return;
+    }
+    if (chip.isConnected) return;
+    if (turn) appendTurnContent(chip);
+    else (appendTarget || log).appendChild(chip);
+  }
+  function ensureAgentChip(record) {
+    if (!record?.id) return;
+    const id = String(record.id);
+    let chip = agentChipOf(id);
+    if (!chip) {
+      chip = el("button", "agent-chip");
+      chip.type = "button";
+      chip.dataset.agentId = id;
+      const mark = el("span", "agent-mark");
+      mark.setAttribute("aria-hidden", "true");
+      const label = el("span", "agent-chip-label");
+      chip.append(mark, label);
+      chip.addEventListener("click", () => openAgentPage(id));
+    }
+    placeAgentChip(chip, id);
+    paintAgentMark(chip.querySelector(".agent-mark"), id, AGENT_ACTIVE.has(record.state));
+    const label = chip.querySelector(".agent-chip-label");
+    const name = String(record.description || "Agent").trim() || "Agent";
+    const status = agentStatusWord(record);
+    agentsSetText(label, `${name} ${status}`);
+    chip.title = `Open ${name}`;
+    chip.setAttribute("aria-label", `Open ${name}, ${status}`);
+    if (agentPageId === id) paintAgentPage(id);
+  }
+  function agentAnswerText(record) {
+    return String(record.message || "").split("\n").filter((line) => !/^\s*FILES:/i.test(line)).join("\n").trim();
+  }
+  function rebindAgentClone(node) {
+    if (node.classList.contains("tool")) {
+      const toggle = node.querySelector(".tool-toggle");
+      if (toggle) {
+        toggle.onclick = () => {
+          if (node.classList.contains("no-body")) return;
+          const open = node.classList.toggle("open");
+          toggle.setAttribute("aria-expanded", String(open));
+        };
+      }
+    }
+    if (node.classList.contains("disclosure")) {
+      node.onclick = () => {
+        const body = node.nextElementSibling;
+        if (!body || !body.classList.contains("reasoning")) return;
+        const open = body.classList.toggle("show");
+        const chev = node.querySelector(".thought-chev");
+        if (chev) chev.textContent = open ? "▾" : "▸";
+        node.setAttribute("aria-expanded", String(open));
+      };
+    }
+    node.querySelectorAll?.(".open-file[data-path]").forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ type: "openFile", path: btn.dataset.path, line: btn.dataset.line ? Number(btn.dataset.line) : undefined });
+      };
+    });
+  }
+  function paintAgentTranscript(id, into) {
+    for (const node of log.querySelectorAll(".tool.agent-owned, .diff.agent-owned, button.disclosure.agent-owned, .reasoning.agent-owned, .thought-static.agent-owned, .thought-note.agent-owned")) {
+      if ((node.dataset.agentId || node.dataset.agent) !== id) continue;
+      // The parent's `task` spawn card is tagged with this id for the pill; it is not the child's work.
+      if (node.classList.contains("tool") && node.dataset.toolName === "task"
+          && !String(node.dataset.callId || "").startsWith(`${id}:`)) continue;
+      const clone = node.cloneNode(true);
+      rebindAgentClone(clone);
+      into.appendChild(clone);
+    }
+  }
+  function paintAgentFiles(into, record) {
+    const paths = agentHandoffFiles(record.message);
+    if (!paths.length) return;
+    const card = el("div", "agent-change-card");
+    const title = el("div", "agent-change-title");
+    title.textContent = paths.length === 1 ? "Edited 1 file" : `Edited ${paths.length} files`;
+    const list = el("div", "agent-files");
+    list.hidden = false;
+    for (const path of paths) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "agent-file";
+      link.textContent = path;
+      link.addEventListener("click", () => vscode.postMessage({ type: "openFile", path }));
+      list.appendChild(link);
+    }
+    card.append(title, list);
+    into.appendChild(card);
+  }
+  function syncAgentPageTick() {
+    const record = agentPageId ? agentRecords.get(agentPageId) : null;
+    const live = !!(record && AGENT_ACTIVE.has(record.state));
+    if (live && !agentPageTick) {
+      agentPageTick = setInterval(() => { if (agentPageId) paintAgentPageMeta(agentPageId); }, 1000);
+    }
+    if (!live && agentPageTick) { clearInterval(agentPageTick); agentPageTick = null; }
+  }
+  function paintAgentPageMeta(id) {
+    const record = agentRecords.get(id);
+    const meta = $("agent-page-meta");
+    if (!record || !meta) return;
+    const working = AGENT_ACTIVE.has(record.state);
+    const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
+    meta.textContent = `${working ? "Working" : "Worked"} for ${agentElapsed(ms)}`;
+  }
+  function paintAgentPage(id) {
+    const record = agentRecords.get(id);
+    const page = $("agent-page"), agentLog = $("agent-log"), mark = $("agent-mark"), title = $("thread-title");
+    if (!record || !page || !agentLog) return;
+    const name = String(record.description || "Agent").trim() || "Agent";
+    const keepBottom = page.scrollHeight - page.scrollTop - page.clientHeight < 24;
+    const keep = page.scrollTop;
+    if (mark) { mark.hidden = false; paintAgentMark(mark, id, AGENT_ACTIVE.has(record.state)); }
+    if (title) {
+      title.textContent = name;
+      title.title = name;
+      title.setAttribute("aria-label", name);
+    }
+    paintAgentPageMeta(id);
+    agentLog.replaceChildren();
+    const answer = agentAnswerText(record);
+    if (answer) {
+      const block = el("div", "text agent-answer");
+      block.innerHTML = md(answer);
+      agentLog.appendChild(block);
+    }
+    paintAgentFiles(agentLog, record);
+    paintAgentTranscript(id, agentLog);
+    syncAgentPageTick();
+    page.scrollTop = keepBottom ? page.scrollHeight : keep;
+  }
+  function openAgentPage(id) {
+    const record = agentRecords.get(id);
+    if (!record) return;
+    agentsHideMenu();
+    if (!agentPageId) {
+      agentPageParentTitle = $("thread-title")?.textContent || "";
+      agentPageScroll = log.scrollTop;
+    }
+    agentPageId = id;
+    document.body.dataset.agentPage = id;
+    const back = $("agent-back");
+    if (back) back.hidden = false;
+    const page = $("agent-page");
+    if (page) page.hidden = false;
+    log.setAttribute("aria-hidden", "true");
+    paintAgentPage(id);
+    back?.focus();
+  }
+  function closeAgentPage() {
+    if (!agentPageId) return;
+    const restoreTitle = agentPageParentTitle;
+    const restoreScroll = agentPageScroll;
+    agentPageId = "";
+    agentPageParentTitle = "";
+    agentPageScroll = 0;
+    delete document.body.dataset.agentPage;
+    const back = $("agent-back"), mark = $("agent-mark"), page = $("agent-page"), agentLog = $("agent-log"), title = $("thread-title");
+    if (back) back.hidden = true;
+    if (mark) { mark.hidden = true; mark.removeAttribute("data-mark"); mark.removeAttribute("data-face"); }
+    if (page) page.hidden = true;
+    if (agentLog) agentLog.replaceChildren();
+    log.removeAttribute("aria-hidden");
+    if (title) {
+      const name = restoreTitle || "Untitled chat";
+      title.textContent = name;
+      title.title = `${name} — click to rename`;
+      title.setAttribute("aria-label", `Current chat: ${name}. Click to rename`);
+      document.title = `${name} — DGC`;
+    }
+    if (agentPageTick) { clearInterval(agentPageTick); agentPageTick = null; }
+    log.scrollTop = restoreScroll;
+  }
   const agentAnchors = new Map();          // id -> the task card this record claimed
   let agentTotalExtra = 0, agentActiveExtra = 0;   // a snapshot's records it did not itemise
   let agentOrder = 0, agentsRenderQueued = false, agentsTick = null;
@@ -4696,6 +4996,7 @@
 
   function agentsLabelCount(active, total) { return total; }
   function agentVisible(record) {
+    if (record.background && AGENT_ACTIVE.has(record.state)) return true;
     if (!agentsTurnLive || record.epoch !== agentsEpoch) return false;
     if (AGENT_ACTIVE.has(record.state)) return true;
     return record.seenLive === true;
@@ -4707,6 +5008,12 @@
   function agentsTurnEnd() {
     agentsTurnLive = false;
     agentsEpoch += 1;
+    for (const record of agentRecords.values()) {
+      if (record.background && AGENT_ACTIVE.has(record.state)) {
+        record.epoch = agentsEpoch;
+        agentsTurnLive = true;
+      }
+    }
     renderAgents();
   }
 
@@ -4774,6 +5081,8 @@
       for (const key of ["duration_ms", "tool_calls", "tokens", "message"]) if (key in ev) record[key] = ev[key];
       delete record.waiting_for; delete record.activity;
     }
+    const current = agentRecords.get(id);
+    if (current) ensureAgentChip(current);
     renderAgents();
     agentAnnounce();
   }
@@ -4802,6 +5111,7 @@
     }
     agentsHoldClaims = false;
     claimAgentAnchors();
+    for (const record of agentRecords.values()) ensureAgentChip(record);
     // A snapshot never speaks. It drops from the batch only the agents it no longer lists, so an
     // agent that ended before a mid-batch snapshot (list_agents while busy, a reload, a resync)
     // is still in the "Agents finished: …" count when the batch ends.
@@ -4838,15 +5148,28 @@
         && !(card.dataset.agentId && agentAnchor(card.dataset.agentId) === card));
       for (let i = records.length - 1, j = free.length - 1; i >= 0 && j >= 0; i -= 1, j -= 1) {
         free[j].dataset.agentId = records[i].id;
+        free[j].classList.add("agent-owned");
+        refreshToolGroup(free[j].closest(".tool-group"));
         agentAnchors.set(records[i].id, free[j]);
       }
     }
   }
   function agentsToolCard(card, ev) {
+    const fromCall = agentIdFromCall(card.dataset.callId || ev.call_id);
+    if (fromCall) {
+      card.dataset.agentId = fromCall;
+      card.classList.add("agent-owned");
+      refreshToolGroup(card.closest(".tool-group"));
+    }
     if (card.dataset.toolName !== "task" || !agentRecords.size) return;
     // A replayed page is built detached and inserted when it is complete; claim once it is.
-    if (replaying || !card.isConnected) queueMicrotask(() => { claimAgentAnchors(); scheduleAgentsMenuRender(); });
-    else { claimAgentAnchors(); scheduleAgentsMenuRender(); }
+    const claim = () => {
+      claimAgentAnchors();
+      for (const record of agentRecords.values()) ensureAgentChip(record);
+      scheduleAgentsMenuRender();
+    };
+    if (replaying || !card.isConnected) queueMicrotask(claim);
+    else claim();
   }
 
   // ---- the pill ----
@@ -4959,23 +5282,50 @@
     const text = document.createElement("span"); text.className = "agent-text";
     const desc = document.createElement("span"); desc.className = "agent-desc";
     const meta = document.createElement("span"); meta.className = "agent-meta";
-    text.append(desc, meta); row.append(dot, text); item.appendChild(row);
+    const files = document.createElement("div"); files.className = "agent-files"; files.hidden = true;
+    text.append(desc, meta); row.append(dot, text); item.append(row, files);
     const id = record.id;
     row.addEventListener("click", () => agentJump(id));
-    entry = { item, row, dot, desc, meta, nested: null };
+    entry = { item, row, dot, desc, meta, files, nested: null };
     agentRowNodes.set(id, entry);
     return entry;
   }
+  function agentHandoffFiles(message) {
+    const line = String(message || "").split("\n").find((part) => /^\s*FILES:/i.test(part));
+    if (!line) return [];
+    return line.split(":").slice(1).join(":").split(",").map((part) => part.trim().replace(/^`|`$/g, "")).filter(Boolean).slice(0, 8);
+  }
   function agentRowUpdate(entry, record) {
-    const { row, dot, desc, meta } = entry;
+    const { row, dot, desc, meta, files } = entry;
     if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
     agentsSetText(desc, record.description || "(no description)");
     agentsSetText(meta, agentMeta(record));
-    const jump = !!agentAnchor(record.id);
-    if (jump && row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
-    if (!jump && row.getAttribute("aria-disabled") !== "true") row.setAttribute("aria-disabled", "true");
+    const paths = AGENT_ENDED_WORD[record.state] ? agentHandoffFiles(record.message) : [];
+    if (files) {
+      files.hidden = paths.length === 0;
+      if (paths.length) {
+        const wanted = paths.join("\n");
+        if (files.dataset.paths !== wanted) {
+          files.dataset.paths = wanted;
+          files.replaceChildren();
+          for (const path of paths) {
+            const link = document.createElement("button");
+            link.type = "button"; link.className = "agent-file";
+            link.textContent = path;
+            link.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              vscode.postMessage({ type: "openFile", path });
+            });
+            files.appendChild(link);
+          }
+        }
+      } else if (files.dataset.paths) {
+        files.dataset.paths = ""; files.replaceChildren();
+      }
+    }
+    if (row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
     const why = AGENT_ENDED_WORD[record.state] && record.message ? String(record.message).trim() : "";
-    hoverTip.retitle(row, (jump ? "Show this agent's task" : "This agent's task is not on screen") + (why ? `\n${why}` : ""));
+    hoverTip.retitle(row, "Open this agent" + (why ? `\n${why}` : ""));
   }
   // Put `nodes` in `list` in order, moving only the ones out of place (a moved node loses focus).
   function agentsPlace(list, nodes) {
@@ -5047,19 +5397,9 @@
     if (agentsTick) { clearInterval(agentsTick); agentsTick = null; }
   }
   function agentJump(id) {
-    const card = agentAnchor(id);
-    if (!card) return;
+    if (!agentRecords.get(id)) return;
     agentsHideMenu();
-    for (let node = card.parentElement; node; node = node.parentElement) {
-      if (node.tagName === "DETAILS" && !node.open) node.open = true;
-    }
-    card.scrollIntoView?.({ block: "center" });
-    card.classList.remove("flash");
-    void card.offsetWidth;
-    card.classList.add("flash");
-    clearTimeout(card._agentFlash);
-    card._agentFlash = setTimeout(() => card.classList.remove("flash"), 1200);
-    card.querySelector(".tool-toggle")?.focus();
+    openAgentPage(id);
   }
   $("agents-pill").addEventListener("click", (event) => {
     event.stopPropagation();
@@ -5121,6 +5461,7 @@
 
   // ---- chat boundaries and backend exits ----
   function agentsSessionReset(kind) {
+    closeAgentPage();
     if (kind === "rewound") {
       // Records are kept until the snapshot that follows the history, but their anchors are not:
       // the history rebuilds every card, and claiming those cards now would pair them with records
@@ -5153,6 +5494,8 @@
     agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false; agentsBatch.clear();
     agentsHideMenu();
+    for (const record of agentRecords.values()) ensureAgentChip(record);
+    if (agentPageId) paintAgentPage(agentPageId);
     renderAgents();
   }
 
@@ -5174,6 +5517,14 @@
   agentsOnBackendExit = agentsChain(agentsOnBackendExit, agentsBackendExit);
   agentsOnToolCard = agentsChain(agentsOnToolCard, agentsToolCard);
   hideAgentsMenu = agentsChain(hideAgentsMenu, agentsHideMenu);
+  $("agent-back")?.addEventListener("click", () => closeAgentPage());
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !agentPageId) return;
+    if (agentsMenuOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeAgentPage();
+  }, true);
   // ---- end 0.40 agents ----------------------------------------------------------------------------
 
 
@@ -6658,7 +7009,11 @@
     button.type = "button"; button.setAttribute("aria-expanded", "false"); button.setAttribute("aria-controls", id);
     body.id = id;
     button.dataset.source = identity.source; body.dataset.source = identity.source;
-    if (identity.agent) { button.dataset.agent = identity.agent; body.dataset.agent = identity.agent; }
+    if (identity.agent) {
+      button.dataset.agent = identity.agent; body.dataset.agent = identity.agent;
+      button.dataset.agentId = identity.agent; body.dataset.agentId = identity.agent;
+      button.classList.add("agent-owned"); body.classList.add("agent-owned");
+    }
     button.title = reasonTitle(identity.source, identity.provider, identity.agent);
     const chev = el("span", "thought-chev"); chev.setAttribute("aria-hidden", "true"); chev.textContent = "▸";
     const label = el("span", "thought-label");
@@ -6812,7 +7167,11 @@
     }
     const row = el("div", "thought-static"); row.dataset.source = "withheld";
     row.dataset.provider = identity.provider; row.dataset.seconds = seconds == null ? "" : String(seconds);
-    if (identity.agent) row.dataset.agent = identity.agent;
+    if (identity.agent) {
+      row.dataset.agent = identity.agent;
+      row.dataset.agentId = identity.agent;
+      row.classList.add("agent-owned");
+    }
     row.title = reasonTitle("withheld", identity.provider, identity.agent);
     // An empty chevron slot, so the label lines up with the disclosure labels around it.
     const slot = el("span", "thought-chev"); slot.setAttribute("aria-hidden", "true");

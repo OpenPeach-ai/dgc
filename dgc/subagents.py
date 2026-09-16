@@ -104,9 +104,9 @@ def format_elapsed(ms) -> str:
 class _Record:
     __slots__ = ("id", "parent_id", "call_id", "description", "agent_type", "model", "depth",
                  "state", "waiting_for", "activity", "started_at", "started_mono", "began_mono",
-                 "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "message",
-                 "turn_id", "restored", "listed", "dirty", "sent_activity", "sent_tool_calls",
-                 "sent_tokens", "order")
+                 "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "background",
+                 "message", "turn_id", "restored", "listed", "dirty", "sent_activity",
+                 "sent_tool_calls", "sent_tokens", "order")
 
     def __init__(self, **fields):
         self.parent_id = None
@@ -122,6 +122,7 @@ class _Record:
         self.tokens = None
         self.message = ""
         self.turn_id = ""
+        self.background = False
         self.restored = False
         self.listed = True
         self.dirty = False
@@ -140,6 +141,8 @@ class _Record:
                 "description": self.description, "depth": self.depth, "state": self.state,
                 "tool_calls": _int(self.tool_calls), "isolated": bool(self.isolated),
                 "parallel": bool(self.parallel), "restored": bool(self.restored)}
+        if self.background:
+            item["background"] = True
         if self.agent_type:
             item["agent_type"] = self.agent_type
         if self.model:
@@ -255,7 +258,7 @@ class SubagentRegistry:
     def start(self, *, id: str, parent_id: str | None = None, call_id: str | None = None,
               description: str = "", agent_type: str = "", depth: int = 1, isolated: bool = False,
               parallel: bool = False, queued: bool = False, turn_hint: str = "",
-              model: str = "") -> None:
+              model: str = "", background: bool = False) -> None:
         """A sub-agent started: ``queued`` in a parallel batch, else ``running``."""
         agent_id = str(id or "")
         if not agent_id:
@@ -275,6 +278,7 @@ class SubagentRegistry:
                     started_at=round(time.time(), 3), started_mono=now,
                     began_mono=None if queued else now,
                     isolated=bool(isolated), parallel=bool(parallel),
+                    background=bool(background),
                     turn_id=str(turn_hint) if isinstance(turn_hint, str) else "",
                     order=self._order)
                 self._order += 1
@@ -287,6 +291,8 @@ class SubagentRegistry:
                            "description": record.description, "depth": record.depth,
                            "state": record.state, "started_at": record.started_at,
                            "isolated": record.isolated, "parallel": record.parallel}
+                if record.background:
+                    payload["background"] = True
                 if record.agent_type:
                     payload["agent_type"] = record.agent_type
                 if record.model:
@@ -409,7 +415,8 @@ class SubagentRegistry:
             return
         with self._publish:
             with self._lock:
-                open_records = sorted((r for r in self._records.values() if r.state in ACTIVE),
+                open_records = sorted((r for r in self._records.values()
+                                       if r.state in ACTIVE and not r.background),
                                       key=lambda r: r.order)
                 payloads = [self._end_locked(r, state, message, 0, None) for r in open_records]
             for payload in payloads:
@@ -478,6 +485,7 @@ class SubagentRegistry:
                       "state": "stopped" if state in ACTIVE else state,
                       "restored": True, "listed": True,
                       "isolated": item.get("isolated") is True, "parallel": item.get("parallel") is True,
+                      "background": item.get("background") is True,
                       "tool_calls": _int(item.get("tool_calls"))}
             for key, limit in (("description", MAX_DESCRIPTION), ("message", MAX_MESSAGE),
                                ("model", MAX_MODEL), ("agent_type", MAX_AGENT_TYPE),

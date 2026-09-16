@@ -1306,16 +1306,18 @@ class CLI:
                 f"transport [{BRAND}]{_markup_literal(st)}[/]")
             self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  "
                                "/subagent transport MODE  ·  /subagent clear[/dim]")
-            if not defs:
-                self.ui.info("no named agents — add .dgc/agents/<name>.md "
-                             "(frontmatter: model, base_url, api_mode, api_key_env, effort)")
-            else:
+            if defs:
                 table = Table("agent", "description", "model", "host", "transport")
                 for a in defs.values():
                     table.add_row(*(_literal_cell(value) for value in (
-                        a.name, a.description, a.model or "(default)",
+                        a.name, a.description + (" (built-in)" if a.builtin else ""),
+                        a.model or "(default)",
                         a.base_url or "(default)", a.api_mode or "(inherit/infer)")))
                 self.console.print(table)
+            custom = [a for a in defs.values() if not a.builtin]
+            if not custom:
+                self.ui.info("add .dgc/agents/<name>.md to override a built-in or add your own "
+                             "(frontmatter: model, base_url, api_mode, api_key_env, effort, tools)")
         elif cmd == "subagent":
             args = rest.split()
             if not args:

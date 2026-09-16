@@ -21,7 +21,7 @@ Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Wi
 
 ![DGC docked in your editor — VS Code and Cursor](docs/screenshot.png)
 
-<sub>The same agent and local models inside a native editor side panel — streaming tool cards, inline diffs, session resume. Installs alongside the CLI ([VS Code · Cursor](https://vibedgc.com/vscode/)).</sub>
+<sub>The same agent and local models inside a native editor side panel — streaming tool cards, inline diffs, session resume. Named specialists (explorer, researcher, critic) land as coloured chips you can open; a background task can finish after the turn ends and wake the chat. Installs alongside the CLI ([VS Code · Cursor](https://vibedgc.com/vscode/)).</sub>
 
 ## Install
 

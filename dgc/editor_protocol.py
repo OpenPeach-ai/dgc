@@ -83,7 +83,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # something while the session was idle; ``prompt`` is then a short label, never user text.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
                    "kind": _f("string", required=False,
-                              enum=("prompt", "resume", "continue", "monitor")),
+                              enum=("prompt", "resume", "continue", "monitor", "wake")),
                    "request_id": _S(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
@@ -423,6 +423,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "state": _f("string", enum=("queued", "running")), "started_at": _N(),
         "isolated": _B(), "parallel": _B(),
         "agent_type": _S(False), "model": _S(False), "turn_id": _S(False),
+        "background": _B(False),
     },
     "agent_updated": {
         "id": _S(), "state": _f("string", enum=("queued", "running", "waiting")),

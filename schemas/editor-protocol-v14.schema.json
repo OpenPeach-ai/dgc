@@ -304,7 +304,8 @@
                 "prompt",
                 "resume",
                 "continue",
-                "monitor"
+                "monitor",
+                "wake"
               ]
             },
             "request_id": {
@@ -3552,6 +3553,9 @@
             },
             "turn_id": {
               "type": "string"
+            },
+            "background": {
+              "type": "boolean"
             }
           },
           "required": [

@@ -162,6 +162,19 @@ test("the dialog lists agents as a nested list, is keyboard driven, and Esc neve
   assert.deepEqual(errors, []);
 });
 
+test("a finished specialist lists FILES from its handoff and opens them", () => {
+  const { $, doc, start, end, posted, errors } = view();
+  start(sid(1), { description: "options research", agent_type: "researcher" });
+  end(sid(1), "finished", { message: "Wrote the options write-up.\nFILES: docs/options.md, README.md" });
+  $("agents-pill").click();
+  const links = [...doc.querySelectorAll(".agent-file")];
+  assert.deepEqual(links.map((n) => n.textContent), ["docs/options.md", "README.md"]);
+  links[0].click();
+  assert.equal(posted.at(-1).type, "openFile");
+  assert.equal(posted.at(-1).path, "docs/options.md");
+  assert.deepEqual(errors, []);
+});
+
 test("the model menu and the agents dialog close each other, and an outside click closes it", () => {
   const { $, doc, dom, start, errors } = view();
   start(sid(1));
@@ -183,29 +196,30 @@ test("the model menu and the agents dialog close each other, and an outside clic
   assert.deepEqual(errors, []);
 });
 
-test("a row jumps to its task card, opening a folded group; a missing card disables the row", () => {
-  const { $, doc, event, start, errors, advance } = view({ clock: true });
+test("a row opens the agent page; Back and Escape return to the chat", () => {
+  const { $, doc, dom, event, start, errors } = view();
   event({ type: "turn_start", turn_id: "t1", prompt: "go" });
   event({ type: "tool_call", call_id: "call_0", name: "task", args: { description: "one" }, summary: "one" });
-  start(sid(1), { call_id: "call_0" });
-  start(sid(2), { call_id: "never_on_screen" });
-  const card = doc.querySelector('.tool[data-tool-name="task"]');
-  assert.equal(card.dataset.agentId, sid(1), "the card is claimed when its agent starts");
-  card.closest(".tool-group").open = false;
+  start(sid(1), { call_id: "call_0", description: "one" });
+  start(sid(2), { call_id: "never_on_screen", description: "two" });
   $("agents-pill").click();
   const [first, second] = doc.querySelectorAll("#agents-tree .agent-row");
   assert.equal(first.getAttribute("aria-disabled"), null);
-  assert.equal(second.getAttribute("aria-disabled"), "true");
-  assert.equal(second.title, "This agent's task is not on screen");
-  second.click();
-  assert.equal($("agentsmenu").hidden, false, "a disabled row does nothing");
+  assert.equal(second.getAttribute("aria-disabled"), null, "a page still opens without a task card");
   first.click();
   assert.equal($("agentsmenu").hidden, true);
-  assert.equal(card.closest(".tool-group").open, true);
-  assert.ok(card.classList.contains("flash"));
-  assert.equal(doc.activeElement, card.querySelector(".tool-toggle"));
-  advance(1300);
-  assert.ok(!card.classList.contains("flash"), "the flash lasts 1.2 s");
+  assert.equal(doc.body.dataset.agentPage, sid(1));
+  assert.equal($("agent-page").hidden, false);
+  assert.equal($("thread-title").textContent, "one");
+  assert.equal($("agent-back").hidden, false);
+  $("agent-back").click();
+  assert.ok(!doc.body.dataset.agentPage);
+  assert.equal($("agent-page").hidden, true);
+  $("agents-pill").click();
+  second.click();
+  assert.equal(doc.body.dataset.agentPage, sid(2));
+  doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal($("agent-page").hidden, true);
   assert.deepEqual(errors, []);
 });
 
@@ -225,12 +239,12 @@ test("call_0 in two turns jumps to the right card, and a nested card that arrive
   start(sid(3), { call_id: `${sid(2)}:c1`, parent_id: sid(2), depth: 2, description: "nested" });
   $("agents-pill").click();
   const nested = () => doc.querySelector(`.agent-row[data-agent-id="${sid(3)}"]`);
-  assert.equal(nested().getAttribute("aria-disabled"), "true");
+  assert.equal(nested().getAttribute("aria-disabled"), null);
   event({ type: "tool_call", call_id: `${sid(2)}:c1`, name: "task", args: {}, summary: "nested" });
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(nested().getAttribute("aria-disabled"), null, "the replayed card enables the row");
   doc.querySelector(`.agent-row[data-agent-id="${sid(2)}"]`).click();
-  assert.equal(doc.activeElement, cards[1].querySelector(".tool-toggle"));
+  assert.equal(doc.body.dataset.agentPage, sid(2));
+  assert.equal($("thread-title").textContent, "second turn");
   assert.deepEqual(errors, []);
 });
 
@@ -483,7 +497,7 @@ test("a long multi-line failure message shows one bounded line; the row's label 
   assert.ok(!meta.includes("rejected the key"), "only the first line");
   assert.ok(meta.length <= "Failed · 1s · ".length + 120, `bounded (${meta.length})`);
   assert.ok(row.title.includes("\n  → the endpoint rejected the key") || row.title.includes("→ the endpoint rejected the key"), row.title);
-  assert.ok(row.title.startsWith("This agent's task is not on screen\nHTTP 401"), row.title);
+  assert.ok(row.title.startsWith("Open this agent\nHTTP 401"), row.title);
   assert.ok(!/\[REDA(?!CTED\])/.test(marked.querySelector(".agent-meta").textContent), "never half a redaction marker");
   assert.match(mainCss, /\.agent-meta \{[^}]*-webkit-line-clamp: 2/);
   assert.match(mainCss, /\.agent-row\[aria-disabled="true"\] \.agent-desc \{ color: var\(--muted\); \}/);

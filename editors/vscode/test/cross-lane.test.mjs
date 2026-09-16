@@ -75,14 +75,15 @@ test("300px: a reconnect line and an inline summary each end a tool group; Escap
       const block = document.querySelector("#log .turn:last-of-type") || document.getElementById("log");
       const kinds = [];
       for (const node of block.querySelectorAll(".tool-group, .model-retry, .thought-note")) {
+        if (node.classList.contains("agent-owned")) continue;
         if (node.parentElement.closest(".tool-group, .model-retry, .thought-note")) continue;
         kinds.push(node.classList.contains("tool-group")
-          ? "group:" + [...node.querySelectorAll(".tool")].map((c) => c.dataset.toolName).join(",")
+          ? "group:" + [...node.querySelectorAll(".tool:not(.agent-owned)")].map((c) => c.dataset.toolName).join(",")
           : node.classList.contains("model-retry") ? "retry" : "note");
       }
       return kinds;
     });
-    assert.deepEqual(order, ["group:task,task", "retry", "group:view_image", "note", "group:propose_options"]);
+    assert.deepEqual(order, ["retry", "group:view_image", "note", "group:propose_options"]);
 
     // Open the image step, then its chip: the viewer covers the panel over the docked question.
     await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());

@@ -20,17 +20,23 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Sessions & rewind: https://docs.vibedgc.com/sessions-rewind
 - Checkpoints & rewind: https://docs.vibedgc.com/checkpoints-rewind
 - Context notes: https://docs.vibedgc.com/context-notes
+- Memory: https://docs.vibedgc.com/memory
 - Standing goals: https://docs.vibedgc.com/standing-goals
 - Files pane: https://docs.vibedgc.com/files-pane
 - Diff pane: https://docs.vibedgc.com/diff-pane
+- Git changes: https://docs.vibedgc.com/git-changes
 - In your editor: https://docs.vibedgc.com/in-your-editor
+- Questions: https://docs.vibedgc.com/questions
 - Turn ETA & notifications: https://docs.vibedgc.com/turn-eta-notifications
 - Background monitors: https://docs.vibedgc.com/background-monitors
+- Sandbox: https://docs.vibedgc.com/sandbox
+- Worktrees: https://docs.vibedgc.com/worktrees
 - Connect your model: https://docs.vibedgc.com/connect-your-model
 - Reconnecting: https://docs.vibedgc.com/reconnecting
 - Subscriptions: https://docs.vibedgc.com/subscriptions
 - Thinking & reasoning: https://docs.vibedgc.com/thinking-reasoning
 - Token usage: https://docs.vibedgc.com/token-usage
+- Web search: https://docs.vibedgc.com/web-search
 - Artifacts: https://docs.vibedgc.com/artifacts
 - Looking at a page: https://docs.vibedgc.com/looking-at-a-page
 - Viewed images: https://docs.vibedgc.com/viewed-images
@@ -39,6 +45,9 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Skills: https://docs.vibedgc.com/skills
 - Multiple agents: https://docs.vibedgc.com/multiple-agents
 - Sub-agents: https://docs.vibedgc.com/sub-agents
+- Handoff: https://docs.vibedgc.com/handoff
+- Code intelligence: https://docs.vibedgc.com/code-intelligence
+- Built-in tools: https://docs.vibedgc.com/built-in-tools
 - Training export: https://docs.vibedgc.com/training-export
 - Python code-action (power mode): https://docs.vibedgc.com/python-code-action-power-mode
 - Configuration: https://docs.vibedgc.com/configuration

@@ -250,8 +250,8 @@ test("with the dialog open and an agent working, the 1 s tick keeps the focused 
     await page.mouse.up();
     await page.waitForTimeout(50);
     const jumped = await page.evaluate(() => ({ open: !document.getElementById("agentsmenu").hidden,
-      flashed: document.querySelector(".tool.flash")?.dataset.callId || "" }));
-    assert.deepEqual(jumped, { open: false, flashed: "call_2" });
+      page: document.body.dataset.agentPage || "", hidden: document.getElementById("agent-page").hidden }));
+    assert.deepEqual(jumped, { open: false, page: "sub-000000000002", hidden: false });
   } finally { await page.close(); }
 });
 
@@ -311,16 +311,13 @@ for (const light of [false, true]) {
         const node = meta.firstChild, at = node.textContent.indexOf("3 tools"), range = document.createRange();
         range.setStart(node, at); range.setEnd(node, at + "3 tools".length);
         const statsVisible = at >= 0 && range.getBoundingClientRect().bottom <= meta.getBoundingClientRect().bottom + 0.5;
-        return { enabled: desc("sub-000000000001"), disabled: desc("sub-000000000009"),
-          disabledRatio: ratio(rgb(desc("sub-000000000009")), bg),
+        return { enabled: desc("sub-000000000001"),
           disabledAttr: row("sub-000000000009").getAttribute("aria-disabled"),
           metaHeight: meta.getBoundingClientRect().height, lineHeight, statsVisible,
           rowHeight: row("sub-000000000001").getBoundingClientRect().height,
           menu: document.getElementById("agentsmenu").getBoundingClientRect().toJSON(), inner: innerWidth };
       });
-      assert.equal(facts.disabledAttr, "true");
-      assert.notEqual(facts.disabled, facts.enabled, "a disabled row's description is muted");
-      assert.ok(facts.disabledRatio >= 4.5, `muted description contrast ${facts.disabledRatio.toFixed(2)}`);
+      assert.equal(facts.disabledAttr, null, "a row without a task card still opens the agent page");
       assert.ok(facts.metaHeight <= facts.lineHeight * 2 + 1, `the meta is two lines at most (${facts.metaHeight} / ${facts.lineHeight})`);
       assert.ok(facts.rowHeight < 80, `a failed row stays short (${facts.rowHeight}px)`);
       assert.equal(facts.statsVisible, true, "the clamp cuts the reason, never the duration and tool count");

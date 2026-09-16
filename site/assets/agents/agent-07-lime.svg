@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-07-lime</title>
+  <defs>
+    <radialGradient id="agent-07-lime-a" cx="9.1" cy="8.4" r="7.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DADFC1"/>
+      <stop offset="1" stop-color="#DADFC1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-07-lime-b" cx="11.6" cy="12.2" r="6.6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#97DA5B"/>
+      <stop offset="1" stop-color="#97DA5B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-07-lime-c" cx="15.4" cy="15.8" r="6.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4DCE66"/>
+      <stop offset="1" stop-color="#4DCE66" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-07-lime-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-07-lime-clip">
+      <path d="M 7.200 7.100 H 16.800 Q 21.700 7.100 21.700 12.000 V 12.000 Q 21.700 16.900 16.800 16.900 H 7.200 Q 2.300 16.900 2.300 12.000 V 12.000 Q 2.300 7.100 7.200 7.100 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#agent-07-lime-clip)">
+      <path d="M 7.200 7.100 H 16.800 Q 21.700 7.100 21.700 12.000 V 12.000 Q 21.700 16.900 16.800 16.900 H 7.200 Q 2.300 16.900 2.300 12.000 V 12.000 Q 2.300 7.100 7.200 7.100 Z" fill="#E3E5D4"/>
+    <g filter="url(#agent-07-lime-blur)">
+      <ellipse cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-07-lime-a)"/>
+      <ellipse cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-07-lime-b)"/>
+      <ellipse cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-07-lime-c)"/>
+    </g>
+  </g>
+</svg>

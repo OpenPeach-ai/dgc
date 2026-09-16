@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-08-rose</title>
+  <defs>
+    <radialGradient id="agent-08-rose-a" cx="9.1" cy="8.4" r="7.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E2BEE1"/>
+      <stop offset="1" stop-color="#E2BEE1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-08-rose-b" cx="11.6" cy="12.2" r="6.6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E64F95"/>
+      <stop offset="1" stop-color="#E64F95" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-08-rose-c" cx="15.4" cy="15.8" r="6.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DA4146"/>
+      <stop offset="1" stop-color="#DA4146" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-08-rose-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-08-rose-clip">
+      <path d="M 12.000 2.550 C 16.900 2.550 20.850 6.050 20.850 10.350 C 20.850 13.900 18.200 16.850 12.000 21.450 C 5.800 16.850 3.150 13.900 3.150 10.350 C 3.150 6.050 7.100 2.550 12.000 2.550 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#agent-08-rose-clip)">
+      <path d="M 12.000 2.550 C 16.900 2.550 20.850 6.050 20.850 10.350 C 20.850 13.900 18.200 16.850 12.000 21.450 C 5.800 16.850 3.150 13.900 3.150 10.350 C 3.150 6.050 7.100 2.550 12.000 2.550 Z" fill="#E7D2E6"/>
+    <g filter="url(#agent-08-rose-blur)">
+      <ellipse cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-08-rose-a)"/>
+      <ellipse cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-08-rose-b)"/>
+      <ellipse cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-08-rose-c)"/>
+    </g>
+  </g>
+</svg>

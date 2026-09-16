@@ -326,8 +326,11 @@ TOOL_SCHEMAS = [
         "never batch tasks that depend on or edit the same files.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
          "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"},
-         "agent": {"type": "string", "description": "Optional: name of a defined sub-agent "
-                   "(.dgc/agents/<name>.md) to use its persona, model and host"}},
+         "agent": {"type": "string", "description": "Specialist to run: explorer (read-only map), "
+                   "researcher (write one findings file), critic (review that file), worker "
+                   "(implement), or a name from .dgc/agents/<name>.md. Omit for worker."},
+         "background": {"type": "boolean", "description": "If true, the child keeps working after "
+                        "this turn ends and the parent is woken when it finishes. Default false."}},
         ["description", "prompt"]),
 ]
 

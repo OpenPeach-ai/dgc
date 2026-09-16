@@ -3271,13 +3271,15 @@ test("a selected control is a filled pill, not a pill with a bar under it", () =
 });
 
 test("auto mode colours the model pill too, not just the box around it", () => {
-  // Auto mode owns the whole composer. A purple pill inside an olive box reads as two states at
-  // once, and auto is the one that matters.
+  // Auto mode is a lavender outline on the ordinary composer surface, not the olive error colour.
   assert.match(mainCss,
-    /#cbox\[data-mode="auto"\] \.model-control\.ultra \{[^}]*background: var\(--err-soft\)/,
+    /#cbox\[data-mode="auto"\] \{[^}]*background: var\(--surface2\)/,
+    "the box fill stays the ordinary surface");
+  assert.match(mainCss,
+    /#cbox\[data-mode="auto"\] \.model-control\.ultra \{[^}]*background: var\(--accent-soft\)/,
     "the model pill takes the auto colour");
   assert.match(mainCss,
-    /#cbox\[data-mode="auto"\] \.model-control\.ultra #effortname \{ color: var\(--err-text\)/,
+    /#cbox\[data-mode="auto"\] \.model-control\.ultra #effortname \{ color: var\(--lav\)/,
     "including the reasoning label inside it");
 });
 

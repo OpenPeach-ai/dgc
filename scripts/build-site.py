@@ -502,6 +502,10 @@ def build_outputs() -> dict[str, str | bytes]:
         outputs[f"assets/{name}"] = minify_css(source)
     for name in ("site.js", "hero-mesh.js"):
         outputs[f"assets/{name}"] = (SRC / "assets" / name).read_bytes()
+    agents = SRC / "assets" / "agents"
+    if agents.is_dir():
+        for path in sorted(agents.glob("*.svg")):
+            outputs[f"assets/agents/{path.name}"] = path.read_bytes()
     return outputs
 
 

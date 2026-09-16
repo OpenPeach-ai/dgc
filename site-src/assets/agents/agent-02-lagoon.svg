@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-02-lagoon</title>
+  <defs>
+    <radialGradient id="agent-02-lagoon-a" cx="9.1" cy="8.4" r="7.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C1DFD5"/>
+      <stop offset="1" stop-color="#C1DFD5" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-02-lagoon-b" cx="11.6" cy="12.2" r="6.6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5BD9CF"/>
+      <stop offset="1" stop-color="#5BD9CF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-02-lagoon-c" cx="15.4" cy="15.8" r="6.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4E7ACD"/>
+      <stop offset="1" stop-color="#4E7ACD" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-02-lagoon-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-02-lagoon-clip">
+      <path fill-rule="evenodd" d="M 3.179 16.595 C 2.301 14.872 5.539 11.464 10.411 8.981 C 15.283 6.499 19.943 5.883 20.821 7.605 C 21.699 9.328 18.461 12.736 13.589 15.219 C 8.717 17.701 4.057 18.317 3.179 16.595 Z M 5.050 15.641 C 4.699 14.952 7.526 12.808 11.364 10.853 C 15.203 8.897 18.599 7.870 18.950 8.559 C 19.301 9.248 16.474 11.392 12.636 13.347 C 8.797 15.303 5.401 16.330 5.050 15.641 Z"/>
+      <path d="M 12.000 5.400 C 15.645 5.400 18.600 8.355 18.600 12.000 C 18.600 15.645 15.645 18.600 12.000 18.600 C 8.355 18.600 5.400 15.645 5.400 12.000 C 5.400 8.355 8.355 5.400 12.000 5.400 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#agent-02-lagoon-clip)">
+      <path fill-rule="evenodd" d="M 3.179 16.595 C 2.301 14.872 5.539 11.464 10.411 8.981 C 15.283 6.499 19.943 5.883 20.821 7.605 C 21.699 9.328 18.461 12.736 13.589 15.219 C 8.717 17.701 4.057 18.317 3.179 16.595 Z M 5.050 15.641 C 4.699 14.952 7.526 12.808 11.364 10.853 C 15.203 8.897 18.599 7.870 18.950 8.559 C 19.301 9.248 16.474 11.392 12.636 13.347 C 8.797 15.303 5.401 16.330 5.050 15.641 Z" fill="#D4E5E0"/>
+      <path d="M 12.000 5.400 C 15.645 5.400 18.600 8.355 18.600 12.000 C 18.600 15.645 15.645 18.600 12.000 18.600 C 8.355 18.600 5.400 15.645 5.400 12.000 C 5.400 8.355 8.355 5.400 12.000 5.400 Z" fill="#D4E5E0"/>
+    <g filter="url(#agent-02-lagoon-blur)">
+      <ellipse cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-02-lagoon-a)"/>
+      <ellipse cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-02-lagoon-b)"/>
+      <ellipse cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-02-lagoon-c)"/>
+    </g>
+  </g>
+</svg>

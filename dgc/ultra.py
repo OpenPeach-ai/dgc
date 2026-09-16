@@ -63,8 +63,11 @@ def delegated_prompt(config, prompt: str, mode: str) -> str:
         "DGC Ultra is active for this turn. Use extended reasoning and proactively split genuinely "
         f"independent work into parallel sub-agents when that improves quality or latency (up to {workers}). "
         "Keep coupled edits serial, reconcile all child results, and verify the integrated result before "
-        "finishing. Do not delegate trivial work merely to use the quota. The current DGC permission mode "
-        f"remains {mode}; Ultra does not grant additional filesystem, shell, or network authority.\n"
+        "finishing. For work that will take more than a short wait and does not block the rest of this "
+        "turn, set task.background true so the child continues after you finish speaking; DGC starts a "
+        "new turn when it lands. Do not delegate trivial work merely to use the quota. The current DGC "
+        f"permission mode remains {mode}; Ultra does not grant additional filesystem, shell, or network "
+        "authority.\n"
         "</dgc-ultra-policy>\n\n" + prompt
     )
 

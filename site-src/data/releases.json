@@ -1,12 +1,25 @@
 {
-  "refreshed_at": "2026-09-16T00:00:00Z",
+  "refreshed_at": "2026-09-17T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
+    {
+      "version": "0.41.0",
+      "date": "2026-09-17",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.41.0",
+      "status": "current",
+      "notes": [
+        "Named specialists on the task tool: explorer maps the tree read-only, researcher writes one findings file, critic reviews that file, and worker implements. After research, the main agent should spawn critic on the findings path unless you asked it to skip review.",
+        "A task with background true keeps working after the turn ends. The composer stays free. When the child lands, DGC starts a wake turn with its summary so you are not stuck in a blocked turn polling it.",
+        "Ultra asks the model to background long independent work that does not block the rest of the turn. Permission mode is unchanged.",
+        "Documentation now covers memory, sandbox, worktrees, questions, git changes, built-in tools, web search, code intelligence, and handoff. Sub-agents documents specialists, identity chips, and background wake.",
+        "Pair with extension 0.26.0; editor protocol remains v14."
+      ]
+    },
     {
       "version": "0.40.4",
       "date": "2026-09-16",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.4",
-      "status": "current",
+      "status": "past",
       "notes": [
         "CLI 0.40.4 is 0.40.3 with a complete GitHub Release. Mid-turn model switch, viewed-image chips, and turn-scoped agents are unchanged.",
         "Pair with extension 0.25.3; editor protocol remains v14."
@@ -448,10 +461,22 @@
   ],
   "extension": [
     {
+      "version": "0.26.0",
+      "date": "2026-09-17",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.41.0",
+      "status": "current",
+      "notes": [
+        "Requires CLI 0.41.0; editor protocol v14.",
+        "Sub-agents land as coloured identity chips. The mark moves while the agent works and stills when it finishes. Click the chip, or its row, for that agent's page: duration, answer, and files. Child greps and edits stay on that page.",
+        "A background specialist keeps the agents pill until it finishes. When it lands, DGC starts a wake turn with the child's summary. The parent transcript stays idle while it runs.",
+        "Auto mode uses a DGC lavender outline on the composer; the fill stays the normal surface."
+      ]
+    },
+    {
       "version": "0.25.3",
       "date": "2026-09-16",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.3",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Requires CLI 0.40.3; editor protocol v14.",
         "Stacked option cards: each choice is its own rounded tile with a radio, a quiet Recommended tag, and Continue instead of Submit.",

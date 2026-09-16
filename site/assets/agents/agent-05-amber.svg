@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-05-amber</title>
+  <defs>
+    <radialGradient id="agent-05-amber-a" cx="9.1" cy="8.4" r="7.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E6E4B9"/>
+      <stop offset="1" stop-color="#E6E4B9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-05-amber-b" cx="11.6" cy="12.2" r="6.6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EBAD4A"/>
+      <stop offset="1" stop-color="#EBAD4A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-05-amber-c" cx="15.4" cy="15.8" r="6.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DF653C"/>
+      <stop offset="1" stop-color="#DF653C" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-05-amber-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-05-amber-clip">
+      <path d="M 9.454 5.000 Q 12.000 2.454 14.546 5.000 L 19.000 9.454 Q 21.546 12.000 19.000 14.546 L 14.546 19.000 Q 12.000 21.546 9.454 19.000 L 5.000 14.546 Q 2.454 12.000 5.000 9.454 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#agent-05-amber-clip)">
+      <path d="M 9.454 5.000 Q 12.000 2.454 14.546 5.000 L 19.000 9.454 Q 21.546 12.000 19.000 14.546 L 14.546 19.000 Q 12.000 21.546 9.454 19.000 L 5.000 14.546 Q 2.454 12.000 5.000 9.454 Z" fill="#EAE8CF"/>
+    <g filter="url(#agent-05-amber-blur)">
+      <ellipse cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-05-amber-a)"/>
+      <ellipse cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-05-amber-b)"/>
+      <ellipse cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-05-amber-c)"/>
+    </g>
+  </g>
+</svg>

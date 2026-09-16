@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-03-coral</title>
+  <defs>
+    <radialGradient id="agent-03-coral-a">
+      <stop offset="0" stop-color="#E8C8B7"/>
+      <stop offset="1" stop-color="#E8C8B7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-03-coral-b">
+      <stop offset="0" stop-color="#EB4A4A"/>
+      <stop offset="1" stop-color="#EB4A4A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-03-coral-c">
+      <stop offset="0" stop-color="#DF3C83"/>
+      <stop offset="1" stop-color="#DF3C83" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-03-coral-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-03-coral-clip">
+      <path d="M 10.015 6.602 Q 12.000 2.900 13.985 6.602 L 18.915 15.798 Q 20.900 19.500 16.700 19.500 L 7.300 19.500 Q 3.100 19.500 5.085 15.798 Z"/>
+    </clipPath>
+  </defs>
+  <style>
+    @keyframes agent-03-coral-a {
+      0% { transform: translate(1.50px, 0.00px); }
+      12% { transform: translate(1.06px, 0.78px); }
+      25% { transform: translate(0.00px, 1.10px); }
+      38% { transform: translate(-1.06px, 0.78px); }
+      50% { transform: translate(-1.50px, 0.00px); }
+      62% { transform: translate(-1.06px, -0.78px); }
+      75% { transform: translate(-0.00px, -1.10px); }
+      88% { transform: translate(1.06px, -0.78px); }
+      100% { transform: translate(1.50px, -0.00px); }
+    }
+    .agent-03-coral-a { animation: agent-03-coral-a 2s linear infinite; }
+    @keyframes agent-03-coral-b {
+      0% { transform: translate(-0.82px, 1.09px); }
+      12% { transform: translate(0.04px, 1.50px); }
+      25% { transform: translate(0.87px, 1.03px); }
+      38% { transform: translate(1.20px, -0.05px); }
+      50% { transform: translate(0.82px, -1.09px); }
+      62% { transform: translate(-0.04px, -1.50px); }
+      75% { transform: translate(-0.87px, -1.03px); }
+      88% { transform: translate(-1.20px, 0.05px); }
+      100% { transform: translate(-0.82px, 1.09px); }
+    }
+    .agent-03-coral-b { animation: agent-03-coral-b 2s linear infinite; }
+    @keyframes agent-03-coral-c {
+      0% { transform: translate(-0.68px, -1.09px); }
+      12% { transform: translate(0.54px, -1.13px); }
+      25% { transform: translate(1.45px, -0.51px); }
+      38% { transform: translate(1.51px, 0.41px); }
+      50% { transform: translate(0.68px, 1.09px); }
+      62% { transform: translate(-0.54px, 1.13px); }
+      75% { transform: translate(-1.45px, 0.51px); }
+      88% { transform: translate(-1.51px, -0.41px); }
+      100% { transform: translate(-0.68px, -1.09px); }
+    }
+    .agent-03-coral-c { animation: agent-03-coral-c 2s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .agent-03-coral-a, .agent-03-coral-b, .agent-03-coral-c { animation: none; }
+    }
+  </style>
+  <g clip-path="url(#agent-03-coral-clip)">
+    <path d="M 10.015 6.602 Q 12.000 2.900 13.985 6.602 L 18.915 15.798 Q 20.900 19.500 16.700 19.500 L 7.300 19.500 Q 3.100 19.500 5.085 15.798 Z" fill="#EBD8CE"/>
+    <g filter="url(#agent-03-coral-blur)">
+      <ellipse class="agent-03-coral-a" cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-03-coral-a)"/>
+      <ellipse class="agent-03-coral-b" cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-03-coral-b)"/>
+      <ellipse class="agent-03-coral-c" cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-03-coral-c)"/>
+    </g>
+  </g>
+</svg>

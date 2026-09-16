@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-01-seafoam</title>
+  <defs>
+    <radialGradient id="agent-01-seafoam-a" cx="9.1" cy="8.4" r="7.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#BEE2D1"/>
+      <stop offset="1" stop-color="#BEE2D1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-01-seafoam-b" cx="11.6" cy="12.2" r="6.6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#50E5CB"/>
+      <stop offset="1" stop-color="#50E5CB" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-01-seafoam-c" cx="15.4" cy="15.8" r="6.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4261D9"/>
+      <stop offset="1" stop-color="#4261D9" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-01-seafoam-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-01-seafoam-clip">
+      <path d="M 12.000 2.700 C 17.136 2.700 21.300 6.864 21.300 12.000 C 21.300 17.136 17.136 21.300 12.000 21.300 C 6.864 21.300 2.700 17.136 2.700 12.000 C 2.700 6.864 6.864 2.700 12.000 2.700 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#agent-01-seafoam-clip)">
+      <path d="M 12.000 2.700 C 17.136 2.700 21.300 6.864 21.300 12.000 C 21.300 17.136 17.136 21.300 12.000 21.300 C 6.864 21.300 2.700 17.136 2.700 12.000 C 2.700 6.864 6.864 2.700 12.000 2.700 Z" fill="#D2E7DD"/>
+    <g filter="url(#agent-01-seafoam-blur)">
+      <ellipse cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-01-seafoam-a)"/>
+      <ellipse cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-01-seafoam-b)"/>
+      <ellipse cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-01-seafoam-c)"/>
+    </g>
+  </g>
+</svg>

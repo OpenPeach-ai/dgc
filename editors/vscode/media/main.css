@@ -114,6 +114,66 @@ body {
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
+#phead .agent-back { flex: none; width: var(--control-sm); height: var(--control-sm); border: 0; padding: 0; background: transparent; color: var(--text); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
+#phead .agent-back:hover { background: var(--surface2); }
+#phead .agent-back[hidden] { display: none; }
+#phead .agent-mark { flex: none; width: 20px; height: 20px; }
+#phead .agent-mark[hidden] { display: none; }
+body[data-agent-page] #phead .pm, body[data-agent-page] #phead .pd { display: none; }
+body[data-agent-page] #log { display: none; }
+body[data-agent-page] #to-latest { display: none; }
+#agent-page { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+#agent-page[hidden] { display: none; }
+.agent-page-meta { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+#agent-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.agent-change-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
+.agent-change-title { font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
+.agent-chip { display: flex; align-items: center; gap: var(--sp-2); align-self: flex-start; max-width: 100%; border: 0; background: transparent; color: var(--text); cursor: pointer; padding: var(--sp-1) 0; font: var(--w-med) var(--t-sm)/1.3 var(--sans); text-align: left; }
+.agent-chip:hover { color: var(--text-strong); }
+.agent-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+.agent-chip .agent-mark { width: 16px; height: 16px; flex: none; }
+.agent-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#log .agent-owned { display: none; }
+.agent-mark {
+  display: inline-block; width: 16px; height: 16px; flex: none; background: var(--mark, #7D8CA3);
+  /* Hairline ring + lift + colour bloom so the mark sits off the chat instead of reading as a sticker. */
+  filter:
+    drop-shadow(0 0 0.6px rgba(255,255,255,.7))
+    drop-shadow(0 1px 2px rgba(0,0,0,.55))
+    drop-shadow(0 0 7px color-mix(in srgb, var(--mark) 70%, transparent));
+}
+.agent-mark.is-live {
+  filter:
+    drop-shadow(0 0 0.7px rgba(255,255,255,.8))
+    drop-shadow(0 1px 2px rgba(0,0,0,.58))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 88%, transparent));
+}
+body.vscode-light .agent-mark {
+  filter:
+    drop-shadow(0 0 0.55px rgba(255,255,255,.95))
+    drop-shadow(0 1px 2px rgba(0,0,0,.28))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--mark) 55%, transparent));
+}
+body.vscode-light .agent-mark.is-live {
+  filter:
+    drop-shadow(0 0 0.6px rgba(255,255,255,.95))
+    drop-shadow(0 1px 2px rgba(0,0,0,.32))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 70%, transparent));
+}
+.agent-mark:has(img) { background: none; clip-path: none; border-radius: 0; }
+.agent-mark img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.agent-mark[data-mark="0"] { --mark: #50E5CB; clip-path: circle(46% at 50% 50%); }
+.agent-mark[data-mark="1"] { --mark: #2BB3A8; clip-path: circle(46% at 50% 50%); }
+.agent-mark[data-mark="2"] { --mark: #EB4A4A; clip-path: polygon(50% 8%, 92% 86%, 8% 86%); }
+.agent-mark[data-mark="3"] { --mark: #8B7CFF; clip-path: polygon(25% 8%, 75% 8%, 92% 50%, 75% 92%, 25% 92%, 8% 50%); }
+.agent-mark[data-mark="4"] { --mark: #F5A524; clip-path: polygon(50% 6%, 94% 50%, 50% 94%, 6% 50%); }
+.agent-mark[data-mark="5"] { --mark: #7D8CA3; border-radius: 4px; }
+.agent-mark[data-mark="6"] { --mark: #8BD44A; border-radius: 999px; }
+.agent-mark[data-mark="7"] { --mark: #E86AA5; clip-path: ellipse(42% 48% at 50% 52%); }
+body.vscode-light .agent-mark[data-mark="0"] { --mark: #1AA890; }
+body.vscode-light .agent-mark[data-mark="1"] { --mark: #1A8F86; }
+body.vscode-light .agent-mark[data-mark="4"] { --mark: #C47A12; }
+body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 
 /* transcript */
 #log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
@@ -155,8 +215,16 @@ body {
    reasoning draws nothing.) */
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
-.user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
+:root, body {
+  --prompt-fill: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --prompt-border: 0;
+  --prompt-rail: none;
+}
+body.vscode-light, body.vscode-high-contrast-light {
+  --prompt-fill: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
 .text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
 .text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
@@ -250,15 +318,14 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
    inside it rather than floating under the turn. Before this it was one more paragraph with 4px
    of margin, and after a page of commentary and twenty tool cards a reader could not tell which
    text was the reply -- which is exactly what "it just stopped mid turn" turned out to be. */
-.answer { margin-top: var(--sp-3); padding: var(--sp-3) var(--sp-3) var(--sp-2);
-  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.answer { margin-top: var(--sp-3); padding: 0; border: 0; border-radius: 0; background: transparent; }
 .answer > .text.final { margin-top: 0; }
 /* The action row belongs to the answer, so inside the block it is always legible rather than a
    secret kept until hover. Outside it -- a stopped turn's partial prose -- it stays quiet. */
 .answer > .response-actions { margin-top: var(--sp-2); opacity: .85; }
 .msg.dgc:hover .answer > .response-actions { opacity: 1; }
 /* One card inside another reads as a seam; the summary sits inset on the panel ground instead. */
-.answer > .turn-summary { background: var(--bg); }
+.answer > .turn-summary { background: var(--surface); }
 .md-table-wrap { position: relative; max-width: 100%; overflow-x: auto; margin: var(--sp-2) 0; }
 .md-table { width: 100%; border-collapse: collapse; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); white-space: normal; }
 .md-table th, .md-table td { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
@@ -543,11 +610,17 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 
 #cbox { position: relative; z-index: 2; background: var(--surface2); border: 1px solid var(--border-strong); border-radius: var(--r-2xl); display: flex; flex-direction: column; box-shadow: 0 7px 24px rgba(0,0,0,.18); }
 #cbox:focus-within { border-color: var(--border-strong); }
-#cbox[data-mode="auto"] { border-color: var(--err); }
-#cbox[data-mode="auto"]:focus-within { border-color: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
+#cbox[data-mode="auto"] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-strong));
+  background: var(--surface2);
+}
+#cbox[data-mode="auto"]:focus-within {
+  border-color: var(--lav);
+  box-shadow: 0 0 0 3px rgba(167,139,250,.22);
+}
 .cinput { min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
 .cinput .pmark { display: none; }
-#cbox[data-mode="auto"] .cinput .pmark { color: var(--err-text); }
+#cbox[data-mode="auto"] .cinput .pmark { color: #8B7CFF; }
 #input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-base)/1.45 var(--sans); padding: 0; max-height: 200px; min-width: 0; }
 #input::placeholder { color: var(--faint); }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
@@ -583,10 +656,9 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
    background reads as a second, heavier element rather than as emphasis. */
 .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
 .model-control.ultra #effortname { color: var(--lav); }
-/* Auto mode owns the whole composer, so the model pill wears its colour too. A purple pill inside
-   an olive box reads as two states at once, and auto is the one that matters. */
-#cbox[data-mode="auto"] .model-control.ultra { color: var(--err-text); background: var(--err-soft); }
-#cbox[data-mode="auto"] .model-control.ultra #effortname { color: var(--err-text); }
+/* Auto mode uses the same light purple wash as the prompt bubble, not the olive error colour. */
+#cbox[data-mode="auto"] .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
+#cbox[data-mode="auto"] .model-control.ultra #effortname { color: var(--lav); }
 #btn-ctx.warn { color: var(--err-text); }
 #btn-ctx.busy .codicon { color: var(--lav); animation: context-pulse 1.1s ease-in-out infinite; }
 .context-picker { flex: none; }
@@ -613,7 +685,8 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .csend.ready { background: var(--accent-fill); color: #fff; }
 .csend.ready:hover { background: var(--accent-hover); }
 .csend:not(.ready):hover { background: var(--border); color: var(--text); }
-.csend[data-mode="auto"] { background: var(--err); }
+.csend[data-mode="auto"] { background: var(--accent-fill); color: #fff; }
+.csend[data-mode="auto"]:hover { background: var(--accent-hover); }
 .csend .codicon { font-size: var(--t-lg); }
 
 /* Reading back through a run should not mean losing your place at the end of it. The pill only
@@ -1086,7 +1159,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 
 /* Turns recovered from the archive: readable, and visibly older than the live conversation. */
 .msg.archived { opacity: .82; }
-.msg.archived .bubble { background: var(--surface); }
+.msg.archived .bubble { filter: saturate(.85); }
 
 /* ==================================================================================================
    0.40.0 lane sections. Each lane adds rules only inside its own section, including its own
@@ -1128,6 +1201,10 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-row[aria-disabled="true"]:hover { background: transparent; }
 /* A row with no card on screen to jump to reads quieter than one that jumps (its label says why). */
 .agent-row[aria-disabled="true"] .agent-desc { color: var(--muted); }
+.agent-files { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 0 var(--sp-1) calc(6px + var(--sp-2) + var(--sp-2)); }
+.agent-files[hidden] { display: none; }
+.agent-file { border: 0; background: transparent; color: var(--accent-text); font: var(--w-reg) var(--t-xs)/1.4 var(--mono); padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.agent-file:hover { text-decoration-color: currentColor; }
 .agent-dot { box-sizing: border-box; flex: none; width: 7px; height: 7px; margin-top: 6px;
   border-radius: var(--r-full); background: var(--agent-idle); }
 .agent-dot[data-state="running"] { background: var(--agent-run); }

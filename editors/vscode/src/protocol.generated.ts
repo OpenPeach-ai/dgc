@@ -306,7 +306,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "prompt",
         "resume",
         "continue",
-        "monitor"
+        "monitor",
+        "wake"
       ]
     },
     "request_id": {
@@ -3055,6 +3056,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "turn_id": {
       "types": [
         "string"
+      ],
+      "required": false
+    },
+    "background": {
+      "types": [
+        "boolean"
       ],
       "required": false
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.26.0 — 2026-09-17
+
+- Requires CLI 0.41.0; editor protocol remains v14.
+- **Identity chips.** Each sub-agent is a coloured mark in the thread. The mark moves while it works and stills when it finishes. Click the chip, or its row in the agents list, for that agent's page: duration, answer, and files. Child greps and edits stay on that page, not in the parent chat.
+- **Background specialists.** A task started with `background: true` keeps going after the turn ends. The composer stays free and the agents pill remains until it finishes. When it lands, DGC starts a wake turn with the child's summary.
+- **Auto-mode outline.** The composer in auto mode uses a DGC lavender outline; the fill stays the normal surface.
+
 ## 0.25.3 — 2026-09-16
 
 - Requires CLI 0.40.3; editor protocol remains v14.

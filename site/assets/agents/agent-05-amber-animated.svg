@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>agent-05-amber</title>
+  <defs>
+    <radialGradient id="agent-05-amber-a">
+      <stop offset="0" stop-color="#E6E4B9"/>
+      <stop offset="1" stop-color="#E6E4B9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-05-amber-b">
+      <stop offset="0" stop-color="#EBAD4A"/>
+      <stop offset="1" stop-color="#EBAD4A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agent-05-amber-c">
+      <stop offset="0" stop-color="#DF653C"/>
+      <stop offset="1" stop-color="#DF653C" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="agent-05-amber-blur" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+    <clipPath id="agent-05-amber-clip">
+      <path d="M 9.454 5.000 Q 12.000 2.454 14.546 5.000 L 19.000 9.454 Q 21.546 12.000 19.000 14.546 L 14.546 19.000 Q 12.000 21.546 9.454 19.000 L 5.000 14.546 Q 2.454 12.000 5.000 9.454 Z"/>
+    </clipPath>
+  </defs>
+  <style>
+    @keyframes agent-05-amber-a {
+      0% { transform: translate(1.50px, 0.00px); }
+      12% { transform: translate(1.06px, 0.78px); }
+      25% { transform: translate(0.00px, 1.10px); }
+      38% { transform: translate(-1.06px, 0.78px); }
+      50% { transform: translate(-1.50px, 0.00px); }
+      62% { transform: translate(-1.06px, -0.78px); }
+      75% { transform: translate(-0.00px, -1.10px); }
+      88% { transform: translate(1.06px, -0.78px); }
+      100% { transform: translate(1.50px, -0.00px); }
+    }
+    .agent-05-amber-a { animation: agent-05-amber-a 2s linear infinite; }
+    @keyframes agent-05-amber-b {
+      0% { transform: translate(-0.82px, 1.09px); }
+      12% { transform: translate(0.04px, 1.50px); }
+      25% { transform: translate(0.87px, 1.03px); }
+      38% { transform: translate(1.20px, -0.05px); }
+      50% { transform: translate(0.82px, -1.09px); }
+      62% { transform: translate(-0.04px, -1.50px); }
+      75% { transform: translate(-0.87px, -1.03px); }
+      88% { transform: translate(-1.20px, 0.05px); }
+      100% { transform: translate(-0.82px, 1.09px); }
+    }
+    .agent-05-amber-b { animation: agent-05-amber-b 2s linear infinite; }
+    @keyframes agent-05-amber-c {
+      0% { transform: translate(-0.68px, -1.09px); }
+      12% { transform: translate(0.54px, -1.13px); }
+      25% { transform: translate(1.45px, -0.51px); }
+      38% { transform: translate(1.51px, 0.41px); }
+      50% { transform: translate(0.68px, 1.09px); }
+      62% { transform: translate(-0.54px, 1.13px); }
+      75% { transform: translate(-1.45px, 0.51px); }
+      88% { transform: translate(-1.51px, -0.41px); }
+      100% { transform: translate(-0.68px, -1.09px); }
+    }
+    .agent-05-amber-c { animation: agent-05-amber-c 2s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .agent-05-amber-a, .agent-05-amber-b, .agent-05-amber-c { animation: none; }
+    }
+  </style>
+  <g clip-path="url(#agent-05-amber-clip)">
+    <path d="M 9.454 5.000 Q 12.000 2.454 14.546 5.000 L 19.000 9.454 Q 21.546 12.000 19.000 14.546 L 14.546 19.000 Q 12.000 21.546 9.454 19.000 L 5.000 14.546 Q 2.454 12.000 5.000 9.454 Z" fill="#EAE8CF"/>
+    <g filter="url(#agent-05-amber-blur)">
+      <ellipse class="agent-05-amber-a" cx="9.1" cy="8.4" rx="7.4" ry="7.4" fill="url(#agent-05-amber-a)"/>
+      <ellipse class="agent-05-amber-b" cx="11.6" cy="12.2" rx="6.6" ry="6.6" fill="url(#agent-05-amber-b)"/>
+      <ellipse class="agent-05-amber-c" cx="15.4" cy="15.8" rx="6.8" ry="6.8" fill="url(#agent-05-amber-c)"/>
+    </g>
+  </g>
+</svg>

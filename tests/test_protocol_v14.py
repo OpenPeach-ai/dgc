@@ -226,9 +226,10 @@ class SharedShapeTests(unittest.TestCase):
                 # _handle_call's task branch hands its call id to _run_subagent ...
                 agent.config.data["mode"] = "auto"
                 seen = []
-                with patch.object(agent, "_run_subagent", side_effect=lambda *args: seen.append(args) or "ok"):
+                with patch.object(agent, "_run_subagent",
+                                  side_effect=lambda *args, **kwargs: seen.append((args, kwargs)) or "ok"):
                     agent._handle_call(ToolCall("task-7", "task", {"description": "d", "prompt": "p"}))
-                self.assertEqual(seen, [("d", "p", "", "task-7")])
+                self.assertEqual(seen, [(("d", "p", "", "task-7"), {"background": False})])
 
                 # ... which passes it on, and the child links back to its parent and that call.
                 linked = []

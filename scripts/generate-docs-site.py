@@ -35,12 +35,13 @@ from site_common import render_shell, site_context  # noqa: E402
 GROUPS: list[tuple[str, list[str]]] = [
     ("Getting started", ["Getting started", "Keyboard shortcuts", "Slash commands", "Command line"]),
     ("Using DGC", ["Permission modes", "Plan mode", "Sessions & rewind", "Checkpoints & rewind", "Context notes",
-                   "Standing goals", "Files pane", "Diff pane", "In your editor",
-                   "Turn ETA & notifications", "Background monitors"]),
+                   "Memory", "Standing goals", "Files pane", "Diff pane", "Git changes", "In your editor",
+                   "Questions", "Turn ETA & notifications", "Background monitors", "Sandbox", "Worktrees"]),
     ("Providers & models", ["Connect your model", "Reconnecting", "Subscriptions", "Thinking & reasoning",
-                            "Token usage"]),
+                            "Token usage", "Web search"]),
     ("Features", ["Artifacts", "Looking at a page", "Viewed images", "MCP servers", "Lifecycle hooks", "Skills",
-                  "Multiple agents", "Sub-agents", "Training export", "Python code-action (power mode)"]),
+                  "Multiple agents", "Sub-agents", "Handoff", "Code intelligence", "Built-in tools",
+                  "Training export", "Python code-action (power mode)"]),
     ("Reference", ["Configuration"]),
 ]
 

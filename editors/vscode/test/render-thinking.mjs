@@ -82,6 +82,8 @@ export const SCENARIOS = {
     { type: "thinking_end", block: "t1:think1", source: "summarized", provider: "anthropic", placement: "collapsed", seconds: 4.2 },
     { type: "stream_end", phase: "commentary" },
     { type: "tool_call", call_id: "c1", name: "task", args: { prompt: "read gate.py" }, summary: "read gate.py" },
+    { type: "agent_started", id: "sub-e051bf6ba1c3", parent_id: null, call_id: "c1",
+      description: "read gate.py", depth: 1, state: "running", started_at: 1, isolated: true, parallel: false },
     { type: "thinking_delta", block: "t1:think2", source: "raw", agent: "sub-e051bf6ba1c3", text: "The helper reads gate.py and finds the > comparison." },
     { type: "thinking_end", block: "t1:think2", source: "raw", agent: "sub-e051bf6ba1c3", placement: "collapsed", seconds: 2.3 },
     { type: "thinking_end", block: "t1:think3", source: "withheld", provider: "anthropic", agent: "sub-e051bf6ba1c3", placement: "collapsed", seconds: 1.2 },

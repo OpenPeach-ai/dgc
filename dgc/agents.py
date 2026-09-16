@@ -11,22 +11,30 @@ A sub-agent is a Markdown file with frontmatter:
     api_mode: ollama                 # optional — auto | ollama | anthropic | chat_completions | responses
     api_key_env: REVIEWER_API_KEY    # optional — key from an environment variable
     effort: high                     # optional — off | low | medium | high | xhigh
+    tools: read_file, glob, grep     # optional — allow-list; omit for the full child catalog
     ---
 
     System guidance the sub-agent follows for this kind of task...
 
-Discovery (trusted project overrides user):
-  <project>/.dgc/agents/<name>.md
+Discovery (trusted project overrides user, which overrides built-ins):
+  built-in explorer / researcher / critic / worker
   ~/.dgc/agents/<name>.md
+  <project>/.dgc/agents/<name>.md
 
 Invoked via the `task` tool's optional `agent` argument, or listed with `/agents`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import USER_AGENTS
+
+_READS = "read_file, glob, grep, repo_map, code_intel, git_diff, web_fetch, web_search, skill, view_image"
+_HANDOFF = (
+    "End your result with a short summary, then a line `FILES: path[, path…]` naming every "
+    "file you wrote or the files a reader should open. If you wrote nothing, omit FILES."
+)
 
 
 @dataclass
@@ -39,6 +47,52 @@ class AgentDef:
     api_mode: str = ""
     api_key_env: str = ""
     effort: str = ""
+    tools: str = ""
+    builtin: bool = False
+    tool_allow: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self):
+        names = {part.strip() for part in str(self.tools or "").split(",") if part.strip()}
+        self.tool_allow = frozenset(names)
+
+
+def builtin_agents() -> dict[str, AgentDef]:
+    """Always-on specialists. A user or project file with the same name replaces one."""
+    return {
+        "explorer": AgentDef(
+            name="explorer", builtin=True, tools=_READS,
+            description="Read-only map of the codebase",
+            body="You are a read-only explorer. Search and read. Do not write, edit, or run "
+                 "mutating shell commands. Report where the relevant code lives.\n" + _HANDOFF),
+        "researcher": AgentDef(
+            name="researcher", builtin=True, tools=_READS + ", write_file, present_document",
+            description="Investigate and write one findings file, then stop",
+            body="You are a researcher. Investigate, then write one markdown findings file in "
+                 "the project. Do not implement the feature.\n" + _HANDOFF),
+        "critic": AgentDef(
+            name="critic", builtin=True,
+            tools=_READS + ", edit_file, write_file, multi_edit",
+            description="Review a named artifact; correct it or list blocking issues",
+            body="You are a critic. Review the artifact named in the task. Correct that file or "
+                 "list blocking issues. Do not implement the surrounding feature.\n" + _HANDOFF),
+        "worker": AgentDef(
+            name="worker", builtin=True, tools="",
+            description="Implement a bounded change",
+            body="You are a worker. Implement the bounded change in the task. Keep the diff "
+                 "small and verify when tests exist.\n" + _HANDOFF),
+    }
+
+
+def parse_handoff_files(text: str) -> list[str]:
+    """Paths from a trailing `FILES:` line in a child's summary."""
+    files: list[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line.upper().startswith("FILES:"):
+            continue
+        rest = line.split(":", 1)[1]
+        files = [part.strip().strip("`") for part in rest.split(",") if part.strip().strip("`")]
+    return files[:16]
 
 
 def _parse_agent(path: Path) -> AgentDef | None:
@@ -47,7 +101,7 @@ def _parse_agent(path: Path) -> AgentDef | None:
     except OSError:
         return None
     fields = {"name": path.stem, "description": "", "model": "",
-              "base_url": "", "api_mode": "", "api_key_env": "", "effort": ""}
+              "base_url": "", "api_mode": "", "api_key_env": "", "effort": "", "tools": ""}
     body = text
     if text.startswith("---"):
         end = text.find("\n---", 3)
@@ -65,15 +119,15 @@ def _parse_agent(path: Path) -> AgentDef | None:
 
 
 def discover_agents(project_root, *, config=None) -> dict[str, AgentDef]:
-    """Read personal definitions, and project definitions only after directory trust.
+    """Built-ins, then personal definitions, then project definitions after directory trust.
 
     A project definition can select a model endpoint and an environment key. Even read-only
     automation must not load it before trust; permission-gating its later tools is too late.
-    Callers without a trust-bearing config receive personal definitions only.
+    Callers without a trust-bearing config receive built-ins and personal definitions only.
     """
     from .trust import is_trusted
 
-    agents: dict[str, AgentDef] = {}
+    agents: dict[str, AgentDef] = dict(builtin_agents())
     bases = [USER_AGENTS]
     if config is not None and is_trusted(config, project_root):
         bases.append(Path(project_root) / ".dgc" / "agents")
@@ -82,5 +136,5 @@ def discover_agents(project_root, *, config=None) -> dict[str, AgentDef]:
             for f in sorted(base.glob("*.md")):
                 a = _parse_agent(f)
                 if a:
-                    agents[a.name] = a   # project scanned last → overrides personal
+                    agents[a.name] = a   # project scanned last → overrides personal and built-ins
     return agents
