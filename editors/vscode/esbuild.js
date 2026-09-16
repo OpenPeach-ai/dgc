@@ -32,8 +32,19 @@ function sourceCommit() {
 async function main() {
   const coreVersion = readFileSync(resolve(__dirname, "../../dgc/__init__.py"), "utf8")
     .match(/__version__\s*=\s*"([^"]+)"/)?.[1];
-  if (require("./package.json").dgcCliVersion !== coreVersion) {
-    throw new Error("package.json dgcCliVersion must match the reviewed CLI source version");
+  const minimumCli = require("./package.json").dgcCliVersion;
+  const parts = (value) => String(value).split(".").map((n) => Number(n));
+  const coreParts = parts(coreVersion);
+  const minimumParts = parts(minimumCli);
+  const coreMeetsMinimum = coreParts.length === 3 && minimumParts.length === 3
+    && coreParts.every((n) => Number.isInteger(n) && n >= 0)
+    && minimumParts.every((n) => Number.isInteger(n) && n >= 0)
+    && (coreParts[0] > minimumParts[0]
+      || (coreParts[0] === minimumParts[0] && coreParts[1] > minimumParts[1])
+      || (coreParts[0] === minimumParts[0] && coreParts[1] === minimumParts[1]
+        && coreParts[2] >= minimumParts[2]));
+  if (!coreMeetsMinimum) {
+    throw new Error("package.json dgcCliVersion is newer than the reviewed CLI source version");
   }
   await esbuild.build({
     entryPoints: ["src/markdown.ts"], bundle: true, format: "iife",
