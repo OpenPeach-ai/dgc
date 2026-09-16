@@ -1154,10 +1154,11 @@ class FrontEndTests(unittest.TestCase):
         child_b = _SubUI(ui, "b", buffered=True)
         child_a.model_wait("No response from the model", "A at h · no reply for 45s+")
         child_b.model_wait("No response from the model", "B at h · no reply for 45s+")
-        child_a.model_wait(None)            # A resumes; B is still silent
-        self.assertEqual(self.activity(ui)[-1],
-                         ("waiting", "No response from the model", "B at h · no reply for 45s+"))
-        child_b.model_wait(None)            # nobody is waiting any more
+        child_a.model_wait(None)
+        # Parent chat stays on the spawn step. Child stalls are the chip / agents pill, not a
+        # waiting line in the parent transcript.
+        self.assertEqual(self.activity(ui)[-1], ("tool", "Run sub-agents", ""))
+        child_b.model_wait(None)
         self.assertEqual(self.activity(ui)[-1], ("tool", "Run sub-agents", ""))
         for event in ui.em.events:
             self.assertIsNone(event_error({"seq": 0, **event}), event)
@@ -1184,10 +1185,9 @@ class FrontEndTests(unittest.TestCase):
         child_b.model_wait("No response from the model", "child-b at 127.0.0.1:2 · no reply", since=now)
         child_a.model_wait(None)
         status = self.plain(tui)
-        self.assertIn("child-b at 127.0.0.1:2", status)
-        self.assertNotIn("Responding", status)
+        self.assertNotIn("child-a at 127.0.0.1:1", status)
+        self.assertNotIn("child-b at 127.0.0.1:2", status)
         child_b.model_wait(None)
-        self.assertIn("Responding", self.plain(tui))
         # Streamed text is the newer truth: it hides a notice, and a later clear does not revive it.
         child_a.model_wait("No response from the model", "child-a at 127.0.0.1:1 · no reply", since=now)
         child_b.model_wait("No response from the model", "child-b at 127.0.0.1:2 · no reply", since=now)
@@ -1205,8 +1205,7 @@ class FrontEndTests(unittest.TestCase):
         _call_model_wait(OldUI().model_wait, "No response from the model", "d", since=1.0,
                          restore=False, origin="x")
         _SubUI(OldUI(), "child").model_wait("Loading the model", "m at h", since=2.0)
-        self.assertEqual(seen, [("No response from the model", "d", 1.0),
-                                ("Loading the model", "m at h", 2.0)])
+        self.assertEqual(seen, [("No response from the model", "d", 1.0)])
 
     def test_classic_repl_renames_a_live_spinner_only(self):
         from unittest import mock
