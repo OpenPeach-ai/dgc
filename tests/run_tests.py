@@ -19574,9 +19574,11 @@ def test_subscription_engines():
               and settings_backend.config.data["subscription_effort"] == "high")
 
         settings_backend.dispatch({"type": "set_model", "model": "gpt-active"})
-        model_event = settings_backend.em.events[-1]
+        model_event = next(event for event in reversed(settings_backend.em.events)
+                           if event.get("type") == "model_changed")
         settings_backend.dispatch({"type": "set_think", "level": "xhigh"})
-        think_event = settings_backend.em.events[-1]
+        think_event = next(event for event in reversed(settings_backend.em.events)
+                           if event.get("type") == "think_changed")
         check("subscriptions: headless model/thinking setters follow the active delegated route",
               settings_backend.config.model == "native-model"
               and settings_backend.config.data["subscription_model"] == "gpt-active"
