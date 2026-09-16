@@ -3,10 +3,20 @@
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli": [
     {
+      "version": "0.40.4",
+      "date": "2026-09-16",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.4",
+      "status": "current",
+      "notes": [
+        "CLI 0.40.4 is 0.40.3 with a complete GitHub Release. Mid-turn model switch, viewed-image chips, and turn-scoped agents are unchanged.",
+        "Pair with extension 0.25.3; editor protocol remains v14."
+      ]
+    },
+    {
       "version": "0.40.3",
       "date": "2026-09-16",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.40.3",
-      "status": "current",
+      "status": "past",
       "notes": [
         "You can change the model while a turn is running. The round already on the wire keeps its client; the next model round uses the new one. The chat records Switched to <model>.",
         "Viewed images always appear as a chip on the tool step that produced them. Click the chip to open the image, even when the current model cannot see it. After switching to a vision-capable model, the next turn can send the pixels.",
