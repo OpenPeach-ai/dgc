@@ -65,9 +65,9 @@
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.25.3",
-      "packaged_extension_source_commit": "efba2f1a919656bd45815bd891fa87b413934c8e",
-      "extension_vsix_sha256": "a016cb083cacd2bc148290f67445b61e6683ef59f08a1febed4680600a364785",
+      "extension_version": "0.26.0",
+      "packaged_extension_source_commit": "d64aff79752ec4123eb8aa429408717efdca26a6",
+      "extension_vsix_sha256": "bf1785cba3737e8c2e7639d9060578fc93f6863788e071dd5ba60b0b3651dfd4",
       "time_compression": 1,
       "files": {
         "webm": {
