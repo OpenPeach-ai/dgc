@@ -62,7 +62,6 @@ class RequestedFeatures(unittest.TestCase):
     def test_requested_recommendation_is_obtained_before_showing_the_card(self):
         missing = {'questions': [{'question': 'Which test?', 'options': ['Read', 'Write']}]}
         answers = [ChatResult(tool_calls=[ToolCall('missing', 'propose_options', missing)]),
-                   ChatResult(tool_calls=[ToolCall('choice', 'propose_options', ASK)]),
                    ChatResult(content='You chose Local.')]
         with patch.object(self.agent.client, 'chat', side_effect=answers):
             self.agent.run_turn(SELECT_PROMPT)
