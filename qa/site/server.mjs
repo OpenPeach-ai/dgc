@@ -46,7 +46,7 @@ function routeFile(pathname) {
   if (pathname.length > 1) pathname = pathname.replace(/\/$/, "");
   if (routes.has(pathname)) {
     if (pathname === "/") return "index.html";
-    if (["/docs", "/vscode"].includes(pathname)) {
+    if (["/docs", "/vscode", "/sdk"].includes(pathname)) {
       return `${pathname.slice(1)}/index.html`;
     }
     return `${pathname.slice(1)}.html`;
@@ -144,10 +144,10 @@ const server = createServer((request, response) => {
     return;
   }
 
-  if (pathname === "/vscode") {
+  if (pathname === "/vscode" || pathname === "/sdk") {
     // Cloudflare Pages serves a directory index only at its trailing-slash URL and answers the
     // slashless form with a 308. Serving it directly here hid a redirecting sitemap URL.
-    response.writeHead(308, {"Cache-Control": "no-store", Location: `/vscode/${url.search}`}).end();
+    response.writeHead(308, {"Cache-Control": "no-store", Location: `${pathname}/${url.search}`}).end();
     return;
   }
   const file = resolve(SITE, routeFile(pathname));
