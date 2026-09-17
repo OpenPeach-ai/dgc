@@ -241,8 +241,14 @@ def options_if_offered(agent, request):
 
 class OptionsIntentTests(unittest.TestCase):
     def test_explicit_requests_to_choose_are_recognised(self):
+        from dgc.agent import _OptionsAsk
         for text in ASKS:
             self.assertIn("options", _tool_intents(text), text)
+        self.assertTrue(_OptionsAsk.demo_ask(
+            "can you show me a test option picker , with recomendation so i can select , "
+            "i want to see how it looks and functions"))
+        self.assertFalse(_OptionsAsk.demo_ask(
+            "fix the failing test, then give me options so I can decide which refactor to do next"))
 
     def test_ordinary_coding_language_is_not_a_request_to_choose(self):
         for text in NOT_ASKS:
@@ -451,6 +457,42 @@ class TurnTests(AgentTests):
         calls = scripted(agent, [ChatResult(content="done")])
         self.assertTrue(agent.run_turn("now fix the parser"))
         self.assertNotIn("propose_options", calls[0]["tools"], "full-auto keeps its rule otherwise")
+
+    def test_a_picker_demo_does_not_write_a_mock_file(self):
+        ui = UI()
+        agent = self.agent(ui=ui, mode="auto")
+        demo = Path(agent.config.project_root) / "option-picker-demo.html"
+
+        def mock_html(_agent, _request):
+            return call("write_file", path="option-picker-demo.html",
+                        content="<html>fake picker</html>")
+
+        calls = scripted(agent, [mock_html, options_if_offered, ChatResult(content="You picked B.")])
+        text = ("can you show me a test option picker , with recomendation so i can select , "
+                "i want to see how it looks and functions")
+        self.assertTrue(agent.run_turn(text))
+        self.assertEqual(calls[1]["reason"], "options_gate")
+        self.assertIn("propose_options", calls[1]["tools"])
+        self.assertFalse(demo.exists(), "a mock HTML file must not land")
+        self.assertEqual(len(ui.questions), 1)
+        self.assertTrue(any("native options picker" in (m.get("content") or "")
+                            for m in agent.messages if m.get("role") == "tool"))
+        self.assertTrue(ui.questions[0][1], "the native picker opened after the mock was refused")
+
+    def test_work_then_choose_still_runs_the_fix(self):
+        ui = UI()
+        agent = self.agent(ui=ui, mode="auto")
+        target = Path(agent.config.project_root) / "fixed.txt"
+
+        def write_fix(_agent, _request):
+            return call("write_file", path="fixed.txt", content="ok\n")
+
+        calls = scripted(agent, [write_fix, options_if_offered, ChatResult(content="You picked B.")])
+        self.assertTrue(agent.run_turn(
+            "fix the failing test, then give me options so I can decide which refactor to do next"))
+        self.assertTrue(target.exists())
+        self.assertNotEqual(calls[0].get("reason"), "options_gate")
+        self.assertEqual(len(ui.questions), 1)
 
     def test_a_full_auto_goal_run_asks_once_then_runs_unattended(self):
         ui = UI()

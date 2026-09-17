@@ -2,7 +2,7 @@
 
 ## 0.26.2 — 2026-09-17
 
-- Requires CLI 0.41.2; editor protocol remains v14.
+- Requires CLI 0.41.3; editor protocol remains v14.
 - **Sent attachments are chips.** Images, pastes, files and skills sit above the typed prompt in the sent bubble. Click a chip to open it. They are no longer shown as `[📷 image]` in the sentence.
 
 ## 0.26.1 — 2026-09-17

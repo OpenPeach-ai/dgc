@@ -311,6 +311,12 @@ class _OptionsAsk:
                 return True
         return False
 
+    @classmethod
+    def demo_ask(cls, text: str) -> bool:
+        """The user asked to see DGC's picker itself, not to choose after other work."""
+        source = _trusted_intent_text(cls._FRAME.sub("\n", str(text or ""))).replace("\u2019", "'")
+        return bool(cls._BY_NAME.search(source))
+
 
 _TOOL_INTENT_PATTERNS = {
     # present_document is the Auto-mode browser page + .md download. A plan/design-doc/spec/report
@@ -2091,9 +2097,11 @@ class Agent(GoalLifecycle):
         if self._picker_offered():
             return ("# Requested options picker\nThe user explicitly asked to choose. Call "
                     "propose_options to display the interactive selector, including for a demo "
-                    "or test. Put your recommendation first and explain it. A prose list does "
-                    "not open the selector. After the user answers or dismisses it, continue "
-                    "without asking again. If the user withdraws the request, follow that instead.")
+                    "or test. Put your recommendation first and explain it. A prose list, an "
+                    "HTML/Markdown/Python mock, or a file opened in the editor is not the "
+                    "selector — do not write one. After the user answers or dismisses it, "
+                    "continue without asking again. If the user withdraws the request, follow "
+                    "that instead.")
         if self.depth:
             # Whatever the parent's situation, a sub-agent answers the parent, never the user.
             reason = "you are a sub-agent"
@@ -2724,8 +2732,9 @@ class Agent(GoalLifecycle):
                 "going until the task is completely done and verified. Do not stop early to ask "
                 "questions you can answer yourself with tools. Auto-approval is not the options "
                 "picker: if propose_options is in your tools, call it to open the native selector "
-                "(put the recommended option first). Never mock the picker in Markdown or ask the "
-                "user to reply with a number in chat.",
+                "(put the recommended option first). Never mock the picker in Markdown, HTML, or "
+                "Python, never open a demo file as a stand-in, and never ask the user to reply "
+                "with a number in chat.",
                 "Work efficiently — a slow local model makes every round-trip and every compile costly:",
                 "- Read what you need in as few calls as possible; don't re-read a file you already have.",
                 "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
@@ -5061,8 +5070,9 @@ class Agent(GoalLifecycle):
                         self.messages.append({"role": "user", "content":
                             "<system-reminder>\nThe requested interactive options have not been "
                             "shown. `propose_options` is available in this session. Call it now "
-                            "with a recommended option; writing choices in chat does not open "
-                            "the selector. Do not repeat completed work.\n</system-reminder>"})
+                            "with a recommended option. Writing choices in chat, an HTML/Markdown/"
+                            "Python mock, or opening a file in the editor does not open the "
+                            "selector. Do not repeat completed work.\n</system-reminder>"})
                         next_request_reason = "options_gate"
                         self._activity("continuing", "Opening the requested options")
                         continue
@@ -5381,6 +5391,35 @@ class Agent(GoalLifecycle):
                         "<system-reminder>\n" + reissue + "\n</system-reminder>"})
                 next_request_reason = "tool_reissue"
                 continue
+
+            if (self._options_asked_interactively() and self._picker_offered()
+                    and not wake and not self.cancelled.is_set()
+                    and not any(call.name == "propose_options" for call in result.tool_calls)
+                    and _OptionsAsk.demo_ask(user_text)):
+                refuse = ("error: DGC did not run this. The user asked to see the native options "
+                          "picker. Call `propose_options` now with a recommended option. Do not "
+                          "write HTML, Markdown, or Python mocks, and do not open a file as a "
+                          "stand-in.")
+                if native:
+                    for call in result.tool_calls:
+                        self.messages.append({"role": "tool", "tool_call_id": call.id,
+                                              "content": refuse})
+                else:
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\n" + refuse + "\n</system-reminder>"})
+                if options_repair < 2:
+                    options_repair += 1
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nThe requested interactive options have not been "
+                        "shown. `propose_options` is available in this session. Call it now "
+                        "with a recommended option. Writing a demo file or opening HTML in the "
+                        "editor is not the selector.\n</system-reminder>"})
+                    next_request_reason = "options_gate"
+                    self._activity("continuing", "Opening the requested options")
+                    continue
+                self.ui.info("The model did not open the requested options picker after two reminders. "
+                             "The selector is available; try a model that follows tool requests.")
+                return True
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
@@ -5906,10 +5945,11 @@ class Agent(GoalLifecycle):
             return finish(f"error: {exc}")
         if (self._options_asked_interactively()
                 and getattr(self, "_options_recommendation_requested", False)
-                and not any(o["recommended"] for q in questions for o in q["options"])):
-            return finish("error: the user requested your recommendation. Mark the option you "
-                          "recommend with recommended: true, put it first and explain why in its "
-                          "description. The recommendation belongs on the option, not the question.")
+                and questions and questions[0].get("options")
+                and not any(o.get("recommended") for q in questions for o in q["options"])):
+            # Open the picker anyway: hiding it because the model forgot the flag is worse than
+            # preselecting the first option when the user asked for a recommendation.
+            questions[0]["options"][0]["recommended"] = True
         ask = getattr(self.ui, "ask_questions", None)
         if self.depth > 0 or not callable(ask):
             return finish(UNAVAILABLE_RESULT)
