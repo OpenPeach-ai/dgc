@@ -33,6 +33,8 @@ MAX_AGENT_TYPE = 64
 MAX_MODEL = 200
 MAX_CALL_ID = 256
 MAX_MESSAGE_LINE = 120     # the one line a terminal row shows of a failure message
+MAX_LOG_EVENTS = 48        # display-only child tool steps kept for the inner page
+MAX_LOG_OUTPUT = 1500
 _MAX_SAFE = 2 ** 53 - 1
 _URL_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>`]+")
 
@@ -106,7 +108,7 @@ class _Record:
                  "state", "waiting_for", "activity", "started_at", "started_mono", "began_mono",
                  "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "background",
                  "message", "turn_id", "restored", "listed", "dirty", "sent_activity",
-                 "sent_tool_calls", "sent_tokens", "order")
+                 "sent_tool_calls", "sent_tokens", "order", "log")
 
     def __init__(self, **fields):
         self.parent_id = None
@@ -129,8 +131,11 @@ class _Record:
         self.sent_activity = ""
         self.sent_tool_calls = 0
         self.sent_tokens = None
+        self.log = []
         for key, value in fields.items():
             setattr(self, key, value)
+        if not isinstance(getattr(self, "log", None), list):
+            self.log = []
 
     def elapsed_ms(self, now: float) -> int:
         since = self.began_mono if self.began_mono is not None else self.started_mono
@@ -163,6 +168,9 @@ class _Record:
             item["message"] = self.message
         if self.turn_id:
             item["turn_id"] = self.turn_id
+        log = [entry for entry in (self.log or []) if isinstance(entry, dict)][:MAX_LOG_EVENTS]
+        if log:
+            item["log"] = log
         return item
 
 
@@ -359,6 +367,34 @@ class SubagentRegistry:
             record.dirty = True
             self._ensure_timer_locked()
 
+    def append_log(self, id: str, event: dict) -> None:
+        """Keep a bounded display transcript for the inner agent page. Never sent to the model."""
+        if not isinstance(event, dict):
+            return
+        kind = event.get("type")
+        if kind not in ("tool_call", "tool_result"):
+            return
+        with self._lock:
+            record = self._records.get(str(id or ""))
+            if record is None:
+                return
+            if not isinstance(getattr(record, "log", None), list):
+                record.log = []
+            entry = {"type": kind, "name": clip(str(event.get("name") or "tool"), 64)}
+            call_id = event.get("call_id")
+            if isinstance(call_id, str) and call_id:
+                entry["call_id"] = clip(call_id, MAX_CALL_ID)
+            if kind == "tool_call":
+                entry["summary"] = clip(str(event.get("summary") or ""), 120)
+                entry["args"] = {}
+            else:
+                entry["output"] = clip(str(event.get("output") or ""), MAX_LOG_OUTPUT)
+                entry["is_error"] = event.get("is_error") is True
+                entry["is_diff"] = False
+            record.log.append(entry)
+            if len(record.log) > MAX_LOG_EVENTS:
+                record.log = record.log[-MAX_LOG_EVENTS:]
+
     def progress(self, id: str, *, tool_calls: int, tokens: int | None) -> None:
         """Running totals (a child's include its descendants'). Coalesced."""
         with self._lock:
@@ -495,6 +531,27 @@ class SubagentRegistry:
             for key in ("started_at", "duration_ms", "tokens"):
                 if isinstance(item.get(key), (int, float)) and not isinstance(item[key], bool):
                     fields[key] = _int(item[key])
+            raw_log = item.get("log")
+            if isinstance(raw_log, list):
+                kept = []
+                for event in raw_log[:MAX_LOG_EVENTS]:
+                    if not isinstance(event, dict) or event.get("type") not in ("tool_call", "tool_result"):
+                        continue
+                    entry = {"type": event["type"],
+                             "name": clip(str(event.get("name") or "tool"), 64)}
+                    call_id = event.get("call_id")
+                    if isinstance(call_id, str) and call_id:
+                        entry["call_id"] = clip(call_id, MAX_CALL_ID)
+                    if event["type"] == "tool_call":
+                        entry["summary"] = clip(str(event.get("summary") or ""), 120)
+                        entry["args"] = {}
+                    else:
+                        entry["output"] = clip(str(event.get("output") or ""), MAX_LOG_OUTPUT)
+                        entry["is_error"] = event.get("is_error") is True
+                        entry["is_diff"] = False
+                    kept.append(entry)
+                if kept:
+                    fields["log"] = kept
             if state in ACTIVE:
                 fields["duration_ms"] = _int(item.get("elapsed_ms"))
                 fields["message"] = "the backend stopped before this agent reported"

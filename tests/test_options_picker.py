@@ -63,6 +63,8 @@ ASKS = [
     "ask me which approach to take",
     "can you call propose_options so I can see it",
     "demo the options picker",
+    "can you show me a test option picker , with recomendation so i can select , i want to see how it looks and functions",
+    "show me a test option picker",
     "Can't you give me some options to pick from?",
     "Couldn't you propose me options to select from?",
     "Won't you let me choose?",

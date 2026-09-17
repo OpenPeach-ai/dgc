@@ -810,14 +810,20 @@ stays in the prompt until it finishes, and DGC starts a new turn when it lands. 
 stays in the transcript; it does not inflate the count as a chat gets longer.
 
 You can change the model while a turn is running. The round already on the wire keeps its
-client; the next model round uses the new one. The chat records `Switched to <model>`. If you
-stop a turn and pick a vision-capable model, the next turn can view images. Viewed images
-always appear as a chip on the tool step that produced them — click the chip to open the
-image, even when the model itself cannot see it.
+client; the next model round uses the new one. The chat records `Switched to <model>`. Thinking
+works the same way: Settings → General → Thinking is the composer dial. Changing it mid-turn
+keeps the current request's budget and uses the new level on the next model round. The chat
+records `Thinking → high`. If you stop a turn and pick a vision-capable model, the next
+turn can view images. Viewed images always appear as a chip on the tool step that produced
+them — click the chip to open the image, even when the model itself cannot see it.
 
 A diamond (◆) means an agent needs you; a filled dot (●) means work is queued or running.
 The editor uses an empty ring (○) when the turn still has agents but none is working any more.
-Reopening a chat does not show old failures. Rewinding drops agents started later.
+Reopening a chat restores spawn cards and identity chips next to the `task` that started them.
+Compaction summarises those turns for the model, but the chips stay in the human log after the
+summary marker — they are not dumped under the last answer. Clicking a chip opens that agent's
+page: its report, files, and any tool steps DGC kept for the person. Rewinding drops agents
+started later.
 
 ## In the terminal
 
@@ -1621,11 +1627,13 @@ agent with its recommendation. Subscription CLI turns keep the vendor's own ques
 A turn a background event started, and later wake turns after you have already answered a round,
 are told to list the choices as a numbered list instead of claiming the picker is missing.
 
-Full-auto does not stop to ask, so it leaves `propose_options` out, except on a turn where you
-explicitly ask to choose ("propose me options", "let me choose", "ask me to pick"). That turn
-gets the picker in every permission mode. In full-auto it is withdrawn again once one round has
-been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text you type
-counts: attached files, editor context, and a goal's objective never re-open the picker. A
+Full-auto auto-approves tool calls; it does not hide the options picker. It leaves
+`propose_options` out of ordinary coding turns, except on a turn where you explicitly ask to
+choose ("propose me options", "let me choose", "ask me to pick", "show me a test option picker").
+That turn gets the native picker in every permission mode — the model must call `propose_options`,
+not mock it in Markdown or ask you to reply with a number. In full-auto it is withdrawn again once
+one round has been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text
+you type counts: attached files, editor context, and a goal's objective never re-open the picker. A
 sentence that describes software ("the dropdown should let me choose a region") is not an ask.
 """.strip()),
     ("Looking at a page", "drive a real browser to see a deployed or local site", """
@@ -2078,7 +2086,9 @@ the strongest supported tier; it cannot add a native tier a model does not offer
 
 - `/think` — cycle, or `/think high` to set a level (persisted across restarts).
 - `--think <level>` — set it for one `dgc -p` run.
-- TUI: `/think` opens a picker; **Settings → Model & sampling → Thinking effort**.
+- TUI: `/think` opens a picker; **Settings → General → Thinking**.
+- Editor: the composer thinking control and Settings → General → Thinking are the same dial.
+  You can change it while a turn runs; the next model round uses the new level.
 
 Native controls differ:
 

@@ -3913,10 +3913,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         artifact_in_plan: v.artifact_in_plan === true,
         tool_profile: v.tool_profile === "full" ? "full" : "adaptive",
         max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
-        thinking: v.think || "off",
+        // General → Thinking is the composer dial. On a subscription route it maps to
+        // subscription_effort; native thinking stays the last native value so a Save does not
+        // overwrite it with the vendor effort.
+        thinking: selectedEngine ? (this.routeState.nativeThink || "off") : (v.think || "off"),
         subscription_engine: selectedEngine,
         subscription_model: v.subscription_model || "",
-        subscription_effort: subscriptionEffort,
+        subscription_effort: selectedEngine
+          ? (String(v.think || "off") === "off" ? "" : String(v.think || "").trim().toLowerCase())
+          : subscriptionEffort,
       };
       if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
       if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
@@ -4593,8 +4598,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div class="set-group">Behavior</div>
     <label>Permission mode
       <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
-    <label>Thinking
-      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
+    <label>Thinking <span class="set-hint">Same control as the composer. Applies to the next model round; the round already on the wire keeps its budget.</span>
+      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
     <p id="s-reasoning-note" class="set-hint"></p>
     <label>DGC Ultra <span class="set-hint">extended reasoning guidance + proactive bounded sub-agents; never changes permissions</span>
       <select id="s-ultra_mode"><option value="false">off</option><option value="true">on</option></select></label>

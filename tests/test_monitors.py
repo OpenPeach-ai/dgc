@@ -1340,9 +1340,8 @@ class BackendYieldTests(unittest.TestCase):
         return gate
 
     def test_a_busy_command_racing_a_queued_wake_runs_instead_of_being_refused(self):
-        for command, answer in (({"type": "set_think", "level": "high", "request_id": "cmd"}, "think_changed"),
-                                ({"type": "set_workspace_roots", "roots": [], "request_id": "cmd"},
-                                 "workspace_roots")):
+        for command, answer in (({"type": "set_workspace_roots", "roots": [], "request_id": "cmd"},
+                                 "workspace_roots"),):
             self.events = []
             backend = self.backend()
             hub = backend.agent.monitors
@@ -1365,8 +1364,8 @@ class BackendYieldTests(unittest.TestCase):
         with backend._turn_state_lock():
             backend._queue.append(("a real prompt", None, None, "prompt", "p1"))
         backend._await_idle = lambda timeout: False
-        backend.dispatch({"type": "set_think", "level": "high", "request_id": "cmd"})
-        self.assertEqual([e["command"] for e in self.rejected()], ["set_think"])
+        backend.dispatch({"type": "name_session", "name": "busy-wake", "request_id": "cmd"})
+        self.assertEqual([e["command"] for e in self.rejected()], ["name_session"])
         self.assertEqual([item[3] for item in backend._queue], ["monitor", "prompt"])
         with backend._turn_state_lock():
             backend._queue.clear()

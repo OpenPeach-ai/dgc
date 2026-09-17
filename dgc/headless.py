@@ -79,6 +79,9 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes",
     "thinking_inline", "thinking_inline_max_chars",
+    # Same dial as the composer: the in-flight generation keeps its budget; the next model
+    # round in this turn (or the next prompt) uses the new level.
+    "thinking", "subscription_effort",
 })
 # Commands that only read state. Every other command is the user doing something, so a monitor
 # wake-up waits one wake delay after it -- and never starts while the command is being handled.
@@ -101,10 +104,9 @@ _BUSY_MUTATIONS = {
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
     # `clear_todos` is not here either: Clear empties the list at once, even mid-turn, and the
     # worker that owns the session saves it as it retires.
-    # set_model is allowed mid-turn: the in-flight generation keeps its client, and the next
-    # model round in this turn (or the next prompt) uses the new one. set_think stays gated
-    # because thinking is baked into the request already on the wire.
-    "set_think", "clear_session", "resume_session",
+    # set_model and set_think are allowed mid-turn: the in-flight generation keeps its
+    # request; the next model round in this turn (or the next prompt) uses the new one.
+    "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
@@ -2736,6 +2738,7 @@ class Backend:
         close_turn()
         self._history_finish_reasoning(items)   # (may drop items: find the live turn again after)
         self._history_finish_images(items)
+        items = self._history_restored_agent_cards(items)
         if live_start is not None:
             first = next(i for i, item in enumerate(items) if item is live_start)
             hid = live_start.get("turn_id")
@@ -3482,9 +3485,12 @@ class Backend:
                                 "choose its reasoning model with /model instead",
                         **_request_fields(request_id))
                     return
+                previous = str(config_get("subscription_effort", "") if callable(config_get) else "") or "off"
                 self.config.set("subscription_effort", effort)
-                self.em.emit("think_changed", think=effort or "off",
-                             **_request_fields(request_id))
+                shown = effort or "off"
+                self.em.emit("think_changed", think=shown, **_request_fields(request_id))
+                if shown != previous:
+                    self.em.emit("info", message=f"Thinking → {shown}")
             else:
                 if level == "max":
                     self.em.emit(
@@ -3492,9 +3498,12 @@ class Backend:
                         message="max reasoning effort is available only on a supported subscription route",
                         **_request_fields(request_id))
                     return
+                previous = str(self.config.get("thinking", "off") or "off")
                 self.config.set("thinking", level)   # persisted native route
-                self.em.emit("think_changed", think=self.config.get("thinking", "off"),
-                             **_request_fields(request_id))
+                shown = str(self.config.get("thinking", "off") or "off")
+                self.em.emit("think_changed", think=shown, **_request_fields(request_id))
+                if shown != previous:
+                    self.em.emit("info", message=f"Thinking → {shown}")
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
@@ -3943,6 +3952,11 @@ class Backend:
                 if has_persist_flag:
                     self.config._persist = persist_before
             self._emit_config(request_id)
+            if "thinking" in values or "subscription_effort" in values:
+                active_engine = str(self.config.get("subscription_engine", "") or "").strip()
+                shown = ((str(self.config.get("subscription_effort", "") or "").strip() or "off")
+                         if active_engine else str(self.config.get("thinking", "off") or "off"))
+                self.em.emit("think_changed", think=shown, **_request_fields(request_id))
             if "context_size" in values:
                 self._emit_context(request_id)
         elif t == "get_config":
@@ -3996,6 +4010,48 @@ class Backend:
         except Exception:
             # A frame that failed validation is lost; a snapshot shortly after heals the client.
             self._schedule_agents_snapshot()
+
+    def _history_restored_agent_cards(self, items: list) -> list:
+        """After compaction, put spawn cards back in the human log (not the model window).
+
+        Compaction folds `task` calls out of the live messages, so resume used to dump identity
+        chips under the last answer. The model still sees only the summary. The panel gets the
+        original spawn cards after the compaction marker, so chips sit where that work ran.
+        """
+        registry = getattr(getattr(self, "agent", None), "subagents", None)
+        if registry is None or not items:
+            return items
+        compacted = any(isinstance(it, dict) and it.get("role") == "compaction" for it in items)
+        if not compacted:
+            return items
+        present = {it.get("call_id") for it in items
+                   if isinstance(it, dict) and it.get("type") == "tool_call"
+                   and it.get("name") == "task" and it.get("call_id")}
+        cards = []
+        for rec in registry.snapshot().get("items") or []:
+            if not isinstance(rec, dict):
+                continue
+            call_id = rec.get("call_id")
+            if not call_id or call_id in present:
+                continue
+            if rec.get("state") not in ("finished", "failed", "stopped"):
+                continue
+            description = str(rec.get("description") or "Agent")
+            args = {"description": description}
+            cards.append({"type": "tool_call", "call_id": call_id, "name": "task",
+                          "args": args, "summary": description[:120]})
+            message = str(rec.get("message") or "")
+            output = message or f"Sub-task '{description}' {rec.get('state')}."
+            cards.append({"type": "tool_result", "call_id": call_id, "name": "task",
+                          "output": output[:4000],
+                          "is_error": rec.get("state") == "failed", "is_diff": False})
+        if not cards:
+            return items
+        idx = 0
+        for i, it in enumerate(items):
+            if isinstance(it, dict) and it.get("role") == "compaction":
+                idx = i + 1
+        return items[:idx] + cards + items[idx:]
 
     def _emit_agents(self, request_id: str | None = None) -> None:
         """The `agents` snapshot: every active record, then the most recent ended, exact counts."""

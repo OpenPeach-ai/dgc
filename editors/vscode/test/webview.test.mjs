@@ -2586,8 +2586,8 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
   assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
   assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
-  assert.equal(doc.getElementById("s-think").value, "xhigh",
-    "native xhigh must survive settings hydration while a subscription route is active");
+  assert.equal(doc.getElementById("s-think").value, "max",
+    "General → Thinking is the composer dial, so a subscription route shows its effort");
   assert.equal(doc.getElementById("s-subscription_effort").value, "max",
     "subscription max must survive settings hydration");
   assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
@@ -2607,7 +2607,7 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
   assert.equal(saved.values.subscription_engine, "codex");
   assert.equal(saved.values.subscription_model, "gpt-5.6");
-  assert.equal(saved.values.think, "xhigh");
+  assert.equal(saved.values.think, "max");
   assert.equal(saved.values.subscription_effort, "max");
   assert.equal(saved.values.ultra_mode, true);
   doc.getElementById("s-provider").value = "ollama";

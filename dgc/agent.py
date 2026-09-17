@@ -246,7 +246,7 @@ class _OptionsAsk:
     # The picker by name: "show me the options picker", "use propose_options", or just the name.
     _BY_NAME = re.compile(
         _POS + r"(?:(?:show|give|bring\s+up|pop\s+up|display|open)\s+(?:me|us)|trigger|demo|try)\s+"
-        r"(?:(?:the|a|an|your|dgc'?s)\s+)?(?:options?|choices?|selection)\s+"
+        r"(?:(?:the|a|an|your|dgc'?s|" + _DET + r")\s+)*(?:options?|choices?|selection)\s+"
         r"(?:picker|popup|pop-up|dialog|card|selector)\b"
         r"|\b(?:use|call|invoke|try|trigger|run|demo|with|via|using|through)\s+(?:the\s+|your\s+)?"
         r"`?propose_options\b`?(?!\s*(?:tests?|handler|schema|description|function|implementation|"
@@ -263,8 +263,10 @@ class _OptionsAsk:
         r"\b(?:drop-?downs?|combo\s?box(?:es)?|list\s?box(?:es)?|select\s+(?:elements?|box(?:es)?|"
         r"menus?|tags?|inputs?|fields?)|components?|widgets?|modals?|pop-?ups?|dialogs?|menus?|"
         r"screens?|pages?|(?<!in\sthe\s)forms?|buttons?|check\s?box(?:es)?|radio|wizards?|quiz(?:zes)?|"
-        r"surveys?|onboarding|toolbars?|sidebars?|nav\s?bars?|as\s+you\s+type|should|functions?|"
-        r"methods?|endpoints?|schemas?|handlers?|fixtures?|tests?\s+for|unit\s+tests?|css|html|jsx|tsx|"
+        r"surveys?|onboarding|toolbars?|sidebars?|nav\s?bars?|as\s+you\s+type|should|"
+        r"(?:write|implement|add|create|define)\s+(?:a\s+)?(?:function|method)s?|"
+        r"\b(?:function|method)s?\s+that\b|"
+        r"endpoints?|schemas?|handlers?|fixtures?|tests?\s+for|unit\s+tests?|css|html|jsx|tsx|"
         r"click(?:s|ed|ing)?|taps?|hover(?:s|ed|ing)?|drag(?:s|ged|ging)?|"
         r"when(?:ever)?\s+(?:I|we|the\s+user|users?|someone|they)|"
         r"(?:in|on|from|inside)\s+the\s+(?:\w+\s+)?(?:tui|cli|gui|ui|pill|panel|webview|table|export|"
@@ -972,6 +974,7 @@ class _SubUI:
         self._route_session = getattr(tls, "session", None) if tls is not None else None
         self._deny_reason: str | None = None
         self._plan_feedback: str | None = None
+        self._registry = None
 
     def _call_id(self, call_id):
         return f"{self._call_prefix}:{call_id}" if call_id else call_id
@@ -1073,8 +1076,20 @@ class _SubUI:
     def model_retry_supported(self) -> bool:
         return _ui_supports_model_retry(self._parent)
 
+    def _record_display(self, event: dict) -> None:
+        registry = getattr(self, "_registry", None)
+        append = getattr(registry, "append_log", None) if registry is not None else None
+        if callable(append):
+            append(self.agent_id, event)
+
     def tool_call(self, name, args, call_id=None):
-        self._emit("tool_call", name, args, self._call_id(call_id))
+        from .ui import arg_summary
+        wire = self._call_id(call_id)
+        self._record_display({
+            "type": "tool_call", "call_id": wire, "name": name,
+            "summary": arg_summary(name, args if isinstance(args, dict) else {}),
+        })
+        self._emit("tool_call", name, args, wire)
 
     def tool_progress(self, name, message, *, progress=None, total=None, level="", call_id=None):
         callback = getattr(self._parent, "tool_progress", None)
@@ -1083,7 +1098,14 @@ class _SubUI:
                        call_id=self._call_id(call_id))
 
     def tool_result(self, name, out, call_id=None):
-        self._emit("tool_result", name, out, self._call_id(call_id))
+        from .ui import tool_output_is_error
+        wire = self._call_id(call_id)
+        text = str(out or "")
+        self._record_display({
+            "type": "tool_result", "call_id": wire, "name": name,
+            "output": text, "is_error": tool_output_is_error(text),
+        })
+        self._emit("tool_result", name, out, wire)
 
     def tool_denied(self, name, args, reason, call_id=None):
         self._emit("tool_denied", name, args, reason, self._call_id(call_id))
@@ -2683,7 +2705,10 @@ class Agent(GoalLifecycle):
                 "",
                 "FULL-AUTO MODE: your tool calls are auto-approved. Work autonomously and keep "
                 "going until the task is completely done and verified. Do not stop early to ask "
-                "questions you can answer yourself with tools.",
+                "questions you can answer yourself with tools. Auto-approval is not the options "
+                "picker: if propose_options is in your tools, call it to open the native selector "
+                "(put the recommended option first). Never mock the picker in Markdown or ask the "
+                "user to reply with a number in chat.",
                 "Work efficiently — a slow local model makes every round-trip and every compile costly:",
                 "- Read what you need in as few calls as possible; don't re-read a file you already have.",
                 "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
@@ -6931,6 +6956,7 @@ class Agent(GoalLifecycle):
         own_cancel = threading.Event() if detach else self.cancelled
         sub_ui = _SubUI(self.ui, description, cancel=own_cancel)
         registry = getattr(self, "subagents", None)
+        sub_ui._registry = registry
         if registry is not None:
             registry.start(id=sub_ui.agent_id, parent_id=getattr(self, "_subagent_id", None),
                            call_id=_wire_call_id(self.ui, call_id), description=description,
@@ -7092,9 +7118,12 @@ class Agent(GoalLifecycle):
 
         interaction_lock = threading.Lock()
         executions: dict[int, tuple[str, str, str]] = {}
+        registry = getattr(self, "subagents", None)
         sub_uis = {i: _SubUI(
             self.ui, self._safe_text(str(calls[i].arguments.get("description", ""))), buffered=True,
             interaction_lock=interaction_lock, cancel=self.cancelled) for i in prepared}
+        for sub_ui in sub_uis.values():
+            sub_ui._registry = registry
         replay_errors: list[str] = []
         if prepared:
             from concurrent.futures import ThreadPoolExecutor, as_completed

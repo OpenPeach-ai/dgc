@@ -1369,6 +1369,8 @@ def unit_tests(tmp: Path):
     from dgc.headless import _LIVE_SAFE_CONFIG_KEYS as _LIVE_SAFE
     check("raising the context window no longer requires abandoning the turn",
           "context_size" in _LIVE_SAFE and "set_config" not in _BUSY_LIVE)
+    check("thinking is the composer dial and may change mid-turn",
+          "thinking" in _LIVE_SAFE and "subscription_effort" in _LIVE_SAFE)
     check("changing the execution route still waits for the turn to end",
           not ({"model", "base_url", "api_key", "api_mode", "subscription_engine", "sandbox",
                 "tool_profile"} & _LIVE_SAFE),
@@ -1868,6 +1870,7 @@ def unit_tests(tmp: Path):
     check("the commands that really cannot run mid-turn still cannot",
           {"rewind", "compact", "resume_session"} <= _BUSY
           and "set_model" not in _BUSY
+          and "set_think" not in _BUSY
           and "set_config" not in _BUSY)
 
     from dgc import sessions as _sessions
@@ -19643,12 +19646,15 @@ def test_subscription_engines():
         settings_backend.config.data["subscription_engine"] = "claude"
         settings_backend.dispatch({"type": "set_think", "level": "max",
                                    "request_id": "think-max-subscription"})
-        delegated_max = settings_backend.em.events[-1]
+        delegated_max = next(event for event in settings_backend.em.events
+                             if event.get("request_id") == "think-max-subscription"
+                             and event.get("type") == "think_changed")
         settings_backend.config.data["subscription_engine"] = ""
         native_before = settings_backend.config.data.get("thinking")
         settings_backend.dispatch({"type": "set_think", "level": "max",
                                    "request_id": "think-max-native"})
-        native_max = settings_backend.em.events[-1]
+        native_max = next(event for event in settings_backend.em.events
+                          if event.get("request_id") == "think-max-native")
         check("subscriptions: protocol-v5 max effort round-trips only on a supported route",
               delegated_max.get("type") == "think_changed"
               and delegated_max.get("think") == "max"

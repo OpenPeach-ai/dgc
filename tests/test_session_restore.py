@@ -110,6 +110,40 @@ class SessionRestoreTests(unittest.TestCase):
             if item.get("type"):
                 self.assertIsNone(event_error({"seq": 0, **item}), item)
 
+    def test_compacted_history_replays_spawn_cards_after_the_summary(self):
+        from dgc.agent import _COMPACT_PREFIX
+        self.agent.messages = [
+            {"role": "user", "content": f"{_COMPACT_PREFIX}\nEarlier work spawned sub-agents."},
+            {"role": "assistant", "content": "Acknowledged."},
+            {"role": "user", "content": "show the screenshots"},
+            {"role": "assistant", "content": "Here they are."},
+        ]
+        self.assertTrue(self.agent.subagents.restore_state({
+            "version": 1,
+            "items": [{
+                "id": "sub-aaaaaaaaaaaa", "call_id": "call_ttaype0a",
+                "description": "3.5 Semantic search via Ollama", "state": "finished",
+                "depth": 1, "tool_calls": 4, "isolated": True, "parallel": False,
+                "message": "Indexed the notes.\nFILES: search.py",
+                "log": [{"type": "tool_call", "call_id": "sub-aaaaaaaaaaaa:g1",
+                         "name": "grep", "summary": "semantic"}],
+            }],
+            "counts": {"finished": 1, "total": 1},
+        }))
+        items = self.backend._history()
+        for item in items:
+            if item.get("type"):
+                self.assertIsNone(event_error({"seq": 0, **item}), item)
+        compact_at = next(i for i, item in enumerate(items) if item.get("role") == "compaction")
+        spawn = next(item for item in items
+                     if item.get("type") == "tool_call" and item.get("name") == "task")
+        spawn_at = items.index(spawn)
+        last_answer = max(i for i, item in enumerate(items) if item.get("type") == "text_delta")
+        self.assertEqual(spawn["call_id"], "call_ttaype0a")
+        self.assertGreater(spawn_at, compact_at)
+        self.assertLess(spawn_at, last_answer)
+        self.assertEqual(self.agent.subagents.snapshot()["items"][0]["log"][0]["name"], "grep")
+
     def test_a_turn_whose_last_round_called_tools_designates_no_answer(self):
         # A session interrupted mid-tool has no answer block, and says so instead of promoting
         # whatever prose happens to sit last.

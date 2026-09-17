@@ -1094,6 +1094,24 @@ class RebuildTests(unittest.TestCase):
                       *task_turn("call_0", "second", "Sub-task 'second' completed.")])
         self.assertEqual([i["id"] for i in reg.snapshot()["items"]], [sid(4)])
 
+    def test_saved_child_log_round_trips_for_the_inner_page(self):
+        reg = SubagentRegistry()
+        rid = sid(1)
+        reg.start(id=rid, call_id="call_0", description="map auth")
+        reg.append_log(rid, {"type": "tool_call", "call_id": f"{rid}:g1", "name": "grep",
+                             "summary": "login"})
+        reg.append_log(rid, {"type": "tool_result", "call_id": f"{rid}:g1", "name": "grep",
+                             "output": "app.ts:4", "is_error": False})
+        reg.end(rid, "finished", "Mapped auth.\nFILES: app.ts")
+        saved = reg.saved_state()
+        self.assertEqual(saved["items"][0]["log"][0]["name"], "grep")
+        other = SubagentRegistry()
+        self.assertTrue(other.restore_state(saved))
+        item = other.snapshot()["items"][0]
+        self.assertEqual(item["restored"], True)
+        self.assertEqual(item["log"][1]["output"], "app.ts:4")
+        self.assertIsNone(ep.event_error({"type": "agents", "seq": 0, **other.snapshot()}))
+
 
 class AgentBoundaryTests(HarnessCase):
     def test_resume_rebuilds_rewind_prunes_reset_clears(self):

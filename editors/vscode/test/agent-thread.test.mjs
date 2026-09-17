@@ -120,3 +120,60 @@ test("a background agent keeps the pill after the parent turn ends", () => {
   assert.match(doc.querySelector(".resume-note").textContent, /Woke on agent/);
   assert.deepEqual(errors, []);
 });
+
+test("restored agents without a spawn card do not dump chips under the last answer", () => {
+  const { doc, event, errors } = view();
+  event({ type: "history", items: [
+    { role: "compaction", text: "Earlier work spawned sub-agents." },
+    { type: "turn_start", turn_id: "h1", prompt: "show the screenshots", kind: "prompt" },
+    { type: "text_delta", text: "Here they are." },
+    { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+  ] });
+  event({ type: "agents", items: [{
+    id: sid(1), parent_id: null, call_id: "call_old", description: "3.5 Semantic search via Ollama",
+    depth: 1, state: "finished", tool_calls: 4, isolated: true, parallel: false, restored: true,
+    message: "Indexed the notes.",
+  }], total: 1, active: 0 });
+  assert.equal(doc.querySelectorAll(".agent-chip").length, 0);
+  assert.deepEqual(errors, []);
+});
+
+test("restored spawn cards after the summary pin chips there, and the inner page uses the saved log", () => {
+  const { $, doc, event, errors } = view();
+  event({ type: "history", items: [
+    { role: "compaction", text: "Earlier work spawned sub-agents." },
+    { type: "tool_call", call_id: "call_old", name: "task", args: { description: "3.5 Semantic search via Ollama" },
+      summary: "3.5 Semantic search via Ollama" },
+    { type: "tool_result", call_id: "call_old", name: "task", output: "Indexed the notes.\nFILES: search.py",
+      is_error: false, is_diff: false },
+    { type: "turn_start", turn_id: "h1", prompt: "show the screenshots", kind: "prompt" },
+    { type: "text_delta", text: "Here they are." },
+    { type: "stream_end", message_id: "h1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: "h1:1" },
+  ] });
+  event({ type: "agents", items: [{
+    id: sid(1), parent_id: null, call_id: "call_old", description: "3.5 Semantic search via Ollama",
+    depth: 1, state: "finished", tool_calls: 4, isolated: true, parallel: false, restored: true,
+    message: "Indexed the notes.\nFILES: search.py",
+    log: [
+      { type: "tool_call", call_id: `${sid(1)}:g1`, name: "grep", summary: "semantic", args: {} },
+      { type: "tool_result", call_id: `${sid(1)}:g1`, name: "grep", output: "search.py:12", is_error: false },
+    ],
+  }], total: 1, active: 0 });
+  const chips = [...doc.querySelectorAll(".agent-chip")];
+  assert.equal(chips.length, 1);
+  const compaction = doc.querySelector(".compaction");
+  const answer = [...doc.querySelectorAll(".text")].find((n) => n.textContent.includes("Here they are"));
+  assert.ok(compaction);
+  assert.ok(answer);
+  const following = compaction.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING;
+  assert.equal(Boolean(compaction.compareDocumentPosition(chips[0]) & following), true,
+    "chip sits after the summary marker");
+  assert.equal(Boolean(chips[0].compareDocumentPosition(answer) & following), true,
+    "chip sits above the last answer");
+  chips[0].click();
+  assert.match($("agent-log").textContent, /Indexed the notes/);
+  assert.ok($("agent-log").querySelector('.tool[data-tool-name="grep"]'));
+  assert.deepEqual(errors, []);
+});

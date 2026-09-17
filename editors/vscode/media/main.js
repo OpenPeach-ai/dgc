@@ -2638,6 +2638,18 @@
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
+      case "think_changed": {
+        const level = String(ev.think || "off");
+        if (lastConfig) {
+          if (lastConfig.subscription_engine) {
+            lastConfig.subscription_effort = level === "off" ? "" : level;
+          } else {
+            lastConfig.think = level;
+          }
+        }
+        if (!$("settings").hidden && lastConfig) fillSettings(lastConfig);
+        break;
+      }
       case "turn_start":
         if (!replaying) { removeRecoveryCards(); liveTurnHint = null; agentsTurnBegin(); }
         startTurn(ev.prompt, ev.kind, ev.turn_id,
@@ -3831,7 +3843,8 @@
     reasoningControl = cfg.provider_capabilities?.reasoning_control || reasoningControl;
     $("s-reasoning-note").textContent = reasoningNote();
     const map = {
-      base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
+      base_url: cfg.base_url, model: cfg.model, mode: cfg.mode,
+      think: cfg.subscription_engine ? (cfg.subscription_effort || "off") : (cfg.think || curThink),
       subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
       subagent_api_mode: cfg.subagent_api_mode,
       subagent_api_key: "", fallback_model: cfg.fallback_model,
@@ -3855,6 +3868,8 @@
       subscription_effort: cfg.subscription_effort || "",
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
+    const thinkMax = $("s-think") && [...$("s-think").options].find((o) => o.value === "max");
+    if (thinkMax) thinkMax.hidden = !map.subscription_engine;
     const subscriptionSelect = $("s-subscription_engine");
     if (subscriptionSelect) subscriptionSelect.dataset.loadedValue = map.subscription_engine;
     updateSubscriptionFields();
@@ -4817,6 +4832,12 @@
   function ensureAgentChip(record) {
     if (!record?.id) return;
     const id = String(record.id);
+    const live = AGENT_ACTIVE.has(record.state);
+    if (!live && !agentAnchor(id)) {
+      const stray = agentChipOf(id);
+      if (stray && stray.isConnected) stray.remove();
+      return;
+    }
     let chip = agentChipOf(id);
     if (!chip) {
       chip = el("button", "agent-chip");
@@ -4870,6 +4891,7 @@
     });
   }
   function paintAgentTranscript(id, into) {
+    let cloned = 0;
     for (const node of log.querySelectorAll(".tool.agent-owned, .diff.agent-owned, button.disclosure.agent-owned, .reasoning.agent-owned, .thought-static.agent-owned, .thought-note.agent-owned")) {
       if ((node.dataset.agentId || node.dataset.agent) !== id) continue;
       // The parent's `task` spawn card is tagged with this id for the pill; it is not the child's work.
@@ -4878,6 +4900,36 @@
       const clone = node.cloneNode(true);
       rebindAgentClone(clone);
       into.appendChild(clone);
+      cloned += 1;
+    }
+    if (cloned) return;
+    const record = agentRecords.get(id);
+    const events = Array.isArray(record?.log) ? record.log : [];
+    const store = Object.create(null);
+    for (const ev of events) {
+      if (!ev || typeof ev !== "object") continue;
+      if (ev.type === "tool_call") {
+        const card = toolCard({ name: ev.name, call_id: ev.call_id, args: ev.args || {}, summary: ev.summary });
+        card.classList.add("agent-owned");
+        card.dataset.agentId = id;
+        store[ev.call_id || ev.name] = card;
+        into.appendChild(card);
+      } else if (ev.type === "tool_result") {
+        const key = ev.call_id || ev.name;
+        const card = store[key] || (store[key] = toolCard({ name: ev.name, call_id: ev.call_id }));
+        if (!card.isConnected) {
+          card.classList.add("agent-owned");
+          card.dataset.agentId = id;
+          into.appendChild(card);
+        }
+        setToolStatus(card, ev.is_error ? "failed" : "completed");
+        setToolOutput(card, String(ev.output || "").slice(0, 4000));
+      }
+    }
+    if (!into.childElementCount && record?.restored) {
+      const note = el("div", "sys hist");
+      note.textContent = "This agent's tool steps were not kept in the parent chat. The summary above is what it reported.";
+      into.appendChild(note);
     }
   }
   function paintAgentFiles(into, record) {

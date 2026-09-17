@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.1 — 2026-09-17
+
+- Requires CLI 0.41.2; editor protocol remains v14.
+- **Restored sub-agents stay with their spawn.** Compaction still summarises the model window. The human log keeps the `task` cards after that summary, and identity chips pin there instead of dumping under the last answer. A chip without a spawn card is not drawn. Opening a chip shows the child's saved tool steps when DGC kept them.
+- **Thinking is one dial.** Settings → General → Thinking is the composer control. You can change it while a turn runs; the round already on the wire keeps its budget, and the next model round uses the new level.
+
 ## 0.26.0 — 2026-09-17
 
 - Requires CLI 0.41.0; editor protocol remains v14.
