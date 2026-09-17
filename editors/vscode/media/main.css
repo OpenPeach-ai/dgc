@@ -215,7 +215,26 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    reasoning draws nothing.) */
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
-.user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
+.user .bubble .prompt-text { white-space: pre-wrap; word-break: break-word; }
+.user .bubble .prompt-atts { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.user .bubble .prompt-atts:last-child { margin-bottom: 0; }
+.user .bubble .prompt-atts > li { display: flex; min-width: 0; }
+.user .bubble .prompt-att.chip { font: var(--w-reg) var(--t-xs)/1.2 var(--sans); background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); display: inline-flex; gap: var(--sp-1); align-items: center; min-width: 0; max-width: 100%; cursor: pointer; }
+.user .bubble .prompt-att.chip:hover { border-color: var(--border-strong); color: var(--text-strong); }
+.user .bubble .prompt-att.chip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.user .bubble .prompt-att .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user .bubble .prompt-att .codicon { font-size: 12px; color: var(--muted); flex: none; }
+.user .bubble .image-chip { cursor: zoom-in; }
+#att-viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-5); background: rgba(0, 0, 0, .72); }
+#att-viewer .att-bar { flex: none; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface)); }
+#att-viewer .att-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
+#att-viewer .att-body { flex: 1 1 auto; min-height: 0; margin: 0; padding: var(--sp-3); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--vscode-editorWidget-background, var(--surface));
+  color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
 :root, body {
   --prompt-fill: color-mix(in srgb, var(--accent) 12%, var(--surface));

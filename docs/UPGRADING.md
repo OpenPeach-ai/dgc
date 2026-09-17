@@ -1,7 +1,7 @@
 # Updating DGC and resolving protocol mismatches
 
 The CLI and editor extension are separate installations with independent version numbers. Update
-both for the current feature set: CLI 0.41.2 and extension 0.26.1 use editor protocol v14 (CLI 0.39.0
+both for the current feature set: CLI 0.41.2 and extension 0.26.2 use editor protocol v14 (CLI 0.39.0
 and extension 0.24.0 use editor protocol v13). Additive
 capabilities let the extension explain a missing backend feature instead of sending unsupported
 commands to an older CLI.
@@ -46,7 +46,7 @@ and [Cursor extension guide](https://prod.cursor.com/help/customization/extensio
 ## How paired updates work
 
 DGC currently uses the CLI installed on your machine; it does not bundle a private runtime inside
-its extension. Extension 0.26.1 records its minimum CLI version, 0.41.0. If the connected CLI is too
+its extension. Extension 0.26.2 records its minimum CLI version, 0.41.0. If the connected CLI is too
 old, the existing automatic CLI recovery installs that specific release, then reconnects. The user
 setting `dgc.autoUpdateCli` controls this. A custom executable or unsupported install still needs
 its own installation method; DGC never overwrites an arbitrary checkout.

@@ -556,8 +556,8 @@ test("prompt rejection restores matching text and attachments while preserving a
   input.value = "new draft";
   send({ type: "event", event: { type: "command_rejected", command: "prompt", request_id: first.requestId, message: "Queue full" } });
   assert.equal(input.value, "new draft");
-  assert.ok(doc.querySelector(".msg.rejected button"));
-  input.value = ""; doc.querySelector(".msg.rejected button").click();
+  assert.ok(doc.querySelector(".msg.rejected button.act"));
+  input.value = ""; doc.querySelector(".msg.rejected button.act").click();
   assert.equal(input.value, "Review this file");
   assert.match(doc.getElementById("attachments").textContent, /app.ts/);
   assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
@@ -760,12 +760,12 @@ test("skill and template chips preserve text, travel as selections, and restore 
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
   assert.equal(input.value, "Review  after");
-  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 1);
   assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
   input.value += " /check"; input.selectionStart = input.selectionEnd = input.value.length;
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
+  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 2);
   assert.equal(posted.some((m) => m.type === "prompt"), false);
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const prompt = posted.at(-1);
@@ -775,9 +775,9 @@ test("skill and template chips preserve text, travel as selections, and restore 
   assert.deepEqual(Array.from(prompt.templates), ["check-api"]);
   send({ type: "prompt_rejected", requestId: prompt.requestId });
   assert.equal(input.value, "Review  after");
-  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
-  doc.querySelector(".invocation-chip .x").click();
-  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 2);
+  doc.querySelector("#attachments .invocation-chip .x").click();
+  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 1);
   assert.deepEqual(errors, []);
 });
 
@@ -1701,8 +1701,81 @@ test("a large paste becomes an attachment that can be put back", () => {
   assert.ok(sent, "the prompt was sent");
   assert.ok(sent.text.startsWith("explain this"), "what was typed comes first");
   assert.ok(sent.text.includes(big), "and the folded paste is included in full");
+  const bubble = doc.querySelector(".msg.user .bubble");
+  assert.equal(bubble.querySelector(".prompt-text").textContent, "explain this",
+    "the bubble's prose is the typed prompt, not the folded paste");
+  assert.equal(bubble.querySelector(".prompt-text").textContent.includes("["), false,
+    "attachments must not appear as [label] placeholders in the sent prompt");
+  const pasteChip = bubble.querySelector(".prompt-atts .pasted-chip");
+  assert.ok(pasteChip, "the folded paste sits above the prompt as a chip");
+  pasteChip.click();
+  assert.equal(doc.getElementById("att-viewer").querySelector(".att-body").textContent, big,
+    "opening the chip shows the pasted text");
+  doc.querySelector("#att-viewer .att-close").click();
+  assert.equal(doc.getElementById("att-viewer"), null);
   assert.deepEqual(errors, []);
   dom.window.close();
+});
+
+test("a sent prompt shows image and file attachments as clickable chips above the text", () => {
+  const { dom, errors, posted, doc, send } = makeDom({ scope: "workspace" });
+  send({ type: "session_ready", sessionId: "alpha" });
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  const input = doc.getElementById("input");
+  dom.window.FileReader = class {
+    readAsDataURL() {
+      this.result = "data:image/png;base64,iVBORw0KGgo=";
+      this.onload();
+    }
+  };
+  input.value = "what's in this";
+  const paste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { items: [{ type: "image/png",
+    getAsFile: () => new dom.window.File([new Uint8Array(32)], "shot.png", { type: "image/png" }) }] } });
+  input.dispatchEvent(paste);
+  doc.getElementById("send").click();
+  const imageBubble = doc.querySelector(".msg.user .bubble");
+  assert.equal(imageBubble.querySelector(".prompt-text").textContent, "what's in this");
+  assert.equal(/📷|\[[^\]]*image\]/i.test(imageBubble.querySelector(".prompt-text").textContent), false);
+  const imageChip = imageBubble.querySelector(".prompt-atts .image-chip");
+  assert.ok(imageChip, "the image sits above the prompt as a chip");
+  imageChip.click();
+  assert.ok(doc.getElementById("image-viewer"), "clicking the image chip opens the viewer");
+  doc.querySelector("#image-viewer .iv-close").click();
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "what's in this" } });
+  assert.equal(doc.querySelectorAll(".msg.user").length, 1, "the turn echo must not draw a second bubble");
+
+  send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  send({ type: "session_ready", sessionId: "beta" });
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "beta" } });
+  // Restore a file mention into the composer through the saved draft, then send it.
+  const fileDom = makeDom({ scope: "workspace", state: { version: 1, scope: "workspace", active: "file",
+    entries: [["file", { text: "look at this", attachments: [{ label: "src/app.ts",
+      resource: { type: "file_mention", path: "/tmp/src/app.ts" } }], start: 11, end: 11 }]], pending: [] } });
+  fileDom.send({ type: "session_ready", sessionId: "file" });
+  fileDom.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  fileDom.doc.getElementById("send").click();
+  const fileBubble = fileDom.doc.querySelector(".msg.user .bubble");
+  assert.equal(fileBubble.querySelector(".prompt-text").textContent, "look at this");
+  const fileChip = fileBubble.querySelector(".prompt-atts .chip");
+  assert.match(fileChip.textContent, /src\/app\.ts/);
+  fileChip.click();
+  assert.equal(fileDom.posted.at(-1).type, "openFile");
+  assert.equal(fileDom.posted.at(-1).path, "/tmp/src/app.ts");
+  assert.deepEqual(errors, []);
+  assert.deepEqual(fileDom.errors, []);
+  fileDom.dom.window.close();
+  dom.window.close();
+});
+
+test("a restored camera mark becomes an image chip instead of a glyph in the prompt", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "look at this 📷" } });
+  const bubble = doc.querySelector(".msg.user .bubble");
+  assert.equal(bubble.querySelector(".prompt-text").textContent, "look at this");
+  assert.ok(bubble.querySelector(".prompt-atts .image-chip"));
+  assert.deepEqual(errors, []);
 });
 
 test("a folded paste can be put back into the text field", () => {

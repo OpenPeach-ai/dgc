@@ -540,8 +540,9 @@
     const draft = cleanDraft({ ...(item?.draft || {}), start: 0, end: 0 })
       || { text: String(item?.text || "").slice(0, 1_000_000), attachments: [] };
     const node = el("div", "msg user"); node.appendChild(el("div", "role", label));
-    node.appendChild(el("div", "bubble", esc(String(item?.text || "").slice(0, 1_000_000))
-      + draft.attachments.filter((a) => a.label).map((a) => `\n[${esc(a.label)}]`).join("")));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, String(item?.text || "").slice(0, 1_000_000), draft.attachments);
+    node.appendChild(bubble);
     return { text: draft.text, attachments: draft.attachments, node,
              session: typeof item?.session === "string" ? item.session : "" };
   }
@@ -891,22 +892,128 @@
 
   // ---- turn lifecycle ----
   // Two prompts are "the same" when their opening prose matches; the composer's own bubble may
-  // carry attachment labels the backend never echoes, and the backend may expand a template.
+  // carry attachment chips the backend never echoes, and the backend may expand a template.
   function sameProse(a, b) {
-    const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const norm = (v) => String(v || "").replace(/📷/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
     const x = norm(a), y = norm(b);
     return !!x && !!y && (x.startsWith(y) || y.startsWith(x));
   }
+  function bubbleProse(node) {
+    return (node?.querySelector?.(".prompt-text") || node)?.textContent || "";
+  }
+  function splitPromptMarks(text) {
+    const raw = String(text || "");
+    const marked = /📷/.test(raw);
+    return {
+      text: raw.replace(/\s*📷\s*/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\s+$/g, "").trimEnd(),
+      attachments: marked ? [{ label: "image", img: true }] : [],
+    };
+  }
+  function fillUserBubble(bubble, text, attachments) {
+    bubble.replaceChildren();
+    const items = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    if (items.length) {
+      const row = el("ul", "prompt-atts");
+      row.setAttribute("role", "list");
+      row.setAttribute("aria-label", "Attachments");
+      const images = [];
+      items.forEach((item) => {
+        const li = el("li");
+        li.appendChild(promptAttachmentChip(item, images, bubble));
+        row.appendChild(li);
+      });
+      if (images.length) bubble._images = images;
+      bubble.appendChild(row);
+    }
+    const body = String(text || "");
+    if (body || !items.length) bubble.appendChild(el("div", "prompt-text", esc(body)));
+  }
+  function promptAttachmentChip(item, images, bubble) {
+    if (item.img) {
+      const record = {
+        name: String(item.label || "Image").replace(/^📷\s*/, "") || "Image",
+        bytes: Number(item.bytes) || 0,
+        source: "view_image",
+        owner: bubble,
+        state: item.data && String(item.data).startsWith("data:image/") ? "ready" : "failed",
+        src: item.data && String(item.data).startsWith("data:image/") ? item.data : "",
+        reason: item.data && String(item.data).startsWith("data:image/") ? "" : "not_found",
+      };
+      images.push(record);
+      const chip = imageChip(record, images.length - 1, images.length);
+      chip.classList.add("prompt-att");
+      return chip;
+    }
+    const chip = el("button", `prompt-att chip${item.skill || item.template ? " invocation-chip" : ""}${item.pasted ? " pasted-chip" : ""}`);
+    chip.type = "button";
+    const icon = item.pasted ? "copy" : item.skill ? "sparkle" : item.template ? "file-code" : item.resource?.path ? "file" : "link";
+    const label = item.pasted
+      ? `Pasted text · ${(item.chars || String(item.pasted).length).toLocaleString()} chars`
+      : (item.label || "Attachment");
+    chip.appendChild(el("span", `codicon codicon-${icon}`));
+    chip.lastChild.setAttribute("aria-hidden", "true");
+    chip.appendChild(el("span", "chip-label", esc(label)));
+    chip.title = label;
+    chip.setAttribute("aria-label", `Open attachment ${label}`);
+    chip.onclick = () => openPromptAttachment(item);
+    return chip;
+  }
+  function openPromptAttachment(item) {
+    if (item.pasted) { openTextAttachment("Pasted text", item.pasted); return; }
+    if (item.skill) { vscode.postMessage({ type: "slash", action: "skills" }); return; }
+    if (item.template) { openTextAttachment(item.label || item.template, `/${item.template}`); return; }
+    const path = item.resource?.path || item.resource?.relative_path;
+    if (path) { vscode.postMessage({ type: "openFile", path }); return; }
+    const preview = item.resource?.text || item.resource?.uri || item.label || "";
+    openTextAttachment(item.label || "Attachment", String(preview));
+  }
+  let textViewer = null;
+  function openTextAttachment(title, body) {
+    closeTextAttachment(false);
+    const viewer = el("div");
+    viewer.id = "att-viewer";
+    viewer.setAttribute("role", "dialog");
+    viewer.setAttribute("aria-modal", "true");
+    viewer.setAttribute("aria-labelledby", "att-title");
+    viewer.innerHTML = `<div class="att-bar"><h2 id="att-title" class="att-title"></h2><button type="button" class="iv-btn att-close" aria-label="Close attachment preview" title="Close (Esc)"><span class="codicon codicon-close" aria-hidden="true"></span></button></div><pre class="att-body"></pre>`;
+    viewer.querySelector("#att-title").textContent = title;
+    viewer.querySelector(".att-body").textContent = String(body || "");
+    const inert = [...document.body.children]
+      .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
+      .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
+    for (const saved of inert) { saved.node.setAttribute("inert", ""); try { saved.node.inert = true; } catch {} }
+    const onKey = (event) => { if (event.key === "Escape") { event.preventDefault(); closeTextAttachment(true); } };
+    viewer.querySelector(".att-close").onclick = () => closeTextAttachment(true);
+    viewer.addEventListener("click", (event) => { if (event.target === viewer) closeTextAttachment(true); });
+    viewer.addEventListener("keydown", onKey);
+    textViewer = { el: viewer, inert, onKey };
+    document.body.appendChild(viewer);
+    viewer.querySelector(".att-close").focus();
+  }
+  function closeTextAttachment(restoreFocus) {
+    if (!textViewer) return;
+    const { el: viewer, inert } = textViewer;
+    textViewer = null;
+    viewer.remove();
+    for (const saved of inert) {
+      if (!saved.attr) saved.node.removeAttribute("inert");
+      try { saved.node.inert = saved.prop; } catch {}
+    }
+    if (restoreFocus) input.focus();
+  }
   function echoPrompt(text) {
-    const body = String(text || "").trim();
-    if (!body) return;
+    const parsed = splitPromptMarks(text);
+    const body = parsed.text.trim();
+    if (!body && !parsed.attachments.length) return;
     // The composer renders what the user typed there. A turn begun anywhere else — a slash
     // command, an editor action, a queued follow-up, a retry, the terminal beside us — must
     // still show its prompt, or the transcript reads as answers to questions nobody asked.
     const last = [...appendTarget.querySelectorAll(".msg.user > .bubble")].at(-1);
-    if (last && sameProse(last.textContent, body)) return;
+    if (last && sameProse(bubbleProse(last), body)) return;
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
-    m.appendChild(el("div", "bubble", esc(body)));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, parsed.text, parsed.attachments);
+    m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
   }
   // A prompt that was queued behind a running turn already has its bubble, drawn when it was sent,
@@ -3306,10 +3413,12 @@
   $("changes-review").addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
   });
-  function appendGoalPrompt(objective) {
+  function appendGoalPrompt(objective, attachments = []) {
     const m = el("div", "msg user goal-prompt");
     m.appendChild(el("div", "role", "goal"));
-    m.appendChild(el("div", "bubble", esc(objective)));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, objective, attachments);
+    m.appendChild(bubble);
     log.appendChild(m); setSending(true);
     return m;
   }
@@ -3318,7 +3427,7 @@
       sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
     }
     const selected = [...attachments];
-    const node = appendGoalPrompt(objective + selected.map(item => `\n[${item.label}]`).join(""));
+    const node = appendGoalPrompt(objective, selected);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
     const values = key => selected.filter(item => item[key]).map(item => item[key]);
@@ -3379,7 +3488,9 @@
       clearComposer(); persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
-    m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m); settleBlock(m);
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, typed, attachments);
+    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
@@ -4400,7 +4511,10 @@
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
-      node.appendChild(el("div", "bubble", esc(String(it.text || "").slice(0, 50000))));
+      const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
+      const bubble = el("div", "bubble");
+      fillUserBubble(bubble, parsed.text, parsed.attachments);
+      node.appendChild(bubble);
       placeSteering(node);
       return;
     }
@@ -4482,7 +4596,10 @@
         if (it.role === "user") {
           const m = el("div", "msg user hist archived");
           m.appendChild(el("div", "role", "you"));
-          m.appendChild(el("div", "bubble", esc(it.text)));
+          const parsed = splitPromptMarks(it.text);
+          const bubble = el("div", "bubble");
+          fillUserBubble(bubble, parsed.text, parsed.attachments);
+          m.appendChild(bubble);
           frag.appendChild(m);
         } else {
           const m = el("div", "msg dgc hist archived");

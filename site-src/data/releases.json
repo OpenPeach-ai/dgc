@@ -13,7 +13,7 @@
         "Thinking is the same dial as the composer. You can change it while a turn runs; the next model round uses the new level.",
         "Asking to see the options picker in full-auto opens the native selector. Auto-approval is not the picker.",
         "Asking for a plan or design doc in Auto also offers the native browser page plus a Markdown download. You do not have to ask for a URL. Plan-mode approval is still present_plan.",
-        "Pair with extension 0.26.1; editor protocol remains v14."
+        "Pair with extension 0.26.2; editor protocol remains v14."
       ]
     },
     {
@@ -484,10 +484,20 @@
   ],
   "extension": [
     {
+      "version": "0.26.2",
+      "date": "2026-09-17",
+      "url": "https://github.com/OpenPeach-ai/dgc/blob/main/editors/vscode/CHANGELOG.md",
+      "status": "current",
+      "notes": [
+        "Requires CLI 0.41.2; editor protocol v14.",
+        "Sent attachments are chips above the typed prompt. Images, pastes, files and skills open on click. They are no longer shown as [📷 image] in the sentence."
+      ]
+    },
+    {
       "version": "0.26.1",
       "date": "2026-09-17",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.41.2",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Requires CLI 0.41.2; editor protocol v14.",
         "Restored sub-agents stay with their spawn cards after compaction. A chip without a spawn card is not drawn. Opening a chip shows the child's saved tool steps when they were kept.",
