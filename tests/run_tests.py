@@ -13492,6 +13492,9 @@ def test_overnight_parity_fixes():
         check("a mid-turn /model is refused visibly instead of becoming a prompt",
               ui._dispatch_composer_text("/model gpt") == "local-command"
               and flashes and "waits for this turn" in flashes[-1] and not routed, flashes[-1:])
+        check("a mid-turn /think applies now instead of waiting",
+              ui._dispatch_composer_text("/think xhigh") == "local-command"
+              and flashes and "thinking → xhigh" in flashes[-1] and not routed, flashes[-1:])
         check("mid-turn text that is not a command still steers the turn",
               ui._dispatch_composer_text("/not-a-command really") == "follow-up"
               and routed == ["/not-a-command really"])
