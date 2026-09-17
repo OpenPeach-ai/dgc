@@ -279,10 +279,12 @@ TOOL_SCHEMAS = [
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
     _fn("present_document", "Show a Markdown plan, research report or document as a readable browser "
-        "page with a downloadable .md source. Available in every mode, including Auto; this does "
-        "not request approval or change modes. Pass the complete Markdown, then include the "
-        "returned links in your answer. Use this for browser-readable plans, not artifact or "
-        "present_plan. The URL stays local and works while this DGC process is running.",
+        "page with a downloadable .md source. Call this when you produce a plan or design doc so "
+        "the user gets a clickable local URL; also write a repo .md if they asked for a file. "
+        "Available in every mode, including Auto; this does not request approval or change modes. "
+        "Pass the complete Markdown, then include the returned links in your answer. Use this for "
+        "browser-readable plans, not artifact or present_plan. The URL stays local and works while "
+        "this DGC process is running.",
         {"markdown": {"type": "string", "description": "Complete document in Markdown, up to 200,000 characters"},
          "title": {"type": "string", "description": "Short document title"}}, ["markdown", "title"]),
     _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked. Use only when the whole goal, not merely this turn, reached that state.",

@@ -12,6 +12,7 @@
         "Child tool steps are kept for the inner agent page. Opening a restored chip shows that log when DGC saved it.",
         "Thinking is the same dial as the composer. You can change it while a turn runs; the next model round uses the new level.",
         "Asking to see the options picker in full-auto opens the native selector. Auto-approval is not the picker.",
+        "Asking for a plan or design doc in Auto also offers the native browser page plus a Markdown download. You do not have to ask for a URL. Plan-mode approval is still present_plan.",
         "Pair with extension 0.26.1; editor protocol remains v14."
       ]
     },

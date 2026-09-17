@@ -24,11 +24,13 @@ permissions until its complete prompt has passed validation and can start.
 
 ## Read a document in the browser
 
-Ask DGC to show a Markdown plan or report in your browser, from any permission mode.
-`present_document` creates a light page with section links, tables, a Markdown download and a
-print layout. Use the browser’s Print → Save as PDF to export it. The links are local to the
-computer running DGC and remain available while that process runs. This tool does not request
-execution approval or switch modes; general interactive HTML previews still use `artifact`.
+Asking for a plan or design doc, from any permission mode including Auto, also offers a native
+browser page plus a Markdown download. You do not have to ask for a URL. `present_document`
+creates a light page with section links, tables, a Markdown download and a print layout. Use
+the browser’s Print → Save as PDF to export it. The links are local to the computer running DGC
+and remain available while that process runs. This tool does not request execution approval or
+switch modes; general interactive HTML previews still use `artifact`. Plan-mode execution
+approval is still `present_plan`.
 
 ## Review
 

@@ -313,9 +313,26 @@ class _OptionsAsk:
 
 
 _TOOL_INTENT_PATTERNS = {
+    # present_document is the Auto-mode browser page + .md download. A plan/design-doc/spec/report
+    # as the deliverable is enough; the user does not have to also say "in the browser". Ordinary
+    # "research the code" or "plan mode" does not count. present_plan stays Plan-mode approval.
     "document": re.compile(
-        r"\bpresent_document\b|(?=.*\b(?:plans?|reports?|documents?|research|markdown|\.md)\b)"
-        r"(?=.*\b(?:browser|url|links?|html|pdf|web|download|readable)\b)", re.I | re.S),
+        r"\bpresent_document\b"
+        r"|(?=.*\b(?:plans?|reports?|documents?|research|markdown|\.md)\b)"
+        r"(?=.*\b(?:browser|url|links?|html|pdf|web|download|readable)\b)"
+        r"|\b(?:design\s+docs?|implementation\s+plans?|tech(?:nical)?\s+specs?|"
+        r"architecture\s+(?:docs?|decisions?|plans?)|prds?)\b"
+        r"|\b(?:write|draft|create|propose|author|prepare|produce|outline)\s+"
+        r"(?:me\s+)?(?:a|an|the|this)\s+"
+        r"(?:test\s+|detailed\s+|full\s+|short\s+)?"
+        r"(?:design\s+|implementation\s+|architecture\s+|technical\s+)?"
+        r"(?:doc(?:ument)?|plan|spec|report|write-?up)s?\b"
+        r"|\b(?:give|show|send)\s+me\s+(?:a|an|the)\s+"
+        r"(?:test\s+|design\s+)?"
+        r"(?:doc(?:ument)?|plan|spec|report)s?\b"
+        r"|\bpropose\s+(?:me\s+)?(?:a|an|the)\s+(?:test\s+)?plans?\b"
+        r"|docs/[A-Za-z0-9_.-]*(?:PLAN|SPEC|DESIGN|PRD)[A-Za-z0-9_.-]*\.md",
+        re.I | re.S),
     "git_review": re.compile(
         r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
         r"\b(?:inspect|check|audit)\b.{0,32}\bchanges?\b", re.IGNORECASE | re.DOTALL),
@@ -2784,11 +2801,15 @@ class Agent(GoalLifecycle):
         if options_note:
             parts += ["", options_note]
         if "document" in getattr(self, "_active_tool_intents", set()):
-            parts += ["", "# Browser document\nUse present_document with the complete Markdown "
-                      "to provide the requested readable plan/report URL and .md download. It "
-                      "works in Auto and other modes without changing permissions. Include its "
-                      "returned links in your answer. present_plan is only for execution approval; "
-                      "artifact is for custom HTML/apps. Never invent a URL."]
+            parts += ["", "# Browser document",
+                      "When this turn produces a plan, design doc, spec or report the user will "
+                      "read, call present_document with the complete Markdown and a short title. "
+                      "Include the returned browser link and Markdown-download link in your answer. "
+                      "If they also asked for a repo file, write the .md as well — do not skip the "
+                      "URL, and do not wait for them to ask for a browser. This works in Auto and "
+                      "other modes; it does not request approval or change permissions. "
+                      "present_plan is only for execution approval in Plan mode. artifact is for "
+                      "custom HTML/apps. Never invent a URL."]
 
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:

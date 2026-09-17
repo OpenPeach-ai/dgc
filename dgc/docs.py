@@ -343,9 +343,10 @@ When the plan lands you get an approval prompt:
 
 ## Read a plan in your browser, from any mode
 
-Ask "Show this Markdown plan in my browser." The native `present_document` tool creates a light
-page with section links, tables and a Markdown download. It works in Auto and other modes, without
-an execution-approval dialog. Use browser Print → Save as PDF to export a PDF. Links are local to
+Asking for a plan or design doc in Auto (or any other mode) also offers the native browser page
+plus a Markdown download. You do not have to say "in the browser". The native `present_document`
+tool creates a light page with section links, tables and a Markdown download, without an
+execution-approval dialog. Use browser Print → Save as PDF to export a PDF. Links are local to
 the machine running DGC and last while that process runs. General interactive HTML previews use
 `artifact`; approving a plan to execute still uses `present_plan` in Plan mode.
 

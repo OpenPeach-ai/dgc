@@ -81,6 +81,36 @@ class RequestedFeatures(unittest.TestCase):
         self.assertEqual(PermissionEngine("auto", {"deny": ["PresentDocument"]}, self.root)
                          .decide("present_document", {})[0], "deny")
 
+    def test_plan_or_design_doc_lifts_document_in_auto_without_asking_for_a_browser(self):
+        asks = (
+            "write a design doc for the agent toni workflow",
+            "propose an implementation plan for the FSM",
+            "create a technical spec in docs/AGENT_TONI_WORKFLOW_PLAN.md",
+            "draft a report on the rollout",
+            "give me a plan for the invoice sketch",
+            "docs/AGENT_TONI_WORKFLOW_PLAN.md",
+        )
+        for text in asks:
+            self.assertIn("document", _tool_intents(text), text)
+            self.agent.set_mode("auto")
+            self.agent._active_tool_intents = _tool_intents(text)
+            names = {t["function"]["name"] for t in self.agent._tool_schemas()}
+            self.assertIn("present_document", names, text)
+            self.assertNotIn("present_plan", names, text)
+        prompt = self.agent.system_prompt()
+        self.assertIn("present_document", prompt)
+        self.assertIn("do not skip the URL", prompt)
+
+    def test_ordinary_coding_does_not_lift_document(self):
+        for text in (
+            "fix the parser",
+            "research the auth code",
+            "switch to plan mode",
+            "implement the queued plan in planning.py",
+            "write tests for the report helper",
+        ):
+            self.assertNotIn("document", _tool_intents(text), text)
+
     def test_document_serves_exact_markdown_and_inert_light_html(self):
         md = '# A test plan\n\n## Verify\n\n- Test one\n- Test two\n\n<script>alert(1)</script>'
         before = {a.id for a in artifacts._PLAN_SRV.list()}
