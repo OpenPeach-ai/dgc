@@ -4871,7 +4871,8 @@
   let agentPageScroll = 0;
   let agentPageTick = null;
   // Pack B identity marks in media/agents/. Same file on light and dark (they hold on #141414).
-  // Working agents load the -animated.svg (2s swirl); finished agents load the still frame.
+  // Always the still frame: the -animated swirl reads as a colour smear at chip size. Live agents
+  // keep `.is-live` so CSS can pulse a ring around the same face.
   const AGENT_MARK_NAMES = ["seafoam", "lagoon", "coral", "violet", "amber", "slate", "lime", "rose"];
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
@@ -4892,7 +4893,7 @@
     const base = (document.body.dataset.agentMarks || "").replace(/\/$/, "");
     if (!base) return "";
     const name = AGENT_MARK_NAMES[index];
-    const file = `agent-${String(index + 1).padStart(2, "0")}-${name}${live ? "-animated" : ""}.svg`;
+    const file = `agent-${String(index + 1).padStart(2, "0")}-${name}.svg`;
     return `${base}/${file}`;
   }
   function paintAgentMark(node, id, live) {

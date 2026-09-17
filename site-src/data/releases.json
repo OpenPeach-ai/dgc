@@ -9,7 +9,7 @@
       "status": "current",
       "notes": [
         "If you ask to see the options picker, DGC opens the native selector. It will not run a mock HTML or Python demo or open a file instead. A recommendation is preselected when you asked for one.",
-        "Pair with extension 0.26.2; editor protocol remains v14."
+        "Pair with extension 0.26.3; editor protocol remains v14."
       ]
     },
     {
@@ -494,10 +494,20 @@
   ],
   "extension": [
     {
-      "version": "0.26.2",
+      "version": "0.26.3",
       "date": "2026-09-17",
       "url": "https://github.com/OpenPeach-ai/dgc/blob/main/editors/vscode/CHANGELOG.md",
       "status": "current",
+      "notes": [
+        "Requires CLI 0.41.3; editor protocol v14.",
+        "Sub-agent marks keep the same face while they work. The parent chip and the agent's page share the still identity mark; a live ring pulses instead of the colour-swirl file."
+      ]
+    },
+    {
+      "version": "0.26.2",
+      "date": "2026-09-17",
+      "url": "https://github.com/OpenPeach-ai/dgc/blob/main/editors/vscode/CHANGELOG.md",
+      "status": "past",
       "notes": [
         "Requires CLI 0.41.3; editor protocol v14.",
         "Sent attachments are chips above the typed prompt. Images, pastes, files and skills open on click. They are no longer shown as [📷 image] in the sentence."

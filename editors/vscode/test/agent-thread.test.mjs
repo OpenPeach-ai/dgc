@@ -2,7 +2,7 @@
 // parent transcript (they replay on the inner page, filtered by call-id prefix).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeDom } from "./support/webview-dom.mjs";
+import { makeDom, mainCss } from "./support/webview-dom.mjs";
 
 function view() {
   const v = makeDom();
@@ -40,6 +40,38 @@ test("the parent turn shows chips, not the child's greps", () => {
   const visibleTools = [...doc.querySelectorAll("#log .tool")].filter((n) => !n.classList.contains("agent-owned"));
   assert.equal(visibleTools.length, 0, "parent task cards are claimed and owned; the chips are the spawn");
   assert.deepEqual(errors, []);
+});
+
+test("agent-mark CSS does not clip or bloom the SVG face", () => {
+  assert.match(mainCss, /\.agent-mark:has\(img\)[\s\S]{0,120}clip-path:\s*none/);
+  assert.match(mainCss, /\.agent-mark:not\(:has\(img\)\)\[data-mark="0"\]/);
+  assert.match(mainCss, /\.agent-mark:not\(:has\(img\)\)\[data-mark="3"\]/);
+  assert.equal(
+    (mainCss.match(/\.agent-mark\[data-mark="0"\]\s*\{[^}]*clip-path/g) || []).length, 0,
+    "clip-path on [data-mark] must not win over the SVG img",
+  );
+});
+
+test("a live chip and its inner page share the still identity face", () => {
+  const { $, doc, event } = view();
+  doc.body.dataset.agentMarks = "vscode-file://agents";
+  event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  event({ type: "agent_started", id: sid(4), parent_id: null, call_id: "call_0",
+    description: "Invoice workflow cards UI", depth: 1, state: "running", started_at: 1,
+    isolated: true, parallel: false });
+  const chipMark = doc.querySelector(".agent-chip .agent-mark");
+  const chipImg = chipMark.querySelector("img");
+  assert.ok(chipMark.classList.contains("is-live"));
+  assert.ok(chipImg, "chip paints the SVG face");
+  assert.match(chipImg.getAttribute("src"), /agent-0[1-8]-[a-z]+\.svg$/);
+  assert.ok(!chipImg.getAttribute("src").includes("-animated"),
+    "live agents keep the still face; motion is CSS");
+  doc.querySelector(".agent-chip").click();
+  const pageMark = $("agent-mark");
+  const pageImg = pageMark.querySelector("img");
+  assert.equal(pageMark.hidden, false);
+  assert.equal(pageMark.dataset.face, chipMark.dataset.face);
+  assert.equal(pageImg.getAttribute("src"), chipImg.getAttribute("src"));
 });
 
 test("the same agent id keeps the same identity mark after a second paint", () => {

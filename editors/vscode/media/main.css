@@ -135,41 +135,65 @@ body[data-agent-page] #to-latest { display: none; }
 .agent-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #log .agent-owned { display: none; }
 .agent-mark {
-  display: inline-block; width: 16px; height: 16px; flex: none; background: var(--mark, #7D8CA3);
-  /* Hairline ring + lift + colour bloom so the mark sits off the chat instead of reading as a sticker. */
+  display: inline-block; position: relative; width: 16px; height: 16px; flex: none;
+  overflow: visible; background: var(--mark, #7D8CA3);
+}
+/* Fallback geometry only. The SVG already clips itself; a second CSS clip-path plus a coloured
+   drop-shadow bloom smeared the live swirl into a blob on the parent chip. */
+.agent-mark:not(:has(img)) {
   filter:
     drop-shadow(0 0 0.6px rgba(255,255,255,.7))
     drop-shadow(0 1px 2px rgba(0,0,0,.55))
     drop-shadow(0 0 7px color-mix(in srgb, var(--mark) 70%, transparent));
 }
-.agent-mark.is-live {
+.agent-mark:not(:has(img)).is-live {
   filter:
     drop-shadow(0 0 0.7px rgba(255,255,255,.8))
     drop-shadow(0 1px 2px rgba(0,0,0,.58))
     drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 88%, transparent));
 }
-body.vscode-light .agent-mark {
+body.vscode-light .agent-mark:not(:has(img)) {
   filter:
     drop-shadow(0 0 0.55px rgba(255,255,255,.95))
     drop-shadow(0 1px 2px rgba(0,0,0,.28))
     drop-shadow(0 0 8px color-mix(in srgb, var(--mark) 55%, transparent));
 }
-body.vscode-light .agent-mark.is-live {
+body.vscode-light .agent-mark:not(:has(img)).is-live {
   filter:
     drop-shadow(0 0 0.6px rgba(255,255,255,.95))
     drop-shadow(0 1px 2px rgba(0,0,0,.32))
     drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 70%, transparent));
 }
-.agent-mark:has(img) { background: none; clip-path: none; border-radius: 0; }
-.agent-mark img { display: block; width: 100%; height: 100%; pointer-events: none; }
-.agent-mark[data-mark="0"] { --mark: #50E5CB; clip-path: circle(46% at 50% 50%); }
-.agent-mark[data-mark="1"] { --mark: #2BB3A8; clip-path: circle(46% at 50% 50%); }
-.agent-mark[data-mark="2"] { --mark: #EB4A4A; clip-path: polygon(50% 8%, 92% 86%, 8% 86%); }
-.agent-mark[data-mark="3"] { --mark: #8B7CFF; clip-path: polygon(25% 8%, 75% 8%, 92% 50%, 75% 92%, 25% 92%, 8% 50%); }
-.agent-mark[data-mark="4"] { --mark: #F5A524; clip-path: polygon(50% 6%, 94% 50%, 50% 94%, 6% 50%); }
-.agent-mark[data-mark="5"] { --mark: #7D8CA3; border-radius: 4px; }
-.agent-mark[data-mark="6"] { --mark: #8BD44A; border-radius: 999px; }
-.agent-mark[data-mark="7"] { --mark: #E86AA5; clip-path: ellipse(42% 48% at 50% 52%); }
+.agent-mark:has(img) { background: none; clip-path: none; border-radius: 0; filter: none; }
+.agent-mark img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.agent-mark.is-live:has(img)::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none;
+  box-shadow: 0 0 0 1.25px color-mix(in srgb, var(--mark) 80%, #fff);
+  animation: agent-mark-live 1.6s ease-in-out infinite;
+}
+@keyframes agent-mark-live {
+  0%, 100% { opacity: .4; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-mark.is-live:has(img)::after { animation: none; opacity: .7; }
+}
+.agent-mark:not(:has(img))[data-mark="0"] { --mark: #50E5CB; clip-path: circle(46% at 50% 50%); }
+.agent-mark:not(:has(img))[data-mark="1"] { --mark: #2BB3A8; clip-path: circle(46% at 50% 50%); }
+.agent-mark:not(:has(img))[data-mark="2"] { --mark: #EB4A4A; clip-path: polygon(50% 8%, 92% 86%, 8% 86%); }
+.agent-mark:not(:has(img))[data-mark="3"] { --mark: #8B7CFF; clip-path: polygon(25% 8%, 75% 8%, 92% 50%, 75% 92%, 25% 92%, 8% 50%); }
+.agent-mark:not(:has(img))[data-mark="4"] { --mark: #F5A524; clip-path: polygon(50% 6%, 94% 50%, 50% 94%, 6% 50%); }
+.agent-mark:not(:has(img))[data-mark="5"] { --mark: #7D8CA3; border-radius: 4px; }
+.agent-mark:not(:has(img))[data-mark="6"] { --mark: #8BD44A; border-radius: 999px; }
+.agent-mark:not(:has(img))[data-mark="7"] { --mark: #E86AA5; clip-path: ellipse(42% 48% at 50% 52%); }
+.agent-mark[data-mark="0"] { --mark: #50E5CB; }
+.agent-mark[data-mark="1"] { --mark: #2BB3A8; }
+.agent-mark[data-mark="2"] { --mark: #EB4A4A; }
+.agent-mark[data-mark="3"] { --mark: #8B7CFF; }
+.agent-mark[data-mark="4"] { --mark: #F5A524; }
+.agent-mark[data-mark="5"] { --mark: #7D8CA3; }
+.agent-mark[data-mark="6"] { --mark: #8BD44A; }
+.agent-mark[data-mark="7"] { --mark: #E86AA5; }
 body.vscode-light .agent-mark[data-mark="0"] { --mark: #1AA890; }
 body.vscode-light .agent-mark[data-mark="1"] { --mark: #1A8F86; }
 body.vscode-light .agent-mark[data-mark="4"] { --mark: #C47A12; }

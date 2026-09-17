@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.3 — 2026-09-17
+
+- Requires CLI 0.41.3; editor protocol remains v14.
+- **Sub-agent marks keep the same face.** A working agent no longer swaps to the colour-swirl file. The chip in the parent chat and that agent's page share the still identity mark; a live ring pulses while it works.
+
 ## 0.26.2 — 2026-09-17
 
 - Requires CLI 0.41.3; editor protocol remains v14.
