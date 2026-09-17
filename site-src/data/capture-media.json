@@ -14,15 +14,15 @@
       ],
       "duration_seconds": 47.433,
       "duration_label": "0:47",
-      "provenance": "Actual current DGC 0.41.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "provenance": "Actual current DGC 0.41.2 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
       "time_compression": 1,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "73963f5747b7e91a7ef6b82efea0e32d316d6cdf15c1bbffd0c1dd91e48368f6",
-          "bytes": 2009662,
+          "sha256": "58b0b3863f9a2d56e356f731cd4660cf8a56ebab198fc6df9bcd0089d9c0613e",
+          "bytes": 2183086,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
@@ -30,8 +30,8 @@
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "7724a613662d6c13c4c35ec4ec3e09314cc7b67dcce26e528dfce8e440fef079",
-          "bytes": 483310,
+          "sha256": "b9cf03b06a387c742d6fc1a7c4b1f823ed5209dbb644cb5c2624da78b8748945",
+          "bytes": 500077,
           "codec": "h264",
           "width": 1280,
           "height": 720,
@@ -39,8 +39,8 @@
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
-          "sha256": "84a8fef5abc852dbb6be350f092cf70cfbe069b8464ff5849514a7fe7283b1ba",
-          "bytes": 106559,
+          "sha256": "b2520bdc5703eafd6cfd8ba1ebfcd14f737338286fd71f6c465b885514e9c5fb",
+          "bytes": 119244,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720
@@ -65,15 +65,15 @@
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.26.0",
-      "packaged_extension_source_commit": "d64aff79752ec4123eb8aa429408717efdca26a6",
-      "extension_vsix_sha256": "bf1785cba3737e8c2e7639d9060578fc93f6863788e071dd5ba60b0b3651dfd4",
+      "extension_version": "0.26.1",
+      "packaged_extension_source_commit": "3cb7a3e281caa9190a53422716819ca8042028c4",
+      "extension_vsix_sha256": "5773ba91b581114f31130671927b461e17bcb474f3c771a4e81aa040d706a10d",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "2b1cdfb5e8f31c2ed1470ba89f8d59fac00e540fbf1a4a5114546b01ee89e519",
-          "bytes": 1801717,
+          "sha256": "6e4153733353fc2fbfabd7c95c39188664335f6c0dca608d3aad8ff1a39e6a2c",
+          "bytes": 1752003,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
@@ -81,8 +81,8 @@
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "fc8970cbe907cb232fb5cac1722b189b4da28f52a3b359d99af569fdb32da80e",
-          "bytes": 637930,
+          "sha256": "c802af042e28d3a0ba418d47e4602d4c5d2d11d183eac4d76a095600e20b3bbe",
+          "bytes": 635343,
           "codec": "h264",
           "width": 1440,
           "height": 900,
@@ -90,16 +90,16 @@
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "478aaf67fccb0ae2440a1839a79c5c3478d5f63934eb6194c6815a3c727d5a48",
-          "bytes": 159611,
+          "sha256": "25d415416d8676e59c239f45b0978b84c7c35d2c5776cce534ca0dda87663c0b",
+          "bytes": 155247,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "8ae070d8656188b393d0e23f82fd6215dfb4220a1c60694362ff3929814a9163",
-          "bytes": 39551,
+          "sha256": "f3ae17c3dff956471455f965ae803efa5e1de726e9fa3eb8518cf34659933b38",
+          "bytes": 38811,
           "codec": "mjpeg",
           "width": 720,
           "height": 450
