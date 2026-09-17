@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dgc-sdk"
+version = "0.5.0"
+description = "Embed the DGC coding harness in applications and CI"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Mohit Kalra" }]
+
+[tool.setuptools.packages.find]
+include = ["dgc_sdk*"]
+
+[tool.setuptools.package-data]
+dgc_sdk = ["py.typed"]

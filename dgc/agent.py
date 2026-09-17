@@ -6159,6 +6159,8 @@ class Agent(GoalLifecycle):
                 reason = approval_note
                 if hasattr(self.ui, "deny_reason"):
                     self.ui.deny_reason = ""          # consume it
+                if self.cancelled.is_set():
+                    return "The turn was stopped. Do not continue."
                 if reason:
                     return (f"The user DENIED this action and said: \"{reason}\". Follow that "
                             "guidance instead; do not retry the denied action.")

@@ -449,6 +449,7 @@ def build_outputs() -> dict[str, str | bytes]:
         "vscode/index.html": ("DGC for VS Code and Cursor", "The DGC coding harness inside VS Code, Cursor, and VSCodium with structured tools, diffs, plans, and goals.", page_template("vscode.html", ctx), "/og-editor.png"),
         "pricing.html": ("Pricing", "DGC is free and open source under the Apache License 2.0.", page_template("pricing.html", ctx), "/og-card.png"),
         "changelog.html": ("Changelog", "A build-time record of reviewed DGC CLI and editor releases.", page_template("changelog.html", ctx), "/og-card.png"),
+        "sdk/index.html": ("DGC SDK", "Embed the DGC coding harness in applications and CI. Free, local, Apache-2.0.", generic_markdown_page("sdk.md", "SDK"), "/og-card.png"),
         "brand.html": ("Brand", "Official DGC naming, marks, colours, clear space, and downloadable vector assets.", page_template("brand.html", ctx), "/og-card.png"),
         "about.html": ("About DGC", "Why DGC exists, who builds it, and how to help shape the coding-agent harness.", generic_markdown_page("about.md", "About"), "/og-card.png"),
         "security.html": ("Security", "DGC's permission, workspace, sandbox, credential, and vulnerability-reporting boundaries.", generic_markdown_page("security.md", "Security"), "/og-card.png"),

@@ -11,12 +11,26 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 APP = "dgc"
-USER_HOME = Path.home() / ".dgc"
+
+
+def _user_home_root() -> Path:
+    """Directory whose ``.dgc`` holds user state.
+
+    ``DGC_HOME`` lets an SDK child keep state off the host account without relying only on
+    ``HOME``. Unset, this is ``Path.home()`` and editor/CLI behavior is unchanged.
+    """
+    override = os.environ.get("DGC_HOME")
+    if override:
+        return Path(override).expanduser()
+    return Path.home()
+
+
+USER_HOME = _user_home_root() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
 USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
-PORTABLE_USER_SKILLS = Path.home() / ".agents" / "skills"
+PORTABLE_USER_SKILLS = _user_home_root() / ".agents" / "skills"
 USER_AGENTS = USER_HOME / "agents"
 BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
 SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key", "fallback_api_key"})
@@ -485,8 +499,24 @@ def context_for_model(model: str) -> int | None:
 
 
 def find_project_root(start: Path | None = None) -> Path:
-    """Walk up from `start` looking for a project marker (.git, DGC.md, .dgc)."""
+    """Walk up from `start` looking for a project marker (.git, DGC.md, .dgc).
+
+    ``DGC_PROJECT_ROOT`` pins the workspace (SDK sessions). Isolated SDK children also
+    refuse to walk up to a parent git root, so a job directory inside a repo stays the
+    project root and relative writes cannot escape it.
+    """
+    pinned = (os.environ.get("DGC_PROJECT_ROOT") or "").strip()
+    if pinned:
+        path = Path(pinned).expanduser()
+        try:
+            path = path.resolve(strict=True)
+        except OSError:
+            path = path.resolve()
+        if path.is_dir():
+            return path
     p = Path(start or os.getcwd()).resolve()
+    if os.environ.get("DGC_SDK_ISOLATED") == "1":
+        return p
     for d in (p, *p.parents):
         dgc_dir = d / ".dgc"
         # a project's own .dgc counts, but NOT the global ~/.dgc config dir — otherwise every

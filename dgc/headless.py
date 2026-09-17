@@ -167,6 +167,10 @@ _CONFIG_INTEGER_RANGES = {
     "monitor_wake_cooldown_s": (1, 3600),
     "monitor_max_consecutive_wakes": (1, 100),
     "thinking_inline_max_chars": (0, 1000),
+    # SDK / unattended run budgets. 0 keeps the existing "unlimited / off" meaning from DEFAULTS.
+    "max_turns": (0, 10_000),
+    "turn_budget_s": (0, 86_400),
+    "max_tokens": (0, 1_000_000),
 }
 
 
