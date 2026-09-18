@@ -553,8 +553,9 @@ class EnvironmentTests(_Base):
         self.assertEqual(env["DGC_API_KEY"], "sk-local")
         self.assertEqual(env["HOME"], str(self.state / "home"))
         self.assertIn("PATH", env)
-        # A source checkout needs only itself: not the SDK dir, not the host's PYTHONPATH.
-        self.assertEqual(env.get("PYTHONPATH"), str(ROOT))
+        # A source checkout needs only itself: not the SDK dir, not the host's PYTHONPATH. An
+        # installed wheel's runtime needs nothing on it.
+        self.assertEqual(env.get("PYTHONPATH"), str(ROOT) if sdk_runtime.is_checkout() else None)
 
     @unittest.skipUnless(ON_LINUX, "reads /proc")
     def test_inherit_env_is_an_explicit_opt_in(self):

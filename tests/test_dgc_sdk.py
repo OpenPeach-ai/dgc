@@ -716,7 +716,10 @@ class SdkTests(unittest.TestCase):
             "os._exit(9)\n"
         )
         env = os.environ.copy()
-        env["DGC_PYTHON"] = str(ROOT / ".venv" / "bin" / "python")
+        checkout_python = ROOT / ".venv" / "bin" / "python"
+        if checkout_python.exists():
+            # A checkout run; the installed-wheel job already names its runtime in DGC_PYTHON.
+            env["DGC_PYTHON"] = str(checkout_python)
         subprocess.run([sys.executable, "-c", script], env=env, check=False)
         self.assertTrue(pidfile.exists(), "child pid was not recorded")
         pid = int(pidfile.read_text().strip())

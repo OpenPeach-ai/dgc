@@ -450,9 +450,23 @@ class CleanInterpreterTests(unittest.TestCase):
         if made.returncode != 0 or not cls.python.exists():
             raise unittest.SkipTest(f"cannot create a venv: {made.stderr[-300:]}")
         site = next((venv / "lib").glob("python3*/site-packages"))
-        (site / "dgc-test-deps.pth").write_text(sysconfig.get_paths()["purelib"] + "\n")
-        cls.runtime = venv / "bin" / "dgc-runtime-python"
-        cls.runtime.symlink_to("python")
+        cls.sdk_path = ""
+        if os.environ.get("DGC_SDK_TEST_INSTALLED") == "1":
+            # Installed-wheel job: the host venv holds only the installed dgc_sdk (no dgc, which
+            # this interpreter has installed); the runtime is this interpreter.
+            import dgc_sdk
+            sdk_only = cls.tmp / "sdk-only"
+            shutil.copytree(Path(dgc_sdk.__file__).resolve().parent, sdk_only / "dgc_sdk",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            (site / "dgc-test-sdk.pth").write_text(str(sdk_only) + "\n")
+            cls.runtime = Path(sys.executable)
+        else:
+            # Checkout: the host gets this checkout's SDK on PYTHONPATH and the dependencies
+            # through a .pth; the runtime (the same venv) imports dgc from the checkout.
+            (site / "dgc-test-deps.pth").write_text(sysconfig.get_paths()["purelib"] + "\n")
+            cls.runtime = venv / "bin" / "dgc-runtime-python"
+            cls.runtime.symlink_to("python")
+            cls.sdk_path = str(ROOT / "sdk" / "python")
 
     @classmethod
     def tearDownClass(cls):
@@ -463,8 +477,9 @@ class CleanInterpreterTests(unittest.TestCase):
         script.write_text(PREAMBLE + body, encoding="utf-8")
         env = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
         env.update({"HOME": str(Path(tempfile.mkdtemp(dir=self.tmp))),
-                    "PYTHONPATH": str(ROOT / "sdk" / "python"),
                     "DGC_PYTHON": str(self.runtime)})
+        if self.sdk_path:
+            env["PYTHONPATH"] = self.sdk_path
         return subprocess.run([str(self.python), str(script)], capture_output=True, text=True,
                               env=env, timeout=240)
 
@@ -803,13 +818,21 @@ class ToolSocketTests(unittest.TestCase):
                                    "error": "initialize failed: server exited"}]}
 
         tools = [define_tool("echo", "Echo", {"type": "object"}, lambda args: args)]
-        before = set(os.listdir(tempfile.gettempdir()))
-        with self.assertRaises(DGCRuntimeError) as caught:
-            bridge.install_tools(Transport(), tools, runtime=None, request_id="r1")
+        hubs = []
+        real_hub = bridge.ToolHub
+
+        def recorded(*args, **kwargs):
+            hubs.append(real_hub(*args, **kwargs))
+            return hubs[-1]
+
+        with mock.patch.object(bridge, "ToolHub", side_effect=recorded):
+            with self.assertRaises(DGCRuntimeError) as caught:
+                bridge.install_tools(Transport(), tools, runtime=None, request_id="r1")
         self.assertIn("server exited", str(caught.exception))
-        leaked = [name for name in set(os.listdir(tempfile.gettempdir())) - before
-                  if name.startswith("dgc-")]
-        self.assertEqual(leaked, [])
+        # The hub's own socket directory is gone (checked by path: other processes on the host
+        # may be creating temporary directories of their own meanwhile).
+        self.assertEqual(len(hubs), 1)
+        self.assertFalse(os.path.exists(os.path.dirname(hubs[0].socket_path)), hubs[0].socket_path)
 
     def test_bridge_python_never_uses_a_launcher(self):
         chosen = bridge.bridge_python(["/usr/local/bin/dgc", "serve"])
