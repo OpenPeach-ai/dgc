@@ -1471,7 +1471,7 @@ The terminal's `/diff` pane is the live working-tree view while a turn runs; see
 The DGC SDK embeds the same agent in your own process. It is **free and local**. You do not pay
 DGC to use it. Optional `Pricing` on a client only attributes **your** model-token spend.
 
-Frozen cut: **0.5.2**, protocol **v14**, Linux. Pair it with CLI **0.41.4** (this checkout or the
+Frozen cut: **0.5.2**, protocol **v14**, Linux. Pair it with CLI **0.41.5** (this checkout or the
 GitHub release). Tag [`sdk-v0.5.2`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2)
 — not `v0.5.2`, which is a historical CLI tag.
 
@@ -1486,7 +1486,7 @@ Or from a clone: `python3 -m pip install -e sdk/python`.
 
 Do **not** `pip install dgc`. That PyPI name is an unrelated clustering package. This SDK is not
 on PyPI or npm yet. The wheel still needs a runtime that can run `python -m dgc serve` (this
-repository or CLI 0.41.4). Set `DGC_PYTHON` if `python3` cannot import `dgc`.
+repository or CLI 0.41.5). Set `DGC_PYTHON` if `python3` cannot import `dgc`.
 
 ## Isolation
 

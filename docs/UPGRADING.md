@@ -1,7 +1,7 @@
 # Updating DGC and resolving protocol mismatches
 
 The CLI and editor extension are separate installations with independent version numbers. Update
-both for the current feature set: CLI 0.41.4 and extension 0.26.4 use editor protocol v14 (CLI 0.39.0
+both for the current feature set: CLI 0.41.5 and extension 0.26.5 use editor protocol v14 (CLI 0.39.0
 and extension 0.24.0 use editor protocol v13). Additive
 capabilities let the extension explain a missing backend feature instead of sending unsupported
 commands to an older CLI.

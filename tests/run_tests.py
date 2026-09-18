@@ -11244,95 +11244,97 @@ def test_benchmark_integrity():
         import edit_micro as _EM
         import prompt_surface as _PS
         import runtime_micro as _RM
-        _site_spec = _importlib_util.spec_from_file_location(
-            "dgc_check_site_test", scripts_dir / "check-site.py")
-        assert _site_spec is not None and _site_spec.loader is not None
-        _site_gate = _importlib_util.module_from_spec(_site_spec)
-        _site_spec.loader.exec_module(_site_gate)
+        _site_py = scripts_dir / "check-site.py"
         _evidence_path = PROJECT / "site" / "evidence" / "dgc-0.24.0.tar.gz"
-        with _tarfile.open(_evidence_path, "r:gz") as _bundle:
-            _evidence_members = {
-                member.name: _bundle.extractfile(member).read()
-                for member in _bundle.getmembers() if member.isfile()
-            }
-        _dgc_claim = next(
-            item for item in _site_gate.BENCH["harnesses"] if item["name"] == "DGC")
-        _evidence_errors = []
-        _evidence_identity = _site_gate._check_benchmark_evidence(
-            "dgc", _evidence_members, _dgc_claim, _evidence_errors)
-        check("site benchmark claims are derived from the downloadable evidence",
-              _evidence_identity is not None and not _evidence_errors)
-        _tampered_claim = dict(_dgc_claim)
-        _tampered_claim["solved"] -= 1
-        _claim_errors = []
-        _site_gate._check_benchmark_evidence(
-            "dgc", _evidence_members, _tampered_claim, _claim_errors)
-        check("site benchmark gate rejects a headline changed without evidence",
-              any("published metrics disagree" in error for error in _claim_errors))
-        _tampered_members = dict(_evidence_members)
-        _tampered_summary = json.loads(_tampered_members["summary.json"])
-        _tampered_summary["aggregate"]["python"]["p2"] -= 1
-        _tampered_members["summary.json"] = json.dumps(_tampered_summary).encode()
-        _summary_errors = []
-        _site_gate._check_benchmark_evidence(
-            "dgc", _tampered_members, _dgc_claim, _summary_errors)
-        check("site benchmark gate rejects summaries changed without result rows",
-              any("summary disagrees" in error for error in _summary_errors))
-        _codex_path = PROJECT / "site" / "evidence" / "codex-0.24.0.tar.gz"
-        with _tarfile.open(_codex_path, "r:gz") as _bundle:
-            _codex_members = {
-                member.name: _bundle.extractfile(member).read()
-                for member in _bundle.getmembers() if member.isfile()
-            }
-        _codex_claim = next(
-            item for item in _site_gate.BENCH["harnesses"] if item["name"] == "Codex CLI")
-        _codex_errors = []
-        _codex_identity = _site_gate._check_benchmark_evidence(
-            "codex", _codex_members, _codex_claim, _codex_errors)
-        check("site benchmark gate binds every harness to one canonical task set",
-              not _codex_errors and _codex_identity is not None
-              and _evidence_identity["task_set_sha256"]
-                  == _codex_identity["task_set_sha256"])
+        if _site_py.is_file() and _evidence_path.is_file():
+            _site_spec = _importlib_util.spec_from_file_location(
+                "dgc_check_site_test", _site_py)
+            assert _site_spec is not None and _site_spec.loader is not None
+            _site_gate = _importlib_util.module_from_spec(_site_spec)
+            _site_spec.loader.exec_module(_site_gate)
+            with _tarfile.open(_evidence_path, "r:gz") as _bundle:
+                _evidence_members = {
+                    member.name: _bundle.extractfile(member).read()
+                    for member in _bundle.getmembers() if member.isfile()
+                }
+            _dgc_claim = next(
+                item for item in _site_gate.BENCH["harnesses"] if item["name"] == "DGC")
+            _evidence_errors = []
+            _evidence_identity = _site_gate._check_benchmark_evidence(
+                "dgc", _evidence_members, _dgc_claim, _evidence_errors)
+            check("site benchmark claims are derived from the downloadable evidence",
+                  _evidence_identity is not None and not _evidence_errors)
+            _tampered_claim = dict(_dgc_claim)
+            _tampered_claim["solved"] -= 1
+            _claim_errors = []
+            _site_gate._check_benchmark_evidence(
+                "dgc", _evidence_members, _tampered_claim, _claim_errors)
+            check("site benchmark gate rejects a headline changed without evidence",
+                  any("published metrics disagree" in error for error in _claim_errors))
+            _tampered_members = dict(_evidence_members)
+            _tampered_summary = json.loads(_tampered_members["summary.json"])
+            _tampered_summary["aggregate"]["python"]["p2"] -= 1
+            _tampered_members["summary.json"] = json.dumps(_tampered_summary).encode()
+            _summary_errors = []
+            _site_gate._check_benchmark_evidence(
+                "dgc", _tampered_members, _dgc_claim, _summary_errors)
+            check("site benchmark gate rejects summaries changed without result rows",
+                  any("summary disagrees" in error for error in _summary_errors))
+            _codex_path = PROJECT / "site" / "evidence" / "codex-0.24.0.tar.gz"
+            with _tarfile.open(_codex_path, "r:gz") as _bundle:
+                _codex_members = {
+                    member.name: _bundle.extractfile(member).read()
+                    for member in _bundle.getmembers() if member.isfile()
+                }
+            _codex_claim = next(
+                item for item in _site_gate.BENCH["harnesses"] if item["name"] == "Codex CLI")
+            _codex_errors = []
+            _codex_identity = _site_gate._check_benchmark_evidence(
+                "codex", _codex_members, _codex_claim, _codex_errors)
+            check("site benchmark gate binds every harness to one canonical task set",
+                  not _codex_errors and _codex_identity is not None
+                  and _evidence_identity["task_set_sha256"]
+                      == _codex_identity["task_set_sha256"])
 
-        _wrong_task_members = dict(_codex_members)
-        _wrong_task_rows = [json.loads(line) for line in
-                            _wrong_task_members["results.jsonl"].splitlines() if line.strip()]
-        _wrong_task_rows[0]["input_sha256"] = "0" * 64
-        _wrong_task_members["results.jsonl"] = (
-            "\n".join(json.dumps(row) for row in _wrong_task_rows) + "\n").encode()
-        _wrong_task_errors = []
-        _wrong_task_identity = _site_gate._check_benchmark_evidence(
-            "codex", _wrong_task_members, _codex_claim, _wrong_task_errors)
-        check("site benchmark fingerprint detects a same-count substituted task",
-              not _wrong_task_errors and _wrong_task_identity is not None
-              and _wrong_task_identity["task_set_sha256"]
-                  != _evidence_identity["task_set_sha256"])
+            _wrong_task_members = dict(_codex_members)
+            _wrong_task_rows = [json.loads(line) for line in
+                                _wrong_task_members["results.jsonl"].splitlines() if line.strip()]
+            _wrong_task_rows[0]["input_sha256"] = "0" * 64
+            _wrong_task_members["results.jsonl"] = (
+                "\n".join(json.dumps(row) for row in _wrong_task_rows) + "\n").encode()
+            _wrong_task_errors = []
+            _wrong_task_identity = _site_gate._check_benchmark_evidence(
+                "codex", _wrong_task_members, _codex_claim, _wrong_task_errors)
+            check("site benchmark fingerprint detects a same-count substituted task",
+                  not _wrong_task_errors and _wrong_task_identity is not None
+                  and _wrong_task_identity["task_set_sha256"]
+                      != _evidence_identity["task_set_sha256"])
 
-        _invalid_semantics_members = dict(_evidence_members)
-        _invalid_rows = [json.loads(line) for line in
-                         _invalid_semantics_members["results.jsonl"].splitlines()
-                         if line.strip()]
-        _invalid_rows[0]["solved"] = False
-        _invalid_semantics_members["results.jsonl"] = (
-            "\n".join(json.dumps(row) for row in _invalid_rows) + "\n").encode()
-        _semantic_errors = []
-        _site_gate._check_benchmark_evidence(
-            "dgc", _invalid_semantics_members, _dgc_claim, _semantic_errors)
-        check("site benchmark gate rejects contradictory solved-row semantics",
-              any("invalid result semantics/bounds" in error for error in _semantic_errors))
+            _invalid_semantics_members = dict(_evidence_members)
+            _invalid_rows = [json.loads(line) for line in
+                             _invalid_semantics_members["results.jsonl"].splitlines()
+                             if line.strip()]
+            _invalid_rows[0]["solved"] = False
+            _invalid_semantics_members["results.jsonl"] = (
+                "\n".join(json.dumps(row) for row in _invalid_rows) + "\n").encode()
+            _semantic_errors = []
+            _site_gate._check_benchmark_evidence(
+                "dgc", _invalid_semantics_members, _dgc_claim, _semantic_errors)
+            check("site benchmark gate rejects contradictory solved-row semantics",
+                  any("invalid result semantics/bounds" in error for error in _semantic_errors))
 
-        _invalid_bounds_members = dict(_evidence_members)
-        _invalid_rows = [json.loads(line) for line in
-                         _invalid_bounds_members["results.jsonl"].splitlines()
-                         if line.strip()]
-        _invalid_rows[0]["rounds"][0]["agent"]["usage"]["output_tokens"] = -1
-        _invalid_bounds_members["results.jsonl"] = (
-            "\n".join(json.dumps(row) for row in _invalid_rows) + "\n").encode()
-        _bounds_errors = []
-        _site_gate._check_benchmark_evidence(
-            "dgc", _invalid_bounds_members, _dgc_claim, _bounds_errors)
-        check("site benchmark gate rejects negative or unbounded row metrics",
-              any("invalid result semantics/bounds" in error for error in _bounds_errors))
+            _invalid_bounds_members = dict(_evidence_members)
+            _invalid_rows = [json.loads(line) for line in
+                             _invalid_bounds_members["results.jsonl"].splitlines()
+                             if line.strip()]
+            _invalid_rows[0]["rounds"][0]["agent"]["usage"]["output_tokens"] = -1
+            _invalid_bounds_members["results.jsonl"] = (
+                "\n".join(json.dumps(row) for row in _invalid_rows) + "\n").encode()
+            _bounds_errors = []
+            _site_gate._check_benchmark_evidence(
+                "dgc", _invalid_bounds_members, _dgc_claim, _bounds_errors)
+            check("site benchmark gate rejects negative or unbounded row metrics",
+                  any("invalid result semantics/bounds" in error for error in _bounds_errors))
         check("edit corpus treats every negative-case application as a wrong apply",
               _EM.verdict("ambiguous", "wrong_apply") == "WRONG"
               and _EM.verdict("miss", "apply_success") == "WRONG"

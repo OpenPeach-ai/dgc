@@ -702,7 +702,7 @@ for (const [way, from, to] of resizes) {
 
 // The host changes the transcript's fonts (VS Code rewrites its --vscode-* variables on the root
 // element) without changing the width: every pin measured in the old fonts is wrong.
-// Both the old and the new fonts are faces this repository ships (qa/site/fonts, DejaVu 2.37),
+// Both the old and the new fonts are faces this repository ships (test/fonts, DejaVu 2.37),
 // added to the page as loaded FontFaces before the chat is drawn. Named system families are not:
 // a stock CI runner resolves 'DejaVu Serif' and the default sans to the same face, nothing
 // re-wraps, and the test could neither fail nor pass on what it is meant to prove.
@@ -710,7 +710,7 @@ const BUNDLED_FONTS = [["DGC Test Sans", "DejaVuSans.ttf"], ["DGC Test Mono", "D
 test("the page does not jump after the fonts change at the same width", async (t) => {
   if (skipOrFail(t)) return;
   const faces = BUNDLED_FONTS.map(([family, file]) =>
-    [family, readFileSync(here + "/../../../qa/site/fonts/" + file).toString("base64")]);
+    [family, readFileSync(here + "/fonts/" + file).toString("base64")]);
   for (const settleFirst of [true, false]) {
     const panel = await openPanel(320);
     try {

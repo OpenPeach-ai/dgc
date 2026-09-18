@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.5 — 2026-09-18
+
+- Requires CLI 0.41.5; editor protocol remains v14.
+- Same Tasks-row behaviour as 0.26.4. Layout tests load bundled DejaVu fonts from the extension tree.
+
 ## 0.26.4 — 2026-09-18
 
 - Requires CLI 0.41.4; editor protocol remains v14.
