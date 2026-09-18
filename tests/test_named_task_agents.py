@@ -68,6 +68,9 @@ class ExplorerToolGateTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         h = Harness(Path(temp.name))
         self.addCleanup(h.close)
+        # The roster follows the `task` tool: listed once the request can delegate.
+        self.assertNotIn("explorer:", h.agent.system_prompt())
+        h.agent._activate_tool_intents("delegate the survey to a sub-agent", replace=True)
         prompt = h.agent.system_prompt()
         self.assertIn("explorer:", prompt)
         self.assertIn("critic:", prompt)

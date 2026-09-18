@@ -63,9 +63,11 @@ def builtin_agents() -> dict[str, AgentDef]:
     return {
         "explorer": AgentDef(
             name="explorer", builtin=True, tools=_READS,
-            description="Read-only map of the codebase",
+            description="Read-only search and map of the codebase",
             body="You are a read-only explorer. Search and read. Do not write, edit, or run "
-                 "mutating shell commands. Report where the relevant code lives.\n" + _HANDOFF),
+                 "mutating shell commands. Report where the relevant code lives and how it fits "
+                 "together, with path:line references; quote only the lines that matter.\n"
+                 + _HANDOFF),
         "researcher": AgentDef(
             name="researcher", builtin=True, tools=_READS + ", write_file, present_document",
             description="Investigate and write one findings file, then stop",
@@ -74,9 +76,10 @@ def builtin_agents() -> dict[str, AgentDef]:
         "critic": AgentDef(
             name="critic", builtin=True,
             tools=_READS + ", edit_file, write_file, multi_edit",
-            description="Review a named artifact; correct it or list blocking issues",
-            body="You are a critic. Review the artifact named in the task. Correct that file or "
-                 "list blocking issues. Do not implement the surrounding feature.\n" + _HANDOFF),
+            description="Review named files or a change; correct them or list blocking issues",
+            body="You are a critic. Review the files or change named in the task against its "
+                 "requirements: correctness, missed cases, tests. Correct those files or list "
+                 "blocking issues. Do not implement the surrounding feature.\n" + _HANDOFF),
         "worker": AgentDef(
             name="worker", builtin=True, tools="",
             description="Implement a bounded change",
