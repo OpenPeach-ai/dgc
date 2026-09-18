@@ -100,3 +100,14 @@ versions, GitHub tag SHA, representative production routes, retired form/blog/AP
 install in a temporary home. If promotion fails, do not rebuild: fix the channel and promote the
 same bytes. Roll back by redeploying prior committed site artifacts; never move or rewrite an
 existing release tag.
+
+## SDK releases
+
+The SDK (`dgc-sdk` on PyPI, `@vibedgc/sdk` as a release tarball) has its own version stream and
+tags, `sdk-vX.Y.Z`; `vX.Y.Z` tags are CLI releases only. Bump every SDK version surface together
+(`tests/test_sdk_packaging.py` checks them), regenerate and sign the checkout manifest with
+`make -C sdk sbom`, and dry-run the build with `bash sdk/scripts/release-sdk.sh`. After the commit
+is on public `main`, push an annotated `sdk-vX.Y.Z` tag at it. `.github/workflows/publish-dgc-sdk.yml`
+is the only publisher: it builds from the tag, tests the built wheel, uploads to PyPI through
+Trusted Publishing, and attaches the same bytes (with attestations, SBOM and `SHA256SUMS`) to a
+GitHub release that does not take the Latest badge from the CLI. Never upload SDK files by hand.
