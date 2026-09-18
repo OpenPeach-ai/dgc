@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,25 +11,86 @@ export function isCheckout(): boolean {
     && existsSync(join(REPO_ROOT, "sdk", "typescript", "package.json"));
 }
 
-export function defaultRuntime(): string[] {
-  const checkoutPython = join(REPO_ROOT, ".venv/bin/python");
-  const python = process.env.DGC_PYTHON
-    || (isCheckout() && existsSync(checkoutPython) ? checkoutPython : "python3");
-  return [python, "-m", "dgc", "serve"];
+function executable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
+/** The installed CLI launcher: `dgc` on PATH, then the vibedgc.com installer's ~/.local/bin/dgc. */
+export function installedLauncher(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const dir of (env.PATH || "").split(delimiter)) {
+    if (dir && executable(join(dir, "dgc"))) return join(dir, "dgc");
+  }
+  const local = join(env.HOME || homedir(), ".local", "bin", "dgc");
+  return executable(local) ? local : undefined;
+}
+
+/**
+ * How to start `dgc serve`: DGC_PYTHON, then this checkout's .venv (source checkouts only),
+ * then the installed `dgc` launcher, then `python3 -m dgc`. The ready handshake checks the
+ * protocol either way.
+ */
+export function defaultRuntime(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.DGC_PYTHON) return [env.DGC_PYTHON, "-m", "dgc", "serve"];
+  const checkoutPython = join(REPO_ROOT, ".venv/bin/python");
+  if (isCheckout() && existsSync(checkoutPython)) return [checkoutPython, "-m", "dgc", "serve"];
+  const launcher = installedLauncher(env);
+  if (launcher) return [launcher, "serve"];
+  return ["python3", "-m", "dgc", "serve"];
+}
+
+/** Host variables every runtime child receives: program lookup, locale, terminal, time zone,
+ *  temp and certificate locations. None is a credential; anything else must be passed on purpose
+ *  (`extraEnv`, `inheritEnv`). Mirrors the Python SDK's BASE_ENV. */
+export const BASE_ENV: ReadonlySet<string> = new Set([
+  "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+  "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC", "LC_TIME", "LC_MONETARY", "TERM", "COLORTERM",
+  "NO_COLOR", "TZ", "TMPDIR", "TEMP", "TMP", "SSL_CERT_FILE", "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+  "PATHEXT",
+]);
+const SECRET_ENV = ["DGC_API_KEY", "DGC_SEARCH_API_KEY", "DGC_SUBAGENT_API_KEY", "DGC_FALLBACK_API_KEY"];
+
+/**
+ * The runtime child's environment. `inheritEnv` false (default) passes only BASE_ENV, a list of
+ * names adds those host variables, true passes everything (the host DGC_*_API_KEY values are
+ * still dropped in isolated mode). With `inherit` (inheritUserState) DGC_* and XDG_* variables
+ * pass too, since they locate the user's own DGC state.
+ */
 export function isolatedEnv(
   stateDir: string,
   extra?: Record<string, string>,
   inherit = false,
   projectRoot?: string,
+  inheritEnv: boolean | readonly string[] = false,
+  hostEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" };
+  let env: NodeJS.ProcessEnv;
+  if (inheritEnv === true) {
+    env = { ...hostEnv };
+  } else {
+    env = {};
+    for (const [key, value] of Object.entries(hostEnv)) {
+      const upper = key.toUpperCase();
+      if (BASE_ENV.has(upper) || (inherit && (upper.startsWith("DGC_") || upper.startsWith("XDG_")))) {
+        env[key] = value;
+      }
+    }
+    for (const name of inheritEnv || []) {
+      if (!name || name.includes("=") || name.includes("\0")) {
+        throw new Error(`inheritEnv has an invalid variable name: ${JSON.stringify(name)}`);
+      }
+      if (hostEnv[name] !== undefined) env[name] = hostEnv[name];
+    }
+  }
+  env.PYTHONUNBUFFERED = "1";
+  env.PYTHONDONTWRITEBYTECODE = "1";
   if (!inherit) {
-    delete env.DGC_API_KEY;
-    delete env.DGC_SEARCH_API_KEY;
-    delete env.DGC_SUBAGENT_API_KEY;
-    delete env.DGC_FALLBACK_API_KEY;
+    for (const key of SECRET_ENV) delete env[key];
     const home = join(stateDir, "home");
     mkdirSync(join(home, ".dgc"), { recursive: true });
     mkdirSync(join(home, ".config"), { recursive: true });

@@ -200,6 +200,8 @@ export type ClientOptions = {
   mode?: PermissionMode;
   thinking?: string;
   extraEnv?: Record<string, string>;
+  /** Host variables the runtime may see besides the basic ones: false (default), names, or true. */
+  inheritEnv?: boolean | string[];
   instructions?: string;
   department?: string;
   pricing?: Pricing;

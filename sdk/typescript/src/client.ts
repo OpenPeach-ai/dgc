@@ -80,6 +80,7 @@ export class DGC {
     const env = isolatedEnv(
       this.options.stateDir, extra, this.options.inheritUserState,
       this.options.inheritUserState ? undefined : options.cwd,
+      this.options.inheritEnv ?? false,
     );
     const argv = this.options.runtime ?? defaultRuntime();
     const transport = new Transport(argv, options.cwd, env);

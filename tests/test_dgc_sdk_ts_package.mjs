@@ -10,9 +10,10 @@
  */
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -98,6 +99,33 @@ test("npm install <packed tarball> gives an importable, typed package", async (t
     run(NPM, ["install", "--offline", "--no-save", tarball], { cwd: app, env: npmEnv });
     assert.ok(existsSync(join(app, "node_modules", "@vibedgc", "sdk", "dist", "index.js")));
 
+    // Installed (not a checkout): without DGC_PYTHON the runtime is the installed dgc launcher.
+    const installedRuntime = await import(pathToFileURL(
+      join(app, "node_modules", "@vibedgc", "sdk", "dist", "runtime.js")).href);
+    assert.equal(installedRuntime.isCheckout(), false);
+    const bin = join(scratch, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "dgc"), "#!/bin/sh\n", { mode: 0o755 });
+    assert.deepEqual(installedRuntime.defaultRuntime({ PATH: bin, HOME: scratch }), [join(bin, "dgc"), "serve"]);
+    assert.deepEqual(installedRuntime.defaultRuntime({ PATH: bin, HOME: scratch, DGC_PYTHON: "/opt/py" }),
+      ["/opt/py", "-m", "dgc", "serve"]);
+    assert.deepEqual(installedRuntime.defaultRuntime({ PATH: "", HOME: scratch }), ["python3", "-m", "dgc", "serve"]);
+    // The child gets the basic variables, the key it was given, and nothing else from the host.
+    const host = { PATH: "/usr/bin", LANG: "C.UTF-8", FAKE_CLOUD_SECRET: "s3cret",
+                   DGC_API_KEY: "host-key", PYTHONPATH: "/app/site-packages" };
+    const minimal = installedRuntime.isolatedEnv(join(scratch, "state"), { DGC_API_KEY: "sdk-key" },
+      false, scratch, false, host);
+    assert.equal(minimal.PATH, "/usr/bin");
+    assert.equal(minimal.LANG, "C.UTF-8");
+    assert.equal(minimal.FAKE_CLOUD_SECRET, undefined);
+    assert.equal(minimal.DGC_API_KEY, "sdk-key");
+    assert.equal(minimal.PYTHONPATH, undefined, "an installed package puts nothing on PYTHONPATH");
+    assert.equal(minimal.HOME, join(scratch, "state", "home"));
+    const named = installedRuntime.isolatedEnv(join(scratch, "state"), {}, false, scratch,
+      ["FAKE_CLOUD_SECRET"], host);
+    assert.equal(named.FAKE_CLOUD_SECRET, "s3cret");
+    assert.equal(named.DGC_API_KEY, undefined, "the host's DGC key never passes implicitly");
+
     // Types resolve for a Node consumer (with @types/node) compiled with the package's own TypeScript.
     writeFileSync(join(app, "consumer.ts"), [
       'import { DGC, VERSION, defineTool, type RunResult } from "@vibedgc/sdk";',
@@ -133,6 +161,7 @@ const dgc = new DGC({
   stateDir: mkdtempSync(join(tmpdir(), "dgc-sdk-ts-pack-state-")),
   model: "sdk-model", baseUrl: process.env.MODEL_URL, apiKey: "sk-local",
   runtime: [process.env.DGC_PYTHON || "python3", "-m", "dgc", "serve"],
+  inheritEnv: ["PYTHONPATH"],
 });
 try {
   const session = await dgc.session({ cwd: process.env.WORK, permissions: { mode: "auto", unhandled: "deny" }, tools: [tool] });

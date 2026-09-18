@@ -33,13 +33,13 @@ try {
 }
 ```
 
-The SDK needs a DGC runtime: a Python that can run `python -m dgc serve`. For the CLI from
-`curl -fsSL https://vibedgc.com/install.sh | bash`, point `DGC_PYTHON` at the Python beside the
-`dgc` launcher, or pass `runtime: ["/path/to/python", "-m", "dgc", "serve"]`:
+The SDK needs a DGC CLI (0.41.6 or newer). It uses `DGC_PYTHON` when set, else the installed
+`dgc` launcher (on `PATH` or `~/.local/bin/dgc`, where `curl -fsSL https://vibedgc.com/install.sh | bash`
+puts it), else `python3 -m dgc`. Pass `runtime: [...]` to choose explicitly.
 
-```bash
-export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
-```
+The runtime child sees only basic variables (`PATH`, locale, terminal, temp and certificate
+locations), the isolated HOME, `apiKey` and `extraEnv`. Pass `inheritEnv: ["NAME"]` (or `true`)
+to hand it more of your environment.
 
 Full reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md).
 Licensed under Apache-2.0.
