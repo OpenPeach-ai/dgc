@@ -27,7 +27,7 @@ editors/vscode/    VS Code/Cursor client, webview and tests
 schemas/           generated reviewable wire schemas (regenerate, never hand-edit)
 install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`)
 site-src/          vibedgc.com templates, content, data and self-hosted source assets
-site/              generated, exact-allowlist deploy tree plus promoted release artifacts
+site/              generated deploy tree + release artifacts (linguist-generated; not product source)
 scripts/           site generation/checks and explicit, separated release/deploy phases
 ```
 

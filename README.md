@@ -364,6 +364,20 @@ streamed responses are always released before retry or transport fallback.
 See [AGENTS.md](AGENTS.md) for the layout and conventions, and
 [bench/README.md](bench/README.md) for the controlled six-harness protocol.
 
+## Repository layout
+
+This repository is the DGC **product** (Apache-2.0):
+
+| Path | What it is |
+| --- | --- |
+| `dgc/` | CLI |
+| `editors/vscode/` | VS Code / Cursor extension |
+| `sdk/` | Embed client (`dgc-sdk`) |
+| `tests/`, `scripts/` | Tests and release/build |
+| `dgc/docs.py` | In-app `/docs` library (also published to docs.vibedgc.com) |
+
+`site-src/` is the vibedgc.com **templates** (open, like the rest of the tree). `site/` is the **generated** site plus the installer/VSIX copy used to deploy Cloudflare — not the product language. GitHub marks `site/` as generated so the repo reads as Python/TypeScript, not as a static website. Release binaries also live on [GitHub Releases](https://github.com/OpenPeach-ai/dgc/releases).
+
 ## Security
 
 DGC is a coding agent that runs shell commands and edits files on your machine. Worth knowing:
