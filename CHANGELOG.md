@@ -10,6 +10,26 @@ Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.
 
 ### For everyone
 
+- **Ultra delegates for real.** Ultra splits a multi-part task across sub-agents before the lead
+  reads the code (workers, explorers, researchers in one parallel batch), has a critic review the
+  changed files, then integrates and runs the tests. Sub-agents stay one level deep, the roster
+  lists your own named agents, and a `todo` update beside the `task` calls no longer makes the
+  batch run one at a time. Outside Ultra, `task` is offered when it clearly helps.
+- **Sub-agents get their own context window.** `subagent_context_size` (0 uses the main window), a
+  named agent's `context_size:` frontmatter, `/subagent context 64k`, and Settings → Agents.
+- **The sub-agent route can change mid-turn**, as the main model can: model, host, transport, key
+  and window apply from the next sub-agent.
+- **Changing the model mid-turn no longer hangs.** A request that had not started answering is sent
+  again to the new model at once, instead of waiting out the old one (up to 15 minutes on Ollama
+  Cloud, which DGC also mistook for a model still loading).
+- **Thinking levels reach the model.** On Ollama, Low, Medium and High are sent as those levels and
+  Extra high as `max` (they all used to be plain "think on"); a level changed mid-turn applies from
+  the next request; GLM-5's Off no longer leaks its reasoning into the answer.
+- **Eyes for a model without vision.** When the chat's model cannot see images, an attached or
+  produced image is shown to a vision-capable model (the sub-agent model, or a named agent with
+  vision) and its report goes to the chat's model. The card names the model that looked.
+- **Parallel sub-agents no longer lose work to shared caches.** `__pycache__`, `*.pyc` and test
+  runner caches are not counted as a child's changes.
 - **`repo_map` sees plain job folders.** A workspace that is not a git repository and holds only
   notes, CSV or other text files is no longer reported as 0 files. The map is rebuilt from disk on
   every call, so files added during a session show up the next time the agent maps the folder.

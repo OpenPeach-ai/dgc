@@ -1,8 +1,14 @@
 # Changelog
 
-## 0.26.7 — 2026-09-18
+## 0.26.7 — 2026-09-19
 
-- Requires CLI 0.41.5 or newer; editor protocol remains v14.
+- Requires CLI 0.41.6; editor protocol remains v14.
+- **Set the context window from the prompt box.** The context meter's menu has a Window size row (8K to 1M, or Custom), and says when the model holds less than you picked.
+- **Settings lists the models a host offers.** Pick the Ollama preset, or type a host, on the Models or Agents tab and the model field suggests that host's models (Ollama's list, or `/v1/models`).
+- **Sub-agents get their own context window** (Settings → Agents), and the sub-agent model can change while a turn runs, as the main model can.
+- **The token count no longer reads 0.** A turn made only of tool calls (glm-5.3 working without narrating) counts the arguments the model wrote.
+- **Quieter conversation text.** Prompts and answers are 12px (code 11px), and a prompt uses the answers' line spacing.
+- **Truthful thinking note.** The reasoning note says which levels the current model actually honours, and follows a model switch.
 - **Every error line is shown again.** 0.26.6 hid an error whose text matched the previous error, so the backend-exit reason vanished after a reconnect replayed the chat, and a repeated failure on the next turn or in a new chat showed no reason. The skipped-event notice is still shown once per event type by the backend connection.
 
 ## 0.26.6 — 2026-09-18
