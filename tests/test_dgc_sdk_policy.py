@@ -247,6 +247,10 @@ class RuntimePolicyAutoModeTests(_E2E):
         with self._client(policy=RuntimePolicy(deny_tools=("mcp__app__refnd",))) as dgc:
             with self.assertRaises(DGCConfigError):
                 dgc.session(cwd=self.work, permissions={"mode": "auto"}, tools=[tool])
+        # The client's policy also covers sessions without custom tools; those still start.
+        with self._client(policy=RuntimePolicy(deny_tools=("mcp__app__issue_refund",))) as dgc:
+            plain = dgc.session(cwd=self.work, permissions={"mode": "auto"})
+            self.assertTrue(plain.session_id)
 
     def test_network_deny_refuses_web_tools_and_skill_downloads(self):
         result, _asks, _status = self._run([

@@ -241,8 +241,14 @@ class RuntimePolicy:
         return False
 
     def check_session_tools(self, custom_tools: Iterable[str]) -> None:
-        """Raise when an ``mcp__app__`` route names none of the session's own tools."""
+        """Raise when an ``mcp__app__`` route names none of the session's own tools.
+
+        A client's policy covers every session, so one that defines no custom tools has nothing
+        to misname: the routes simply match nothing there.
+        """
         routes = {_app_route(name) for name in custom_tools}
+        if not routes:
+            return
         for field in ("deny_tools", "allow_tools"):
             for entry in getattr(self, field) or ():
                 if not entry.startswith(f"mcp__{_APP_SERVER}__") or entry.endswith("*"):
