@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.6 — 2026-09-18
+
+- Requires CLI 0.41.5; editor protocol remains v14.
+- Unknown backend events (for example `remote_status` from a remote-capable CLI) are skipped once. The connection stays up instead of reconnect-spamming the chat.
+
 ## 0.26.5 — 2026-09-18
 
 - Requires CLI 0.41.5; editor protocol remains v14.

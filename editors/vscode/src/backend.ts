@@ -78,6 +78,7 @@ export class DgcBackend extends EventEmitter {
   private pendingBytes = 0;
   private activeRequests = new Map<string, string>();
   private respondedRequests = new Set<string>();
+  private ignoredUnknownTypes = new Set<string>();
   private draining = false;
   private startedAt = 0;
   /**
@@ -113,6 +114,7 @@ export class DgcBackend extends EventEmitter {
     this.buf = "";
     this.activeRequests.clear();
     this.respondedRequests.clear();
+    this.ignoredUnknownTypes.clear();
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(this.command, ["serve"], {
@@ -174,6 +176,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend command stream failed before queued commands could run");
       this.emit("event", {
         type: "error",
@@ -206,6 +209,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend failed before queued commands could run");
       this.launchError(err);
     });
@@ -236,6 +240,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.ignoredUnknownTypes.clear();
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
       }
@@ -253,6 +258,36 @@ export class DgcBackend extends EventEmitter {
       fatal: true,
       notInstalled: missing,
     });
+  }
+
+  /**
+   * A newer CLI may emit extra event types (for example remote_status) before this
+   * extension's generated schema knows them. Killing the child and reconnecting
+   * turns that into a chat-spam loop. Advance seq and keep the connection.
+   */
+  private skipUnknownEvent(parsed: unknown, schemaProblem: string): boolean {
+    if (!schemaProblem.startsWith("unknown message type")) {
+      return false;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      return false;
+    }
+    const rec = parsed as Record<string, unknown>;
+    const seq = rec.seq;
+    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0 || seq <= this.lastSeq) {
+      return false;
+    }
+    this.lastSeq = seq;
+    const name = typeof rec.type === "string" ? rec.type : "unknown";
+    if (!this.ignoredUnknownTypes.has(name)) {
+      this.ignoredUnknownTypes.add(name);
+      this.emit("event", {
+        type: "error",
+        message: `This extension skipped a backend event it does not handle yet (${name}). The connection stays up. Update Vibe DGC if this keeps appearing.`,
+        fatal: false,
+      });
+    }
+    return true;
   }
 
   private protocolFailure(message: string, cliOutdated = false, extensionOutdated = false): void {
@@ -286,6 +321,9 @@ export class DgcBackend extends EventEmitter {
       }
       const schemaProblem = dgcEventError(parsed);
       if (schemaProblem) {
+        if (this.skipUnknownEvent(parsed, schemaProblem)) {
+          continue;
+        }
         this.protocolFailure(`dgc backend violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
         return;
       }
