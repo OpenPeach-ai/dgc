@@ -466,6 +466,26 @@ def _history_steering_texts(message: dict) -> list[str] | None:
     return texts
 
 
+def _history_vision_items(seen) -> list:
+    """The view_image card DGC drew when a vision model looked at a prompt's attachments for a
+    model that cannot see (``_dgc_vision`` on the prompt's message), as live tool events."""
+    if not isinstance(seen, dict) or not str(seen.get("text") or "").strip():
+        return []
+    call_id = str(seen.get("call_id") or "")[:64] or None
+    count = seen.get("images") if isinstance(seen.get("images"), int) and seen.get("images") > 0 else 1
+    model, origin = str(seen.get("model") or "")[:512], str(seen.get("origin") or "")[:128]
+    args = {"path": "attached image" if count == 1 else f"{count} attached images",
+            "via": f"{model} ({origin})" if origin else model,
+            "question": str(seen.get("question") or "")[:500]}
+    output = str(seen.get("output") or "") or f"{args['via']} looked at the attachments:\n\n{seen['text']}"
+    output = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
+    is_diff, diff = split_diff(output)          # the same pure reading the live tool_result made
+    return [{"type": "tool_call", "call_id": call_id, "name": "view_image", "args": args,
+             "summary": arg_summary("view_image", args)},
+            {"type": "tool_result", "call_id": call_id, "name": "view_image", "output": output,
+             "is_error": tool_output_is_error(output), "is_diff": is_diff, "diff": diff}]
+
+
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
                    "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
@@ -2723,6 +2743,9 @@ class Backend:
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 open_turn(text, "prompt")
+                # A vision model looked at this prompt's attachments for a model that cannot see
+                # (dgc/vision.py): its view_image card comes back, as it was drawn live.
+                items.extend(_history_vision_items(m.get("_dgc_vision")))
             elif role == "assistant":
                 current = ensure_turn()
                 text = str(content or "")

@@ -805,6 +805,38 @@ fleet workspaces use the approved source project's definitions rather than loadi
 definitions from their scratch checkout. An optional `tools:` frontmatter line is an
 allow-list of built-in tool names.
 
+## Eyes for a model without vision
+
+If the chat's model cannot read images (for Ollama, `vision` is missing from its capabilities in
+`ollama show`), DGC finds a model that can and lets it do the looking:
+
+1. the sub-agent model (`/subagent model NAME`, with `/subagent host URL` if it runs elsewhere),
+   when its capabilities include vision;
+2. otherwise a named agent whose `model` has vision: one named `viewer` first, then the others by
+   name;
+3. for a sub-agent whose own model cannot see, the chat's main model when it can.
+
+A look is one request to that model with the image and a question. It uses no tools, no checkout
+and no agent loop, so a vision model that cannot call tools (`qwen2.5vl`, `llava`) works too. The
+answer comes back as text the chat's model works from:
+
+- **An image you attach to a prompt** is looked at before the turn starts, with your prompt as
+  the question. The chat shows a `view_image` step, *attached image · via qwen3-vl:8b (sub-agent
+  model)*; open it to read what that model saw. The picture stays in the conversation, and the
+  chat's model receives that report in its place on every later request too. If you switch to a
+  model that can see, it gets the picture itself.
+- **An image file in the workspace.** `view_image` is still offered, with a `question` argument:
+  the chat's model asks what it needs to know ("which elements overlap, and what text do they
+  show?"), and the step's output names the model that looked and gives its answer. `read_file` on
+  an image works the same way, with a general describe-everything question. A browser screenshot
+  says where it was saved so the model can ask `view_image` about it.
+
+A model's capabilities are read once and cached (`capability_cache_ttl_s`, 5 minutes by default),
+never checked on every request. Only positive evidence counts: an Ollama model has to list `vision`,
+and an endpoint that turns out to refuse the image is dropped. With no vision model available, DGC
+keeps the old behaviour: the image reaches no model, the model is told it exists, and you get one
+line saying how to set up a vision sub-agent model.
+
 ## The count
 
 The prompt area lists every sub-agent started in the current turn — queued, running, waiting,
@@ -950,7 +982,8 @@ unless you asked to choose.
 
 - `read_file` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` — read, overwrite,
   exact-string edit, several edits to one file, or an atomic unified diff.
-- `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**).
+- `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**). For a model
+  without vision, a configured vision model looks and answers its `question` (see **Sub-agents**).
 - `glob` · `grep` — find files; search contents.
 - `repo_map` · `code_intel` — inventory and symbols (see **Code intelligence**).
 - `git_diff` — local Git without a shell (see **Git changes**).
@@ -1772,8 +1805,10 @@ it in a viewer. In the terminal, open the step and click `open` to hand it to yo
 viewer. *Viewed images* has the details.
 
 Whether the *model* can see it is a separate question, and DGC checks rather than guesses. With a
-vision model the picture is attached for it to read. A model without vision is told the image exists
-and never receives it, with a nudge to use `snapshot` instead, which is more precise anyway. If an
+vision model the picture is attached for it to read. A model without vision never receives it. If a
+vision sub-agent model is set, the result says where the screenshot was saved, and the model can ask
+that vision model about it with `view_image` (see *Sub-agents*); either way it is nudged to use
+`snapshot`, which is more precise for page structure. If an
 endpoint turns out not to accept images, DGC caches the rejection for that endpoint/model pair
 for up to one hour, shared across chats in the same process. Restarting DGC clears it. Check
 with `ollama show <model>` — look for `vision` under Capabilities.
@@ -1828,8 +1863,9 @@ covers a browser screenshot, an image file from your workspace, and an image an 
 - **Image files.** With a model that accepts images, the agent can use `view_image` on a PNG, JPEG, GIF
   or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about
   something only a picture shows. `read_file` on an image file views it the same way, in the read
-  step; with a model that cannot read images it says so instead. A BMP is shown to you but never
-  sent to the model; convert it to PNG if the model needs to look at it.
+  step. With a model that cannot read images, a configured vision model looks instead and answers in
+  text; without one, the step says so. A BMP is shown to you but never sent to a model; convert it to
+  PNG if a model needs to look at it.
 - **MCP tools** that return images.
 
 A step keeps up to eight images. More than that are counted, not kept.
@@ -1863,8 +1899,10 @@ this; without a display it shows where the file is instead. The classic `dgc` pr
 
 - A model that accepts images gets them after the batch of tool calls that produced them. Text inside
   an image is treated as data, never as instructions.
-- A model without vision is told that an image exists and never receives it, and `view_image` is not
-  offered to it.
+- A model without vision never receives the pixels. When a vision model is configured (the sub-agent
+  model, or a named agent's model), that model looks for it and its answer comes back as text, in a
+  step that names it; see *Sub-agents* ▸ *Eyes for a model without vision*. With none, the model is
+  told that an image exists, `view_image` is not offered to it, and you are told how to set one up.
 - If an endpoint refuses an image, DGC sends the request again without it and stops sending images to
   that endpoint/model pair until the rejection cache expires (up to one hour) or DGC restarts.
   The cache is shared across chats in the same process.

@@ -781,7 +781,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
 from .tools import (MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS, bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images)
 from . import image_views
-from .tools import _image_entry, _vision_available, image_call_scope, reset_image_call
+from .tools import VIEW_IMAGE_RELAY_SCHEMA, _image_entry, _vision_available, image_call_scope, reset_image_call
 
 THINK_LEVELS = ("off", "low", "medium", "high", "xhigh")
 THINK_INSTRUCTIONS = {
@@ -1684,6 +1684,62 @@ class Agent(GoalLifecycle):
         if ctx is not None:
             ctx.vision = lambda agent=self: bool(getattr(agent.client, "vision_supported", False))
             ctx.shows_images = lambda agent=self: agent._images_shown()
+            # dgc/vision.py: when the model cannot see, a configured vision model looks for it.
+            ctx.vision_look = lambda images, question, agent=self: agent._vision_look(images, question)
+            ctx.vision_route_label = lambda agent=self: agent._vision_route_label()
+
+    # ------------------------------------------------------------ vision relay ---
+    def _vision_route(self, *, probe: bool = False):
+        """The vision model that looks for this agent's model (dgc/vision.py), or None when the
+        model sees for itself or nothing configured can. ``probe=False`` never touches the network."""
+        from . import vision
+        try:
+            return vision.route_for(self, probe=probe)
+        except Exception:
+            return None
+
+    def _vision_route_label(self) -> str:
+        route = self._vision_route(probe=False)
+        return route.label if route is not None else ""
+
+    def _vision_look(self, images, question: str):
+        """``ctx.vision_look`` for view_image/read_file: None when no vision model can look, else
+        ``(label, ok, answer)``. Runs on the tool's thread; the look has its own client."""
+        route = self._vision_route(probe=True)
+        if route is None:
+            return None
+        from . import vision
+        ok, answer = vision.look(self, route, list(images or ()), question)
+        return route.label, ok, self._safe_text(answer)
+
+    def _look_at_attachments(self, images: list, user_text: str) -> dict | None:
+        """A prompt's attached images reach a model that cannot see: have the vision model look
+        before the turn starts, under a view_image card that names it. Returns the record kept on
+        the prompt's message (``_dgc_vision``), or None when nothing looked. Without a vision model
+        the user is told how to get one; the request then says the image exists (today's path)."""
+        from . import vision
+        if not images or vision.client_sees_images(self.client):
+            return None
+        main = str(getattr(self.client, "model", "") or "this model")
+        count = len(images)
+        route = self._vision_route(probe=True)
+        if route is None:
+            self.ui.info(vision.missing_notice(main, count))
+            return None
+        question = vision.bounded_question(self._safe_text(_trusted_intent_text(user_text)))
+        call_id = f"vision-{uuid.uuid4().hex[:12]}"
+        args = {"path": "attached image" if count == 1 else f"{count} attached images",
+                "via": route.label, "question": question[:500]}
+        self.ui.tool_call("view_image", args, call_id)
+        ok, answer = vision.look(self, route, [(uri, "attached by the user") for uri in images],
+                                 question, attachments=True)
+        answer = self._safe_text(answer)
+        output = vision.attachment_report(route, main, count, ok, answer)
+        self.ui.tool_result("view_image", output, call_id)
+        if not ok:
+            return None
+        return {"call_id": call_id, "model": route.model, "origin": route.origin, "images": count,
+                "question": question[:500], "text": answer, "output": output}
 
     def _fallback_client(self, model: str) -> LLMClient:
         base = self.config.get("fallback_base_url") or self.config.base_url
@@ -2073,8 +2129,13 @@ class Agent(GoalLifecycle):
         schemas = TOOL_SCHEMAS + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas
         if not bool(getattr(self.client, "vision_supported", False)):
             # images: a model that cannot read an image is never offered a tool that shows it one.
-            schemas = [tool for tool in schemas
-                       if tool.get("function", {}).get("name") != "view_image"]
+            # When a vision model can look for it (dgc/vision.py), view_image asks that model and
+            # answers in text instead. Cached route only: building a tool list never probes.
+            relay = self._vision_route(probe=False) is not None
+            schemas = [VIEW_IMAGE_RELAY_SCHEMA
+                       if relay and tool.get("function", {}).get("name") == "view_image" else tool
+                       for tool in schemas
+                       if relay or tool.get("function", {}).get("name") != "view_image"]
         if not self.config.get("code_action", False):
             # The persistent Python "code action" interpreter runs arbitrary code; keep it out of the
             # advertised catalog entirely unless the user opted in. (When on, it is still gated by the
@@ -4787,6 +4848,9 @@ class Agent(GoalLifecycle):
             # first schema snapshot so a model without native tools receives DGC's text protocol on
             # its first generation instead of spending a rejected model request to negotiate.
             prepare_model(cancel=self.cancelled)
+            # A model that cannot see gets a vision model's eyes (dgc/vision.py). Resolved here,
+            # once and cached, so this turn's tool list and its attachments agree on who looks.
+            self._vision_route(probe=True)
             self._refresh_system()
         # The capability a new client reports before its metadata arrives is the provider's
         # optimistic default. Re-read it now that the model's own capabilities are known, so a
@@ -4807,9 +4871,17 @@ class Agent(GoalLifecycle):
                                    [{"type": "image_url", "image_url": {"url": u}} for u in images])
             else:
                 content = user_text
-            self.messages.append({"role": "user", "content": content})
+            prompt_message = {"role": "user", "content": content}
+            self.messages.append(prompt_message)
             self._drain_monitors(with_prompt=True)
             self._save_turn_progress()
+            if images:
+                # The prompt is saved before a vision model spends time looking at its images; the
+                # look's report then joins that same message (the pixels stay in the transcript).
+                seen = self._look_at_attachments(images, user_text)
+                if seen:
+                    prompt_message["_dgc_vision"] = seen
+                    self._save_turn_progress()
             effort_text = user_text
         # Pass the raw level; the client maps it to the right per-provider reasoning
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
@@ -6531,6 +6603,11 @@ class Agent(GoalLifecycle):
         """A read_file that viewed an image turns view_image on for the rest of this turn: the model
         is working with images, and view_image is how it looks at the next one."""
         if name == "read_file" and isinstance(out, str) and out.startswith("viewed "):
+            self._active_tool_intents.add("image")
+        elif (name == "browser" and isinstance(out, str) and "call view_image with path" in out
+              and self._vision_route(probe=False) is not None):
+            # A screenshot a model without vision took: a vision model can look at it through
+            # view_image (dgc/vision.py), which the result just told the model to call.
             self._active_tool_intents.add("image")
 
     def _images_shown(self) -> bool:
