@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,24 +8,31 @@ version = "0.5.3"
 description = "Embed the DGC coding harness in applications and CI"
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Mohit Kalra" }]
 keywords = ["dgc", "agent", "sdk", "coding-agent"]
 classifiers = [
-  "License :: OSI Approved :: Apache Software License",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+  "Typing :: Typed",
 ]
 
 [project.urls]
 Homepage = "https://vibedgc.com/sdk/"
-Documentation = "https://docs.vibedgc.com/sdk"
+Documentation = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md"
 Repository = "https://github.com/OpenPeach-ai/dgc"
 Issues = "https://github.com/OpenPeach-ai/dgc/issues"
-Release = "https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2"
+Changelog = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/sdk/CHANGELOG.md"
+Release = "https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.3"
 
 [tool.setuptools.packages.find]
 include = ["dgc_sdk*"]

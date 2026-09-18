@@ -1,30 +1,38 @@
 # DGC SDK
 
-Frozen **0.5.2**. Protocol **v14**, CLI **0.41.5**, Linux. GitHub tag **`sdk-v0.5.2`**
-(not `v0.5.2` — that is a historical CLI tag).
+Embed the DGC coding agent in an application or a CI job. **0.5.3**, editor protocol **v14**,
+pairs with CLI **0.41.6**. Proven on Linux; macOS and WSL are unproven; native Windows is
+experimental. Release tag **`sdk-v0.5.3`** (not `v0.5.x`, which are historical CLI tags).
 
-Install the wheel from the GitHub release, or from this repository:
+| Package | Install |
+| --- | --- |
+| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.5.3` |
+| Node `@vibedgc/sdk` | `npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vibedgc-sdk-0.5.3.tgz` |
 
-```bash
-python3 -m pip install \
-  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
-# from a clone:
-python3 -m pip install -e sdk/python
-# TypeScript: import sdk/typescript (Node 22+, strip-types). Not on npm yet.
-#   node --experimental-strip-types examples/sdk/hello_run.mjs .
+Both drive `python -m dgc serve` from a DGC CLI install; set `DGC_PYTHON` to that Python (see
+[docs/SDK.md](../docs/SDK.md#install)). From a clone: `python3 -m pip install -e sdk/python`, and
+for Node `npm ci && npm run build` in `sdk/typescript`.
+
+```python
+import os
+import tempfile
+
+from dgc_sdk import DGC
+
+with DGC(
+    state_dir=tempfile.mkdtemp(prefix="dgc-sdk-"),
+    model=os.environ["DGC_MODEL"],          # for example "qwen3:8b"
+    base_url=os.environ["DGC_BASE_URL"],    # for example "http://127.0.0.1:11434/v1"
+    api_key=os.environ.get("DGC_API_KEY"),  # only when the endpoint needs a key
+) as dgc:
+    session = dgc.session(cwd=".", permissions={"mode": "plan", "unhandled": "deny"})
+    result = session.run("Summarize this repository in two sentences. Do not edit files.")
+    print(result.status, result.final_text)
+    if result.error:
+        print("error:", result.error)
 ```
 
-The SDK is **free**. There is no DGC subscription fee to embed it. Optional `Pricing` /
-`department` exist so **your application** can record **model-token** spend (what an LLM
-provider would charge for tokens), not a charge for this library.
-
-The SDK launches a managed `dgc serve` child with an **isolated HOME** (`DGC_HOME`). The host
-process `~/.dgc` is not read or written unless you pass `inherit_user_state=True`.
-
-Requires a DGC runtime that speaks editor protocol v14 (CLI 0.41.3 or this checkout). Set
-`DGC_PYTHON` if `python3` cannot import `dgc`.
-
-## Public surface (0.5.2)
+The full guide and API reference is [docs/SDK.md](../docs/SDK.md).
 
 | Concept | Python | TypeScript |
 | --- | --- | --- |
@@ -39,37 +47,28 @@ Requires a DGC runtime that speaks editor protocol v14 (CLI 0.41.3 or this check
 | Decisions | `on_permission` / `on_plan` / `on_question` / `on_mcp_input` | `onPermission` / `onPlan` / `onQuestion` / `onMcpInput` |
 | Tools | `define_tool(...)` then `session(tools=[...])` | `defineTool(...)` then `session({ tools })` |
 | Schema | `session.run(..., output_schema={...})` | `session.run(prompt, { outputSchema })` |
-| Skills / hooks / memory | `list_skills` / `list_hooks` / `get_memory` / `add_memory` | `listSkills` / `listHooks` / `getMemory` / `addMemory` |
-| Permissions | `list_permissions` / `add_permission_rule` | `listPermissions` / `addPermissionRule` |
-| Unattended | `permissions={"mode": "...", "unhandled": "deny"}` | `permissions: { unhandled: "deny" }` |
-| Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | — |
-| Policy | `DGC(..., policy=RuntimePolicy(network="deny", deny_tools=(...)))` — write-tool denies also inspect bash file-writes | — |
-| Audit | `dgc.export_audit(session_id)` (redacted JSONL) | — |
-| Retry | `RetryPolicy(max_attempts=4)` — 429/5xx retried by `dgc serve` | — |
+| Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | `dgc.usageReport(department)` |
+| Policy | `DGC(..., policy=RuntimePolicy(...))` — deny rules plus shell screening; the sandbox is the boundary | `policy` |
+| Audit | `dgc.export_audit(session_id)` (redacted) | `dgc.exportAudit(sessionId)` |
 
-Do not `pip install dgc`. Public PyPI `dgc` is an unrelated clustering package.
-The SDK package names are `dgc-sdk` / `@vibedgc/sdk`. This cut is the GitHub release
-and the in-tree sources; it is not on PyPI or npm yet. The SDK still needs a DGC
-runtime that can `python -m dgc serve` (this checkout or CLI 0.41.3).
+## Layout
 
-## Isolation
+- `python/` — the `dgc-sdk` package (`dgc_sdk`).
+- `typescript/` — the `@vibedgc/sdk` package; `npm run build` compiles `src/` to `dist/`.
+- `scripts/` — `make_sbom.py` (checkout manifest and release manifest), `check_dist.py`
+  (artifact checks), `release-sdk.sh` (local dry run of a release build),
+  `requirements-release.txt` (pinned build tools).
+- `sbom/` — the signed checkout manifest and the maintainer public key.
+- `COMPATIBILITY.md`, `CHANGELOG.md`.
 
-Each `DGC` client owns one isolated HOME under `state_dir`. Every session from that client
-shares it, so transcripts, checkpoints and goals survive `resume` / `fork` after the child
-exits. The child sees `HOME`/`DGC_HOME` there, empty `mcp_servers`/`hooks`,
-`artifact_autostart=false`, `monitor_wake=false`, and `trusted_dirs` limited to the workspace
-you passed. `on_permission` returning `always` only writes rules into that isolated home.
+## Releasing
 
-Two `DGC` clients with different `state_dir` values do not share state. Per-session directories
-would wipe resume/fork persistence.
-
-## Examples
-
-`examples/sdk/hello_run.py`, `app_session.py`, `resume_run.py`, `ci_review.py`, `ci_edit.py`,
-`hello_run.mjs`, and `workbench.py` (loopback UI on port 8765). CI recipes print JSON, write a
-patch file, and use exit codes 0/1/2/3/4/5.
-
-## Release
-
-Channel tag: `sdk-v0.5.2`. Proven on Linux. macOS and WSL are unproven. Native Windows is
-experimental. TypeScript covers the embed client; usage, audit, and retry helpers are Python-first.
+1. Bump `python/dgc_sdk/_version.py`, `python/pyproject.toml` (version and the tag-pinned URLs),
+   `typescript/package.json`, `typescript/src/types.ts`, `COMPATIBILITY.md`, `CHANGELOG.md` and
+   the docs; `tests/test_sdk_packaging.py` checks that they agree.
+2. With the maintainer key in `sdk/.signing/`: `make -C sdk sbom` (writes and signs
+   `sbom/SHA256SUMS`), then `bash sdk/scripts/release-sdk.sh` for a local build and test.
+3. Commit, merge to `main`, and push an annotated tag `sdk-vX.Y.Z` on that commit. The tag runs
+   `.github/workflows/publish-dgc-sdk.yml`, which is the only way a release is built: it tests the
+   wheel, publishes to PyPI with Trusted Publishing, and attaches the same bytes to the GitHub
+   release without taking the Latest badge from the CLI.
