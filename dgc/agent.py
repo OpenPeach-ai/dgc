@@ -6782,6 +6782,18 @@ class Agent(GoalLifecycle):
                 self.checkpoints.discard_last_empty()
             return result
 
+    def _subagent_window(self, adef) -> int:
+        """A sub-agent's context window in tokens: its definition's ``context_size``, then
+        ``subagent_context_size``, else 0 (it runs in the main window)."""
+        for raw in ((adef.context_size if adef else ""), self.config.get("subagent_context_size", 0)):
+            try:
+                size = int(str(raw or 0).strip() or 0)
+            except (TypeError, ValueError):
+                continue
+            if size > 0:
+                return max(2_048, size)
+        return 0
+
     def _subagent_client(self, adef):
         """Resolve a sub-agent's (base_url, api_key, model): per-agent def → global
         subagent_* config → inherit the main loop. Returns None to reuse the parent client."""
@@ -6832,6 +6844,12 @@ class Agent(GoalLifecycle):
             except Exception as exc:
                 start_error = f"{type(exc).__name__}: {exc}"
                 return "", "", start_error
+            # The sub-agent's own window, as context_size is the main one's: it sizes each request
+            # (Ollama's num_ctx) and every budget the child measures, compaction included.
+            window = self._subagent_window(adef)
+            if window:
+                child_config.data["context_size"] = window
+                child_config._explicit_keys = set(getattr(child_config, "_explicit_keys", set())) | {"context_size"}
 
             isolated_mcp = None
             thrown = ""
@@ -6872,6 +6890,8 @@ class Agent(GoalLifecycle):
                     sub._monitor_turn = True
                 override = self._subagent_client(adef)
                 if override is not None:
+                    if window:
+                        override.context_size = window     # built from the parent's config
                     sub.client = override
                 if registry is not None and agent_id:
                     registry.running(agent_id, model=str(getattr(sub.client, "model", "") or ""))

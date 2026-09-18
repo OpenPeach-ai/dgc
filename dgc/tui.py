@@ -48,6 +48,8 @@ from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
+from .config import SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
+from .config import subagent_window_text as _subagent_window_text
 from .monitors import plural
 from .reasoning import (display_text as reasoning_display_text, label_suffix as reasoning_label_suffix,
                         placement as reasoning_placement, saved_reasoning,
@@ -690,6 +692,7 @@ class TUI:
             ("subagent_base_url", "Sub-agent endpoint", "str"),
             ("subagent_api_mode", "Sub-agent transport", "enum",
              ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
+            ("subagent_context_size", "Sub-agent context window (0 = main)", "int"),
             ("max_parallel_tasks", "Parallel task workers (1–8)", "int"),
             ("fleet_worktree_root", "Fleet worktree storage", "str"),
             ("fallback_model", "Fallback model", "str"),
@@ -5900,6 +5903,7 @@ class TUI:
             self._append(self._rich(listing + f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
                                     f"  host   [{th.text}]{_esc(sh)}[/]\n"
                                     f"  route  [{th.text}]{_esc(st)}[/]\n"
+                                    f"  window [{th.text}]{_esc(_subagent_window_text(cfg))}[/]\n"
                                     f"  named  [{th.faint}]{_esc(defs)}[/]\n"
                                     f"  [{th.faint}]/subagent to change[/]"))
         elif cmd in ("skills", "extensions", "ext"):
@@ -6960,14 +6964,21 @@ class TUI:
                     "transport must be auto, ollama, anthropic, chat_completions, or responses"); return
             cfg.set("subagent_api_mode", mode)
             self._flash(f"sub-agent transport → {mode}"); return
+        if args and args[0] == "context" and len(args) == 2:
+            size = _subagent_window_arg(args[1])
+            if size is None:
+                self._flash("context must be a token count of at least 2048, or 0 for the main window"); return
+            cfg.set("subagent_context_size", size)
+            self._flash(f"sub-agent context → {size:,} tokens" if size else "sub-agent context → the main window"); return
         if args and args[0] == "clear":
             for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                      "subagent_api_mode"):
-                cfg.set(k, "")
+                      "subagent_api_mode", "subagent_context_size"):
+                cfg.set(k, 0 if k == "subagent_context_size" else "")
             self._flash("sub-agent overrides cleared — inherits the main model/host"); return
         labels = ["Set sub-agent host (provider or a custom LAN URL)",
                   "Set sub-agent model (from that host)",
                   "Set sub-agent API transport",
+                  "Set sub-agent context window",
                   "Clear — inherit the main model & host"]
 
         def pick(i):
@@ -6979,17 +6990,23 @@ class TUI:
                 modes = ["auto", "ollama", "anthropic", "chat_completions", "responses"]
                 self._show_picker("Sub-agent transport", modes,
                                   lambda j: self._subagent_flow(f"transport {modes[j]}"))
+            elif i == 3:
+                sizes = [0, *SUBAGENT_WINDOWS]
+                names = ["Same as the main model"] + [f"{size // 1024}K tokens" for size in SUBAGENT_WINDOWS]
+                self._show_picker("Sub-agent context window", names,
+                                  lambda j: self._subagent_flow(f"context {sizes[j]}"))
             else:
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode"):
-                    cfg.set(k, "")
+                          "subagent_api_mode", "subagent_context_size"):
+                    cfg.set(k, 0 if k == "subagent_context_size" else "")
                 self._flash("sub-agent → inherits the main model/host")
         sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
         sh = cfg.get("subagent_base_url") or "(inherit main host)"
         st = cfg.get("subagent_api_mode") or "inherit/infer"
+        sc = _subagent_window_text(cfg)
         self._append(self._rich(
             f"[{style_mod.theme().faint}]sub-agent model {_esc(sm)} · host {_esc(sh)} · "
-            f"transport {_esc(st)}[/]"))
+            f"transport {_esc(st)} · context {_esc(sc)}[/]"))
         self._show_picker("Sub-agents", labels, pick)
 
     def _tui_worktree(self, rest: str) -> None:

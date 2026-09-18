@@ -377,6 +377,7 @@ DEFAULTS: dict = {
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
     "subagent_api_key": "",                     # key for another sub-agent endpoint
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
+    "subagent_context_size": 0,                 # sub-agents' context window in tokens (0: the main one's)
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
     "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
@@ -487,6 +488,31 @@ MODEL_CATALOG: list[tuple[str, int]] = [
     ("gemma", 8192), ("phi", 16384), ("command-r", 131072), ("claude", 200000),
     ("kimi", 131072), ("glm", 131072),
 ]
+
+
+# The windows a sub-agent picker offers, as the editor's context menu does for the main model.
+SUBAGENT_WINDOWS = (8_192, 16_384, 32_768, 65_536, 131_072, 262_144)
+
+
+def subagent_window_arg(text: str) -> int | None:
+    """``/subagent context N``: a token count of at least 2048, a size like ``64k``, or 0 for the
+    main model's window. None when it is neither."""
+    raw = str(text or "").strip().lower().replace(",", "").replace("_", "")
+    scale = 1024 if raw.endswith("k") else 1
+    try:
+        size = int(float(raw[:-1] if scale > 1 else raw) * scale)
+    except ValueError:
+        return None
+    return size if size == 0 or 2_048 <= size <= 16_777_216 else None
+
+
+def subagent_window_text(config) -> str:
+    """What a sub-agent's window is, for a listing: its tokens, or that it follows the main one."""
+    try:
+        size = int(config.get("subagent_context_size", 0) or 0)
+    except (TypeError, ValueError):
+        size = 0
+    return f"{max(2_048, size):,} tokens" if size > 0 else "(inherit main)"
 
 
 def context_for_model(model: str) -> int | None:

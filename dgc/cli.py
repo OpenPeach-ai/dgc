@@ -1305,7 +1305,7 @@ class CLI:
                 f"host [{BRAND}]{_markup_literal(sh)}[/]  ·  "
                 f"transport [{BRAND}]{_markup_literal(st)}[/]")
             self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  "
-                               "/subagent transport MODE  ·  /subagent clear[/dim]")
+                               "/subagent transport MODE  ·  /subagent context TOKENS  ·  /subagent clear[/dim]")
             if defs:
                 table = Table("agent", "description", "model", "host", "transport")
                 for a in defs.values():
@@ -1317,13 +1317,15 @@ class CLI:
             custom = [a for a in defs.values() if not a.builtin]
             if not custom:
                 self.ui.info("add .dgc/agents/<name>.md to override a built-in or add your own "
-                             "(frontmatter: model, base_url, api_mode, api_key_env, effort, tools)")
+                             "(frontmatter: model, base_url, api_mode, api_key_env, effort, context_size, tools)")
         elif cmd == "subagent":
             args = rest.split()
             if not args:
+                from .config import subagent_window_text
                 self.ui.info(f"sub-agent model: {cfg.get('subagent_model') or '(inherit main)'}  ·  "
                              f"host: {cfg.get('subagent_base_url') or '(inherit main)'}  ·  "
-                             f"transport: {cfg.get('subagent_api_mode') or '(inherit/infer)'}")
+                             f"transport: {cfg.get('subagent_api_mode') or '(inherit/infer)'}  ·  "
+                             f"context: {subagent_window_text(cfg)}")
             elif args[0] == "model" and len(args) > 1:
                 cfg.set("subagent_model", args[1])
                 self.ui.info(f"sub-agent model → {args[1]}")
@@ -1341,13 +1343,21 @@ class CLI:
                     return True
                 cfg.set("subagent_api_mode", mode)
                 self.ui.info(f"sub-agent transport → {mode}")
+            elif args[0] == "context" and len(args) == 2:
+                from .config import subagent_window_arg
+                size = subagent_window_arg(args[1])
+                if size is None:
+                    self.ui.error("context must be a token count of at least 2048, or 0 for the main window")
+                    return True
+                cfg.set("subagent_context_size", size)
+                self.ui.info(f"sub-agent context → {size:,} tokens" if size else "sub-agent context → the main window")
             elif args[0] == "clear":
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode"):
-                    cfg.set(k, "")
+                          "subagent_api_mode", "subagent_context_size"):
+                    cfg.set(k, "" if k != "subagent_context_size" else 0)
                 self.ui.info("sub-agent overrides cleared — inherits the main model/host")
             else:
-                self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | clear]")
+                self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | context TOKENS | clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)

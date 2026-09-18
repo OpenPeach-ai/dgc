@@ -71,9 +71,12 @@ _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
 # Settings that only shape the next request, so changing them mid-turn cannot disturb the one in
 # flight. Anything that moves the execution route -- provider, model, sandbox, delegation -- is
-# deliberately absent and still waits for the turn to end.
+# deliberately absent and still waits for the turn to end. The sub-agent route is the exception
+# that proves it: it is read only when a sub-agent starts, and a running one keeps the client it
+# started with, so a new sub-agent model (as a new main model) applies from the next one on.
 _LIVE_SAFE_CONFIG_KEYS = frozenset({
-    "context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "context_size", "subagent_context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
@@ -129,6 +132,10 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
+# Config fields added to protocol v14 after it first shipped. An editor validates every event it
+# receives and rejects a field it doesn't know, so these go only to a client whose get_config
+# listed them in `fields`.
+_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -161,6 +168,7 @@ _CONFIG_ENUMS = {
 _CONFIG_INTEGER_RANGES = {
     "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
     "context_size": (2_048, MAX_SAFE_INTEGER),
+    "subagent_context_size": (0, MAX_SAFE_INTEGER),     # 0: the main window
     "max_parallel_tasks": (1, 8),
     "autonomous_max_turns": (1, 1_000),
     "monitor_wake_delay_s": (1, 300),
@@ -2403,8 +2411,16 @@ class Backend:
         self.em.emit("retained_tasks", items=[task.as_dict() for task in tasks[:100]],
                      errors=errors, total=len(tasks), **_request_fields(request_id))
 
+    _config_fields: frozenset = frozenset()     # opt-in config fields this client asked for
+
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
+        extra = {}
+        if "subagent_context_size" in self._config_fields:
+            try:
+                extra["subagent_context_size"] = max(0, int(c.get("subagent_context_size", 0) or 0))
+            except (TypeError, ValueError):
+                extra["subagent_context_size"] = 0
         from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      subscription_engine=str(c.get("subscription_engine", "")),
@@ -2428,7 +2444,7 @@ class Backend:
                      fallback_base_url=c.get("fallback_base_url", ""),
                      fallback_api_key_set=bool(c.get("fallback_api_key", "")),
                      fallback_api_mode=c.get("fallback_api_mode", ""),
-                     context_size=c.get("context_size", 32768),
+                     context_size=c.get("context_size", 32768), **extra,
                      sandbox=bool(c.get("sandbox", False)),
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
@@ -3964,6 +3980,9 @@ class Backend:
             if "context_size" in values:
                 self._emit_context(request_id)
         elif t == "get_config":
+            fields = cmd.get("fields")
+            if isinstance(fields, list):
+                self._config_fields = frozenset(f for f in fields if f in _CONFIG_OPT_IN_FIELDS)
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()

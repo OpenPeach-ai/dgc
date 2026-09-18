@@ -1443,6 +1443,22 @@ test("the activity verb is the backend's, and does not outlive the turn", () => 
   dom.window.close();
 });
 
+// A model that works only through tool calls (glm-5.3 on Ollama Cloud) wrote no prose and showed no
+// reasoning, so the row read "↓ 0 tok" for the whole run. Its tool arguments are output it wrote.
+test("a turn made only of tool calls counts the arguments the model wrote", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Write the parser" });
+  const args = { path: "parser.py", content: "def parse(text):\n    return text.split()\n".repeat(20) };
+  event({ type: "tool_call", call_id: "c1", name: "write_file", args, summary: "parser.py" });
+  event({ type: "tool_call", call_id: "c1", name: "write_file", args, summary: "parser.py" });   // re-sent: once
+  event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Writing a file" });
+  const meta = doc.querySelector(".msg.dgc .thinking .meta").textContent;
+  assert.match(meta, new RegExp(`· ↓ ${Math.round(JSON.stringify(args).length / 4)} tok\\)$`));
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 // The founder's screenshot: while a command ran, the panel printed it three times -- in the tool
 // group header, on the card, and again on the activity row at the bottom. The card is the one place
 // the argument belongs; the header summarises and the row says what kind of step is running.
@@ -1816,6 +1832,97 @@ test("the Agents tab offers the same provider preset the Models tab does", () =>
                "choosing a preset fills the sub-agent host");
   assert.equal(doc.getElementById("s-base_url").value, "",
                "and never touches the main connection");
+  assert.deepEqual(errors, []);
+});
+
+test("picking a host fills the model dropdown with the models that host offers", () => {
+  const { errors, send, doc, posted } = makeDom();
+  const ollama = "http://localhost:11434/v1";
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "settings_open", providers: [
+    { id: "ollama", label: "Ollama (local)", url: ollama, needsKey: false },
+  ], models: [], section: "agents" });
+  const asks = () => posted.filter((m) => m.type === "settingsModels");
+  assert.equal(asks().at(-1).target, "subagent", "opening Settings lists the sub-agent host's models");
+
+  const sub = doc.getElementById("s-subagent_provider");
+  sub.value = "ollama"; sub.onchange();
+  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["subagent", ollama]);
+  send({ type: "settings_models", target: "subagent", base_url: ollama, ids: ["glm-5.3:cloud", "qwen3.8:27b"] });
+  assert.equal(doc.getElementById("s-subagent_model").getAttribute("list"), "s-subagent-models");
+  assert.deepEqual([...doc.querySelectorAll("#s-subagent-models option")].map((o) => o.value),
+                   ["glm-5.3:cloud", "qwen3.8:27b"]);
+  assert.match(doc.getElementById("s-subagent_model").placeholder, /2 models on this host/);
+
+  const main = doc.getElementById("s-provider");
+  main.value = "ollama"; main.onchange();
+  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["main", ollama]);
+  send({ type: "settings_models", target: "main", base_url: ollama, ids: ["qwen3.8:27b"] });
+  assert.deepEqual([...doc.querySelectorAll("#s-models option")].map((o) => o.value), ["qwen3.8:27b"]);
+  send({ type: "settings_models", target: "main", base_url: "http://elsewhere:11434/v1", ids: ["stale"] });
+  assert.deepEqual([...doc.querySelectorAll("#s-models option")].map((o) => o.value), ["qwen3.8:27b"],
+                   "a reply for a host the form moved away from is ignored");
+
+  const host = doc.getElementById("s-subagent_base_url");
+  host.value = "http://gpu:11434/v1";
+  host.dispatchEvent(new doc.defaultView.Event("change"));
+  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["subagent", "http://gpu:11434/v1"]);
+  send({ type: "settings_models", target: "subagent", base_url: "http://gpu:11434/v1", ids: [], error: "HTTP 404" });
+  assert.match(doc.getElementById("s-subagent_model").placeholder, /couldn't list/);
+  assert.deepEqual(errors, []);
+});
+
+test("the sub-agent context window loads from the config and saves with the form", () => {
+  const { errors, send, doc, posted } = makeDom();
+  send({ type: "settings_open", providers: [], models: [], section: "agents" });
+  const preset = doc.getElementById("s-subagent_context_size_preset");
+  const custom = doc.getElementById("s-subagent_context_size");
+  const config = (extra) => send({ type: "event", event: { type: "config", model: "m", mode: "default",
+    base_url: "http://localhost:11434/v1", context_size: 131072, ...extra } });
+  config({ subagent_context_size: 65536 });
+  assert.deepEqual([preset.value, custom.hidden], ["65536", true]);
+  config({});
+  assert.deepEqual([preset.value, custom.hidden], ["0", true], "no value: the main model's window");
+  config({ subagent_context_size: 50000 });
+  assert.deepEqual([preset.value, custom.hidden, custom.value], ["custom", false, "50000"]);
+  preset.value = "16384"; preset.onchange();
+  doc.getElementById("set-save").click();
+  assert.equal(posted.find((m) => m.type === "saveSettings").values.subagent_context_size, "16384");
+  assert.equal(doc.getElementById("s-context_size_preset").value, "131072", "the main window is its own menu");
+  assert.deepEqual(errors, []);
+});
+
+test("the context meter's menu sets the context window, as Settings does", () => {
+  const { errors, send, doc, posted } = makeDom();
+  const event = (ev) => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "config", model: "m", mode: "default", base_url: "http://localhost:11434/v1", context_size: 65536 });
+  event({ type: "context", used: 12000, size: 65536, compact_threshold: 0.85, compact_at: 55705,
+          input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 0 });
+  doc.getElementById("btn-ctx").click();
+  const select = doc.getElementById("ctx-size"), custom = doc.getElementById("ctx-size-custom");
+  const note = doc.getElementById("ctx-size-note");
+  assert.equal(doc.getElementById("ctxmenu").hidden, false);
+  assert.deepEqual([select.value, custom.hidden, note.hidden], ["65536", true, true]);
+
+  select.value = "131072"; select.onchange();
+  assert.equal(posted.filter((m) => m.type === "setContextSize").at(-1).size, 131072);
+  // The model holds less than asked for: the row keeps the choice and says what is really used.
+  event({ type: "config", model: "m", mode: "default", base_url: "http://localhost:11434/v1", context_size: 131072 });
+  event({ type: "context", used: 12000, size: 40960, compact_threshold: 0.85, compact_at: 34816,
+          input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 0 });
+  assert.equal(select.value, "131072");
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /^This model holds 40,960 tokens, so DGC uses that\.$/);
+
+  select.value = "custom"; select.onchange();
+  assert.equal(custom.hidden, false, "Custom opens a token field");
+  custom.value = "100000";
+  custom.dispatchEvent(new doc.defaultView.Event("change"));
+  assert.equal(posted.filter((m) => m.type === "setContextSize").at(-1).size, 100000);
+  custom.value = "100";
+  custom.dispatchEvent(new doc.defaultView.Event("change"));
+  assert.equal(posted.filter((m) => m.type === "setContextSize").length, 2, "a window under 2048 is never sent");
   assert.deepEqual(errors, []);
 });
 

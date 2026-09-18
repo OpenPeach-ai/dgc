@@ -258,7 +258,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "subagent_api_mode": _S(False), "subagent_api_key_set": _B(False),
         "fallback_model": _S(False), "fallback_base_url": _S(False),
         "fallback_api_mode": _S(False), "fallback_api_key_set": _B(False),
-        "context_size": _I(False), "goal": _O(),
+        "context_size": _I(False), "subagent_context_size": _I(False), "goal": _O(),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
         "ultra_mode": _B(False),
@@ -573,7 +573,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "stop_artifact": {"id": _S(), "request_id": _S(False)},
     # v14: ``values`` may carry thinking_inline (bool) and thinking_inline_max_chars (int 0..1000).
     "set_config": {"values": _O(), "request_id": _S(False)},
-    "get_config": {"request_id": _S(False)},
+    # `fields`: config fields added after v14 first shipped that this client understands (see
+    # Backend._config_fields); an editor that lists none never receives them.
+    "get_config": {"request_id": _S(False), "fields": _A(False)},
     "status": {"request_id": _S(False)},
     "shutdown": {},
     # ---- v13: background monitors ------------------------------------------------------------

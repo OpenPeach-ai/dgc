@@ -53,6 +53,8 @@
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
   --t-xs: 11px; --t-sm: 12px; --t-base: 14px; --t-lg: 16px; --t-xl: 18px;
+  /* The conversation itself: your prompts, the answers, and what you're typing. */
+  --t-chat: 12px;
   --w-reg: 400; --w-med: 500; --w-semi: 600; --w-bold: 700;
   --control: 28px;               /* every button, chip and field lands on this height */
   --control-sm: 20px;
@@ -240,7 +242,8 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
 .user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
-.user .bubble .prompt-text { white-space: pre-wrap; word-break: break-word; }
+/* A prompt reads at the answer's size and spacing: it inherited the page's tight default line height. */
+.user .bubble .prompt-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-chat); line-height: 1.62; }
 .user .bubble .prompt-atts { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .user .bubble .prompt-atts:last-child { margin-bottom: 0; }
 .user .bubble .prompt-atts > li { display: flex; min-width: 0; }
@@ -268,7 +271,7 @@ body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { ma
 body.vscode-light, body.vscode-high-contrast-light {
   --prompt-fill: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
-.text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
+.text { white-space: normal; overflow-wrap: anywhere; font-size: var(--t-chat); line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
 .text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
 .text p, .surface-markdown p { margin: 0 0 var(--sp-3); }
@@ -664,7 +667,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .cinput { min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
 .cinput .pmark { display: none; }
 #cbox[data-mode="auto"] .cinput .pmark { color: #8B7CFF; }
-#input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-base)/1.45 var(--sans); padding: 0; max-height: 200px; min-width: 0; }
+#input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-chat)/1.45 var(--sans); padding: 0; max-height: 200px; min-width: 0; }
 #input::placeholder { color: var(--faint); }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 /* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,
@@ -714,6 +717,12 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .context-track { height: 4px; margin-top: var(--sp-3); overflow: hidden; border-radius: var(--r-2xl); background: var(--border); }
 .context-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--lav)); transition: width .24s ease; }
 .context-split { display: flex; justify-content: space-between; margin-top: var(--sp-1); color: var(--faint); font: var(--w-med) var(--t-xs)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.context-size { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-top: var(--sp-3); }
+.context-size-controls { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.context-size-select, .context-size-custom { height: 24px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface2); color: var(--text-strong); padding: 0 var(--sp-2); font: var(--w-semi) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
+.context-size-custom { width: 10ch; cursor: text; }
+.context-size-select:hover, .context-size-custom:hover, .context-size-custom:focus { border-color: var(--accent); }
+.context-size-note { margin: var(--sp-1) 0 0; color: var(--faint); text-align: right; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-usage { margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); background: var(--code); font: var(--w-med) var(--t-xs)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
 .context-last { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-last .codicon { flex: none; margin-top: 0; color: var(--accent-text); }
@@ -1035,7 +1044,8 @@ button.act.danger { color: var(--err-text); }
 /* open-file link + code copy */
 button.link { font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; background: transparent; border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--muted); flex: none; }
 button.link:hover { border-color: var(--accent); color: var(--text); }
-pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) var(--t-sm)/1.6 var(--mono); color: var(--text); white-space: pre; }
+/* A step under the conversation's text: monospace at the prose size reads a size larger. */
+pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
 pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
 /* One 400-line fence used to bury the answer and push the response actions off screen. Collapse
    past a readable height, with the expander saying how much is hidden. */

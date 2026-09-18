@@ -11,6 +11,7 @@ A sub-agent is a Markdown file with frontmatter:
     api_mode: ollama                 # optional — auto | ollama | anthropic | chat_completions | responses
     api_key_env: REVIEWER_API_KEY    # optional — key from an environment variable
     effort: high                     # optional — off | low | medium | high | xhigh
+    context_size: 65536              # optional — its context window; else subagent_context_size, else the main one
     tools: read_file, glob, grep     # optional — allow-list; omit for the full child catalog
     ---
 
@@ -47,6 +48,7 @@ class AgentDef:
     api_mode: str = ""
     api_key_env: str = ""
     effort: str = ""
+    context_size: str = ""
     tools: str = ""
     builtin: bool = False
     tool_allow: frozenset[str] = field(default_factory=frozenset)
@@ -101,7 +103,8 @@ def _parse_agent(path: Path) -> AgentDef | None:
     except OSError:
         return None
     fields = {"name": path.stem, "description": "", "model": "",
-              "base_url": "", "api_mode": "", "api_key_env": "", "effort": "", "tools": ""}
+              "base_url": "", "api_mode": "", "api_key_env": "", "effort": "", "context_size": "",
+              "tools": ""}
     body = text
     if text.startswith("---"):
         end = text.find("\n---", 3)
