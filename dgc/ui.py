@@ -125,6 +125,10 @@ def arg_summary(name: str, args: dict) -> str:
         from .questions import args_summary
         value = args_summary(args).replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
+    if name == "view_image" and isinstance(args, dict) and args.get("via"):
+        # The card DGC draws when a vision model looked at a prompt's attachments (dgc/vision.py).
+        value = f"{args.get('path') or 'image'} · via {args['via']}".replace("\n", " ")
+        return value[:120] + ("…" if len(value) > 120 else "")
     for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
         if key in args:
             value = str(args[key]).replace("\n", " ")

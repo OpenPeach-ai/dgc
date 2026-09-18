@@ -211,10 +211,18 @@ def _strip_images_with_note(messages: list, model: str) -> tuple[list, int]:
         kept = [part for part in content if not _is_image_part(part)]
         count = len(content) - len(kept)
         dropped += count
-        note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but {model} cannot "
-                "read images. Say so and ask for a description, or suggest switching to a "
-                "vision-capable model. Do not pretend to have seen "
-                f"{'them' if count > 1 else 'it'}.]")
+        seen = message.get("_dgc_vision")
+        if isinstance(seen, dict) and str(seen.get("text") or "").strip():
+            # A vision model already looked at these for this model (dgc/vision.py): its report
+            # stands in for the pixels. Counted as dropped all the same: the pixels did not go.
+            from .vision import replacement_note
+            note = replacement_note(count, model, seen)
+        else:
+            note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but {model} "
+                    "cannot read images. Say so and ask for a description, or suggest switching to "
+                    "a vision-capable model or setting a vision sub-agent model (`/subagent model "
+                    "NAME`) so DGC can look at images for this one. Do not pretend to have seen "
+                    f"{'them' if count > 1 else 'it'}.]")
         clean = dict(message)
         clean["content"] = [*kept, {"type": "text", "text": note}]
         out.append(clean)

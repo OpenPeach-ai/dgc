@@ -8046,6 +8046,10 @@ class _ClickControl(FormattedTextControl):
 
 
 def _arg_summary(args: dict) -> str:
+    if isinstance(args, dict) and args.get("via"):   # a vision model looked (dgc/vision.py)
+        v = style_mod.terminal_safe_text(f"{args.get('path') or 'image'} · via {args['via']}")
+        v = v.replace("\n", " ")
+        return v[:100] + ("…" if len(v) > 100 else "")
     for k in ("path", "command", "pattern", "url", "name", "description", "symbol", "operation"):
         if k in args:
             v = style_mod.terminal_safe_text(args[k]).replace("\n", " ")
