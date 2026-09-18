@@ -498,13 +498,25 @@ def _checked_target(root: Path, repo_path: str) -> Path:
     return target
 
 
+# Interpreter and test-runner caches are never a child's work, and parallel children that each
+# run the tests write the same ones. In a repository that doesn't ignore them, counting them made
+# the second child's real changes a conflict, and its work was not integrated.
+_CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis"})
+
+
+def _is_cache(path: str) -> bool:
+    parts = path.split("/")
+    return any(part in _CACHE_DIRS for part in parts[:-1]) or path.endswith((".pyc", ".pyo"))
+
+
 def _dirty_paths(repo: Path, base_commit: str, project_rel: Path) -> set[str]:
     pathspec = str(project_rel) if project_rel != Path(".") else "."
     tracked = _nul_paths(_git_bytes(
         ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames",
          base_commit, "--", pathspec], repo))
-    untracked = _nul_paths(_git_bytes(
+    untracked = [path for path in _nul_paths(_git_bytes(
         ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec], repo))
+        if not _is_cache(path)]
     return {path for path in (*tracked, *untracked) if _inside_project(path, project_rel)}
 
 
