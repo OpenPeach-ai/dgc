@@ -490,16 +490,68 @@ npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vib
 ```js
 import { DGC } from "@vibedgc/sdk";
 
-const dgc = new DGC({ stateDir, model: process.env.DGC_MODEL, baseUrl: process.env.DGC_BASE_URL });
-const session = await dgc.session({ cwd: ".", permissions: { mode: "plan", unhandled: "deny" } });
-const result = await session.run("Explain the checkout flow. Do not edit files.");
-console.log(result.status, result.finalText);
-await dgc.close();
+const dgc = new DGC({ model: process.env.DGC_MODEL, baseUrl: process.env.DGC_BASE_URL });
+try {
+  const session = await dgc.session({ cwd: ".", permissions: { mode: "plan", unhandled: "deny" } });
+  const result = await session.run("Explain the checkout flow. Do not edit files.");
+  console.log(result.status, result.finalText, result.error ?? "");
+} finally {
+  await dgc.close();
+}
 ```
 
 Names are camelCase versions of the Python ones (`stateDir`, `onPermission`, `outputSchema`,
-`finalText`, `defineTool`, `usageReport`, `exportAudit`). The package ships compiled JavaScript
-and type declarations.
+`finalText`, `defineTool`, `usageReport`, `exportAudit`), and every time is in milliseconds
+(`timeoutMs`, `decisionTimeoutMs`, `startTimeoutMs`, `requestTimeoutMs`) where Python uses
+seconds. The package ships compiled JavaScript and type declarations. It behaves like the Python
+client in everything this guide describes:
+
+- **State and isolation.** `stateDir` is optional (a fresh private temporary directory; see
+  `dgc.stateDir`), must be private, and each session writes its isolated `config.json` from
+  scratch, so a planted or stale file is never merged and per-session options (`model`,
+  `maxTurns`, `verifyCommand`, `turnBudgetS`, `maxTokens`) never reach a later session. Extra DGC
+  settings go through `extraConfig`. The runtime child gets basic variables only
+  (`inheritEnv: false`), and a `dgc/` package in the workspace cannot replace the runtime.
+- **Policy and sandbox.** `policy: { network, denyTools, allowTools, extraReadDirs,
+  denyPathPrefixes, shell, redactEvents }` is the `RuntimePolicy` above, compiled to the same
+  per-session policy the Python client sends (`DGC_SESSION_POLICY`), enforced by the runtime in
+  every mode and never written to a config file. `sandbox: "required" | "preferred" | "off"` (or
+  `{ requirement }`) works as in Python; `session.sandbox` reports what was applied.
+- **Runs.** `stream()` returns a `RunHandle` (`for await` over its events, `result(timeoutMs?)`,
+  `cancel()`). `timeoutMs: null` means no limit, and a run that hits its timeout ends
+  `status: "failed"`, `reason: "timeout"`. `signal: AbortSignal` cancels a run; so does leaving a
+  `for await` loop early. A per-run `maxTurns` and an `outputSchema` repair are restored after
+  the run. `followup()` returns a handle for its own observed, audited turn; `steer()` throws
+  unless a run is active.
+- **Results.** `result.usage` has the provider's token counts (`input_tokens`, `output_tokens`,
+  `cached_input_tokens`, `reasoning_tokens`, `requests`; `null` when not reported) and `cost_usd`
+  from `pricing`; `usageReport(department?)` returns totals, `unknownUsageRuns`, `byDepartment`
+  and the rows. `result.changes` lists `{ path, kind, before, after, root, diff }` with a
+  `git apply`-able diff, and `result.verification` reports only the configured `verifyCommand`.
+  Failed runs carry the runtime's error in `result.error`.
+- **Decisions.** `decisionTimeoutMs` (default 30 000; `null` for no limit) bounds every
+  callback, `onMcpInput` included, and a cancel always wins. `permissions.unhandled: "callback"`
+  requires `onPermission` and fails the run (`reason: "decision_failed"`) when it throws, times
+  out or answers something invalid.
+- **Errors.** Every error is a `DGCError`: `DGCConfigError`, `DGCUnsupportedError`,
+  `DGCRuntimeError`, `DGCProtocolError` (with `offeredProtocol`, `backendVersion`),
+  `DGCCommandRejectedError` (with `reason`, `command`; thrown at once) and `DGCTimeoutError`. A
+  failed setup never leaves `dgc serve` or the tool socket behind. Event types newer than the
+  SDK are skipped (`session.transport.ignoredEventTypes` counts them).
+- **Custom tools.** `defineTool(name, description, inputSchema, handler, { timeoutMs })`. Tools
+  are served from a private, randomly named socket in a fresh 0700 directory; the relay proves a
+  per-session secret on its first line, and one relay connection is served at a time.
+- **Audit.** Audit and usage files are owner-only, and `exportAudit(sessionId?, { redact })`
+  redacts with the same rules as Python (`redact` and `redactText` are exported).
+
+Where the Node client differs: there is no separate async class (every call is already async)
+and no `RetryPolicy`; the stateDir lock is per process (Python also takes a file lock across
+processes), so give each process its own `stateDir`. The Node tool relay cannot mark itself
+non-dumpable the way the Python relay does on Linux, so with the OS sandbox off another process
+of the same user could read its secret from `/proc`. The secret is refused while the relay is
+connected, but such a process could stop the relay and take its place before DGC restarts it.
+The OS sandbox (the default for a `RuntimePolicy`) hides both the relay and the socket from the
+agent's shell.
 
 ## Verifying a release
 

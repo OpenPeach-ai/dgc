@@ -128,12 +128,18 @@ test("npm install <packed tarball> gives an importable, typed package", async (t
 
     // Types resolve for a Node consumer (with @types/node) compiled with the package's own TypeScript.
     writeFileSync(join(app, "consumer.ts"), [
-      'import { DGC, VERSION, defineTool, type RunResult } from "@vibedgc/sdk";',
+      'import { DGC, DGCError, VERSION, defineTool, type RunResult } from "@vibedgc/sdk";',
       "const version: string = VERSION;",
       'const tool = defineTool("sku_lookup", "Look up a SKU", { type: "object" }, () => "ok");',
       "export async function main(dgc: DGC): Promise<RunResult> {",
       '  const session = await dgc.session({ cwd: ".", tools: [tool] });',
-      '  return session.run(version);',
+      "  const controller = new AbortController();",
+      "  try {",
+      '    return await session.run(version, { timeoutMs: null, signal: controller.signal });',
+      "  } catch (error) {",
+      "    if (error instanceof DGCError) throw error;",
+      "    throw error;",
+      "  }",
       "}",
       "",
     ].join("\n"));
@@ -144,6 +150,24 @@ test("npm install <packed tarball> gives an importable, typed package", async (t
       files: ["consumer.ts"],
     }));
     run(process.execPath, [TSC, "-p", join(app, "tsconfig.json")], { cwd: app });
+    // The declarations stand on their own: a consumer without @types/node (and without the DOM
+    // library) type-checks them too.
+    writeFileSync(join(app, "bare.ts"), [
+      'import { DGC, defineTool, PROTOCOL, VERSION, type RunResult, type RuntimePolicy } from "@vibedgc/sdk";',
+      'const policy: RuntimePolicy = { denyTools: ["mcp__app__x"], denyPathPrefixes: ["secrets"], shell: "sandboxed" };',
+      'const dgc = new DGC({ model: "m", baseUrl: "http://127.0.0.1:1/v1", policy });',
+      'const tool = defineTool("x", "d", { type: "object", properties: {} }, async () => "ok", { timeoutMs: 5000 });',
+      "const numbers: [number, string] = [PROTOCOL, VERSION];",
+      "let result: RunResult | undefined;",
+      "void dgc; void tool; void numbers; void result;",
+      "",
+    ].join("\n"));
+    writeFileSync(join(app, "tsconfig.bare.json"), JSON.stringify({
+      compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", lib: ["ES2022"],
+                         strict: true, noEmit: true, types: [], skipLibCheck: false },
+      files: ["bare.ts"],
+    }));
+    run(process.execPath, [TSC, "-p", join(app, "tsconfig.bare.json")], { cwd: app });
 
     // Plain `node` (no --experimental-strip-types) imports it and runs a real session, including
     // a host tool over the packaged dist/mcp-bridge.mjs relay.

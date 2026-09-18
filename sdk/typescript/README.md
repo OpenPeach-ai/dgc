@@ -37,6 +37,13 @@ The SDK needs a DGC CLI (0.41.6 or newer). It uses `DGC_PYTHON` when set, else t
 `dgc` launcher (on `PATH` or `~/.local/bin/dgc`, where `curl -fsSL https://vibedgc.com/install.sh | bash`
 puts it), else `python3 -m dgc`. Pass `runtime: [...]` to choose explicitly.
 
+Each session runs with a private, freshly written config: nothing left in `stateDir` is merged,
+and a `policy` (tool, path, network and shell limits) is enforced by the runtime for that session
+only, in every permission mode. Every error is a `DGCError` subclass (`DGCConfigError`,
+`DGCRuntimeError`, `DGCProtocolError`, `DGCCommandRejectedError`, `DGCTimeoutError`,
+`DGCUnsupportedError`). Times are milliseconds: `run(prompt, { timeoutMs: null })` has no limit,
+and `{ signal }` takes an `AbortSignal` that cancels the run.
+
 The runtime child sees only basic variables (`PATH`, locale, terminal, temp and certificate
 locations), the isolated HOME, `apiKey` and `extraEnv`. Pass `inheritEnv: ["NAME"]` (or `true`)
 to hand it more of your environment.
