@@ -3,11 +3,12 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-09-18T16:47:10Z",
+    "timestamp": "2026-09-18T19:53:20Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
-      "version": "0.5.3"
+      "version": "0.5.3",
+      "purl": "pkg:pypi/dgc-sdk@0.5.3"
     }
   },
   "components": [
@@ -15,7 +16,7 @@
       "type": "library",
       "name": "dgc-sdk",
       "version": "0.5.3",
-      "purl": "pkg:generic/dgc-sdk@0.5.3"
+      "purl": "pkg:pypi/dgc-sdk@0.5.3"
     },
     {
       "type": "file",
@@ -24,7 +25,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "68e70e5e7897911251262fe7d4359790937bffc9bd8f7ced084eecd38cbac4a9"
+          "content": "3dccf247f689168c5b67674ed719b2800f48a9473dd80a832147deb62a232d11"
         }
       ]
     },
@@ -35,7 +36,18 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1011446e12cbfb22e517fd762c2166925e8488b27b54ae6fa74a666f911260cb"
+          "content": "3fb4cb58a881d5c096d5d38af3dd071c0c7323fa1f1fb244878acf53d43abdcf"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/python/dgc_sdk/_state.py",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "eef28c9e3fd0465d5d6a9a6c866c91a0c0ccb34d99b51bd00555cd29af021ba6"
         }
       ]
     },
@@ -46,7 +58,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "312359d3cb022680bdc72708dc0b8e8ce7dde10f0a0b96c40087b53084262f15"
+          "content": "f0c80b603bdb25edae440e0381848398b1682554b43d8611b9358268cce8f4cc"
         }
       ]
     },
@@ -57,7 +69,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6ba9112a03e4b95232d7461512c425233f009f38aae5162235d2d282ee424d3d"
+          "content": "f53e97efc6febe2c953cf1003ddc637e4f2a76e1daa58c81f447490f5918a2f8"
         }
       ]
     },
@@ -68,7 +80,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "891788f62dc42bfeba8a22b6bbf085fa248bf430a9d1a21b6041ac75bf708bca"
+          "content": "910d8886ba2210866a07f578a99314933686958c401344e36472b7c8450e4a40"
         }
       ]
     },
@@ -79,7 +91,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a41e05f1b1c62709714a04723ca29f27d3a91c0be309da100ce64a0825897e92"
+          "content": "6cd5f45b5cfaa5d2499004d4002b5d70df219309ddc68709e5ad496fadb7f09b"
         }
       ]
     },
@@ -90,7 +102,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c0d78148d4ccff8fa53b8db2ca8ef335f46e3be8a30d5e875d2a8fcf3423e6f4"
+          "content": "d001192cf8c0639e11c24a750ac02b81877a303629c7466082d18c2e0ef30bb1"
         }
       ]
     },
@@ -112,7 +124,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a4cd9c8ec05993c46f2a7f5c4bbe2494b4c724981d91c8341ce76be0cdbc332e"
+          "content": "a749b62c86b18efcbb807a6fe054c42d5a7f241b7f7697f83d6de29d4ecbed92"
         }
       ]
     },
@@ -123,7 +135,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f63849f75191fd9fff8d73d63ca8b1692676e67424b064ca78bd0a0d5bbdae17"
+          "content": "0da3152c16c4cb7add8e9b87720d273a101f2db55f7a403622c7ea6b623624b0"
         }
       ]
     },
@@ -145,7 +157,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c79d057375a51f4b0bef0989fb621aaf34603d1d4b68cfb83763844e350b4662"
+          "content": "a897530102ec1f7e3d870ac632f486c0ca08ef4e9f1f7bb79ff59a8ed9b667df"
         }
       ]
     },
@@ -167,7 +179,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a166899aae68cb80de33046d325128a693f0f229eff89e6283b11e9a3a8abf48"
+          "content": "96e755ddb51563efb7ad4512ea8f5f029f53186f1b531de7fcc3da3cfdd3c98f"
         }
       ]
     },
@@ -178,7 +190,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9344e5f3e3d2fed88d0bf498636b33aaf2499b626e3ccabc948d7924f7b6ee72"
+          "content": "ad645c7762ff1d5ed5f2e69cb0e6f1d93d5a699595355ea22f32b003364bf280"
         }
       ]
     },
@@ -200,7 +212,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "004e9337442d1de8623f8e0abda6057e0ed35d16191ffbf44858a540e7554f4d"
+          "content": "df207f970f3bdd2de23b9100c9aa22153901f7e6420d5db69945553ddc61694d"
         }
       ]
     },
@@ -233,7 +245,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "af475b2260e387c661f312178a917cf5ba3de07a2fe5ae212860986b30aa6dcf"
+          "content": "8dc322a83b5461139357be6a2b2d7e91a9654263afe9f7624b8beaa4dd09a1e0"
         }
       ]
     },
@@ -244,7 +256,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9e2d6b3a01d6338c4eb26c1c5dbbd7349182b83229c79c23c56021013191aa62"
+          "content": "d27c6b31f39c39c0de8f83a48222b4cae7bd69409ee89d08fb9e2d9533941f9c"
         }
       ]
     },
@@ -277,7 +289,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "b77e3e70671301ca2ff71c55729ee0244c16b2dead650dbce0fd9f1dcc6ae092"
+          "content": "d7c3a16d8c39948a8eb9da3077e24efade237568a575cf3b6448a09e5dae1f56"
         }
       ]
     },
@@ -299,7 +311,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "da43746c1311549e0496cb50f0aa3e57c0e98650234a8006f92b318213452147"
+          "content": "88a8a93a3b1dc52c331b4e835448de79a2658012409cab538216492fb3eb33b4"
         }
       ]
     },
@@ -310,7 +322,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "2a50d1f6119c5693894aef8f3f53171c5c4bc65cdda4c14c16eb70ee22682186"
+          "content": "011ed2b2c30b75bf77528dc8d77a24c12a83ccc8e725be08707ea4cd7686353a"
         }
       ]
     },
@@ -332,7 +344,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "e34cea91958520591d264f67fee16a24f33a74e92a2f78b96563a1668886aa9c"
+          "content": "85ceca07afc1e645fe68a0c48d8585c73d0ef8e2765578e34860a2743b707414"
         }
       ]
     },
@@ -343,7 +355,29 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "04f9239261faeb77e6f26a1240fa4ea7a5a238ab0643cff47b1d3e2b146ff66a"
+          "content": "073d431c7033869eb83e7827130cfb57a263eafd8eea557059b358fa65e07ad7"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/python/README.md",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "284c287ef24aff9271f0a3fc56f69a4c8fc59d1780241f80e7408886752f301d"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/python/LICENSE",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "feaa25a07a44540b6d1930c43322664b91f1f5454f8146a9e8e0f0ad264904af"
         }
       ]
     },
@@ -354,7 +388,62 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "acabeab7e29f748c60473d935c159bce6c23a852595897366a7c38c8ac39c638"
+          "content": "605451805caaf634612879314b901de0d4aa6794495950f27772ae0add49cc23"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/package-lock.json",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3092d3ae9c8472317e24d927e9ae8475a4a42419503a966702b2cb176954c385"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/tsconfig.json",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c1ba3196ce000cfdd5372133657a746f3f858034908b6bc9a10c76b6e6ac0231"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/scripts/build.mjs",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d794e3955adcb1f29a655864d7bae08c0673d79081ab27d13a7b2ae6109f0531"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/README.md",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "dd8c87c931e07009a611f116c7de20b6622c73bc737b18efe233d4ed16eb9eb4"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/LICENSE",
+      "version": "0.5.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "feaa25a07a44540b6d1930c43322664b91f1f5454f8146a9e8e0f0ad264904af"
         }
       ]
     },
@@ -365,7 +454,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "632a93f369f5d1d9d81e8625ba074a221b2dc4c7800cca99b7714b0df49d2bdf"
+          "content": "ebe842f406a633d84f9e46dc7c70ce604a61f7115b09055a75d29689188eea71"
         }
       ]
     },
@@ -376,7 +465,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "0c3432366ce321cdd57e0a75a83205cc02454bfb55304a7a5dd9f00447cc3d7b"
+          "content": "ce273ddbf8169f1c17f885ac4080f3213b70247f1569614369bb343087513494"
         }
       ]
     }
