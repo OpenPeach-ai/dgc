@@ -1191,16 +1191,13 @@ class Session:
             diff=event.get("diff") if isinstance(event.get("diff"), str) else None,
             command=event.get("command") if isinstance(event.get("command"), str) else None,
         )
-        if self._policy is not None:
-            forced = self._policy.decision(request, cwd=self._cwd)
-            if forced == "deny":
-                staff = self._on_permission is not None and self._permission_mode != "auto"
-                # Named deny_tools stay fail-closed even when staff is present. Bash
-                # write/network inspection defers to the callback so the ask is visible.
-                if self._policy.named_tool_denied(request.name) or not staff:
-                    return "deny"
-        action = self._decide(self._on_permission, request, "deny")
-        return action if action in ("once", "always", "deny") else "deny"
+        from .policy import resolve_permission
+        # Policy denies (tools, paths) are final; command screening defers to a reviewing
+        # callback so staff see the Bash ask; policy-checked reads are answered here.
+        return resolve_permission(
+            self._policy, request, cwd=self._cwd, permission_mode=self._permission_mode,
+            on_permission=self._on_permission,
+            ask=lambda: self._decide(self._on_permission, request, "deny"))
 
     def _plan(self, event: dict[str, Any]) -> str:
         request = PlanRequest(

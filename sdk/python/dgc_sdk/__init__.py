@@ -20,8 +20,8 @@ from .types import (
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionMode, PermissionPolicy, PermissionRequest, PermissionRule, PlanAction, PlanRequest,
     Question, QuestionAnswer, QuestionOption, QuestionRequest, RunEvent, RunResult, RunStatus,
-    SandboxPolicy, SandboxRequirement, SessionInfo, SkillInfo, TaskItem, TaskStatus, ToolRecord,
-    ToolSpec, UnhandledPolicy, VerificationResult,
+    SandboxPolicy, SandboxRequirement, SandboxStatus, SessionInfo, SkillInfo, TaskItem, TaskStatus,
+    ToolRecord, ToolSpec, UnhandledPolicy, VerificationResult,
 )
 
 __all__ = [
@@ -34,7 +34,8 @@ __all__ = [
     "PermissionAction", "PermissionMode", "PermissionPolicy", "PermissionRequest",
     "PermissionRule", "PlanAction", "PlanRequest",
     "Question", "QuestionAnswer", "QuestionOption", "QuestionRequest", "RunEvent", "RunHandle",
-    "RunResult", "RunStatus", "SandboxPolicy", "SandboxRequirement", "Session", "SessionInfo",
+    "RunResult", "RunStatus", "SandboxPolicy", "SandboxRequirement", "SandboxStatus", "Session",
+    "SessionInfo",
     "SkillInfo", "TaskItem", "TaskStatus", "ToolRecord", "ToolSpec", "UnhandledPolicy",
     "VerificationResult", "define_tool",
 ]

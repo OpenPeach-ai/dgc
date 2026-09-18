@@ -20,13 +20,45 @@ GoalStatus = Literal["none", "active", "paused", "completed", "blocked"]
 
 @dataclass(frozen=True)
 class PermissionPolicy:
+    """``session(permissions=...)``, also accepted as ``{"mode": ..., "unhandled": ...}``.
+
+    ``unhandled`` decides the permission requests ``on_permission`` does not answer: ``"deny"``
+    denies them (and every request when there is no callback); ``"callback"`` requires a
+    callback, so ``session()`` refuses to start without one, and still denies a request the
+    callback leaves unanswered (it raised, returned something else, or timed out).
+    """
+
     mode: PermissionMode = "default"
     unhandled: UnhandledPolicy = "deny"
 
 
 @dataclass(frozen=True)
 class SandboxPolicy:
+    """``DGC(sandbox=...)`` / ``session(sandbox=...)``, also accepted as ``{"requirement": ...}``.
+
+    ``"required"``: the session does not start unless the runtime confines shell commands in the
+    OS sandbox. ``"preferred"``: confined when a sandbox is available; otherwise the session
+    starts, warns (``RuntimeWarning``) and says why in ``Session.sandbox``. ``"off"``: no
+    sandbox unless a RuntimePolicy asks for one.
+    """
+
     requirement: SandboxRequirement = "off"
+
+
+@dataclass(frozen=True)
+class SandboxStatus:
+    """Whether a session's shell commands run inside the OS sandbox (``Session.sandbox``).
+
+    ``requirement`` is what the session asked for (a sandboxed-shell RuntimePolicy asks for at
+    least ``"preferred"``), ``active`` whether the runtime confines shell commands, ``backend``
+    the confinement tool (``bwrap`` or ``sandbox-exec``), and ``reason`` why a ``"preferred"``
+    sandbox is off.
+    """
+
+    requirement: SandboxRequirement = "off"
+    active: bool = False
+    backend: str = ""
+    reason: str = ""
 
 
 @dataclass(frozen=True)

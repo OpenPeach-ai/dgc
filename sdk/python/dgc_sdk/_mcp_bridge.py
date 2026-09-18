@@ -1,19 +1,37 @@
 """stdio ↔ Unix-socket relay so DGC can spawn an MCP server that lives in the SDK process.
 
-``python -m dgc_sdk._mcp_bridge SOCKET`` copies NDJSON in both directions. The SDK host speaks
-MCP on the accepted socket (initialize, tools/list, tools/call).
+DGC runs ``python -I .../_mcp_bridge.py SOCKET`` with the session's secret in
+``DGC_SDK_TOOL_TOKEN``. The relay proves it knows the secret, then copies NDJSON in both
+directions; the SDK host speaks MCP on the accepted socket (initialize, tools/list, tools/call).
+
+``-I`` keeps this file's own directory off ``sys.path``: run as a script from inside the
+package, ``dgc_sdk/types.py`` would otherwise stand in for the standard ``types`` module and
+the relay would die on its first import. The relay itself needs only the standard library.
 """
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import secrets
+import shutil
 import socket
+import struct
 import sys
+import tempfile
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+TOKEN_ENV = "DGC_SDK_TOOL_TOKEN"
+SERVER_NAME = "app"
+_HELLO_KEY = "dgc_sdk_bridge"
+_HELLO_TIMEOUT_S = 10.0
+_HELLO_MAX = 4096
+# sun_path holds 104 bytes on macOS and 108 on Linux, terminator included.
+_SOCKET_PATH_MAX = 100
 
 
 def _sdk_version() -> str:
@@ -29,8 +47,17 @@ def _sdk_version() -> str:
 
 
 def relay(socket_path: str) -> int:
+    token = os.environ.get(TOKEN_ENV, "")
+    if not token:
+        sys.stderr.write(f"dgc-sdk tool bridge: {TOKEN_ENV} is not set\n")
+        return 2
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(socket_path)
+    try:
+        sock.connect(socket_path)
+        sock.sendall((json.dumps({_HELLO_KEY: 1, "token": token}) + "\n").encode("utf-8"))
+    except OSError as exc:
+        sys.stderr.write(f"dgc-sdk tool bridge: cannot reach the application: {exc}\n")
+        return 1
 
     def stdin_to_sock() -> None:
         try:
@@ -59,21 +86,78 @@ def relay(socket_path: str) -> int:
     return 0
 
 
-class ToolHub:
-    """Accept one MCP stdio proxy and dispatch ``tools/call`` to host handlers."""
+def _private_socket_path() -> tuple[str, str]:
+    """A fresh 0700 directory with a random socket name, short enough for ``sun_path``.
 
-    def __init__(self, socket_path: str, tools: SequenceToolMap):
-        self.socket_path = socket_path
+    The directory's mode keeps other users out; its random name means nothing can be planted or
+    squatted at a predictable path ahead of time.
+    """
+    from .errors import DGCConfigError
+    bases: list[str] = []
+    for base in (os.environ.get("XDG_RUNTIME_DIR") or "", tempfile.gettempdir(), "/tmp"):
+        if base and base not in bases and os.path.isdir(base):
+            bases.append(base)
+    for base in bases:
+        try:
+            directory = tempfile.mkdtemp(prefix="dgc-", dir=base)
+        except OSError:
+            continue
+        path = os.path.join(directory, secrets.token_hex(4) + ".sock")
+        if len(os.fsencode(path)) <= _SOCKET_PATH_MAX:
+            return directory, path
+        shutil.rmtree(directory, ignore_errors=True)
+    raise DGCConfigError(
+        "custom tools need a Unix socket path under 100 bytes; none of "
+        f"{', '.join(bases) or 'the temporary directories'} is short enough (set TMPDIR to a "
+        "short directory)")
+
+
+def _peer_uid(conn: socket.socket) -> int | None:
+    option = getattr(socket, "SO_PEERCRED", None)
+    if option is None:
+        return None
+    try:
+        raw = conn.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", raw)
+    except OSError:
+        return None
+    return uid
+
+
+class ToolHub:
+    """Serve host tool handlers to the authenticated MCP stdio relay DGC starts.
+
+    The socket lives in a private 0700 directory under a random name, and a connection is served
+    only after its first line carries this session's secret (and, on Linux, only from this
+    user). DGC hands the secret to the relay in its environment, which is never persisted.
+    """
+
+    def __init__(self, tools: SequenceToolMap, socket_path: str | None = None):
         self.tools = {item.name: item for item in tools}
+        self.token = secrets.token_urlsafe(32)
+        self._directory: str | None = None
+        self.socket_path = socket_path or ""
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
+        self.authenticated = threading.Event()
+        self.rejected = 0
 
     def start(self) -> None:
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
+        from .errors import DGCConfigError, DGCUnsupportedError
+        if not hasattr(socket, "AF_UNIX"):
+            raise DGCUnsupportedError(
+                f"custom tools need Unix domain sockets, which Python does not offer on {sys.platform}")
+        if not self.socket_path:
+            self._directory, self.socket_path = _private_socket_path()
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(self.socket_path)
-        server.listen(4)
+        try:
+            server.bind(self.socket_path)
+            os.chmod(self.socket_path, 0o600)
+            server.listen(4)
+        except OSError as exc:
+            server.close()
+            self._remove_files()
+            raise DGCConfigError(f"custom tools could not open their socket: {exc}") from exc
         server.settimeout(1.0)
         self._server = server
         self._thread = threading.Thread(target=self._accept, name="dgc-sdk-mcp", daemon=True)
@@ -85,11 +169,57 @@ class ToolHub:
                 self._server.close()
             except OSError:
                 pass
-        if os.path.exists(self.socket_path):
+        self._remove_files()
+
+    def _remove_files(self) -> None:
+        if self.socket_path and os.path.exists(self.socket_path):
             try:
                 os.unlink(self.socket_path)
             except OSError:
                 pass
+        if self._directory:
+            shutil.rmtree(self._directory, ignore_errors=True)
+            self._directory = None
+
+    def server_spec(self, python: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(runtime, persisted) MCP server specs for ``upsert_mcp_server``.
+
+        The secret rides only in the runtime spec's env; the persisted spec names the variable.
+        """
+        bridge = str(Path(__file__).resolve())
+        args = ["-I", bridge, self.socket_path]
+        persisted = {"transport": "stdio", "command": python, "args": args,
+                     "env_names": [TOKEN_ENV], "log_level": "warning"}
+        return {**persisted, "env": {TOKEN_ENV: self.token}}, persisted
+
+    def _authenticate(self, conn: socket.socket) -> bytes | None:
+        """Read the relay's hello line; return any bytes after it, or None to drop the peer."""
+        uid = _peer_uid(conn)
+        if uid is not None and hasattr(os, "getuid") and uid != os.getuid():
+            return None
+        conn.settimeout(_HELLO_TIMEOUT_S)
+        buf = b""
+        try:
+            while b"\n" not in buf:
+                chunk = conn.recv(_HELLO_MAX)
+                if not chunk:
+                    return None
+                buf += chunk
+                if len(buf) > _HELLO_MAX:
+                    return None
+        except OSError:
+            return None
+        line, rest = buf.split(b"\n", 1)
+        try:
+            hello = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        token = hello.get("token") if isinstance(hello, dict) else None
+        if not isinstance(token, str) or not hmac.compare_digest(
+                token.encode("utf-8"), self.token.encode("utf-8")):
+            return None
+        conn.settimeout(None)
+        return rest
 
     def _accept(self) -> None:
         assert self._server is not None
@@ -103,13 +233,18 @@ class ToolHub:
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
     def _serve(self, conn: socket.socket) -> None:
-        buf = b""
+        rest = self._authenticate(conn)
+        if rest is None:
+            self.rejected += 1
+            try:
+                conn.close()
+            except OSError:
+                pass
+            return
+        self.authenticated.set()
+        buf = rest
         try:
             while True:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    return
-                buf += chunk
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     line = line.strip()
@@ -122,6 +257,10 @@ class ToolHub:
                     reply = self._handle(message)
                     if reply is not None:
                         conn.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode())
+                chunk = conn.recv(65536)
+                if not chunk:
+                    return
+                buf += chunk
         except OSError:
             return
         finally:
@@ -208,7 +347,7 @@ class ToolHub:
         return box[0] if box else None
 
 
-# Imported after types to keep this module usable as ``python -m``.
+# The relay runs this file as a standalone script (no package), where the relative import fails.
 try:
     from .types import ToolSpec
     SequenceToolMap = list[ToolSpec]
@@ -236,10 +375,70 @@ def define_tool(name: str, description: str, input_schema: Mapping[str, Any],
                 handler=handler, timeout=None if timeout is None else float(timeout))
 
 
+def bridge_python(runtime: Sequence[str] | None = None) -> str:
+    """The interpreter DGC runs the relay with. The relay is standard-library only, so this
+    host's own Python serves; a ``python -m dgc`` runtime's interpreter is the fallback. A
+    runtime launcher such as ``dgc`` is never mistaken for a Python."""
+    from .errors import DGCConfigError
+    candidates = [sys.executable or ""]
+    argv = list(runtime or ())
+    if len(argv) >= 3 and argv[1:3] == ["-m", "dgc"]:
+        candidates.append(argv[0])
+    candidates += [shutil.which("python3") or "", shutil.which("python") or ""]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return os.path.abspath(candidate)
+    raise DGCConfigError("custom tools need a Python interpreter to run their bridge; none found")
+
+
+def _catalog_problem(catalog: Mapping[str, Any], expected: int) -> str:
+    if catalog.get("error"):
+        return str(catalog.get("error"))
+    items = catalog.get("items") if isinstance(catalog.get("items"), list) else []
+    entry = next((item for item in items
+                  if isinstance(item, Mapping) and item.get("name") == SERVER_NAME), None)
+    if entry is None:
+        return "the runtime did not register the tool server"
+    state = str(entry.get("state") or "")
+    if entry.get("error") or state != "connected":
+        return str(entry.get("error") or f"the tool server is {state or 'not connected'}")
+    count = int(entry.get("tool_count") or 0)
+    if count < expected:
+        return f"the tool server offered {count} of {expected} tools"
+    return ""
+
+
+def install_tools(transport: Any, tools: Sequence[Any], *, runtime: Sequence[str] | None,
+                  request_id: str, timeout: float = 20.0) -> ToolHub:
+    """Start the host tool server, register it with DGC as MCP server ``app``, and confirm it.
+
+    Raises :class:`~dgc_sdk.DGCRuntimeError` when DGC could not start or reach the tools, rather
+    than leaving a session whose model silently lacks them.
+    """
+    from .errors import DGCRuntimeError
+    hub = ToolHub(list(tools))
+    hub.start()
+    try:
+        runtime_spec, persisted = hub.server_spec(bridge_python(runtime))
+        catalog = transport.request(
+            {"type": "upsert_mcp_server", "request_id": request_id, "name": SERVER_NAME,
+             "runtime": runtime_spec, "persisted": persisted},
+            "mcp_servers", timeout=timeout)
+        problem = _catalog_problem(catalog, len(hub.tools))
+        if not problem and not hub.authenticated.is_set():
+            problem = "the tool bridge never authenticated to the application"
+        if problem:
+            raise DGCRuntimeError(f"custom tools failed to start: {problem}")
+    except BaseException:
+        hub.close()
+        raise
+    return hub
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if not args:
-        sys.stderr.write("usage: python -m dgc_sdk._mcp_bridge SOCKET\n")
+        sys.stderr.write("usage: python -I _mcp_bridge.py SOCKET  (with DGC_SDK_TOOL_TOKEN set)\n")
         return 2
     return relay(args[0])
 

@@ -3,30 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .wire.client import DGCClient, DGCProtocolError as WireProtocolError, DGCStartError
 
-from ._mcp_bridge import ToolHub
+from ._mcp_bridge import ToolHub, install_tools
 from ._version import PROTOCOL, REQUIRES_CLI, __version__
 from .errors import DGCConfigError, DGCProtocolError, DGCRuntimeError
-from .policy import inspect_bash_for_engine
-from .runtime import default_runtime_argv, isolated_env, require_sandbox, write_isolated_config
+from .policy import (
+    RuntimePolicy, compile_session, permission_settings, sandbox_precheck, sandbox_requirement,
+)
+from .runtime import default_runtime_argv, isolated_env, write_isolated_config
 from .session import RunHandle, Session, _new_id
 from .types import (
-    OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionMode, RunEvent, RunResult,
-    SandboxRequirement, ToolSpec, UnhandledPolicy,
+    OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionMode, PermissionPolicy, RunEvent,
+    RunResult, SandboxPolicy, SandboxStatus, ToolSpec,
 )
-
-
-def _mcp_socket_path(slot: Path) -> str:
-    """Unix-domain bind paths are short (104 bytes on macOS). Always use /tmp."""
-    digest = hashlib.sha1(str(slot.resolve()).encode()).hexdigest()[:12]
-    return f"/tmp/dgc-{digest}.sock"
 
 
 def _existing_dirs(items) -> list[str]:
@@ -56,13 +50,15 @@ class DGC:
         mode: PermissionMode = "default",
         thinking: str = "off",
         extra_env: dict[str, str] | None = None,
-        sandbox: dict[str, str] | None = None,
+        sandbox: SandboxPolicy | Mapping[str, str] | None = None,
         instructions: str = "",
         pricing=None,
         department: str = "",
-        policy=None,
+        policy: RuntimePolicy | None = None,
         retry=None,
     ):
+        if policy is not None and not isinstance(policy, RuntimePolicy):
+            raise DGCConfigError(f"policy must be a RuntimePolicy, not {type(policy).__name__}")
         self._state_dir = Path(state_dir).expanduser().resolve()
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._inherit = bool(inherit_user_state)
@@ -73,7 +69,7 @@ class DGC:
         self._mode = mode
         self._thinking = thinking
         self._extra_env = extra_env
-        self._sandbox = sandbox or {"requirement": "off"}
+        self._sandbox = sandbox_requirement(sandbox)
         self._instructions = instructions
         self._pricing = pricing
         self._department = str(department or "")
@@ -86,7 +82,7 @@ class DGC:
         self._audit_log = AuditLog(self._state_dir / "audit")
         self._closed = False
         self._sessions: list[Session] = []
-        require_sandbox(str(self._sandbox.get("requirement") or "off"))
+        sandbox_precheck(self._sandbox)
 
     @property
     def version(self) -> str:
@@ -100,7 +96,7 @@ class DGC:
         self,
         *,
         cwd: str | Path,
-        permissions: dict | None = None,
+        permissions: PermissionPolicy | Mapping[str, str] | None = None,
         on_permission: OnPermission | None = None,
         on_plan: OnPlan | None = None,
         on_question: OnQuestion | None = None,
@@ -113,7 +109,7 @@ class DGC:
         tools: Sequence[ToolSpec] = (),
         instructions: str | None = None,
         max_turns: int | None = None,
-        sandbox: dict[str, str] | None = None,
+        sandbox: SandboxPolicy | Mapping[str, str] | None = None,
         verify_command: str | None = None,
         decision_timeout: float | None = 30.0,
         turn_budget_s: int | None = None,
@@ -124,22 +120,20 @@ class DGC:
         workspace = Path(cwd).expanduser().resolve()
         if not workspace.is_dir():
             raise DGCConfigError("cwd must be an existing directory")
-        policy = dict(permissions or {})
-        unhandled: UnhandledPolicy = policy.get("unhandled") or "deny"
-        if unhandled not in ("deny", "callback"):
-            raise DGCConfigError("permissions.unhandled must be 'deny' or 'callback'")
-        perm_mode: PermissionMode = mode or policy.get("mode") or self._mode
-        if perm_mode not in ("default", "acceptEdits", "plan", "auto"):
-            raise DGCConfigError("invalid permission mode")
-        sandbox_spec = sandbox or self._sandbox
-        requirement: SandboxRequirement = sandbox_spec.get("requirement") or "off"  # type: ignore[assignment]
-        backend = require_sandbox(requirement)
+        perm_mode, unhandled = permission_settings(
+            permissions, mode=mode, default_mode=self._mode, on_permission=on_permission)
+        requirement = sandbox_requirement(sandbox) if sandbox is not None else self._sandbox
+        sandbox_precheck(requirement)
+        # The RuntimePolicy and sandbox reach this session's runtime only through its
+        # environment (DGC_SESSION_POLICY); nothing is written to any config.json.
+        plan = compile_session(
+            self._policy, cwd=workspace, mode=perm_mode, on_permission=on_permission,
+            sandbox=requirement, tools=[spec.name for spec in tools])
         key = api_key if api_key is not None else self._api_key
         extra = dict(self._extra_env or {})
         if key and not self._inherit:
             extra["DGC_API_KEY"] = str(key)
-        inspect_bash = inspect_bash_for_engine(
-            on_permission=on_permission, permission_mode=perm_mode)
+        extra.update(plan.env)
         if not self._inherit:
             isolated_values: dict[str, object] = {
                 "model": model or self._model,
@@ -157,15 +151,8 @@ class DGC:
                 "trusted_dirs": [str(workspace)] + _existing_dirs(
                     getattr(self._policy, "extra_read_dirs", ()) or ()
                 ),
-                "sandbox": requirement != "off" and bool(backend),
+                "sandbox": False,
                 "sandbox_network": bool(self._policy and getattr(self._policy, "network", "deny") == "allow"),
-                "permissions": {
-                    "allow": [],
-                    "ask": [],
-                    "deny": list(self._policy.engine_deny_rules(
-                        inspect_bash=inspect_bash,
-                    )) if self._policy is not None else [],
-                },
             }
             isolated_values.update(self._retry.isolated_values())
             if max_turns is not None:
@@ -195,11 +182,18 @@ class DGC:
             raise DGCProtocolError(
                 f"DGC SDK {__version__} requires protocol v{PROTOCOL} (CLI {REQUIRES_CLI}); "
                 f"child reported {protocol}")
+        try:
+            sandbox_status = plan.confirm(ready)
+        except Exception:
+            transport.close()
+            raise
         hub = None
         if tools:
-            tool_dir = self._state_dir / f"tools-{_new_id('t')[-8:]}"
-            tool_dir.mkdir(parents=True, exist_ok=True)
-            hub = self._install_tools(transport, tool_dir, list(tools))
+            try:
+                hub = self._install_tools(transport, list(tools))
+            except Exception:
+                transport.close()
+                raise
         if perm_mode in ("acceptEdits", "auto") and not ready.get("workspace_trusted"):
             try:
                 transport.send({
@@ -224,12 +218,7 @@ class DGC:
             permission_mode=perm_mode,
         )
         session._verify_command = verify_command or ""
-        if self._policy is not None:
-            for rule in self._policy.engine_deny_rules(inspect_bash=inspect_bash):
-                try:
-                    session.add_permission_rule("deny", rule)
-                except Exception:
-                    pass
+        session.sandbox = sandbox_status
         try:
             session.bind_identity()
         except Exception:
@@ -266,48 +255,9 @@ class DGC:
             pass
         return session
 
-    def _install_tools(self, transport: DGCClient, slot: Path,
-                       tools: list[ToolSpec]) -> ToolHub:
-        socket_path = _mcp_socket_path(slot)
-        hub = ToolHub(socket_path, tools)
-        hub.start()
-        python = self._runtime[0] if self._runtime else sys.executable
-        bridge = str(Path(__file__).resolve().parent / "_mcp_bridge.py")
-        argv = [bridge, socket_path]
-        runtime_spec = {
-            "transport": "stdio",
-            "command": python,
-            "args": argv,
-            "env": {},
-            "env_names": [],
-            "log_level": "warning",
-        }
-        persisted = {
-            "transport": "stdio",
-            "command": python,
-            "args": argv,
-            "env_names": [],
-            "log_level": "warning",
-        }
-        try:
-            catalog = transport.request(
-                {
-                    "type": "upsert_mcp_server",
-                    "request_id": _new_id("mcp"),
-                    "name": "app",
-                    "runtime": runtime_spec,
-                    "persisted": persisted,
-                },
-                "mcp_servers",
-                timeout=20.0,
-            )
-        except Exception:
-            hub.close()
-            raise
-        if catalog.get("error"):
-            hub.close()
-            raise DGCRuntimeError(f"custom tools failed to connect: {catalog.get('error')}")
-        return hub
+    def _install_tools(self, transport: DGCClient, tools: list[ToolSpec]) -> ToolHub:
+        """Serve ``tools`` from this process as MCP server ``app``; raise if DGC cannot reach them."""
+        return install_tools(transport, tools, runtime=self._runtime, request_id=_new_id("mcp"))
 
     def usage_report(self, *, department: str | None = None) -> dict:
         """Queryable isolated usage (JSONL). Does not read host ~/.dgc."""
@@ -393,6 +343,10 @@ class AsyncSession:
     @property
     def raw(self):
         return self._sync.raw
+
+    @property
+    def sandbox(self) -> SandboxStatus:
+        return self._sync.sandbox
 
     async def run(self, prompt: str, **kwargs) -> RunResult:
         return await asyncio.to_thread(self._sync.run, prompt, **kwargs)
