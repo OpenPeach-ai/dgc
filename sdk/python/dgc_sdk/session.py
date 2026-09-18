@@ -23,7 +23,9 @@ from typing import Any, Callable, NamedTuple
 from .wire.client import DGCClient, DGCClientError, DGCEventTimeout
 
 from ._mcp_bridge import ToolHub
-from .errors import DGCConfigError, DGCRuntimeError, DGCTimeoutError
+from .errors import (
+    DGCCommandRejectedError, DGCConfigError, DGCRuntimeError, DGCTimeoutError, public_error,
+)
 from .schema import assert_supported, extract_json, validate as validate_schema
 from .types import (
     AgentInfo, Artifact, Checkpoint, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
@@ -306,14 +308,6 @@ def _same_command(left: str, right: str) -> bool:
     return " ".join(str(left or "").split()) == " ".join(str(right or "").split())
 
 
-class _Rejected(DGCRuntimeError):
-    """The backend refused a control command (``command_rejected`` / ``error``)."""
-
-    def __init__(self, message: str, reason: str = ""):
-        super().__init__(message)
-        self.reason = reason
-
-
 class _Run:
     """Pump-side state of one run. Outcome events for its prompt ids land here, whoever reads
     them off the pipe."""
@@ -427,12 +421,14 @@ class RunHandle:
             if event is not None:
                 yield event
 
-    def result(self, timeout: float | None = 180.0) -> RunResult:
+    def result(self, timeout: float | None = None) -> RunResult:
         """Drain the run and return its result.
 
         Events nobody iterated are consumed here. If another thread is iterating, this waits
-        for it between events. With ``timeout`` (seconds) the current result is returned when
-        the run is still going at the deadline; the run keeps going.
+        for it between events. ``timeout`` (seconds) bounds this wait; ``None`` waits until the
+        run ends, which the run's own ``timeout`` bounds. If the run is still going when it
+        lapses, :class:`DGCTimeoutError` is raised; the run keeps going (call :meth:`cancel`
+        to stop it).
         """
         deadline = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
         while not self._done:
@@ -445,7 +441,9 @@ class RunHandle:
                 finally:
                     self._step_lock.release()
             if deadline is not None and time.monotonic() >= deadline and not self._done:
-                break
+                raise DGCTimeoutError(
+                    f"run {self._result.run_id} was still {self._result.status} after "
+                    f"{float(timeout or 0):g}s")
         return self._result
 
     def cancel(self) -> None:
@@ -515,6 +513,7 @@ class Session:
         verify_command: str = "",
         state_lock: Any = None,
         exclude_paths: Sequence[str | Path] = (),
+        request_timeout: float | None = None,
     ):
         if unhandled not in ("deny", "callback"):
             raise DGCConfigError("permissions.unhandled must be 'deny' or 'callback'")
@@ -561,6 +560,7 @@ class Session:
         self._bill_to: tuple[_Run | None, str] | None = None
         self._task_ids: dict[str, str] = {}
         self._task_revision = 0
+        self._request_timeout = 15.0 if request_timeout is None else float(request_timeout)
         self.session_id = str(ready.get("session_id") or "")
         self.session_path = ""
         self.protocol_version = ready.get("protocol_version")
@@ -1059,7 +1059,9 @@ class Session:
         return [_agent_from_row(row) for row in event.get("items") or [] if isinstance(row, dict)]
 
     def clear_todos(self) -> list[TaskItem]:
-        event = self._request({"type": "clear_todos", "request_id": _new_id("cleartodo")}, "todos")
+        # DGC acknowledges with the uncorrelated ``todos`` event every frontend hears.
+        event = self._request({"type": "clear_todos", "request_id": _new_id("cleartodo")}, "todos",
+                              uncorrelated_reply=True)
         self._task_ids.clear()
         self._task_revision += 1
         return self._project_tasks(event.get("todos") or [])
@@ -1078,40 +1080,31 @@ class Session:
         return lock.hold()
 
     def _request(self, command: Mapping[str, Any], response_type: str,
-                 timeout: float = 15.0) -> dict[str, Any]:
+                 timeout: float | None = None, *,
+                 uncorrelated_reply: bool = False) -> dict[str, Any]:
         """Send one correlated command and wait for its answer (or its rejection).
 
         A run pump reading the pipe at the same time skips this request's events, so the answer
-        cannot be lost to it.
+        cannot be lost to it. A refusal raises :class:`DGCCommandRejectedError` at once; no
+        answer within ``timeout`` (at least the client's ``request_timeout``) raises
+        :class:`DGCTimeoutError`.
         """
         payload = dict(command)
         rid = payload.get("request_id")
         if not isinstance(rid, str) or not rid:
             rid = _new_id("req")
             payload["request_id"] = rid
+        wait = self._request_timeout if timeout is None else max(timeout, self._request_timeout)
         with self._lock:
             self._outstanding.add(rid)
-
-        def answer(event: Mapping[str, Any]) -> bool:
-            return (event.get("request_id") == rid
-                    and event.get("type") in (response_type, "command_rejected", "error"))
-
         try:
-            self._client.send(payload)
-            event = self._client.wait_for(None, predicate=answer, timeout=timeout)
-        except DGCEventTimeout as exc:
-            raise DGCTimeoutError(
-                f"DGC did not answer {payload.get('type')} within {timeout:g}s") from exc
+            return self._client.request(payload, response_type, timeout=wait,
+                                        uncorrelated_reply=uncorrelated_reply)
         except DGCClientError as exc:
-            raise DGCRuntimeError(str(exc)) from exc
+            raise public_error(exc) from exc
         finally:
             with self._lock:
                 self._outstanding.discard(rid)
-        if event.get("type") != response_type:
-            message = str(event.get("message") or event.get("reason") or "rejected")
-            raise _Rejected(f"DGC rejected {payload.get('type')}: {message}",
-                            str(event.get("reason") or ""))
-        return event
 
     # ---- reading the pipe -----------------------------------------------------------------------
 
@@ -1354,7 +1347,7 @@ class Session:
                     self._request({"type": "set_config", "values": {"max_turns": int(value)},
                                    "request_id": _new_id("cfg")}, "config")
                 return
-            except _Rejected as exc:
+            except DGCCommandRejectedError as exc:
                 if exc.reason == "turn_in_progress" and time.monotonic() < deadline:
                     time.sleep(0.1)
                     continue
@@ -1507,6 +1500,7 @@ class Session:
                 with contextlib.suppress(DGCRuntimeError):
                     self._cancel(run, run.cancel_reason)
             if deadline is not None and now >= deadline and not run.cancel_reason:
+                acc.timeout_s = float(timeout or 0)
                 acc.partial()
                 with contextlib.suppress(DGCRuntimeError):
                     self._cancel(run, "timeout")
@@ -1906,6 +1900,7 @@ class _Accumulator:
         self.reason = ""
         self.error: str | None = None
         self.fatal = False
+        self.timeout_s = 0.0             # the run's timeout, once it was reached
         self.last_error = ""
         self.turn_final = ""
         self.verify_calls: set[str] = set()
@@ -2066,7 +2061,7 @@ class _Accumulator:
         """A cancel or timeout whose turn never reported its end within the grace period."""
         self.partial()
         if run.cancel_reason == "timeout":
-            self.fail("timeout", f"run exceeded its timeout of {timeout:g}s")
+            self.fail("timeout", f"run exceeded its {float(timeout or 0):g}s timeout")
         elif run.cancel_reason == "decision_failed":
             self.fail("decision_failed", run.decision_error or "a decision callback failed")
         else:
@@ -2098,7 +2093,9 @@ class _Accumulator:
         status, reason, error = self.status, self.reason, self.error
         if run.cancel_reason == "timeout":
             status, reason = "failed", "timeout"
-            error = error if error and "timeout" in error else "run exceeded its timeout"
+            error = error if error and "timeout" in error else (
+                f"run exceeded its {self.timeout_s:g}s timeout" if self.timeout_s
+                else "run exceeded its timeout")
             result.partial_text = result.partial_text or result.final_text
         elif run.cancel_reason == "decision_failed":
             status, reason = "failed", "decision_failed"
