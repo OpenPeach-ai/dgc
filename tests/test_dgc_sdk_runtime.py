@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -259,6 +260,17 @@ class ProcessLifetimeTests(_Base):
             self.assertEqual(dgc._sessions, [])
         self.assertIn("AF_UNIX path too long", str(caught.exception))
         self.assertEqual(_serve_children(), [], "a failed setup left dgc serve running")
+
+
+    def test_an_app_error_inside_with_survives_a_dead_backend(self):
+        _RuntimeModel.behavior = "stall"
+        with self._client() as dgc:
+            session = dgc.session(cwd=self.work, permissions=self._auto())
+            with self.assertRaises(ValueError):
+                with session.stream("Summarize README.", timeout=60):
+                    os.kill(session.raw.pid, signal.SIGKILL)
+                    time.sleep(0.5)
+                    raise ValueError("the application's own error")
 
 
 class ProtocolTests(_Base):
