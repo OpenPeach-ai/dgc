@@ -9,8 +9,8 @@ experimental. Release tag **`sdk-v0.5.3`** (not `v0.5.x`, which are historical C
 | Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.5.3` |
 | Node `@vibedgc/sdk` | `npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vibedgc-sdk-0.5.3.tgz` |
 
-Both drive `python -m dgc serve` from a DGC CLI install; set `DGC_PYTHON` to that Python (see
-[docs/SDK.md](../docs/SDK.md#install)). From a clone: `python3 -m pip install -e sdk/python`, and
+Both drive `dgc serve` from a DGC CLI install, which they find on their own; `DGC_PYTHON` pins a
+particular one (see [docs/SDK.md](../docs/SDK.md#install)). From a clone: `python3 -m pip install -e sdk/python`, and
 for Node `npm ci && npm run build` in `sdk/typescript`.
 
 ```python
@@ -48,7 +48,7 @@ The full guide and API reference is [docs/SDK.md](../docs/SDK.md).
 | Tools | `define_tool(...)` then `session(tools=[...])` | `defineTool(...)` then `session({ tools })` |
 | Schema | `session.run(..., output_schema={...})` | `session.run(prompt, { outputSchema })` |
 | Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | `dgc.usageReport(department)` |
-| Policy | `DGC(..., policy=RuntimePolicy(...))` — deny rules plus shell screening; the sandbox is the boundary | `policy` |
+| Policy | `DGC(..., policy=RuntimePolicy(...))` — tool, path and network limits the runtime enforces; shell commands in the OS sandbox | `policy` |
 | Audit | `dgc.export_audit(session_id)` (redacted) | `dgc.exportAudit(sessionId)` |
 
 ## Layout

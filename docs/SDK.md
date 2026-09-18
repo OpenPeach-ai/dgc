@@ -32,18 +32,23 @@ python3 -m pip install dgc-sdk==0.5.3
 That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named `dgc` is an
 unrelated library.
 
-The SDK does not contain the agent. It starts `python -m dgc serve` from a DGC CLI install, so you
-also need the CLI (0.41.6 or newer with protocol v14):
+The SDK does not contain the agent. It drives `dgc serve` from a DGC CLI install, so you also need
+the CLI (0.41.6 or newer, protocol v14):
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
-export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
 ```
 
-`DGC_PYTHON` names the Python that runs `dgc serve`: the installer keeps each CLI version in its
-own virtual environment and links the `dgc` launcher to it, so the Python beside that launcher is
-the right one. You can instead pass `runtime=["/path/to/python", "-m", "dgc", "serve"]` to `DGC`.
-Without either, the SDK uses its own interpreter when that interpreter can import `dgc`.
+The SDK finds that install itself. It uses the first of these that imports DGC and speaks
+protocol v14: the Python named by `DGC_PYTHON`; the Python running your application, when it can
+import `dgc`; `dgc` on `PATH`; `~/.local/bin/dgc`; the newest complete version in the installer's
+data directory. If none qualifies, `DGC()` raises `DGCConfigError` listing what it tried and
+why each was skipped. To pin a particular install, set `DGC_PYTHON` to the Python beside its
+launcher, or pass `runtime=[...]`:
+
+```bash
+export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
+```
 
 ## Quickstart
 
@@ -75,12 +80,14 @@ CI edits with a `git apply`-able patch, and a local browser workbench.
 
 ## How a session works
 
-- **`DGC`** is a client. It owns one *state directory*: an isolated HOME for the agent (config,
-  transcripts, checkpoints, goals, memory), plus the SDK's usage and audit logs. Your real
+- **`DGC`** is a client. It owns one *state directory*: an isolated HOME for the agent
+  (transcripts, checkpoints, goals, memory), plus the SDK's usage and audit logs. Your real
   `~/.dgc` is neither read nor written unless you pass `inherit_user_state=True`. Every session of
   one client shares that state, which is what makes `resume` and `fork` work after a restart.
-  Use a private directory per application or tenant; never a shared, predictable path such as
-  `/tmp/dgc`.
+  The directory is created private (0700); one owned by another user or writable by others is
+  refused, and without `state_dir` the client uses a fresh private temporary directory. Each
+  session writes the agent's config from scratch, so one session's options never leak into the
+  next and nothing planted in the directory is merged.
 - **`Session`** is one conversation in one workspace (`cwd`), backed by its own `dgc serve` child
   process. A session runs one prompt at a time.
 - **`run()`** sends a prompt and blocks until the turn ends. **`stream()`** returns a `RunHandle`
@@ -98,61 +105,76 @@ CI edits with a `git apply`-able patch, and a local browser workbench.
 
 Run untrusted prompts (issue text, pull requests, user input) in `plan` mode, or in `default` mode
 with an `on_permission` callback that approves only what you expect. `auto` mode executes whatever
-the model decides within the rules below.
+the model decides within the limits below.
 
 - **Isolation.** The child gets an isolated HOME under `state_dir`, empty MCP server and hook
   lists, and only the workspace as a trusted directory.
-- **`RuntimePolicy`** turns your restrictions into deny rules that the agent enforces in every
-  mode, including `auto`: denied tools, denied path prefixes, and network or write screening for
-  shell commands. Shell screening matches command patterns. It stops ordinary commands such as
-  `curl` or `echo > file`, but a determined program can reach the network or write files in ways a
-  pattern does not recognise. It is a guard rail, not a boundary.
-- **The sandbox** is the boundary: `sandbox={"requirement": "required"}` runs commands under
-  `bwrap` (Linux) or `sandbox-exec` (macOS), with the network off unless the policy allows it, and
-  fails the session if the runtime has no sandbox.
-- **Secrets.** Pass the provider key as `api_key`; the SDK hands it to the child in `DGC_API_KEY`
-  and strips any `DGC_*_API_KEY` it inherited. DGC masks known secret values in tool output, but
-  anything else in your process environment is visible to the agent's shell. Start embeds with a
-  minimal environment, and keep cloud credentials out of it.
+- **Environment.** The child does not inherit your process environment. It gets only locale,
+  `PATH`, terminal, temp and certificate variables, the isolated HOME, the provider key you pass
+  as `api_key` (as `DGC_API_KEY`), and `extra_env`. `inherit_env=["NAME", ...]` passes more by name;
+  `inherit_env=True` passes everything.
+- **`RuntimePolicy`** limits are enforced by the runtime for that session in every permission
+  mode, including `auto`, and are never written to any config file: which tools may run
+  (including MCP routes and your custom tools), which paths the file tools may reach (the
+  workspace, `extra_read_dirs`, never `deny_path_prefixes`), and whether web, skill-download and
+  third-party MCP access is allowed.
+- **Shell commands** run arbitrary programs, so no rule on command text can hold them. With the
+  default `RuntimePolicy(shell="sandboxed")` the session asks for the OS sandbox (`bwrap` on
+  Linux, `sandbox-exec` on macOS): no network unless the policy allows it, no writes outside the
+  workspace (none at all when a write tool is denied), no home directory. In `auto` mode the
+  shell runs only inside it and the `python` tool is refused. `shell="screened"` runs commands
+  unconfined and refuses those whose text looks like a network call or file write; that is best
+  effort, not a boundary.
+- **Sandbox requirement.** `sandbox={"requirement": "required"}` refuses to start a session whose
+  runtime cannot confine shell commands; `"preferred"` starts anyway, warns, and reports why in
+  `Session.sandbox`.
+- **Logs.** Audit and usage files are created owner-only (0600 in 0700 directories), and audit
+  rows are redacted for common credential formats and the key you passed.
 
 ## API reference
 
-Everything below is importable from `dgc_sdk`. Keyword-only parameters are marked with `*`.
+Everything below is importable from `dgc_sdk`. Parameters after `*` are keyword-only.
 
 ### `DGC`
 
 ```python
-DGC(*, state_dir, runtime=None, inherit_user_state=False, model=None, base_url=None,
-    api_key=None, mode="default", thinking="off", extra_env=None, sandbox=None,
-    instructions="", pricing=None, department="", policy=None, retry=None)
+DGC(*, state_dir=None, runtime=None, inherit_user_state=False, model=None, base_url=None,
+    api_key=None, mode="default", thinking="off", extra_env=None, inherit_env=False,
+    sandbox=None, instructions="", pricing=None, department="", policy=None, retry=None,
+    extra_config=None, start_timeout=30.0, request_timeout=15.0)
 ```
 
 | Parameter | Meaning |
 | --- | --- |
-| `state_dir` | Directory for this client's isolated HOME, usage log and audit log. Created if missing. |
-| `runtime` | Command that starts the agent, for example `["/opt/dgc/.venv/bin/python", "-m", "dgc", "serve"]`. Default: see [Install](#install). |
-| `inherit_user_state` | `True` runs against the real `~/.dgc` (your model, rules, MCP servers). Development only. |
+| `state_dir` | Private directory for this client's isolated HOME, usage log and audit log. Created 0700 if missing; refused when owned by another user or writable by others. Default: a new private temporary directory. |
+| `runtime` | Command that starts the agent, for example `["/opt/dgc/.venv/bin/python", "-m", "dgc", "serve"]` or `["dgc", "serve"]`. Default: discovered (see [Install](#install)). |
+| `inherit_user_state` | `True` runs against your real `~/.dgc` (your model, rules, MCP servers). Options DGC would have to save there (a different model, `max_turns`, `verify_command`, and so on) raise `DGCConfigError`. Development only. |
 | `model`, `base_url`, `api_key` | Model name, OpenAI-compatible endpoint and key for every session. Without them the CLI's own defaults apply. |
 | `mode` | Default permission mode: `"plan"`, `"default"`, `"acceptEdits"` or `"auto"`. |
 | `thinking` | Reasoning effort passed to the model: `"off"` or a level the CLI accepts. |
-| `extra_env` | Extra environment variables for the child. |
-| `sandbox` | `{"requirement": "required" \| "preferred" \| "off"}` (a `SandboxPolicy` value). |
+| `extra_env` | Environment variables to set in the child. |
+| `inherit_env` | Host variables the child may see besides the basic ones: `False`, a list of names, or `True` for all. |
+| `sandbox` | A `SandboxPolicy` or `{"requirement": "required" \| "preferred" \| "off"}`. |
 | `instructions` | Application instructions added to every prompt of every session. |
 | `pricing` | A `Pricing` used to cost each run in the usage log. |
 | `department` | Label written on every usage row, for chargeback. |
 | `policy` | A `RuntimePolicy` applied to every session. |
 | `retry` | A `RetryPolicy`. |
+| `extra_config` | Additional DGC settings written into every isolated session's config. |
+| `start_timeout` | Seconds to wait for a session's runtime to start and hand-shake. |
+| `request_timeout` | Seconds to wait for each control request (`list_sessions`, `set_goal`, and so on). |
 
 Members:
 
-- `version` — the SDK version string.
-- `raw_runtime` — the runtime command as a list.
+- `version` — the SDK version string. `state_dir` — the state directory as a `Path`.
+  `raw_runtime` — the runtime command as a list.
 - `session(...)` → `Session` — see below.
-- `resume(session_id=None, *, latest=False, **session_options)` → `Session` — reopen a persisted
-  conversation of this client, by id (or transcript path), or the newest with `latest=True`.
-  `session_options` are the same keywords as `session()`. Raises `DGCConfigError` for an unknown id.
-- `usage_report(*, department=None)` → `dict` — totals (`runs`, `input_tokens`,
-  `output_tokens`, `cached_input_tokens`, `cost_usd`), `by_department`, and the last 500 `rows`.
+- `resume(session_id=None, *, latest=False, cwd, ...)` → `Session` — reopen a persisted
+  conversation of this client by id (or transcript path), or the newest with `latest=True`. It
+  takes the same keywords as `session()`. An unknown id raises `DGCConfigError` at once.
+- `usage_report(*, department=None)` → `dict` — `runs`, `input_tokens`, `output_tokens`,
+  `cached_input_tokens`, `cost_usd`, `unknown_usage_runs` (runs whose provider reported no
+  tokens; they are excluded from the sums), `by_department`, and the last 500 `rows`.
 - `export_audit(session_id=None, *, redact=True)` → `list[dict]` — the audit rows (tool calls,
   results, decisions) of one session, or of all sessions, with secrets redacted.
 - `close()` — close every session and stop their children. `DGC` is a context manager.
@@ -169,35 +191,42 @@ dgc.session(*, cwd, permissions=None, on_permission=None, on_plan=None, on_quest
 | Parameter | Meaning |
 | --- | --- |
 | `cwd` | Workspace directory. Must exist. |
-| `permissions` | `{"mode": ..., "unhandled": "deny" \| "callback"}` (a `PermissionPolicy` value). `mode` here is used when the `mode` argument is not given. |
-| `on_permission` | `(PermissionRequest) -> "once" \| "always" \| "deny"`. `"always"` adds a rule to the isolated config. |
+| `permissions` | A `PermissionPolicy` or `{"mode": ..., "unhandled": "deny" \| "callback"}`. `mode` here applies when the `mode` argument is not given. `"callback"` requires `on_permission`. |
+| `on_permission` | `(PermissionRequest) -> "once" \| "always" \| "deny"`. `"always"` adds a rule for this session's isolated config. |
 | `on_plan` | `(PlanRequest) -> "auto" \| "acceptEdits" \| "default" \| "reject"`. |
 | `on_question` | `(QuestionRequest) -> {question_id: QuestionAnswer} \| "dismiss"`. |
 | `on_mcp_input` | `(McpInputRequest) -> McpInputResponse`. |
 | `model`, `base_url`, `api_key`, `mode`, `thinking`, `instructions`, `sandbox` | Per-session overrides of the client values. |
 | `tools` | `ToolSpec`s from `define_tool`, served from your process. |
-| `max_turns` | Cap on model rounds per prompt (tool iterations). |
+| `max_turns` | Default cap on model rounds (tool iterations) per prompt in this session. |
 | `turn_budget_s` | Wall-clock budget per turn, in seconds. |
 | `max_tokens` | Output token cap per model request. |
 | `verify_command` | Shell command the agent must pass before it may report completion. |
-| `decision_timeout` | Seconds a callback may take before the request is denied. |
+| `decision_timeout` | Seconds a callback may take before the request is denied; `None` waits for as long as the callback takes. |
+
+Callbacks may be plain functions or `async def` functions; under `AsyncDGC` they are awaited on
+your event loop.
 
 ### `Session`
 
 Attributes: `session_id`, `session_path` (the transcript file once one exists),
-`protocol_version`, `capabilities` (from the runtime handshake), `raw` (the low-level transport;
-prefer the methods below).
+`protocol_version`, `capabilities` (from the runtime handshake), `sandbox` (a `SandboxStatus`:
+`requirement`, `active`, `backend`, `reason`), `raw` (the low-level transport; prefer the methods
+below).
 
 Running:
 
 - `run(prompt, *, timeout=180.0, max_turns=None, output_schema=None, skills=None, workflow=None, repair_attempts=1)`
-  → `RunResult`. `timeout` is in seconds. `output_schema` asks for a JSON answer checked against a
-  schema (see [Structured output](#structured-output)). `skills` names skills to apply to this
-  prompt; `workflow` is `"plan"`, `"review"` or `"init"`.
+  → `RunResult`. `timeout` is in seconds (`None`: no limit); a run that reaches it ends with
+  `status="failed"`, `reason="timeout"`. `max_turns` applies to this run only. `output_schema`
+  asks for a JSON answer checked against a schema (see [Structured output](#structured-output)).
+  `skills` names skills to apply to this prompt; `workflow` is `"plan"`, `"review"` or `"init"`.
 - `stream(prompt, **same options)` → `RunHandle`.
+- `followup(text, *, timeout=180.0, output_schema=None, skills=None, repair_attempts=1)` →
+  `RunHandle` — queue a prompt behind the run in flight (or start it now when idle). Its turn is
+  observed, audited and billed like any run.
+- `steer(text)` — add guidance to the run in flight; raises `DGCRuntimeError` when no run is active.
 - `cancel()` — stop the run in flight, including one waiting for a decision.
-- `steer(text)` — add guidance to the run in flight.
-- `followup(text)` — queue a prompt to run after the current one.
 - `close()` — stop this session's child. `Session` is a context manager.
 
 Conversations and checkpoints:
@@ -209,7 +238,7 @@ Conversations and checkpoints:
   conversation to a checkpoint.
 - `fork(name=None)` → `dict` — continue in a new conversation that shares the history so far.
 - `new_session()` → `dict`; `name_session(name)` → `dict`.
-- `bind_identity()` — refresh `session_path` from the runtime's listing.
+- `bind_identity()` — refresh `session_path` once this session's transcript exists.
 - `generate_handoff(*, save=False)` → `dict` — a continuation document for the conversation.
 
 Agent state:
@@ -229,23 +258,26 @@ Agent state:
 - `get_config()` → `dict`; `get_plan()` → `dict`; `get_usage(range="today")` → `dict` — the
   runtime's own token ledger.
 
-Control requests raise `DGCRuntimeError` when the runtime rejects them, and `DGCTimeoutError`
-when no answer arrives.
+A control request the runtime refuses raises `DGCCommandRejectedError` with its `reason`; one that
+gets no answer within `request_timeout` raises `DGCTimeoutError`.
 
 ### `RunHandle`
 
-Returned by `stream()`. Iterate it for `RunEvent`s. `result(timeout=180.0)` → `RunResult` waits
-for the end of the run (draining remaining events when called on the iterating thread).
+Returned by `stream()` and `followup()`. `run_id` identifies the run. Iterate the handle for
+`RunEvent`s. `result(timeout=180.0)` → `RunResult` drains events nobody iterated and returns
+when the run ends; `timeout` (seconds, `None` for no limit) bounds the wait, not the run.
 `cancel()` stops the run. Use it as a context manager: leaving the block before the run ended
-cancels it.
+cancels it and frees the session.
 
 ### Async: `AsyncDGC`, `AsyncSession`, `AsyncRunHandle`
 
-`AsyncDGC` takes the same arguments as `DGC`. `await dgc.session(...)` returns an `AsyncSession`
-whose methods mirror `Session` as coroutines (`await session.run(...)`,
-`await session.stream(...)` → `AsyncRunHandle`). Iterate a handle with `async for`, then
-`await handle.result()`. All three are async context managers. The pipe to the child is served on
-worker threads, so the event loop is never blocked.
+`AsyncDGC` takes the same arguments as `DGC` and has the same members; `await dgc.session(...)`
+returns an `AsyncSession` whose methods are the `Session` methods as coroutines
+(`await session.run(...)`, `await session.stream(...)` → `AsyncRunHandle`). Iterate a handle with
+`async for`, then `await handle.result()`. Cancelling the task that awaits a run cancels the run.
+All three are async context managers, and `sync` on `AsyncDGC` and `AsyncSession` returns the
+underlying `DGC` or `Session`. The pipe to the child is served on worker threads, so the event
+loop is never blocked.
 
 ```python
 async with AsyncDGC(state_dir=state, model=model, base_url=base_url) as dgc:
@@ -269,15 +301,17 @@ async with AsyncDGC(state_dir=state, model=model, base_url=base_url) as dgc:
 | `QuestionAnswer` | `selected` (0-based option indexes), `other` (free text) |
 | `McpInputRequest` | `id`, `server`, `kind` (`elicitation`, `sampling_request`, `sampling_response`), `payload` |
 | `McpInputResponse` | `action` (`accept`, `decline`, `cancel`), `content` |
-| `PermissionPolicy` | `mode: PermissionMode`, `unhandled: UnhandledPolicy` — the shape of `permissions=` |
-| `SandboxPolicy` | `requirement: SandboxRequirement` — the shape of `sandbox=` |
+| `PermissionPolicy` | `mode: PermissionMode`, `unhandled: UnhandledPolicy` — for `permissions=` |
+| `SandboxPolicy` | `requirement: SandboxRequirement` — for `sandbox=` |
+| `SandboxStatus` | `requirement`, `active`, `backend`, `reason` — `Session.sandbox` |
 
 Callback types: `OnPermission`, `OnPlan`, `OnQuestion`, `OnMcpInput`. Literal types:
 `PermissionMode`, `PermissionAction` (`once`, `always`, `deny`), `PlanAction`, `UnhandledPolicy`
 (`deny`, `callback`), `SandboxRequirement` (`required`, `preferred`, `off`), `RunStatus`,
 `TaskStatus` (`pending`, `in_progress`, `completed`, `blocked`, `cancelled`).
 
-A callback that raises, or does not answer within `decision_timeout`, is treated as `"deny"`.
+A callback that raises, returns something else, or does not answer within `decision_timeout` is
+treated as `"deny"`, and the failure is logged on the `dgc_sdk` logger.
 
 ### Custom tools
 
@@ -295,9 +329,12 @@ session = dgc.session(cwd=".", tools=[lookup])
 
 `define_tool(name, description, input_schema, handler, timeout=30.0)` → `ToolSpec`. The handler
 runs in your process; its return value (text, or anything JSON-serialisable) goes back to the
-model. The model sees the tool as `mcp__app__<name>`. A handler that raises or exceeds `timeout`
-returns an error to the model. `ToolSpec` has `name`, `description`, `input_schema`, `handler`,
-`timeout`. Tools are served over a private Unix socket, so they need Linux or macOS.
+model, which sees the tool as `mcp__app__<name>`. A handler that raises or exceeds `timeout`
+returns an error to the model; a timed-out handler's thread is not stopped, so keep handlers
+idempotent. `session()` raises `DGCRuntimeError` when the tool server does not connect with every
+tool. Tools are served over a private Unix socket that only accepts the session's own relay, so
+they need Linux or macOS. `ToolSpec` has `name`, `description`, `input_schema`, `handler`,
+`timeout`.
 
 ### Structured output
 
@@ -312,31 +349,34 @@ other keyword, and `$ref`, raise `DGCConfigError` before the run starts.
 
 ```python
 RuntimePolicy(network="deny", extra_read_dirs=(), deny_path_prefixes=(), deny_tools=(),
-              allow_tools=None, redact_events=True)
+              allow_tools=None, redact_events=True, shell="sandboxed")
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `network` | `"deny"` blocks the web tools and screens shell commands for network use; `"allow"` also lets the sandbox reach the network. |
-| `extra_read_dirs` | Directories outside `cwd` the agent may read. |
-| `deny_path_prefixes` | Paths the agent may neither read nor write. |
-| `deny_tools` | Tool names to deny, for example `("write_file", "bash")`. Denying any write tool also screens shell commands for file writes. |
-| `allow_tools` | When set, only these tools are allowed. |
+| `network` | `"deny"` refuses web fetch, web search, the browser, skill downloads and MCP servers other than your own tools, and keeps the shell sandbox offline; `"allow"` permits them. |
+| `extra_read_dirs` | Directories outside `cwd` the file tools may read. |
+| `deny_path_prefixes` | Paths the file tools may neither read nor write; relative ones are resolved against `cwd`. |
+| `deny_tools` | Tool names to refuse: DGC tools (`"write_file"`, `"bash"`, ...), a custom tool as `"mcp__app__<name>"`, or `"mcp__app__*"`. Unknown names raise `DGCConfigError`. |
+| `allow_tools` | When set, every other tool is refused. |
+| `shell` | `"sandboxed"` (default) or `"screened"`; see [Security model](#security-model). |
 | `redact_events` | Redact secrets in audit rows. |
-
-See [Security model](#security-model) for what the screening does and does not stop.
 
 ### `RetryPolicy`
 
-`RetryPolicy(max_attempts=4, retry_on=(429, 500, 502, 503, 504), backoff_s=0.5)`. The runtime
-retries rate limits and server errors itself; `max_attempts` bounds how often a stalled model
-stream is re-issued.
+`RetryPolicy(max_attempts=4, retry_on=(429, 500, 502, 503, 504), backoff_s=0.5)`.
+`max_attempts` (1 to 11) is how many times a model request whose stream stalls is sent;
+`RetryPolicy(max_attempts=1)` turns stall re-issues off. The runtime also retries HTTP 408, 429
+and 5xx answers on a fixed schedule; `retry_on` and `backoff_s` describe that schedule and cannot
+be changed (another value raises `DGCUnsupportedError`). Tool calls are never retried.
 
 ### Usage, cost and audit
 
 - `Pricing(input_per_million=0.0, output_per_million=0.0, cached_input_per_million=0.0)` — USD
   per million tokens, set by you. DGC does not know your provider's prices.
 - `cost_usd(input_tokens, output_tokens, cached_input_tokens, pricing)` → `float | None`.
+- A run's `usage` holds the provider's token counts for that run (input, output, cached input),
+  or `None` values when the provider did not report them, and `cost_usd` when you set `pricing`.
 - `DGC.usage_report()` and `DGC.export_audit()` read the logs in `state_dir`.
 - `redact(value)` and `redact_text(text)` apply the SDK's secret redaction to any value or string.
 
@@ -347,18 +387,18 @@ stream is re-issued.
 | Field | Meaning |
 | --- | --- |
 | `session_id`, `run_id` | Identity of the conversation and of this run. |
-| `status` | `RunStatus`: `completed`, `failed`, `cancelled`, `blocked` (a step was denied and the run could not finish), or while streaming `running` / `waiting_for_approval`. |
+| `status` | `RunStatus`: `completed`, `failed`, `cancelled`, `blocked` (a required step was denied), or while in progress `queued`, `running`, `waiting_for_approval`. |
 | `reason` | Why it ended, for example `completed`, `error`, `timeout`, `cancelled`, `permission_denied`, `transport`. |
 | `final_text` | The agent's final answer. `partial_text` holds text streamed before a stop. |
 | `output` | Parsed JSON when `output_schema` was given. |
-| `error` | The runtime's error message when the run failed, else `None`. |
+| `error` | The runtime's error message when the run failed (a missing model, a rejected key), else `None`. |
 | `usage` | Token counts and `cost_usd` for this run. |
 | `tools` | `list[ToolRecord]` — `ToolRecord`: `name`, `call_id`, `summary`, `output`, `is_error`, `is_diff`, `diff`, `args`. |
-| `changes` | `list[FileChange]` — `FileChange`: `path`, `kind` (`added`, `modified`, `deleted`), `before`, `after`, `root`. |
+| `changes` | `list[FileChange]` — `FileChange`: `path`, `kind` (`added`, `modified`, `deleted`), `before`, `after`, `root`, `diff` (a `git apply`-able patch for that file). |
 | `artifacts`, `documents` | `list[Artifact]` — `Artifact`: `id`, `name`, `url`, `rel`. |
 | `tasks` | `list[TaskItem]` — `TaskItem`: `id`, `content`, `status`, `revision`. |
 | `agents` | `list[AgentInfo]` — `AgentInfo`: `id`, `state`, `description`, `parent_id`, `model`. |
-| `verification` | `VerificationResult` (`ok`, `command`, `output`, `exit_code`) when a `verify_command` was set. |
+| `verification` | `VerificationResult` (`ok`, `command`, `output`, `exit_code`) for the configured `verify_command` only, else `None`. |
 
 Other result types: `SessionInfo` (`id`, `path`, `name`, `preview`, `message_count`, `when`),
 `Checkpoint` (`index`, `preview`, `files`), `SkillInfo` (`name`, `description`, `source`,
@@ -371,12 +411,13 @@ Other result types: `SessionInfo` (`id`, `path`, `name`, `preview`, `message_cou
 
 | Exception | Raised when |
 | --- | --- |
-| `DGCError` | Base class of every SDK exception. |
-| `DGCConfigError` | An option is invalid (also a `ValueError`). |
+| `DGCError` | Base class of every exception the SDK raises. |
+| `DGCConfigError` | An option is invalid, or no runtime was found (also a `ValueError`). |
 | `DGCUnsupportedError` | A requested capability is unavailable, such as a required sandbox. |
-| `DGCRuntimeError` | The child could not start, stay alive, or rejected a request. |
-| `DGCProtocolError` | The runtime speaks another protocol version; the message names the CLI you need. |
-| `DGCTimeoutError` | A control request or startup did not answer in time (also a `TimeoutError`). |
+| `DGCRuntimeError` | The runtime could not start, stay alive, or carry out a request. |
+| `DGCCommandRejectedError` | The runtime refused a request; `reason` and `command` say which and why. |
+| `DGCProtocolError` | The runtime speaks another protocol version; the message names the CLI or SDK you need. |
+| `DGCTimeoutError` | Startup or a control request did not answer in time (also a `TimeoutError`). |
 
 A run that fails does not raise: its `RunResult` has `status="failed"` and the reason in `error`.
 
@@ -409,18 +450,24 @@ most applications use:
 | `turn_end` | `turn_id`, `reason` (`completed`, `cancelled`, `error`) |
 
 Events are plain dictionaries, not typed classes; check `event.type` before reading `event.data`.
+The startup handshake is not a run event, and event types newer than this SDK's copy of the protocol
+are skipped rather than ending the session.
 
 ## Defaults
 
 | Setting | Default |
 | --- | --- |
-| Run timeout (`run`, `stream`) | 180 seconds |
+| `state_dir` | a new private temporary directory |
+| Runtime | discovered (see [Install](#install)) |
+| Run timeout (`run`, `stream`) | 180 seconds per turn |
 | Decision timeout | 30 seconds, then deny |
 | Custom tool timeout | 30 seconds |
+| Runtime start / control request | 30 / 15 seconds |
 | Permission mode | `default` |
 | Unhandled permission requests | denied |
 | Model and endpoint | the CLI's defaults unless you pass `model` / `base_url` |
-| Sandbox | off |
+| Child environment | basic variables only (`inherit_env=False`) |
+| Sandbox | off, unless a `RuntimePolicy` with `shell="sandboxed"` asks for it |
 | Output-schema repair attempts | 1 |
 
 ## TypeScript

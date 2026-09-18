@@ -1484,12 +1484,12 @@ v14 and are proven on Linux. The full guide and API reference is
 
 ```
 python3 -m pip install dgc-sdk==0.5.3
-export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
 ```
 
 That installs `import dgc_sdk`. Do **not** run `pip install dgc`: PyPI's package named `dgc` is a
-different project. The SDK drives `python -m dgc serve` from your DGC CLI install, and
-`DGC_PYTHON` names that install's Python (or pass `runtime=[...]`).
+different project. The SDK drives `dgc serve` from your DGC CLI install and finds it on its own
+(`dgc` on `PATH`, `~/.local/bin/dgc`, the installer's versions). `DGC_PYTHON` or `runtime=[...]`
+picks a different one.
 
 ## Quickstart
 
@@ -1532,11 +1532,13 @@ dictionaries keyed by `event.type`; docs/SDK.md lists them.
 
 ## Policy and sandbox
 
-`RuntimePolicy(network="deny", deny_tools=("write_file",))` becomes deny rules that hold in every
-permission mode, including `auto`. Its shell checks match command patterns: they stop ordinary
-network and file-writing commands, not every program that could do the same. For a hard boundary
-add `sandbox={"requirement": "required"}`, which runs commands under `bwrap` or `sandbox-exec`
-and refuses to start without one.
+`RuntimePolicy(network="deny", deny_tools=("write_file",))` is enforced by the runtime for that
+session in every permission mode, including `auto`, and is never saved to a config file: denied
+tools (custom and MCP tools too), file tools kept inside the workspace, no web or third-party MCP
+access. Shell commands cannot be held by rules on their text, so by default the policy runs them
+in the OS sandbox (`bwrap` or `sandbox-exec`): no network, no writes outside the workspace. In
+`auto` mode the shell runs only there. `sandbox={"requirement": "required"}` refuses to start a
+session that cannot be confined.
 
 ## TypeScript
 

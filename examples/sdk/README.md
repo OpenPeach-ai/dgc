@@ -1,11 +1,10 @@
 # SDK examples
 
-Each script runs against an installed SDK and a DGC CLI install. Set the model and endpoint, and
-point `DGC_PYTHON` at the CLI's Python:
+Each script runs against an installed SDK and a DGC CLI install (the SDK finds the CLI that
+`install.sh` put on your `PATH`; `DGC_PYTHON` pins another). Set the model and endpoint:
 
 ```bash
 python3 -m pip install dgc-sdk==0.5.3
-export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
 export DGC_MODEL=qwen3:8b DGC_BASE_URL=http://127.0.0.1:11434/v1   # any OpenAI-compatible endpoint
 # export DGC_API_KEY=...   when the endpoint needs a key
 

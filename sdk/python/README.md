@@ -9,13 +9,15 @@ python3 -m pip install dgc-sdk==0.5.3
 
 This installs `import dgc_sdk`. It is not the unrelated PyPI project `dgc`.
 
-The SDK drives a `dgc serve` process from a DGC CLI install. Install the CLI and tell the SDK which
-Python runs it:
+The SDK drives a `dgc serve` process from a DGC CLI install, which it finds on its own (`dgc` on
+`PATH`, `~/.local/bin/dgc`, or the installer's versions directory). Install the CLI:
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
-export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"
 ```
+
+To pin a different install, set `DGC_PYTHON` to its Python, for example
+`export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"`.
 
 Point `DGC_MODEL` and `DGC_BASE_URL` at an OpenAI-compatible endpoint (for example a local Ollama
 at `http://127.0.0.1:11434/v1`), then run this from the repository you want summarized:
