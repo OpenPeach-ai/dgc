@@ -1,6 +1,6 @@
 # dgc-sdk
 
-Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.3. Frozen 0.5.2.
+Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.4. Frozen 0.5.2.
 
 ```python
 from pathlib import Path

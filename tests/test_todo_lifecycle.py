@@ -186,6 +186,27 @@ class TodoLifecycleTests(unittest.TestCase):
         self.update([{"content": "Check the result", "status": "done"}])
         self.assertEqual(self.agent.todos[0]["status"], "done")
 
+    def test_settled_checklist_is_retired_on_a_new_user_turn(self):
+        self.update([
+            {"content": "One", "status": "done"},
+            {"content": "Two", "status": "done"},
+        ])
+        self.assertEqual(len(self.agent.todos), 2)
+        self.agent._retire_settled_todos()
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual(self.ui.todo_lists[-1], [])
+        self.assertFalse(self.agent.todo_clear_in_force())
+        self.update([{"content": "Fresh work", "status": "in_progress"}])
+        self.assertEqual(self.agent.todos[0]["content"], "Fresh work")
+
+    def test_open_checklist_is_not_retired(self):
+        self.update([
+            {"content": "Done", "status": "done"},
+            {"content": "Still going", "status": "in_progress"},
+        ])
+        self.agent._retire_settled_todos()
+        self.assertEqual(len(self.agent.todos), 2)
+
     def test_new_and_cleared_chats_cannot_inherit_tasks(self):
         for command in ("new_session", "clear_session"):
             with self.subTest(command=command):

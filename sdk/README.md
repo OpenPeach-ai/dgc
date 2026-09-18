@@ -1,6 +1,6 @@
 # DGC SDK
 
-Frozen **0.5.2**. Protocol **v14**, CLI **0.41.3**, Linux. GitHub tag **`sdk-v0.5.2`**
+Frozen **0.5.2**. Protocol **v14**, CLI **0.41.4**, Linux. GitHub tag **`sdk-v0.5.2`**
 (not `v0.5.2` — that is a historical CLI tag).
 
 Install the wheel from the GitHub release, or from this repository:

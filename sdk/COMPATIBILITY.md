@@ -4,7 +4,7 @@ Frozen cut: **0.5.2** (`sdk-v0.5.2`).
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.5.2** | **v14** | **0.41.3** | **≥ 3.10** | **≥ 22** (strip-types) | **Linux** |
+| **0.5.2** | **v14** | **0.41.4** | **≥ 3.10** | **≥ 22** (strip-types) | **Linux** |
 
 macOS and WSL are unproven. Native Windows is experimental.
 

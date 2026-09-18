@@ -10515,14 +10515,13 @@ def test_release_script_contract():
           and 'if [ "$REQUESTED_REF" != HEAD ]' in script
           and "archive and working-tree SBOM cannot describe different revisions" in script
           and "RELEASE_REF=HEAD" in script)
-    check("promoted runtime and editor downloads are ordinary tracked projection candidates",
+    check("website and release blobs are not tracked on the public product tree",
           all(subprocess.run(
               ["git", "check-ignore", "-q", path], cwd=PROJECT,
               capture_output=True, check=False,
-          ).returncode != 0 for path in (
-              "site/dgc.tar.gz", "site/vscode/dgc.vsix",
-              "site/vscode/dgc-999.999.999.vsix")))
-    site_gate = (PROJECT / "scripts" / "check-site.py").read_text()
+          ).returncode == 0 for path in (
+              "site/dgc.tar.gz", "site/vscode/dgc.vsix", "site-src/content/sdk.md",
+              "wrangler.json")))
     ci = (PROJECT / ".github" / "workflows" / "ci.yml").read_text()
     release_workflow = (PROJECT / ".github" / "workflows" / "release.yml").read_text()
     check("package CI verifies the release checksum beside its basename-only sidecar",
@@ -10531,19 +10530,18 @@ def test_release_script_contract():
           "needs: source-python" in release_workflow
           and "os: [ubuntu-latest, macos-latest]" in release_workflow
           and 'python: ["3.10", "3.13"]' in release_workflow)
-    check("pre-publication site CI waives only the unpublished tag, never artifact bytes",
-          "--allow-missing-release-artifacts" not in site_gate + ci
-          and "--allow-unpublished-source-tag" in site_gate
-          and "check-site.py --allow-unpublished-source-tag" in ci
-          and "fetch-depth: 0" in ci
-          and "require_git_binding=True" in site_gate
-          and "require_source_tag=not args.allow_unpublished_source_tag" in site_gate)
-    deploy = (PROJECT / "scripts" / "deploy-site.sh").read_text()
-    check("production site deploys are pinned to an exact reviewed public main projection",
-          "BRANCH=main" in deploy and "DGC_CLOUDFLARE_BRANCH" not in deploy
-          and '--branch="$BRANCH"' in deploy
-          and 'git rev-parse HEAD' in deploy and 'git rev-parse origin/main' in deploy
-          and 'check-site.py" --require-public-release --stage' in deploy)
+    check("CI rejects a website tree on the public product repo",
+          "scripts/check-public-content.py" in ci
+          and "Public product tree" in ci
+          and "check-site.py --allow-unpublished-source-tag" not in ci)
+    deploy_path = PROJECT / "scripts" / "deploy-site.sh"
+    if deploy_path.is_file():
+        deploy = deploy_path.read_text()
+        check("production site deploys are pinned to an exact reviewed public main projection",
+              "BRANCH=main" in deploy and "DGC_CLOUDFLARE_BRANCH" not in deploy
+              and '--branch="$BRANCH"' in deploy
+              and 'git rev-parse HEAD' in deploy and 'git rev-parse origin/main' in deploy
+              and 'check-site.py" --require-public-release --stage' in deploy)
     extension = (PROJECT / "scripts" / "release-extension.sh").read_text()
     check("extension release channels require separate explicit phases",
           all(mode in extension for mode in (
@@ -10585,19 +10583,18 @@ def test_release_script_contract():
           and "npm ci" in extension_job
           and 'DGC_REQUIRE_CHROMIUM: "1"' in extension_job
           and 'process.env.DGC_REQUIRE_CHROMIUM === "1"' in spacing_test)
-    promote = (PROJECT / "scripts" / "promote-release.sh").read_text()
+    promote_path = PROJECT / "scripts" / "promote-release.sh"
     github_release = (PROJECT / "scripts" / "github-release.sh").read_text()
-    check("promotion binds a local tag without mutating historical tags",
-          '--bind-git "$ROOT"' in promote and '--bind-git "$ROOT"' in github_release
-          and "fetch --quiet origin main" in promote
-          and "fetch --quiet origin main --tags" not in promote)
-    check("GitHub publication atomically exposes promotion main and its immutable source tag",
+    if promote_path.is_file():
+        promote = promote_path.read_text()
+        check("promotion binds a local tag without mutating historical tags",
+              "fetch --quiet origin main" in promote
+              and "fetch --quiet origin main --tags" not in promote)
+    check("GitHub publication atomically exposes the tagged product commit",
           'git push --atomic origin' in github_release
           and '"HEAD:refs/heads/main"' in github_release
           and '"refs/tags/$TAG:refs/tags/$TAG"' in github_release
-          and 'git diff --name-only --no-renames -z "$SOURCE_COMMIT" "$HEAD_COMMIT"' in github_release
-          and 'site/*)' in github_release
-          and '--require-public' in github_release)
+          and "tagged product commit" in github_release)
 def test_installer_never_overwrites_a_checkout():
     """Releases are built under <data dir>/versions, and a source checkout is no place for them —
     it is where a mistake has cost uncommitted work before — so naming one as the install
@@ -10641,128 +10638,84 @@ def test_installer_never_overwrites_a_checkout():
               proceeded.returncode == 1 and not (pathlib.Path(tmp) / "bin" / "dgc").exists()
               and not any((plain / "versions").iterdir()), moved_on[-300:])
 
-    check("the published installer is the reviewed one",
-          (PROJECT / "site" / "install.sh").read_text() == installer.read_text())
+    site_installer = PROJECT / "site" / "install.sh"
+    if site_installer.is_file():
+        check("the published installer is the reviewed one",
+              site_installer.read_text() == installer.read_text())
 
 
 def test_release_promotion_contract():
-    """Promotion B contains only a recoverable site projection of source A."""
+    """Public main is the tagged product commit; website is not a git promotion."""
     import importlib.util
     import shutil
 
-    def promotion_case(relative_path: str, *, delete: bool = False, symlink: bool = False):
-        """Run the real publisher against an isolated local bare remote."""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo, remote = root / "repo", root / "origin.git"
-            repo.mkdir()
+    def product_repo():
+        td = tempfile.TemporaryDirectory()
+        root = Path(td.name)
+        repo, remote = root / "repo", root / "origin.git"
+        repo.mkdir()
 
-            def git(*args, cwd=repo):
-                return subprocess.run(
-                    ["git", *args], cwd=cwd, text=True, capture_output=True, check=True,
-                )
-
-            git("init", "-b", "main")
-            git("config", "user.name", "DGC release test")
-            git("config", "user.email", "release-test@invalid.example")
-            (repo / "dgc").mkdir()
-            (repo / "dgc" / "__init__.py").write_text('__version__ = "0.0.1"\n')
-            (repo / "scripts").mkdir()
-            shutil.copy2(PROJECT / "scripts" / "github-release.sh",
-                         repo / "scripts" / "github-release.sh")
-            (repo / "scripts" / "preflight.sh").write_text(
-                "#!/usr/bin/env bash\nexit 0\n")
-            (repo / "scripts" / "check-site.py").write_text("raise SystemExit(0)\n")
-            (repo / "scripts" / "release_bundle.py").write_text("raise SystemExit(0)\n")
-            (repo / "scripts" / "preflight.sh").chmod(0o755)
-            (repo / "install.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
-            (repo / "site" / "vscode").mkdir(parents=True)
-            (repo / "site" / "seed.txt").write_text("source\n")
-            (repo / "site" / "dgc.tar.gz").write_bytes(b"tracked core archive")
-            (repo / "site" / "vscode" / "version.json").write_text(
-                '{"version":"0.0.1"}\n')
-            (repo / "site" / "vscode" / "dgc.vsix").write_bytes(b"tracked editor")
-            (repo / "site" / "vscode" / "dgc-0.0.1.vsix").write_bytes(
-                b"tracked editor")
-            git("add", ".")
-            git("commit", "-m", "source A")
-            source = git("rev-parse", "HEAD").stdout.strip()
-            git("tag", "-a", "v0.0.1", "-m", "source release")
-            subprocess.run(
-                ["git", "init", "--bare", str(remote)], text=True,
-                capture_output=True, check=True,
+        def git(*args, cwd=repo):
+            return subprocess.run(
+                ["git", *args], cwd=cwd, text=True, capture_output=True, check=True,
             )
-            git("remote", "add", "origin", str(remote))
-            git("push", "-u", "origin", "HEAD:refs/heads/main")
 
-            changed = repo / relative_path
-            changed.parent.mkdir(parents=True, exist_ok=True)
-            if delete:
-                changed.unlink()
-            elif symlink:
-                changed.unlink()
-                external = root / "external-release-artifact"
-                external.write_bytes(b"local-only release bytes")
-                changed.symlink_to(external)
-            else:
-                changed.write_text("promotion change\n")
-            git("add", ".")
-            git("commit", "-m", f"promotion B: {relative_path}")
-            head = git("rev-parse", "HEAD").stdout.strip()
-            result = subprocess.run(
-                ["bash", "scripts/github-release.sh", "v0.0.1"], cwd=repo,
-                text=True, capture_output=True, check=False,
-            )
-            remote_main = subprocess.run(
-                ["git", "--git-dir", str(remote), "rev-parse", "refs/heads/main"],
-                text=True, capture_output=True, check=True,
-            ).stdout.strip()
-            remote_tag = subprocess.run(
-                ["git", "--git-dir", str(remote), "rev-parse", "--verify",
-                 "refs/tags/v0.0.1"], text=True, capture_output=True, check=False,
-            )
-            return result, source, head, remote_main, remote_tag.returncode
+        git("init", "-b", "main")
+        git("config", "user.name", "DGC release test")
+        git("config", "user.email", "release-test@invalid.example")
+        (repo / "dgc").mkdir()
+        (repo / "dgc" / "__init__.py").write_text('__version__ = "0.0.1"\n')
+        (repo / "scripts").mkdir()
+        shutil.copy2(PROJECT / "scripts" / "github-release.sh",
+                     repo / "scripts" / "github-release.sh")
+        (repo / "scripts" / "preflight.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (repo / "scripts" / "preflight.sh").chmod(0o755)
+        (repo / "install.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+        git("add", ".")
+        git("commit", "-m", "source A")
+        source = git("rev-parse", "HEAD").stdout.strip()
+        git("tag", "-a", "v0.0.1", "-m", "source release")
+        subprocess.run(["git", "init", "--bare", str(remote)], text=True,
+                       capture_output=True, check=True)
+        git("remote", "add", "origin", str(remote))
+        git("push", "-u", "origin", "HEAD:refs/heads/main")
+        return td, repo, remote, source, git
 
-    allowed, source, head, remote_main, remote_tag_rc = promotion_case(
-        "site/promotion.json")
-    check("a site-only B projection reaches main with its source tag atomically",
-          allowed.returncode == 0 and remote_main == head and remote_tag_rc == 0,
-          allowed.stderr)
-    site_installer, _source, head, remote_main, remote_tag_rc = promotion_case(
-        "site/install.sh")
-    check("promotion B permits the staged site installer while keeping root install.sh frozen",
-          site_installer.returncode == 0 and remote_main == head and remote_tag_rc == 0,
-          site_installer.stderr)
-    for forbidden in (
-            "scripts/unreviewed-release-helper.sh",
-            ".github/workflows/unreviewed-release.yml",
-            "install.sh",
-            "arbitrary-root-file.txt"):
-        rejected, source, _head, remote_main, remote_tag_rc = promotion_case(forbidden)
-        check(f"promotion B rejects non-site path {forbidden}",
+    isolated, repo, remote, source, git = product_repo()
+    try:
+        result = subprocess.run(
+            ["bash", "scripts/github-release.sh", "v0.0.1"], cwd=repo,
+            text=True, capture_output=True, check=False,
+        )
+        remote_main = subprocess.run(
+            ["git", "--git-dir", str(remote), "rev-parse", "refs/heads/main"],
+            text=True, capture_output=True, check=True,
+        ).stdout.strip()
+        remote_tag = subprocess.run(
+            ["git", "--git-dir", str(remote), "rev-parse", "--verify", "refs/tags/v0.0.1"],
+            text=True, capture_output=True, check=False,
+        )
+        check("tagged product HEAD reaches main with its source tag atomically",
+              result.returncode == 0 and remote_main == source and remote_tag.returncode == 0,
+              result.stderr)
+        (repo / "extra.txt").write_text("not a product tag\n")
+        git("add", ".")
+        git("commit", "-m", "website promotion must not ship")
+        rejected = subprocess.run(
+            ["bash", "scripts/github-release.sh", "v0.0.1"], cwd=repo,
+            text=True, capture_output=True, check=False,
+        )
+        remote_main = subprocess.run(
+            ["git", "--git-dir", str(remote), "rev-parse", "refs/heads/main"],
+            text=True, capture_output=True, check=True,
+        ).stdout.strip()
+        check("a commit after the tag is not a public promotion",
               rejected.returncode != 0
-              and "promotion commit may change only paths below site/" in rejected.stderr
-              and remote_main == source and remote_tag_rc != 0,
+              and "tagged product commit" in rejected.stderr
+              and remote_main == source,
               rejected.stderr)
-    symlinked, source, _head, remote_main, remote_tag_rc = promotion_case(
-        "site/dgc.tar.gz", symlink=True)
-    check("promotion B rejects a local-only symlink masquerading as a tracked release artifact",
-          symlinked.returncode != 0
-          and "promotion artifact must be a tracked regular file" in symlinked.stderr
-          and remote_main == source and remote_tag_rc != 0,
-          symlinked.stderr)
-    for required_artifact in (
-            "site/dgc.tar.gz",
-            "site/vscode/dgc.vsix",
-            "site/vscode/dgc-0.0.1.vsix"):
-        rejected, source, _head, remote_main, remote_tag_rc = promotion_case(
-            required_artifact, delete=True)
-        check(f"promotion B must track {required_artifact}",
-              rejected.returncode != 0
-              and f"does not track required release artifact: {required_artifact}"
-                  in rejected.stderr
-              and remote_main == source and remote_tag_rc != 0,
-              rejected.stderr)
+    finally:
+        isolated.cleanup()
 
     release_spec = importlib.util.spec_from_file_location(
         "dgc_release_binding_test", PROJECT / "scripts" / "release_bundle.py")
@@ -16313,6 +16266,9 @@ def test_ultra_profile():
               "# DGC Ultra execution profile" in prompt
               and "up to 3 parallel workers" in prompt
               and "permission mode remains default" in prompt)
+        check("Ultra is not a token-saving mode and skips auto efficiency pressure",
+              "not a token-saving mode" in prompt
+              and "slow local model" not in prompt)
 
     from dgc.headless import _validated_config_values
     valid, problem = _validated_config_values({"ultra_mode": True}, frozenset())
@@ -20348,9 +20304,12 @@ def main():
         test_release_promotion_contract()
         test_extension_vsix_guard()
         test_benchmark_integrity()
-        test_site_critical_css_budget()
-        test_site_hero_mark_lockstep_and_undimmed()
-        test_site_sitemap_and_robots()
+        if (PROJECT / "site-src").is_dir() and (PROJECT / "scripts" / "generate-docs-site.py").is_file():
+            test_site_critical_css_budget()
+            test_site_hero_mark_lockstep_and_undimmed()
+            test_site_sitemap_and_robots()
+        else:
+            print("site tests skipped (website tree is not in this checkout)")
         test_protocol_client()
         test_acp_protocol()
         test_bored_mode()

@@ -48,5 +48,4 @@ REMOTE_TAG=$(git ls-remote origin "refs/tags/$TAG^{}" | awk '{print $1}')
   echo "remote release refs did not verify after the atomic push" >&2; exit 1;
 }
 git fetch --quiet origin main
-python3 "$ROOT/scripts/release_bundle.py" "$ROOT/site" --bind-git "$ROOT" --require-public
-echo "published promotion ${HEAD_COMMIT:0:12} and source tag $TAG atomically; Actions owns the GitHub Release"
+echo "published product ${HEAD_COMMIT:0:12} and source tag $TAG atomically; Actions owns the GitHub Release"

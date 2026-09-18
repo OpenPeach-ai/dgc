@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.4 — 2026-09-18
+
+- Requires CLI 0.41.4; editor protocol remains v14.
+- **Tasks row matches the terminal.** When every item is done and the turn is idle, the Tasks list above the composer hides. A new prompt's checklist replaces a finished one instead of sitting at 4/4.
+
 ## 0.26.3 — 2026-09-17
 
 - Requires CLI 0.41.3; editor protocol remains v14.

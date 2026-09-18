@@ -1521,6 +1521,9 @@
     }
     expireOpenRequests();
     turn = null;
+    // Match the terminal: an all-done checklist folds away when idle so the next prompt's
+    // list replaces it instead of sitting at "Tasks 4/4" above the composer.
+    if (paintedTodos.length) renderTodos(paintedTodos);
   }
   // A checklist belongs to the session, not to a single assistant bubble, so it is not a card
   // in the transcript. It is a row in the composer rail, directly above the goal row and built from
@@ -1613,8 +1616,10 @@
     paintTodoClearBusy(false);
     showTasksNote(message);
   }
+  let paintedTodos = [];
   function renderTodos(value) {
-    const rows = (Array.isArray(value) ? value : []).filter((t) => t && typeof t.content === "string").slice(0, 100);
+    const rows = (Array.isArray(value) ? value : paintedTodos).filter((t) => t && typeof t.content === "string").slice(0, 100);
+    if (Array.isArray(value)) paintedTodos = rows;
     const list = $("tasks-list"), count = $("tasks-count");
     if (!rows.length) {
       const hadFocus = tasksBar.contains(document.activeElement);
@@ -1655,7 +1660,9 @@
       const g = TODO_GLYPHS[statusOf(t)];
       return `<div class="t ${g[1]}" role="listitem"><span class="ti" role="img" aria-label="${g[2]}">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
     }).join("");
-    tasksBar.hidden = false;
+    const open = Boolean(doing) || pending > 0 || blocked > 0;
+    // Idle + every row done/cancelled: hide, same as the terminal todo pane.
+    tasksBar.hidden = !open && !turn;
     paintTasksExpanded();
     syncComposerRail();
   }

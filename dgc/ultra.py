@@ -60,14 +60,18 @@ def delegated_prompt(config, prompt: str, mode: str) -> str:
     workers = worker_limit(config)
     return (
         "<dgc-ultra-policy>\n"
-        "DGC Ultra is active for this turn. Use extended reasoning and proactively split genuinely "
-        f"independent work into parallel sub-agents when that improves quality or latency (up to {workers}). "
-        "Keep coupled edits serial, reconcile all child results, and verify the integrated result before "
-        "finishing. For work that will take more than a short wait and does not block the rest of this "
-        "turn, set task.background true so the child continues after you finish speaking; DGC starts a "
-        "new turn when it lands. Do not delegate trivial work merely to use the quota. The current DGC "
-        f"permission mode remains {mode}; Ultra does not grant additional filesystem, shell, or network "
-        "authority.\n"
+        "DGC Ultra is an orchestration profile, not a token-saving mode. It stays on for fast "
+        "cloud models as well as local ones. Split independent work into parallel sub-agents "
+        f"(up to {workers}) instead of doing those chunks in the parent. Delegate whenever the "
+        "turn has more than one independent chunk (map more than one area, backend vs UI, "
+        "unrelated bugs, a long test/deploy/SSH battery beside other work). Keep coupled edits "
+        "serial, reconcile all child results, and verify the integrated result before finishing. "
+        "For work that will take more than a short wait and does not block the rest of this "
+        "turn, set task.background true so the child continues after you finish speaking; DGC "
+        "starts a new turn when it lands. Do not keep independent work in the parent to save "
+        "tokens or round-trips. Skip sub-agents only for a short question or a single coupled "
+        f"file edit. The current DGC permission mode remains {mode}; Ultra does not grant "
+        "additional filesystem, shell, or network authority.\n"
         "</dgc-ultra-policy>\n\n" + prompt
     )
 

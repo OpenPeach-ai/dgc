@@ -1317,6 +1317,27 @@ class Agent(GoalLifecycle):
         """True from a user's clear through the end of the next top-level turn."""
         return getattr(self, "_todo_clear_turns", None) is not None
 
+    def _retire_settled_todos(self) -> None:
+        """Drop a fully finished checklist at the start of a new top-level user turn.
+
+        The editor Tasks row stays pinned at 4/4 after the turn ends; the terminal already folds
+        an all-done list when idle. Clearing here (without the user's Clear lock) hides the old
+        list so the next `todo` call is a replacement, not a stack of yesterday's done steps.
+        """
+        dropped = False
+        with _todo_lock(self.ctx):
+            rows = [item for item in self.ctx.todos if isinstance(item, dict)]
+            if not rows:
+                return
+            if any(str(item.get("status") or "") not in ("done", "cancelled") for item in rows):
+                return
+            self.ctx.todos.clear()
+            dropped = True
+            if callable(self.ctx.on_todo):
+                self.ctx.on_todo(self.ctx.todos)
+        if dropped and self.session_file and self.messages:
+            self._persist()
+
     def _advance_todo_clear(self) -> None:
         """Called as each top-level turn starts: count the clear down and lift it when spent.
 
@@ -2622,8 +2643,9 @@ class Agent(GoalLifecycle):
             "file, make them in ONE multi_edit call. Keep each old_string as SMALL as possible while "
             "still matching uniquely — don't pad it with unchanged surrounding context (padding is the "
             "#1 cause of edit-not-found). If an edit still won't match, rewrite the whole file with write_file.",
-            "- Multi-step: use `todo`, not JSON. Send the full list: in_progress before work, "
-            "done after verification, pending next steps, blocked with why.",
+            "- Multi-step: use `todo`, not JSON. Send the full list for THIS prompt only: "
+            "in_progress before work, done after verification, pending next steps, blocked with why. "
+            "A new user prompt replaces the previous checklist — do not keep its completed rows.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
             "",
             "# Response cadence",
@@ -2735,16 +2757,19 @@ class Agent(GoalLifecycle):
                 "(put the recommended option first). Never mock the picker in Markdown, HTML, or "
                 "Python, never open a demo file as a stand-in, and never ask the user to reply "
                 "with a number in chat.",
-                "Work efficiently — a slow local model makes every round-trip and every compile costly:",
-                "- Read what you need in as few calls as possible; don't re-read a file you already have.",
-                "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
-                "more. Make ALL your edits first, then run the test ONCE — never edit-one-line-then-test in a loop.",
-                "- When you are confident in a fix, put its ordered edit call(s) and that one verifier call "
-                "in the SAME response. DGC executes file-edit and shell calls in order, avoiding a slow model "
-                "round-trip between a known edit and its test.",
-                "- If an edit_file fails to match, don't retry variations — write the whole corrected file "
-                "in one write_file call and move on.",
             ]
+            if not self.config.get("ultra_mode", False):
+                parts += [
+                    "Work efficiently — a slow local model makes every round-trip and every compile costly:",
+                    "- Read what you need in as few calls as possible; don't re-read a file you already have.",
+                    "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
+                    "more. Make ALL your edits first, then run the test ONCE — never edit-one-line-then-test in a loop.",
+                    "- When you are confident in a fix, put its ordered edit call(s) and that one verifier call "
+                    "in the SAME response. DGC executes file-edit and shell calls in order, avoiding a slow model "
+                    "round-trip between a known edit and its test.",
+                    "- If an edit_file fails to match, don't retry variations — write the whole corrected file "
+                    "in one write_file call and move on.",
+                ]
 
         if self.config.get("ultra_mode", False):
             from .ultra import worker_limit
@@ -2752,12 +2777,18 @@ class Agent(GoalLifecycle):
             parts += [
                 "",
                 "# DGC Ultra execution profile",
-                "Ultra is active: use extended reasoning and proactively delegate genuinely independent "
-                f"workstreams with the task tool when that improves quality or latency (up to {workers} "
-                "parallel workers).",
-                "Keep coupled edits serial. Reconcile every child result in the parent, inspect the landed "
-                "changes, and verify the integrated result before finishing. Do not delegate trivial work "
-                "merely to use the available workers.",
+                "Ultra is an orchestration profile, not a token-saving mode. It stays on for fast "
+                "cloud models as well as local ones. You are the parent: split independent work into "
+                f"parallel `task` calls (up to {workers} parallel workers) instead of doing those chunks yourself.",
+                "Delegate whenever the turn has more than one independent chunk: mapping more than "
+                "one area of a repo; backend and UI that do not share files; two or more unrelated "
+                "bugs; a long test, deploy, or SSH battery that can run beside other work. Emit "
+                "those `task` calls in ONE response so they run concurrently. Use explorer to map, "
+                "researcher to write one findings file, critic to review that file, worker to implement.",
+                "Keep only coupled edits to the same files in the parent. Reconcile every child "
+                "result, inspect the landed changes, and verify the integrated result before finishing.",
+                "Do not keep independent work in the parent to save tokens, round-trips, or because "
+                "the model is fast. Skip `task` only for a short question or a single coupled file edit.",
                 f"Ultra does not change authority: permission mode remains {mode}, and every parent or child "
                 "action stays inside that policy.",
             ]
@@ -3058,6 +3089,7 @@ class Agent(GoalLifecycle):
                 if reset_cancel:
                     self.cancelled.clear()
                 self._advance_todo_clear()
+                self._retire_settled_todos()
                 if not self._session_started:   # SessionStart hook fires once per session
                     self._session_started = True
                     self._run_lifecycle_hooks(
@@ -3349,6 +3381,7 @@ class Agent(GoalLifecycle):
                 # A delegated CLI never saw DGC's checklist, so it gets no note, but its turn still
                 # counts: without this a clear made on a subscription route would never lift.
                 self._advance_todo_clear()
+                self._retire_settled_todos()
                 if not self._session_started:
                     self._session_started = True
                     self._run_lifecycle_hooks(

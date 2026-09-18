@@ -25,6 +25,8 @@ def _load(name: str, filename: str):
         sys.path.remove(str(SCRIPTS))
 
 
+@unittest.skipUnless((PROJECT / "site-src").is_dir() and (SITE / "routes.json").is_file(),
+                     "website tree is local-only")
 class ReleaseNotesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -63,6 +65,8 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r"<li>", card)), len(releases["extension"][0]["notes"]) - 1)
 
 
+@unittest.skipUnless((PROJECT / "site-src").is_dir() and (SITE / "routes.json").is_file(),
+                     "website tree is local-only")
 class VscodeUrlTests(unittest.TestCase):
     def test_the_vscode_page_is_named_by_its_trailing_slash_url(self):
         site_common = _load("common", "site_common.py")
@@ -76,14 +80,14 @@ class VscodeUrlTests(unittest.TestCase):
         routes = json.loads((SITE / "routes.json").read_text(encoding="utf-8"))["html"]
         for route in routes:
             relative = ("index.html" if route == "/" else
-                        f"{route.strip('/')}/index.html" if route in ("/docs", "/vscode") else
+                        f"{route.strip('/')}/index.html" if route in ("/docs", "/vscode", "/sdk") else
                         f"{route.strip('/')}.html")
             source = (SITE / relative).read_text(encoding="utf-8")
             self.assertNotRegex(source, r'href="https://vibedgc\.com/vscode"', relative)
 
     def test_the_local_qa_server_redirects_the_slashless_form_like_pages(self):
         server = (PROJECT / "qa" / "site" / "server.mjs").read_text(encoding="utf-8")
-        self.assertIn('if (pathname === "/vscode") {', server)
+        self.assertIn('pathname === "/sdk"', server)
         self.assertIn("writeHead(308", server)
 
 

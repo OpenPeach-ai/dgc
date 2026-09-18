@@ -86,7 +86,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
                               enum=("prompt", "resume", "continue", "monitor", "wake")),
                    "request_id": _S(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
-    # stops guessing from position. Rule (Codex's, exactly): the last ``stream_end`` of the turn
+    # stops guessing from position. Rule: the last ``stream_end`` of the turn
     # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose
     # phase was absent; else null. Reported for every reason, not just "completed": a stopped turn
     # still has an answer block, and the panel decides what chrome a partial one earns.

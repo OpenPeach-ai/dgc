@@ -1465,6 +1465,56 @@ submodule, and oversized previews send you to Source Control.
 
 The terminal's `/diff` pane is the live working-tree view while a turn runs; see **Diff pane**.
 """.strip()),
+    ("SDK", "embed DGC in an application or CI job", """
+# SDK
+
+The DGC SDK embeds the same agent in your own process. It is **free and local**. You do not pay
+DGC to use it. Optional `Pricing` on a client only attributes **your** model-token spend.
+
+Frozen cut: **0.5.2**, protocol **v14**, Linux. Pair it with CLI **0.41.4** (this checkout or the
+GitHub release). Tag [`sdk-v0.5.2`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2)
+— not `v0.5.2`, which is a historical CLI tag.
+
+## Install
+
+```
+python3 -m pip install \\
+  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
+```
+
+Or from a clone: `python3 -m pip install -e sdk/python`.
+
+Do **not** `pip install dgc`. That PyPI name is an unrelated clustering package. This SDK is not
+on PyPI or npm yet. The wheel still needs a runtime that can run `python -m dgc serve` (this
+repository or CLI 0.41.4). Set `DGC_PYTHON` if `python3` cannot import `dgc`.
+
+## Isolation
+
+Each `DGC` owns one `state_dir` HOME. Host `~/.dgc` is unused unless you pass
+`inherit_user_state=True` — do not, in production embeds.
+
+```python
+from dgc_sdk import DGC, Pricing, RuntimePolicy
+
+dgc = DGC(
+    state_dir="/var/lib/myapp/dgc",
+    inherit_user_state=False,
+    department="platform",
+    pricing=Pricing(input_per_million=0.0, output_per_million=0.0),
+    policy=RuntimePolicy(network="deny", deny_tools=("write_file",)),
+)
+session = dgc.session(cwd="/path/to/workspace", permissions={"mode": "default", "unhandled": "deny"})
+result = session.run("Summarize this repository. Do not edit files.")
+print(result.status, result.usage)
+```
+
+`RuntimePolicy(deny_tools=("write_file",))` is compiled into isolated deny rules in every permission
+mode, including `auto`. Write-tool denies also block bash file-writes (redirects, `tee`, `cp`/`mv`).
+
+TypeScript lives in `sdk/typescript` (Node ≥ 22). Usage, audit, and retry helpers are Python-first.
+
+Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
+""".strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
 # In your editor
 
