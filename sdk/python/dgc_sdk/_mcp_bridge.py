@@ -129,7 +129,10 @@ class ToolHub:
 
     The socket lives in a private 0700 directory under a random name, and a connection is served
     only after its first line carries this session's secret (and, on Linux, only from this
-    user). DGC hands the secret to the relay in its environment, which is never persisted.
+    user), so other users and processes that do not hold the secret cannot call the tools. DGC
+    hands the secret to the relay in its environment, which is never persisted. A process of
+    the same user that can read the relay's environment could still learn it; the OS sandbox
+    keeps the agent's shell from seeing the relay process or this socket.
     """
 
     def __init__(self, tools: SequenceToolMap, socket_path: str | None = None):
@@ -359,6 +362,13 @@ except Exception:  # pragma: no cover - running as a frozen proxy
 def define_tool(name: str, description: str, input_schema: Mapping[str, Any],
                 handler: Callable[[Mapping[str, Any]], Any],
                 timeout: float | None = 30.0) -> "ToolSpec":
+    """Describe a tool the agent can call and this process runs (``mcp__app__<name>``).
+
+    ``handler`` receives the call's arguments and returns a string or JSON-able value. When it
+    runs past ``timeout`` seconds the agent is told the call failed, but the handler's thread is
+    not stopped: make handlers idempotent or bound their own work. Refuse or allow the tool with
+    ``RuntimePolicy(deny_tools=("mcp__app__<name>",))`` or ``allow_tools``.
+    """
     from .errors import DGCConfigError
     from .types import ToolSpec as Spec
     if not name or not isinstance(name, str) or not name.replace("_", "").replace("-", "").isalnum():

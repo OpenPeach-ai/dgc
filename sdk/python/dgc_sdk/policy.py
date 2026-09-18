@@ -689,9 +689,13 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
         deny += [f"MCPCall({pattern})" for pattern in _complement_patterns([f"mcp__{_APP_SERVER}__*"])]
     denied = policy._denied_prefixes(workspace)
     for prefix in denied:
-        text = _escape(str(prefix))
-        for tool in _PATH_RULE_TOOLS:
-            deny += [f"{tool}({text})", f"{tool}({text}/**)"]
+        spellings = [str(prefix)]
+        if _within(prefix, workspace) and prefix != workspace:
+            # The project-relative spelling also covers a subagent's worktree copy of the tree.
+            spellings.append(prefix.relative_to(workspace).as_posix())
+        for text in map(_escape, spellings):
+            for tool in _PATH_RULE_TOOLS:
+                deny += [f"{tool}({text})", f"{tool}({text}/**)"]
     if policy._search_guard(workspace):
         ask += [_DISPLAY[name] for name in sorted(_SEARCH_TOOLS)]
     ask_external = bool(policy._extra_dirs(workspace))
