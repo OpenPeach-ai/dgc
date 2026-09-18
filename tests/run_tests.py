@@ -20307,6 +20307,97 @@ def test_model_reconnect_surfaces():
     _shutil.rmtree(work, ignore_errors=True)
 
 
+def test_session_policy():
+    """DGC_SESSION_POLICY: an SDK's per-process rules and sandbox, never saved, fail closed."""
+    print("session policy:")
+    import hashlib as _hashlib
+    from types import SimpleNamespace
+    from unittest import mock as _mock
+    from dgc import permissions as _perm, sandbox as _sandbox
+    from dgc.headless import Backend as _Backend
+
+    root = Path(tempfile.mkdtemp(prefix="dgc-session-policy-")).resolve()
+    (root / "secrets").mkdir()
+    empty = {"allow": [], "ask": [], "deny": []}
+
+    def engine(mode, rules=None):
+        return _perm.PermissionEngine(mode, rules or empty, root)
+
+    def with_policy(value):
+        os.environ[_perm.SESSION_POLICY_ENV] = value if isinstance(value, str) else json.dumps(value)
+
+    try:
+        os.environ.pop(_perm.SESSION_POLICY_ENV, None)
+        check("no session policy changes nothing",
+              _perm.session_policy() is None and engine("auto").decide("bash", {"command": "ls"})[0] == "allow")
+        for broken in ("{not json", json.dumps({"version": 9}), json.dumps({"version": 1, "extra": 1}),
+                       json.dumps({"version": 1, "deny": ["Frobnicate"]})):
+            with_policy(broken)
+            decision, reason = engine("auto").decide("read_file", {"path": "README.md"})
+            check(f"an unreadable session policy denies every tool ({broken[:24]})",
+                  decision == "deny" and "session policy is invalid" in reason, reason)
+        with_policy({"version": 1, "deny": ["ExternalDirectory", f"Read({root}/secrets/**)"],
+                     "ask": ["Grep"], "auto_deny": ["Bash(*curl*)"]})
+        auto, default, plan = engine("auto"), engine("default"), engine("plan")
+        check("session denies hold in auto mode (outside cwd, denied path)",
+              auto.decide("write_file", {"path": "/tmp/elsewhere.txt"})[0] == "deny"
+              and auto.decide("read_file", {"path": "secrets/key.pem"})[0] == "deny"
+              and auto.decide("view_image", {"path": "secrets/key.png"})[0] == "deny")
+        check("session asks reach the launcher in auto and plan mode, beating a configured allow",
+              auto.decide("grep", {"pattern": "x"})[0] == "ask"
+              and plan.decide("grep", {"pattern": "x"})[0] == "ask"
+              and engine("auto", {"allow": ["Grep"], "ask": [], "deny": []}).decide(
+                  "grep", {"pattern": "x"})[0] == "ask")
+        check("a configured ask in plan mode still leaves read-only tools allowed",
+              _perm.PermissionEngine("plan", {"allow": [], "ask": ["Glob"], "deny": []}, root)
+              .decide("glob", {"pattern": "*"})[0] == "allow")
+        check("auto-only denies apply only in auto mode",
+              auto.decide("bash", {"command": "curl x"})[0] == "deny"
+              and default.decide("bash", {"command": "curl x"})[0] == "ask")
+        with_policy({"version": 1, "sandbox": "preferred", "shell_requires_sandbox": True})
+        with _mock.patch.object(_sandbox, "available", return_value=None):
+            decision, reason = engine("auto").decide("bash", {"command": "ls"})
+            check("unattended shell without a sandbox is refused, with the reason",
+                  decision == "deny" and "sandbox" in reason
+                  and engine("auto").decide("monitor", {"command": "tail -f x"})[0] == "deny"
+                  and engine("default").decide("bash", {"command": "ls"})[0] == "ask", reason)
+            check("preferred sandbox with no backend stays off", not _sandbox.requested(None))
+        with _mock.patch.object(_sandbox, "available", return_value="bwrap"):
+            check("inside the sandbox the unattended shell runs; python never does",
+                  engine("auto").decide("bash", {"command": "ls"})[0] == "allow"
+                  and engine("auto").decide("python", {"code": "1"})[0] == "deny"
+                  and _sandbox.requested(None) and _sandbox.session_confined())
+        with_policy({"version": 1, "sandbox": "required", "sandbox_network": False,
+                     "sandbox_read_only": True})
+        cfg = {"sandbox": False, "sandbox_network": True}
+        check("a required session sandbox is on whatever the config says",
+              _sandbox.requested(cfg))
+        argv = _sandbox.wrap("ls", root, cfg)
+        if argv is not None and "bwrap" in argv[0]:
+            account = _sandbox._account_home()
+            check("session sandbox: no network, project read-only, account home hidden",
+                  "--share-net" not in argv and argv[argv.index("/mnt") - 2] == "--ro-bind"
+                  and (account is None or not account.exists()
+                       or str(account.resolve()) in argv[argv.index("--tmpfs"):]), argv)
+        with_policy({"version": 1, "sandbox": "off"})
+        check("session sandbox 'off' keeps the configured choice",
+              _sandbox.requested({"sandbox": True}) and not _sandbox.requested({"sandbox": False}))
+        raw = json.dumps({"version": 1, "deny": ["Write"]})
+        with_policy(raw)
+        report = _Backend._session_policy_capability(SimpleNamespace(config={"sandbox": False}))
+        check("ready reports the policy it read, so the launcher can confirm it",
+              report["digest"] == _hashlib.sha256(raw.encode()).hexdigest()
+              and report["error"] == "" and report["sandbox"] == "", report)
+        os.environ.pop(_perm.SESSION_POLICY_ENV, None)
+        report = _Backend._session_policy_capability(SimpleNamespace(config={"sandbox": False}))
+        check("ready says it reads session policies even when none is set",
+              report["digest"] == "" and report["version"] == 1, report)
+    finally:
+        os.environ.pop(_perm.SESSION_POLICY_ENV, None)
+        import shutil as _shutil
+        _shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -20385,6 +20476,7 @@ def main():
         test_surfaced_feature_commands()
         test_serve_clear_todos_mid_turn_stdio()
         test_model_reconnect_surfaces()
+        test_session_policy()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

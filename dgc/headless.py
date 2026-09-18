@@ -1242,6 +1242,20 @@ class Backend:
         except Exception:
             pass
 
+    def _session_policy_capability(self) -> dict:
+        """What this process made of DGC_SESSION_POLICY, so its launcher can confirm it applied.
+
+        ``digest`` is the SHA-256 of the policy text it read ("" when none was set), ``error``
+        says why a policy was rejected (every tool is then denied), and ``sandbox`` names the
+        backend confining shell commands, or "" when they run unconfined.
+        """
+        from . import sandbox
+        from .permissions import session_policy
+        policy = session_policy()
+        backend = sandbox.available() if sandbox.requested(self.config) else None
+        return {"version": 1, "digest": policy.digest if policy is not None else "",
+                "error": policy.error if policy is not None else "", "sandbox": backend or ""}
+
     def start(self) -> None:
         self.em.emit(
             "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
@@ -1258,7 +1272,8 @@ class Backend:
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
-                          "steering_native": not bool(self.config.get("subscription_engine", ""))},
+                          "steering_native": not bool(self.config.get("subscription_engine", "")),
+                          "session_policy": self._session_policy_capability()},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),

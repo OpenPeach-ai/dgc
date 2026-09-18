@@ -16,7 +16,6 @@ directories, and what the application passes on purpose (``api_key``, ``extra_en
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import re
 import shutil
@@ -29,7 +28,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ._version import PROTOCOL, REQUIRES_CLI
-from .errors import DGCConfigError, DGCUnsupportedError
+from .errors import DGCConfigError
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SDK_ROOT = Path(__file__).resolve().parents[1]
@@ -296,21 +295,6 @@ def runtime_for_argv(argv: Sequence[str]) -> RuntimeSpec:
                        source="runtime=")
 
 
-def bridge_python(runtime: RuntimeSpec) -> str:
-    """The interpreter for the stdlib-only custom-tool bridge.
-
-    The bridge must never be run by ``runtime.argv[0]``: that may be the ``dgc`` launcher. The
-    application's own Python is always a Python; an embedded interpreter falls back to the
-    runtime's Python, then to ``python3`` on PATH.
-    """
-    current = sys.executable or ""
-    if current and Path(current).name.lower().startswith("python") and os.path.isfile(current):
-        return current
-    if runtime.python:
-        return runtime.python
-    return shutil.which("python3") or shutil.which("python") or current or "python3"
-
-
 def isolated_env(state_dir: Path, *, extra: Mapping[str, str] | None = None,
                  inherit_user_state: bool = False,
                  project_root: Path | None = None,
@@ -369,59 +353,3 @@ def isolated_env(state_dir: Path, *, extra: Mapping[str, str] | None = None,
     if path_parts:
         env["PYTHONPATH"] = os.pathsep.join(path_parts)
     return env
-
-
-def write_isolated_config(state_dir: Path, values: Mapping[str, object]) -> Path:
-    home = state_dir / "home" / ".dgc"
-    home.mkdir(parents=True, exist_ok=True)
-    path = home / "config.json"
-    current: dict = {}
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                current = loaded
-        except json.JSONDecodeError as exc:
-            raise DGCConfigError("isolated config.json is not valid JSON") from exc
-    incoming = {key: value for key, value in values.items() if value is not None}
-    if "trusted_dirs" in incoming or "trusted_dirs" in current:
-        merged: list = []
-        for item in list(current.get("trusted_dirs") or []) + list(incoming.get("trusted_dirs") or []):
-            text = str(item)
-            if text and text not in merged:
-                merged.append(text)
-        incoming["trusted_dirs"] = merged
-    if "permissions" in incoming or "permissions" in current:
-        merged_perms: dict[str, list] = {"allow": [], "ask": [], "deny": []}
-        for action in merged_perms:
-            seen: list[str] = []
-            old = current.get("permissions") if isinstance(current.get("permissions"), dict) else {}
-            new = incoming.get("permissions") if isinstance(incoming.get("permissions"), dict) else {}
-            for item in list(old.get(action) or []) + list(new.get(action) or []):
-                text = str(item)
-                if text and text not in seen:
-                    seen.append(text)
-            merged_perms[action] = seen
-        incoming["permissions"] = merged_perms
-    current.update(incoming)
-    path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
-    return path
-
-
-def require_sandbox(requirement: str) -> str | None:
-    """Return the backend name, or raise if ``required`` isolation is unavailable."""
-    if requirement not in ("required", "preferred", "off"):
-        raise DGCConfigError("sandbox.requirement must be required, preferred, or off")
-    if requirement == "off":
-        return None
-    try:
-        from dgc.sandbox import available
-    except ImportError as exc:
-        if requirement == "required":
-            raise DGCUnsupportedError("sandbox is required but dgc.sandbox could not be imported") from exc
-        return None
-    backend = available()
-    if requirement == "required" and not backend:
-        raise DGCUnsupportedError(
-            "sandbox.requirement is 'required' but this host has no bwrap/sandbox-exec")
-    return backend

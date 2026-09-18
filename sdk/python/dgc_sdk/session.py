@@ -31,8 +31,8 @@ from .types import (
     AgentInfo, Artifact, Checkpoint, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionRequest, PermissionRule, PlanRequest, Question, QuestionAnswer, QuestionOption,
-    QuestionRequest, RunEvent, RunResult, SessionInfo, SkillInfo, TaskItem, TaskStatus,
-    ToolRecord, ToolSpec, VerificationResult,
+    QuestionRequest, RunEvent, RunResult, SandboxStatus, SessionInfo, SkillInfo, TaskItem,
+    TaskStatus, ToolRecord, ToolSpec, VerificationResult,
 )
 from .usage import USAGE_TOTAL_KEYS, cost_usd, reported, usage_delta, usage_totals
 
@@ -514,6 +514,7 @@ class Session:
         state_lock: Any = None,
         exclude_paths: Sequence[str | Path] = (),
         request_timeout: float | None = None,
+        sandbox: SandboxStatus | None = None,
     ):
         if unhandled not in ("deny", "callback"):
             raise DGCConfigError("permissions.unhandled must be 'deny' or 'callback'")
@@ -565,6 +566,8 @@ class Session:
         self.session_path = ""
         self.protocol_version = ready.get("protocol_version")
         self.capabilities = dict(ready.get("capabilities") or {})
+        #: Whether this session's shell commands run inside the OS sandbox.
+        self.sandbox: SandboxStatus = sandbox if sandbox is not None else SandboxStatus()
 
     @property
     def raw(self) -> DGCClient:
@@ -1799,17 +1802,15 @@ class Session:
             diff=event.get("diff") if isinstance(event.get("diff"), str) else None,
             command=event.get("command") if isinstance(event.get("command"), str) else None,
         )
-        if self._policy is not None:
-            forced = self._policy.decision(request, cwd=self._cwd)
-            if forced == "deny":
-                staff = self._on_permission is not None and self._permission_mode != "auto"
-                # Named deny_tools stay fail-closed even when staff is present. Bash
-                # write/network inspection defers to the callback so the ask is visible.
-                if self._policy.named_tool_denied(request.name) or not staff:
-                    return "deny"
-        action = self._decide(run, self._on_permission, request, "deny", label="on_permission",
-                              valid=lambda value: value in ("once", "always", "deny"), mine=mine)
-        return action if action in ("once", "always", "deny") else "deny"
+        from .policy import resolve_permission
+        # Policy denies (tools, paths) are final; command screening defers to a reviewing
+        # callback so staff see the Bash ask; policy-checked reads are answered here.
+        return resolve_permission(
+            self._policy, request, cwd=self._cwd, permission_mode=self._permission_mode,
+            on_permission=self._on_permission,
+            ask=lambda: self._decide(
+                run, self._on_permission, request, "deny", label="on_permission",
+                valid=lambda value: value in ("once", "always", "deny"), mine=mine))
 
     def _plan(self, run: _Run, event: dict[str, Any], mine: bool) -> str:
         request = PlanRequest(
