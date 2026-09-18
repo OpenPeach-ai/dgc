@@ -1478,15 +1478,12 @@ GitHub release). Tag [`sdk-v0.5.2`](https://github.com/OpenPeach-ai/dgc/releases
 ## Install
 
 ```
-python3 -m pip install \\
-  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
+python3 -m pip install dgc-sdk
 ```
 
-Or from a clone: `python3 -m pip install -e sdk/python`.
-
-That URL installs our `dgc-sdk` wheel (`import dgc_sdk`). Do **not** run `pip install dgc`:
-PyPI’s package named `dgc` is a different project. This SDK is not on the PyPI or npm indexes
-yet. The wheel still needs a runtime that can run `python -m dgc serve` (this repository or
+That installs this product (`import dgc_sdk`). Do **not** run `pip install dgc`: PyPI’s package
+named `dgc` is a different project. From a clone: `python3 -m pip install -e sdk/python`.
+The package still needs a runtime that can run `python -m dgc serve` (this repository or
 CLI 0.41.5). Set `DGC_PYTHON` if `python3` cannot import `dgc`.
 
 ## Isolation
