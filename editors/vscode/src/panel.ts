@@ -11,6 +11,7 @@ import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
 } from "./cliupdate";
 import { checkForExtensionUpdates } from "./extensionupdate";
+import { listEndpointModels } from "./endpointmodels";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -2343,6 +2344,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pickModel":
         this.selectModel();
         break;
+      case "settingsModels":
+        void this.settingsModels(msg);
+        break;
       case "listModels":
         this.listModels();
         break;
@@ -2372,6 +2376,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "compact":
         void this.compactContext();
+        break;
+      case "setContextSize":
+        await this.setContextSize(Number(msg.size));
         break;
       case "openSettings":
         // A surface opened from a settings tab asks to be put back on that tab when it closes.
@@ -3720,6 +3727,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       : [];
   }
 
+  // Settings → Models and Agents: the models the host in the form offers, before it is saved, so
+  // picking the Ollama preset (or typing a host) fills the model dropdown. A saved key goes only to
+  // the host it was saved for; a key typed into the form goes to the host typed beside it.
+  private async settingsModels(msg: any): Promise<void> {
+    const target = msg?.target === "subagent" ? "subagent" : "main";
+    const typed = typeof msg?.base_url === "string" ? msg.base_url.trim() : "";
+    const base = typed
+      || (target === "subagent" ? this.routeState.subagentBaseUrl || "" : "")
+      || this.state.baseUrl || PROVIDERS.ollama.url;
+    const typedKey = typeof msg?.api_key === "string" ? msg.api_key.trim() : "";
+    let key = typedKey;
+    // Either saved key may serve (a sub-agent on the main host uses the main key), but only for the
+    // very host it is bound to.
+    for (const id of target === "subagent" ? ["subagentApiKey", "apiKey"] : ["apiKey"]) {
+      if (key) { break; }
+      const [saved, bound] = await Promise.all([
+        this.context.secrets.get(`dgc.${id}`), this.context.secrets.get(`dgc.${id}.endpoint`)]);
+      key = saved && bound && bound === endpointId(base) ? saved : "";
+    }
+    try {
+      this.post({ type: "settings_models", target, base_url: base, ids: await listEndpointModels(base, key) });
+    } catch (err: any) {
+      this.post({ type: "settings_models", target, base_url: base, ids: [],
+                  error: String(err?.message || err).slice(0, 200) });
+    }
+  }
+
   // in-composer model menu (rendered inside the webview)
   async listModels(): Promise<void> {
     const subscription = this.activeSubscription();
@@ -3800,7 +3834,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async loadSettings(section: string, usageRange?: string): Promise<void> {
     const be = this.ensureBackend();
     const configReady = this.requestState(
-      be, "config-read", { type: "get_config" }, "config", 5000);
+      // Ask for the config fields v14 grew later; a CLI only sends them to a client that asks.
+      be, "config-read", { type: "get_config", fields: ["subagent_context_size"] }, "config", 5000);
     const providers = Object.entries(PROVIDERS).map(([id, p]) =>
       ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
     let models: string[] = [];
@@ -3926,6 +3961,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
       if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
       if (v.context_size) { values.context_size = Number(v.context_size); }
+      if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {
+        values.subagent_context_size = Math.max(0, Math.floor(Number(v.subagent_context_size) || 0));
+      }
       if (v.capability_cache_ttl_s) {
         values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
       }
@@ -4312,6 +4350,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  // The composer's context menu sets the window exactly as Settings does. The backend answers with
+  // config and then context, and the context event redraws the meter.
+  private async setContextSize(size: number, be = this.ensureBackend()): Promise<void> {
+    if (!Number.isInteger(size) || size < 2048 || size > 16_777_216) { return; }
+    try {
+      await this.requestState(be, "context-size",
+        { type: "set_config", values: { context_size: size } }, "config", 5000);
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC could not change the context window.");
+    }
+  }
+
   private async setUltra(enabled: boolean, be = this.ensureBackend()): Promise<void> {
     await this.requestState(be, "ultra", {
       type: "set_config", values: { ultra_mode: enabled },
@@ -4538,13 +4588,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label>Provider preset <span class="set-hint">fills the host below; leave the fields blank to inherit the main model</span>
       <select id="s-subagent_provider"><option value="">choose a preset\u2026</option></select></label>
       <label>Sub-agent model
-      <input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main"></label>
+      <span class="set-row"><input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main" list="s-subagent-models"><datalist id="s-subagent-models"></datalist></span></label>
     <label>Sub-agent host URL
       <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
     <label>Sub-agent API transport
       <select id="s-subagent_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Sub-agent API key
       <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit only on the same endpoint"></label>
+    <label>Sub-agent context size (tokens) <span class="set-hint">Each sub-agent\u2019s window, as Context size is the main model\u2019s. A named agent\u2019s own <code>context_size</code> wins.</span>
+      <div class="set-row">
+        <select id="s-subagent_context_size_preset" aria-label="Sub-agent context size preset">
+          <option value="0">Same as the main model</option>
+          <option value="8192">8K &middot; 8,192</option>
+          <option value="16384">16K &middot; 16,384</option>
+          <option value="32768">32K &middot; 32,768</option>
+          <option value="65536">64K &middot; 65,536</option>
+          <option value="131072">128K &middot; 131,072</option>
+          <option value="262144">256K &middot; 262,144</option>
+          <option value="custom">Custom\u2026</option>
+        </select>
+        <input id="s-subagent_context_size" type="number" min="0" step="1024" placeholder="0"
+               aria-label="Custom sub-agent context size in tokens" hidden>
+      </div></label>
 
     <div class="set-group">Fallback <span class="set-hint">retried if the primary model errors</span></div>
     <label>Fallback model
@@ -4718,6 +4783,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong></div><span id="ctx-pct">0%</span></div>
           <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
           <div class="context-split"><span id="ctx-free">0 free</span><span id="ctx-auto">auto at 85%</span></div>
+          <div class="context-size">
+            <label for="ctx-size" class="context-kicker">Window size</label>
+            <div class="context-size-controls">
+              <input id="ctx-size-custom" class="context-size-custom" type="number" min="2048" step="1024" inputmode="numeric" placeholder="tokens" aria-label="Custom context window in tokens" hidden>
+              <select id="ctx-size" class="context-size-select" aria-label="Context window size" title="How much conversation the model is sent, in tokens">
+                <option value="8192">8K</option><option value="16384">16K</option><option value="32768">32K</option>
+                <option value="65536">64K</option><option value="131072">128K</option><option value="262144">256K</option>
+                <option value="524288">512K</option><option value="1048576">1M</option><option value="custom">Custom\u2026</option>
+              </select>
+            </div>
+          </div>
+          <p id="ctx-size-note" class="context-size-note" hidden></p>
           <div id="ctx-usage" class="context-usage">0 in · 0 out · 0 requests</div>
           <div class="context-last"><span class="codicon codicon-history" aria-hidden="true"></span><span id="ctx-last">DGC compacts automatically near 85%.</span></div>
           <p id="ctx-detail" class="context-detail" hidden></p>

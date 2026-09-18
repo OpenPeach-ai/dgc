@@ -208,9 +208,22 @@ def is_hosted_ollama(base_url: str) -> bool:
     return host == "ollama.com" or host.endswith(".ollama.com")
 
 
-def resolve_first_token_timeout(value, base_url: str, family: str = "") -> float:
-    """``"auto"`` is 900 s for a local endpoint (model load plus a large prefill), 300 s otherwise."""
+def is_ollama_cloud_model(model: str) -> bool:
+    """An Ollama cloud model (``glm-5.3:cloud``, ``gpt-oss:120b-cloud``): a local Ollama forwards
+    it to ollama.com. It never loads on this machine, so /api/ps never lists it, and it has none
+    of a local model's load or prefill time."""
+    name = str(model or "").strip().lower()
+    if name.endswith(":latest"):
+        name = name[:-len(":latest")]
+    return name.endswith((":cloud", "-cloud"))
+
+
+def resolve_first_token_timeout(value, base_url: str, family: str = "", model: str = "") -> float:
+    """``"auto"`` is 900 s for a local endpoint (model load plus a large prefill), 300 s otherwise
+    -- including an Ollama cloud model reached through a local Ollama, which is remote work."""
     if value is None or str(value).strip().lower() in ("", "auto", "default"):
+        if is_ollama_cloud_model(model):
+            return AUTO_FIRST_TOKEN_REMOTE_S
         return (AUTO_FIRST_TOKEN_LOCAL_S if is_local_endpoint(base_url, family)
                 else AUTO_FIRST_TOKEN_REMOTE_S)
     return _number(value, AUTO_FIRST_TOKEN_REMOTE_S)

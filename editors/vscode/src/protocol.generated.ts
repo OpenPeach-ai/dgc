@@ -1556,6 +1556,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "subagent_context_size": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
     "goal": {
       "types": [
         "object"
@@ -4340,6 +4346,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "request_id": {
       "types": [
         "string"
+      ],
+      "required": false
+    },
+    "fields": {
+      "types": [
+        "array"
       ],
       "required": false
     }

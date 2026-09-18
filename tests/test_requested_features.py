@@ -179,7 +179,9 @@ class RequestedFeatures(unittest.TestCase):
     def test_native_ollama_levels_are_model_specific(self):
         profiles = ['off', 'low', 'medium', 'high', 'xhigh']
         for model, expected in [
-            ('qwen3:8b', [False, True, True, True, True]),
+            ('qwen3:8b', [False, 'low', 'medium', 'high', 'max']),
+            ('deepseek-v4.1-flash:cloud', [False, 'low', 'medium', 'high', 'max']),
+            ('glm-5.3:cloud', ['low', 'low', 'medium', 'high', 'max']),
             ('gpt-oss:20b', ['low', 'low', 'medium', 'high', 'high']),
             ('glm-5.3-flash:cloud', ['low', 'low', 'high', 'high', 'max']),
         ]:

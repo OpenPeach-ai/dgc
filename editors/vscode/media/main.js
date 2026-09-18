@@ -38,6 +38,10 @@
   function reasoningNote() {
     const detail = reasoningControl === "glm-flash-levels"
       ? "GLM Flash always reasons: Off/Low send Low, Medium/High send High, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+      : reasoningControl === "glm-levels"
+      ? "GLM always reasons (with thinking off it writes its reasoning into the answer): Off/Low send Low, Medium and High send those levels, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+      : reasoningControl === "ollama-levels"
+      ? "Off turns thinking off. Low, Medium and High are sent as Ollama’s thinking levels and Extra high as Max. A model that grades its thinking follows them; one that does not treats every level as on. DGC’s instructions also vary by profile."
       : reasoningControl === "toggle"
       ? "This model accepts thinking on/off. Low–Extra high change DGC’s instructions, not native reasoning levels."
       : reasoningControl === "levels"
@@ -115,6 +119,7 @@
     $("ctx-auto").textContent = `auto at ${thresholdPct}%`;
     $("ctx-usage").textContent = `${fmtTokens(contextState.input_tokens)} in · ` +
       `${fmtTokens(contextState.output_tokens)} out · ${fmtTokens(contextState.requests)} requests`;
+    syncContextSizeControl();
     $("ctx-compact").disabled = compacting;
     $("ctx-compact").textContent = compacting ? "Compacting…" : "Compact now";
     if (lastCompaction) {
@@ -127,6 +132,24 @@
       $("ctx-last").textContent = `DGC compacts automatically near ${thresholdPct}%.`;
       $("ctx-detail").textContent = ""; $("ctx-detail").hidden = true;
     }
+  }
+  // The window size row shows the configured window; the meter above shows the one in use, which
+  // is the smaller of that and the model's own maximum.
+  const CONTEXT_SIZES = [8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
+  function syncContextSizeControl() {
+    const select = $("ctx-size"), custom = $("ctx-size-custom"), note = $("ctx-size-note");
+    if (!select || !custom || !note) return;
+    const configured = Math.floor(Number(lastConfig?.context_size || contextState.size || 0));
+    if (document.activeElement !== custom && document.activeElement !== select) {
+      const known = CONTEXT_SIZES.includes(configured);
+      select.value = known ? String(configured) : "custom";
+      custom.hidden = known;
+      if (!known) custom.value = configured ? String(configured) : "";
+    }
+    const effective = Math.floor(Number(contextState.size || 0));
+    const capped = configured > 0 && effective > 0 && effective < configured;
+    note.hidden = !capped;
+    note.textContent = capped ? `This model holds ${fmtTokens(effective)} tokens, so DGC uses that.` : "";
   }
   function renderContext() {
     const used = Math.max(0, Number(contextState.used || 0));
@@ -1222,6 +1245,10 @@
     const clock = activity && phase !== total ? `${phase}s · ${total}s` : `${total}s`;
     const eta = turn.eta ? ` · ${turn.eta}` : "";
     meta.textContent = `(${clock}${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
+  }
+  function toolArgChars(args) {
+    if (args == null) return 0;
+    try { return typeof args === "string" ? args.length : JSON.stringify(args).length; } catch { return 0; }
   }
   // `finalId` is the backend's own designation of which prose block this turn answered with
   // (`turn_end.final_message_id`). The panel used to guess it from the position of the last
@@ -2879,7 +2906,13 @@
         if (same && same.isConnected && same.dataset.status === "running" && same.dataset.toolName === String(ev.name || "")) {
           same.querySelector(".dot")?.classList.add("run");
           if (!replaying) startToolClock(same);
-        } else turn._tools[ev.call_id || ev.name] = toolCard(ev);
+        } else {
+          turn._tools[ev.call_id || ev.name] = toolCard(ev);
+          // A tool call's arguments are output the model wrote, like its prose and reasoning. A turn
+          // made only of tool calls (a model that works without narrating) read "↓ 0 tok" for its
+          // whole run; its arguments count once, when the call first appears.
+          turn.chars += toolArgChars(ev.args);
+        }
         // Remember the path an edit tool was called with, so a result that carries no diff
         // (a brand-new file, a binary write) still reaches the end-of-turn summary.
         turn._paths = turn._paths || Object.create(null);
@@ -3855,6 +3888,20 @@
     compacting = true; renderContext();
     vscode.postMessage({ type: "compact" });
   };
+  $("ctx-size").onchange = () => {
+    const select = $("ctx-size"), custom = $("ctx-size-custom");
+    if (select.value === "custom") { custom.hidden = false; custom.focus(); return; }
+    custom.hidden = true;
+    vscode.postMessage({ type: "setContextSize", size: Number(select.value) });
+    select.blur();
+  };
+  $("ctx-size-custom").addEventListener("change", () => {
+    const size = Math.floor(Number($("ctx-size-custom").value));
+    if (Number.isFinite(size) && size >= 2048) vscode.postMessage({ type: "setContextSize", size });
+  });
+  $("ctx-size-custom").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("ctx-size-custom").blur(); }
+  });
   $("ctxmenu").addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); $("btn-ctx").focus(); }
   });
@@ -3950,7 +3997,7 @@
   const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
-    "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
+    "capability_cache_ttl_s", "mode", "think", "context_size", "subagent_context_size", "sandbox",
     "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
     "artifact_in_plan", "tool_profile", "max_parallel_tasks", "monitor_wake",
     "subscription_engine", "subscription_model", "subscription_effort"];
@@ -3969,6 +4016,7 @@
       subagent_api_mode: cfg.subagent_api_mode,
       subagent_api_key: "", fallback_model: cfg.fallback_model,
       fallback_base_url: cfg.fallback_base_url, context_size: cfg.context_size,
+      subagent_context_size: Number(cfg.subagent_context_size) > 0 ? cfg.subagent_context_size : 0,
       fallback_api_mode: cfg.fallback_api_mode, fallback_api_key: "",
       api_mode: cfg.api_mode, provider_state: cfg.provider_state,
       prompt_cache: String(cfg.prompt_cache !== false),
@@ -3995,6 +4043,7 @@
     updateSubscriptionFields();
     renderSubscriptionStatus(cfg);
     syncContextPreset(cfg.context_size);
+    syncContextPreset(map.subagent_context_size, "s-subagent_context_size_preset", "s-subagent_context_size");
   }
   function updateSubscriptionFields() {
     const engine = $("s-subscription_engine")?.value || "";
@@ -4324,6 +4373,7 @@
     }
     $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
     if (lastConfig) fillSettings(lastConfig);
+    askModels("subagent");
     // `/usage 30d` opens the tab on the range it named; anything else keeps the last choice.
     if (USAGE_RANGES.includes(range)) $("usage-range").value = range;
     settingsReturnFocus = document.activeElement;
@@ -4338,12 +4388,13 @@
   }
   // Context size: a menu of the sizes people actually use, with Custom for anything else. The
   // number input stays the single source of truth, so collectSettings() is unchanged.
-  function syncContextPreset(value) {
-    const preset = $("s-context_preset") || $("s-context_size_preset");
-    const custom = $("s-context_size");
+  function syncContextPreset(value, presetId, customId) {
+    const preset = presetId ? $(presetId) : ($("s-context_preset") || $("s-context_size_preset"));
+    const custom = $(customId || "s-context_size");
     if (!preset || !custom) return;
-    const known = [...preset.options].some((o) => o.value === String(value || ""));
-    if (value && known) {
+    const known = [...preset.options].some((o) => o.value === String(value ?? ""));
+    // "0" is a real choice on the sub-agent menu (the main window), not a missing value.
+    if ((value || String(value) === "0") && known) {
       preset.value = String(value);
       custom.hidden = true;
     } else {
@@ -4363,11 +4414,12 @@
     v.show_reasoning = shown !== "hidden" && shown !== "false";
     return v;
   }
-  {
-    const preset = $("s-context_size_preset");
+  for (const [presetId, customId] of [["s-context_size_preset", "s-context_size"],
+                                      ["s-subagent_context_size_preset", "s-subagent_context_size"]]) {
+    const preset = $(presetId);
     if (preset) {
       preset.onchange = () => {
-        const custom = $("s-context_size");
+        const custom = $(customId);
         if (preset.value === "custom") { custom.hidden = false; custom.focus(); return; }
         custom.value = preset.value;
         custom.hidden = true;
@@ -4388,6 +4440,36 @@
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
+  // The model dropdowns list what the host in the form offers: picking the Ollama preset, or typing
+  // a host, fetches that host's models (the extension asks the host; nothing is saved).
+  const modelLists = { main: "s-models", subagent: "s-subagent-models" };
+  const modelAsked = { main: "", subagent: "" };
+  function askModels(target) {
+    const base = $(target === "subagent" ? "s-subagent_base_url" : "s-base_url")?.value.trim() || "";
+    const key = $(target === "subagent" ? "s-subagent_api_key" : "s-api_key")?.value.trim() || "";
+    // A sub-agent with no host of its own runs on the main one, and lists the main host's models.
+    const host = base || (target === "subagent" ? $("s-base_url")?.value.trim() || "" : "");
+    modelAsked[target] = host;
+    vscode.postMessage({ type: "settingsModels", target, base_url: host,
+                         api_key: base || target === "main" ? key : $("s-api_key")?.value.trim() || "" });
+  }
+  function fillModelList(msg) {
+    const target = msg.target === "subagent" ? "subagent" : "main";
+    // A reply for a host the form has since moved away from is stale.
+    if (modelAsked[target] && msg.base_url && modelAsked[target].replace(/\/$/, "") !== String(msg.base_url).replace(/\/$/, "")) return;
+    const list = $(modelLists[target]);
+    if (list) list.innerHTML = (msg.ids || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
+    const input = $(target === "subagent" ? "s-subagent_model" : "s-model");
+    if (input) {
+      input.placeholder = msg.error ? "type a model id (couldn't list this host's models)"
+        : (msg.ids || []).length ? `${msg.ids.length} model${msg.ids.length === 1 ? "" : "s"} on this host`
+          : (target === "subagent" ? "inherit main" : "model id");
+    }
+  }
+  for (const [field, target] of [["s-base_url", "main"], ["s-subagent_base_url", "subagent"]]) {
+    const input = $(field);
+    if (input) input.addEventListener("change", () => askModels(target));
+  }
   // The Agents tab needs the same shortcut the Models tab has: pick a provider, get its host.
   // It fills only the sub-agent fields, and never touches the main connection.
   $("s-subagent_provider").onchange = () => {
@@ -4396,6 +4478,7 @@
     $("s-subagent_base_url").value = preset.url;
     $("s-subagent_api_mode").value = "auto";
     if (!preset.needsKey && !$("s-subagent_api_key").value) $("s-subagent_api_key").value = "ollama";
+    askModels("subagent");
   };
   $("s-provider").onchange = () => {
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
@@ -4406,6 +4489,7 @@
       const sf = $("s-subscription_effort"); if (sf) sf.value = "";
       updateSubscriptionFields();
       if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
+      askModels("main");
     }
   };
   const subscriptionEngine = $("s-subscription_engine");
@@ -4685,6 +4769,7 @@
     }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section, msg.range); }
+    else if (msg.type === "settings_models") { fillModelList(msg); }
     else if (msg.type === "usage_unavailable") { usageUnavailable(msg); }
     else if (msg.type === "mcp_command_started") {
       mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");

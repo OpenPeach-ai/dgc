@@ -21,7 +21,8 @@ import requests
 from . import reasoning as _reasoning
 from .image_views import parse_dimensions as _image_dimensions   # one header parser, shared
 from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
-                          bounded_seconds, format_seconds, is_hosted_ollama, ollama_model_listed,
+                          bounded_seconds, format_seconds, is_hosted_ollama, is_ollama_cloud_model,
+                          ollama_model_listed,
                           resolve_first_token_timeout, safe_endpoint)
 from .model_watch import is_local_endpoint
 from .model_errors import classify_exception, classify_status, eof_cause, hint_for, scrub_urls
@@ -211,10 +212,18 @@ def _strip_images_with_note(messages: list, model: str) -> tuple[list, int]:
         kept = [part for part in content if not _is_image_part(part)]
         count = len(content) - len(kept)
         dropped += count
-        note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but {model} cannot "
-                "read images. Say so and ask for a description, or suggest switching to a "
-                "vision-capable model. Do not pretend to have seen "
-                f"{'them' if count > 1 else 'it'}.]")
+        seen = message.get("_dgc_vision")
+        if isinstance(seen, dict) and str(seen.get("text") or "").strip():
+            # A vision model already looked at these for this model (dgc/vision.py): its report
+            # stands in for the pixels. Counted as dropped all the same: the pixels did not go.
+            from .vision import replacement_note
+            note = replacement_note(count, model, seen)
+        else:
+            note = (f"[{count} image{'s were' if count > 1 else ' was'} attached here, but {model} "
+                    "cannot read images. Say so and ask for a description, or suggest switching to "
+                    "a vision-capable model or setting a vision sub-agent model (`/subagent model "
+                    "NAME`) so DGC can look at images for this one. Do not pretend to have seen "
+                    f"{'them' if count > 1 else 'it'}.]")
         clean = dict(message)
         clean["content"] = [*kept, {"type": "text", "text": note}]
         out.append(clean)
@@ -1285,19 +1294,36 @@ def _compat_reasoning_payload(off: bool, level) -> dict:
             "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": level}}
 
 
-def _reasoning_payload(family: str, model: str, level) -> dict:
+def _ollama_always_reasons(model: str) -> bool:
+    """GLM-5 models on Ollama keep reasoning with thinking switched off: the reasoning moves into
+    the answer and ends in a stray ``</think>`` (seen on glm-5.3 and glm-5.3-flash cloud). Their
+    lowest level, Low, is the honest Off: brief reasoning, kept in the thinking channel."""
+    return bool(re.search(r"(?:^|/)glm-5(?:[.:\-]|$)", str(model or "").lower()))
+
+
+def _reasoning_payload(family: str, model: str, level, *, max_tier: bool = True) -> dict:
     """Request fields expressing thinking `level` (off|low|medium|high|xhigh|None) for
-    this provider. `{}` means 'let the model's own default stand'."""
+    this provider. `{}` means 'let the model's own default stand'.
+
+    ``max_tier`` is False once an Ollama server refused ``max`` (versions before its Max tier):
+    Extra high then asks for High instead of losing the whole reasoning control."""
     off = level in _REASONING_OFF
     if family == "ollama":                              # omitting forces thinking ON → always send
         if "glm-5.3-flash" in model.lower():
             return {"reasoning_effort": "low" if off or level == "low" else
-                    "max" if level in ("xhigh", "max") else "high"}
-        if "gpt-oss" in model.lower() and off:
-            return {"reasoning_effort": "low"}
+                    "max" if level in ("xhigh", "max") and max_tier else "high"}
+        if "gpt-oss" in model.lower():
+            # GPT-OSS cannot switch reasoning off, and its tiers stop at High: Ollama accepts
+            # "max" for it but answers at its default (Medium) depth.
+            if off:
+                return {"reasoning_effort": "low"}
+            return {"reasoning_effort": "high" if str(level).lower() in ("xhigh", "max")
+                    else level}
         if off:
-            return {"reasoning_effort": "none"}
-        return {"reasoning_effort": "high" if str(level).lower() == "xhigh" else level}
+            return {"reasoning_effort": "low" if _ollama_always_reasons(model) else "none"}
+        if str(level).lower() in ("xhigh", "max"):
+            return {"reasoning_effort": "max" if max_tier else "high"}
+        return {"reasoning_effort": level}
     if family == "vllm":                                # server renders the chat template
         return _compat_reasoning_payload(off, level)
     if family == "openai":                              # only o-series / gpt-5 accept effort; no "none"
@@ -1353,7 +1379,7 @@ class LLMClient:
         self.read_timeout = read_timeout
         # Stall watcher (dgc/model_watch.py). "auto" resolves per endpoint; 0 turns a window off.
         self.first_token_timeout = resolve_first_token_timeout(
-            first_token_timeout, self.base_url, self.family)
+            first_token_timeout, self.base_url, self.family, model=self.model)
         self.idle_timeout = bounded_seconds(idle_timeout, 300.0)
         self.stall_notice = bounded_seconds(stall_notice, 45.0)
         self.stall_retries = bounded_retries(stall_retries, 2)
@@ -1655,9 +1681,22 @@ class LLMClient:
         result: dict[str, bool | str | int | list] = {"provider": self.family, **snapshot}
         if not snapshot["reasoning"]:
             result["reasoning_control"] = "instructions"
-        elif self.api_mode == "ollama":
-            result["reasoning_control"] = ("glm-flash-levels" if "glm-5.3-flash" in self.model.lower()
-                                           else "levels" if "gpt-oss" in self.model.lower() else "toggle")
+        elif self.api_mode == "ollama" or self.family == "ollama":
+            # What this model is actually sent (see _ollama_think / _reasoning_payload):
+            #   glm-flash-levels  GLM 5.3 Flash's Low/High/Max tiers
+            #   levels            GPT-OSS Low/Medium/High (Off → Low, Extra high → High)
+            #   glm-levels        GLM-5: always reasons, so Off → Low; Low/Medium/High; Extra high
+            #                     as Max
+            #   ollama-levels     Off → thinking off; Low/Medium/High as Ollama levels, Extra high
+            #                     as Max; a model without graded thinking treats each as on
+            #   toggle            this Ollama took only on/off for the model (it refused a level)
+            model = self.model.lower()
+            result["reasoning_control"] = (
+                "glm-flash-levels" if "glm-5.3-flash" in model
+                else "levels" if "gpt-oss" in model
+                else "toggle" if self._rejection_active("think_levels")
+                else "glm-levels" if _ollama_always_reasons(model)
+                else "ollama-levels")
         else:
             result["reasoning_control"] = "provider"
         if metadata.get("source") in ("ollama_show", "anthropic_models"):
@@ -1874,10 +1913,12 @@ class LLMClient:
         when this endpoint cannot say (never an error)."""
         if not (self.api_mode == "ollama" or self.family == "ollama") or not self.model:
             return None
-        if is_hosted_ollama(self.base_url):
+        if is_hosted_ollama(self.base_url) or is_ollama_cloud_model(self.model):
             # Ollama's own cloud loads models out of sight; its /api/ps (if any) describes no
             # hardware this request waits on, and an empty list would pause the clock for nothing.
-            # Every self-hosted Ollama -- local, LAN or on a public address -- is probed.
+            # The same holds for a cloud model reached through a local Ollama: the local /api/ps
+            # never lists it, so every silent cloud request used to count as "Loading the model"
+            # for the whole 900 s load window. Every self-hosted model is probed.
             return None
         url = f"{self._ollama_root}/api/ps"
         headers = self._headers()
@@ -2902,23 +2943,48 @@ class LLMClient:
         return out
 
     def _ollama_think(self, level):
+        max_tier = not self._rejection_active("think_max")
         # This model always reasons and has three native tiers, rather than an off switch.
         if "glm-5.3-flash" in self.model.lower():
             if level in _REASONING_OFF or level == "low":
                 return "low"
-            return "max" if level in ("xhigh", "max") else "high"
+            return "max" if level in ("xhigh", "max") and max_tier else "high"
         # GPT-OSS does not accept booleans and cannot fully disable reasoning. Honor an off request
         # with its lowest supported level rather than sending false, which that model ignores.
+        # Its tiers stop at High ("max" is accepted but answers at the default depth).
         if "gpt-oss" in self.model.lower():
             value = str(level).lower()
             if level in _REASONING_OFF:
                 return "low"
             return value if value in ("low", "medium", "high") else "high"
+        levels_refused = self._rejection_active("think_levels")
         if level in _REASONING_OFF:
-            return False
-        # Most thinking models accept a boolean, not graded effort strings. A string can cause
-        # Ollama to reject the entire control and retry with the model's default, even for "low".
-        return True
+            # GLM-5 answers `false` by writing its reasoning into the answer (see
+            # _ollama_always_reasons); Low keeps it brief and in the thinking channel.
+            return "low" if _ollama_always_reasons(self.model) and not levels_refused else False
+        # Ollama takes the graded levels low|medium|high|max as well as a boolean, and passes them
+        # to models that grade their thinking (Ollama cloud models among them); a model without
+        # graded thinking treats any level as on. Sending True threw the level away: Low and
+        # Extra high asked every such model for the same default-depth thinking. An older Ollama
+        # that accepts only booleans for this model refuses a level once (see _chat_ollama); DGC
+        # then remembers that and sends True.
+        if levels_refused:
+            return True
+        value = str(level).lower()
+        if value in ("xhigh", "max"):
+            return "max" if max_tier else "high"
+        return value if value in ("low", "medium", "high") else True
+
+    def _rejection_active(self, feature: str) -> bool:
+        """A negotiated refusal of ``feature`` for this endpoint+model that has not expired."""
+        key = self._capability_key(feature)
+        now = time.monotonic()
+        with self._capability_lock:
+            expiry = self._capability_rejections.get(key, 0)
+            if expiry and expiry <= now:
+                self._capability_rejections.pop(key, None)
+                return False
+        return bool(expiry)
 
     def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
                         think_budget: int = 0, watch: RequestWatch | None = None) -> ChatResult:
@@ -3276,6 +3342,24 @@ class LLMClient:
                     raise ToolsUnsupportedError("Ollama rejected native tool calling")
                 if (r.status_code == 400 and "think" in payload
                         and re.search(r"think|reason", low)):
+                    sent = payload.get("think")
+                    if (isinstance(sent, str) and "does not support thinking" not in low
+                            and re.search(r"think value|invalid think|not supported for this model",
+                                          low)):
+                        # The server refused a graded level, not thinking itself. Step down one
+                        # rung and remember it, instead of dropping the control -- dropping it
+                        # also dropped `think: false`, so Off stopped switching thinking off.
+                        if sent == "max" and not self._rejection_active("think_max"):
+                            self._mark_rejected("think_max")
+                        elif not self._rejection_active("think_levels"):
+                            self._mark_rejected("think_levels")
+                        else:
+                            sent = None
+                        if sent is not None:
+                            stepped = self._ollama_think(level)
+                            if stepped != sent:
+                                payload["think"] = stepped
+                                continue
                     self._mark_rejected("reasoning")
                     payload.pop("think", None)
                     continue
@@ -3345,7 +3429,18 @@ class LLMClient:
                 level = lower.get(prior_level, "off")
                 if prior_level in ("none", "off"):
                     return result
-                if self.reasoning_supported:
+                if self.reasoning_supported and "think" in payload:
+                    # Step down to the next level that changes the request. A model that takes
+                    # only on/off (or GPT-OSS below Low) would otherwise be re-sent the identical
+                    # control and overthink again at every rung.
+                    stepped = self._ollama_think(level)
+                    while stepped == payload.get("think") and level not in ("none", "off"):
+                        level = lower.get(str(level).lower(), "off")
+                        stepped = self._ollama_think(level)
+                    if stepped == payload.get("think"):
+                        return result       # nothing lower exists for this model
+                    payload["think"] = stepped
+                elif self.reasoning_supported:
                     payload["think"] = self._ollama_think(level)
                 self._report_usage(result)   # the abandoned attempt was a real request
                 continue
@@ -3374,7 +3469,9 @@ class LLMClient:
             if self._feature_supported("parallel_tools"):
                 payload["parallel_tool_calls"] = True
         if self.reasoning_supported:        # F1: provider-aware reasoning/thinking control
-            payload.update(_reasoning_payload(self.family, self.model, reasoning_effort))
+            payload.update(_reasoning_payload(
+                self.family, self.model, reasoning_effort,
+                max_tier=not self._rejection_active("think_max")))
         if self.max_tokens and self._feature_supported("max_output_tokens"):
             payload["max_tokens"] = self.max_tokens
         if self.sampling and self._feature_supported("sampling"):
@@ -3502,6 +3599,17 @@ class LLMClient:
                         and re.search(r"tool|function", low)):
                     self._mark_rejected("tools")
                     raise ToolsUnsupportedError("endpoint rejected native tool calling")
+                if (r.status_code == 400 and payload.get("reasoning_effort") == "max"
+                        and self.family == "ollama"
+                        and re.search(r"(?:reason|effort|think)\w* value|invalid (?:reason|effort)", low)
+                        and "does not support thinking" not in low):
+                    # An Ollama without the Max tier: keep the control, ask for High.
+                    self._mark_rejected("think_max")
+                    for k in _REASONING_KEYS:
+                        payload.pop(k, None)
+                    payload.update(_reasoning_payload(self.family, self.model, level,
+                                                      max_tier=False))
+                    continue
                 if (r.status_code == 400 and self.reasoning_supported
                         and any(k in payload for k in _REASONING_KEYS)
                         and re.search(r"reason|effort|think|template", low)):
@@ -3595,7 +3703,9 @@ class LLMClient:
                 for k in _REASONING_KEYS:
                     payload.pop(k, None)
                 if self.reasoning_supported:
-                    payload.update(_reasoning_payload(self.family, self.model, level))
+                    payload.update(_reasoning_payload(
+                        self.family, self.model, level,
+                        max_tier=not self._rejection_active("think_max")))
                 self._report_usage(res)   # the abandoned attempt was a real request
                 continue
             return res

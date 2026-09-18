@@ -71,9 +71,12 @@ _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
 # Settings that only shape the next request, so changing them mid-turn cannot disturb the one in
 # flight. Anything that moves the execution route -- provider, model, sandbox, delegation -- is
-# deliberately absent and still waits for the turn to end.
+# deliberately absent and still waits for the turn to end. The sub-agent route is the exception
+# that proves it: it is read only when a sub-agent starts, and a running one keeps the client it
+# started with, so a new sub-agent model (as a new main model) applies from the next one on.
 _LIVE_SAFE_CONFIG_KEYS = frozenset({
-    "context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "context_size", "subagent_context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url",
     "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
@@ -104,8 +107,9 @@ _BUSY_MUTATIONS = {
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
     # `clear_todos` is not here either: Clear empties the list at once, even mid-turn, and the
     # worker that owns the session saves it as it retires.
-    # set_model and set_think are allowed mid-turn: the in-flight generation keeps its
-    # request; the next model round in this turn (or the next prompt) uses the new one.
+    # set_model and set_think are allowed mid-turn: a generation already answering keeps its
+    # request; the next model round in this turn (or the next prompt) uses the new one. A request
+    # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
@@ -129,6 +133,10 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
+# Config fields added to protocol v14 after it first shipped. An editor validates every event it
+# receives and rejects a field it doesn't know, so these go only to a client whose get_config
+# listed them in `fields`.
+_CONFIG_OPT_IN_FIELDS = frozenset({"subagent_context_size"})
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
@@ -161,6 +169,7 @@ _CONFIG_ENUMS = {
 _CONFIG_INTEGER_RANGES = {
     "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
     "context_size": (2_048, MAX_SAFE_INTEGER),
+    "subagent_context_size": (0, MAX_SAFE_INTEGER),     # 0: the main window
     "max_parallel_tasks": (1, 8),
     "autonomous_max_turns": (1, 1_000),
     "monitor_wake_delay_s": (1, 300),
@@ -455,6 +464,26 @@ def _history_steering_texts(message: dict) -> list[str] | None:
     if isinstance(content, list) and any(isinstance(part, dict) and part.get("type") == "image_url" for part in content):
         texts[-1] = (texts[-1] + " 📷").strip()
     return texts
+
+
+def _history_vision_items(seen) -> list:
+    """The view_image card DGC drew when a vision model looked at a prompt's attachments for a
+    model that cannot see (``_dgc_vision`` on the prompt's message), as live tool events."""
+    if not isinstance(seen, dict) or not str(seen.get("text") or "").strip():
+        return []
+    call_id = str(seen.get("call_id") or "")[:64] or None
+    count = seen.get("images") if isinstance(seen.get("images"), int) and seen.get("images") > 0 else 1
+    model, origin = str(seen.get("model") or "")[:512], str(seen.get("origin") or "")[:128]
+    args = {"path": "attached image" if count == 1 else f"{count} attached images",
+            "via": f"{model} ({origin})" if origin else model,
+            "question": str(seen.get("question") or "")[:500]}
+    output = str(seen.get("output") or "") or f"{args['via']} looked at the attachments:\n\n{seen['text']}"
+    output = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
+    is_diff, diff = split_diff(output)          # the same pure reading the live tool_result made
+    return [{"type": "tool_call", "call_id": call_id, "name": "view_image", "args": args,
+             "summary": arg_summary("view_image", args)},
+            {"type": "tool_result", "call_id": call_id, "name": "view_image", "output": output,
+             "is_error": tool_output_is_error(output), "is_diff": is_diff, "diff": diff}]
 
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
@@ -1298,6 +1327,42 @@ class Backend:
         # Publish the complete route state immediately after the ready handshake. ``config``
         # carries both native and delegated settings so editors render the route that will run.
         self._emit_config()
+        self._publish_model_capabilities()
+
+    def _publish_model_capabilities(self, *, always: bool = False) -> None:
+        """Learn what the selected model honours, off the command thread, and tell the editor.
+
+        ``ready`` and ``model_changed`` describe a model before its metadata is known, so the
+        editor's reasoning note showed the provider's optimistic default: a model with no thinking
+        control was described as having one, and after a model switch the note kept describing
+        the previous model until something else re-sent ``config``. The model's own metadata
+        (bounded, cached per endpoint+model) is read here, and ``config`` is sent again whenever
+        that changes what the editor was told.
+        """
+        agent = getattr(self, "agent", None)
+        client = getattr(agent, "client", None)
+        prepare = getattr(client, "prepare_model", None)
+        snapshot = getattr(client, "capability_snapshot", None)
+        if not callable(prepare) or not callable(snapshot):
+            return
+        try:
+            before = snapshot()
+        except Exception:
+            return
+
+        def run() -> None:
+            try:
+                prepare()
+                after = snapshot()
+            except Exception:
+                return
+            # Another switch landed meanwhile: that one publishes its own model.
+            if (always or after != before) and getattr(self.agent, "client", None) is client:
+                try:
+                    self._emit_config()
+                except Exception:
+                    pass
+        threading.Thread(target=run, name="dgc-model-capabilities", daemon=True).start()
 
     def _context_window_size(self) -> int:
         effective = getattr(self.agent, "context_size", None)
@@ -2418,8 +2483,16 @@ class Backend:
         self.em.emit("retained_tasks", items=[task.as_dict() for task in tasks[:100]],
                      errors=errors, total=len(tasks), **_request_fields(request_id))
 
+    _config_fields: frozenset = frozenset()     # opt-in config fields this client asked for
+
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
+        extra = {}
+        if "subagent_context_size" in self._config_fields:
+            try:
+                extra["subagent_context_size"] = max(0, int(c.get("subagent_context_size", 0) or 0))
+            except (TypeError, ValueError):
+                extra["subagent_context_size"] = 0
         from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      subscription_engine=str(c.get("subscription_engine", "")),
@@ -2443,7 +2516,7 @@ class Backend:
                      fallback_base_url=c.get("fallback_base_url", ""),
                      fallback_api_key_set=bool(c.get("fallback_api_key", "")),
                      fallback_api_mode=c.get("fallback_api_mode", ""),
-                     context_size=c.get("context_size", 32768),
+                     context_size=c.get("context_size", 32768), **extra,
                      sandbox=bool(c.get("sandbox", False)),
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
@@ -2685,6 +2758,9 @@ class Backend:
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 open_turn(text, "prompt")
+                # A vision model looked at this prompt's attachments for a model that cannot see
+                # (dgc/vision.py): its view_image card comes back, as it was drawn live.
+                items.extend(_history_vision_items(m.get("_dgc_vision")))
             elif role == "assistant":
                 current = ensure_turn()
                 text = str(content or "")
@@ -3453,6 +3529,8 @@ class Backend:
             # configured recommendation happens to be identical. Never leave the editor meter on
             # the prior model's window.
             self._emit_context(request_id if context_changed else None)
+            # The editor still holds the previous model's capabilities: always re-send them.
+            self._publish_model_capabilities(always=True)
         elif t == "list_models":
             request_id = redact_value(
                 str(cmd.get("request_id") or ""), secret_values(self.config))[:128]
@@ -3979,6 +4057,9 @@ class Backend:
             if "context_size" in values:
                 self._emit_context(request_id)
         elif t == "get_config":
+            fields = cmd.get("fields")
+            if isinstance(fields, list):
+                self._config_fields = frozenset(f for f in fields if f in _CONFIG_OPT_IN_FIELDS)
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()

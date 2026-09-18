@@ -321,23 +321,36 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
          "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
         ["path"]),
-    _fn("task", "Delegate a self-contained sub-task to a fresh sub-agent with its own context and "
-        "tools. In a Git project it works in a private checkout, then integrates only its conflict-free "
-        "delta; conflicting or incomplete work is preserved without overwriting the caller. Use for "
-        "large, independent chunks you want handled end-to-end without cluttering the main conversation. "
-        "In auto mode, emit multiple independent task calls in ONE response to run them concurrently; "
-        "never batch tasks that depend on or edit the same files.",
+    _fn("task", "Run a sub-task in a fresh sub-agent with its own context and tools: exploring code, "
+        "an independent chunk of work, or a review. It cannot see this conversation. In a Git "
+        "project it works in a private checkout, then integrates only its conflict-free delta; "
+        "conflicting or incomplete work is preserved without overwriting the caller. Emit "
+        "independent task calls in ONE response (they run concurrently in auto mode); never batch "
+        "tasks that depend on or edit the same files. The user does not see its result: summarize it.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
-         "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"},
-         "agent": {"type": "string", "description": "Specialist to run: explorer (read-only map), "
-                   "researcher (write one findings file), critic (review that file), worker "
-                   "(implement), or a name from .dgc/agents/<name>.md. Omit for worker."},
+         "prompt": {"type": "string", "description": "Self-contained brief: goal, project-relative "
+                    "paths, constraints, what is known, what to return"},
+         "agent": {"type": "string", "description": "explorer (read-only search and map), "
+                   "researcher (writes one findings file), critic (reviews named files or a "
+                   "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
          "background": {"type": "boolean", "description": "If true, the child keeps working after "
                         "this turn ends and the parent is woken when it finishes. Default false."}},
         ["description", "prompt"]),
 ]
 
 SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}
+
+# The view_image a model WITHOUT vision is offered when a vision model can look for it (see
+# dgc/vision.py): the same tool, answering in text. It replaces the entry above, never joins it.
+VIEW_IMAGE_RELAY_SCHEMA = _fn(
+    "view_image", "Find out what an image file in the workspace shows (PNG, JPEG, GIF or WebP, up to "
+    "8 MB): a screenshot, mockup, diagram, icon or rendered output. You cannot read images, so DGC "
+    "sends the image and your question to a vision model and returns its answer as text. Ask "
+    "exactly what you need to know from the picture.",
+    {"path": {"type": "string"},
+     "question": {"type": "string", "description": "What you need to know from the image, e.g. "
+                  "'Which elements overlap or are cut off, and what text do they show?'"}},
+    ["path", "question"])
 
 # ------------------------------------------------------------- executors ---
 
@@ -413,8 +426,12 @@ def read_file(args: dict, ctx) -> str:
         viewed = _view_image_bytes(p, raw, ctx, source="read_file")
         if _vision_available(ctx):
             return viewed
+        relayed = _look_through_vision_model(ctx, p, raw, "", viewed)
+        if relayed is not None:
+            return relayed
         where = "; the user can see it in the chat" if _shows_images(ctx) else ""
-        return f"error: {p} is an image, and this model cannot read images{where}"
+        from .vision import SETUP_HINT
+        return f"error: {p} is an image, and this model cannot read images{where}. {SETUP_HINT}"
     if b"\x00" in raw[:8192]:
         return f"error: {p} looks like a binary file"
     lines = raw.decode("utf-8", errors="replace").splitlines()
@@ -2159,6 +2176,15 @@ def _vision_available(ctx) -> bool:
         return False
 
 
+def _vision_route_label(ctx) -> str:
+    """The vision model that looks for a model without vision ("" when none); never probes."""
+    value = getattr(ctx, "vision_route_label", None)
+    try:
+        return str((value() if callable(value) else value) or "")
+    except Exception:
+        return ""
+
+
 def _browser_session(ctx):
     """One browser per agent session, launched on first use and reused after that."""
     from .browser import BrowserSession, discover_browser
@@ -2266,8 +2292,20 @@ def browser_tool(args: dict, ctx) -> str:
             _queue_image(_tool_owner(ctx), _image_entry(
                 png, name=Path(saved).name if saved else "screenshot.png", source="browser",
                 host=session.current_url or "", path=saved, label=f"screenshot of {page}"))
+            relay = _vision_route_label(ctx)
             if _vision_available(ctx):
                 seen = "The image follows this batch, so you can look at it directly."
+            elif relay and saved:
+                # dgc/vision.py: a vision model can look for this one, through view_image.
+                try:
+                    shown = Path(saved).relative_to(
+                        Path(ctx.project_root).resolve(strict=False)).as_posix()
+                except ValueError:
+                    shown = saved
+                seen = (f"This model does not accept images, so you cannot look at it yourself. To "
+                        f"have {relay} look at it, call view_image with path {shown} and your "
+                        "question; `snapshot` reads the page structure."
+                        + (" The user can see the screenshot in the chat." if _shows_images(ctx) else ""))
             else:
                 seen = ("This model does not accept images, so you cannot look at it — use "
                         "`snapshot` to read the page structure instead"
@@ -3590,9 +3628,46 @@ def view_image(args: dict, ctx) -> str:
     viewed = _view_image_bytes(p, data, ctx, source="view_image")
     if _vision_available(ctx):
         return viewed
+    relayed = _look_through_vision_model(ctx, p, data, str(args.get("question") or ""), viewed)
+    if relayed is not None:
+        return relayed
     where = "; the user can see it in the chat" if _shows_images(ctx) else ""
+    from .vision import SETUP_HINT
     return ("error: this model does not accept images, so it was not sent to the model"
-            + where)
+            + where + ". " + SETUP_HINT)
+
+
+def _look_through_vision_model(ctx, p: Path, data: bytes, question: str, viewed: str) -> str | None:
+    """The chat's model cannot see: have the configured vision model look at ``data`` and answer
+    ``question`` (dgc/vision.py). None when no vision model can look, so the caller keeps its own
+    words. ``viewed`` is the caller's own report, kept for a format no model accepts (BMP)."""
+    look = getattr(ctx, "vision_look", None)
+    if not callable(look):
+        return None
+    mime = image_views.sniff(data) or "image/png"
+    if mime not in image_views.MODEL_MIMES:
+        return viewed
+    from .vision import DEFAULT_QUESTION, bounded_question, tool_report
+    try:
+        rel = p.relative_to(Path(ctx.project_root).resolve(strict=False)).as_posix()
+    except ValueError:
+        rel = str(p)
+    rel = _safe_output(rel, ctx)
+    asked = bounded_question(_safe_output(question, ctx) if str(question or "").strip() else DEFAULT_QUESTION)
+    uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+    try:
+        outcome = look([(uri, f"image file {rel}")], asked)
+    except Exception as exc:                       # a look must never crash the tool loop
+        outcome = ("the vision model", False, f"{type(exc).__name__}: {exc}")
+    if outcome is None:
+        return None
+    label, ok, answer = outcome
+    if not ok:
+        return f"error: {label} could not look at {rel} for this model: {answer}"
+    width, height = image_views.dimensions(data)
+    facts = (f"{mime}, " + (f"{width}×{height}, " if width and height else "")
+             + image_views.human_size(len(data)))
+    return tool_report(label, rel, facts, asked, _safe_output(answer, ctx))
 
 
 def _view_image_bytes(p: Path, data: bytes, ctx, *, source: str) -> str:

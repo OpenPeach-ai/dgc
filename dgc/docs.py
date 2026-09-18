@@ -776,18 +776,21 @@ sub-agent the chat has started and what each one is doing, instead of one spinne
 
 Four specialists are always available as the `task` tool's `agent` argument:
 
-- **explorer** — read-only map of the codebase (no writes).
+- **explorer** — read-only search and map of the codebase (no writes).
 - **researcher** — investigate and write one findings file, then stop.
-- **critic** — review a named artifact; correct it or list blocking issues.
+- **critic** — review named files or a change; correct them or list blocking issues.
 - **worker** — implement a bounded change (the default when `agent` is omitted).
 
-After a researcher writes a design or plan file, the main agent should spawn critic on that
-path before implementing, unless you asked it to skip review. When a child finishes, the
-main agent reports in one or two sentences and names the files; the child's logs stay on
-that agent. In the editor each specialist is a coloured identity chip in the thread: the
-mark moves while it works and stills when it finishes. Click the chip (or its row in the
-agents list) for that agent's own page — duration, answer, and files. Child greps and
-edits do not dump into the parent chat.
+The main agent is offered `task` when you ask it to delegate or to survey the codebase, and on
+every turn under Ultra; a sub-agent is offered it only when its own brief asks, so work does not
+fan out recursively. The roster above, plus your own definitions, is listed to the model only
+while `task` is offered. After a researcher writes a design or plan file, the main agent should
+spawn critic on that path before implementing, unless you asked it to skip review. When a
+child finishes, the main agent reports in one or two sentences and names the files; the
+child's logs stay on that agent. In the editor each specialist is a coloured identity chip in
+the thread: the mark moves while it works and stills when it finishes. Click the chip (or its
+row in the agents list) for that agent's own page — duration, answer, and files. Child greps
+and edits do not dump into the parent chat.
 
 `task` accepts `background: true` so the child keeps working after the current turn ends.
 The composer stays free. The agents pill remains while that specialist runs. When it
@@ -802,6 +805,38 @@ fleet workspaces use the approved source project's definitions rather than loadi
 definitions from their scratch checkout. An optional `tools:` frontmatter line is an
 allow-list of built-in tool names.
 
+## Eyes for a model without vision
+
+If the chat's model cannot read images (for Ollama, `vision` is missing from its capabilities in
+`ollama show`), DGC finds a model that can and lets it do the looking:
+
+1. the sub-agent model (`/subagent model NAME`, with `/subagent host URL` if it runs elsewhere),
+   when its capabilities include vision;
+2. otherwise a named agent whose `model` has vision: one named `viewer` first, then the others by
+   name;
+3. for a sub-agent whose own model cannot see, the chat's main model when it can.
+
+A look is one request to that model with the image and a question. It uses no tools, no checkout
+and no agent loop, so a vision model that cannot call tools (`qwen2.5vl`, `llava`) works too. The
+answer comes back as text the chat's model works from:
+
+- **An image you attach to a prompt** is looked at before the turn starts, with your prompt as
+  the question. The chat shows a `view_image` step, *attached image · via qwen3-vl:8b (sub-agent
+  model)*; open it to read what that model saw. The picture stays in the conversation, and the
+  chat's model receives that report in its place on every later request too. If you switch to a
+  model that can see, it gets the picture itself.
+- **An image file in the workspace.** `view_image` is still offered, with a `question` argument:
+  the chat's model asks what it needs to know ("which elements overlap, and what text do they
+  show?"), and the step's output names the model that looked and gives its answer. `read_file` on
+  an image works the same way, with a general describe-everything question. A browser screenshot
+  says where it was saved so the model can ask `view_image` about it.
+
+A model's capabilities are read once and cached (`capability_cache_ttl_s`, 5 minutes by default),
+never checked on every request. Only positive evidence counts: an Ollama model has to list `vision`,
+and an endpoint that turns out to refuse the image is dropped. With no vision model available, DGC
+keeps the old behaviour: the image reaches no model, the model is told it exists, and you get one
+line saying how to set up a vision sub-agent model.
+
 ## The count
 
 The prompt area lists every sub-agent started in the current turn — queued, running, waiting,
@@ -810,10 +845,12 @@ turn ends the count clears, unless a specialist was started with `background` tr
 stays in the prompt until it finishes, and DGC starts a new turn when it lands. Completed work
 stays in the transcript; it does not inflate the count as a chat gets longer.
 
-You can change the model while a turn is running. The round already on the wire keeps its
-client; the next model round uses the new one. The chat records `Switched to <model>`. Thinking
-works the same way: Settings → General → Thinking is the composer dial. Changing it mid-turn
-keeps the current request's budget and uses the new level on the next model round. The chat
+You can change the model while a turn is running. A round that is already answering keeps its
+client; the next model round uses the new one. A round that has not produced anything yet (the
+old model still loading, queued upstream or stalled) is sent again to the new model at once,
+and the chat says so. The chat records `Switched to <model>`. Thinking works the same way:
+Settings → General → Thinking is the composer dial. Changing it mid-turn keeps the current
+request's level and uses the new level (and its guidance) from the next model round. The chat
 records `Thinking → high`. If you stop a turn and pick a vision-capable model, the next
 turn can view images. Viewed images always appear as a chip on the tool step that produced
 them — click the chip to open the image, even when the model itself cannot see it.
@@ -945,7 +982,8 @@ unless you asked to choose.
 
 - `read_file` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` — read, overwrite,
   exact-string edit, several edits to one file, or an atomic unified diff.
-- `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**).
+- `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**). For a model
+  without vision, a configured vision model looks and answers its `question` (see **Sub-agents**).
 - `glob` · `grep` — find files; search contents.
 - `repo_map` · `code_intel` — inventory and symbols (see **Code intelligence**).
 - `git_diff` — local Git without a shell (see **Git changes**).
@@ -1779,8 +1817,10 @@ it in a viewer. In the terminal, open the step and click `open` to hand it to yo
 viewer. *Viewed images* has the details.
 
 Whether the *model* can see it is a separate question, and DGC checks rather than guesses. With a
-vision model the picture is attached for it to read. A model without vision is told the image exists
-and never receives it, with a nudge to use `snapshot` instead, which is more precise anyway. If an
+vision model the picture is attached for it to read. A model without vision never receives it. If a
+vision sub-agent model is set, the result says where the screenshot was saved, and the model can ask
+that vision model about it with `view_image` (see *Sub-agents*); either way it is nudged to use
+`snapshot`, which is more precise for page structure. If an
 endpoint turns out not to accept images, DGC caches the rejection for that endpoint/model pair
 for up to one hour, shared across chats in the same process. Restarting DGC clears it. Check
 with `ollama show <model>` — look for `vision` under Capabilities.
@@ -1835,8 +1875,9 @@ covers a browser screenshot, an image file from your workspace, and an image an 
 - **Image files.** With a model that accepts images, the agent can use `view_image` on a PNG, JPEG, GIF
   or WebP file of up to 8 MB. It is offered when your prompt names an image file or asks about
   something only a picture shows. `read_file` on an image file views it the same way, in the read
-  step; with a model that cannot read images it says so instead. A BMP is shown to you but never
-  sent to the model; convert it to PNG if the model needs to look at it.
+  step. With a model that cannot read images, a configured vision model looks instead and answers in
+  text; without one, the step says so. A BMP is shown to you but never sent to a model; convert it to
+  PNG if a model needs to look at it.
 - **MCP tools** that return images.
 
 A step keeps up to eight images. More than that are counted, not kept.
@@ -1870,8 +1911,10 @@ this; without a display it shows where the file is instead. The classic `dgc` pr
 
 - A model that accepts images gets them after the batch of tool calls that produced them. Text inside
   an image is treated as data, never as instructions.
-- A model without vision is told that an image exists and never receives it, and `view_image` is not
-  offered to it.
+- A model without vision never receives the pixels. When a vision model is configured (the sub-agent
+  model, or a named agent's model), that model looks for it and its answer comes back as text, in a
+  step that names it; see *Sub-agents* ▸ *Eyes for a model without vision*. With none, the model is
+  told that an image exists, `view_image` is not offered to it, and you are told how to set one up.
 - If an endpoint refuses an image, DGC sends the request again without it and stops sending images to
   that endpoint/model pair until the rejection cache expires (up to one hour) or DGC restarts.
   The cache is shared across chats in the same process.
@@ -2191,9 +2234,17 @@ the strongest supported tier; it cannot add a native tier a model does not offer
 
 Native controls differ:
 
-- Most Ollama thinking models accept **on/off**: all non-off profiles turn thinking on. Low through
-  Extra High still change DGC's instructions, but are not separate native reasoning budgets.
-- **GPT-OSS on Ollama:** Low, Medium and High; Off uses Low and Extra High uses High.
+- **Ollama thinking models** (native `/api/chat` and `/v1` alike): Off sends thinking off; Low,
+  Medium and High are sent as Ollama's own levels and Extra High as Max. A model that grades its
+  thinking follows them (GLM 5.3 on Ollama's cloud thinks far less at Low); one that does not
+  treats every level as on. An older Ollama that takes only on/off for a model refuses a level
+  once; DGC then sends on/off for that model (and High instead of Max where Max is refused)
+  without losing the Off switch. The editor's reasoning note says which of these applies.
+- **GPT-OSS on Ollama:** Low, Medium and High; Off uses Low and Extra High uses High (it has no
+  tier above High).
+- **GLM 5 on Ollama** (for example `glm-5.3:cloud`): it keeps reasoning with thinking off and
+  writes that reasoning into the answer, so Off uses Low; Low, Medium and High are its levels and
+  Extra High uses Max.
 - **GLM 5.3 Flash on Ollama:** reasoning is always on. Off/Low use Low, Medium/High use High,
   and Extra High/Ultra use Max, on both native and compatible transports.
 - Other providers use their supported effort fields or budgets. Unsupported controls are negotiated
@@ -2203,9 +2254,12 @@ Native controls differ:
 
 `/ultra on` is an orchestration profile, not a sixth thinking level. It raises native effort to
 `xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
-effort, and asks the model to split genuinely independent work into parallel sub-agents — up to
-`max_parallel_tasks` (default 4, at most 8). Long work that does not block the rest of the turn
-can use `task` with `background: true`; DGC starts a wake turn when that child lands.
+effort, and makes the main agent a lead: it plans the split before reading code itself, sends
+explorers to map unfamiliar areas, gives each independent chunk its own worker in one parallel
+batch — up to `max_parallel_tasks` (default 4, at most 8; concurrent in auto mode) — has critic
+review changed files before the final answer, then integrates and runs the tests. Long work
+that does not block the rest of the turn can use `task` with `background: true`; DGC starts a
+wake turn when that child lands.
 
 - `/ultra` · `/ultra on|off` — toggle; the status line shows the profile while it is on.
 - `--ultra` / `--no-ultra` — the same for one `dgc` launch.
@@ -2518,6 +2572,11 @@ Useful keys:
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
   Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
   redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
+- `subagent_context_size` — each sub-agent's context window in tokens, as `context_size` is the main
+  model's (0, the default, uses the main window). A named agent's own `context_size:` frontmatter
+  wins. `/subagent context 64k` sets it; so does Settings → Agents in the editor. The sub-agent
+  route (`subagent_model`, host, transport, key, window) may change mid-turn: it applies from the
+  next sub-agent, as a new main model applies from the next request.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
 - `fleet_worktree_root` — optional private storage for automatically isolated TUI agents; empty uses
@@ -2562,7 +2621,8 @@ when you want to override it.
   headers, a silent stream, or keep-alives with no tokens) before it counts as stalled. `auto` is
   `900` for a local endpoint (loopback, private or Tailscale addresses, `*.local`, or an
   Ollama/llama.cpp/LM Studio/vLLM server: room for a model load and a large prefill) and `300`
-  for a remote one. Streamed reasoning counts as progress. `0` turns it off.
+  for a remote one — including an Ollama cloud model (`…:cloud`, `…-cloud`) reached through a
+  local Ollama, which is remote work. Streamed reasoning counts as progress. `0` turns it off.
 - `model_idle_timeout_s` (default `300`) — how long a stream may go silent after it started.
   A stall after partial output continues from what already streamed. `0` turns it off.
 - `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
@@ -2572,6 +2632,7 @@ when you want to override it.
   model and endpoint. Esc / Stop works in every phase, including before any response headers.
 - `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
   model still loading, the first-token clock is paused ("Loading the model") for up to this long.
+  Ollama cloud models never load locally and are never probed.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.
