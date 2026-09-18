@@ -23,11 +23,8 @@ from .types import (
 
 
 def _mcp_socket_path(slot: Path) -> str:
-    """Unix-domain bind paths are short (104 bytes on macOS). Stay under that."""
-    raw = str((slot / "tools.sock").resolve())
-    if len(raw.encode()) < 100:
-        return raw
-    digest = hashlib.sha1(raw.encode()).hexdigest()[:12]
+    """Unix-domain bind paths are short (104 bytes on macOS). Always use /tmp."""
+    digest = hashlib.sha1(str(slot.resolve()).encode()).hexdigest()[:12]
     return f"/tmp/dgc-{digest}.sock"
 
 
