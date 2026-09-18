@@ -67,10 +67,13 @@
 
 <main id="content">
 <header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>SDK</b> DGC</div><h1>DGC SDK</h1><p class="lede">Embed the DGC coding harness in applications and CI. Free, local, Apache-2.0. Not a hosted product.</p></div></header><section class="section"><div class="container content-grid"><article class="prose"><p>The SDK is <strong>free and local</strong>. You do not pay DGC to embed it. Optional <code>Pricing</code> on a client is only so <strong>your</strong> app can attribute <strong>model-token</strong> spend (what a department’s LLM calls cost). It is not a fee for the SDK.</p>
-<p>Current cut: <strong>0.5.0</strong>, protocol <strong>v14</strong>, CLI <strong>0.41.3</strong>, Linux.</p>
-<pre><code>python3 -m pip install dgc-sdk
-# or from the repository: pip install -e sdk/python</code></pre>
-<p>Do not <code>pip install dgc</code>. That PyPI name is an unrelated clustering paper package.</p>
+<p>Frozen cut: <strong>0.5.2</strong>, protocol <strong>v14</strong>, CLI <strong>0.41.3</strong>, Linux. GitHub tag <a href="https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2"><code>sdk-v0.5.2</code></a> (not <code>v0.5.2</code>, which is a historical CLI tag).</p>
+<pre><code>python3 -m pip install \
+  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"</code></pre>
+<p>Or from a clone of this repository:</p>
+<pre><code>python3 -m pip install -e sdk/python</code></pre>
+<p>The wheel is the embed client. It still needs a DGC runtime that can run <code>python -m dgc serve</code> (this repository or CLI <strong>0.41.3</strong>). Set <code>DGC_PYTHON</code> if <code>python3</code> cannot import <code>dgc</code>.</p>
+<p>Do not <code>pip install dgc</code>. That PyPI name is an unrelated clustering paper package. This SDK is not on PyPI or npm yet.</p>
 <pre><code>from dgc_sdk import DGC, Pricing, RuntimePolicy
 
 dgc = DGC(
@@ -78,13 +81,15 @@ dgc = DGC(
     inherit_user_state=False,
     department="platform",
     pricing=Pricing(input_per_million=0.0, output_per_million=0.0),
-    policy=RuntimePolicy(network="deny"),
+    policy=RuntimePolicy(network="deny", deny_tools=("write_file",)),
 )
 session = dgc.session(cwd="/path/to/workspace", permissions={"mode": "default", "unhandled": "deny"})
 result = session.run("Summarize this repository. Do not edit files.")
 print(result.status, result.usage)
 print(dgc.usage_report(department="platform"))</code></pre>
 <p>Isolation: each <code>DGC</code> owns one <code>state_dir</code> HOME. Host <code>~/.dgc</code> is not used unless you pass <code>inherit_user_state=True</code> (do not, in production embeds).</p>
+<p><code>RuntimePolicy(deny_tools=(&quot;write_file&quot;,))</code> is compiled into isolated deny rules and holds in every permission mode, including <code>auto</code>. Write-tool denies also block bash file-writes (redirects, <code>tee</code>, <code>cp</code> / <code>mv</code>).</p>
+<p>TypeScript lives in <code>sdk/typescript</code> (<code>@vibedgc/sdk</code>, Node ≥ 22 with strip-types). Usage, audit, and retry helpers are Python-first.</p>
 <p>Source: <a href="https://github.com/OpenPeach-ai/dgc">github.com/OpenPeach-ai/dgc</a> (<code>sdk/</code>).</p></article><aside class="card side-card"><span class="micro">DGC v0.41.3</span><h3 style="margin-top:18px">Built in the open.</h3><p>Inspect the implementation, its tests, release checksums, and the source that backs this page.</p><a href="https://github.com/OpenPeach-ai/dgc">Open repository ↗</a><a href="/changelog">Read changelog →</a></aside></div></section>
 </main>
 <footer class="site-footer">
@@ -100,7 +105,7 @@ print(dgc.usage_report(department="platform"))</code></pre>
     </div>
     <nav aria-label="Product">
       <h2>Product</h2>
-      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode/">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode/">Extension</a><a href="https://vibedgc.com/sdk/">SDK</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
     </nav>
     <nav aria-label="Learn">
       <h2>Learn</h2>
