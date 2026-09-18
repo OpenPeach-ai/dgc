@@ -1,12 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url)).replace(/\/$/, "");
 
+/** True when this file runs from a DGC source checkout (sdk/typescript inside the repository). */
+export function isCheckout(): boolean {
+  return existsSync(join(REPO_ROOT, "dgc", "__init__.py"))
+    && existsSync(join(REPO_ROOT, "sdk", "typescript", "package.json"));
+}
+
 export function defaultRuntime(): string[] {
+  const checkoutPython = join(REPO_ROOT, ".venv/bin/python");
   const python = process.env.DGC_PYTHON
-    || (existsSync(join(REPO_ROOT, ".venv/bin/python")) ? join(REPO_ROOT, ".venv/bin/python") : "python3");
+    || (isCheckout() && existsSync(checkoutPython) ? checkoutPython : "python3");
   return [python, "-m", "dgc", "serve"];
 }
 
@@ -37,9 +44,14 @@ export function isolatedEnv(
     env.XDG_STATE_HOME = join(home, ".local/state");
   }
   Object.assign(env, extra);
-  const pathParts = [REPO_ROOT];
-  if (env.PYTHONPATH) pathParts.push(env.PYTHONPATH);
-  env.PYTHONPATH = pathParts.join(":");
+  // Only a source checkout puts its own dgc/ on the child's path. An installed package must not:
+  // REPO_ROOT is then node_modules, and anything importable there would shadow the CLI's own
+  // pinned dependencies.
+  if (isCheckout()) {
+    const pathParts = [REPO_ROOT];
+    if (env.PYTHONPATH) pathParts.push(env.PYTHONPATH);
+    env.PYTHONPATH = pathParts.join(delimiter);
+  }
   return env;
 }
 

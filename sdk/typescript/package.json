@@ -1,15 +1,40 @@
 {
   "name": "@vibedgc/sdk",
   "version": "0.5.3",
-  "private": false,
   "description": "Embed the DGC coding harness in applications and CI",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "typescript": "5.9.3"
+  },
+  "keywords": ["dgc", "agent", "sdk", "coding-agent"],
+  "homepage": "https://vibedgc.com/sdk/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenPeach-ai/dgc.git",
+    "directory": "sdk/typescript"
+  },
+  "bugs": "https://github.com/OpenPeach-ai/dgc/issues",
   "license": "Apache-2.0"
 }
