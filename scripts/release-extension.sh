@@ -73,7 +73,7 @@ require_public_head() {
   [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || {
     echo "registry publication requires HEAD to equal origin/main" >&2; exit 1;
   }
-  python3 "$ROOT/scripts/check-site.py"
+  python3 "$ROOT/scripts/check-public-content.py"
 }
 
 case "$MODE" in

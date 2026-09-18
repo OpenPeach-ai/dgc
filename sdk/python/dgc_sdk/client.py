@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -19,6 +20,15 @@ from .types import (
     OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionMode, RunEvent, RunResult,
     SandboxRequirement, ToolSpec, UnhandledPolicy,
 )
+
+
+def _mcp_socket_path(slot: Path) -> str:
+    """Unix-domain bind paths are short (104 bytes on macOS). Stay under that."""
+    raw = str((slot / "tools.sock").resolve())
+    if len(raw.encode()) < 100:
+        return raw
+    digest = hashlib.sha1(raw.encode()).hexdigest()[:12]
+    return f"/tmp/dgc-{digest}.sock"
 
 
 def _existing_dirs(items) -> list[str]:
@@ -255,7 +265,7 @@ class DGC:
 
     def _install_tools(self, transport: DGCClient, slot: Path,
                        tools: list[ToolSpec]) -> ToolHub:
-        socket_path = str(slot / "tools.sock")
+        socket_path = _mcp_socket_path(slot)
         hub = ToolHub(socket_path, tools)
         hub.start()
         python = self._runtime[0] if self._runtime else sys.executable
