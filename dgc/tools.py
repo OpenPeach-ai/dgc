@@ -321,17 +321,18 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
          "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
         ["path"]),
-    _fn("task", "Delegate a self-contained sub-task to a fresh sub-agent with its own context and "
-        "tools. In a Git project it works in a private checkout, then integrates only its conflict-free "
-        "delta; conflicting or incomplete work is preserved without overwriting the caller. Use for "
-        "large, independent chunks you want handled end-to-end without cluttering the main conversation. "
-        "In auto mode, emit multiple independent task calls in ONE response to run them concurrently; "
-        "never batch tasks that depend on or edit the same files.",
+    _fn("task", "Run a sub-task in a fresh sub-agent with its own context and tools: exploring code, "
+        "an independent chunk of work, or a review. It cannot see this conversation. In a Git "
+        "project it works in a private checkout, then integrates only its conflict-free delta; "
+        "conflicting or incomplete work is preserved without overwriting the caller. Emit "
+        "independent task calls in ONE response (they run concurrently in auto mode); never batch "
+        "tasks that depend on or edit the same files. The user does not see its result: summarize it.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
-         "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"},
-         "agent": {"type": "string", "description": "Specialist to run: explorer (read-only map), "
-                   "researcher (write one findings file), critic (review that file), worker "
-                   "(implement), or a name from .dgc/agents/<name>.md. Omit for worker."},
+         "prompt": {"type": "string", "description": "Self-contained brief: goal, project-relative "
+                    "paths, constraints, what is known, what to return"},
+         "agent": {"type": "string", "description": "explorer (read-only search and map), "
+                   "researcher (writes one findings file), critic (reviews named files or a "
+                   "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
          "background": {"type": "boolean", "description": "If true, the child keeps working after "
                         "this turn ends and the parent is woken when it finishes. Default false."}},
         ["description", "prompt"]),

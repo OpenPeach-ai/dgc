@@ -776,18 +776,21 @@ sub-agent the chat has started and what each one is doing, instead of one spinne
 
 Four specialists are always available as the `task` tool's `agent` argument:
 
-- **explorer** — read-only map of the codebase (no writes).
+- **explorer** — read-only search and map of the codebase (no writes).
 - **researcher** — investigate and write one findings file, then stop.
-- **critic** — review a named artifact; correct it or list blocking issues.
+- **critic** — review named files or a change; correct them or list blocking issues.
 - **worker** — implement a bounded change (the default when `agent` is omitted).
 
-After a researcher writes a design or plan file, the main agent should spawn critic on that
-path before implementing, unless you asked it to skip review. When a child finishes, the
-main agent reports in one or two sentences and names the files; the child's logs stay on
-that agent. In the editor each specialist is a coloured identity chip in the thread: the
-mark moves while it works and stills when it finishes. Click the chip (or its row in the
-agents list) for that agent's own page — duration, answer, and files. Child greps and
-edits do not dump into the parent chat.
+The main agent is offered `task` when you ask it to delegate or to survey the codebase, and on
+every turn under Ultra; a sub-agent is offered it only when its own brief asks, so work does not
+fan out recursively. The roster above, plus your own definitions, is listed to the model only
+while `task` is offered. After a researcher writes a design or plan file, the main agent should
+spawn critic on that path before implementing, unless you asked it to skip review. When a
+child finishes, the main agent reports in one or two sentences and names the files; the
+child's logs stay on that agent. In the editor each specialist is a coloured identity chip in
+the thread: the mark moves while it works and stills when it finishes. Click the chip (or its
+row in the agents list) for that agent's own page — duration, answer, and files. Child greps
+and edits do not dump into the parent chat.
 
 `task` accepts `background: true` so the child keeps working after the current turn ends.
 The composer stays free. The agents pill remains while that specialist runs. When it
@@ -2191,9 +2194,12 @@ Native controls differ:
 
 `/ultra on` is an orchestration profile, not a sixth thinking level. It raises native effort to
 `xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
-effort, and asks the model to split genuinely independent work into parallel sub-agents — up to
-`max_parallel_tasks` (default 4, at most 8). Long work that does not block the rest of the turn
-can use `task` with `background: true`; DGC starts a wake turn when that child lands.
+effort, and makes the main agent a lead: it plans the split before reading code itself, sends
+explorers to map unfamiliar areas, gives each independent chunk its own worker in one parallel
+batch — up to `max_parallel_tasks` (default 4, at most 8; concurrent in auto mode) — has critic
+review changed files before the final answer, then integrates and runs the tests. Long work
+that does not block the rest of the turn can use `task` with `background: true`; DGC starts a
+wake turn when that child lands.
 
 - `/ultra` · `/ultra on|off` — toggle; the status line shows the profile while it is on.
 - `--ultra` / `--no-ultra` — the same for one `dgc` launch.

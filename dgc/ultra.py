@@ -64,14 +64,16 @@ def delegated_prompt(config, prompt: str, mode: str) -> str:
         "cloud models as well as local ones. Split independent work into parallel sub-agents "
         f"(up to {workers}) instead of doing those chunks in the parent. Delegate whenever the "
         "turn has more than one independent chunk (map more than one area, backend vs UI, "
-        "unrelated bugs, a long test/deploy/SSH battery beside other work). Keep coupled edits "
-        "serial, reconcile all child results, and verify the integrated result before finishing. "
+        "unrelated bugs, a long test/deploy/SSH battery beside other work). Plan the split before "
+        "reading code yourself: send read-only sub-agents to explore areas you have not read, and "
+        "have a separate reviewer sub-agent check changed files before you finish. Keep coupled "
+        "edits serial, reconcile all child results, and verify the integrated result before finishing. "
         "For work that will take more than a short wait and does not block the rest of this "
         "turn, set task.background true so the child continues after you finish speaking; DGC "
-        "starts a new turn when it lands. Do not keep independent work in the parent to save "
-        "tokens or round-trips. Skip sub-agents only for a short question or a single coupled "
-        f"file edit. The current DGC permission mode remains {mode}; Ultra does not grant "
-        "additional filesystem, shell, or network authority.\n"
+        "starts a new turn when it lands. Do not keep independent work in the parent because it "
+        "looks small or to save tokens or round-trips. Skip sub-agents only when the whole turn "
+        f"is one question or one edit to one file. The current DGC permission mode remains {mode}; "
+        "Ultra does not grant additional filesystem, shell, or network authority.\n"
         "</dgc-ultra-policy>\n\n" + prompt
     )
 
