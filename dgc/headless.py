@@ -107,8 +107,9 @@ _BUSY_MUTATIONS = {
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
     # `clear_todos` is not here either: Clear empties the list at once, even mid-turn, and the
     # worker that owns the session saves it as it retires.
-    # set_model and set_think are allowed mid-turn: the in-flight generation keeps its
-    # request; the next model round in this turn (or the next prompt) uses the new one.
+    # set_model and set_think are allowed mid-turn: a generation already answering keeps its
+    # request; the next model round in this turn (or the next prompt) uses the new one. A request
+    # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
@@ -1291,6 +1292,42 @@ class Backend:
         # Publish the complete route state immediately after the ready handshake. ``config``
         # carries both native and delegated settings so editors render the route that will run.
         self._emit_config()
+        self._publish_model_capabilities()
+
+    def _publish_model_capabilities(self, *, always: bool = False) -> None:
+        """Learn what the selected model honours, off the command thread, and tell the editor.
+
+        ``ready`` and ``model_changed`` describe a model before its metadata is known, so the
+        editor's reasoning note showed the provider's optimistic default: a model with no thinking
+        control was described as having one, and after a model switch the note kept describing
+        the previous model until something else re-sent ``config``. The model's own metadata
+        (bounded, cached per endpoint+model) is read here, and ``config`` is sent again whenever
+        that changes what the editor was told.
+        """
+        agent = getattr(self, "agent", None)
+        client = getattr(agent, "client", None)
+        prepare = getattr(client, "prepare_model", None)
+        snapshot = getattr(client, "capability_snapshot", None)
+        if not callable(prepare) or not callable(snapshot):
+            return
+        try:
+            before = snapshot()
+        except Exception:
+            return
+
+        def run() -> None:
+            try:
+                prepare()
+                after = snapshot()
+            except Exception:
+                return
+            # Another switch landed meanwhile: that one publishes its own model.
+            if (always or after != before) and getattr(self.agent, "client", None) is client:
+                try:
+                    self._emit_config()
+                except Exception:
+                    pass
+        threading.Thread(target=run, name="dgc-model-capabilities", daemon=True).start()
 
     def _context_window_size(self) -> int:
         effective = getattr(self.agent, "context_size", None)
@@ -3454,6 +3491,8 @@ class Backend:
             # configured recommendation happens to be identical. Never leave the editor meter on
             # the prior model's window.
             self._emit_context(request_id if context_changed else None)
+            # The editor still holds the previous model's capabilities: always re-send them.
+            self._publish_model_capabilities(always=True)
         elif t == "list_models":
             request_id = redact_value(
                 str(cmd.get("request_id") or ""), secret_values(self.config))[:128]

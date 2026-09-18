@@ -87,9 +87,13 @@ remain required. An action already dispatched may finish under its previously gr
 Mode changes update permission state immediately; the turn worker refreshes its model instructions
 before the next request, avoiding concurrent transcript writes.
 
-From CLI 0.40.3 and extension 0.25.3, the model picker works while a turn runs. The in-flight
-generation keeps its client; the next model round uses the new one. The chat records
-`Switched to <model>`. Viewed images still appear as a clickable chip on the tool step even when
+From CLI 0.40.3 and extension 0.25.3, the model picker works while a turn runs. A generation
+that is already answering keeps its client; the next model round uses the new one. A request
+that has produced nothing yet (the old model loading, queued upstream or stalled) is sent again
+to the new model at once, and the chat says so; before, the turn waited out the old request's
+stall window, up to fifteen minutes. The chat records `Switched to <model>`, and a `config`
+event follows with the new model's capabilities. A thinking level changed while a turn runs
+applies, with its guidance, from the next model request. Viewed images still appear as a clickable chip on the tool step even when
 the current model cannot see them.
 
 Skills browsing uses the current catalog during a turn. Installation, deletion, enablement and

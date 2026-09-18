@@ -813,10 +813,12 @@ turn ends the count clears, unless a specialist was started with `background` tr
 stays in the prompt until it finishes, and DGC starts a new turn when it lands. Completed work
 stays in the transcript; it does not inflate the count as a chat gets longer.
 
-You can change the model while a turn is running. The round already on the wire keeps its
-client; the next model round uses the new one. The chat records `Switched to <model>`. Thinking
-works the same way: Settings → General → Thinking is the composer dial. Changing it mid-turn
-keeps the current request's budget and uses the new level on the next model round. The chat
+You can change the model while a turn is running. A round that is already answering keeps its
+client; the next model round uses the new one. A round that has not produced anything yet (the
+old model still loading, queued upstream or stalled) is sent again to the new model at once,
+and the chat says so. The chat records `Switched to <model>`. Thinking works the same way:
+Settings → General → Thinking is the composer dial. Changing it mid-turn keeps the current
+request's level and uses the new level (and its guidance) from the next model round. The chat
 records `Thinking → high`. If you stop a turn and pick a vision-capable model, the next
 turn can view images. Viewed images always appear as a chip on the tool step that produced
 them — click the chip to open the image, even when the model itself cannot see it.
@@ -2182,9 +2184,17 @@ the strongest supported tier; it cannot add a native tier a model does not offer
 
 Native controls differ:
 
-- Most Ollama thinking models accept **on/off**: all non-off profiles turn thinking on. Low through
-  Extra High still change DGC's instructions, but are not separate native reasoning budgets.
-- **GPT-OSS on Ollama:** Low, Medium and High; Off uses Low and Extra High uses High.
+- **Ollama thinking models** (native `/api/chat` and `/v1` alike): Off sends thinking off; Low,
+  Medium and High are sent as Ollama's own levels and Extra High as Max. A model that grades its
+  thinking follows them (GLM 5.3 on Ollama's cloud thinks far less at Low); one that does not
+  treats every level as on. An older Ollama that takes only on/off for a model refuses a level
+  once; DGC then sends on/off for that model (and High instead of Max where Max is refused)
+  without losing the Off switch. The editor's reasoning note says which of these applies.
+- **GPT-OSS on Ollama:** Low, Medium and High; Off uses Low and Extra High uses High (it has no
+  tier above High).
+- **GLM 5 on Ollama** (for example `glm-5.3:cloud`): it keeps reasoning with thinking off and
+  writes that reasoning into the answer, so Off uses Low; Low, Medium and High are its levels and
+  Extra High uses Max.
 - **GLM 5.3 Flash on Ollama:** reasoning is always on. Off/Low use Low, Medium/High use High,
   and Extra High/Ultra use Max, on both native and compatible transports.
 - Other providers use their supported effort fields or budgets. Unsupported controls are negotiated
@@ -2561,7 +2571,8 @@ when you want to override it.
   headers, a silent stream, or keep-alives with no tokens) before it counts as stalled. `auto` is
   `900` for a local endpoint (loopback, private or Tailscale addresses, `*.local`, or an
   Ollama/llama.cpp/LM Studio/vLLM server: room for a model load and a large prefill) and `300`
-  for a remote one. Streamed reasoning counts as progress. `0` turns it off.
+  for a remote one — including an Ollama cloud model (`…:cloud`, `…-cloud`) reached through a
+  local Ollama, which is remote work. Streamed reasoning counts as progress. `0` turns it off.
 - `model_idle_timeout_s` (default `300`) — how long a stream may go silent after it started.
   A stall after partial output continues from what already streamed. `0` turns it off.
 - `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
@@ -2571,6 +2582,7 @@ when you want to override it.
   model and endpoint. Esc / Stop works in every phase, including before any response headers.
 - `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
   model still loading, the first-token clock is paused ("Loading the model") for up to this long.
+  Ollama cloud models never load locally and are never probed.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.
