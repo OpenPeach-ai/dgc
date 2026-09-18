@@ -2165,18 +2165,9 @@
       list.appendChild(row);
     });
   }
-  let lastSysErr = "";
-  function sysLine(msg, isErr) {
-    if (isErr) {
-      if (msg === lastSysErr) return;
-      lastSysErr = msg;
-    } else {
-      lastSysErr = "";
-    }
-    const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg));
-    if (isErr) line.setAttribute("role", "alert");
-    appendConversationContent(line);
-  }
+  // Every error line is shown. Repeats are deduplicated where they start: the backend reports a
+  // skipped unknown event type once per connection, so the webview never hides a real reason.
+  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
