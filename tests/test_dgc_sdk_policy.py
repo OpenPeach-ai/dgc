@@ -682,6 +682,13 @@ class PolicyUnitTests(unittest.TestCase):
         with self.assertRaises(DGCConfigError):
             sdk_policy.sandbox_requirement({"requirement": "maybe"})
 
+    def test_oversized_policy_is_refused_before_launch(self):
+        root = Path(tempfile.mkdtemp()).resolve()
+        prefixes = tuple(f"data/part-{index:04d}" for index in range(400))
+        with self.assertRaises(DGCConfigError):
+            sdk_policy.compile_session(RuntimePolicy(deny_path_prefixes=prefixes), cwd=root,
+                                       mode="auto", on_permission=None, sandbox="off")
+
     def test_confirm_refuses_a_runtime_that_ignores_the_policy(self):
         root = Path(tempfile.mkdtemp()).resolve()
         plan = sdk_policy.compile_session(RuntimePolicy(), cwd=root, mode="auto",

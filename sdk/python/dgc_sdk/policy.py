@@ -118,6 +118,8 @@ _INTERPRETER_WRITE_RE = re.compile(
 
 _SESSION_POLICY_ENV = "DGC_SESSION_POLICY"
 _SESSION_POLICY_VERSION = 1
+# Linux refuses a single environment string over 128 KiB (MAX_ARG_STRLEN).
+_SESSION_POLICY_MAX_BYTES = 96 * 1024
 
 
 def _as_names(value: Any, field: str) -> tuple[str, ...]:
@@ -730,7 +732,12 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
         "sandbox_read_only": sandbox_read_only,
         "shell_requires_sandbox": shell_requires_sandbox,
     }
-    return SessionPlan(env={_SESSION_POLICY_ENV: _dump(payload)}, requirement=requirement,
+    text = _dump(payload)
+    if len(text.encode("utf-8")) > _SESSION_POLICY_MAX_BYTES:
+        raise DGCConfigError(
+            "RuntimePolicy compiles to more rules than one environment variable can carry; "
+            "use fewer deny_path_prefixes or broader ones")
+    return SessionPlan(env={_SESSION_POLICY_ENV: text}, requirement=requirement,
                        policy=policy, notes=tuple(notes))
 
 
