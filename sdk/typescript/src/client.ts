@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { defaultRuntime, isolatedEnv, writeIsolatedConfig } from "./runtime.ts";
-import { engineDenyRules, policyDecision } from "./policy.ts";
+import { engineDenyRules, inspectBashForEngine, policyDecision } from "./policy.ts";
 import { Transport } from "./transport.ts";
 import { Session } from "./session.ts";
 import { ToolHub } from "./tools.ts";
@@ -35,12 +35,16 @@ export class DGC {
     const unhandled = options.permissions?.unhandled ?? "deny";
     const policy = this.options.policy;
     const userPermission = options.onPermission;
-    const denyRules = engineDenyRules(policy);
+    const inspectBash = inspectBashForEngine(userPermission, mode);
+    const denyRules = engineDenyRules(policy, { inspectBash });
     if (policy) {
       options = {
         ...options,
         onPermission: async (request) => {
-          if (policyDecision(policy, request) === "deny") return "deny";
+          if (policyDecision(policy, request) === "deny") {
+            const named = (policy.denyTools || []).includes(request.name);
+            if (named || !userPermission || mode === "auto") return "deny";
+          }
           if (!userPermission) return "deny";
           return userPermission(request);
         },

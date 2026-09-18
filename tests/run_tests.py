@@ -373,6 +373,40 @@ def unit_tests(tmp: Path):
     out = execute("repo_map", {"max_files": 100}, ctx)
     check("repo_map inventories files, hashes, and symbols",
           "symbols.py" in out and "Alpha@1" in out and "calculate@4" in out, out[:300])
+    notes = tmp / "notes.txt"
+    notes.write_text("staff job notes\n")
+    out = execute("repo_map", {"max_files": 100}, ctx)
+    check("repo_map includes text files in a non-git job dir",
+          "notes.txt" in out and "0 file(s)" not in out, out[:400])
+    job = tmp / "plain-job"
+    job.mkdir()
+    (job / "notes.txt").write_text("only notes\n")
+    out = execute("repo_map", {"path": "plain-job", "max_files": 50}, ctx)
+    check("repo_map finds notes.txt when the workspace has no source files",
+          "notes.txt" in out and "1 file(s)" in out, out[:400])
+    empty_job = tmp / "empty-then-notes"
+    empty_job.mkdir()
+    out = execute("repo_map", {"path": "empty-then-notes", "max_files": 50}, ctx)
+    check("repo_map reports 0 files in a truly empty job dir",
+          "0 file(s)" in out, out[:400])
+    (empty_job / "notes.txt").write_text("added after the first scan\n")
+    out = execute("repo_map", {"path": "empty-then-notes", "max_files": 50}, ctx)
+    check("repo_map second scan is live, not cached from the empty first pass",
+          "notes.txt" in out and "1 file(s)" in out, out[:400])
+    git_job = tmp / "git-job"
+    git_job.mkdir()
+    (git_job / "notes.txt").write_text("committed notes\n")
+    git = subprocess.run(
+        ["git", "init"], cwd=git_job, capture_output=True, text=True)
+    if git.returncode == 0:
+        subprocess.run(["git", "add", "notes.txt"], cwd=git_job, capture_output=True, check=False)
+        subprocess.run(
+            ["git", "-c", "user.email=dgc@test", "-c", "user.name=dgc",
+             "commit", "-m", "notes"],
+            cwd=git_job, capture_output=True, check=False)
+        out = execute("repo_map", {"path": "git-job", "max_files": 50}, ctx)
+        check("repo_map finds notes.txt after git init in a job dir",
+              "notes.txt" in out and "0 file(s)" not in out, out[:400])
 
     alpha = tmp / "alpha.py"
     alpha.write_text("def target(value):\n    return value + 1\n\ndef caller():\n    return target(2)\n")

@@ -228,8 +228,8 @@ class SdkTests(unittest.TestCase):
             session = dgc.session(cwd=self.work, permissions={"mode": "default", "unhandled": "deny"})
             result = session.run("edit the checkout guard", timeout=60)
         self.assertFalse((self.work / "guard.py").exists(), "denied write_file must not land")
-        self.assertEqual(result.status, "blocked")
-        self.assertEqual(result.reason, "permission_denied")
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.reason, "completed")
 
     def test_on_permission_once_allows_an_edit(self):
         _Model.behavior = "edit"
@@ -734,7 +734,7 @@ class SdkTests(unittest.TestCase):
             )
             result = session.run("edit the checkout guard", timeout=60)
         self.assertFalse((self.work / "guard.py").exists())
-        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.status, "completed")
 
     def test_policy_denies_write_in_auto_mode(self):
         _Model.behavior = "edit"
@@ -816,17 +816,67 @@ class SdkTests(unittest.TestCase):
     def test_policy_denies_bash_redirect_when_write_denied(self):
         _Model.behavior = "bash_write"
         policy = RuntimePolicy(deny_tools=("write_file",))
+        kinds = []
         with self._client(policy=policy) as dgc:
             session = dgc.session(
                 cwd=self.work,
                 permissions={"mode": "auto", "unhandled": "deny"},
             )
-            result = session.run("escaped write via bash redirect", timeout=60)
+            handle = session.stream("escaped write via bash redirect", timeout=60)
+            for event in handle:
+                kinds.append(event.type)
+            result = handle.result()
         self.assertFalse(
             (self.work / "escaped.txt").exists(),
             f"bash redirect must not land when write_file is denied; status={result.status}",
         )
+        self.assertNotIn("permission_request", kinds)
         self.assertIn(result.status, ("blocked", "completed", "failed"))
+
+    def test_staff_deny_does_not_block_the_run(self):
+        _Model.behavior = "edit"
+        seen = []
+
+        def on_permission(request):
+            seen.append(request.name)
+            return "deny"
+
+        with self._client() as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "default", "unhandled": "deny"},
+                on_permission=on_permission,
+            )
+            result = session.run("edit the checkout guard", timeout=60)
+        self.assertIn("write_file", seen)
+        self.assertFalse((self.work / "guard.py").exists())
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.reason, "completed")
+
+    def test_interactive_bash_write_raises_permission_request(self):
+        _Model.behavior = "bash_write"
+        seen = []
+        kinds = []
+
+        def on_permission(request):
+            seen.append(request.name)
+            return "deny"
+
+        policy = RuntimePolicy(deny_tools=("write_file",))
+        with self._client(policy=policy) as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "default", "unhandled": "deny"},
+                on_permission=on_permission,
+            )
+            handle = session.stream("escaped write via bash redirect", timeout=60)
+            for event in handle:
+                kinds.append(event.type)
+            result = handle.result()
+        self.assertIn("permission_request", kinds)
+        self.assertIn("bash", seen)
+        self.assertFalse((self.work / "escaped.txt").exists())
+        self.assertEqual(result.status, "completed")
 
     def test_audit_export_redacts_secrets(self):
         self.assertIn("[redacted]", redact_text("Authorization: Bearer sk-abc123456789"))
@@ -891,6 +941,14 @@ class PolicyUnitTests(unittest.TestCase):
         self.assertEqual(allowed, "allow")
         still_ok, _reason = engine.decide("bash", {"command": "ls 2>&1"})
         self.assertEqual(still_ok, "allow")
+        silent = policy.engine_deny_rules(inspect_bash=False)
+        self.assertIn("Write", silent)
+        self.assertFalse(any(row.startswith("Bash(") for row in silent), silent)
+        from dgc_sdk.policy import inspect_bash_for_engine
+        self.assertTrue(inspect_bash_for_engine(on_permission=None, permission_mode="default"))
+        self.assertTrue(inspect_bash_for_engine(on_permission=lambda _r: "once", permission_mode="auto"))
+        self.assertFalse(inspect_bash_for_engine(
+            on_permission=lambda _r: "deny", permission_mode="default"))
 
 
 class SbomGeneratorTests(unittest.TestCase):

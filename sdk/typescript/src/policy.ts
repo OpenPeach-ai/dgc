@@ -58,16 +58,26 @@ export function looksLikeWrite(command: string): boolean {
     || INPLACE.test(command) || INTERPRETER_WRITE.test(command);
 }
 
-export function engineDenyRules(policy: RuntimePolicy | undefined): string[] {
+export function inspectBashForEngine(onPermission?: unknown, mode?: string): boolean {
+  return !onPermission || mode === "auto";
+}
+
+export function engineDenyRules(
+  policy: RuntimePolicy | undefined,
+  opts?: { inspectBash?: boolean },
+): string[] {
   if (!policy) return [];
+  const inspectBash = opts?.inspectBash ?? true;
   const rules: string[] = [];
   const add = (rule: string) => { if (!rules.includes(rule)) rules.push(rule); };
   for (const name of policy?.denyTools || []) add(DISPLAY[name] || name);
   if ((policy?.network ?? "deny") === "deny") {
     add("WebFetch"); add("WebSearch"); add("Browser");
-    for (const pattern of ["*curl*", "*wget*", "*http://*", "*https://*"]) add(`Bash(${pattern})`);
+    if (inspectBash) {
+      for (const pattern of ["*curl*", "*wget*", "*http://*", "*https://*"]) add(`Bash(${pattern})`);
+    }
   }
-  if (writesDenied(policy)) {
+  if (writesDenied(policy) && inspectBash) {
     for (const pattern of WRITE_BASH_PATTERNS) add(`Bash(${pattern})`);
   }
   return rules;

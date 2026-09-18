@@ -897,9 +897,11 @@ language server.
 
 ## `repo_map`
 
-A compact inventory: tracked and source files, sizes, SHA-256 prefixes, and language-aware
-symbol definitions. The agent uses it near the start of unfamiliar multi-file work. Optional
-`path` narrows the tree; `max_files` defaults to 300 (at most 1,000).
+A compact inventory of the workspace: source, docs, and other text files (including a
+plain job directory that only has `notes.txt`), sizes, SHA-256 prefixes, and language-aware
+symbol definitions. Git is not required; each call walks the tree live. The agent uses it
+near the start of unfamiliar multi-file work. Optional `path` narrows the tree; `max_files`
+defaults to 300 (at most 1,000).
 
 ## `code_intel`
 

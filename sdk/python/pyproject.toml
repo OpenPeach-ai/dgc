@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgc-sdk"
-version = "0.5.2"
+version = "0.5.3"
 description = "Embed the DGC coding harness in applications and CI"
 requires-python = ">=3.10"
 readme = "README.md"

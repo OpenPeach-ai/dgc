@@ -1,10 +1,11 @@
 # DGC SDK compatibility
 
-Frozen cut: **0.5.2** (`sdk-v0.5.2`).
+In-tree cut: **0.5.3**. PyPI `dgc-sdk` and GitHub `sdk-v0.5.2` remain **0.5.2** until the next upload.
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.5.2** | **v14** | **0.41.5** | **≥ 3.10** | **≥ 22** (strip-types) | **Linux** |
+| **0.5.3** | **v14** | **0.41.6** | **≥ 3.10** | **≥ 22** (strip-types) | **Linux** |
+| 0.5.2 | v14 | 0.41.5 | ≥ 3.10 | ≥ 22 (strip-types) | Linux |
 
 macOS and WSL are unproven. Native Windows is experimental.
 

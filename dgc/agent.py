@@ -2610,8 +2610,8 @@ class Agent(GoalLifecycle):
         if (mode == "plan" or profile == "full" or "repo_navigation" in active_tools
                 or "narrow_scope" not in active_tools):
             navigation_guidance.append(
-                "- On an unfamiliar multi-file project, use repo_map once to locate relevant "
-                "files and symbols.")
+                "- On an unfamiliar project (git or a plain directory), use repo_map to locate "
+                "relevant files and symbols. Re-run it if the workspace contents changed.")
         if (mode == "plan" or profile == "full" or "code_navigation" in active_tools
                 or "narrow_scope" not in active_tools):
             navigation_guidance.append(

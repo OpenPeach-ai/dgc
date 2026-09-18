@@ -250,6 +250,7 @@ class Session:
         usage_log=None,
         audit_log=None,
         model: str = "",
+        permission_mode: str = "default",
     ):
         self._client = client
         self._ready = ready
@@ -268,6 +269,7 @@ class Session:
         self._usage_log = usage_log
         self._audit_log = audit_log
         self._model = model
+        self._permission_mode = permission_mode or "default"
         self._decision_timeout = None if decision_timeout is None else max(0.05, float(decision_timeout))
         self._answered_ids: set[str] = set()
         self._stop = threading.Event()
@@ -829,8 +831,6 @@ class Session:
         usage: dict[str, Any] = dict(result.usage)
         timed_out = False
         live_turn_id = ""
-        denied_mutation = False
-        wrote_ok = False
         before = _snapshot_workspace(self._cwd)
         try:
             self._discard_stale_run_events(timeout=0.2)
@@ -973,8 +973,6 @@ class Session:
                         args=record.args,
                     )
                     tools[call_id] = record
-                    if record.name in ("write_file", "edit_file", "multi_edit", "apply_patch") and not record.is_error:
-                        wrote_ok = True
                     if record.name == "present_document":
                         for index, url in enumerate(_document_urls(output)):
                             doc = Artifact(
@@ -991,10 +989,6 @@ class Session:
                         output=str(event.get("reason") or "denied"),
                         is_error=True,
                     )
-                    if str(event.get("name") or "") in (
-                            "write_file", "edit_file", "multi_edit", "apply_patch", "bash"):
-                        denied_mutation = True
-                        result.reason = result.reason or "permission_denied"
                 elif kind == "artifact_ready":
                     art = Artifact(
                         id=str(event.get("id") or ""),
@@ -1057,10 +1051,9 @@ class Session:
                             "failed" if reason in ("error", "failed") else "completed")
                     elif reason in ("error", "failed"):
                         result.status = "failed"
-                    elif denied_mutation and not wrote_ok:
-                        result.status = "blocked"
-                        result.reason = "permission_denied"
                     else:
+                        # A denied tool is a step result. The CLI continues the turn; staff
+                        # deny must not mark the whole run blocked.
                         result.status = "completed"
                     self._finish_usage(result, usage)
                     if not self.session_path:
@@ -1201,7 +1194,11 @@ class Session:
         if self._policy is not None:
             forced = self._policy.decision(request, cwd=self._cwd)
             if forced == "deny":
-                return "deny"
+                staff = self._on_permission is not None and self._permission_mode != "auto"
+                # Named deny_tools stay fail-closed even when staff is present. Bash
+                # write/network inspection defers to the callback so the ask is visible.
+                if self._policy.named_tool_denied(request.name) or not staff:
+                    return "deny"
         action = self._decide(self._on_permission, request, "deny")
         return action if action in ("once", "always", "deny") else "deny"
 

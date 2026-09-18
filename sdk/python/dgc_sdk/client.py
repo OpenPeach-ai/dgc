@@ -14,6 +14,7 @@ from .wire.client import DGCClient, DGCProtocolError as WireProtocolError, DGCSt
 from ._mcp_bridge import ToolHub
 from ._version import PROTOCOL, REQUIRES_CLI, __version__
 from .errors import DGCConfigError, DGCProtocolError, DGCRuntimeError
+from .policy import inspect_bash_for_engine
 from .runtime import default_runtime_argv, isolated_env, require_sandbox, write_isolated_config
 from .session import RunHandle, Session, _new_id
 from .types import (
@@ -137,6 +138,8 @@ class DGC:
         extra = dict(self._extra_env or {})
         if key and not self._inherit:
             extra["DGC_API_KEY"] = str(key)
+        inspect_bash = inspect_bash_for_engine(
+            on_permission=on_permission, permission_mode=perm_mode)
         if not self._inherit:
             isolated_values: dict[str, object] = {
                 "model": model or self._model,
@@ -159,7 +162,9 @@ class DGC:
                 "permissions": {
                     "allow": [],
                     "ask": [],
-                    "deny": list(self._policy.engine_deny_rules()) if self._policy is not None else [],
+                    "deny": list(self._policy.engine_deny_rules(
+                        inspect_bash=inspect_bash,
+                    )) if self._policy is not None else [],
                 },
             }
             isolated_values.update(self._retry.isolated_values())
@@ -216,10 +221,11 @@ class DGC:
             usage_log=self._usage_log,
             audit_log=self._audit_log,
             model=str(model or self._model or ""),
+            permission_mode=perm_mode,
         )
         session._verify_command = verify_command or ""
         if self._policy is not None:
-            for rule in self._policy.engine_deny_rules():
+            for rule in self._policy.engine_deny_rules(inspect_bash=inspect_bash):
                 try:
                     session.add_permission_rule("deny", rule)
                 except Exception:

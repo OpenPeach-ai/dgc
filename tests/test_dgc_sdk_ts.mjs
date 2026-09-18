@@ -82,6 +82,9 @@ test("write deny inspects bash redirects", () => {
   const rules = engineDenyRules(policy);
   assert.ok(rules.includes("Write"));
   assert.ok(rules.some((row) => row.includes("*>[!&]*")));
+  const interactive = engineDenyRules(policy, { inspectBash: false });
+  assert.ok(interactive.includes("Write"));
+  assert.ok(!interactive.some((row) => row.startsWith("Bash(")));
 });
 
 test("schema extract and validate", () => {

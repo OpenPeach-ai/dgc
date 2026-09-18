@@ -84,8 +84,23 @@ class RuntimePolicy:
             return True
         return False
 
-    def engine_deny_rules(self) -> list[str]:
-        """Rules for isolated ``permissions.deny``. Deny wins in every mode, including auto."""
+    def named_tool_denied(self, name: str) -> bool:
+        """True when this policy forbids the tool by name, independent of bash inspection."""
+        if name in self.deny_tools:
+            return True
+        if self.allow_tools is not None and name not in self.allow_tools:
+            if name not in ("propose_options",):
+                return True
+        return False
+
+    def engine_deny_rules(self, *, inspect_bash: bool = True) -> list[str]:
+        """Rules for isolated ``permissions.deny``. Deny wins in auto.
+
+        When ``inspect_bash`` is false (interactive default + staff callback), bash
+        write/network globs are omitted so the same Bash tool always raises
+        ``permission_request`` instead of a silent engine deny. Named ``deny_tools``
+        such as ``Write`` stay in the list.
+        """
         rules: list[str] = []
         for name in self.deny_tools:
             display = _DISPLAY.get(name, name)
@@ -100,11 +115,12 @@ class RuntimePolicy:
             for display in ("WebFetch", "WebSearch", "Browser"):
                 if display not in rules:
                     rules.append(display)
-            for pattern in ("*curl*", "*wget*", "*http://*", "*https://*"):
-                bash = f"Bash({pattern})"
-                if bash not in rules:
-                    rules.append(bash)
-        if self._writes_denied():
+            if inspect_bash:
+                for pattern in ("*curl*", "*wget*", "*http://*", "*https://*"):
+                    bash = f"Bash({pattern})"
+                    if bash not in rules:
+                        rules.append(bash)
+        if self._writes_denied() and inspect_bash:
             for pattern in _WRITE_BASH_PATTERNS:
                 bash = f"Bash({pattern})"
                 if bash not in rules:
@@ -208,3 +224,12 @@ def _looks_like_write(command: str) -> bool:
 
 def sandbox_network_enabled(policy: RuntimePolicy | None) -> bool:
     return bool(policy and policy.network == "allow")
+
+
+def inspect_bash_for_engine(*, on_permission, permission_mode: str) -> bool:
+    """Compile bash write/network globs only when nobody will answer a permission_request.
+
+    Auto mode never raises ``permission_request``, so the engine must deny itself.
+    An interactive staff callback must see every Bash ask, including redirects.
+    """
+    return on_permission is None or permission_mode == "auto"

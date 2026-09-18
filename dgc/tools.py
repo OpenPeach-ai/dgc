@@ -208,8 +208,9 @@ TOOL_SCHEMAS = [
          "path": {"type": "string", "description": "File or directory (default: project root)"},
          "glob": {"type": "string", "description": "Only search files matching this glob, e.g. '*.py'"}},
         ["pattern"]),
-    _fn("repo_map", "Build a compact repository map: tracked/source files, sizes, SHA-256 prefixes, "
-        "and language-aware symbol definitions. Use this near the start of unfamiliar multi-file work.",
+    _fn("repo_map", "Build a compact workspace map: source, docs, and other text files, sizes, "
+        "SHA-256 prefixes, and language-aware symbol definitions. Works in git and non-git dirs. "
+        "Use this near the start of unfamiliar multi-file work.",
         {"path": {"type": "string", "description": "Subdirectory to map (default: project root)"},
          "max_files": {"type": "integer", "description": "Maximum files (default 300, max 1000)"}}, []),
     _fn("git_diff", "Inspect local Git changes without executing shell, filters, or network helpers. "
@@ -3194,10 +3195,16 @@ _SOURCE_EXTS = {
     ".java", ".kt", ".kts", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs",
     ".rb", ".php", ".swift", ".scala", ".sh", ".bash", ".vue", ".svelte",
 }
+_TEXT_EXTS = {
+    ".txt", ".md", ".markdown", ".rst", ".json", ".yaml", ".yml", ".toml",
+    ".xml", ".html", ".htm", ".css", ".csv", ".tsv", ".ini", ".cfg", ".conf",
+    ".log", ".env", ".sql", ".r", ".lua",
+}
 _MANIFEST_NAMES = {
     "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "package.json",
     "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "Makefile",
     "CMakeLists.txt", "Dockerfile", "compose.yaml", "docker-compose.yml",
+    "README", "LICENSE", "CHANGELOG", "NOTES", "TODO",
 }
 
 
@@ -3210,6 +3217,8 @@ def _symbol_lines(path: Path, text: str) -> list[str]:
 
 
 def repo_map(args: dict, ctx) -> str:
+    # Live walk every call. There is no per-path cache: an empty first scan must not
+    # hide files added later, and git vs plain dirs use the same inventory.
     root = (_resolve(str(args.get("path", "")), ctx.project_root,
                      allow_external=_allow_external(args)) if args.get("path") else ctx.project_root)
     prepared = _prepare_search_target(root)
@@ -3218,13 +3227,20 @@ def repo_map(args: dict, ctx) -> str:
     _kind, boundary = prepared
     max_files = max(1, min(1000, int(args.get("max_files") or 300)))
     files: list[Path] = []
+    extras: list[Path] = []
     state = {"entries": 0, "files": 0, "truncated": False, "cancelled": False,
              "timed_out": False, "deadline": time.monotonic() + _search_timeout(ctx)}
     for path, _info in _walk_regular_files(root, ctx, state, boundary=boundary):
-        if path.suffix.lower() in _SOURCE_EXTS or path.name in _MANIFEST_NAMES:
+        suffix = path.suffix.lower()
+        if suffix in _SOURCE_EXTS or suffix in _TEXT_EXTS or path.name in _MANIFEST_NAMES:
             files.append(path)
+        else:
+            extras.append(path)
         if len(files) >= max_files:
             break
+    if not files:
+        # Job dirs are often notes/csv only. Never report an empty map while regular files exist.
+        files = extras[:max_files]
     rows = [f"repository map: {root} · {len(files)} file(s)" +
             (f" (capped at {max_files})" if len(files) == max_files else "")]
     for path in files:
