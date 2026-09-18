@@ -91,6 +91,52 @@ Pairs with CLI 0.41.6 over editor protocol v14. A `RuntimePolicy` or a sandbox s
   `Session.sandbox` reports what was applied. `permissions=` and `sandbox=` accept
   `PermissionPolicy` and `SandboxPolicy`, and `unhandled="callback"` requires `on_permission`.
 
+### TypeScript (`@vibedgc/sdk`)
+
+The Node client now has the same correctness and security fixes as the Python one.
+
+Check these when you upgrade:
+
+- `policy` is enforced by the runtime per session (`DGC_SESSION_POLICY`), in `auto` mode too, and
+  is never written into `config.json` or, with `inheritUserState`, into `~/.dgc`. `denyTools` and
+  `allowTools` take DGC tool names and MCP routes; unknown names throw `DGCConfigError`. New
+  fields: `allowTools`, `denyPathPrefixes`, `shell` (`"sandboxed"` by default: the shell runs
+  in the OS sandbox, and in `auto` mode only there; `"screened"` keeps the pattern screen).
+- A `config.json` already in `stateDir` is not merged, and `stateDir` must be private (a
+  group- or world-writable one is refused). Pass extra DGC settings with `extraConfig`.
+- Every error is a `DGCError` subclass instead of a plain `Error`. `steer()` throws without an
+  active run, and `followup()` returns a `RunHandle` for its own turn.
+- `result.usage.input_tokens` / `output_tokens` are the provider's counts or `null` (they were a
+  context-size estimate and 0). `usageReport()` keeps `runs` and `rows` and adds totals.
+- `session.close()` returns a promise. `decisionTimeoutMs: null` now means no limit.
+
+Fixes:
+
+- Per-session options (`model`, `maxTurns`, `verifyCommand`, trusted directories) no longer leak
+  into later sessions, and a run's `maxTurns` or an `outputSchema` repair no longer caps later
+  runs. `verifyCommand` is applied (it was ignored); `turnBudgetS` and `maxTokens` are new
+  session options.
+- `timeoutMs` works at any length (Node timers overflow past 24.8 days and fired at once);
+  `null` means no limit; invalid values throw before the prompt is sent. `signal: AbortSignal`
+  and leaving a `for await` loop early cancel the run and free the session.
+- Control requests made while a run streams keep their replies; a refused command throws
+  `DGCCommandRejectedError` at once instead of after 15 s; a protocol mismatch throws
+  `DGCProtocolError` naming both versions; event types newer than the SDK are skipped; a runtime
+  that exits, never becomes ready, or cannot be launched is an SDK error that carries its stderr,
+  and no `dgc serve` child is left behind. `startTimeoutMs` and `requestTimeoutMs` are options.
+- Failed runs carry the runtime's error. `result.changes` (new) lists added, modified and deleted
+  files with `git apply`-able diffs; `result.verification` reports only the configured command.
+- A session binds only its own transcript (`sessionPath`); follow-up and steered turns are
+  observed, audited and billed as runs.
+- Custom tools use a random socket in a fresh 0700 directory and a per-session secret the relay
+  must present; a tool server that does not connect, authenticate or offer every tool fails
+  `session()`. `defineTool` takes `{ timeoutMs }`.
+- Decision callbacks, `onMcpInput` included, are bounded by `decisionTimeoutMs`; with
+  `unhandled: "callback"` a failing callback stops the run (`reason: "decision_failed"`).
+- Audit and usage files are owner-only and audit rows are redacted with the Python rules.
+- The runtime is started with `python -P` where available, so a `dgc/` package in the workspace
+  cannot replace it.
+
 ### Packaging and release
 
 - PyPI and the GitHub release now carry the same bytes. `publish-dgc-sdk.yml` builds only from

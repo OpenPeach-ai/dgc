@@ -32,7 +32,10 @@ with DGC(
         print("error:", result.error)
 ```
 
-The full guide and API reference is [docs/SDK.md](../docs/SDK.md).
+The full guide and API reference is [docs/SDK.md](../docs/SDK.md). The Node client follows the
+same rules for state, policy, sandbox, timeouts, usage and errors; its times are milliseconds
+(`timeoutMs: null` for no limit), and the few differences are listed under
+[TypeScript](../docs/SDK.md#typescript).
 
 | Concept | Python | TypeScript |
 | --- | --- | --- |
@@ -43,13 +46,14 @@ The full guide and API reference is [docs/SDK.md](../docs/SDK.md).
 | Checkpoints | `session.list_checkpoints()` / `rewind(index)` | `session.listCheckpoints()` / `rewind(index)` |
 | Run | `session.run(prompt)` | `await session.run(prompt)` |
 | Stream | `session.stream(prompt)` | `for await (const event of session.stream(prompt))` |
-| Cancel | `handle.cancel()` / `session.cancel()` | `handle.cancel()` |
+| Cancel | `handle.cancel()` / `session.cancel()` | `handle.cancel()` / `session.cancel()` / `{ signal }` / leaving `for await` |
 | Decisions | `on_permission` / `on_plan` / `on_question` / `on_mcp_input` | `onPermission` / `onPlan` / `onQuestion` / `onMcpInput` |
 | Tools | `define_tool(...)` then `session(tools=[...])` | `defineTool(...)` then `session({ tools })` |
 | Schema | `session.run(..., output_schema={...})` | `session.run(prompt, { outputSchema })` |
-| Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | `dgc.usageReport(department)` |
-| Policy | `DGC(..., policy=RuntimePolicy(...))` — tool, path and network limits the runtime enforces; shell commands in the OS sandbox | `policy` |
-| Audit | `dgc.export_audit(session_id)` (redacted) | `dgc.exportAudit(sessionId)` |
+| Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | `new DGC({ pricing, department })` then `dgc.usageReport(department)` |
+| Policy | `DGC(..., policy=RuntimePolicy(...))` — tool, path and network limits the runtime enforces; shell commands in the OS sandbox | `new DGC({ policy: { denyTools, allowTools, denyPathPrefixes, ... } })` — the same per-session policy |
+| Audit | `dgc.export_audit(session_id)` (redacted) | `dgc.exportAudit(sessionId)` (redacted) |
+| Errors | `DGCError` and subclasses | the same classes, exported from `@vibedgc/sdk` |
 
 ## Layout
 
