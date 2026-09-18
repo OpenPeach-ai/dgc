@@ -20379,7 +20379,30 @@ def test_session_policy():
                   "--share-net" not in argv and argv[argv.index("/mnt") - 2] == "--ro-bind"
                   and (account is None or not account.exists()
                        or str(account.resolve()) in argv[argv.index("--tmpfs"):]), argv)
+        from dgc.config import Config as _Config
+        (root / ".dgc").mkdir(exist_ok=True)
+        (root / ".dgc" / "permissions.json").write_text(json.dumps(
+            {"allow": ["Bash(*)"], "ask": ["Grep"], "deny": ["Read(secrets/**)"]}))
+
+        def project_rules():
+            holder = SimpleNamespace(project_dir=root / ".dgc",
+                                     permissions={"allow": [], "ask": [], "deny": []})
+            _Config.apply_project_permissions(holder)
+            return holder.permissions
+
+        with_policy({"version": 1, "project_allow": False})
+        rules = project_rules()
+        check("an SDK session policy drops the workspace's own allow rules, keeps its narrowing",
+              rules == {"allow": [], "ask": ["Grep"], "deny": ["Read(secrets/**)"]}, rules)
+        with_policy({"version": 1, "project_allow": "no"})
+        check("a non-boolean project_allow is an invalid policy",
+              bool(_perm.session_policy().error) and project_rules()["allow"] == [])
+        os.environ.pop(_perm.SESSION_POLICY_ENV, None)
+        check("without a session policy the workspace's allow rules still load",
+              project_rules()["allow"] == ["Bash(*)"])
         with_policy({"version": 1, "sandbox": "off"})
+        check("a session policy that does not mention project_allow keeps them",
+              project_rules()["allow"] == ["Bash(*)"])
         check("session sandbox 'off' keeps the configured choice",
               _sandbox.requested({"sandbox": True}) and not _sandbox.requested({"sandbox": False}))
         raw = json.dumps({"version": 1, "deny": ["Write"]})

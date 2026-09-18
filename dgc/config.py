@@ -829,7 +829,14 @@ class Config:
         if not isinstance(pp, dict):
             return False
         merged = False
-        for action in ("allow", "ask", "deny"):
+        actions = ("allow", "ask", "deny")
+        from .permissions import session_policy
+        policy = session_policy()
+        if policy is not None and (policy.error or not policy.project_allow):
+            # The process that launched this session reviews commands itself (the SDK with a
+            # RuntimePolicy): rules the workspace brings may narrow what runs, not pre-approve it.
+            actions = ("ask", "deny")
+        for action in actions:
             rules = pp.get(action, [])
             if isinstance(rules, list) and rules:
                 self.permissions[action] += [str(rule) for rule in rules]

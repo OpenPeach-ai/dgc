@@ -159,7 +159,7 @@ def parse_rules(rules: dict[str, list[str]]) -> list[Rule]:
 SESSION_POLICY_ENV = "DGC_SESSION_POLICY"
 SESSION_POLICY_VERSION = 1
 _SESSION_POLICY_KEYS = {"version", "deny", "ask", "auto_deny", "sandbox", "sandbox_network",
-                        "sandbox_read_only", "shell_requires_sandbox"}
+                        "sandbox_read_only", "shell_requires_sandbox", "project_allow"}
 _SESSION_POLICY_MAX_RULES = 4096
 # Shell tools the OS sandbox confines, and the persistent interpreter it never wraps.
 SANDBOXED_SHELL_TOOLS = ("bash", "monitor")
@@ -175,6 +175,7 @@ class SessionPolicy:
     sandbox_network: bool | None = None   # None keeps the configured value
     sandbox_read_only: bool = False
     shell_requires_sandbox: bool = False
+    project_allow: bool = True            # False: a project's allow rules are not loaded
     error: str = ""
 
     @property
@@ -219,6 +220,7 @@ def _parse_session_policy(raw: str) -> SessionPolicy:
         return broken(f"{SESSION_POLICY_ENV}.sandbox must be off, preferred or required")
     network = data.get("sandbox_network")
     flags = {key: data.get(key, False) for key in ("sandbox_read_only", "shell_requires_sandbox")}
+    flags["project_allow"] = data.get("project_allow", True)
     if (network is not None and not isinstance(network, bool)) or any(
             not isinstance(value, bool) for value in flags.values()):
         return broken(f"{SESSION_POLICY_ENV} sandbox flags must be true or false")
