@@ -14,7 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // The installed package, or this checkout's sources when it is not installed.
-const { DGC } = await import("@vibedgc/sdk").catch(() => import("../../sdk/typescript/src/index.ts"));
+const { DGC } = await import("@vibedgc/sdk").catch((error) => {
+  if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+  return import("../../sdk/typescript/src/index.ts");
+});
 
 const workspace = process.argv[2];
 const model = process.env.DGC_MODEL;
