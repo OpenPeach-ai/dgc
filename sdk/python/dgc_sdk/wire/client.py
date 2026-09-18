@@ -3,6 +3,11 @@
 The client owns one child process and is intentionally one-shot.  It validates both sides of the
 NDJSON contract, preserves unrelated events while waiting for correlated replies, bounds every
 buffer, and reaps the child plus its POSIX process group on failure or shutdown.
+
+This is the SDK's copy of ``dgc/client.py``. It differs on purpose: its errors are the SDK's own
+exception types, correlated requests are protected from a concurrent event reader and fail fast
+when the backend refuses them, event types added after this copy are skipped instead of fatal,
+waits may be longer than an hour, and on Linux every backend is forked from one long-lived thread.
 """
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import copy
 import json
 import math
 import os
+import queue
 import signal
 import subprocess
 import sys
@@ -29,11 +35,13 @@ from .editor_protocol import (
     event_error,
 )
 from .protocol import strict_json_loads
+from .. import errors as _sdk
 
 __all__ = [
     "DGCClient",
     "DGCClientError",
     "DGCCommandError",
+    "DGCCommandRejected",
     "DGCEventTimeout",
     "DGCProcessError",
     "DGCProtocolError",
@@ -41,16 +49,26 @@ __all__ = [
 ]
 
 
-class DGCClientError(RuntimeError):
-    """Base error for the synchronous DGC client."""
+class DGCClientError(_sdk.DGCRuntimeError, RuntimeError):
+    """Base error for the synchronous DGC client. It is also an SDK ``DGCRuntimeError``."""
 
 
 class DGCStartError(DGCClientError):
     """The backend could not be launched or did not become ready in time."""
 
 
-class DGCProtocolError(DGCClientError):
-    """The backend violated the installed protocol contract."""
+class DGCProtocolError(DGCClientError, _sdk.DGCProtocolError):
+    """The backend violated the installed protocol contract.
+
+    ``offered_protocol`` and ``backend_version`` are set when a ``ready`` handshake offered a
+    protocol this client does not speak.
+    """
+
+    def __init__(self, message: str = "", *, offered_protocol: object = None,
+                 backend_version: str = ""):
+        super().__init__(message)
+        self.offered_protocol = offered_protocol
+        self.backend_version = backend_version
 
 
 class DGCProcessError(DGCClientError):
@@ -61,7 +79,14 @@ class DGCCommandError(DGCClientError, ValueError):
     """An outbound command is invalid or unsafe to serialize."""
 
 
-class DGCEventTimeout(DGCClientError, TimeoutError):
+class DGCCommandRejected(DGCClientError, _sdk.DGCCommandRejectedError):
+    """The backend refused a correlated command instead of answering it."""
+
+    def __init__(self, message: str, *, reason: str = "", command: str = ""):
+        _sdk.DGCCommandRejectedError.__init__(self, message, reason=reason, command=command)
+
+
+class DGCEventTimeout(DGCClientError, _sdk.DGCTimeoutError):
     """No matching event arrived within the requested timeout."""
 
 
@@ -72,6 +97,7 @@ _REQUEST_RESPONSES = {
     "mcp_input_request": "mcp_input_response",
 }
 _RESPONSE_COMMANDS = frozenset(_REQUEST_RESPONSES.values())
+_TURN_EVENTS = frozenset({"turn_start", "turn_end", "request_expired", "prompt_accepted"})
 _DEFAULT_PENDING_EVENTS = 4096
 _MAX_PENDING_EVENTS = 65536
 _DEFAULT_STDERR_BYTES = 64 * 1024
@@ -80,29 +106,100 @@ _MAX_ARGV = 128
 _MAX_ARG_BYTES = 128 * 1024
 
 
+_USE_DEATH_SIGNAL = sys.platform.startswith("linux")
+_SIGTERM = int(signal.SIGTERM)
+_PRCTL: Any = None
+
+
+def _load_prctl() -> Any:
+    """Resolve prctl(2) in the parent, so the forked child runs no import machinery."""
+    global _PRCTL
+    if _PRCTL is None:
+        try:
+            import ctypes
+            _PRCTL = ctypes.CDLL(None, use_errno=True).prctl
+        except (AttributeError, ImportError, OSError, TypeError):
+            _PRCTL = False
+    return _PRCTL
+
+
 def _posix_death_signal() -> None:
     """Ask the kernel to SIGTERM this child if the embedding parent dies.
 
     ``start_new_session`` puts the backend in its own process group so ``close()`` can
     kill the group; without ``PR_SET_PDEATHSIG`` a crash between ``start()`` and
-    ``close()`` still leaks ``dgc serve``.
+    ``close()`` still leaks ``dgc serve``. Linux sends the signal when the *thread* that
+    forked the child ends, so every fork goes through :class:`_Spawner`.
     """
+    prctl = _PRCTL
+    if not prctl:
+        return
     try:
-        import ctypes
-        libc = ctypes.CDLL(None, use_errno=True)
-        # PR_SET_PDEATHSIG = 1 on Linux. Harmless no-op on kernels without prctl.
-        if libc.prctl(1, int(signal.SIGTERM)) != 0:
+        # PR_SET_PDEATHSIG = 1 on Linux.
+        if prctl(1, _SIGTERM) != 0:
             return
-    except (AttributeError, OSError, TypeError):
+    except (OSError, TypeError):
         return
     if os.getppid() == 1:
-        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), _SIGTERM)
+
+
+class _Spawner:
+    """One thread that lives as long as the process and forks every backend.
+
+    ``PR_SET_PDEATHSIG`` fires when the forking thread exits, not the process. A session made on
+    a request-handler thread, a recycled pool worker or any short-lived thread used to lose its
+    backend as soon as that thread returned. Forking from this thread keeps the signal tied to
+    the life of the whole process.
+    """
+
+    _lock = threading.Lock()
+    _current: _Spawner | None = None
+
+    def __init__(self) -> None:
+        self._pid = os.getpid()
+        self._jobs: queue.SimpleQueue[Callable[[], None]] = queue.SimpleQueue()
+        self._thread = threading.Thread(target=self._loop, name="dgc-client-spawner", daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while True:
+            self._jobs.get()()
+
+    @classmethod
+    def run(cls, launch: Callable[[], Any]) -> Any:
+        with cls._lock:
+            spawner = cls._current
+            # A forked child inherits this object but not its thread; start a fresh one there.
+            if spawner is None or spawner._pid != os.getpid() or not spawner._thread.is_alive():
+                spawner = cls._current = cls()
+        done = threading.Event()
+        outcome: list[tuple[bool, Any]] = []
+
+        def job() -> None:
+            try:
+                outcome.append((True, launch()))
+            except BaseException as exc:  # transported back to the calling thread
+                outcome.append((False, exc))
+            finally:
+                done.set()
+
+        spawner._jobs.put(job)
+        done.wait()
+        ok, value = outcome[0]
+        if not ok:
+            raise value
+        return value
 
 
 _MAX_TIMEOUT_S = 3600.0
+# A single wait for events may be as long as a caller's run deadline; the condition variable is
+# still woken at least this often so no platform timer limit is ever reached.
+_MAX_WAIT_S = 366 * 24 * 3600.0
 
 
-def _timeout(value: float, name: str, *, allow_zero: bool = False) -> float:
+def _timeout(value: float, name: str, *, allow_zero: bool = False,
+             maximum: float = _MAX_TIMEOUT_S) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a finite number")
     try:
@@ -110,10 +207,10 @@ def _timeout(value: float, name: str, *, allow_zero: bool = False) -> float:
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a finite number") from exc
     lower_ok = number >= 0 if allow_zero else number > 0
-    if not lower_ok or not math.isfinite(number) or number > _MAX_TIMEOUT_S:
+    if not lower_ok or not math.isfinite(number) or number > maximum:
         relation = "non-negative" if allow_zero else "positive"
         raise ValueError(
-            f"{name} must be a finite {relation} number no greater than {_MAX_TIMEOUT_S:g}")
+            f"{name} must be a finite {relation} number no greater than {maximum:g}")
     return number
 
 
@@ -198,6 +295,12 @@ class DGCClient:
         self._stderr = bytearray()
         self._active_requests: dict[str, str] = {}
         self._responded_requests: set[str] = set()
+        # request_id -> callers waiting in request(). next_event() leaves their replies alone.
+        self._awaited: dict[str, int] = {}
+        # request_id -> monotonic expiry. A reply that arrives after its request timed out is
+        # dropped instead of surfacing as an unrelated event.
+        self._abandoned: dict[str, float] = {}
+        self._ignored_types: dict[str, int] = {}
         self._proc: subprocess.Popen[bytes] | None = None
         self._threads: list[threading.Thread] = []
         self._ready: dict[str, Any] | None = None
@@ -246,6 +349,12 @@ class DGCClient:
         with self._condition:
             return self._closed
 
+    @property
+    def ignored_event_types(self) -> dict[str, int]:
+        """Event types this client skipped because they are newer than its schema, with counts."""
+        with self._condition:
+            return dict(self._ignored_types)
+
     def start(self) -> dict[str, Any]:
         """Launch the backend and wait for the matching versioned ``ready`` handshake."""
         with self._condition:
@@ -267,13 +376,17 @@ class DGCClient:
         }
         if os.name == "posix":
             kwargs["start_new_session"] = True
-            kwargs["preexec_fn"] = _posix_death_signal
+            if _USE_DEATH_SIGNAL and _load_prctl():
+                kwargs["preexec_fn"] = _posix_death_signal
         elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         try:
-            proc = subprocess.Popen(self._argv, **kwargs)
+            if _USE_DEATH_SIGNAL:
+                proc = _Spawner.run(lambda: subprocess.Popen(self._argv, **kwargs))
+            else:
+                proc = subprocess.Popen(self._argv, **kwargs)
         except (OSError, ValueError) as exc:
-            error = DGCStartError("could not launch the DGC backend")
+            error = DGCStartError(f"could not launch the DGC backend {self._argv[0]!r}: {exc}")
             with self._condition:
                 self._failure = error
                 self._closed = True
@@ -302,6 +415,11 @@ class DGCClient:
             ready = copy.deepcopy(self._ready)
             failure = self._failure
         if failure is not None or ready is None:
+            if proc.poll() is not None:
+                # It already exited: let the reader collect its last words for stderr_tail.
+                for thread in self._threads:
+                    if thread.name == "dgc-client-stderr":
+                        thread.join(timeout=1.0)
             self._force_reap()
             raise failure or DGCStartError("the DGC backend did not become ready")
         return ready
@@ -331,13 +449,20 @@ class DGCClient:
             raise
 
     def next_event(self, timeout: float | None = None) -> dict[str, Any]:
-        """Return and remove the oldest retained event."""
-        wait = self._event_timeout if timeout is None else _timeout(timeout, "timeout")
+        """Return and remove the oldest retained event.
+
+        A reply that a concurrent :meth:`request` is waiting for is left for that caller.
+        """
+        wait = (self._event_timeout if timeout is None
+                else _timeout(timeout, "timeout", maximum=_MAX_WAIT_S))
         deadline = time.monotonic() + wait
         with self._condition:
             while True:
-                if self._events:
-                    event, size = self._events.popleft()
+                for index, (event, size) in enumerate(self._events):
+                    request_id = event.get("request_id")
+                    if isinstance(request_id, str) and request_id in self._awaited:
+                        continue
+                    del self._events[index]
                     self._pending_bytes -= size
                     return copy.deepcopy(event)
                 if self._failure is not None:
@@ -347,7 +472,7 @@ class DGCClient:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DGCEventTimeout("timed out waiting for the next DGC event")
-                self._condition.wait(remaining)
+                self._condition.wait(min(remaining, _MAX_TIMEOUT_S))
 
     def wait_for(
         self,
@@ -367,7 +492,8 @@ class DGCClient:
             raise ValueError("predicate must be callable or None")
         if not isinstance(after_seq, int) or isinstance(after_seq, bool) or after_seq < -1:
             raise ValueError("after_seq must be an integer of at least -1")
-        wait = self._event_timeout if timeout is None else _timeout(timeout, "timeout")
+        wait = (self._event_timeout if timeout is None
+                else _timeout(timeout, "timeout", maximum=_MAX_WAIT_S))
         deadline = time.monotonic() + wait
         with self._condition:
             while True:
@@ -391,7 +517,7 @@ class DGCClient:
                 if remaining <= 0:
                     label = event_type or "matching"
                     raise DGCEventTimeout(f"timed out waiting for {label} DGC event")
-                self._condition.wait(remaining)
+                self._condition.wait(min(remaining, _MAX_TIMEOUT_S))
 
     def request(
         self,
@@ -401,18 +527,79 @@ class DGCClient:
         request_id: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Send a command and wait for its new response without consuming unrelated events."""
+        """Send a command and wait for its new response without consuming unrelated events.
+
+        While it waits, :meth:`next_event` on another thread leaves this reply alone. A
+        ``command_rejected`` or ``error`` for the same request raises
+        :class:`DGCCommandRejected` at once instead of running out the timeout.
+        """
         if not isinstance(command, Mapping):
             raise DGCCommandError("command must be an object")
+        if not isinstance(response_type, str) or not response_type:
+            raise ValueError("response_type must be a non-empty string")
         inferred = command.get("request_id")
         if request_id is None and isinstance(inferred, str):
             request_id = inferred
+        command_type = command.get("type") if isinstance(command.get("type"), str) else ""
+        failed_prefix = f"Command '{command_type}' failed"
+
+        def answers(event: Mapping[str, Any]) -> bool:
+            kind = event["type"]
+            reply_id = event.get("request_id")
+            if request_id is None:
+                if kind == response_type:
+                    return True
+            elif reply_id == request_id:
+                return kind in (response_type, "command_rejected", "error")
+            if reply_id is not None:
+                return False
+            # Refusals the backend cannot correlate (an unknown command, or a handler that
+            # raised) still name the command type.
+            if kind == "command_rejected":
+                return bool(command_type) and event.get("command") == command_type
+            return (kind == "error" and bool(command_type)
+                    and str(event.get("message") or "").startswith(failed_prefix))
+
         with self._condition:
             self._require_live_locked()
             barrier = self._last_seq
-        self.send(command)
-        return self.wait_for(
-            response_type, request_id=request_id, timeout=timeout, after_seq=barrier)
+            if request_id is not None:
+                self._awaited[request_id] = self._awaited.get(request_id, 0) + 1
+        timed_out = False
+        try:
+            self.send(command)
+            event = self.wait_for(predicate=answers, timeout=timeout, after_seq=barrier)
+        except DGCEventTimeout as exc:
+            timed_out = True
+            label = command_type or "command"
+            raise DGCEventTimeout(
+                f"timed out waiting for the {response_type} reply to {label}") from exc
+        finally:
+            if request_id is not None:
+                with self._condition:
+                    left = self._awaited.get(request_id, 1) - 1
+                    if left > 0:
+                        self._awaited[request_id] = left
+                    else:
+                        self._awaited.pop(request_id, None)
+                        if timed_out:
+                            self._abandon_locked(request_id)
+                    self._condition.notify_all()
+        if event["type"] == response_type:
+            return event
+        reason = str(event.get("reason") or "") if event["type"] == "command_rejected" else "error"
+        message = str(event.get("message") or "").strip() or "the backend refused the command"
+        label = command_type or "command"
+        raise DGCCommandRejected(f"{label} was refused: {message}", reason=reason,
+                                 command=str(event.get("command") or command_type))
+
+    def _abandon_locked(self, request_id: str) -> None:
+        now = time.monotonic()
+        for stale in [key for key, expiry in self._abandoned.items() if expiry <= now]:
+            del self._abandoned[stale]
+        while len(self._abandoned) >= 1024:
+            del self._abandoned[next(iter(self._abandoned))]
+        self._abandoned[request_id] = now + 300.0
 
     def close(self) -> None:
         """Request graceful shutdown, then terminate and reap the owned process if needed."""
@@ -583,10 +770,34 @@ class DGCClient:
             raise DGCProtocolError("backend emitted malformed NDJSON") from exc
         problem = event_error(event)
         if problem:
+            if problem.startswith("unknown message type") and self._skip_unknown_event(event):
+                return
             safe = _safe_protocol_problem(problem)
             raise DGCProtocolError(
                 f"backend violated protocol v{PROTOCOL_VERSION}: {safe}")
         self._accept_event(event, wire_size)
+
+    def _skip_unknown_event(self, event: Any) -> bool:
+        """Step over an event type this copy of the schema does not know yet.
+
+        The CLI adds event types within a protocol version (``remote_status`` and friends), and
+        a client must tolerate them. Only a well-formed frame after the ``ready`` handshake, with
+        a string type and the next sequence number, is skipped; everything else stays fatal.
+        """
+        if not isinstance(event, dict):
+            return False
+        name = event.get("type")
+        seq = event.get("seq")
+        if (not isinstance(name, str) or not name or len(name) > 128
+                or not isinstance(seq, int) or isinstance(seq, bool) or seq < 0):
+            return False
+        with self._condition:
+            if self._ready is None or seq <= self._last_seq:
+                return False
+            self._last_seq = seq
+            if name in self._ignored_types or len(self._ignored_types) < 64:
+                self._ignored_types[name] = self._ignored_types.get(name, 0) + 1
+        return True
 
     def _accept_event(self, event: dict[str, Any], size: int) -> None:
         with self._condition:
@@ -602,9 +813,11 @@ class DGCClient:
                 if self._ready is not None:
                     raise DGCProtocolError("backend emitted more than one ready event")
                 if event["protocol_version"] != PROTOCOL_VERSION:
+                    offered = event["protocol_version"]
+                    version = event.get("version") if isinstance(event.get("version"), str) else ""
                     raise DGCProtocolError(
-                        "backend offered an incompatible protocol; "
-                        f"client requires v{PROTOCOL_VERSION}")
+                        f"backend offered protocol v{offered}; client requires v{PROTOCOL_VERSION}",
+                        offered_protocol=offered, backend_version=version[:64])
                 self._ready = copy.deepcopy(event)
 
             expected = _REQUEST_RESPONSES.get(event_type)
@@ -619,6 +832,13 @@ class DGCClient:
             elif event_type == "turn_end":
                 self._active_requests.clear()
                 self._responded_requests.clear()
+
+            reply_to = event.get("request_id")
+            if (isinstance(reply_to, str) and reply_to in self._abandoned and not expected
+                    and event_type not in _TURN_EVENTS):
+                if self._abandoned[reply_to] > time.monotonic():
+                    return            # a late reply to a request that already timed out
+                del self._abandoned[reply_to]
 
             if (len(self._events) >= self._max_pending_events
                     or self._pending_bytes + size > self._max_pending_bytes):

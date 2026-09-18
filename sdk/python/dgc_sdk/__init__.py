@@ -11,8 +11,8 @@ from .policy import RuntimePolicy
 from .retry import RetryPolicy
 from .usage import Pricing, cost_usd
 from .errors import (
-    DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError, DGCTimeoutError,
-    DGCUnsupportedError,
+    DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError,
+    DGCTimeoutError, DGCUnsupportedError,
 )
 from .session import RunHandle, Session
 from .types import (
@@ -28,7 +28,8 @@ __all__ = [
     "PROTOCOL", "REQUIRES_CLI", "__version__",
     "AgentInfo", "Artifact", "AsyncDGC", "AsyncRunHandle", "AsyncSession", "Checkpoint", "DGC",
     "Pricing", "RetryPolicy", "RuntimePolicy", "cost_usd", "redact", "redact_text",
-    "DGCConfigError", "DGCError", "DGCProtocolError", "DGCRuntimeError", "DGCTimeoutError",
+    "DGCCommandRejectedError", "DGCConfigError", "DGCError", "DGCProtocolError",
+    "DGCRuntimeError", "DGCTimeoutError",
     "DGCUnsupportedError", "FileChange", "Goal", "HookInfo", "McpInputRequest", "McpInputResponse",
     "McpServerInfo", "Monitor", "OnMcpInput", "OnPermission", "OnPlan", "OnQuestion",
     "PermissionAction", "PermissionMode", "PermissionPolicy", "PermissionRequest",

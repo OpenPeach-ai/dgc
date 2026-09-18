@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -16,7 +17,7 @@ from typing import Any
 from .wire.client import DGCClient, DGCClientError, DGCEventTimeout
 
 from ._mcp_bridge import ToolHub
-from .errors import DGCConfigError, DGCRuntimeError, DGCTimeoutError
+from .errors import DGCConfigError, DGCRuntimeError, DGCTimeoutError, public_error
 from .schema import assert_supported, extract_json, validate as validate_schema
 from .types import (
     AgentInfo, Artifact, Checkpoint, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
@@ -197,6 +198,12 @@ class RunHandle:
         return self._iterator
 
     def result(self, timeout: float | None = 180.0) -> RunResult:
+        """Wait for the run to end. On the iterating thread the run's own ``timeout`` bounds it.
+
+        From another thread, ``timeout`` bounds the wait (None waits for the run) and
+        :class:`DGCTimeoutError` is raised if the run is still going when it lapses. The run
+        keeps going; call :meth:`cancel` to stop it.
+        """
         terminal = frozenset({"completed", "cancelled", "failed", "blocked"})
         owner = getattr(self, "_iter_thread", None)
         same_thread = owner is None or owner is threading.current_thread()
@@ -205,8 +212,11 @@ class RunHandle:
                 pass
             self._consumed = True
             return self._result
-        deadline = time.monotonic() + (180.0 if timeout is None else float(timeout))
-        while self._result.status not in terminal and time.monotonic() < deadline:
+        deadline = None if timeout is None else time.monotonic() + float(timeout)
+        while self._result.status not in terminal:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise DGCTimeoutError(
+                    f"run {self._result.run_id} was still {self._result.status} after {timeout:g}s")
             time.sleep(0.05)
         return self._result
 
@@ -280,6 +290,7 @@ class Session:
         self._task_ids: dict[str, str] = {}
         self._task_revision = 0
         self._verify_command = ""
+        self._request_timeout = 15.0
         self.session_id = str(ready.get("session_id") or "")
         self.session_path = ""
         self.protocol_version = ready.get("protocol_version")
@@ -340,6 +351,10 @@ class Session:
             raise DGCRuntimeError("this session is closed")
         if not isinstance(prompt, str) or not prompt.strip():
             raise DGCConfigError("prompt must be a non-empty string")
+        if timeout is not None and (
+                isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or timeout <= 0):
+            raise DGCConfigError("timeout must be a positive number of seconds, or None for no limit")
         if output_schema is not None:
             assert_supported(output_schema)
         with self._lock:
@@ -688,13 +703,12 @@ class Session:
         return self._request({"type": "get_plan", "request_id": _new_id("plan")}, "saved_plan")
 
     def _request(self, command: Mapping[str, Any], response_type: str,
-                 timeout: float = 15.0) -> dict[str, Any]:
+                 timeout: float | None = None) -> dict[str, Any]:
+        wait = self._request_timeout if timeout is None else max(timeout, self._request_timeout)
         try:
-            return self._client.request(dict(command), response_type, timeout=timeout)
-        except DGCEventTimeout as exc:
-            raise DGCTimeoutError(str(exc)) from exc
+            return self._client.request(dict(command), response_type, timeout=wait)
         except DGCClientError as exc:
-            raise DGCRuntimeError(str(exc)) from exc
+            raise public_error(exc) from exc
 
     def _next_event(self, timeout: float | None) -> dict[str, Any]:
         if self._pending:
@@ -856,13 +870,15 @@ class Session:
             while True:
                 if deadline is not None and time.monotonic() >= deadline:
                     if not timed_out:
+                        # The SDK's own deadline: stop the turn without marking it a user
+                        # cancel, so the result says timeout.
                         timed_out = True
                         result.reason = "timeout"
-                        result.error = "run exceeded timeoutMs"
+                        result.error = f"run exceeded its {float(timeout):g}s timeout"
                         result.partial_text = "".join(text_buf) or "".join(blocks.values())
                         try:
-                            self._cancel_run()
-                        except DGCRuntimeError:
+                            self._client.send({"type": "cancel"})
+                        except DGCClientError:
                             pass
                         deadline = time.monotonic() + 5.0
                         continue
@@ -872,11 +888,14 @@ class Session:
                 remaining = None if deadline is None else max(0.05, deadline - time.monotonic())
                 try:
                     event = self._next_event(timeout=remaining)
-                except DGCEventTimeout as exc:
-                    self._cancel_run()
-                    result.status = "cancelled" if self._stop.is_set() else "failed"
-                    result.reason = "cancelled" if self._stop.is_set() else "timeout"
-                    result.error = None if self._stop.is_set() else str(exc)
+                except DGCEventTimeout:
+                    if not self._stop.is_set():
+                        # A quiet model or a long tool is not a failure. The deadline above
+                        # (or none, for timeout=None) decides when the run is over.
+                        continue
+                    result.status = "cancelled"
+                    result.reason = "cancelled"
+                    result.error = None
                     result.partial_text = "".join(text_buf) or "".join(blocks.values())
                     break
                 except DGCClientError as exc:
@@ -1040,15 +1059,18 @@ class Session:
                     result.agents = list(agents.values())
                     result.changes = _diff_workspace(self._cwd, before)
                     result.verification = self._verification_from_tools(result.tools)
-                    if self._stop.is_set() or reason in ("cancelled", "interrupted"):
+                    if timed_out and not self._stop.is_set() and reason != "completed":
+                        result.status = "failed"
+                        result.reason = "timeout"
+                        result.partial_text = result.final_text
+                    elif self._stop.is_set() or reason in ("cancelled", "interrupted"):
                         result.status = "cancelled"
                         result.reason = "cancelled"
                         result.partial_text = result.final_text
                     elif timed_out:
-                        result.reason = "timeout"
-                        result.partial_text = result.final_text
-                        result.status = "cancelled" if reason in ("cancelled", "interrupted") else (
-                            "failed" if reason in ("error", "failed") else "completed")
+                        # It finished before the stop reached it.
+                        result.error = None
+                        result.status = "completed"
                     elif reason in ("error", "failed"):
                         result.status = "failed"
                     else:
