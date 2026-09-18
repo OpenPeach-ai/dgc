@@ -18,8 +18,8 @@ jobs:
     name: Public product tree
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       - run: python scripts/check-public-content.py
@@ -33,8 +33,8 @@ jobs:
         python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -49,8 +49,8 @@ jobs:
     name: Windows import and CLI smoke
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -66,8 +66,8 @@ jobs:
       run:
         working-directory: editors/vscode
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         id: python
         with:
           python-version: "3.13"
@@ -78,7 +78,7 @@ jobs:
           python -m pip install -r requirements.lock
           python -m pip install --no-deps -e .
           python -m pip check
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -99,26 +99,79 @@ jobs:
           DGC_REQUIRE_CHROMIUM: "1"
           DGC_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
         run: xvfb-run -a bash ../../scripts/release-extension.sh --build
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dgc-extension-ci
           path: ${{ runner.temp }}/dgc-extension-release/*
+
+  sdk:
+    name: SDK · built wheel · Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Build and check the wheel, sdist and npm tarball
+        run: |
+          python -m pip install -r sdk/scripts/requirements-release.txt
+          python -m build sdk/python --outdir "$RUNNER_TEMP/sdk-dist"
+          python -m twine check --strict "$RUNNER_TEMP"/sdk-dist/*
+          (cd sdk/typescript && npm ci && npm pack --pack-destination "$RUNNER_TEMP/sdk-dist")
+          python sdk/scripts/check_dist.py "$RUNNER_TEMP/sdk-dist"
+      # A clean venv with the CLI and the SDK wheel installed the way users install them. No
+      # editable install: its .pth hook pre-imports modules and once hid a broken tool bridge.
+      - name: Install the CLI and the SDK wheel into a clean venv
+        run: |
+          python -m venv "$RUNNER_TEMP/app"
+          "$RUNNER_TEMP/app/bin/python" -m pip install -r requirements.lock
+          "$RUNNER_TEMP/app/bin/python" -m pip install --no-deps .
+          "$RUNNER_TEMP/app/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/sdk-dist/dgc_sdk-*.whl
+          "$RUNNER_TEMP/app/bin/python" -m pip check
+          "$RUNNER_TEMP/app/bin/python" -m pip install -r sdk/scripts/requirements-release.txt
+      - name: SDK suites against the installed wheel (public API under mypy --strict)
+        env:
+          DGC_SDK_TEST_INSTALLED: "1"
+          DGC_REQUIRE_RELEASE_TOOLS: "1"
+        run: |
+          export DGC_PYTHON="$RUNNER_TEMP/app/bin/python"
+          cd "$RUNNER_TEMP"
+          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_dgc_sdk.py"
+          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_examples.py"
+          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_packaging.py"
+          "$DGC_PYTHON" -m mypy --strict "$GITHUB_WORKSPACE/tests/sdk_typing/public_api.py"
+      - name: TypeScript SDK from source and from its packed tarball
+        env:
+          DGC_REQUIRE_TS_PACKAGE: "1"
+        run: |
+          export DGC_PYTHON="$RUNNER_TEMP/app/bin/python"
+          node --experimental-strip-types --test tests/test_dgc_sdk_ts.mjs tests/test_dgc_sdk_ts_package.mjs
 
   package:
     name: Python package and release archive
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
-      - run: python -m pip install build twine
+      - run: python -m pip install -r sdk/scripts/requirements-release.txt
       - run: python -m build
       - run: python -m twine check dist/*
       - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
       - run: (cd dist/release && sha256sum -c dgc.tar.gz.sha256)
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dgc-release-candidate
           path: |

@@ -1,30 +1,42 @@
 #!/usr/bin/env python3
-"""Write CycloneDX SBOM + SHA256SUMS for the in-tree SDK, then sign.
+"""SDK checkout manifest (signed) and release-artifact manifest (for CI).
 
-Run after every SDK source change, as the last step before a release cut:
+Checkout manifest — run after every SDK source change, as the last step before tagging:
 
-    python3 sdk/scripts/make_sbom.py
-    python3 sdk/scripts/make_sbom.py --verify
+    python3 sdk/scripts/make_sbom.py            # write sdk/sbom/{cyclonedx.json,SHA256SUMS}, sign
+    python3 sdk/scripts/make_sbom.py --verify   # tree == SHA256SUMS, signature valid
 
-Hashed set is source only: no __pycache__, no .pyc, no SBOM outputs, no signing keys.
-The signature is produced last, over SHA256SUMS of the current tree.
+Hashed set is source only: no __pycache__, no .pyc, no SBOM outputs, no signing keys. The
+signature is produced last with the maintainer key in sdk/.signing/ and verifies against the
+public key committed as sdk/sbom/sdk.pub.
+
+Release manifest — run by .github/workflows/publish-dgc-sdk.yml on the built artifacts:
+
+    python3 sdk/scripts/make_sbom.py --dist DIST_DIR
+
+writes DIST_DIR/dgc-sdk-VERSION.cdx.json (CycloneDX, pkg:pypi / pkg:npm purls, artifact
+hashes) and DIST_DIR/SHA256SUMS over the wheel, sdist, npm tarball and that SBOM. Those files
+are covered by the workflow's GitHub artifact attestation, not by the maintainer key.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
 SDK = ROOT / "sdk"
 OUT = SDK / "sbom"
 SIGNING = SDK / ".signing"
-SKIP_DIR_NAMES = frozenset({"__pycache__", ".signing", "sbom"})
+COMMITTED_PUB = OUT / "sdk.pub"
+SKIP_DIR_NAMES = frozenset({"__pycache__", ".signing", "sbom", "node_modules", "dist"})
 SKIP_SUFFIXES = (".pyc", ".pyo", ".so", ".sig")
 
 
@@ -51,7 +63,14 @@ def source_files() -> list[Path]:
             paths.append(path)
     extra = [
         SDK / "python" / "pyproject.toml",
+        SDK / "python" / "README.md",
+        SDK / "python" / "LICENSE",
         SDK / "typescript" / "package.json",
+        SDK / "typescript" / "package-lock.json",
+        SDK / "typescript" / "tsconfig.json",
+        SDK / "typescript" / "scripts" / "build.mjs",
+        SDK / "typescript" / "README.md",
+        SDK / "typescript" / "LICENSE",
         SDK / "README.md",
         SDK / "COMPATIBILITY.md",
     ]
@@ -70,7 +89,7 @@ def write_sbom() -> int:
         "type": "library",
         "name": "dgc-sdk",
         "version": version,
-        "purl": f"pkg:generic/dgc-sdk@{version}",
+        "purl": f"pkg:pypi/dgc-sdk@{version}",
     }]
     sums: list[str] = []
     for path in files:
@@ -89,7 +108,8 @@ def write_sbom() -> int:
         "version": 1,
         "metadata": {
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "component": {"type": "library", "name": "dgc-sdk", "version": version},
+            "component": {"type": "library", "name": "dgc-sdk", "version": version,
+                          "purl": f"pkg:pypi/dgc-sdk@{version}"},
         },
         "components": components,
     }
@@ -97,13 +117,18 @@ def write_sbom() -> int:
     (OUT / "cyclonedx.json").write_text(json.dumps(bom, indent=2) + "\n", encoding="utf-8")
     sums_path = OUT / "SHA256SUMS"
     sums_path.write_text("\n".join(sums) + "\n", encoding="utf-8")
-    SIGNING.mkdir(parents=True, exist_ok=True)
     key = SIGNING / "sdk.key"
     pub = SIGNING / "sdk.pub"
     if not key.is_file():
+        if COMMITTED_PUB.is_file():
+            # Never mint a replacement key silently: the committed sdk/sbom/sdk.pub is the anchor.
+            raise SystemExit("sdk/.signing/sdk.key is missing; sign with the maintainer key "
+                             "that matches sdk/sbom/sdk.pub")
+        SIGNING.mkdir(parents=True, exist_ok=True)
         subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
         subprocess.run(["openssl", "rsa", "-in", str(key), "-pubout", "-out", str(pub)],
                        check=True, capture_output=True)
+        COMMITTED_PUB.write_bytes(pub.read_bytes())
     sig = OUT / "SHA256SUMS.sig"
     subprocess.run(
         ["openssl", "dgst", "-sha256", "-sign", str(key), "-out", str(sig), str(sums_path)],
@@ -182,8 +207,11 @@ def verify() -> int:
     sums_mismatch = [rel for rel, digest in listed.items() if bom_files.get(rel) and bom_files[rel] != digest]
     if sums_mismatch:
         errors.append("SBOM/SUMS disagree: " + ", ".join(sums_mismatch[:12]))
-    pub = SIGNING / "sdk.pub"
     sig = OUT / "SHA256SUMS.sig"
+    pub = COMMITTED_PUB
+    local_pub = SIGNING / "sdk.pub"
+    if local_pub.is_file() and pub.is_file() and _key_der(local_pub) != _key_der(pub):
+        errors.append("sdk/.signing/sdk.pub is not the key committed as sdk/sbom/sdk.pub")
     if pub.is_file() and sig.is_file():
         check = subprocess.run(
             ["openssl", "dgst", "-sha256", "-verify", str(pub), "-signature", str(sig), str(sums_path)],
@@ -192,7 +220,7 @@ def verify() -> int:
         if check.returncode != 0:
             errors.append("SHA256SUMS.sig does not verify")
     else:
-        errors.append("missing sdk/.signing/sdk.pub or SHA256SUMS.sig")
+        errors.append("missing sdk/sbom/sdk.pub or sdk/sbom/SHA256SUMS.sig")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
@@ -200,10 +228,77 @@ def verify() -> int:
     return 0
 
 
+def _key_der(path: Path) -> bytes:
+    return subprocess.run(["openssl", "pkey", "-pubin", "-in", str(path), "-outform", "DER"],
+                          check=True, capture_output=True).stdout
+
+
+def _timestamp() -> str:
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    moment = datetime.fromtimestamp(int(epoch), timezone.utc) if epoch else datetime.now(timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def release_artifacts(dist: Path, version: str) -> list[tuple[Path, str]]:
+    """The installable artifacts of one release, each with its package URL."""
+    wanted = [
+        (dist / f"dgc_sdk-{version}-py3-none-any.whl", "pypi"),
+        (dist / f"dgc_sdk-{version}.tar.gz", "pypi"),
+        (dist / f"vibedgc-sdk-{version}.tgz", "npm"),
+    ]
+    found: list[tuple[Path, str]] = []
+    for path, kind in wanted:
+        if not path.is_file():
+            if kind == "npm":
+                continue
+            raise SystemExit(f"missing release artifact {path}")
+        if kind == "pypi":
+            purl = f"pkg:pypi/dgc-sdk@{version}?file_name={quote(path.name)}"
+        else:
+            purl = f"pkg:npm/{quote('@vibedgc')}/sdk@{version}"
+        found.append((path, purl))
+    return found
+
+
+def write_release_manifest(dist: Path) -> int:
+    """SBOM + SHA256SUMS for the exact bytes a release uploads (PyPI and the GitHub release)."""
+    version = sdk_version()
+    artifacts = release_artifacts(dist, version)
+    bom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+            "timestamp": _timestamp(),
+            "component": {"type": "library", "name": "dgc-sdk", "version": version,
+                          "purl": f"pkg:pypi/dgc-sdk@{version}",
+                          "licenses": [{"license": {"id": "Apache-2.0"}}]},
+        },
+        "components": [{
+            "type": "library",
+            "name": path.name,
+            "version": version,
+            "purl": purl,
+            "hashes": [{"alg": "SHA-256", "content": sha256(path)}],
+            "licenses": [{"license": {"id": "Apache-2.0"}}],
+        } for path, purl in artifacts],
+    }
+    sbom = dist / f"dgc-sdk-{version}.cdx.json"
+    sbom.write_text(json.dumps(bom, indent=2) + "\n", encoding="utf-8")
+    listed = [path for path, _purl in artifacts] + [sbom]
+    (dist / "SHA256SUMS").write_text(
+        "".join(f"{sha256(path)}  {path.name}\n" for path in listed), encoding="utf-8")
+    print(f"dgc-sdk {version}: SHA256SUMS over {len(listed)} release files in {dist}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--verify", action="store_true", help="check SUMS against the current tree")
+    parser.add_argument("--dist", type=Path, help="write the release manifest for built artifacts")
     args = parser.parse_args()
+    if args.dist is not None:
+        return write_release_manifest(args.dist)
     if args.verify:
         return verify()
     write_sbom()
