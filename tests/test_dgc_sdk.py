@@ -142,6 +142,9 @@ class _Model(BaseHTTPRequestHandler):
         if self.behavior == "edit" or last.lower().startswith("edit "):
             self._send(_call("write_file", {"path": "guard.py", "content": "ok\n"}))
             return
+        if self.behavior == "bash_write" or "escaped write" in last.lower():
+            self._send(_call("bash", {"command": "echo pwned > escaped.txt"}))
+            return
         self._send(_answer("The checkout flow creates an empty cart and then redirects."))
 
 
@@ -733,6 +736,74 @@ class SdkTests(unittest.TestCase):
         self.assertFalse((self.work / "guard.py").exists())
         self.assertEqual(result.status, "blocked")
 
+    def test_policy_denies_write_in_auto_mode(self):
+        _Model.behavior = "edit"
+        policy = RuntimePolicy(deny_tools=("write_file", "edit_file", "apply_patch"))
+        with self._client(policy=policy) as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "auto", "unhandled": "deny"},
+            )
+            result = session.run("edit the checkout guard", timeout=60)
+        self.assertFalse((self.work / "guard.py").exists(), "auto mode must still honour deny_tools")
+        self.assertIn(result.status, ("blocked", "completed", "failed"))
+
+    def test_cancel_after_permission_event_drains_to_cancelled(self):
+        _Model.behavior = "edit"
+
+        def slow(_request):
+            time.sleep(30)
+            return "once"
+
+        with self._client() as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "default", "unhandled": "deny"},
+                on_permission=slow,
+                decision_timeout=30,
+            )
+            handle = session.stream("edit the checkout guard", timeout=25)
+            for event in handle:
+                if event.type == "permission_request":
+                    break
+            handle.cancel()
+            result = handle.result(timeout=10)
+        self.assertNotEqual(result.status, "running")
+        self.assertEqual(result.status, "cancelled")
+        self.assertFalse((self.work / "guard.py").exists())
+
+    def test_audit_includes_redacted_tool_args(self):
+        _Model.behavior = "edit"
+        with self._client() as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "default", "unhandled": "deny"},
+                on_permission=lambda _req: "once",
+            )
+            result = session.run("edit the checkout guard", timeout=60)
+            rows = dgc.export_audit(result.session_id)
+        blob = json.dumps(rows)
+        self.assertIn("write_file", blob)
+        self.assertTrue("args" in blob or "path" in blob or "guard.py" in blob, blob[:500])
+        self.assertNotIn("sk-local", blob)
+
+    def test_tool_record_keeps_output_for_host_tools(self):
+        seen = []
+        tool = define_tool(
+            "sku_lookup", "Look up a product SKU",
+            {"type": "object", "properties": {"sku": {"type": "string"}}},
+            lambda args: {"name": "Widget", "sku": args.get("sku")},
+        )
+        _Model.behavior = "mcp"
+        with self._client() as dgc:
+            session = dgc.session(
+                cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"}, tools=[tool],
+            )
+            result = session.run("look up sku A-1", timeout=60)
+        records = [rec for rec in result.tools if "sku" in rec.name]
+        self.assertTrue(records, result.tools)
+        self.assertTrue(any(rec.output for rec in records), records)
+
     def test_policy_denies_network_shaped_bash(self):
         from dgc_sdk.policy import RuntimePolicy as Policy
         from dgc_sdk.types import PermissionRequest
@@ -741,6 +812,21 @@ class SdkTests(unittest.TestCase):
         self.assertEqual(policy.decision(req, cwd=self.work), "deny")
         req2 = PermissionRequest(id="r2", name="bash", args={"command": "ls"})
         self.assertIsNone(policy.decision(req2, cwd=self.work))
+
+    def test_policy_denies_bash_redirect_when_write_denied(self):
+        _Model.behavior = "bash_write"
+        policy = RuntimePolicy(deny_tools=("write_file",))
+        with self._client(policy=policy) as dgc:
+            session = dgc.session(
+                cwd=self.work,
+                permissions={"mode": "auto", "unhandled": "deny"},
+            )
+            result = session.run("escaped write via bash redirect", timeout=60)
+        self.assertFalse(
+            (self.work / "escaped.txt").exists(),
+            f"bash redirect must not land when write_file is denied; status={result.status}",
+        )
+        self.assertIn(result.status, ("blocked", "completed", "failed"))
 
     def test_audit_export_redacts_secrets(self):
         self.assertIn("[redacted]", redact_text("Authorization: Bearer sk-abc123456789"))
@@ -768,6 +854,64 @@ class PolicyUnitTests(unittest.TestCase):
         from dgc_sdk import cost_usd
         self.assertEqual(cost_usd(1_000_000, 500_000, 0, Pricing(1.0, 2.0)), 2.0)
         self.assertIsNone(cost_usd(10, 10, 0, None))
+
+    def test_write_deny_inspects_bash_like_network(self):
+        from dgc.permissions import PermissionEngine
+        from dgc_sdk.types import PermissionRequest
+        policy = RuntimePolicy(deny_tools=("write_file",), network="allow")
+        def decide(command: str):
+            return policy.decision(
+                PermissionRequest(id="r", name="bash", args={"command": command}),
+                cwd=None,
+            )
+        self.assertEqual(decide("echo pwned > escaped.txt"), "deny")
+        self.assertEqual(decide("echo pwned>escaped.txt"), "deny")
+        self.assertEqual(decide("echo pwned >> escaped.txt"), "deny")
+        self.assertEqual(decide("echo x | tee escaped.txt"), "deny")
+        self.assertEqual(decide("cp a b"), "deny")
+        self.assertEqual(decide("sudo mv a b"), "deny")
+        self.assertEqual(decide("sed -i s/a/b/ file"), "deny")
+        self.assertEqual(decide("python -c \"open('f','w').write('x')\""), "deny")
+        self.assertIsNone(decide("ls"))
+        self.assertIsNone(decide("ls -la"))
+        self.assertIsNone(decide("ls 2>&1"))
+        self.assertIsNone(decide("cat README.md"))
+        open_policy = RuntimePolicy(network="allow")
+        self.assertIsNone(open_policy.decision(
+            PermissionRequest(id="r", name="bash", args={"command": "echo x > f"}),
+            cwd=None,
+        ))
+        rules = policy.engine_deny_rules()
+        self.assertIn("Write", rules)
+        self.assertTrue(any(row.startswith("Bash(") and "*>[!&]*" in row for row in rules), rules)
+        engine = PermissionEngine("auto", {"allow": [], "ask": [], "deny": rules})
+        denied, _reason = engine.decide("bash", {"command": "echo pwned > escaped.txt"})
+        self.assertEqual(denied, "deny")
+        allowed, _reason = engine.decide("bash", {"command": "ls"})
+        self.assertEqual(allowed, "allow")
+        still_ok, _reason = engine.decide("bash", {"command": "ls 2>&1"})
+        self.assertEqual(still_ok, "allow")
+
+
+class SbomGeneratorTests(unittest.TestCase):
+    def test_source_set_excludes_pycache_and_reads_version(self):
+        import importlib.util
+        from dgc_sdk._version import __version__
+        path = ROOT / "sdk" / "scripts" / "make_sbom.py"
+        spec = importlib.util.spec_from_file_location("dgc_sdk_make_sbom", path)
+        self.assertIsNotNone(spec and spec.loader)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        files = [p.relative_to(ROOT).as_posix() for p in mod.source_files()]
+        self.assertTrue(files)
+        self.assertFalse(any("__pycache__" in f or f.endswith(".pyc") for f in files))
+        for name in (
+            "sdk/python/dgc_sdk/_mcp_bridge.py",
+            "sdk/python/dgc_sdk/_version.py",
+            "sdk/python/dgc_sdk/client.py",
+        ):
+            self.assertIn(name, files)
+        self.assertEqual(mod.sdk_version(), __version__)
 
 
 if __name__ == "__main__":

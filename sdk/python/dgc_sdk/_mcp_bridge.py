@@ -12,7 +12,20 @@ import socket
 import sys
 import threading
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
+
+
+def _sdk_version() -> str:
+    try:
+        from ._version import __version__
+        return __version__
+    except ImportError:
+        text = Path(__file__).with_name("_version.py").read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("__version__"):
+                return line.split('"', 2)[1]
+        return "0.0.0"
 
 
 def relay(socket_path: str) -> int:
@@ -126,7 +139,7 @@ class ToolHub:
                 "result": {
                     "protocolVersion": "2025-11-25",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "dgc-sdk", "version": "0.5.0"},
+                    "serverInfo": {"name": "dgc-sdk", "version": _sdk_version()},
                 },
             }
         if method in ("notifications/initialized", "notifications/cancelled"):

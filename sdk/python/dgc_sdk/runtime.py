@@ -112,6 +112,18 @@ def write_isolated_config(state_dir: Path, values: Mapping[str, object]) -> Path
             if text and text not in merged:
                 merged.append(text)
         incoming["trusted_dirs"] = merged
+    if "permissions" in incoming or "permissions" in current:
+        merged_perms: dict[str, list] = {"allow": [], "ask": [], "deny": []}
+        for action in merged_perms:
+            seen: list[str] = []
+            old = current.get("permissions") if isinstance(current.get("permissions"), dict) else {}
+            new = incoming.get("permissions") if isinstance(incoming.get("permissions"), dict) else {}
+            for item in list(old.get(action) or []) + list(new.get(action) or []):
+                text = str(item)
+                if text and text not in seen:
+                    seen.append(text)
+            merged_perms[action] = seen
+        incoming["permissions"] = merged_perms
     current.update(incoming)
     path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
     return path

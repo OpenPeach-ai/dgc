@@ -193,13 +193,21 @@ class RunHandle:
 
     def __iter__(self) -> Iterator[RunEvent]:
         self._consumed = True
+        self._iter_thread = threading.current_thread()
         return self._iterator
 
-    def result(self) -> RunResult:
-        if not self._consumed:
+    def result(self, timeout: float | None = 180.0) -> RunResult:
+        terminal = frozenset({"completed", "cancelled", "failed", "blocked"})
+        owner = getattr(self, "_iter_thread", None)
+        same_thread = owner is None or owner is threading.current_thread()
+        if same_thread:
             for _ in self._iterator:
                 pass
             self._consumed = True
+            return self._result
+        deadline = time.monotonic() + (180.0 if timeout is None else float(timeout))
+        while self._result.status not in terminal and time.monotonic() < deadline:
+            time.sleep(0.05)
         return self._result
 
     def cancel(self) -> None:
@@ -882,11 +890,12 @@ class Session:
                         "turn_start", "turn_end", "tool_call", "tool_result", "tool_denied",
                         "permission_request", "error"):
                     try:
+                        payload = {k: event.get(k) for k in (
+                            "name", "id", "reason", "summary", "path", "message", "is_error",
+                            "args", "output", "diff", "command",
+                        ) if k in event and event.get(k) not in (None, "", {}, [])}
                         self._audit_log.append(
-                            self.session_id, result.run_id, kind,
-                            {k: event.get(k) for k in ("name", "id", "reason", "summary",
-                                                       "path", "message", "is_error")
-                             if k in event},
+                            self.session_id, result.run_id, kind, payload,
                             do_redact=not (self._policy and not self._policy.redact_events),
                         )
                     except Exception:
@@ -909,7 +918,7 @@ class Session:
                         action = self._permission(event)
                     self._client.send({"type": "permission_response", "id": event["id"],
                                        "decision": action})
-                    result.status = "running"
+                    result.status = "cancelled" if self._stop.is_set() else "running"
                 elif kind == "plan_proposal":
                     result.status = "waiting_for_approval"
                     decision = "reject" if repairing else self._plan(event)
@@ -936,16 +945,23 @@ class Session:
                             answer_ids.append(message_id)
                 elif kind == "tool_call":
                     call_id = str(event.get("call_id") or "")
+                    args = event.get("args") if isinstance(event.get("args"), dict) else {}
                     tools[call_id] = ToolRecord(
                         name=str(event.get("name") or ""),
                         call_id=call_id,
                         summary=str(event.get("summary") or ""),
+                        args=args,
                     )
                 elif kind == "tool_result":
                     call_id = str(event.get("call_id") or "")
                     record = tools.get(call_id) or ToolRecord(
                         name=str(event.get("name") or ""), call_id=call_id)
-                    output = str(event.get("output") or "")
+                    output = event.get("output")
+                    if output is None:
+                        output = event.get("result") or event.get("content") or ""
+                    output = output if isinstance(output, str) else json.dumps(output, default=str)
+                    if not output and record.summary:
+                        output = record.summary
                     record = ToolRecord(
                         name=record.name or str(event.get("name") or ""),
                         call_id=call_id,
@@ -954,6 +970,7 @@ class Session:
                         is_error=bool(event.get("is_error")),
                         is_diff=bool(event.get("is_diff")),
                         diff=event.get("diff") if isinstance(event.get("diff"), str) else None,
+                        args=record.args,
                     )
                     tools[call_id] = record
                     if record.name in ("write_file", "edit_file", "multi_edit", "apply_patch") and not record.is_error:

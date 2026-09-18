@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { defaultRuntime, isolatedEnv, writeIsolatedConfig } from "./runtime.ts";
+import { engineDenyRules, policyDecision } from "./policy.ts";
 import { Transport } from "./transport.ts";
 import { Session } from "./session.ts";
 import { ToolHub } from "./tools.ts";
@@ -34,11 +35,12 @@ export class DGC {
     const unhandled = options.permissions?.unhandled ?? "deny";
     const policy = this.options.policy;
     const userPermission = options.onPermission;
-    if (policy?.denyTools?.length) {
+    const denyRules = engineDenyRules(policy);
+    if (policy) {
       options = {
         ...options,
         onPermission: async (request) => {
-          if (policy.denyTools?.includes(request.name)) return "deny";
+          if (policyDecision(policy, request) === "deny") return "deny";
           if (!userPermission) return "deny";
           return userPermission(request);
         },
@@ -62,6 +64,11 @@ export class DGC {
         mcp_servers: {},
         hooks: {},
         trusted_dirs: [options.cwd],
+        permissions: {
+          allow: [],
+          ask: [],
+          deny: denyRules,
+        },
         ...(typeof options.maxTurns === "number" ? { max_turns: options.maxTurns } : {}),
       });
     }
@@ -133,6 +140,9 @@ export class DGC {
       this.options.stateDir,
       this.options.department || "",
     );
+    for (const rule of denyRules) {
+      try { await session.addPermissionRule("deny", rule); } catch { /* isolated config already has it */ }
+    }
     this.sessions.push(session);
     return session;
   }

@@ -109,6 +109,7 @@ class ToolRecord:
     is_error: bool = False
     is_diff: bool = False
     diff: str | None = None
+    args: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

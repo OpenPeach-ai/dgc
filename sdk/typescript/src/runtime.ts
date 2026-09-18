@@ -68,5 +68,21 @@ export function writeIsolatedConfig(stateDir: string, values: Record<string, unk
     }
     incoming.trusted_dirs = merged;
   }
+  if ("permissions" in incoming || "permissions" in current) {
+    const merged: Record<string, string[]> = { allow: [], ask: [], deny: [] };
+    const oldP = (current.permissions && typeof current.permissions === "object")
+      ? current.permissions as Record<string, unknown> : {};
+    const newP = (incoming.permissions && typeof incoming.permissions === "object")
+      ? incoming.permissions as Record<string, unknown> : {};
+    for (const action of ["allow", "ask", "deny"]) {
+      const seen: string[] = [];
+      for (const item of [...((oldP[action] as unknown[]) || []), ...((newP[action] as unknown[]) || [])]) {
+        const text = String(item || "");
+        if (text && !seen.includes(text)) seen.push(text);
+      }
+      merged[action] = seen;
+    }
+    incoming.permissions = merged;
+  }
   writeFileSync(path, JSON.stringify({ ...current, ...incoming }, null, 2) + "\n");
 }

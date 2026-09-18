@@ -1,15 +1,16 @@
-# DGC SDK (local)
+# DGC SDK
 
-This is the in-tree DGC SDK. It is **not published**. Version it here the same way as the CLI
-and the editor: bump `sdk/python/dgc_sdk/_version.py` and `sdk/typescript/package.json` together
-when the contract changes. Whatever version is current when the SDK is actually released is the
-first public number.
+Frozen **0.5.2**. Protocol **v14**, CLI **0.41.3**, Linux. GitHub tag **`sdk-v0.5.2`**
+(not `v0.5.2` — that is a historical CLI tag).
 
-Install locally (from this repository):
+Install the wheel from the GitHub release, or from this repository:
 
 ```bash
+python3 -m pip install \
+  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
+# from a clone:
 python3 -m pip install -e sdk/python
-# TypeScript: import from sdk/typescript (package is private). Node 22+:
+# TypeScript: import sdk/typescript (Node 22+, strip-types). Not on npm yet.
 #   node --experimental-strip-types examples/sdk/hello_run.mjs .
 ```
 
@@ -23,7 +24,7 @@ process `~/.dgc` is not read or written unless you pass `inherit_user_state=True
 Requires a DGC runtime that speaks editor protocol v14 (CLI 0.41.3 or this checkout). Set
 `DGC_PYTHON` if `python3` cannot import `dgc`.
 
-## Public surface (local 0.5.0)
+## Public surface (0.5.2)
 
 | Concept | Python | TypeScript |
 | --- | --- | --- |
@@ -42,11 +43,14 @@ Requires a DGC runtime that speaks editor protocol v14 (CLI 0.41.3 or this check
 | Permissions | `list_permissions` / `add_permission_rule` | `listPermissions` / `addPermissionRule` |
 | Unattended | `permissions={"mode": "...", "unhandled": "deny"}` | `permissions: { unhandled: "deny" }` |
 | Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | — |
-| Policy | `DGC(..., policy=RuntimePolicy(network="deny", deny_tools=(...)))` | — |
+| Policy | `DGC(..., policy=RuntimePolicy(network="deny", deny_tools=(...)))` — write-tool denies also inspect bash file-writes | — |
 | Audit | `dgc.export_audit(session_id)` (redacted JSONL) | — |
 | Retry | `RetryPolicy(max_attempts=4)` — 429/5xx retried by `dgc serve` | — |
 
-Do not `pip install dgc`. Public PyPI `dgc` is unrelated. Packages are `dgc-sdk` / `@vibedgc/sdk`.
+Do not `pip install dgc`. Public PyPI `dgc` is an unrelated clustering package.
+The SDK package names are `dgc-sdk` / `@vibedgc/sdk`. This cut is the GitHub release
+and the in-tree sources; it is not on PyPI or npm yet. The SDK still needs a DGC
+runtime that can `python -m dgc serve` (this checkout or CLI 0.41.3).
 
 ## Isolation
 
@@ -65,7 +69,7 @@ would wipe resume/fork persistence.
 `hello_run.mjs`, and `workbench.py` (loopback UI on port 8765). CI recipes print JSON, write a
 patch file, and use exit codes 0/1/2/3/4/5.
 
-## Not published
+## Release
 
-Do not push packages, `/sdk` on the website, or GitHub release artifacts until this SDK has been
-run inside a real application and the contract is frozen.
+Channel tag: `sdk-v0.5.2`. Proven on Linux. macOS and WSL are unproven. Native Windows is
+experimental. TypeScript covers the embed client; usage, audit, and retry helpers are Python-first.

@@ -149,6 +149,11 @@ class DGC:
                 ),
                 "sandbox": requirement != "off" and bool(backend),
                 "sandbox_network": bool(self._policy and getattr(self._policy, "network", "deny") == "allow"),
+                "permissions": {
+                    "allow": [],
+                    "ask": [],
+                    "deny": list(self._policy.engine_deny_rules()) if self._policy is not None else [],
+                },
             }
             isolated_values.update(self._retry.isolated_values())
             if max_turns is not None:
@@ -206,6 +211,12 @@ class DGC:
             model=str(model or self._model or ""),
         )
         session._verify_command = verify_command or ""
+        if self._policy is not None:
+            for rule in self._policy.engine_deny_rules():
+                try:
+                    session.add_permission_rule("deny", rule)
+                except Exception:
+                    pass
         try:
             session.bind_identity()
         except Exception:

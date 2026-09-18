@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DGC, defineTool, extractJson, validate, assertSupported } from "../sdk/typescript/src/index.ts";
+import { engineDenyRules, looksLikeWrite, policyDecision } from "../sdk/typescript/src/policy.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -70,6 +71,18 @@ function startModel(behavior = "text") {
     });
   });
 }
+
+test("write deny inspects bash redirects", () => {
+  const policy = { denyTools: ["write_file"], network: "allow" };
+  assert.equal(policyDecision(policy, { id: "1", name: "bash", args: { command: "echo pwned > escaped.txt" } }), "deny");
+  assert.equal(policyDecision(policy, { id: "2", name: "bash", args: { command: "ls" } }), null);
+  assert.equal(policyDecision(policy, { id: "3", name: "bash", args: { command: "ls 2>&1" } }), null);
+  assert.ok(looksLikeWrite("echo x | tee out.txt"));
+  assert.ok(!looksLikeWrite("cat README.md"));
+  const rules = engineDenyRules(policy);
+  assert.ok(rules.includes("Write"));
+  assert.ok(rules.some((row) => row.includes("*>[!&]*")));
+});
 
 test("schema extract and validate", () => {
   const value = extractJson('Here you go:\n```json\n{"ok": true}\n```');

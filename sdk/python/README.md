@@ -1,6 +1,6 @@
-# dgc-sdk (local)
+# dgc-sdk
 
-Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.3. Local 0.5.0. Not published.
+Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.3. Frozen 0.5.2.
 
 ```python
 from pathlib import Path
@@ -22,4 +22,5 @@ with DGC(state_dir=Path("/tmp/dgc-sdk-state"), model="demo-model",
     print(restored.session_id, restored.history().get("items") and "history ok")
 ```
 
-Install from the DGC checkout: `pip install -e sdk/python`.
+Install the GitHub release wheel, or from this checkout: `pip install -e sdk/python`.
+Do not `pip install dgc`.
