@@ -5358,7 +5358,9 @@ def unit_tests(tmp: Path):
         read_timeout = 1800
         observed = None
         def chat(self, *args, cancel=None, **kwargs):
-            self.observed = (self.read_timeout, isinstance(cancel, _DeadlineCancel))
+            # The request's cancel view is the model-switch gate over the budget deadline.
+            self.observed = (self.read_timeout,
+                             isinstance(getattr(cancel, "parent", cancel), _DeadlineCancel))
             return _ChatResult(content="Budgeted response complete.")
     _budget_agent = _Ag(_Cfg(tmp), _AgUI())
     _budget_agent.config.data["turn_budget_s"] = 10
@@ -16041,7 +16043,7 @@ def e2e_native_ollama(port: int, tmp: Path) -> bool:
     assistant = next((m for m in followup if m.get("role") == "assistant"
                       and m.get("tool_calls")), {})
     tool_result = next((m for m in followup if m.get("role") == "tool"), {})
-    return (requests_seen[0].get("think") is True
+    return (requests_seen[0].get("think") == "high"      # the level itself, not a bare True
             and assistant.get("thinking") == "native thought "
             and assistant.get("content") == ""
             and "I’ve got" not in str(assistant)
@@ -16191,8 +16193,12 @@ def test_reasoning_payload():
           rp("llamacpp", "qwen3", "medium") == {"reasoning_effort": "medium",
               "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "medium"}})
     # xhigh is accepted by every transport without error
-    check("ollama xhigh → clamped to high (v1 chat path)",
-          rp("ollama", "qwen3", "xhigh") == {"reasoning_effort": "high"})
+    check("ollama xhigh → Max (v1 chat path), High once Max was refused",
+          rp("ollama", "qwen3", "xhigh") == {"reasoning_effort": "max"}
+          and rp("ollama", "qwen3", "xhigh", max_tier=False) == {"reasoning_effort": "high"})
+    check("ollama gpt-oss has no tier above High and cannot switch reasoning off (v1 chat path)",
+          rp("ollama", "gpt-oss:120b", "xhigh") == {"reasoning_effort": "high"}
+          and rp("ollama", "gpt-oss:120b", "off") == {"reasoning_effort": "low"})
     for _f in ("compat", "vllm", "llamacpp", "ollama", "openrouter", "groq", "openai", "anthropic",
                "deepseek", "together", "mistral"):
         try:
@@ -16201,11 +16207,14 @@ def test_reasoning_payload():
         except Exception:
             _ok = False
         check(f"xhigh accepted without error: {_f}", _ok)
-    # Native Ollama think field only accepts low|medium|high|max → xhigh clamps to high, never crashes
+    # Native Ollama think takes low|medium|high|max or a boolean → the level itself is sent (Extra
+    # high as Max), never a bare True that throws the level away.
     from dgc.llm import LLMClient
     _oc = LLMClient("http://localhost:11434/v1", "ollama", "qwen3")
-    check("_ollama_think xhigh enables boolean thinking", _oc._ollama_think("xhigh") is True)
-    check("_ollama_think high enables boolean thinking", _oc._ollama_think("high") is True)
+    _oc.invalidate_capabilities()
+    check("_ollama_think xhigh → Max", _oc._ollama_think("xhigh") == "max")
+    check("_ollama_think keeps graded levels",
+          [_oc._ollama_think(level) for level in ("low", "medium", "high")] == ["low", "medium", "high"])
     check("_ollama_think off → False", _oc._ollama_think("off") is False)
     _gpt = LLMClient("http://localhost:11434/v1", "ollama", "gpt-oss:120b")
     check("_ollama_think gpt-oss xhigh → high", _gpt._ollama_think("xhigh") == "high")
@@ -17656,7 +17665,7 @@ def test_ollama_adapter():
     finally:
         _llm.requests.post = original_post
     check("native Ollama negotiates a rejected thinking field without abandoning native chat",
-          len(negotiation_posts) == 2 and negotiation_posts[0]["think"] is True
+          len(negotiation_posts) == 2 and negotiation_posts[0]["think"] == "high"
           and "think" not in negotiation_posts[1] and negotiated.api_mode == "ollama"
           and not negotiated.reasoning_supported and len(negotiated_result.tool_calls) == 2)
 

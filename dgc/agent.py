@@ -556,6 +556,57 @@ class _DeadlineCancel:
         return self.parent.is_set() or time.monotonic() >= self.deadline
 
 
+class _RouteGate:
+    """Cancellation view for one model request that a mid-turn model switch may retire.
+
+    A switch used to leave the running request on the model the user had just left. When that
+    request was stuck before its first token (a cloud model queued upstream, a local model that
+    never loads) the turn sat on it for the whole stall window -- fifteen minutes on a local
+    endpoint -- while the chat said the new model was selected. ``supersede`` ends such a request
+    so the same request is sent again on the new model at once. It succeeds only while nothing of
+    the request has reached the turn: once text, reasoning or a tool call has arrived, that
+    generation finishes on the model that started it and the NEXT request uses the new one.
+    """
+
+    def __init__(self, parent, client):
+        self.parent = parent
+        self.client = client
+        self.superseded = False
+        self.started = False        # output of this request reached the turn
+        self.closed = False         # the request is over; nothing is left to supersede
+        self._lock = threading.Lock()
+
+    def is_set(self) -> bool:
+        return self.superseded or bool(self.parent is not None and self.parent.is_set())
+
+    def admit(self) -> bool:
+        """Called before any output of this request is shown. False: it was superseded, drop it."""
+        with self._lock:
+            if self.superseded:
+                return False
+            self.started = True
+            return True
+
+    def supersede(self) -> bool:
+        with self._lock:
+            if self.started or self.superseded or self.closed:
+                return False
+            self.superseded = True
+            return True
+
+    def close(self) -> None:
+        with self._lock:
+            self.closed = True
+
+
+def _route_identity(client) -> tuple:
+    """What makes two clients the same model route: a request is re-sent only across a real change."""
+    return (str(getattr(client, "base_url", "") or "").rstrip("/").lower(),
+            str(getattr(client, "model", "") or ""),
+            str(getattr(client, "requested_api_mode", getattr(client, "api_mode", "")) or ""),
+            str(getattr(client, "api_key", "") or ""))
+
+
 def _within_own_checkout(agent, path) -> bool:
     """Is this write inside the checkout the agent may treat as disposable?
 
@@ -737,7 +788,8 @@ THINK_INSTRUCTIONS = {
     "off": "",
     "low": "Think briefly before acting; keep your reasoning short and focused.",
     "medium": "Reason step by step before acting. Consider edge cases and how your changes affect the rest of the system.",
-    "high": ("Engage maximum reasoning depth (ultrathink). Analyze the problem thoroughly, "
+    # "high" is not the top level (xhigh is), so its guidance must not claim maximum depth.
+    "high": ("Reason deeply (ultrathink). Analyze the problem thoroughly, "
              "explore alternative approaches, verify assumptions against the actual code, "
              "and double-check every action before taking it."),
     "xhigh": ("Analyze complex work in depth. Enumerate "
@@ -1588,8 +1640,23 @@ class Agent(GoalLifecycle):
             metered=usage_reported(raw_usage))
 
     def refresh_client(self) -> None:
+        previous = getattr(self, "client", None)
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
         self._sync_vision()
+        if previous is not None and _route_identity(previous) != _route_identity(self.client):
+            # A model switch while a turn runs: a request still waiting on the old route is sent
+            # again on the new one now, instead of after the old one's stall window.
+            self._supersede_request(previous)
+
+    def _supersede_request(self, previous) -> bool:
+        """Retire ``previous``'s in-flight request if nothing of it has streamed yet (see _RouteGate)."""
+        gate = getattr(self, "_route_gate", None)
+        if gate is None or gate.client is not previous:
+            return False
+        watch = getattr(previous, "_active_watch", None)
+        if watch is not None and getattr(watch, "progressed", False):
+            return False        # tokens are arriving (a tool call streams no text): let it finish
+        return gate.supersede()
 
     def _route_api_mode(self, base_url: str, config_key: str, explicit: str = "") -> str:
         """Resolve a secondary route without leaking a forced main-provider transport into it."""
@@ -2420,15 +2487,14 @@ class Agent(GoalLifecycle):
                 # stands now; a clear that lands while the model generates or the batch runs
                 # makes them stale.
                 ctx.todo_request_epoch = int(getattr(ctx, "todo_clear_epoch", 0) or 0)
-        if getattr(self, "_mode_prompt_dirty", False):
+        baked = getattr(self, "_prompt_think_level", None)
+        if (getattr(self, "_mode_prompt_dirty", False)
+                or (baked is not None and baked != self._effective_thinking(""))):
             self._refresh_system()
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
             self.messages = repaired
             self.ui.info("repaired an interrupted tool-call transcript")
-        old_timeout = getattr(self.client, "read_timeout", None)
-        if read_timeout is not None and old_timeout is not None:
-            self.client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
         secrets = self._secret_values()
         for message in self.messages:
             if not isinstance(message, dict):
@@ -2457,8 +2523,17 @@ class Agent(GoalLifecycle):
         # would end the block in a frontend while the block goes on here (and in the saved record).
         # It is held and joins the next prose, after that block's thinking_end.
         held_space: list[str] = []
+        # The gate of the request in flight: a mid-turn model switch may retire it (see _RouteGate),
+        # and output of a retired request never reaches the turn.
+        current_gate: list = [None]
+
+        def admitted() -> bool:
+            gate = current_gate[0]
+            return gate is None or gate.admit()
 
         def emit_text(chunk) -> None:
+            if not admitted():
+                return
             if str(chunk or "").strip():
                 reasoning.text_boundary()       # the open reasoning block ends before the prose
             safe = text_stream.feed(chunk)
@@ -2473,26 +2548,70 @@ class Agent(GoalLifecycle):
             self.ui.on_text(safe)
 
         def emit_thinking(chunk, origin=None) -> None:
-            reasoning.thinking(chunk, origin)
+            if admitted():
+                reasoning.thinking(chunk, origin)
 
-        # The stall watcher reports "no response yet" from its own thread. Capture the UI route on
-        # THIS thread so a background fleet session's notice lands on that session.
-        watch_client = self.client if hasattr(self.client, "stall_listener") else None
-        old_listener = old_route = None
-        if watch_client is not None:
-            old_listener, old_route = watch_client.stall_listener, getattr(
-                watch_client, "stall_route", None)
-            route_factory = getattr(self.ui, "callback_route", None)
-            watch_client.stall_listener = self._on_model_wait
-            watch_client.stall_route = route_factory() if callable(route_factory) else None
+        route_factory = getattr(self.ui, "callback_route", None)
+        base_cancel = cancel or self.cancelled
         self._model_wait_shown = False
         result = None
         try:
             try:
-                result = self.client.chat(safe_messages, tools=tools, reasoning_effort=effort,
-                                          on_text=emit_text, on_thinking=emit_thinking,
-                                          cancel=cancel or self.cancelled)
+                while True:
+                    client = self.client
+                    gate = _RouteGate(base_cancel, client)
+                    current_gate[0] = gate
+                    self._route_gate = gate
+                    # The stall watcher reports "no response yet" from its own thread. Capture the
+                    # UI route on THIS thread so a background fleet session's notice lands on that
+                    # session.
+                    watched = hasattr(client, "stall_listener")
+                    old_listener = old_route = None
+                    if watched:
+                        old_listener, old_route = client.stall_listener, getattr(
+                            client, "stall_route", None)
+                        client.stall_listener = self._on_model_wait
+                        client.stall_route = route_factory() if callable(route_factory) else None
+                    old_timeout = getattr(client, "read_timeout", None)
+                    if read_timeout is not None and old_timeout is not None:
+                        client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
+                    try:
+                        result = client.chat(safe_messages, tools=tools, reasoning_effort=effort,
+                                             on_text=emit_text, on_thinking=emit_thinking,
+                                             cancel=gate)
+                    except LLMError:
+                        # A retired request can surface as a transport error instead of a cancel
+                        # (its socket was shut under it); that is the switch, not a failure.
+                        if not (gate.superseded and not base_cancel.is_set()
+                                and self.client is not client):
+                            raise
+                        from .llm import ChatResult
+                        result = ChatResult(finish_reason="cancelled")
+                    finally:
+                        gate.close()
+                        if getattr(self, "_route_gate", None) is gate:
+                            self._route_gate = None
+                        if old_timeout is not None:
+                            client.read_timeout = old_timeout
+                        if watched:
+                            client.stall_listener, client.stall_route = old_listener, old_route
+                    if not (gate.superseded and not base_cancel.is_set() and result is not None
+                            and getattr(result, "finish_reason", "") == "cancelled"
+                            and self.client is not client):
+                        break
+                    # Nothing of that request reached the turn: send it again on the new model.
+                    self._close_runs("cancelled", layers=("request",))
+                    if getattr(self, "_model_wait_shown", False):
+                        self._model_wait_shown = False
+                        self._show_model_wait(None, restore=False)
+                    self.ui.info(self._safe_text(
+                        f"↻ {getattr(client, 'model', '') or 'the previous model'} had not started "
+                        f"answering; sent this request to "
+                        f"{getattr(self.client, 'model', '') or 'the new model'} instead"))
+                    self._activity("waiting", "Waiting for the model")
+                    result = None
             finally:
+                current_gate[0] = None
                 final_text = text_stream.flush()
                 if final_text and not defer_text:
                     if final_text.strip():
@@ -2527,10 +2646,6 @@ class Agent(GoalLifecycle):
                     self.ui.on_text("".join(held_space))    # trailing whitespace, after the ends
                     held_space.clear()
         finally:
-            if old_timeout is not None:
-                self.client.read_timeout = old_timeout
-            if watch_client is not None:
-                watch_client.stall_listener, watch_client.stall_route = old_listener, old_route
             # reconnecting: a call that returned an answer proves the connection worked even when
             # nothing streamed to report it; a cancelled call ends its retry runs as stopped.
             self._settle_retry_runs(result)
@@ -2896,7 +3011,11 @@ class Agent(GoalLifecycle):
                       "present_plan is only for execution approval in Plan mode. artifact is for "
                       "custom HTML/apps. Never invent a URL."]
 
-        think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
+        prompt_level = self._effective_thinking("")
+        # Which level's guidance this prompt carries: a level changed while a turn runs is
+        # re-read before that turn's next request (see _chat), not only at the next prompt.
+        self._prompt_think_level = prompt_level
+        think = THINK_INSTRUCTIONS.get(prompt_level, "")
         if think:
             parts += ["", "# Reasoning", think]
 
@@ -4679,7 +4798,7 @@ class Agent(GoalLifecycle):
             self._trim_session_notices(len(user_text))
             self.messages.append(self._notice_message(notification, "wake"))
             self._monitor_turn_notice_chars += len(user_text)
-            thinking = self._effective_thinking("")
+            effort_text = ""
         else:
             images = self._pending_images
             self._pending_images = None
@@ -4691,11 +4810,17 @@ class Agent(GoalLifecycle):
             self.messages.append({"role": "user", "content": content})
             self._drain_monitors(with_prompt=True)
             self._save_turn_progress()
-            thinking = self._effective_thinking(user_text)
+            effort_text = user_text
         # Pass the raw level; the client maps it to the right per-provider reasoning
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
         # Ollama it becomes reasoning_effort:"none" (omitting would force thinking ON).
-        effort = thinking
+        # The level is read again before every request of the turn (current_effort below), so a
+        # change made while the turn runs applies from its next request, as the editor promises.
+        effort = self._effective_thinking(effort_text)
+        effort_floor: str | None = None     # "off" once a thinking-off closeout has been forced
+
+        def current_effort() -> str:
+            return effort_floor or self._effective_thinking(effort_text)
         configured_turn_limit = int(self.config.get("max_turns", 0) or 0)
         max_turns: int | None = configured_turn_limit if configured_turn_limit > 0 else None
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
@@ -4949,6 +5074,7 @@ class Agent(GoalLifecycle):
             # Every continuation lands here, so this is the one place that can honestly name the
             # gap between "a gate decided to keep going" and "the model started answering".
             self._activity("waiting", "Waiting for the model")
+            effort = current_effort()
             try:
                 result = self._chat(tools, effort, cancel=chat_cancel, read_timeout=chat_timeout,
                                     defer_text=defer_completion,
@@ -5201,7 +5327,7 @@ class Agent(GoalLifecycle):
                     finalization_retries += 1
                     if result.finish_reason == "length":
                         continues += 1
-                    effort = "off"
+                    effort = effort_floor = "off"
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\nYour last generation used its reasoning/output budget "
                         "without any normal-channel text or complete tool call. Stop hidden reasoning. "

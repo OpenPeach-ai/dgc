@@ -38,6 +38,10 @@
   function reasoningNote() {
     const detail = reasoningControl === "glm-flash-levels"
       ? "GLM Flash always reasons: Off/Low send Low, Medium/High send High, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+      : reasoningControl === "glm-levels"
+      ? "GLM always reasons (with thinking off it writes its reasoning into the answer): Off/Low send Low, Medium and High send those levels, Extra high/Ultra send Max. DGC’s instructions also vary by profile."
+      : reasoningControl === "ollama-levels"
+      ? "Off turns thinking off. Low, Medium and High are sent as Ollama’s thinking levels and Extra high as Max. A model that grades its thinking follows them; one that does not treats every level as on. DGC’s instructions also vary by profile."
       : reasoningControl === "toggle"
       ? "This model accepts thinking on/off. Low–Extra high change DGC’s instructions, not native reasoning levels."
       : reasoningControl === "levels"
