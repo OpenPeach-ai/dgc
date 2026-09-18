@@ -10,7 +10,9 @@ macOS and WSL are unproven. Native Windows is experimental: custom tools need Un
 The SDK launches `dgc serve` from a DGC CLI install: the `runtime=` you pass, the Python named by
 `DGC_PYTHON`, its own interpreter when that can import `dgc`, or the installed CLI (`dgc` on
 `PATH`, `~/.local/bin/dgc`, the installer's versions directory). A runtime that speaks another
-protocol is skipped with the reason. It is not the unrelated PyPI package named `dgc`.
+protocol is skipped with the reason; when none speaks v14, `DGC()` raises `DGCProtocolError`
+saying whether the CLI or dgc-sdk needs updating. It is not the unrelated PyPI package named
+`dgc`.
 
 0.5.2 on PyPI was built from a later commit than tag `sdk-v0.5.2` and differs from the wheel on
 that GitHub release (one comment line and the README). From 0.5.3 the PyPI files and the GitHub

@@ -122,9 +122,11 @@ the model decides within the limits below.
   default `RuntimePolicy(shell="sandboxed")` the session asks for the OS sandbox (`bwrap` on
   Linux, `sandbox-exec` on macOS): no network unless the policy allows it, no writes outside the
   workspace (none at all when a write tool is denied), no home directory. In `auto` mode the
-  shell runs only inside it and the `python` tool is refused. `shell="screened"` runs commands
-  unconfined and refuses those whose text looks like a network call or file write; that is best
-  effort, not a boundary.
+  shell runs only inside it and the `python` tool is refused. In the other modes every command
+  is a permission request for your `on_permission` callback: with a `RuntimePolicy`, allow rules
+  the workspace brings (`.dgc/permissions.json`) are not loaded. `shell="screened"` runs
+  commands unconfined and refuses those whose text looks like a network call or file write; that
+  is best effort, not a boundary.
 - **Sandbox requirement.** `sandbox={"requirement": "required"}` refuses to start a session whose
   runtime cannot confine shell commands; `"preferred"` starts anyway, warns, and reports why in
   `Session.sandbox`.
@@ -146,7 +148,7 @@ DGC(*, state_dir=None, runtime=None, inherit_user_state=False, model=None, base_
 
 | Parameter | Meaning |
 | --- | --- |
-| `state_dir` | Private directory for this client's isolated HOME, usage log and audit log. Created 0700 if missing; refused when owned by another user or writable by others. Default: a new private temporary directory. |
+| `state_dir` | Private directory for this client's isolated HOME, usage log and audit log. Created 0700 if missing, and an existing one you own is made 0700; refused when owned by another user or writable by others. Use a dedicated directory, not your project. Default: a new private temporary directory. |
 | `runtime` | Command that starts the agent, for example `["/opt/dgc/.venv/bin/python", "-m", "dgc", "serve"]` or `["dgc", "serve"]`. Default: discovered (see [Install](#install)). |
 | `inherit_user_state` | `True` runs against your real `~/.dgc` (your model, rules, MCP servers). Options DGC would have to save there (a different model, `max_turns`, `verify_command`, and so on) raise `DGCConfigError`. Development only. |
 | `model`, `base_url`, `api_key` | Model name, OpenAI-compatible endpoint and key for every session. Without them the CLI's own defaults apply. |
@@ -224,8 +226,10 @@ Running:
 - `stream(prompt, **same options)` → `RunHandle`.
 - `followup(text, *, timeout=180.0, output_schema=None, skills=None, repair_attempts=1)` →
   `RunHandle` — queue a prompt behind the run in flight (or start it now when idle). Its turn is
-  observed, audited and billed like any run.
-- `steer(text)` — add guidance to the run in flight; raises `DGCRuntimeError` when no run is active.
+  observed, audited and billed like any run. Behind a run with its own `max_turns` or
+  `output_schema` it is sent once that run is over, so it runs under the session's settings; it
+  does not run when the run in front of it is cancelled or times out.
+- `steer(text)` — add guidance to the run in flight; raises `DGCConfigError` when no run is active.
 - `cancel()` — stop the run in flight, including one waiting for a decision.
 - `close()` — stop this session's child. `Session` is a context manager.
 
@@ -264,8 +268,9 @@ gets no answer within `request_timeout` raises `DGCTimeoutError`.
 ### `RunHandle`
 
 Returned by `stream()` and `followup()`. `run_id` identifies the run. Iterate the handle for
-`RunEvent`s. `result(timeout=180.0)` → `RunResult` drains events nobody iterated and returns
-when the run ends; `timeout` (seconds, `None` for no limit) bounds the wait, not the run.
+`RunEvent`s. `result(timeout=None)` → `RunResult` drains events nobody iterated and returns
+when the run ends. `timeout` (seconds) bounds this wait, not the run: when it lapses first,
+`DGCTimeoutError` is raised and the run keeps going. With `None` the run's own timeout bounds it.
 `cancel()` stops the run. Use it as a context manager: leaving the block before the run ended
 cancels it and frees the session.
 
@@ -366,14 +371,17 @@ RuntimePolicy(network="deny", extra_read_dirs=(), deny_path_prefixes=(), deny_to
 
 `RetryPolicy(max_attempts=4, retry_on=(429, 500, 502, 503, 504), backoff_s=0.5)`.
 `max_attempts` (1 to 11) is how many times a model request whose stream stalls is sent;
-`RetryPolicy(max_attempts=1)` turns stall re-issues off. The runtime also retries HTTP 408, 429
-and 5xx answers on a fixed schedule; `retry_on` and `backoff_s` describe that schedule and cannot
-be changed (another value raises `DGCUnsupportedError`). Tool calls are never retried.
+`RetryPolicy(max_attempts=1)` turns stall re-issues off. The runtime also retries HTTP 429 and
+5xx answers (and 408 from the Anthropic Messages API) and dropped connections on a fixed schedule,
+up to 4 tries; `retry_on` and `backoff_s` describe that schedule and cannot be changed (another
+value raises `DGCUnsupportedError`). Tool calls are never retried.
 
 ### Usage, cost and audit
 
 - `Pricing(input_per_million=0.0, output_per_million=0.0, cached_input_per_million=0.0)` — USD
-  per million tokens, set by you. DGC does not know your provider's prices.
+  per million tokens, set by you. DGC does not know your provider's prices. Input tokens include
+  cached ones; the cached part is billed at `cached_input_per_million` (left at 0, at the input
+  price).
 - `cost_usd(input_tokens, output_tokens, cached_input_tokens, pricing)` → `float | None`.
 - A run's `usage` holds the provider's token counts for that run (input, output, cached input),
   or `None` values when the provider did not report them, and `cost_usd` when you set `pricing`.
@@ -416,8 +424,8 @@ Other result types: `SessionInfo` (`id`, `path`, `name`, `preview`, `message_cou
 | `DGCUnsupportedError` | A requested capability is unavailable, such as a required sandbox. |
 | `DGCRuntimeError` | The runtime could not start, stay alive, or carry out a request. |
 | `DGCCommandRejectedError` | The runtime refused a request; `reason` and `command` say which and why. |
-| `DGCProtocolError` | The runtime speaks another protocol version; the message names the CLI or SDK you need. |
-| `DGCTimeoutError` | Startup or a control request did not answer in time (also a `TimeoutError`). |
+| `DGCProtocolError` | The runtime, or every runtime discovery found, speaks another protocol version; the message says whether to update the CLI or dgc-sdk. |
+| `DGCTimeoutError` | Startup, a control request, or a `RunHandle.result(timeout)` wait ran out of time (also a `TimeoutError`). |
 
 A run that fails does not raise: its `RunResult` has `status="failed"` and the reason in `error`.
 
