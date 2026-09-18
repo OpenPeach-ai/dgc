@@ -354,7 +354,8 @@ class Session:
         if timeout is not None and (
                 isinstance(timeout, bool) or not isinstance(timeout, (int, float))
                 or not math.isfinite(timeout) or timeout <= 0):
-            raise DGCConfigError("timeout must be a positive number of seconds, or None for no limit")
+            raise DGCConfigError(
+                "timeout must be a positive number of seconds, or None for no limit")
         if output_schema is not None:
             assert_supported(output_schema)
         with self._lock:
@@ -885,7 +886,9 @@ class Session:
                     result.status = "failed"
                     result.partial_text = "".join(text_buf) or "".join(blocks.values())
                     break
-                remaining = None if deadline is None else max(0.05, deadline - time.monotonic())
+                # Wait in slices of at most an hour; the deadline check above ends the run.
+                remaining = (None if deadline is None
+                             else max(0.05, min(3600.0, deadline - time.monotonic())))
                 try:
                     event = self._next_event(timeout=remaining)
                 except DGCEventTimeout:

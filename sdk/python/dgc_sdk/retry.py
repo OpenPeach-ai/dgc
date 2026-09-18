@@ -36,11 +36,13 @@ class RetryPolicy:
         attempts = self.max_attempts
         if isinstance(attempts, bool) or not isinstance(attempts, int) or not (
                 1 <= attempts <= _MAX_ATTEMPTS):
-            raise DGCConfigError(f"RetryPolicy.max_attempts must be an integer from 1 to {_MAX_ATTEMPTS}")
+            raise DGCConfigError(
+                f"RetryPolicy.max_attempts must be an integer from 1 to {_MAX_ATTEMPTS}")
         try:
             statuses = tuple(sorted(int(code) for code in self.retry_on))
         except (TypeError, ValueError) as exc:
-            raise DGCConfigError("RetryPolicy.retry_on must be a sequence of HTTP status codes") from exc
+            raise DGCConfigError(
+                "RetryPolicy.retry_on must be a sequence of HTTP status codes") from exc
         if statuses != tuple(sorted(RUNTIME_RETRY_STATUSES)):
             raise DGCUnsupportedError(
                 "RetryPolicy.retry_on cannot be changed: the DGC runtime always retries HTTP 408, "

@@ -462,7 +462,9 @@ class TimeoutTests(_Base):
         with self._client() as dgc:
             session = dgc.session(cwd=self.work, permissions=self._auto())
             result = session.run("Summarize README. Do not edit files.", timeout=7200)
+            huge = session.run("Summarize README. Do not edit files.", timeout=10**9)
         self.assertEqual(result.status, "completed", result)
+        self.assertEqual(huge.status, "completed", huge)
 
     def test_invalid_timeouts_fail_before_the_prompt_is_sent(self):
         with self._client() as dgc:

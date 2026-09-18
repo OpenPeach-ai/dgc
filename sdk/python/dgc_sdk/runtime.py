@@ -73,7 +73,8 @@ def sdk_root() -> Path:
 
 def is_checkout() -> bool:
     """True when this SDK is imported from a DGC source tree rather than an installed wheel."""
-    return (_REPO_ROOT / "dgc" / "headless.py").is_file() and _SDK_ROOT == _REPO_ROOT / "sdk" / "python"
+    return ((_REPO_ROOT / "dgc" / "headless.py").is_file()
+            and _SDK_ROOT == _REPO_ROOT / "sdk" / "python")
 
 
 @dataclass(frozen=True)
@@ -172,7 +173,8 @@ def _launcher_python(launcher: Path) -> str:
             candidate = match.group(1) if match else ""
         elif candidate.endswith("/env") and len(words) > 1:
             candidate = shutil.which(words[1]) or ""
-        if candidate and Path(candidate).name.lower().startswith("python") and os.path.isfile(candidate):
+        if (candidate and Path(candidate).name.lower().startswith("python")
+                and os.path.isfile(candidate)):
             return candidate
     for name in ("python3", "python", "python.exe"):
         sibling = real.parent / name
@@ -195,7 +197,8 @@ def _installed_launchers(env: Mapping[str, str], home: Path) -> list[tuple[Path,
     if env.get("DGC_DATA_DIR"):
         data_dirs.append(Path(env["DGC_DATA_DIR"]).expanduser())
     xdg = env.get("XDG_DATA_HOME", "")
-    data_dirs.append((Path(xdg) if xdg and os.path.isabs(xdg) else home / ".local" / "share") / "dgc")
+    share = Path(xdg) if xdg and os.path.isabs(xdg) else home / ".local" / "share"
+    data_dirs.append(share / "dgc")
     for data in data_dirs:
         try:
             names = [entry.name for entry in (data / "versions").iterdir() if entry.is_dir()]
