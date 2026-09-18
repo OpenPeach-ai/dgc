@@ -15,12 +15,14 @@ from typing import Any, Literal
 import dgc_sdk
 from dgc_sdk import (
     PROTOCOL, REQUIRES_CLI, AgentInfo, Artifact, AsyncDGC, AsyncRunHandle, AsyncSession, Checkpoint,
-    DGC, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError, DGCTimeoutError,
+    DGC, DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError,
+    DGCTimeoutError,
     DGCUnsupportedError, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse, McpServerInfo,
     Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction, PermissionMode,
     PermissionPolicy, PermissionRequest, PermissionRule, PlanAction, PlanRequest, Pricing, Question,
     QuestionAnswer, QuestionOption, QuestionRequest, RetryPolicy, RunEvent, RunHandle, RunResult,
-    RunStatus, RuntimePolicy, SandboxPolicy, SandboxRequirement, Session, SessionInfo, SkillInfo,
+    RunStatus, RuntimePolicy, SandboxPolicy, SandboxRequirement, SandboxStatus, Session,
+    SessionInfo, SkillInfo,
     TaskItem, TaskStatus, ToolRecord, ToolSpec, UnhandledPolicy, VerificationResult, cost_usd,
     define_tool, redact, redact_text,
 )
@@ -34,7 +36,11 @@ REQUIREMENT: SandboxRequirement = "off"
 TERMINAL: tuple[RunStatus, ...] = ("completed", "failed", "cancelled", "blocked")
 TASK: TaskStatus = "pending"
 ERRORS: tuple[type[DGCError], ...] = (DGCConfigError, DGCProtocolError, DGCRuntimeError,
-                                      DGCTimeoutError, DGCUnsupportedError)
+                                      DGCTimeoutError, DGCUnsupportedError, DGCCommandRejectedError)
+
+
+def rejection(error: DGCCommandRejectedError) -> str:
+    return f"{error.command}: {error.reason}"
 
 
 def allow_reads(request: PermissionRequest) -> PermissionAction:
@@ -101,7 +107,10 @@ def use_session(session: Session) -> str:
     handle.cancel()
     session.cancel()
     session.steer("Prefer the smaller fix.")
-    session.followup("Then run the tests.")
+    queued: RunHandle = session.followup("Then run the tests.", timeout=None)
+    queued_id: str = queued.run_id
+    sandbox: SandboxStatus = session.sandbox
+    confined: bool = sandbox.active and bool(sandbox.backend or sandbox.reason or sandbox.requirement)
     sessions: list[SessionInfo] = session.list_sessions()
     checkpoints: list[Checkpoint] = session.list_checkpoints()
     skills: list[SkillInfo] = session.list_skills()
@@ -133,7 +142,7 @@ def use_session(session: Session) -> str:
     session.new_session()
     session.delete_session(sessions[0].path)
     session.bind_identity()
-    identity: str = session.session_id + session.session_path
+    identity: str = session.session_id + session.session_path + queued_id + str(confined)
     session.close()
     return " ".join([summarize(result), summarize(streamed), identity, goal.text, str(len(memory)),
                      str(len(checkpoints) + len(skills) + len(hooks) + len(rules) + len(servers)
@@ -144,10 +153,13 @@ def use_client(state: Path) -> str:
     with DGC(state_dir=state, model="qwen3:8b", base_url="http://127.0.0.1:11434/v1", api_key=None,
              mode="plan", pricing=Pricing(input_per_million=1.0, output_per_million=2.0),
              department="erp", policy=RuntimePolicy(network="deny", deny_tools=("write_file",)),
-             retry=RetryPolicy(max_attempts=2), sandbox={"requirement": REQUIREMENT}) as dgc:
+             retry=RetryPolicy(max_attempts=2), sandbox=SandboxPolicy(requirement=REQUIREMENT),
+             inherit_env=["LANG"], start_timeout=60.0, request_timeout=30.0,
+             extra_config={"notify": "off"}) as dgc:
         version: str = dgc.version
+        where: Path = dgc.state_dir
         runtime: list[str] = dgc.raw_runtime
-        session = dgc.session(cwd=state, permissions={"mode": MODE, "unhandled": UNHANDLED},
+        session = dgc.session(cwd=state, permissions=PermissionPolicy(mode=MODE, unhandled=UNHANDLED),
                               on_permission=ON_PERMISSION, on_plan=ON_PLAN, on_question=ON_QUESTION,
                               on_mcp_input=ON_MCP_INPUT, tools=[TOOL], decision_timeout=None)
         text = use_session(session)
@@ -159,7 +171,7 @@ def use_client(state: Path) -> str:
         latest.close()
     cost: float | None = cost_usd(1000, 500, 0, Pricing(output_per_million=10.0))
     safe: Any = redact({"api_key": "x"})
-    return " ".join([version, runtime[0], text, str(report.get("runs")), str(len(rows)), str(cost),
+    return " ".join([version, str(where), runtime[0], text, str(report.get("runs")), str(len(rows)), str(cost),
                      redact_text("Bearer x"), str(safe),
                      str(PermissionPolicy(mode=MODE, unhandled=UNHANDLED)),
                      str(SandboxPolicy(requirement=REQUIREMENT)), str(Question(id="q", question="?")),
@@ -167,9 +179,16 @@ def use_client(state: Path) -> str:
 
 
 async def use_async(state: Path) -> str:
-    async with AsyncDGC(state_dir=state, model="qwen3:8b", base_url="http://127.0.0.1:11434/v1") as dgc:
+    async def ask(request: PermissionRequest) -> PermissionAction:
+        return "deny" if request.name == "bash" else "once"
+
+    async with AsyncDGC(state_dir=state, model="qwen3:8b", base_url="http://127.0.0.1:11434/v1",
+                        start_timeout=60.0, inherit_env=False) as dgc:
         version: str = dgc.version
-        session: AsyncSession = await dgc.session(cwd=state, permissions={"mode": "plan", "unhandled": "deny"})
+        client: DGC = dgc.sync
+        session: AsyncSession = await dgc.session(cwd=state, permissions={"mode": "plan", "unhandled": "deny"},
+                                                  on_permission=ask, decision_timeout=None)
+        underlying: Session = session.sync
         result: RunResult = await session.run("Summarize.", timeout=60.0)
         handle: AsyncRunHandle = await session.stream("Summarize.")
         async with handle:
@@ -183,8 +202,11 @@ async def use_async(state: Path) -> str:
         goal: Goal = await session.get_goal()
         rules: list[PermissionRule] = await session.list_permissions()
         servers: list[McpServerInfo] = await session.list_mcp_servers()
+        await session.steer("Prefer the smaller fix.")
+        queued: AsyncRunHandle = await session.followup("Then run the tests.")
         await session.close()
         resumed: AsyncSession = await dgc.resume(latest=True, cwd=state)
         await resumed.close()
-    return " ".join([version, summarize(result), summarize(streamed), goal.text,
+    return " ".join([version, client.version, underlying.session_id, queued.run_id,
+                     summarize(result), summarize(streamed), goal.text,
                      str(len(sessions) + len(checkpoints) + len(rules) + len(servers))])

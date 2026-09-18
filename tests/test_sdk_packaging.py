@@ -300,7 +300,11 @@ class PublicApiTests(unittest.TestCase):
                     continue
                 if parameter.annotation is inspect.Parameter.empty:
                     missing.append(f"{qualname}({parameter.name})")
-            if signature.return_annotation is inspect.Signature.empty:
+            # mypy (and PEP 484) treat an __init__ with annotated parameters as returning None.
+            annotated_init = qualname.endswith(".__init__") and any(
+                parameter.annotation is not inspect.Parameter.empty
+                for parameter in signature.parameters.values())
+            if signature.return_annotation is inspect.Signature.empty and not annotated_init:
                 missing.append(f"{qualname} -> ?")
         self.assertEqual(missing, [], "unannotated public API")
 
