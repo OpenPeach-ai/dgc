@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.7 — 2026-09-18
+
+- Requires CLI 0.41.5 or newer; editor protocol remains v14.
+- **Every error line is shown again.** 0.26.6 hid an error whose text matched the previous error, so the backend-exit reason vanished after a reconnect replayed the chat, and a repeated failure on the next turn or in a new chat showed no reason. The skipped-event notice is still shown once per event type by the backend connection.
+
 ## 0.26.6 — 2026-09-18
 
 - Requires CLI 0.41.5; editor protocol remains v14.
@@ -12,6 +17,7 @@
 
 ## 0.26.4 — 2026-09-18
 
+- Built, not published to the registries; 0.26.5 shipped the same change.
 - Requires CLI 0.41.4; editor protocol remains v14.
 - **Tasks row matches the terminal.** When every item is done and the turn is idle, the Tasks list above the composer hides. A new prompt's checklist replaces a finished one instead of sitting at 4/4.
 

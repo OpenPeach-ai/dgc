@@ -1,6 +1,6 @@
 export const VERSION = "0.5.3";
 export const PROTOCOL = 14;
-export const REQUIRES_CLI = "0.41.3";
+export const REQUIRES_CLI = "0.41.6";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto";
 export type PermissionAction = "once" | "always" | "deny";
@@ -200,6 +200,8 @@ export type ClientOptions = {
   mode?: PermissionMode;
   thinking?: string;
   extraEnv?: Record<string, string>;
+  /** Host variables the runtime may see besides the basic ones: false (default), names, or true. */
+  inheritEnv?: boolean | string[];
   instructions?: string;
   department?: string;
   pricing?: Pricing;

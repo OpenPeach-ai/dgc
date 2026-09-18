@@ -1,0 +1,45 @@
+# @vibedgc/sdk
+
+Node client for the DGC coding harness. It starts a managed `dgc serve` child with an isolated
+HOME and speaks editor protocol v14. Version 0.5.3 pairs with DGC CLI 0.41.6. Node 22 or newer.
+
+The package is attached to the GitHub release `sdk-v0.5.3` as `vibedgc-sdk-0.5.3.tgz`. It is not
+on the npm registry yet.
+
+```bash
+npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vibedgc-sdk-0.5.3.tgz
+```
+
+```js
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DGC } from "@vibedgc/sdk";
+
+const dgc = new DGC({
+  stateDir: mkdtempSync(join(tmpdir(), "dgc-sdk-")),
+  model: process.env.DGC_MODEL,          // for example "qwen3:8b"
+  baseUrl: process.env.DGC_BASE_URL,     // for example "http://127.0.0.1:11434/v1"
+});
+try {
+  const session = await dgc.session({
+    cwd: process.cwd(),
+    permissions: { mode: "plan", unhandled: "deny" },
+  });
+  const result = await session.run("Summarize this repository in two sentences.");
+  console.log(result.status, result.finalText);
+} finally {
+  await dgc.close();
+}
+```
+
+The SDK needs a DGC CLI (0.41.6 or newer). It uses `DGC_PYTHON` when set, else the installed
+`dgc` launcher (on `PATH` or `~/.local/bin/dgc`, where `curl -fsSL https://vibedgc.com/install.sh | bash`
+puts it), else `python3 -m dgc`. Pass `runtime: [...]` to choose explicitly.
+
+The runtime child sees only basic variables (`PATH`, locale, terminal, temp and certificate
+locations), the isolated HOME, `apiKey` and `extraEnv`. Pass `inheritEnv: ["NAME"]` (or `true`)
+to hand it more of your environment.
+
+Full reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md).
+Licensed under Apache-2.0.

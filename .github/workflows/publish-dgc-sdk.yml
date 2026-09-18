@@ -1,29 +1,203 @@
-# Publish sdk/python to PyPI as dgc-sdk. First upload needs a pending trusted
-# publisher on pypi.org (project dgc-sdk, repo OpenPeach-ai/dgc, this workflow).
+# Publish dgc-sdk from an sdk-vX.Y.Z tag, and only from that tag's tree.
+#
+# build    — checks out the tag, proves it is the released version on public main, runs the SDK
+#            suites against the built wheel, and uploads one set of artifacts.
+# pypi     — uploads that wheel and sdist through PyPI Trusted Publishing (OIDC, no token) with
+#            PEP 740 attestations. The trusted publisher is bound to this file name and to the
+#            `pypi` environment, so neither may be renamed.
+# release  — attests the same bytes with GitHub artifact attestations and attaches them, the npm
+#            tarball, the SBOM and SHA256SUMS to the GitHub release. Latest stays on the CLI.
+#
+# workflow_dispatch republishes an existing tag (for example after a failed upload); it still
+# builds from refs/tags/<tag>, never from the branch it was dispatched on.
 name: Publish dgc-sdk
 on:
-  workflow_dispatch:
   push:
     tags:
       - "sdk-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing SDK tag to publish, for example sdk-v0.5.3"
+        required: true
+        type: string
 
-permissions:
-  contents: read
-  id-token: write
+permissions: {}
+
+concurrency:
+  group: publish-dgc-sdk-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  pypi:
-    name: Upload dgc-sdk to PyPI
+  build:
+    name: Build and test dgc-sdk from its tag
     runs-on: ubuntu-latest
-    environment: pypi
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - name: Resolve the tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then tag="$INPUT_TAG"; else tag="$GITHUB_REF_NAME"; fi
+          if ! [[ "$tag" =~ ^sdk-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::'$tag' is not an sdk-vX.Y.Z tag"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag is this SDK version, on public main
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          python3 - "$VERSION" <<'PY'
+          import json, re, sys, tomllib
+          from pathlib import Path
+          version = sys.argv[1]
+          found = {
+              "sdk/python/dgc_sdk/_version.py": re.search(r'^__version__ = "([^"]+)"',
+                  Path("sdk/python/dgc_sdk/_version.py").read_text(), re.M).group(1),
+              "sdk/python/pyproject.toml": tomllib.loads(
+                  Path("sdk/python/pyproject.toml").read_text())["project"]["version"],
+              "sdk/typescript/package.json": json.loads(
+                  Path("sdk/typescript/package.json").read_text())["version"],
+          }
+          wrong = {path: value for path, value in found.items() if value != version}
+          if wrong:
+              raise SystemExit(f"tag says {version}, but {wrong}")
+          PY
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "refs/tags/$TAG^{commit}" origin/main
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - run: python -m pip install build twine
-      - run: python -m build sdk/python
-      - run: python -m twine check --strict sdk/python/dist/*
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          packages-dir: sdk/python/dist
+          node-version: 22
+      - name: The signed checkout manifest matches the tagged tree
+        run: python sdk/scripts/make_sbom.py --verify
+      - name: Build the wheel, sdist and npm tarball
+        run: |
+          python -m pip install -r sdk/scripts/requirements-release.txt
+          python -m build sdk/python --outdir dist/sdk
+          python -m twine check --strict dist/sdk/*
+          (cd sdk/typescript && npm ci && npm pack --pack-destination ../../dist/sdk)
+          python sdk/scripts/check_dist.py dist/sdk
+      - name: SDK suites against the built wheel (clean, non-editable venv)
+        env:
+          DGC_SDK_TEST_INSTALLED: "1"
+          DGC_REQUIRE_RELEASE_TOOLS: "1"
+          DGC_REQUIRE_TS_PACKAGE: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/app"
+          "$RUNNER_TEMP/app/bin/python" -m pip install -r requirements.lock
+          "$RUNNER_TEMP/app/bin/python" -m pip install --no-deps .
+          "$RUNNER_TEMP/app/bin/python" -m pip install --no-deps dist/sdk/dgc_sdk-*.whl
+          "$RUNNER_TEMP/app/bin/python" -m pip check
+          "$RUNNER_TEMP/app/bin/python" -m pip install -r sdk/scripts/requirements-release.txt
+          export DGC_PYTHON="$RUNNER_TEMP/app/bin/python"
+          (cd "$RUNNER_TEMP" && "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_installed.py" \
+            "$GITHUB_WORKSPACE"/tests/test_dgc_sdk*.py "$GITHUB_WORKSPACE"/tests/test_sdk_*.py)
+          (cd "$RUNNER_TEMP" && "$DGC_PYTHON" -m mypy --strict "$GITHUB_WORKSPACE/tests/sdk_typing/public_api.py")
+          node --experimental-strip-types --test tests/test_dgc_sdk_ts.mjs tests/test_dgc_sdk_ts_package.mjs
+      - name: Release manifest (SBOM and SHA256SUMS over the exact artifacts)
+        run: python sdk/scripts/make_sbom.py --dist dist/sdk
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dgc-sdk-${{ steps.tag.outputs.version }}
+          path: dist/sdk/*
+          if-no-files-found: error
+
+  pypi:
+    name: Upload dgc-sdk to PyPI (trusted publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dgc-sdk-${{ needs.build.outputs.version }}
+          path: artifacts
+      - name: Verify the downloaded bytes and keep only the Python distributions
+        shell: bash
+        run: |
+          (cd artifacts && sha256sum -c SHA256SUMS)
+          mkdir pypi
+          cp "artifacts/dgc_sdk-${{ needs.build.outputs.version }}-py3-none-any.whl" \
+             "artifacts/dgc_sdk-${{ needs.build.outputs.version }}.tar.gz" pypi/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi
+          attestations: true
+          # No skip-existing: PyPI accepts a re-upload of identical bytes and rejects different
+          # bytes under a published file name, which is exactly the guarantee wanted here.
+
+  release:
+    name: Attest and attach the same artifacts to the GitHub release
+    needs: [build, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dgc-sdk-${{ needs.build.outputs.version }}
+          path: artifacts
+      - run: (cd artifacts && sha256sum -c SHA256SUMS)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: artifacts/*
+      - name: Create or complete the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          dgc-sdk $VERSION: the Python package on PyPI (\`pip install dgc-sdk==$VERSION\`) and the
+          Node package \`vibedgc-sdk-$VERSION.tgz\` (\`npm install <url of that asset>\`).
+
+          The publish workflow built every file here from this tag. The wheel and sdist are the
+          same bytes as on PyPI. Verify a download against this repository's workflow:
+
+              sha256sum -c SHA256SUMS --ignore-missing
+              gh attestation verify dgc_sdk-$VERSION-py3-none-any.whl --repo $GH_REPO \\
+                --signer-workflow $GH_REPO/.github/workflows/publish-dgc-sdk.yml
+
+          See docs/SDK.md, "Verifying a release".
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A rerun: published assets must be these exact bytes; attach only what is missing.
+            mkdir published
+            gh release download "$TAG" --dir published
+            for file in artifacts/*; do
+              name=$(basename "$file")
+              if [ -e "published/$name" ]; then
+                cmp -s "$file" "published/$name" || { echo "::error::$name on the release differs"; exit 1; }
+              else
+                gh release upload "$TAG" "$file"
+              fi
+            done
+          else
+            gh release create "$TAG" artifacts/* --verify-tag --latest=false \
+              --title "DGC SDK $VERSION" --notes-file notes.md
+          fi

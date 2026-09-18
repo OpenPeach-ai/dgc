@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -79,6 +80,7 @@ export class DGC {
     const env = isolatedEnv(
       this.options.stateDir, extra, this.options.inheritUserState,
       this.options.inheritUserState ? undefined : options.cwd,
+      this.options.inheritEnv ?? false,
     );
     const argv = this.options.runtime ?? defaultRuntime();
     const transport = new Transport(argv, options.cwd, env);
@@ -98,8 +100,9 @@ export class DGC {
     }
     let hub: ToolHub | null = null;
     if (options.tools?.length) {
-      const slot = join(this.options.stateDir, `tools-${randomUUID().slice(0, 8)}`);
-      mkdirSync(slot, { recursive: true });
+      // A private 0700 directory from mkdtemp: unpredictable, and short enough for the AF_UNIX
+      // path limit (104 bytes on macOS) wherever stateDir lives.
+      const slot = mkdtempSync(join(tmpdir(), "dgc-sdk-"));
       hub = new ToolHub(join(slot, "tools.sock"), options.tools);
       try {
         await hub.start();
@@ -123,10 +126,18 @@ export class DGC {
             log_level: "warning",
           },
         }, "mcp_servers", 20_000);
-        if (catalog.error) {
+        const items = Array.isArray(catalog.items) ? catalog.items as Array<Record<string, unknown>> : [];
+        const app = items.find((item) => item.name === "app");
+        const problem = catalog.error
+          ? String(catalog.error)
+          : !app ? "the app tool server is missing from the catalog"
+            : app.state !== "connected" ? `the app tool server is ${String(app.state || "not connected")}`
+              + (app.error ? `: ${String(app.error)}` : "")
+              : "";
+        if (problem) {
           hub.close();
           transport.close();
-          throw new Error(`custom tools failed to connect: ${String(catalog.error)}`);
+          throw new Error(`custom tools failed to connect: ${problem}`);
         }
       } catch (error) {
         hub.close();

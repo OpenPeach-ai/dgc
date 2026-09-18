@@ -18,8 +18,8 @@ jobs:
         python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -38,14 +38,14 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -57,14 +57,14 @@ jobs:
           version=$(sed -n 's/^__version__ = "\([^"]*\)"$/\1/p' dgc/__init__.py)
           test "$GITHUB_REF_NAME" = "v$version"
           git merge-base --is-ancestor "${GITHUB_REF_NAME}^{commit}" origin/main
-      - run: python -m pip install build
+      - run: python -m pip install -r sdk/scripts/requirements-release.txt
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
       - run: bash scripts/preflight.sh
       - run: python -m build
       - run: bash scripts/build-release.sh
       - run: python scripts/release_bundle.py dist/release --bind-git . --require-public
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/release/dgc.tar.gz

@@ -528,7 +528,7 @@ class DGC:
     def __enter__(self) -> "DGC":
         return self
 
-    def __exit__(self, *_exc) -> None:
+    def __exit__(self, *_exc: object) -> None:
         self.close()
 
 

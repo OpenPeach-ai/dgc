@@ -1,0 +1,6 @@
+# Pinned tools for building, checking and type-checking dgc-sdk (CI, publish workflow,
+# release-sdk.sh). PyYAML lets tests/test_sdk_packaging.py read the workflows.
+build==1.6.1
+twine==7.0.0
+mypy==2.3.1
+PyYAML==6.0.3

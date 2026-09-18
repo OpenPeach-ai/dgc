@@ -1,4 +1,5 @@
-import { unlinkSync, existsSync } from "node:fs";
+import { existsSync, rmdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import net from "node:net";
 import { VERSION } from "./types.ts";
 
@@ -52,6 +53,8 @@ export class ToolHub {
     try { this.server?.close(); } catch { /* */ }
     this.server = null;
     try { if (existsSync(this.socketPath)) unlinkSync(this.socketPath); } catch { /* */ }
+    // The socket lives alone in a private mkdtemp directory; remove it once it is empty.
+    try { rmdirSync(dirname(this.socketPath)); } catch { /* not empty or already gone */ }
   }
 
   private serve(socket: net.Socket): void {

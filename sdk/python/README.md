@@ -1,36 +1,52 @@
 # dgc-sdk
 
-Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.5. Frozen 0.5.2.
+Run the DGC coding agent inside your own Python application or CI job. Version **0.5.3**, editor
+protocol v14, pairs with DGC CLI **0.41.6**. Python 3.10+, proven on Linux.
 
 ```bash
-python3 -m pip install dgc-sdk
+python3 -m pip install dgc-sdk==0.5.3
 ```
 
-That installs **this** package (`import dgc_sdk`). It is not PyPI `dgc` (an unrelated clustering library). Until the index has this release, use the GitHub wheel:
+This installs `import dgc_sdk`. It is not the unrelated PyPI project `dgc`.
+
+The SDK drives a `dgc serve` process from a DGC CLI install, which it finds on its own (`dgc` on
+`PATH`, `~/.local/bin/dgc`, or the installer's versions directory). Install the CLI:
 
 ```bash
-python3 -m pip install \
-  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
+curl -fsSL https://vibedgc.com/install.sh | bash
 ```
+
+To pin a different install, set `DGC_PYTHON` to its Python, for example
+`export DGC_PYTHON="$(dirname "$(readlink -f "$(command -v dgc)")")/python"`.
+
+Point `DGC_MODEL` and `DGC_BASE_URL` at an OpenAI-compatible endpoint (for example a local Ollama
+at `http://127.0.0.1:11434/v1`), then run this from the repository you want summarized:
 
 ```python
-from pathlib import Path
-from dgc_sdk import DGC, QuestionAnswer, define_tool
+import os
+import tempfile
 
-with DGC(state_dir=Path("/tmp/dgc-sdk-state"), model="demo-model",
-         base_url="http://127.0.0.1:11434/v1") as dgc:
-    session = dgc.session(
-        cwd=".",
-        permissions={"mode": "default", "unhandled": "deny"},
-        on_permission=lambda req: "deny",
-        on_question=lambda req: {req.questions[0].id: QuestionAnswer(selected=(0,))}
-        if req.questions else "dismiss",
-    )
-    result = session.run("Summarize this repository. Do not edit files.")
+from dgc_sdk import DGC
+
+with DGC(
+    state_dir=tempfile.mkdtemp(prefix="dgc-sdk-"),
+    model=os.environ["DGC_MODEL"],          # for example "qwen3:8b"
+    base_url=os.environ["DGC_BASE_URL"],    # for example "http://127.0.0.1:11434/v1"
+    api_key=os.environ.get("DGC_API_KEY"),  # only when the endpoint needs a key
+) as dgc:
+    session = dgc.session(cwd=".", permissions={"mode": "plan", "unhandled": "deny"})
+    result = session.run("Summarize this repository in two sentences. Do not edit files.")
     print(result.status, result.final_text)
-    session.close()
-    restored = dgc.resume(latest=True, cwd=".", permissions={"mode": "default", "unhandled": "deny"})
-    print(restored.session_id, restored.history().get("items") and "history ok")
+    if result.error:
+        print("error:", result.error)
 ```
 
-From a clone: `pip install -e sdk/python`. The wheel still needs a DGC runtime (`python -m dgc serve`, CLI 0.41.5). Set `inherit_user_state=False` in production.
+It prints `completed` and the summary. Each `DGC` client keeps its conversations, checkpoints and
+logs in `state_dir`, an isolated HOME; your own `~/.dgc` is not touched.
+
+- Guide and full API reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md)
+- Runnable examples: [examples/sdk](https://github.com/OpenPeach-ai/dgc/tree/sdk-v0.5.3/examples/sdk)
+- Changes: [sdk/CHANGELOG.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/sdk/CHANGELOG.md)
+- Verifying this package against its GitHub release: [docs/SDK.md#verifying-a-release](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md#verifying-a-release)
+
+Licensed under Apache-2.0.

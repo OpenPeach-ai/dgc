@@ -1,38 +1,53 @@
 #!/usr/bin/env python3
-"""Small local SDK probe. Point cwd at a checkout and a reachable model.
+"""Ask one read-only question about a workspace and print the answer.
 
-  PYTHONPATH=sdk/python:. python3 examples/sdk/hello_run.py /path/to/workspace
+    python3 -m pip install dgc-sdk
+    export DGC_MODEL=qwen3:8b DGC_BASE_URL=http://127.0.0.1:11434/v1
+    python3 hello_run.py /path/to/workspace
+
+The model and endpoint come from --model/--base-url or DGC_MODEL/DGC_BASE_URL; DGC_API_KEY is
+passed through when the endpoint needs a key. The SDK runs `python -m dgc serve` from the
+Python named by DGC_PYTHON (see the SDK README). State goes to a fresh temporary directory
+unless --state-dir is given.
 """
 from __future__ import annotations
 
+import argparse
+import os
 import sys
+import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "sdk" / "python"))
-sys.path.insert(0, str(ROOT))
-
-from dgc_sdk import DGC, QuestionAnswer
+from dgc_sdk import DGC, DGCError
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: hello_run.py WORKSPACE", file=sys.stderr)
-        return 2
-    workspace = Path(sys.argv[1]).resolve()
-    state = Path("/tmp/dgc-sdk-hello")
-    with DGC(state_dir=state, inherit_user_state=False) as dgc:
-        session = dgc.session(
-            cwd=workspace,
-            permissions={"mode": "default", "unhandled": "deny"},
-            on_permission=lambda req: "deny",
-            on_question=lambda req: {req.questions[0].id: QuestionAnswer(selected=(0,))}
-            if req.questions else "dismiss",
-        )
-        result = session.run("Summarize this repository in two sentences. Do not edit files.")
-        print(result.status, result.reason)
-        print(result.final_text)
-        return 0 if result.status == "completed" else 1
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("workspace", type=Path)
+    parser.add_argument("--model", default=os.environ.get("DGC_MODEL"))
+    parser.add_argument("--base-url", default=os.environ.get("DGC_BASE_URL"))
+    parser.add_argument("--state-dir", type=Path, help="default: a new temporary directory")
+    args = parser.parse_args()
+    if not args.model or not args.base_url:
+        parser.error("set --model and --base-url (or DGC_MODEL and DGC_BASE_URL), for example "
+                     "qwen3:8b and http://127.0.0.1:11434/v1")
+    if not args.workspace.is_dir():
+        parser.error(f"{args.workspace} is not a directory")
+    state = args.state_dir or Path(tempfile.mkdtemp(prefix="dgc-sdk-hello-"))
+    try:
+        with DGC(state_dir=state, model=args.model, base_url=args.base_url,
+                 api_key=os.environ.get("DGC_API_KEY")) as dgc:
+            # Plan mode: the agent may read and search, but it cannot edit or run commands.
+            session = dgc.session(cwd=args.workspace, permissions={"mode": "plan", "unhandled": "deny"})
+            result = session.run("Summarize this repository in two sentences. Do not edit files.")
+    except DGCError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"status: {result.status} ({result.reason or 'no reason'})")
+    if result.error:
+        print(f"error: {result.error}")
+    print(result.final_text)
+    return 0 if result.status == "completed" else 1
 
 
 if __name__ == "__main__":

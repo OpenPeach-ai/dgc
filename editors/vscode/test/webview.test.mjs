@@ -4393,6 +4393,27 @@ test("the backend exit line is still there after the reconnect replays the chat"
   assert.deepEqual(errors, []);
 });
 
+test("an error that repeats verbatim is shown again on the next turn and in a new chat", () => {
+  // Before (0.26.6): sysLine remembered the last error text and swallowed the same text until a
+  // non-error line appeared, so the second turn and a freshly opened chat showed no reason at all.
+  const { errors, send, doc } = makeDom({ scope: "workspace" });
+  const event = ev => send({ type: "event", event: ev });
+  const alerts = () => [...doc.querySelectorAll("#log .sys.err")].map(line => line.textContent);
+  const failure = "MCP server github failed to start";
+  send({ type: "session_ready", sessionId: "chat" });
+  event({ type: "turn_start", prompt: "first", turn_id: "t1" });
+  event({ type: "error", message: failure });
+  event({ type: "turn_end", reason: "error", turn_id: "t1" });
+  event({ type: "turn_start", prompt: "second", turn_id: "t2" });
+  event({ type: "error", message: failure });
+  event({ type: "turn_end", reason: "error", turn_id: "t2" });
+  assert.equal(alerts().filter(text => text === failure).length, 2, "each failed turn keeps its reason");
+  event({ type: "session", kind: "new", session_id: "other" });
+  event({ type: "error", message: failure });
+  assert.deepEqual(alerts(), [failure], "a new chat shows the error even though the last chat ended on it");
+  assert.deepEqual(errors, []);
+});
+
 test("Stop with messages queued gives them back as not sent instead of leaving them looking sent", () => {
   // Before: doStop emptied the restore set and the backend dropped the queue without a word, so
   // both bubbles stayed below "Stopped" as ordinary sent messages that never ran.

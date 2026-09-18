@@ -373,7 +373,8 @@ export class Session {
             + `\nPrevious errors: ${previous}`
           );
           yield* this.runOnce(repair, result, timeoutMs, 1, true);
-          if (result.status === "completed") this.applySchema(result, schema);
+          // runOnce mutates result; re-read the status instead of the narrowed "running".
+          if ((result as RunResult).status === "completed") this.applySchema(result, schema);
         }
       }
       this.recordUsage(result);
