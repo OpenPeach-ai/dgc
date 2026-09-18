@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import subprocess
@@ -970,6 +971,698 @@ class SbomGeneratorTests(unittest.TestCase):
         ):
             self.assertIn(name, files)
         self.assertEqual(mod.sdk_version(), __version__)
+
+
+# ---- sessions: identity, scoped options, private state, usage, changes, runs, async, audit ----
+
+def _usage_chunk(prompt_tokens: int, completion_tokens: int) -> str:
+    return "data: " + json.dumps({"id": "mock", "object": "chat.completion.chunk", "choices": [],
+                                  "usage": {"prompt_tokens": prompt_tokens,
+                                            "completion_tokens": completion_tokens,
+                                            "total_tokens": prompt_tokens + completion_tokens}}) + "\n\n"
+
+
+def _with_usage(body: str, prompt_tokens: int = 1200, completion_tokens: int = 300) -> str:
+    head, _sep, _tail = body.rpartition("data: [DONE]\n\n")
+    return head + _usage_chunk(prompt_tokens, completion_tokens) + "data: [DONE]\n\n"
+
+
+class _SessionsModel(_Model):
+    """Extra scripted behaviours for the session tests; everything else falls back to _Model."""
+
+    behavior = "text"
+    auth_headers: list = []
+
+    def do_POST(self):
+        _SessionsModel.auth_headers.append(self.headers.get("Authorization") or "")
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) or b"{}"
+        request = json.loads(raw)
+        messages = request.get("messages") or []
+        tools_seen = sum(1 for message in messages if message.get("role") == "tool")
+        last = ""
+        for message in reversed(messages):
+            if message.get("role") == "tool":
+                last = "TOOL:" + str(message.get("content") or "")
+                break
+            if message.get("role") == "user":
+                content = message.get("content")
+                last = content if isinstance(content, str) else json.dumps(content)
+                break
+        behavior = _SessionsModel.behavior
+        _Model.posts += 1
+        if behavior == "usage":
+            if "tool please" in last and not last.startswith("TOOL:"):
+                self._send(_with_usage(_call("read_file", {"path": "README.md"})))
+            else:
+                self._send(_with_usage(_answer("Usage reported.")))
+            return
+        if behavior == "two_steps":
+            if tools_seen < 2:
+                self._send(_call("read_file", {"path": "README.md"}))
+            else:
+                self._send(_answer("both steps done"))
+            return
+        if behavior == "http404":
+            body = b'{"error":{"message":"model \'nope\' not found, try pulling it first"}}'
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if behavior == "flow":
+            if "STEER-MARK" in last:
+                self._send(_answer("STEERED-ANSWER"))
+            elif last.startswith("TOOL:"):
+                self._send(_answer("SECOND-ANSWER"))
+            elif "second task" in last:
+                self._send(_call("write_file", {"path": "followup_wrote.txt", "content": "x\n"}))
+            elif "first task" in last:
+                time.sleep(1.5)
+                self._send(_answer("FIRST-ANSWER"))
+            elif "slow edit" in last:
+                time.sleep(2.0)
+                self._send(_call("write_file", {"path": "after_break.txt", "content": "x\n"}))
+            elif "quiet please" in last:
+                time.sleep(4.0)
+                self._send(_answer("LATE-OK"))
+            elif "slow answer" in last:
+                time.sleep(3.0)
+                self._send(_answer("SLOW-OK"))
+            else:
+                self._send(_answer("The checkout flow creates an empty cart and then redirects."))
+            return
+        if behavior == "bash_echo":
+            if last.startswith("TOOL:"):
+                self._send(_answer("done"))
+            else:
+                self._send(_call("bash", {"command": "echo hi"}))
+            return
+        if behavior == "bash_verify":
+            if last.startswith("TOOL:"):
+                self._send(_answer("verified"))
+            else:
+                self._send(_call("bash", {"command": "echo VERIFY-OK"}))
+            return
+        # Re-dispatch the ordinary behaviours on the already-read body.
+        _Model.posts -= 1
+        self.rfile = io.BytesIO(raw)
+        super().do_POST()
+
+
+class SessionFixTests(unittest.TestCase):
+    def setUp(self):
+        self.host_home = Path(tempfile.mkdtemp(prefix="dgc-sdk-host-"))
+        self.state = Path(tempfile.mkdtemp(prefix="dgc-sdk-state-"))
+        self.work = Path(tempfile.mkdtemp(prefix="dgc-sdk-work-"))
+        (self.work / "README.md").write_text("empty cart checkout\n", encoding="utf-8")
+        (self.host_home / ".dgc").mkdir()
+        self._old_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.host_home)
+        _Model.behavior = "text"
+        _Model.posts = 0
+        _SessionsModel.behavior = "text"
+        _SessionsModel.auth_headers = []
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _SessionsModel)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
+
+    tearDown = SdkTests.tearDown
+
+    def _client(self, **kwargs):
+        kwargs.setdefault("state_dir", self.state)
+        return DGC(model="sdk-model", base_url=self.base_url, api_key="sk-local", **kwargs)
+
+    def _auto(self, dgc, **kwargs):
+        kwargs.setdefault("cwd", self.work)
+        return dgc.session(permissions={"mode": "auto", "unhandled": "deny"}, **kwargs)
+
+    def _config(self):
+        return json.loads((self.state / "home" / ".dgc" / "config.json").read_text(encoding="utf-8"))
+
+    # identity -----------------------------------------------------------------------------------
+
+    def test_new_session_does_not_take_over_the_previous_identity(self):
+        with self._client() as dgc:
+            first = self._auto(dgc)
+            first.run("Summarize README alpha. Do not edit files.", timeout=60)
+            self.assertTrue(first.session_path.endswith(first.session_id + ".json"))
+            second = self._auto(dgc)
+            own = str(second._ready.get("session_id") or "")
+            self.assertTrue(own)
+            self.assertEqual(second.session_id, own, "must keep the id DGC reported at ready")
+            self.assertNotEqual(second.session_id, first.session_id)
+            self.assertEqual(second.session_path, "", "no transcript of its own exists yet")
+            result = second.run("Summarize README beta. Do not edit files.", timeout=60)
+            self.assertEqual(result.session_id, own)
+            self.assertTrue(second.session_path.endswith(own + ".json"), second.session_path)
+            mine = {row.get("run_id") for row in dgc.export_audit(own)}
+            theirs = {row.get("run_id") for row in dgc.export_audit(first.session_id)}
+            self.assertIn(result.run_id, mine)
+            self.assertNotIn(result.run_id, theirs)
+            restored = dgc.resume(own, cwd=self.work,
+                                  permissions={"mode": "auto", "unhandled": "deny"})
+            blob = json.dumps(restored.history()).lower()
+        self.assertIn("beta", blob)
+        self.assertNotIn("alpha", blob)
+
+    # options stay scoped --------------------------------------------------------------------------
+
+    def test_output_schema_repair_does_not_cap_later_runs(self):
+        schema = {"type": "object", "required": ["ok"], "properties": {"ok": {"type": "boolean"}}}
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            repaired = session.run("Summarize README as JSON.", timeout=60, output_schema=schema)
+            self.assertEqual(repaired.status, "completed")
+            self.assertEqual(repaired.output["ok"], True)
+            self.assertIn(self._config().get("max_turns", 0), (0, None),
+                          "a repair's one-turn cap must not stay in the isolated config")
+            _SessionsModel.behavior = "two_steps"
+            again = session.run("Read the README twice.", timeout=60)
+            later = self._auto(dgc).run("Read the README twice.", timeout=60)
+        self.assertEqual(again.status, "completed", again.error)
+        self.assertIn("both steps done", again.final_text)
+        self.assertEqual(later.status, "completed", later.error)
+        self.assertIn("both steps done", later.final_text)
+
+    def test_run_max_turns_is_restored_after_the_run(self):
+        _SessionsModel.behavior = "two_steps"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            capped = session.run("Read the README twice.", timeout=60, max_turns=1)
+            free = session.run("Read the README twice.", timeout=60)
+        self.assertEqual(capped.status, "failed")
+        self.assertTrue(capped.error, "a stopped run must say why")
+        self.assertEqual(free.status, "completed", free.error)
+
+    def test_session_options_do_not_leak_into_the_next_session(self):
+        other = Path(tempfile.mkdtemp(prefix="dgc-sdk-work-b-"))
+        with self._client() as dgc:
+            first = self._auto(dgc, verify_command="echo first-verify", max_turns=5,
+                               turn_budget_s=60, model="first-model")
+            seen = self._config()
+            self.assertEqual(seen.get("verify_command"), "echo first-verify")
+            self.assertEqual(seen.get("max_turns"), 5)
+            self.assertEqual(first.get_config().get("model"), "first-model")
+            first.close()
+            second = self._auto(dgc, cwd=other)
+            config = self._config()
+            self.assertEqual(second.get_config().get("model"), "sdk-model")
+        for key in ("verify_command", "verify_before_done", "max_turns", "turn_budget_s"):
+            self.assertNotIn(key, config, f"{key} leaked into the next session")
+        self.assertEqual(config.get("trusted_dirs"), [str(other.resolve())])
+
+    def test_concurrent_sessions_get_their_own_settings(self):
+        errors: list = []
+        models: dict = {}
+        with self._client() as dgc:
+            def open_one(index: int) -> None:
+                try:
+                    session = self._auto(dgc, model=f"sdk-model-{index}")
+                    models[index] = session.get_config().get("model")
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    errors.append(repr(exc))
+            threads = [threading.Thread(target=open_one, args=(i,)) for i in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(120)
+            config = self._config()
+        self.assertEqual(errors, [])
+        self.assertEqual(models, {i: f"sdk-model-{i}" for i in range(4)})
+        self.assertIsInstance(config, dict)
+
+    def test_extra_config_is_the_explicit_way_to_add_settings(self):
+        with self._client(extra_config={"context_size": 65536}) as dgc:
+            config = self._auto(dgc).get_config()
+        self.assertEqual(config.get("context_size"), 65536)
+
+    # private state ------------------------------------------------------------------------------
+
+    def test_planted_config_in_state_dir_is_ignored(self):
+        marker = self.work / "planted-gate-ran"
+        verifier = self.work / "planted-verifier-ran"
+        folder = self.state / "home" / ".dgc"
+        folder.mkdir(parents=True)
+        (folder / "config.json").write_text(json.dumps({
+            "autonomous_gate": f"touch {marker}",
+            "verify_command": f"touch {verifier}",
+            "verify_before_done": True,
+            "model": "planted-model",
+            "base_url": "http://127.0.0.1:9/v1",
+        }), encoding="utf-8")
+        os.chmod(self.state, 0o755)
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            result = session.run("Summarize README. Do not edit files.", timeout=60)
+            config = self._config()
+        self.assertEqual(result.status, "completed", result.error)
+        self.assertFalse(marker.exists(), "a planted autonomous_gate must not run")
+        self.assertFalse(verifier.exists(), "a planted verify_command must not run")
+        self.assertNotIn("autonomous_gate", config)
+        self.assertEqual(config.get("model"), "sdk-model")
+        self.assertEqual(os.stat(self.state).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(folder / "config.json").st_mode & 0o777, 0o600)
+
+    def test_writable_state_dir_is_refused_and_default_is_private(self):
+        os.chmod(self.state, 0o777)
+        with self.assertRaises(DGCConfigError):
+            DGC(state_dir=self.state, model="sdk-model", base_url=self.base_url)
+        dgc = DGC(model="sdk-model", base_url=self.base_url)
+        try:
+            self.assertTrue(dgc.state_dir.is_dir())
+            self.assertEqual(os.stat(dgc.state_dir).st_mode & 0o777, 0o700)
+        finally:
+            dgc.close()
+
+    def test_inherit_user_state_rejects_what_it_cannot_apply(self):
+        (self.host_home / ".dgc" / "config.json").write_text(json.dumps({
+            "model": "sdk-model", "base_url": self.base_url, "mode": "default",
+        }), encoding="utf-8")
+        with self.assertRaises(DGCConfigError):
+            DGC(state_dir=self.state, inherit_user_state=True, model="other-model")
+        with DGC(state_dir=self.state, inherit_user_state=True) as dgc:
+            for options in ({"max_turns": 3}, {"verify_command": "pytest -q"},
+                            {"turn_budget_s": 30}, {"max_tokens": 100}):
+                with self.assertRaises(DGCConfigError, msg=str(options)):
+                    dgc.session(cwd=self.work, **options)
+            with self.assertRaises(DGCConfigError):
+                dgc.session(cwd=self.work, permissions={"mode": "auto"})
+            with self.assertRaises(DGCConfigError):
+                dgc.session(cwd=self.work, base_url="http://127.0.0.1:9/v1")
+
+    def test_inherit_user_state_uses_the_api_key_without_saving_it(self):
+        user_config = self.host_home / ".dgc" / "config.json"
+        user_config.write_text(json.dumps({
+            "model": "sdk-model", "base_url": self.base_url, "mode": "default",
+        }), encoding="utf-8")
+        key = "sk-inherit-0123456789abcdef"
+        with DGC(state_dir=self.state, inherit_user_state=True, api_key=key) as dgc:
+            session = dgc.session(cwd=self.work, model="sdk-model",
+                                  permissions={"mode": "default", "unhandled": "deny"})
+            result = session.run("Summarize README. Do not edit files.", timeout=60)
+        self.assertEqual(result.status, "completed", result.error)
+        self.assertIn(f"Bearer {key}", _SessionsModel.auth_headers)
+        stored = "".join(path.read_text(encoding="utf-8")
+                         for path in (self.host_home / ".dgc").glob("*.json"))
+        self.assertNotIn(key, stored, "an explicit key must not be saved into ~/.dgc")
+
+    # usage --------------------------------------------------------------------------------------
+
+    def test_usage_counts_provider_tokens_and_cost(self):
+        _SessionsModel.behavior = "usage"
+        with self._client(pricing=Pricing(input_per_million=1.0, output_per_million=10.0),
+                          department="erp") as dgc:
+            session = self._auto(dgc)
+            first = session.run("tool please: read the README", timeout=60)
+            second = session.run("Summarize README. Do not edit files.", timeout=60)
+            report = dgc.usage_report(department="erp")
+        self.assertEqual(first.status, "completed", first.error)
+        self.assertEqual((first.usage["input_tokens"], first.usage["output_tokens"]), (2400, 600))
+        self.assertEqual(first.usage["requests"], 2)
+        self.assertAlmostEqual(first.usage["cost_usd"], 0.0084)
+        self.assertIn("token_estimate", first.usage)
+        self.assertEqual((second.usage["input_tokens"], second.usage["output_tokens"]), (1200, 300))
+        self.assertEqual((report["input_tokens"], report["output_tokens"]), (3600, 900))
+        self.assertAlmostEqual(report["cost_usd"], 0.0126)
+        self.assertEqual(report["unknown_usage_runs"], 0)
+
+    def test_unreported_usage_is_unknown_not_zero(self):
+        with self._client(pricing=Pricing(1.0, 10.0)) as dgc:
+            result = self._auto(dgc).run("Summarize README. Do not edit files.", timeout=60)
+            report = dgc.usage_report()
+        self.assertIsNone(result.usage["input_tokens"])
+        self.assertIsNone(result.usage["output_tokens"])
+        self.assertIsNone(result.usage["cost_usd"])
+        self.assertEqual(report["unknown_usage_runs"], 1)
+        self.assertIsNone(report["cost_usd"])
+
+    def test_failed_run_reports_the_backend_error(self):
+        _SessionsModel.behavior = "http404"
+        with self._client() as dgc:
+            result = self._auto(dgc).run("Summarize README.", timeout=60)
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.error)
+        self.assertIn("not found", result.error)
+
+    # changes ------------------------------------------------------------------------------------
+
+    def test_changes_cover_dot_dirs_home_locks_and_lockfiles(self):
+        from dgc_sdk.session import _diff_workspace, _snapshot_workspace
+        root = Path(tempfile.mkdtemp(prefix="dgc-sdk-changes-"))
+        state = root / ".sdk-state"
+        for rel, text in {
+            "src/home/page.tsx": "export default 1;\n",
+            ".github/workflows/ci.yml": "on: push\n",
+            "app/locks/mutex.py": "LOCK = 1\n",
+            "poetry.lock": "[[package]]\n",
+            "gone.txt": "bye\n",
+            "noeol.txt": "a\nb",
+        }.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8")
+        state.mkdir()
+        original = Path(tempfile.mkdtemp(prefix="dgc-sdk-orig-"))
+        subprocess.run(["cp", "-a", f"{root}/.", str(original)], check=True)
+        before = _snapshot_workspace(root, (state,))
+        time.sleep(0.01)
+        (root / "src/home/page.tsx").write_text("export default 2;\n", encoding="utf-8")
+        (root / ".github/workflows/ci.yml").write_text("on: [push, pull_request]\n", encoding="utf-8")
+        (root / "app/locks/mutex.py").write_text("LOCK = 2\n", encoding="utf-8")
+        (root / "poetry.lock").write_text("[[package]]\nname = 'x'\n", encoding="utf-8")
+        (root / "gone.txt").unlink()
+        (root / "noeol.txt").write_text("a\nc", encoding="utf-8")
+        (root / "new dir").mkdir()
+        (root / "new dir" / "added.txt").write_text("hello\n", encoding="utf-8")
+        (state / "noise.json").write_text("{}", encoding="utf-8")
+        changes = {change.path: change for change in _diff_workspace(root, before, (state,))}
+        self.assertEqual(set(changes), {
+            "src/home/page.tsx", ".github/workflows/ci.yml", "app/locks/mutex.py",
+            "poetry.lock", "gone.txt", "noeol.txt", "new dir/added.txt"})
+        self.assertEqual(changes["gone.txt"].kind, "deleted")
+        self.assertEqual(changes["gone.txt"].before, "bye\n")
+        self.assertEqual(changes["src/home/page.tsx"].before, "export default 1;\n")
+        self.assertEqual(changes["new dir/added.txt"].kind, "added")
+        patch = "".join(change.diff for change in changes.values())
+        (original / "run.patch").write_text(patch, encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=original, check=True)
+        check = subprocess.run(["git", "apply", "--check", "run.patch"], cwd=original,
+                               capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stderr + patch)
+        subprocess.run(["git", "apply", "run.patch"], cwd=original, check=True)
+        self.assertEqual((original / "noeol.txt").read_text(encoding="utf-8"), "a\nc")
+        self.assertEqual((original / "new dir" / "added.txt").read_text(encoding="utf-8"), "hello\n")
+        self.assertFalse((original / "gone.txt").exists())
+
+    def test_run_changes_carry_an_applicable_diff(self):
+        _Model.behavior = "edit"
+        _SessionsModel.behavior = "edit"
+        with self._client() as dgc:
+            result = self._auto(dgc).run("edit the checkout guard", timeout=60)
+        change = next(item for item in result.changes if item.path == "guard.py")
+        self.assertEqual(change.kind, "added")
+        self.assertIn("+ok", change.diff)
+        self.assertIn("new file mode", change.diff)
+
+    # verification -------------------------------------------------------------------------------
+
+    def test_verification_is_not_an_unrelated_bash_command(self):
+        _SessionsModel.behavior = "bash_echo"
+        command = "echo VERIFIER-RAN; exit 3"
+        with self._client() as dgc:
+            result = self._auto(dgc, verify_command=command).run("run something", timeout=90)
+        self.assertIsNotNone(result.verification)
+        self.assertEqual(result.verification.command, command)
+        self.assertIsNot(result.verification.ok, True, result.verification)
+        self.assertNotIn("hi", result.verification.output)
+
+    def test_verification_uses_the_model_run_of_the_exact_command(self):
+        _SessionsModel.behavior = "bash_verify"
+        with self._client() as dgc:
+            result = self._auto(dgc, verify_command="echo VERIFY-OK").run("verify", timeout=90)
+        self.assertEqual(result.verification.ok, True)
+        self.assertEqual(result.verification.exit_code, 0)
+        self.assertIn("VERIFY-OK", result.verification.output)
+
+    # follow-ups, steering, early exit -------------------------------------------------------------
+
+    def test_steer_needs_an_active_run(self):
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            with self.assertRaises(DGCConfigError):
+                session.steer("do this instead")
+
+    def test_followup_is_an_observed_audited_run(self):
+        _SessionsModel.behavior = "flow"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("first task", timeout=60)
+            follow = session.followup("second task", timeout=60)
+            first = handle.result()
+            second = follow.result()
+            rows = dgc.export_audit(session.session_id)
+            report = dgc.usage_report()
+        self.assertEqual(first.status, "completed", first.error)
+        self.assertIn("FIRST-ANSWER", first.final_text)
+        self.assertNotIn("SECOND-ANSWER", first.final_text)
+        self.assertEqual(second.status, "completed", second.error)
+        self.assertIn("SECOND-ANSWER", second.final_text)
+        self.assertTrue((self.work / "followup_wrote.txt").exists())
+        self.assertIn("followup_wrote.txt", [change.path for change in second.changes])
+        self.assertTrue(any(row.get("run_id") == second.run_id and row.get("type") == "tool_call"
+                            and row["payload"].get("name") == "write_file" for row in rows), rows)
+        self.assertIn(second.run_id, {row.get("run_id") for row in report["rows"]})
+
+    def test_steer_is_part_of_the_run(self):
+        _SessionsModel.behavior = "flow"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("first task", timeout=60)
+            time.sleep(0.4)
+            session.steer("STEER-MARK: answer differently")
+            result = handle.result()
+            after = session.run("Summarize README. Do not edit files.", timeout=60)
+        self.assertEqual(result.status, "completed", result.error)
+        self.assertIn("STEERED-ANSWER", result.final_text)
+        self.assertNotIn("STEERED-ANSWER", after.final_text)
+
+    def test_leaving_with_early_cancels_and_frees_the_session(self):
+        _SessionsModel.behavior = "flow"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            with session.stream("slow edit please", timeout=30) as handle:
+                first = next(iter(handle))
+            self.assertNotEqual(first.type, "ready", "the startup handshake is not a run event")
+            self.assertEqual(handle.result().status, "cancelled")
+            time.sleep(3.0)
+            again = session.run("Summarize README. Do not edit files.", timeout=60)
+        self.assertFalse((self.work / "after_break.txt").exists(),
+                         "the agent must stop when the caller left the with block")
+        self.assertEqual(again.status, "completed", again.error)
+
+    def test_control_requests_during_a_stream_get_their_answers(self):
+        _SessionsModel.behavior = "flow"
+        kinds: list = []
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("slow answer please", timeout=60)
+            reader = threading.Thread(target=lambda: kinds.extend(ev.type for ev in handle))
+            reader.start()
+            slowest = 0.0
+            for _ in range(10):
+                started = time.monotonic()
+                session.list_permissions()
+                slowest = max(slowest, time.monotonic() - started)
+            reader.join(60)
+            result = handle.result()
+        self.assertLess(slowest, 5.0)
+        self.assertNotIn("permissions", kinds)
+        self.assertEqual(result.status, "completed", result.error)
+
+    def test_timeout_none_waits_through_a_quiet_model(self):
+        _SessionsModel.behavior = "flow"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            session.raw._event_timeout = 1.5  # the transport's idle fallback
+            result = session.run("quiet please", timeout=None)
+        self.assertEqual(result.status, "completed", result.error)
+        self.assertIn("LATE-OK", result.final_text)
+
+    def test_run_timeout_is_reported_as_a_timeout(self):
+        _SessionsModel.behavior = "stall"
+        started = time.monotonic()
+        with self._client() as dgc:
+            result = self._auto(dgc).run("Summarize README.", timeout=2)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual((result.status, result.reason), ("failed", "timeout"))
+
+    # async --------------------------------------------------------------------------------------
+
+    def test_cancelling_the_async_task_cancels_the_run(self):
+        _SessionsModel.behavior = "stall"
+
+        async def go():
+            async with AsyncDGC(state_dir=self.state, model="sdk-model", base_url=self.base_url,
+                                api_key="sk-local") as dgc:
+                session = await dgc.session(cwd=self.work,
+                                            permissions={"mode": "auto", "unhandled": "deny"})
+
+                async def consume():
+                    handle = await session.stream("Summarize README.", timeout=60)
+                    async for _event in handle:
+                        pass
+
+                task = asyncio.create_task(consume())
+                await asyncio.sleep(1.5)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                _SessionsModel.behavior = "text"
+                return await session.run("Summarize README. Do not edit files.", timeout=60)
+
+        result = asyncio.run(go())
+        self.assertEqual(result.status, "completed", result.error)
+
+    def test_async_surface_matches_the_sync_one(self):
+        import inspect
+        from dgc_sdk import AsyncRunHandle, AsyncSession, RunHandle, Session
+
+        def params(func):
+            return [(p.name, p.kind, p.default) for p in inspect.signature(func).parameters.values()]
+
+        public = [name for name, _ in inspect.getmembers(Session, inspect.isfunction)
+                  if not name.startswith("_")]
+        for name in public:
+            self.assertTrue(hasattr(AsyncSession, name), f"AsyncSession lacks {name}")
+            self.assertEqual(params(getattr(AsyncSession, name)), params(getattr(Session, name)),
+                             name)
+        for name in ("__init__", "session", "resume"):
+            self.assertEqual(params(getattr(AsyncDGC, name)), params(getattr(DGC, name)), name)
+        for name in ("usage_report", "export_audit"):
+            self.assertEqual(params(getattr(AsyncDGC, name)), params(getattr(DGC, name)), name)
+        self.assertTrue(hasattr(AsyncDGC, "raw_runtime"))
+        self.assertTrue(hasattr(AsyncDGC, "state_dir"))
+        for name in ("cancel", "result"):
+            self.assertTrue(hasattr(AsyncRunHandle, name) and hasattr(RunHandle, name))
+        for func in (AsyncDGC.__init__, AsyncDGC.session, AsyncSession.run, AsyncSession.stream,
+                     DGC.resume):
+            kinds = {p.kind for p in inspect.signature(func).parameters.values()}
+            self.assertNotIn(inspect.Parameter.VAR_KEYWORD, kinds, func.__qualname__)
+
+    def test_async_permission_callback_is_awaited(self):
+        _SessionsModel.behavior = "edit"
+        _Model.behavior = "edit"
+        seen: list = []
+
+        async def ask_person(request):
+            await asyncio.sleep(0.05)
+            seen.append(request.name)
+            return "once"
+
+        async def go():
+            async with AsyncDGC(state_dir=self.state, model="sdk-model", base_url=self.base_url,
+                                api_key="sk-local") as dgc:
+                session = await dgc.session(cwd=self.work, on_permission=ask_person,
+                                            permissions={"mode": "default", "unhandled": "deny"})
+                handle = await session.stream("edit the checkout guard", timeout=60)
+                return await handle.result()
+
+        result = asyncio.run(go())
+        self.assertIn("write_file", seen)
+        self.assertTrue((self.work / "guard.py").exists(), "an async approval must be honoured")
+        self.assertEqual(result.status, "completed", result.error)
+
+    # audit --------------------------------------------------------------------------------------
+
+    def test_audit_redaction_covers_modern_secret_formats(self):
+        from dgc_sdk.audit import redact
+        secrets = {
+            "anthropic": "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0" * 2,
+            "openai": "sk-proj-" + "Zy9Xw8Vu7Ts6Rq5Po4Nm3" * 2,
+            "github": "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+            "oauth": "gho_" + "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8",
+            "aws": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        }
+        texts = [
+            f"key={secrets['anthropic']}",
+            f"OPENAI_API_KEY={secrets['openai']}",
+            json.dumps({"api_key": "plain-json-secret-value-123"}),
+            f"token: {secrets['github']}",
+            f"oauth_token: {secrets['oauth']}",
+            f"aws_secret_access_key = {secrets['aws']}",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\n"
+            "-----END OPENSSH PRIVATE KEY-----",
+        ]
+        blob = json.dumps(redact({"output": "\n".join(texts), "args": {"password": "hunter2hunter2"}}))
+        for value in (*secrets.values(), "plain-json-secret-value-123", "b3BlbnNzaC1rZXktdjEAAAA",
+                      "hunter2hunter2"):
+            self.assertNotIn(value, blob)
+        self.assertIn("[redacted]", redact_text("Authorization: Bearer sk-abc123456789"))
+        self.assertEqual(redact({"max_tokens": 4096, "token_estimate": 12})["max_tokens"], 4096)
+
+    def test_audit_and_usage_files_are_owner_only(self):
+        with self._client(pricing=Pricing(1.0, 1.0)) as dgc:
+            self._auto(dgc).run("Summarize README. Do not edit files.", timeout=60)
+        for folder in (self.state / "audit", self.state / "usage", self.state / "home"):
+            self.assertEqual(os.stat(folder).st_mode & 0o777, 0o700, folder)
+        files = list((self.state / "audit").glob("*.jsonl")) + [self.state / "usage" / "usage.jsonl"]
+        self.assertTrue(files)
+        for path in files:
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600, path)
+
+    # decisions ----------------------------------------------------------------------------------
+
+    def _bare_session(self, **kwargs):
+        from dgc_sdk.session import Session
+
+        class _Pipe:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, command):
+                self.sent.append(dict(command))
+
+        pipe = _Pipe()
+        options = dict(unhandled="deny", on_permission=None, on_plan=None, on_question=None)
+        options.update(kwargs)
+        return Session(pipe, {"session_id": "s-test"}, **options), pipe
+
+    def test_decision_timeout_none_has_no_limit(self):
+        from unittest import mock
+        from dgc_sdk.session import _Run
+        from dgc_sdk.types import PermissionRequest, RunResult
+
+        def slow(_request):
+            time.sleep(0.4)
+            return "once"
+
+        session, _pipe = self._bare_session(on_permission=slow, decision_timeout=None)
+        run = _Run(RunResult(session_id="s", run_id="r", status="running"), "req")
+        real = time.monotonic
+        start = real()
+        # Every clock read after the first looks 40 s later: a hidden 30 s cap would fire.
+        with mock.patch("dgc_sdk.session.time.monotonic",
+                        side_effect=lambda: real() + (40.0 if real() - start > 0.01 else 0.0)):
+            answer = session._decide(run, slow, PermissionRequest(id="p1", name="bash", args={}),
+                                     "deny", label="on_permission",
+                                     valid=lambda value: value in ("once", "always", "deny"),
+                                     mine=True)
+        self.assertEqual(answer, "once")
+
+    def test_mcp_input_callback_honours_decision_timeout(self):
+        from dgc_sdk import McpInputResponse
+        from dgc_sdk.session import _Run
+        from dgc_sdk.types import RunResult
+
+        def slow(_request):
+            time.sleep(2.0)
+            return McpInputResponse(action="accept", content={"x": 1})
+
+        session, pipe = self._bare_session(on_mcp_input=slow, decision_timeout=0.2)
+        run = _Run(RunResult(session_id="s", run_id="r", status="running"), "req")
+        started = time.monotonic()
+        session._answer_mcp(run, {"id": "m1", "server": "s", "kind": "elicitation",
+                                  "payload": {}}, True)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(pipe.sent[-1]["action"], "cancel")
+
+    def test_unhandled_callback_requires_and_enforces_the_callback(self):
+        _SessionsModel.behavior = "edit"
+        _Model.behavior = "edit"
+        with self._client() as dgc:
+            with self.assertRaises(DGCConfigError):
+                dgc.session(cwd=self.work, permissions={"mode": "default", "unhandled": "callback"})
+
+            def boom(_request):
+                raise RuntimeError("approval service down")
+
+            session = dgc.session(cwd=self.work, on_permission=boom,
+                                  permissions={"mode": "default", "unhandled": "callback"})
+            result = session.run("edit the checkout guard", timeout=60)
+        self.assertFalse((self.work / "guard.py").exists())
+        self.assertEqual((result.status, result.reason), ("failed", "decision_failed"))
+        self.assertIn("approval service down", result.error)
 
 
 if __name__ == "__main__":
