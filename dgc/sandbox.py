@@ -62,7 +62,7 @@ def available() -> str | None:
 def capabilities(config=None) -> SandboxCapabilities:
     """Describe guarantees without treating unlike host backends as equivalent."""
     kind = available()
-    network_allowed = bool(config and config.get("sandbox_network", False))
+    network_allowed = _network_allowed(config)
     network = "shared by explicit opt-in" if network_allowed else "isolated"
     if kind == "bwrap":
         return SandboxCapabilities(
@@ -113,9 +113,53 @@ def describe(config=None) -> str:
             f"outside project; network {report.network}; approvals unchanged")
 
 
+def _session():
+    """The launching process's session policy (``DGC_SESSION_POLICY``), when one parsed."""
+    from .permissions import session_policy
+    policy = session_policy()
+    return policy if policy is not None and not policy.error else None
+
+
 def requested(config) -> bool:
-    """Return whether confinement was explicitly requested, backend availability aside."""
+    """Return whether confinement was explicitly requested, backend availability aside.
+
+    A session policy can require the sandbox (then a missing backend makes shell commands fail
+    closed) or prefer it (on when a backend exists); it never turns a configured sandbox off.
+    """
+    policy = _session()
+    if policy is not None:
+        if policy.sandbox == "required" or (policy.sandbox == "preferred" and available()):
+            return True
     return bool(config and config.get("sandbox"))
+
+
+def session_confined() -> bool:
+    """True when this process's session policy has the OS sandbox on (backend present)."""
+    policy = _session()
+    return bool(policy is not None and policy.sandbox in ("required", "preferred")
+                and available() is not None)
+
+
+def _network_allowed(config) -> bool:
+    policy = _session()
+    if policy is not None and policy.sandbox_network is not None:
+        return policy.sandbox_network
+    return bool(config and config.get("sandbox_network", False))
+
+
+def _read_only(config) -> bool:
+    policy = _session()
+    return bool((config and config.get("sandbox_read_only", False))
+                or (policy is not None and policy.sandbox_read_only))
+
+
+def _account_home() -> Path | None:
+    """The OS account's home, which HOME may not name (an SDK child runs with a private HOME)."""
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError, AttributeError):
+        return None
 
 
 def active(config) -> bool:
@@ -187,9 +231,10 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # `/` has no outside boundary. A helper inside the model-writable workspace could be
         # replaced between turns and would execute on the host before confinement takes effect.
         return None
-    network = bool(config and config.get("sandbox_network", False))
-    # `--sandbox read-only` (a review run): the project is visible but nothing under it is writable.
-    read_only = bool(config and config.get("sandbox_read_only", False))
+    network = _network_allowed(config)
+    # `--sandbox read-only` (a review run, or a session policy that denies writes): the project is
+    # visible but nothing under it is writable.
+    read_only = _read_only(config)
     if kind == "bwrap":
         argv = [
             str(executable), "--unshare-all", "--unshare-user",
@@ -201,7 +246,10 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # Hide ambient credentials and user state. The real project stays reachable at
         # /mnt and, when nested below a masked path, through a compatibility link.
         seen: set[Path] = set()
-        for candidate in (Path.home().resolve(strict=False), Path("/root"), Path("/tmp"), Path("/run")):
+        # HOME and the account's home differ for an SDK child (a private HOME under its state
+        # directory); both hold user state, so both are hidden.
+        homes = [Path.home()] + ([account] if (account := _account_home()) else [])
+        for candidate in (*homes, Path("/root"), Path("/tmp"), Path("/run")):
             try:
                 candidate = candidate.resolve(strict=False)
             except OSError:
@@ -218,7 +266,10 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         def q(value: Path) -> str:
             return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
-        home = Path.home().resolve(strict=False)
+        homes: list[Path] = []
+        for candidate in (Path.home(), _account_home()):
+            if candidate is not None and candidate.resolve(strict=False) not in homes:
+                homes.append(candidate.resolve(strict=False))
         writable_project = "" if read_only else f'(subpath "{q(root)}") '
         profile = [
             "(version 1)", "(allow default)", "(deny file-write*)",
@@ -226,9 +277,11 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             '(literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") '
             '(literal "/dev/dtracehelper") (subpath "/dev/fd"))',
         ]
-        if not _inside(home, root):
-            profile += [f'(deny file-read* (subpath "{q(home)}"))',
-                        f'(allow file-read* (subpath "{q(root)}"))']
+        hidden = [home for home in homes if not _inside(home, root)]
+        for home in hidden:
+            profile.append(f'(deny file-read* (subpath "{q(home)}"))')
+        if hidden:
+            profile.append(f'(allow file-read* (subpath "{q(root)}"))')
         if not network:
             profile.append("(deny network*)")
         return [str(executable), "-p", "".join(profile),

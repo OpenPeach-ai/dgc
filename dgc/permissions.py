@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,6 +94,8 @@ class Rule:
     tool: str          # internal tool name, or "*" for all
     pattern: str | None
     action: str
+    note: str = ""     # why a rule DGC added itself exists; shown with the deny reason
+    session: bool = False  # from the launching process's session policy (never saved)
 
     @classmethod
     def parse(cls, text: str, action: str) -> "Rule":
@@ -146,6 +150,129 @@ def parse_rules(rules: dict[str, list[str]]) -> list[Rule]:
     return out
 
 
+# ------------------------------------------------------------------ session policy ---
+# A process that launches `dgc serve` for one session (the SDK) can fix permission rules and
+# sandbox settings for that process only. They arrive in this environment variable as JSON, are
+# never written to config.json, and every PermissionEngine adds them, so no command, mode or
+# editor setting can drop them. A policy that does not parse denies every tool: a malformed
+# policy must not quietly become no policy.
+SESSION_POLICY_ENV = "DGC_SESSION_POLICY"
+SESSION_POLICY_VERSION = 1
+_SESSION_POLICY_KEYS = {"version", "deny", "ask", "auto_deny", "sandbox", "sandbox_network",
+                        "sandbox_read_only", "shell_requires_sandbox"}
+_SESSION_POLICY_MAX_RULES = 4096
+# Shell tools the OS sandbox confines, and the persistent interpreter it never wraps.
+SANDBOXED_SHELL_TOOLS = ("bash", "monitor")
+UNSANDBOXED_CODE_TOOLS = ("python",)
+
+
+@dataclass(frozen=True)
+class SessionPolicy:
+    raw: str
+    rules: tuple[Rule, ...] = ()
+    auto_rules: tuple[Rule, ...] = ()     # deny rules that apply only in auto mode
+    sandbox: str = "off"                  # off | preferred | required
+    sandbox_network: bool | None = None   # None keeps the configured value
+    sandbox_read_only: bool = False
+    shell_requires_sandbox: bool = False
+    error: str = ""
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(self.raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _parse_session_policy(raw: str) -> SessionPolicy:
+    def broken(message: str) -> SessionPolicy:
+        return SessionPolicy(raw=raw, error=message[:500])
+
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return broken(f"{SESSION_POLICY_ENV} is not valid JSON")
+    if not isinstance(data, dict):
+        return broken(f"{SESSION_POLICY_ENV} must be a JSON object")
+    if data.get("version") != SESSION_POLICY_VERSION:
+        return broken(f"{SESSION_POLICY_ENV} version {data.get('version')!r} is not supported "
+                      f"(this DGC reads version {SESSION_POLICY_VERSION})")
+    unknown = sorted(set(data) - _SESSION_POLICY_KEYS)
+    if unknown:
+        return broken(f"{SESSION_POLICY_ENV} has an unknown field {unknown[0]!r}")
+    parsed: dict[str, list[Rule]] = {}
+    for key, action in (("deny", DENY), ("ask", ASK), ("auto_deny", DENY)):
+        texts = data.get(key, [])
+        if not isinstance(texts, list) or len(texts) > _SESSION_POLICY_MAX_RULES:
+            return broken(f"{SESSION_POLICY_ENV}.{key} must be a list of rules")
+        parsed[key] = []
+        for text in texts:
+            if not isinstance(text, str):
+                return broken(f"{SESSION_POLICY_ENV}.{key} must contain only strings")
+            try:
+                rule = Rule.parse(text, action)
+            except ValueError as exc:
+                return broken(f"{SESSION_POLICY_ENV}.{key}: {exc}")
+            rule.session = True
+            rule.note = "a limit the application running this session set"
+            parsed[key].append(rule)
+    sandbox = data.get("sandbox", "off")
+    if sandbox not in ("off", "preferred", "required"):
+        return broken(f"{SESSION_POLICY_ENV}.sandbox must be off, preferred or required")
+    network = data.get("sandbox_network")
+    flags = {key: data.get(key, False) for key in ("sandbox_read_only", "shell_requires_sandbox")}
+    if (network is not None and not isinstance(network, bool)) or any(
+            not isinstance(value, bool) for value in flags.values()):
+        return broken(f"{SESSION_POLICY_ENV} sandbox flags must be true or false")
+    return SessionPolicy(raw=raw, rules=(*parsed["deny"], *parsed["ask"]),
+                         auto_rules=tuple(parsed["auto_deny"]), sandbox=sandbox,
+                         sandbox_network=network, **flags)
+
+
+_SESSION_POLICY_CACHE: tuple[str, SessionPolicy] | None = None
+
+
+def session_policy() -> SessionPolicy | None:
+    """The launching process's policy for this `dgc serve`, or None when it set none."""
+    global _SESSION_POLICY_CACHE
+    raw = os.environ.get(SESSION_POLICY_ENV)
+    if raw is None:
+        return None
+    cached = _SESSION_POLICY_CACHE
+    if cached is not None and cached[0] == raw:
+        return cached[1]
+    policy = _parse_session_policy(raw)
+    _SESSION_POLICY_CACHE = (raw, policy)
+    return policy
+
+
+def session_policy_rules(mode: str) -> list[Rule]:
+    """Rules every PermissionEngine adds on top of the configured ones, for its current mode.
+
+    Auto mode has nobody to review a command, so the policy's auto-only denies apply there, and
+    with ``shell_requires_sandbox`` shell code runs only inside the OS sandbox: bash and monitor
+    are refused when it is off, and the python tool (a persistent interpreter the sandbox never
+    wraps) is always refused. In the other modes each shell call is still a permission request.
+    """
+    policy = session_policy()
+    if policy is None:
+        return []
+    if policy.error:
+        return [Rule("*", None, DENY, note=f"the session policy is invalid: {policy.error}",
+                     session=True)]
+    rules = list(policy.rules)
+    if mode == "auto":
+        rules.extend(policy.auto_rules)
+        if policy.shell_requires_sandbox:
+            from . import sandbox
+            confined = sandbox.session_confined()
+            for tool in (*(() if confined else SANDBOXED_SHELL_TOOLS), *UNSANDBOXED_CODE_TOOLS):
+                why = ("the python tool is never sandboxed" if tool in UNSANDBOXED_CODE_TOOLS
+                       else "no OS sandbox is available")
+                rules.append(Rule(tool, None, DENY, session=True, note=(
+                    f"this session's policy runs unattended shell code only inside the OS sandbox, "
+                    f"and {why}")))
+    return rules
+
+
 _MCP_ROUTE_RE = re.compile(r"mcp__[A-Za-z0-9_-]{1,506}\Z")
 
 
@@ -190,7 +317,9 @@ _SEARCH_PATH_TOOLS = {"glob", "grep", "repo_map"}
 class PermissionEngine:
     def __init__(self, mode: str, rules: dict[str, list[str]], project_root: Path | None = None):
         self.mode = mode if mode in MODES else "default"
-        self.rules = parse_rules(rules)
+        # Session-policy rules come last: deny still wins wherever it sits, and an ask added by
+        # the launching process is not skipped by a broader configured allow.
+        self.rules = parse_rules(rules) + session_policy_rules(self.mode)
         self.project_root = Path(project_root).resolve(strict=False) if project_root else None
 
     def external_paths(self, tool: str, args: dict) -> list[str]:
@@ -269,7 +398,7 @@ class PermissionEngine:
         ext_deny = self._rule_action("external_directory", ext_args, DENY) if external else None
         if deny or ext_deny:
             r = deny or ext_deny
-            return DENY, f"blocked by deny rule: {r.render()}"
+            return DENY, f"blocked by deny rule: {r.render()}" + (f" ({r.note})" if r.note else "")
 
         if policy_tool in STOP_TOOLS:
             return ALLOW, "stopping a process this agent started"
@@ -280,6 +409,13 @@ class PermissionEngine:
             if policy_tool in ("mcp_search", "mcp_call"):
                 return DENY, "plan mode does not expose MCP discovery or execution"
             if policy_tool in READ_ONLY_TOOLS or policy_tool == "present_plan":
+                # A session policy's ask still goes to the process that set it (an SDK checks a
+                # search against its denied paths), even for a read-only tool in plan mode.
+                session_ask = next((r for subject, subject_args in subjects for r in self.rules
+                                    if r.session and r.action == ASK
+                                    and self._matches(r, subject, subject_args)), None)
+                if session_ask:
+                    return ASK, f"rule: {session_ask.render()}"
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
 
