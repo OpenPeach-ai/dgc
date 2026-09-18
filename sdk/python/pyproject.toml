@@ -10,6 +10,22 @@ requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Mohit Kalra" }]
+keywords = ["dgc", "agent", "sdk", "coding-agent"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://vibedgc.com/sdk/"
+Documentation = "https://docs.vibedgc.com/sdk"
+Repository = "https://github.com/OpenPeach-ai/dgc"
+Issues = "https://github.com/OpenPeach-ai/dgc/issues"
+Release = "https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2"
 
 [tool.setuptools.packages.find]
 include = ["dgc_sdk*"]

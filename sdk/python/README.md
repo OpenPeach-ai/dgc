@@ -2,6 +2,17 @@
 
 Python facade over a managed `dgc serve` process. Protocol v14 / CLI 0.41.5. Frozen 0.5.2.
 
+```bash
+python3 -m pip install dgc-sdk
+```
+
+That installs **this** package (`import dgc_sdk`). It is not PyPI `dgc` (an unrelated clustering library). Until the index has this release, use the GitHub wheel:
+
+```bash
+python3 -m pip install \
+  "https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.2/dgc_sdk-0.5.2-py3-none-any.whl"
+```
+
 ```python
 from pathlib import Path
 from dgc_sdk import DGC, QuestionAnswer, define_tool
@@ -22,5 +33,4 @@ with DGC(state_dir=Path("/tmp/dgc-sdk-state"), model="demo-model",
     print(restored.session_id, restored.history().get("items") and "history ok")
 ```
 
-Install the GitHub release wheel, or from this checkout: `pip install -e sdk/python`.
-Do not `pip install dgc`.
+From a clone: `pip install -e sdk/python`. The wheel still needs a DGC runtime (`python -m dgc serve`, CLI 0.41.5). Set `inherit_user_state=False` in production.
