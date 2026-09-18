@@ -107,7 +107,9 @@ class BackgroundTaskTests(HarnessCase):
             deadline = time.monotonic() + 6
             while time.monotonic() < deadline:
                 ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
-                if ended:
+                # "stopped" is announced before the child's checkout is cleaned up; the job leaves
+                # the list only after that, and the fixture's folder must not vanish under it.
+                if ended and agent_id not in (getattr(h.agent, "_detached_jobs", None) or {}):
                     self.assertEqual(ended[-1]["state"], "stopped")
                     return
                 time.sleep(0.05)
