@@ -337,6 +337,11 @@ class _Run:
         self.done = threading.Event()
         self.handle_ref: Callable[[], "RunHandle | None"] = lambda: None
         self.pump_started = False
+        # This run changes DGC's config for its own turns (a per-run max_turns, or a schema
+        # repair still to come), so a follow-up behind it must not start inside those turns.
+        self.holds_followups = False
+        # A follow-up the SDK keeps until the run in front of it is over, then sends.
+        self.held = False
 
 
 class _Turn(NamedTuple):
@@ -662,6 +667,7 @@ class Session:
                 raise DGCConfigError("this session already has an active run")
             run = _Run(RunResult(session_id=self.session_id, run_id=_new_id("run"),
                                  status="running"), _new_id("req"))
+            run.holds_followups = max_turns is not None or output_schema is not None
             self._run = run
             self._owners[run.request_id] = run
         handle = RunHandle(self, run)
@@ -686,6 +692,10 @@ class Session:
         With no run in flight this is :meth:`stream`. A queued follow-up is observed, audited
         and billed like any run; iterate its handle or call ``result()`` once the run it is
         queued behind is done. A new ``stream()`` first waits for queued follow-ups.
+
+        Behind a run with its own ``max_turns`` or ``output_schema``, the follow-up is sent
+        when that run is over, so it runs under the session's own settings. A follow-up does
+        not run when the run in front of it is cancelled or times out.
         """
         if not isinstance(text, str) or not text.strip():
             raise DGCConfigError("followup text must be a non-empty string")
@@ -701,26 +711,32 @@ class Session:
             else:
                 queued = _Run(RunResult(session_id=self.session_id, run_id=_new_id("run"),
                                         status="queued"), _new_id("follow"))
+                # DGC would start a queued prompt as soon as the turn in front of it ends: inside
+                # that run's own max_turns, or ahead of its schema repair. Such a follow-up is
+                # kept here and sent once the run in front of it is over.
+                queued.held = prior.holds_followups or prior.held
+                queued.holds_followups = output_schema is not None
                 self._queued.append(queued)
                 self._owners[queued.request_id] = queued
         if queued is None:
             return self.stream(text, timeout=timeout, output_schema=output_schema,
                                skills=skills, repair_attempts=repair_attempts)
-        payload: dict[str, Any] = {
-            "type": "prompt", "text": self._compose_prompt(text.strip()), "delivery": "queue",
-            "request_id": queued.request_id,
-        }
-        if skills:
-            payload["skills"] = list(skills)
-        try:
-            self._client.send(payload)
-        except DGCClientError as exc:
-            self._forget(queued)
-            raise DGCRuntimeError(str(exc)) from exc
+        if not queued.held:
+            payload: dict[str, Any] = {
+                "type": "prompt", "text": self._compose_prompt(text.strip()),
+                "delivery": "queue", "request_id": queued.request_id,
+            }
+            if skills:
+                payload["skills"] = list(skills)
+            try:
+                self._client.send(payload)
+            except DGCClientError as exc:
+                self._forget(queued)
+                raise DGCRuntimeError(str(exc)) from exc
         handle = RunHandle(self, queued)
         handle._gen = self._pump(
             queued, text.strip(), timeout, None, output_schema, skills, None, repair_attempts,
-            send=False, prior=prior,
+            send=queued.held, prior=prior,
         )
         # Keep the handle alive while it is queued so stream() can drain it.
         queued.handle_ref = _strong(handle)
@@ -836,9 +852,16 @@ class Session:
         if name:
             command["name"] = name
         event = self._request(command, "session")
-        self.session_id = str(event.get("session_id") or self.session_id)
-        self.session_path = str(event.get("path") or self.session_path)
+        forked = str(event.get("session_id") or self.session_id)
+        if event.get("path"):
+            self.session_path = str(event.get("path"))
+        elif forked != self.session_id:
+            self.session_path = ""        # the parent's transcript is not the fork's
+        self.session_id = forked
         self._discard_idle_events()
+        if not self.session_path:
+            with contextlib.suppress(DGCRuntimeError):
+                self.bind_identity()
         return event
 
     def new_session(self) -> dict[str, Any]:
@@ -1240,6 +1263,9 @@ class Session:
                 owner.billed += 1
                 if delta is None or not reported(delta):
                     owner.usage_unknown = True
+                    if delta is not None:
+                        # DGC still counted the requests; only their token usage is unknown.
+                        owner.usage["requests"] += delta["requests"]
                 else:
                     for key in USAGE_TOTAL_KEYS:
                         owner.usage[key] += delta[key]
@@ -1409,6 +1435,15 @@ class Session:
                         self._run = run
                     result.status = "running"
             before = _snapshot_workspace(self._cwd, self._exclude)
+            if run.held and (run.cancel_reason or (prior is not None and (
+                    prior.cancel_reason or prior.result.status == "cancelled"))):
+                # DGC hands queued prompts back when the run in front of them is stopped; a
+                # follow-up the SDK held does the same and never runs.
+                acc.cancel()
+                if run.cancel_reason != "cancelled":
+                    acc.error = "DGC stopped before this queued prompt ran"
+                self._finish(run, acc, before)
+                return
             if send:
                 if max_turns is not None:
                     self._max_turns_dirty = True

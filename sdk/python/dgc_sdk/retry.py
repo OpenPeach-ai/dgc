@@ -21,8 +21,9 @@ class RetryPolicy:
     keep-alives): the first try plus ``max_attempts - 1`` re-issues, 1 to 11. It becomes the
     runtime's ``model_stall_retries``. ``RetryPolicy(max_attempts=1)`` turns stall re-issues off.
 
-    HTTP 408, 429 and 5xx answers and dropped connections are retried by the runtime on a fixed
-    schedule: up to 4 tries, waiting 0.5 s times the attempt number or the server's Retry-After.
+    HTTP 429 and 5xx answers (and 408 from the Anthropic Messages API) and dropped connections
+    are retried by the runtime on a fixed schedule: up to 4 tries, waiting 0.5 s times the attempt
+    number or the server's Retry-After.
     CLI 0.41 has no setting for that schedule, so ``retry_on`` and ``backoff_s`` only describe it:
     any value other than the default raises :class:`DGCUnsupportedError` instead of being
     silently ignored. Only failed or stalled model requests are retried, never tool calls.
@@ -45,8 +46,8 @@ class RetryPolicy:
                 "RetryPolicy.retry_on must be a sequence of HTTP status codes") from exc
         if statuses != tuple(sorted(RUNTIME_RETRY_STATUSES)):
             raise DGCUnsupportedError(
-                "RetryPolicy.retry_on cannot be changed: the DGC runtime always retries HTTP 408, "
-                "429 and 5xx answers up to 4 tries. Leave retry_on at its default.")
+                "RetryPolicy.retry_on cannot be changed: the DGC runtime always retries HTTP 429 "
+                "and 5xx answers up to 4 tries. Leave retry_on at its default.")
         if isinstance(self.backoff_s, bool) or not isinstance(self.backoff_s, (int, float)) or (
                 float(self.backoff_s) != RUNTIME_BACKOFF_S):
             raise DGCUnsupportedError(

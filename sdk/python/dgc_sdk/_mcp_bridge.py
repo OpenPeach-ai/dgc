@@ -23,7 +23,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 TOKEN_ENV = "DGC_SDK_TOOL_TOKEN"
 SERVER_NAME = "app"
@@ -46,8 +46,25 @@ def _sdk_version() -> str:
         return "0.0.0"
 
 
+def _hide_environment() -> None:
+    """Keep the secret this relay was started with away from other processes of the same user.
+
+    Linux shows every process's starting environment in ``/proc/<pid>/environ`` to the same
+    user; a non-dumpable process's is readable only with ``CAP_SYS_PTRACE``. So an agent's shell
+    running as this user cannot lift the token from the relay and call the tools directly.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+        ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)   # PR_SET_DUMPABLE, 0
+    except (AttributeError, ImportError, OSError, TypeError):
+        pass
+
+
 def relay(socket_path: str) -> int:
-    token = os.environ.get(TOKEN_ENV, "")
+    _hide_environment()
+    token = os.environ.pop(TOKEN_ENV, "")
     if not token:
         sys.stderr.write(f"dgc-sdk tool bridge: {TOKEN_ENV} is not set\n")
         return 2
@@ -130,9 +147,10 @@ class ToolHub:
     The socket lives in a private 0700 directory under a random name, and a connection is served
     only after its first line carries this session's secret (and, on Linux, only from this
     user), so other users and processes that do not hold the secret cannot call the tools. DGC
-    hands the secret to the relay in its environment, which is never persisted. A process of
-    the same user that can read the relay's environment could still learn it; the OS sandbox
-    keeps the agent's shell from seeing the relay process or this socket.
+    hands the secret to the relay in its environment, which is never persisted; on Linux the
+    relay makes itself non-dumpable at once, so other processes of the same user cannot read it
+    from ``/proc``. On macOS a process of the same user could still inspect the relay; the OS
+    sandbox keeps the agent's shell from seeing the relay process or this socket.
     """
 
     def __init__(self, tools: SequenceToolMap, socket_path: str | None = None):
@@ -351,12 +369,17 @@ class ToolHub:
 
 
 # The relay runs this file as a standalone script (no package), where the relative import fails.
-try:
+# Type checkers always take the package branch, so define_tool() is typed for callers.
+if TYPE_CHECKING:
     from .types import ToolSpec
     SequenceToolMap = list[ToolSpec]
-except Exception:  # pragma: no cover - running as a frozen proxy
-    ToolSpec = Any  # type: ignore[misc,assignment]
-    SequenceToolMap = list
+else:
+    try:
+        from .types import ToolSpec
+        SequenceToolMap = list[ToolSpec]
+    except Exception:  # pragma: no cover - running as a frozen proxy
+        ToolSpec = Any
+        SequenceToolMap = list
 
 
 def define_tool(name: str, description: str, input_schema: Mapping[str, Any],

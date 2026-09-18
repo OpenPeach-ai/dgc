@@ -57,6 +57,17 @@ def _toml(path: Path) -> dict:
 REQUIRE_TOOLS = os.environ.get("DGC_REQUIRE_RELEASE_TOOLS") == "1"
 
 
+def _workflows() -> list[Path]:
+    """The product's workflow files: what git tracks, not maintainer-only files beside them."""
+    folder = ROOT / ".github/workflows"
+    try:
+        listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--", ".github/workflows"],
+                                check=True, capture_output=True, text=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        return sorted(folder.glob("*.yml"))
+    return sorted(ROOT / name for name in listed if name.endswith(".yml"))
+
+
 def _yaml(path: Path):
     try:
         import yaml
@@ -146,6 +157,12 @@ class PackageMetadataTests(unittest.TestCase):
             self.assertIn("licenses/LICENSE is missing", errors)
             self.assertIn(f"dgc_sdk-{SDK_VERSION}/LICENSE is missing", errors)
             self.assertIn("is not a packaged dist file", errors)
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            _fake_npm(dist, SDK_VERSION, main="./src/index.ts", exports="./src/index.ts")
+            errors = "\n".join(check_dist.check_npm(
+                dist / f"vibedgc-sdk-{SDK_VERSION}.tgz", SDK_VERSION))
+            self.assertIn("not an import/types map", errors)
 
 
 class ReleaseManifestTests(unittest.TestCase):
@@ -209,7 +226,7 @@ class ReleaseManifestTests(unittest.TestCase):
 
 class WorkflowTests(unittest.TestCase):
     def test_every_action_is_pinned_to_a_commit(self):
-        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for path in _workflows():
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 match = re.search(r"uses:\s*(\S+)", line)
                 if not match or match.group(1).startswith("./"):
@@ -223,7 +240,7 @@ class WorkflowTests(unittest.TestCase):
                  (ROOT / "sdk/scripts/requirements-release.txt").read_text(encoding="utf-8").splitlines()]
         for requirement in filter(None, lines):
             self.assertRegex(requirement, r"^[A-Za-z0-9_.-]+==[\w.]+$")
-        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for path in _workflows():
             text = path.read_text(encoding="utf-8")
             self.assertNotRegex(text, r"pip install (?:-U )?build\b", f"{path.name} installs build unpinned")
             self.assertNotRegex(text, r"pip install [^\n]*\btwine\b(?!==)", f"{path.name} installs twine unpinned")
@@ -366,9 +383,10 @@ def _fake_sdist(dist: Path, version: str, *, license: bool) -> None:
             _add(sdist, prefix + "LICENSE", (ROOT / "LICENSE").read_bytes())
 
 
-def _fake_npm(dist: Path, version: str, *, main: str) -> None:
+def _fake_npm(dist: Path, version: str, *, main: str, exports: object = None) -> None:
     manifest = {"name": "@vibedgc/sdk", "version": version, "main": main,
-                "exports": {".": {"import": main, "types": main.replace(".js", ".d.ts")}}}
+                "exports": exports if exports is not None else
+                {".": {"import": main, "types": main.replace(".js", ".d.ts")}}}
     with tarfile.open(dist / f"vibedgc-sdk-{version}.tgz", "w:gz") as tgz:
         _add(tgz, "package/package.json", json.dumps(manifest).encode())
         for name in ("dist/index.js", "dist/index.d.ts", "dist/mcp-bridge.mjs", "README.md"):

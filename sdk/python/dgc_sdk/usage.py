@@ -20,7 +20,11 @@ USAGE_TOTAL_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "rea
 
 @dataclass(frozen=True)
 class Pricing:
-    """USD per 1,000,000 tokens. Both sides optional; missing side counts as 0."""
+    """USD per 1,000,000 tokens. Both sides optional; missing side counts as 0.
+
+    ``cached_input_per_million`` prices the part of the input the provider served from its
+    cache; left at 0 it is billed at ``input_per_million``.
+    """
 
     input_per_million: float = 0.0
     output_per_million: float = 0.0
@@ -29,13 +33,20 @@ class Pricing:
 
 def cost_usd(input_tokens: int | None, output_tokens: int | None, cached_input_tokens: int | None,
              pricing: Pricing | None) -> float | None:
-    """Cost of one usage record, or None without pricing or when the token counts are unknown."""
+    """Cost of one usage record, or None without pricing or when the token counts are unknown.
+
+    ``input_tokens`` counts every prompt token, cached ones included (as DGC reports them);
+    ``cached_input_tokens`` is the part of it served from a cache, billed at the cached price.
+    """
     if pricing is None or input_tokens is None or output_tokens is None:
         return None
+    total_in = max(0, input_tokens)
+    cached = min(total_in, max(0, cached_input_tokens or 0))
+    cached_rate = float(pricing.cached_input_per_million) or float(pricing.input_per_million)
     dollars = (
-        (max(0, input_tokens) / 1_000_000) * float(pricing.input_per_million)
+        ((total_in - cached) / 1_000_000) * float(pricing.input_per_million)
+        + (cached / 1_000_000) * cached_rate
         + (max(0, output_tokens) / 1_000_000) * float(pricing.output_per_million)
-        + (max(0, cached_input_tokens or 0) / 1_000_000) * float(pricing.cached_input_per_million)
     )
     return round(dollars, 8)
 

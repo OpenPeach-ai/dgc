@@ -309,6 +309,45 @@ class ProtocolTests(_Base):
             if ON_LINUX:
                 self.assertEqual(_serve_children(), [])
 
+    def _fake_python(self, offered: int) -> Path:
+        """An 'interpreter' whose DGC answers the discovery probe with another protocol."""
+        fake = self.tmp / f"python-v{offered}"
+        fake.write_text(f"#!/bin/sh\necho '{offered} 0.40.9 3 12'\n", encoding="utf-8")
+        fake.chmod(0o755)
+        return fake
+
+    @unittest.skipUnless(os.name == "posix", "the fake interpreter is a shell script")
+    def test_discovery_that_finds_only_other_protocols_raises_the_protocol_error(self):
+        for offered, advice in ((13, "dgc update"), (15, "pip install -U dgc-sdk")):
+            sdk_runtime._CACHE.clear()
+            with self.assertRaises(DGCProtocolError) as caught:
+                sdk_runtime.discover_runtime(
+                    {"PATH": "/nonexistent", "DGC_PYTHON": str(self._fake_python(offered))},
+                    home=self.tmp, use_current=False, checkout=False)
+            message = str(caught.exception)
+            self.assertIn(f"protocol v{offered}", message)
+            self.assertIn("0.40.9", message)
+            self.assertIn(advice, message)
+        sdk_runtime._CACHE.clear()
+        with self.assertRaises(DGCConfigError) as missing:
+            sdk_runtime.discover_runtime({"PATH": "/nonexistent"}, home=self.tmp,
+                                         use_current=False, checkout=False)
+        self.assertNotIsInstance(missing.exception, DGCProtocolError)
+
+    @unittest.skipUnless(os.name == "posix", "the fake interpreter is a shell script")
+    def test_an_unusable_dgc_python_is_reported_when_another_runtime_is_used(self):
+        sdk_runtime._CACHE.clear()
+        env = {"PATH": os.environ.get("PATH", ""), "DGC_PYTHON": str(self._fake_python(13))}
+        try:
+            with self.assertLogs("dgc_sdk", "WARNING") as logged:
+                found = sdk_runtime.discover_runtime(env, home=self.tmp, use_current=True,
+                                                     checkout=sdk_runtime.is_checkout())
+        finally:
+            sdk_runtime._CACHE.clear()
+        self.assertEqual(found.protocol, 14)
+        self.assertIn("DGC_PYTHON", "\n".join(logged.output))
+        self.assertIn("protocol v13", "\n".join(logged.output))
+
 
 class RequestTests(_Base):
     def test_rejected_command_raises_at_once_with_its_reason(self):

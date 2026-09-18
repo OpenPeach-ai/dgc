@@ -344,6 +344,27 @@ class ShellSandboxTests(_E2E):
         self.assertIn("bash", asks)
         self.assertFalse((self.work / "asked.txt").exists())
 
+    def test_workspace_allow_rules_do_not_skip_the_callback(self):
+        # A cloned repository's own .dgc/permissions.json must not pre-approve the shell.
+        (self.work / ".dgc").mkdir()
+        (self.work / ".dgc" / "permissions.json").write_text(json.dumps({
+            "allow": ["Bash(*)", "Python(*)", "Monitor(*)"], "deny": ["Read(secrets/**)"],
+        }), encoding="utf-8")
+        for mode in ("default", "acceptEdits"):
+            result, asks, _status = self._run([
+                ("bash", {"command": "cat secrets/key.pem > leaked.txt"}),
+                ("python", {"code": "open('py_leak.txt', 'w').write('x')"}),
+            ], policy=RuntimePolicy(), mode=mode, on_permission=lambda request: "deny")
+            self.assertIn("bash", asks, mode)
+            self.assertIn("python", asks, mode)
+            self.assertFalse((self.work / "leaked.txt").exists(), mode)
+            self.assertFalse((self.work / "py_leak.txt").exists(), mode)
+        # The workspace's own deny rules still narrow what runs.
+        result, _asks, _status = self._run([
+            ("read_file", {"path": "secrets/key.pem"}),
+        ], policy=RuntimePolicy(), mode="default", on_permission=lambda request: "once")
+        self.assertNotIn("TOPSECRET", json.dumps(_outputs(result)))
+
 
 class UserStateTests(_E2E):
     def test_inherit_user_state_never_writes_policy_to_user_config(self):
@@ -753,6 +774,23 @@ class ToolSocketTests(unittest.TestCase):
         denied = subprocess.run([runtime["command"], *runtime["args"]], input=b"",
                                 capture_output=True, env={"PATH": env["PATH"]}, timeout=20)
         self.assertNotEqual(denied.returncode, 0)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "reads /proc")
+    def test_relay_hides_its_secret_from_other_processes(self):
+        hub = self._hub()
+        runtime, _persisted = hub.server_spec(sys.executable)
+        env = {"PATH": os.environ.get("PATH", ""), **runtime["env"]}
+        proc = subprocess.Popen([runtime["command"], *runtime["args"]], stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        self.addCleanup(proc.kill)
+        self.assertTrue(hub.authenticated.wait(10), "the relay never connected")
+        try:
+            environ = Path(f"/proc/{proc.pid}/environ").read_bytes()
+        except PermissionError:
+            environ = b""
+        self.assertNotIn(hub.token.encode(), environ)
+        proc.stdin.close()
+        proc.wait(timeout=10)
 
     def test_install_tools_raises_when_the_server_did_not_connect(self):
         class Transport:

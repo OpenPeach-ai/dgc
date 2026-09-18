@@ -21,13 +21,6 @@ from typing import Any, Iterator, Mapping
 
 from .errors import DGCConfigError
 
-# CLI settings that make DGC start processes. A pre-existing config.json is never merged, so
-# these reach a session only when the embedder passes them explicitly.
-COMMAND_KEYS = frozenset({
-    "verify_command", "autonomous_gate", "hooks", "mcp_servers", "language_servers",
-    "subscription_engine", "code_action",
-})
-
 _LOCKS_GUARD = threading.Lock()
 _LOCKS: dict[str, "_StateLock"] = {}
 

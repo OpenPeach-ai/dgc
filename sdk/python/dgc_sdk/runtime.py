@@ -16,6 +16,7 @@ directories, and what the application passes on purpose (``api_key``, ``extra_en
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import re
 import shutil
@@ -27,8 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from ._version import PROTOCOL, REQUIRES_CLI
-from .errors import DGCConfigError
+from ._version import PROTOCOL, REQUIRES_CLI, __version__
+from .errors import DGCConfigError, DGCProtocolError
+
+log = logging.getLogger("dgc_sdk")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SDK_ROOT = Path(__file__).resolve().parents[1]
@@ -226,7 +229,11 @@ def _installed_launchers(env: Mapping[str, str], home: Path) -> list[tuple[Path,
 
 def discover_runtime(env: Mapping[str, str] | None = None, *, home: Path | None = None,
                      use_current: bool = True, checkout: bool | None = None) -> RuntimeSpec:
-    """Find a ``dgc serve`` this SDK can drive. Raises DGCConfigError when there is none."""
+    """Find a ``dgc serve`` this SDK can drive.
+
+    Raises :class:`DGCProtocolError` when every DGC found speaks another protocol (with the
+    advice to update the CLI or dgc-sdk), and :class:`DGCConfigError` when none was found.
+    """
     env = os.environ if env is None else env
     home = Path.home() if home is None else home
     checkout = is_checkout() if checkout is None else checkout
@@ -256,6 +263,7 @@ def discover_runtime(env: Mapping[str, str] | None = None, *, home: Path | None 
             candidates.append((f"{label} ({launcher})", python, (), (str(launcher), "serve")))
 
     notes: list[str] = []
+    offered: list[int] = []
     for label, python, pythonpath, launch in candidates:
         answer = _probe(python, pythonpath)
         if isinstance(answer, str):
@@ -263,16 +271,33 @@ def discover_runtime(env: Mapping[str, str] | None = None, *, home: Path | None 
             continue
         protocol, version, py_version = answer
         if protocol != PROTOCOL:
-            notes.append(f"{label} {python}: DGC {version} speaks protocol v{protocol}, "
-                         f"this SDK needs v{PROTOCOL} (CLI {REQUIRES_CLI} or newer)")
+            offered.append(protocol)
+            if protocol > PROTOCOL:
+                notes.append(f"{label} {python}: DGC {version} speaks protocol v{protocol}, "
+                             f"newer than this SDK's v{PROTOCOL}")
+            else:
+                notes.append(f"{label} {python}: DGC {version} speaks protocol v{protocol}, "
+                             f"this SDK needs v{PROTOCOL} (CLI {REQUIRES_CLI} or newer)")
             continue
         spec = RuntimeSpec(
             argv=launch or _python_argv(python, py_version), python=python,
             pythonpath=pythonpath, source=label, version=version, protocol=protocol,
             notes=tuple(notes))
+        explicit = [note for note in notes if note.startswith(("DGC_PYTHON ", "DGC_RUNTIME_PYTHON "))]
+        if explicit:
+            log.warning("dgc_sdk: %s; using %s instead", explicit[0], label)
         _CACHE[key] = spec
         return spec
     detail = "; ".join(notes) if notes else "no candidates"
+    if offered:
+        if all(protocol > PROTOCOL for protocol in offered):
+            advice = "Upgrade dgc-sdk (pip install -U dgc-sdk) to drive this CLI."
+        else:
+            advice = ("Update the CLI (dgc update), or point DGC_PYTHON or runtime= at a DGC "
+                      f"that is {REQUIRES_CLI} or newer.")
+        raise DGCProtocolError(
+            f"DGC SDK {__version__} speaks protocol v{PROTOCOL} and needs CLI {REQUIRES_CLI} or "
+            f"newer, but no DGC found speaks it. {advice} Looked at: {detail}")
     raise DGCConfigError(
         "no DGC runtime found. Install the CLI (curl -fsSL https://vibedgc.com/install.sh | bash) "
         "or set DGC_PYTHON to a Python that can import dgc, or pass runtime=[...]. "

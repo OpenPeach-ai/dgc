@@ -183,7 +183,9 @@ class RuntimePolicy:
       sandbox would still show, ``bash`` and ``monitor`` are refused, and ``python`` (never
       sandboxed) always is. In the other modes each shell command is a permission request that
       your ``on_permission`` callback decides (no callback means deny); an approved command runs
-      in the sandbox when one is available and unconfined otherwise.
+      in the sandbox when one is available and unconfined otherwise. Allow rules the workspace
+      brings (``.dgc/permissions.json``) are not loaded, so only your callback's own
+      ``"always"`` answers skip that request.
     * ``"screened"``. The shell runs unconfined. In ``auto`` mode, commands whose text looks
       like a network call or (with a write tool denied) a file write are refused. This is best
       effort: an agent can phrase a command so the screen misses it.
@@ -731,6 +733,9 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
         "sandbox_network": policy.network == "allow",
         "sandbox_read_only": sandbox_read_only,
         "shell_requires_sandbox": shell_requires_sandbox,
+        # A workspace's own .dgc/permissions.json may narrow what runs, never pre-approve it:
+        # outside auto mode every shell command still reaches on_permission.
+        "project_allow": False,
     }
     text = _dump(payload)
     if len(text.encode("utf-8")) > _SESSION_POLICY_MAX_BYTES:

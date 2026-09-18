@@ -24,6 +24,8 @@ _SAFE_PLACEHOLDERS = frozenset({
     "changeme", "example", "placeholder",
 })
 # Key names that carry credentials (``max_tokens`` / ``token_estimate`` are not).
+_COUNT_NAME_RE = re.compile(
+    r"(?i)(?:^|[_-])tokens?[_-](?:estimate|count|budget|limit|usage|used)(?:$|[_-])")
 _SENSITIVE_NAME_RE = re.compile(
     r"(?i)(?:^|[_-])(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|"
     r"secret[_-]?(?:access[_-]?)?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|"
@@ -47,10 +49,13 @@ _JSON_SECRET_RE = re.compile(
     (["'])([^\r\n]*?)(\2)
     '''
 )
+# ``NAME=value`` / ``name: value`` lines (.env, YAML, shell), the bare names included. A value that
+# is code reading the secret (``config.get(...)``, ``os.environ["..."]``) is left alone.
 _ASSIGN_SECRET_RE = re.compile(
-    r"(?im)(\b[A-Za-z_][A-Za-z0-9_]*(?:API_KEY|APIKEY|ACCESS_KEY_ID|SECRET_ACCESS_KEY|SECRET_KEY|"
+    r"(?im)(\b[A-Za-z0-9_]*(?:API_KEY|APIKEY|ACCESS_KEY_ID|SECRET_ACCESS_KEY|SECRET_KEY|"
     r"ACCESS_TOKEN|REFRESH_TOKEN|AUTH_TOKEN|SESSION_TOKEN|OAUTH_TOKEN|TOKEN|PASSWORD|PASSWD|"
     r"PASSPHRASE|CLIENT_SECRET|PRIVATE_KEY|CREDENTIAL|SECRET)\s*[:=]\s*[\"']?)"
+    r"(?![A-Za-z_][A-Za-z0-9_.]*[(\[])"
     r"([^\s\"'`;,]{4,})"
 )
 _FLAG_SECRET_RE = re.compile(
@@ -90,7 +95,8 @@ def _usable_secret(value: Any) -> str | None:
 
 def sensitive_name(name: Any) -> bool:
     """Whether a key or variable name conventionally carries a credential."""
-    return bool(_SENSITIVE_NAME_RE.search(str(name or "")))
+    text = str(name or "")
+    return bool(_SENSITIVE_NAME_RE.search(text)) and not _COUNT_NAME_RE.search(text)
 
 
 def remember_secret(value: Any) -> None:

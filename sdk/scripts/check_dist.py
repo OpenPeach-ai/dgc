@@ -95,7 +95,12 @@ def check_npm(path: Path, version: str) -> list[str]:
         manifest = json.load(io.TextIOWrapper(manifest_file, encoding="utf-8")) if manifest_file else {}
         if manifest.get("version") != version:
             errors.append(f"{path.name}: package.json version {manifest.get('version')!r}, expected {version!r}")
-        exports = (manifest.get("exports") or {}).get(".") or {}
+        exports = manifest.get("exports") or {}
+        exports = exports.get(".") if isinstance(exports, dict) else exports
+        if not isinstance(exports, dict):
+            # A bare string (``"exports": "./src/index.ts"``, as in 0.5.2) has no import/types.
+            errors.append(f"{path.name}: exports is {exports!r}, not an import/types map")
+            exports = {}
         for key, target in (("import", exports.get("import")), ("types", exports.get("types")),
                             ("main", manifest.get("main"))):
             if not isinstance(target, str) or not target.startswith("./dist/") \

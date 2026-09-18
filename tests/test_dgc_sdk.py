@@ -412,11 +412,16 @@ class SdkTests(unittest.TestCase):
             session = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
             session.run("Summarize README. Do not edit files.", timeout=60)
             origin = session.session_id
+            origin_path = session.session_path
             session.fork("sdk-branch")
             listed = session.list_sessions()
+            session.run("Summarize README again. Do not edit files.", timeout=60)
         self.assertGreaterEqual(len(listed), 2)
         self.assertTrue(session.session_id)
         self.assertNotEqual(session.session_id, origin)
+        self.assertNotEqual(session.session_path, origin_path)
+        self.assertTrue(session.session_path.endswith(session.session_id + ".json"),
+                        session.session_path)
 
     def test_cancel_drains_and_session_is_reusable(self):
         _Model.behavior = "stall"
@@ -913,6 +918,10 @@ class PolicyUnitTests(unittest.TestCase):
         from dgc_sdk import cost_usd
         self.assertEqual(cost_usd(1_000_000, 500_000, 0, Pricing(1.0, 2.0)), 2.0)
         self.assertIsNone(cost_usd(10, 10, 0, None))
+        # DGC's input count already includes the cached tokens: they are billed once, at the
+        # cached price, or at the input price when no cached price is set.
+        self.assertAlmostEqual(cost_usd(10_000, 100, 8_000, Pricing(3.0, 15.0, 0.3)), 0.0099)
+        self.assertAlmostEqual(cost_usd(10_000, 100, 8_000, Pricing(3.0, 15.0)), 0.0315)
 
     def test_write_deny_inspects_bash_like_network(self):
         from dgc.permissions import PermissionEngine
@@ -1024,6 +1033,17 @@ class _SessionsModel(_Model):
                 self._send(_with_usage(_call("read_file", {"path": "README.md"})))
             else:
                 self._send(_with_usage(_answer("Usage reported.")))
+            return
+        if behavior == "repair_follow":
+            if "Return only valid JSON" in last:
+                self._send(_answer('{"ok": true}'))
+            elif last.startswith("TOOL:"):
+                self._send(_answer("FOLLOW-DONE"))
+            elif "follow task" in last:
+                self._send(_call("read_file", {"path": "README.md"}))
+            else:
+                time.sleep(1.0)
+                self._send(_answer("not JSON yet"))
             return
         if behavior == "two_steps":
             if tools_seen < 2:
@@ -1303,6 +1323,8 @@ class SessionFixTests(unittest.TestCase):
         self.assertIsNone(result.usage["input_tokens"])
         self.assertIsNone(result.usage["output_tokens"])
         self.assertIsNone(result.usage["cost_usd"])
+        # The request itself was made and counted by DGC; only its tokens are unknown.
+        self.assertGreaterEqual(result.usage["requests"], 1)
         self.assertEqual(report["unknown_usage_runs"], 1)
         self.assertIsNone(report["cost_usd"])
 
@@ -1421,6 +1443,52 @@ class SessionFixTests(unittest.TestCase):
         self.assertTrue(any(row.get("run_id") == second.run_id and row.get("type") == "tool_call"
                             and row["payload"].get("name") == "write_file" for row in rows), rows)
         self.assertIn(second.run_id, {row.get("run_id") for row in report["rows"]})
+
+    def test_followup_behind_a_schema_repair_gets_its_own_turn(self):
+        _SessionsModel.behavior = "repair_follow"
+        schema = {"type": "object", "required": ["ok"], "properties": {"ok": {"type": "boolean"}}}
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("json task", timeout=60, output_schema=schema)
+            follow = session.followup("follow task", timeout=60)
+            first = handle.result(timeout=90)
+            second = follow.result(timeout=90)
+            after = session.run("Summarize README. Do not edit files.", timeout=60)
+        self.assertEqual(first.status, "completed", first.error)
+        self.assertEqual(first.output, {"ok": True})
+        self.assertNotIn("read_file", [tool.name for tool in first.tools])
+        self.assertEqual(second.status, "completed", second.error)
+        self.assertIn("FOLLOW-DONE", second.final_text)
+        self.assertIn("read_file", [tool.name for tool in second.tools])
+        self.assertEqual(after.status, "completed", after.error)
+
+    def test_followup_behind_a_capped_run_is_not_capped(self):
+        _SessionsModel.behavior = "two_steps"
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("Read the README twice.", timeout=60, max_turns=1)
+            follow = session.followup("Read the README twice.", timeout=60)
+            capped = handle.result(timeout=90)
+            second = follow.result(timeout=90)
+        self.assertEqual(capped.status, "failed")
+        self.assertEqual(second.status, "completed", second.error)
+        self.assertIn("both steps done", second.final_text)
+
+    def test_held_followup_does_not_run_when_the_run_in_front_is_cancelled(self):
+        _SessionsModel.behavior = "repair_follow"
+        schema = {"type": "object", "required": ["ok"], "properties": {"ok": {"type": "boolean"}}}
+        with self._client() as dgc:
+            session = self._auto(dgc)
+            handle = session.stream("json task", timeout=60, output_schema=schema)
+            follow = session.followup("follow task", timeout=60)
+            handle.cancel()
+            first = handle.result(timeout=60)
+            second = follow.result(timeout=60)
+            after = session.run("Summarize README. Do not edit files.", timeout=60)
+        self.assertEqual(first.status, "cancelled")
+        self.assertEqual(second.status, "cancelled")
+        self.assertEqual(second.tools, [])
+        self.assertEqual(after.status, "completed", after.error)
 
     def test_steer_is_part_of_the_run(self):
         _SessionsModel.behavior = "flow"
@@ -1587,7 +1655,18 @@ class SessionFixTests(unittest.TestCase):
                       "hunter2hunter2"):
             self.assertNotIn(value, blob)
         self.assertIn("[redacted]", redact_text("Authorization: Bearer sk-abc123456789"))
-        self.assertEqual(redact({"max_tokens": 4096, "token_estimate": 12})["max_tokens"], 4096)
+        self.assertEqual(redact({"max_tokens": 4096, "token_estimate": 12}),
+                         {"max_tokens": 4096, "token_estimate": 12})
+        from dgc_sdk.audit import sensitive_name
+        self.assertFalse(sensitive_name("token_estimate"))
+        self.assertTrue(sensitive_name("GITHUB_TOKEN"))
+        # Bare names at the start of a .env or YAML line, as 0.5.2 redacted them.
+        for line in ("API_KEY=zq8Lx9Vb7Nm5", "api_key: zq8Lx9Vb7Nm5", "TOKEN=zq8Lx9Vb7Nm5",
+                     "password=zq8Lx9Vb7Nm5"):
+            self.assertNotIn("zq8Lx9Vb7Nm5", redact_text(line), line)
+        # Code that reads a secret is not a secret.
+        for code in ("api_key = config.get('api_key')", 'token = os.environ["TOKEN"]'):
+            self.assertEqual(redact_text(code), code)
 
     def test_audit_and_usage_files_are_owner_only(self):
         with self._client(pricing=Pricing(1.0, 1.0)) as dgc:
