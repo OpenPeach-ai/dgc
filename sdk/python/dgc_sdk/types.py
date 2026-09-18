@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Awaitable, Callable, Literal, Mapping
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "auto"]
 UnhandledPolicy = Literal["deny", "callback"]
@@ -114,11 +114,19 @@ class ToolRecord:
 
 @dataclass(frozen=True)
 class FileChange:
+    """One file the run added, modified or deleted under the session cwd.
+
+    ``before``/``after`` hold UTF-8 text up to 1 MB ("" for binary or larger files). ``diff`` is a
+    ``git apply``-able patch for this file ("" when a side is not text); a whole-run patch is
+    ``"".join(change.diff for change in result.changes)``.
+    """
+
     path: str
     kind: str
     before: str = ""
     after: str = ""
     root: str = ""
+    diff: str = ""
 
 
 @dataclass(frozen=True)
@@ -250,7 +258,12 @@ class RunResult:
     error: str | None = None
 
 
-OnPermission = Callable[[PermissionRequest], PermissionAction]
-OnPlan = Callable[[PlanRequest], PlanAction]
-OnQuestion = Callable[[QuestionRequest], Mapping[str, QuestionAnswer] | Literal["dismiss"]]
-OnMcpInput = Callable[[McpInputRequest], McpInputResponse]
+# Callbacks may be plain functions or ``async def`` (awaited on the session's event loop).
+OnPermission = Callable[[PermissionRequest], "PermissionAction | Awaitable[PermissionAction]"]
+OnPlan = Callable[[PlanRequest], "PlanAction | Awaitable[PlanAction]"]
+OnQuestion = Callable[
+    [QuestionRequest],
+    "Mapping[str, QuestionAnswer] | Literal['dismiss'] "
+    "| Awaitable[Mapping[str, QuestionAnswer] | Literal['dismiss']]",
+]
+OnMcpInput = Callable[[McpInputRequest], "McpInputResponse | Awaitable[McpInputResponse]"]
