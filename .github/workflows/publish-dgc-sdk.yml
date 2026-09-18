@@ -109,9 +109,9 @@ jobs:
           "$RUNNER_TEMP/app/bin/python" -m pip check
           "$RUNNER_TEMP/app/bin/python" -m pip install -r sdk/scripts/requirements-release.txt
           export DGC_PYTHON="$RUNNER_TEMP/app/bin/python"
-          (cd "$RUNNER_TEMP" && "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_dgc_sdk.py" \
-            && "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_examples.py" \
-            && "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_packaging.py")
+          (cd "$RUNNER_TEMP" && "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_installed.py" \
+            "$GITHUB_WORKSPACE"/tests/test_dgc_sdk*.py "$GITHUB_WORKSPACE"/tests/test_sdk_*.py)
+          (cd "$RUNNER_TEMP" && "$DGC_PYTHON" -m mypy --strict "$GITHUB_WORKSPACE/tests/sdk_typing/public_api.py")
           node --experimental-strip-types --test tests/test_dgc_sdk_ts.mjs tests/test_dgc_sdk_ts_package.mjs
       - name: Release manifest (SBOM and SHA256SUMS over the exact artifacts)
         run: python sdk/scripts/make_sbom.py --dist dist/sdk

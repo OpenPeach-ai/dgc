@@ -146,9 +146,8 @@ jobs:
         run: |
           export DGC_PYTHON="$RUNNER_TEMP/app/bin/python"
           cd "$RUNNER_TEMP"
-          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_dgc_sdk.py"
-          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_examples.py"
-          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/test_sdk_packaging.py"
+          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_installed.py" \
+            "$GITHUB_WORKSPACE"/tests/test_dgc_sdk*.py "$GITHUB_WORKSPACE"/tests/test_sdk_*.py
           "$DGC_PYTHON" -m mypy --strict "$GITHUB_WORKSPACE/tests/sdk_typing/public_api.py"
       - name: TypeScript SDK from source and from its packed tarball
         env:

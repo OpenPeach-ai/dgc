@@ -14,14 +14,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "sdk" / "python"))
-sys.path.insert(0, str(ROOT))
+# DGC_SDK_TEST_INSTALLED=1 (CI's SDK job) tests the installed dgc-sdk wheel and dgc runtime, not
+# this checkout: an editable install's .pth hook pre-imports modules and once hid a broken bridge.
+INSTALLED = os.environ.get("DGC_SDK_TEST_INSTALLED") == "1"
+SOURCE_PATHS = [] if INSTALLED else [str(ROOT / "sdk" / "python"), str(ROOT)]
+sys.path[:0] = SOURCE_PATHS
 
 from dgc_sdk import (  # noqa: E402
     AsyncDGC, DGC, DGCConfigError, DGCUnsupportedError, Pricing, QuestionAnswer,
     RetryPolicy, RuntimePolicy, define_tool, redact_text,
 )
 from dgc_sdk.schema import extract_json, validate  # noqa: E402
+
+if INSTALLED:
+    import dgc_sdk as _installed  # noqa: E402
+    assert not Path(_installed.__file__).resolve().is_relative_to(ROOT), \
+        f"DGC_SDK_TEST_INSTALLED=1 but dgc_sdk was imported from the checkout: {_installed.__file__}"
 
 
 def _sse(delta: dict, finish: str | None = None) -> str:
@@ -691,7 +699,7 @@ class SdkTests(unittest.TestCase):
         crash_state = self.state / "crash-home"
         script = (
             "import os, sys\n"
-            f"sys.path[:0] = [{str(ROOT / 'sdk' / 'python')!r}, {str(ROOT)!r}]\n"
+            f"sys.path[:0] = {SOURCE_PATHS!r}\n"
             "from pathlib import Path\n"
             "from dgc_sdk import DGC\n"
             f"dgc = DGC(state_dir={str(crash_state)!r}, model='sdk-model', "
