@@ -1,9 +1,34 @@
 #!/usr/bin/env python3
-"""Reject private work records in tracked release sources without printing their contents."""
+"""Reject private work records and website trees in tracked public sources."""
 from pathlib import Path
 import re
 import subprocess
 import sys
+
+# Public GitHub is the product (CLI, extension, SDK). vibedgc.com lives in a local
+# deploy tree and must not return to the tracked index.
+_WEBSITE_EXACT = {
+    "wrangler.json",
+    "package.json",
+    "package-lock.json",
+    "scripts/build-site.py",
+    "scripts/check-site.py",
+    "scripts/check-site-worker.mjs",
+    "scripts/deploy-site.sh",
+    "scripts/generate-docs-site.py",
+    "scripts/benchmark_site.py",
+    "scripts/site-measurement.py",
+    "scripts/site_common.py",
+    "scripts/sync-site-version.sh",
+    ".github/workflows/site-metrics.yml",
+}
+_WEBSITE_PREFIXES = ("site/", "site-src/", "qa/site/")
+
+
+def _website_path(name: str) -> bool:
+    if name in _WEBSITE_EXACT:
+        return True
+    return name.startswith(_WEBSITE_PREFIXES)
 
 
 def check(root: Path) -> list[str]:
@@ -20,6 +45,9 @@ def check(root: Path) -> list[str]:
     for name in filter(None, paths):
         path = root / name
         if not path.is_file():
+            continue
+        if _website_path(name):
+            errors.append(name + ': website path must not be tracked on the public product repo')
             continue
         if forbidden.search(name):
             errors.append(name + ': private work-record path')
@@ -46,4 +74,4 @@ if __name__ == '__main__':
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         raise SystemExit(1)
-    print('Public source content: no private work records found.')
+    print('Public source content: product tree only; no private work records or website paths.')

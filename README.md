@@ -366,17 +366,17 @@ See [AGENTS.md](AGENTS.md) for the layout and conventions, and
 
 ## Repository layout
 
-This repository is the DGC **product** (Apache-2.0):
+This repository is the DGC **product** only (Apache-2.0): CLI, editor, SDK, tests, and release scripts. The website (vibedgc.com) is not in this tree. Preflight fails if `site/`, `site-src/`, or other website paths are tracked.
 
 | Path | What it is |
 | --- | --- |
 | `dgc/` | CLI |
 | `editors/vscode/` | VS Code / Cursor extension |
 | `sdk/` | Embed client (`dgc-sdk`) |
-| `tests/`, `scripts/` | Tests and release/build |
-| `dgc/docs.py` | In-app `/docs` library (also published to docs.vibedgc.com) |
+| `tests/`, `scripts/` | Tests and product release/build |
+| `dgc/docs.py` | In-app `/docs` library |
 
-`site-src/` is the vibedgc.com **templates** (open, like the rest of the tree). `site/` is the **generated** site plus the installer/VSIX copy used to deploy Cloudflare — not the product language. GitHub marks `site/` as generated so the repo reads as Python/TypeScript, not as a static website. Release binaries also live on [GitHub Releases](https://github.com/OpenPeach-ai/dgc/releases).
+Binaries live on [GitHub Releases](https://github.com/OpenPeach-ai/dgc/releases). The site is [vibedgc.com](https://vibedgc.com/).
 
 ## Security
 

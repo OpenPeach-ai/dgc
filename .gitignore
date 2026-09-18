@@ -6,10 +6,28 @@ build/
 dist/
 .DS_Store
 dgc.tar.gz
-!site/dgc.tar.gz
 .env
 .env.*
 !.env.example
+
+# vibedgc.com is not this product repository. A maintainer checkout may still
+# hold these locally for Cloudflare; they must not be git-tracked.
+/site/
+/site-src/
+/qa/site/
+/wrangler.json
+/package.json
+/package-lock.json
+/scripts/build-site.py
+/scripts/check-site.py
+/scripts/check-site-worker.mjs
+/scripts/deploy-site.sh
+/scripts/generate-docs-site.py
+/scripts/benchmark_site.py
+/scripts/site-measurement.py
+/scripts/site_common.py
+/scripts/sync-site-version.sh
+/.github/workflows/site-metrics.yml
 
 # Maintainer/release scripts are source-controlled build inputs. Private notes remain local.
 HANDOFF.md
@@ -18,7 +36,6 @@ DGC_HARNESS_IMPROVEMENT_PLAN.md
 bench/PLAN.md
 node_modules/
 *.vsix
-!site/vscode/*.vsix
 editors/vscode/dist/
 HARNESS_SYNTHESIS.md
 

@@ -12,8 +12,17 @@ if [ "${DGC_ALLOW_DIRTY:-0}" != 1 ] && [ -n "$(git status --porcelain --untracke
   exit 1
 fi
 
-for script in scripts/*.sh bench/*.sh install.sh site/install.sh; do bash -n "$script"; done
-cmp -s install.sh site/install.sh || { echo "root and site installers differ" >&2; exit 1; }
+for script in scripts/*.sh bench/*.sh install.sh; do
+  [ -f "$script" ] || continue
+  case "$script" in
+    scripts/deploy-site.sh) continue ;;
+  esac
+  bash -n "$script"
+done
+if [ -f site/install.sh ]; then
+  bash -n site/install.sh
+  cmp -s install.sh site/install.sh || { echo "root and site installers differ" >&2; exit 1; }
+fi
 "$PYTHON" scripts/check-public-content.py
 
 # The redaction suite must contain synthetic credentials by construction — that is exactly what it

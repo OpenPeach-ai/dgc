@@ -1,5 +1,0 @@
-# vibedgc.com and docs.vibedgc.com serve this same file; the sitemap lists both hosts.
-User-agent: *
-Allow: /
-
-Sitemap: https://vibedgc.com/sitemap.xml
