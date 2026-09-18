@@ -1471,9 +1471,9 @@ The terminal's `/diff` pane is the live working-tree view while a turn runs; see
 The DGC SDK embeds the same agent in your own process. It is **free and local**. You do not pay
 DGC to use it. Optional `Pricing` on a client only attributes **your** model-token spend.
 
-Frozen cut: **0.5.2**, protocol **v14**, Linux. Pair it with CLI **0.41.5** (this checkout or the
-GitHub release). Tag [`sdk-v0.5.2`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2)
-— not `v0.5.2`, which is a historical CLI tag.
+Frozen cut: **0.5.2** on [PyPI](https://pypi.org/project/dgc-sdk/), protocol **v14**, Linux.
+Pair it with CLI **0.41.5**. GitHub tag [`sdk-v0.5.2`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.2)
+is the same cut — not `v0.5.2`, which is a historical CLI tag.
 
 ## Install
 
@@ -1483,8 +1483,11 @@ python3 -m pip install dgc-sdk
 
 That installs this product (`import dgc_sdk`). Do **not** run `pip install dgc`: PyPI’s package
 named `dgc` is a different project. From a clone: `python3 -m pip install -e sdk/python`.
-The package still needs a runtime that can run `python -m dgc serve` (this repository or
-CLI 0.41.5). Set `DGC_PYTHON` if `python3` cannot import `dgc`.
+
+You still need a DGC runtime that can run `python -m dgc serve` (this repository or CLI 0.41.5).
+Set `DGC_PYTHON` if `python3` cannot import `dgc`.
+
+TypeScript is in `sdk/typescript` on GitHub (Node ≥ 22). It is not on npm yet.
 
 ## Isolation
 
@@ -1492,26 +1495,59 @@ Each `DGC` owns one `state_dir` HOME. Host `~/.dgc` is unused unless you pass
 `inherit_user_state=True` — do not, in production embeds.
 
 ```python
+from pathlib import Path
 from dgc_sdk import DGC, Pricing, RuntimePolicy
 
-dgc = DGC(
-    state_dir="/var/lib/myapp/dgc",
+with DGC(
+    state_dir=Path("/var/lib/myapp/dgc"),
     inherit_user_state=False,
     department="platform",
     pricing=Pricing(input_per_million=0.0, output_per_million=0.0),
     policy=RuntimePolicy(network="deny", deny_tools=("write_file",)),
-)
-session = dgc.session(cwd="/path/to/workspace", permissions={"mode": "default", "unhandled": "deny"})
-result = session.run("Summarize this repository. Do not edit files.")
-print(result.status, result.usage)
+) as dgc:
+    session = dgc.session(
+        cwd="/path/to/workspace",
+        permissions={"mode": "default", "unhandled": "deny"},
+    )
+    result = session.run("Summarize this repository. Do not edit files.")
+    print(result.status, result.final_text)
+    print(dgc.usage_report(department="platform"))
 ```
 
 `RuntimePolicy(deny_tools=("write_file",))` is compiled into isolated deny rules in every permission
 mode, including `auto`. Write-tool denies also block bash file-writes (redirects, `tee`, `cp`/`mv`).
 
-TypeScript lives in `sdk/typescript` (Node ≥ 22). Usage, audit, and retry helpers are Python-first.
+## Stream and cancel
 
-Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
+```python
+run = session.stream("Review the checkout flow", max_turns=12, timeout=120)
+for event in run:
+    print(event.type)
+result = run.result()
+# run.cancel() stops an in-flight turn, including during an approval wait.
+```
+
+Async: `AsyncDGC` / `await session.stream(...)` / `async for event in run`.
+
+## TypeScript (in-tree)
+
+```
+import { DGC } from "@vibedgc/sdk"; // from sdk/typescript until npm
+
+const dgc = new DGC({
+  stateDir: "/var/lib/myapp/dgc",
+  inheritUserState: false,
+});
+const session = await dgc.session({
+  cwd: "./checkout-app",
+  permissions: { mode: "default", unhandled: "deny" },
+});
+const result = await session.run("Explain the checkout flow. Do not edit files.");
+console.log(result.status, result.finalText);
+await dgc.close();
+```
+
+Product page: [vibedgc.com/sdk](https://vibedgc.com/sdk/). Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
 """.strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
 # In your editor

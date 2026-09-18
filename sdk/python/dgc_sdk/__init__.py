@@ -1,6 +1,6 @@
 """DGC SDK for embedding the harness in applications and CI.
 
-Local package. Not published. Version with the TypeScript SDK when the contract changes.
+Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Pair with CLI 0.41.5 / protocol v14.
 """
 
 from ._mcp_bridge import define_tool
