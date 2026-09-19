@@ -28,7 +28,8 @@ from .errors import (
 )
 from .schema import assert_supported, extract_json, validate as validate_schema
 from .types import (
-    AgentInfo, Artifact, Checkpoint, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
+    AgentInfo, Artifact, Checkpoint, Denial, FileChange, Goal, HookInfo, McpInputRequest,
+    McpInputResponse,
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionRequest, PermissionRule, PlanRequest, Question, QuestionAnswer, QuestionOption,
     QuestionRequest, RunEvent, RunResult, SandboxStatus, SessionInfo, SkillInfo, TaskItem,
@@ -52,7 +53,7 @@ _TASK_MAP = {
     "cancelled": "cancelled", "canceled": "cancelled",
     "pending": "pending", "todo": "pending",
 }
-_TERMINAL = frozenset({"completed", "cancelled", "failed", "blocked"})
+_TERMINAL = frozenset({"completed", "cancelled", "failed"})
 _DECISION_EVENTS = frozenset({
     "permission_request", "plan_proposal", "options_request", "mcp_input_request",
 })
@@ -128,11 +129,17 @@ def _snapshot_workspace(root: Path | None, exclude: Sequence[Path] = (), *,
 
 
 def _read_regular(path: str) -> bytes | None:
+    # O_NONBLOCK: a workspace path swapped for a FIFO would otherwise block the open forever and
+    # hang the diff. O_NOFOLLOW keeps a symlink from redirecting the read.
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return None
     try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):   # a FIFO/device/socket is not a regular file
+            return None
         with os.fdopen(fd, "rb") as handle:
             return handle.read(_TEXT_LIMIT + 1)[:_TEXT_LIMIT + 1]
     except OSError:
@@ -268,6 +275,21 @@ def _document_urls(text: str) -> list[str]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _denial_source(reason: str) -> str:
+    """Best-effort category for a ``tool_denied`` reason (see :class:`~dgc_sdk.Denial`)."""
+    low = (reason or "").lower()
+    if "pretooluse hook" in low or "blocked by a pretooluse" in low:
+        return "hook"
+    if "plan mode" in low or "monitor event" in low or "approve on your next prompt" in low:
+        return "mode"
+    if "deny rule" in low or "session policy" in low or "outside the project" in low \
+            or "application running this session" in low or "the application's" in low:
+        return "policy"
+    if "denied by the user" in low or "the user denied" in low or low == "denied":
+        return "callback"
+    return "runtime"
 
 
 def _goal_from_event(event: Mapping[str, Any]) -> Goal:
@@ -844,6 +866,10 @@ class Session:
     def rewind(self, index: int) -> dict[str, Any]:
         event = self._request({"type": "rewind", "index": int(index), "request_id": _new_id("rw")},
                               "rewound")
+        if not event.get("ok"):
+            raise DGCConfigError(
+                f"could not rewind to checkpoint {int(index)}; list_checkpoints() shows the valid "
+                "indexes")
         self._discard_idle_events()
         return event
 
@@ -1730,12 +1756,17 @@ class Session:
         run.result.status = "waiting_for_approval" if mine else run.result.status
         try:
             if kind == "permission_request":
+                deny_reason = ""
                 if run.cancel_reason or repairing:
                     action = "deny"
                 else:
-                    action = self._permission(run, event, mine=mine)
-                self._respond({"type": "permission_response", "id": event["id"],
-                               "decision": action}, run)
+                    action, deny_reason = self._permission(run, event, mine=mine)
+                command: dict[str, Any] = {"type": "permission_response", "id": event["id"],
+                                           "decision": action}
+                if action == "deny" and deny_reason:
+                    # So the runtime does not report a policy denial as "Denied by the user".
+                    command["reason"] = deny_reason
+                self._respond(command, run)
             elif kind == "plan_proposal":
                 decision = "reject" if repairing or run.cancel_reason else self._plan(run, event, mine)
                 self._respond({"type": "plan_response", "id": event["id"],
@@ -1826,7 +1857,10 @@ class Session:
             with contextlib.suppress(Exception):
                 future.cancel()
 
-    def _permission(self, run: _Run, event: dict[str, Any], *, mine: bool) -> PermissionAction:
+    def _permission(self, run: _Run, event: dict[str, Any], *, mine: bool) -> tuple[
+            PermissionAction, str]:
+        """Answer one permission request; also return a reason when the *policy* denied it, so the
+        runtime does not label a policy or screening denial "Denied by the user"."""
         request = PermissionRequest(
             id=str(event.get("id") or ""),
             name=str(event.get("name") or ""),
@@ -1837,15 +1871,23 @@ class Session:
             diff=event.get("diff") if isinstance(event.get("diff"), str) else None,
             command=event.get("command") if isinstance(event.get("command"), str) else None,
         )
-        from .policy import resolve_permission
         # Policy denies (tools, paths) are final; command screening defers to a reviewing
         # callback so staff see the Bash ask; policy-checked reads are answered here.
-        return resolve_permission(
-            self._policy, request, cwd=self._cwd, permission_mode=self._permission_mode,
-            on_permission=self._on_permission,
-            ask=lambda: self._decide(
-                run, self._on_permission, request, "deny", label="on_permission",
-                valid=lambda value: value in ("once", "always", "deny"), mine=mine))
+        if self._policy is not None:
+            verdict = self._policy.evaluate(request, cwd=self._cwd)
+            if verdict == "deny":
+                return "deny", ("the application's RuntimePolicy does not allow this "
+                                "(a tool, path or network rule it set for this session)")
+            if verdict == "once":
+                return "once", ""
+            if verdict == "screen" and (self._on_permission is None
+                                        or self._permission_mode == "auto"):
+                return "deny", ("the application's RuntimePolicy screened this as a network call "
+                                "or file write and runs unattended, so it was refused")
+        action = self._decide(
+            run, self._on_permission, request, "deny", label="on_permission",
+            valid=lambda value: value in ("once", "always", "deny"), mine=mine)
+        return action, ""
 
     def _plan(self, run: _Run, event: dict[str, Any], mine: bool) -> str:
         request = PlanRequest(
@@ -1924,6 +1966,7 @@ class _Accumulator:
     def __init__(self, result: RunResult):
         self.result = result
         self.tools: dict[str, ToolRecord] = {}
+        self.denials: list[Denial] = []
         self.text: list[str] = []
         self.blocks: dict[str, str] = {}
         self.answer_ids: list[str] = []
@@ -2007,12 +2050,18 @@ class _Accumulator:
                     self.documents[doc.id] = doc
         elif kind == "tool_denied":
             call_id = str(event.get("call_id") or "")
+            name = str(event.get("name") or "")
+            reason = str(event.get("reason") or "denied")
             self.tools[call_id] = ToolRecord(
-                name=str(event.get("name") or ""),
+                name=name,
                 call_id=call_id,
-                output=str(event.get("reason") or "denied"),
+                output=reason,
                 is_error=True,
             )
+            self.denials.append(Denial(
+                name=name, reason=reason, source=_denial_source(reason),
+                call_id=call_id, args=_mapping(event.get("args")),
+            ))
         elif kind == "artifact_ready":
             art = Artifact(
                 id=str(event.get("id") or ""),
@@ -2122,6 +2171,7 @@ class _Accumulator:
         """Fill the run's result and return its final status (the caller publishes it last)."""
         result = self.result
         result.tools = list(self.tools.values())
+        result.denials = list(self.denials)
         result.artifacts = list(self.artifacts.values())
         result.documents = list(self.documents.values())
         result.tasks = self.tasks

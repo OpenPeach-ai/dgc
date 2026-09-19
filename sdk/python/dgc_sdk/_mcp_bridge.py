@@ -316,15 +316,17 @@ class ToolHub:
                 })
             return {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
         if method == "tools/call":
-            params = message.get("params") if isinstance(message.get("params"), dict) else {}
+            params_raw = message.get("params")
+            params = params_raw if isinstance(params_raw, dict) else {}
             name = str(params.get("name") or "")
-            arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
-            spec = self.tools.get(name)
-            if spec is None:
+            args_raw = params.get("arguments")
+            arguments = args_raw if isinstance(args_raw, dict) else {}
+            tool_spec = self.tools.get(name)
+            if tool_spec is None:
                 return {"jsonrpc": "2.0", "id": mid, "error": {
                     "code": -32601, "message": f"unknown tool {name}"}}
             try:
-                result = self._call_handler(spec, arguments)
+                result = self._call_handler(tool_spec, arguments)
             except TimeoutError:
                 return {"jsonrpc": "2.0", "id": mid, "result": {
                     "content": [{"type": "text", "text": "tool error: TimeoutError: handler exceeded timeout"}],
@@ -428,7 +430,8 @@ def bridge_python(runtime: Sequence[str] | None = None) -> str:
 def _catalog_problem(catalog: Mapping[str, Any], expected: int) -> str:
     if catalog.get("error"):
         return str(catalog.get("error"))
-    items = catalog.get("items") if isinstance(catalog.get("items"), list) else []
+    items_raw = catalog.get("items")
+    items = items_raw if isinstance(items_raw, list) else []
     entry = next((item for item in items
                   if isinstance(item, Mapping) and item.get("name") == SERVER_NAME), None)
     if entry is None:

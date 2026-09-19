@@ -42,7 +42,13 @@ with DGC(
 ```
 
 It prints `completed` and the summary. Each `DGC` client keeps its conversations, checkpoints and
-logs in `state_dir`, an isolated HOME; your own `~/.dgc` is not touched.
+logs in `state_dir`, an isolated HOME; your own `~/.dgc` is not touched, and an SDK-created
+temporary `state_dir` is removed on `close()`.
+
+For untrusted input (a pull request, a cloned repo) the workspace cannot grant the session
+capabilities: its own `.dgc/permissions.json` allow rules and `.dgc/agents` are ignored unless you
+pass `trust_workspace=True`. Add a `RuntimePolicy` to sandbox the shell and confine the file tools,
+and see the security model in [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md#security-model).
 
 - Guide and full API reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md)
 - Runnable examples: [examples/sdk](https://github.com/OpenPeach-ai/dgc/tree/sdk-v0.5.3/examples/sdk)

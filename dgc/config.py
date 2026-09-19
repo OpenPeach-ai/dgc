@@ -253,6 +253,26 @@ def _clean_provider_identity_map(value) -> dict[str, str]:
             and re.fullmatch(r"[0-9a-f]{64}", fingerprint)}
 
 
+def _read_secret_file(path: str | None) -> str | None:
+    """Read a provider key a launcher wrote to a private file, then delete the file.
+
+    The key must not linger where an unsandboxed shell tool (same user) could read it, so the file
+    is removed immediately, before any tool runs. A missing or unreadable path yields None.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read()
+    except OSError:
+        return None
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return value
+
+
 def _write_private_json(path: Path, payload: dict) -> None:
     """Atomically persist user configuration with owner-only permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -792,13 +812,28 @@ class Config:
         }
         self.credential_warnings = tuple(credential_warnings)
         for key, env_name in SECRET_ENV.items():
-            if env_name in os.environ:
-                self.data[key] = os.environ[env_name]
+            # A launcher (the SDK) can hand a provider key through a private 0600 file instead of
+            # the environment, whose initial block stays readable in /proc/<pid>/environ. We read
+            # it and delete it here, at load — long before any tool subprocess can run.
+            value = os.environ.get(env_name)
+            if value is None:
+                value = _read_secret_file(os.environ.get(env_name + "_FILE"))
+            if value is not None:
+                self.data[key] = value
                 self._env_secret_keys.add(key)
                 if key in _PROVIDER_SECRET_KEYS:
                     self._provider_secret_identity[key] = _provider_secret_identity(self.data, key)
         for action in ("allow", "ask", "deny"):
             self.permissions[action] = list(perms.get(action, []))
+        # A launching process's policy that reviews permissions itself (project_allow=False, set by
+        # an SDK session without workspace trust) must not let even the user's own stored allow
+        # rules pre-approve a command — only its callback's runtime "always" answers may. This is
+        # what makes the RuntimePolicy promise hold under inherit_user_state=True, where these
+        # rules come from the real ~/.dgc. Ask/deny (which only tighten) are kept.
+        from .permissions import session_policy as _session_policy
+        _policy = _session_policy()
+        if _policy is not None and (_policy.error or not _policy.project_allow):
+            self.permissions["allow"] = []
         # Project-local permission rules load ONLY once the directory is trusted. Loading them
         # first and asking afterwards meant a cloned repository's `.dgc/permissions.json` was in
         # force before the trust gate ran — and under `dgc -p` the gate never runs at all.

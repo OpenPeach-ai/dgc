@@ -17,7 +17,8 @@ from .errors import (
 )
 from .session import RunHandle, Session
 from .types import (
-    AgentInfo, Artifact, Checkpoint, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
+    AgentInfo, Artifact, Checkpoint, Denial, FileChange, Goal, HookInfo, McpInputRequest,
+    McpInputResponse,
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionMode, PermissionPolicy, PermissionRequest, PermissionRule, PlanAction, PlanRequest,
     Question, QuestionAnswer, QuestionOption, QuestionRequest, RunEvent, RunResult, RunStatus,
@@ -28,7 +29,7 @@ from .types import (
 __all__ = [
     "PROTOCOL", "REQUIRES_CLI", "__version__",
     "AgentInfo", "Artifact", "AsyncDGC", "AsyncRunHandle", "AsyncSession", "Checkpoint", "DGC",
-    "Pricing", "RetryPolicy", "RuntimePolicy", "cost_usd", "redact", "redact_text",
+    "Denial", "Pricing", "RetryPolicy", "RuntimePolicy", "cost_usd", "redact", "redact_text",
     "DGCCommandRejectedError", "DGCConfigError", "DGCError", "DGCProtocolError",
     "DGCRuntimeError", "DGCTimeoutError",
     "DGCUnsupportedError", "FileChange", "Goal", "HookInfo", "McpInputRequest", "McpInputResponse",

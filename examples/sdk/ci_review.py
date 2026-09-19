@@ -7,7 +7,7 @@
 
 Options and environment are the same as hello_run.py. The run uses plan mode, so the agent can
 read the checkout but not edit it or run commands. It never reads the runner's ~/.dgc.
-Exit codes: 0 accepted, 1 rejected, 2 usage, 3 blocked, 4 timeout, 5 failed.
+Exit codes: 0 accepted, 1 rejected, 2 usage, 3 no verdict with denied steps, 4 timeout, 5 failed.
 """
 from __future__ import annotations
 
@@ -34,7 +34,9 @@ SCHEMA = {
 def exit_code(result) -> int:
     if result.status == "completed" and isinstance(result.output, dict):
         return 0 if result.output.get("ok") else 1
-    if result.status == "blocked":
+    # No valid verdict. If the run was held back by denied steps (a locked-down policy, or a
+    # workspace it could not read), say so distinctly so the gate does not read that as "passed".
+    if result.denials:
         return 3
     if result.reason == "timeout":
         return 4
@@ -72,6 +74,8 @@ def main() -> int:
         "reason": result.reason,
         "output": result.output,
         "error": result.error,
+        "denials": [{"name": d.name, "source": d.source, "reason": d.reason}
+                    for d in result.denials],
         "session_id": result.session_id,
         "run_id": result.run_id,
     }, indent=2))

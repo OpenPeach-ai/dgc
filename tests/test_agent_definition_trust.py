@@ -125,6 +125,46 @@ class AgentDefinitionTrustTests(unittest.TestCase):
             self.assertEqual(project_requests[-1][0], "Bearer synthetic-agent-key")
             self.assertIn("Project-only persona", json.dumps(project_requests[-1][1]))
 
+    def test_session_policy_strips_project_agent_route_even_after_trust(self):
+        # An SDK session (a DGC_SESSION_POLICY is present) never lets a workspace agent definition
+        # choose an endpoint or credential, even a trusted one that shadows a built-in.
+        from dgc import permissions as perms_mod
+        main_url, main_requests = self.endpoint("Main route replied.")
+        project_url, project_requests = self.endpoint("Project route replied.")
+        self.write_definition(self.definitions, "Project-only persona", endpoint=project_url,
+                              key="DGC_AGENT_TRUST_TEST_KEY")
+        h = Harness(self.project, base_url=main_url, api_mode="chat_completions", mode="default",
+                    trusted_dirs=[str(self.project)])
+        self.addCleanup(h.close)
+        policy = json.dumps({"version": 1, "project_agents": True})
+        with patch.object(Config, "clone_for_root", clone_fixture), \
+                patch.dict("os.environ", {"DGC_AGENT_TRUST_TEST_KEY": "synthetic-agent-key",
+                                          perms_mod.SESSION_POLICY_ENV: policy}):
+            perms_mod._SESSION_POLICY_CACHE = None
+            result = h.agent._run_subagent("reply", "Reply with a brief greeting.", "reviewer", "x")
+        perms_mod._SESSION_POLICY_CACHE = None
+        self.assertIn("Main route replied", result)
+        self.assertEqual(project_requests, [], "the project route must not be contacted")
+        self.assertNotIn("synthetic-agent-key", json.dumps(main_requests))
+        # The persona (body) is still applied on the main route.
+        self.assertIn("Project-only persona", json.dumps(main_requests))
+
+    def test_agent_def_cannot_read_a_dgc_provider_key(self):
+        # A definition (even a personal one) may not name a DGC provider-credential env var: that
+        # would forward this session's provider key to the endpoint the definition chose.
+        main_url, main_requests = self.endpoint("Main route replied.")
+        other_url, other_requests = self.endpoint("Other route replied.")
+        self.write_definition(self.personal, "Personal persona", endpoint=other_url,
+                              key="DGC_API_KEY")
+        h = Harness(self.project, base_url=main_url, api_mode="chat_completions", mode="default")
+        self.addCleanup(h.close)
+        with patch.object(Config, "clone_for_root", clone_fixture), \
+                patch.dict("os.environ", {"DGC_API_KEY": "sk-provider-secret"}):
+            h.agent._run_subagent("reply", "Reply with a brief greeting.", "reviewer", "x")
+        # The def's endpoint differs from the main one, so no key is routed to it at all.
+        self.assertNotIn("sk-provider-secret", json.dumps(other_requests))
+        self.assertNotIn("sk-provider-secret", json.dumps(main_requests))
+
     def test_isolated_child_keeps_approved_source_definitions(self):
         self.write_definition(self.definitions, "Approved reviewer")
         h = Harness(self.project, trusted_dirs=[str(self.project)])

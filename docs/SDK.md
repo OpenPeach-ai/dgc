@@ -108,11 +108,27 @@ with an `on_permission` callback that approves only what you expect. `auto` mode
 the model decides within the limits below.
 
 - **Isolation.** The child gets an isolated HOME under `state_dir`, empty MCP server and hook
-  lists, and only the workspace as a trusted directory.
+  lists, and no configuration from the workspace.
+- **The workspace cannot grant itself capabilities.** By default (`trust_workspace=False`) a
+  session treats its `cwd` as untrusted input: the repo's own `.dgc/permissions.json` *allow*
+  rules are not loaded (so a planted file cannot pre-approve a shell command — even with no
+  `RuntimePolicy`), and its `.dgc/agents/*.md` are not loaded (they can choose a model endpoint
+  and a credential env var). The workspace can still *narrow* the run with ask/deny rules. Set
+  `trust_workspace=True` to opt in; even then a project agent definition keeps only its persona,
+  its `base_url`/`api_key_env`/`api_mode`/`model` are ignored, and no agent definition may read a
+  `DGC_*_API_KEY`. Project hooks and MCP servers never load in an isolated session (its config is
+  written from scratch). Skills, commands and `DGC.md`/`AGENTS.md` are still read as instructions
+  (untrusted input the model sees), but grant no permissions and run no code on their own.
 - **Environment.** The child does not inherit your process environment. It gets only locale,
-  `PATH`, terminal, temp and certificate variables, the isolated HOME, the provider key you pass
-  as `api_key` (as `DGC_API_KEY`), and `extra_env`. `inherit_env=["NAME", ...]` passes more by name;
-  `inherit_env=True` passes everything.
+  `PATH`, terminal, temp and certificate variables, the isolated HOME, and `extra_env`.
+  `inherit_env=["NAME", ...]` passes more by name; `inherit_env=True` passes everything. The
+  provider key you pass as `api_key` is handed to the runtime through a private 0600 file that the
+  CLI reads and deletes before any tool runs — never the child's environment — and it is stripped
+  from every shell/`python`/`monitor`/hook subprocess, so a command like
+  `printf %s "$DGC_API_KEY" | rev` cannot recover it. What *does* remain reachable by an
+  **unsandboxed** shell (same-user process): anything you pass through `inherit_env`/`extra_env`,
+  and other of your processes' environments via `/proc/<pid>/environ`. Run untrusted input under
+  the OS sandbox (below), which gives the shell a private `/proc` and drops those.
 - **`RuntimePolicy`** limits are enforced by the runtime for that session in every permission
   mode, including `auto`, and are never written to any config file: which tools may run
   (including MCP routes and your custom tools), which paths the file tools may reach (the
@@ -121,15 +137,20 @@ the model decides within the limits below.
 - **Shell commands** run arbitrary programs, so no rule on command text can hold them. With the
   default `RuntimePolicy(shell="sandboxed")` the session asks for the OS sandbox (`bwrap` on
   Linux, `sandbox-exec` on macOS): no network unless the policy allows it, no writes outside the
-  workspace (none at all when a write tool is denied), no home directory. In `auto` mode the
-  shell runs only inside it and the `python` tool is refused. In the other modes every command
-  is a permission request for your `on_permission` callback: with a `RuntimePolicy`, allow rules
-  the workspace brings (`.dgc/permissions.json`) are not loaded. `shell="screened"` runs
-  commands unconfined and refuses those whose text looks like a network call or file write; that
-  is best effort, not a boundary.
+  workspace (none at all when a write tool is denied), no home directory, no access to the client's
+  `state_dir`. In `auto` mode the shell runs only inside it and the `python` tool is refused. In
+  the other modes every command is a permission request for your `on_permission` callback.
+  `shell="screened"` runs the shell **and** the `python` tool unconfined and refuses those whose
+  text looks like a network call or file write; that is best effort, not a boundary.
+- **A sandboxed-shell policy fails closed.** If the runtime has no working OS sandbox (no
+  bubblewrap, or unprivileged user namespaces are disabled), `RuntimePolicy(shell="sandboxed")`
+  refuses to start a shell-capable session with `DGCUnsupportedError` rather than run the shell
+  unconfined. A `plan` (no-shell) session still starts. To accept the weaker mode on purpose,
+  pass `sandbox={"requirement": "preferred"}` (starts, warns, and reports why in
+  `Session.sandbox`; in `auto` mode the shell is still refused) or `shell="screened"`.
 - **Sandbox requirement.** `sandbox={"requirement": "required"}` refuses to start a session whose
   runtime cannot confine shell commands; `"preferred"` starts anyway, warns, and reports why in
-  `Session.sandbox`.
+  `Session.sandbox`. DGC verifies bubblewrap actually confines before reporting it available.
 - **Logs.** Audit and usage files are created owner-only (0600 in 0700 directories), and audit
   rows are redacted for common credential formats and the key you passed.
 
@@ -142,13 +163,16 @@ Everything below is importable from `dgc_sdk`. Parameters after `*` are keyword-
 ```python
 DGC(*, state_dir=None, runtime=None, inherit_user_state=False, model=None, base_url=None,
     api_key=None, mode="default", thinking="off", extra_env=None, inherit_env=False,
-    sandbox=None, instructions="", pricing=None, department="", policy=None, retry=None,
-    extra_config=None, start_timeout=30.0, request_timeout=15.0)
+    trust_workspace=False, keep_state_dir=False, sandbox=None, instructions="", pricing=None,
+    department="", policy=None, retry=None, extra_config=None, start_timeout=30.0,
+    request_timeout=15.0)
 ```
 
 | Parameter | Meaning |
 | --- | --- |
-| `state_dir` | Private directory for this client's isolated HOME, usage log and audit log. Created 0700 if missing, and an existing one you own is made 0700; refused when owned by another user or writable by others. Use a dedicated directory, not your project. Default: a new private temporary directory. |
+| `state_dir` | Private directory for this client's isolated HOME, usage log and audit log. Created 0700 if missing, and an existing one you own is made 0700; refused when owned by another user or writable by others. Use a dedicated directory, not your project. Default: a new private temporary directory, which is removed on `close()` unless `keep_state_dir=True`. |
+| `trust_workspace` | `False` (default): a session's workspace is untrusted — its own `.dgc/permissions.json` *allow* rules and its `.dgc/agents` definitions are not loaded, so the checkout cannot grant the run capabilities (it can still *narrow* them with ask/deny rules). `True` opts in; even then a project agent file keeps only its persona, never an endpoint or credential. |
+| `keep_state_dir` | Keep an SDK-created temporary `state_dir` after `close()` (an explicit `state_dir` is always kept). |
 | `runtime` | Command that starts the agent, for example `["/opt/dgc/.venv/bin/python", "-m", "dgc", "serve"]` or `["dgc", "serve"]`. Default: discovered (see [Install](#install)). |
 | `inherit_user_state` | `True` runs against your real `~/.dgc` (your model, rules, MCP servers). Options DGC would have to save there (a different model, `max_turns`, `verify_command`, and so on) raise `DGCConfigError`. Development only. |
 | `model`, `base_url`, `api_key` | Model name, OpenAI-compatible endpoint and key for every session. Without them the CLI's own defaults apply. |
@@ -361,9 +385,9 @@ RuntimePolicy(network="deny", extra_read_dirs=(), deny_path_prefixes=(), deny_to
 | --- | --- |
 | `network` | `"deny"` refuses web fetch, web search, the browser, skill downloads and MCP servers other than your own tools, and keeps the shell sandbox offline; `"allow"` permits them. |
 | `extra_read_dirs` | Directories outside `cwd` the file tools may read. |
-| `deny_path_prefixes` | Paths the file tools may neither read nor write; relative ones are resolved against `cwd`. |
-| `deny_tools` | Tool names to refuse: DGC tools (`"write_file"`, `"bash"`, ...), a custom tool as `"mcp__app__<name>"`, or `"mcp__app__*"`. Unknown names raise `DGCConfigError`. |
-| `allow_tools` | When set, every other tool is refused. |
+| `deny_tools` | Tool names to refuse: DGC tools by internal name (`"write_file"`, `"bash"`, ...) or display name (`"Write"`, `"Bash"`), a custom tool as `"mcp__app__<name>"`, or `"mcp__app__*"`. Unknown names raise `DGCConfigError`. |
+| `allow_tools` | When set, every other tool is refused. Same name forms as `deny_tools`. |
+| `deny_path_prefixes` | Paths the file tools may neither read nor write; relative ones resolve against `cwd`. A denied prefix *inside* `cwd` turns root-level `glob`/`grep`/`repo_map`/`code_intel`/`git_diff` into permission requests (a search cannot say "this hit is a denied path"), refused in `plan` and `auto` mode; scope a search under a subdirectory to avoid the ask. |
 | `shell` | `"sandboxed"` (default) or `"screened"`; see [Security model](#security-model). |
 | `redact_events` | Redact secrets in audit rows. |
 
@@ -395,8 +419,9 @@ value raises `DGCUnsupportedError`). Tool calls are never retried.
 | Field | Meaning |
 | --- | --- |
 | `session_id`, `run_id` | Identity of the conversation and of this run. |
-| `status` | `RunStatus`: `completed`, `failed`, `cancelled`, `blocked` (a required step was denied), or while in progress `queued`, `running`, `waiting_for_approval`. |
-| `reason` | Why it ended, for example `completed`, `error`, `timeout`, `cancelled`, `permission_denied`, `transport`. |
+| `status` | `RunStatus`: `completed`, `failed`, `cancelled`, or while in progress `queued`, `running`, `waiting_for_approval`. A denied step does not change the status (see `denials`). |
+| `reason` | Why it ended, for example `completed`, `error`, `timeout`, `cancelled`, `transport`. |
+| `denials` | `list[Denial]` — every tool call the run refused. `Denial`: `name`, `reason`, `source` (`policy`, `callback`, `hook`, `mode`, `runtime`), `call_id`, `args`. A CI gate can key on this to tell "did nothing / passed" from "was blocked from acting". |
 | `final_text` | The agent's final answer. `partial_text` holds text streamed before a stop. |
 | `output` | Parsed JSON when `output_schema` was given. |
 | `error` | The runtime's error message when the run failed (a missing model, a rejected key), else `None`. |
@@ -408,7 +433,8 @@ value raises `DGCUnsupportedError`). Tool calls are never retried.
 | `agents` | `list[AgentInfo]` — `AgentInfo`: `id`, `state`, `description`, `parent_id`, `model`. |
 | `verification` | `VerificationResult` (`ok`, `command`, `output`, `exit_code`) for the configured `verify_command` only, else `None`. |
 
-Other result types: `SessionInfo` (`id`, `path`, `name`, `preview`, `message_count`, `when`),
+Other result types: `Denial` (`name`, `reason`, `source`, `call_id`, `args`),
+`SessionInfo` (`id`, `path`, `name`, `preview`, `message_count`, `when`),
 `Checkpoint` (`index`, `preview`, `files`), `SkillInfo` (`name`, `description`, `source`,
 `enabled`), `HookInfo` (`event`, `configured`, `matchers`, `valid`, `truncated`),
 `PermissionRule` (`action`, `rule`), `McpServerInfo` (`name`, `state`, `enabled`, `tool_count`,

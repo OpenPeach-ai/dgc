@@ -178,7 +178,7 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
         "stdin": subprocess.PIPE,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
-        "env": sandbox.process_env(config) if sandbox_requested else None,
+        "env": sandbox.process_env(config) if sandbox_requested else sandbox.tool_env(),
     }
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
