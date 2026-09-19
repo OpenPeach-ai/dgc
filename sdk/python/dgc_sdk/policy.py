@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .errors import DGCConfigError, DGCUnsupportedError
 from .types import (
@@ -38,6 +38,9 @@ _DISPLAY = {
 # by name: the option picker is how the agent asks the application a question.
 _UNRULED_TOOLS = frozenset({"update_goal"})
 _ALWAYS_OFFERED = frozenset({"propose_options"})
+# The display spelling permission rules use -> DGC's internal tool name, so deny_tools/allow_tools
+# accept either ("Bash" and "bash", "Write" and "write_file").
+_DISPLAY_TO_INTERNAL = {display.lower(): internal for internal, display in _DISPLAY.items()}
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "multi_edit", "apply_patch"})
 _READ_PATH_TOOLS = frozenset({"read_file", "view_image", "code_intel", "git_diff", "repo_map",
@@ -126,18 +129,26 @@ def _as_names(value: Any, field: str) -> tuple[str, ...]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
         raise DGCConfigError(f"RuntimePolicy.{field} must be a tuple of tool names, not {value!r}")
     names = tuple(value)
+    normalized: list[str] = []
     for name in names:
         if not isinstance(name, str) or not name:
             raise DGCConfigError(f"RuntimePolicy.{field} must contain non-empty tool names")
         if name in _DISPLAY or (field == "allow_tools" and name in _UNRULED_TOOLS):
+            normalized.append(name)
             continue
         if _MCP_EXACT_RE.fullmatch(name) or _MCP_WILDCARD_RE.fullmatch(name):
+            normalized.append(name)
+            continue
+        # Accept the display spelling ("Bash", "Write") as well as the internal name.
+        internal = _DISPLAY_TO_INTERNAL.get(name.lower())
+        if internal is not None or (field == "allow_tools" and name.lower() in _UNRULED_TOOLS):
+            normalized.append(internal or name.lower())
             continue
         hint = (" (update_goal cannot be denied)" if name in _UNRULED_TOOLS else
                 "; known tools: " + ", ".join(sorted(_DISPLAY))
                 + ", and MCP routes such as mcp__app__<tool> or mcp__app__*")
         raise DGCConfigError(f"RuntimePolicy.{field} names an unknown tool {name!r}{hint}")
-    return names
+    return tuple(normalized)
 
 
 def _as_paths(value: Any, field: str) -> tuple[str, ...]:
@@ -282,29 +293,6 @@ class RuntimePolicy:
                 rules.append(display)
         return rules
 
-    # --------------------------------------------------------------- screening ---
-
-    def engine_deny_rules(self, *, inspect_bash: bool = True) -> list[str]:
-        """Named-tool, network-tool and write-path rules, plus command-screening globs.
-
-        The globs (``inspect_bash``) are best-effort command screening, not a boundary; they are
-        what ``shell="screened"`` applies in ``auto`` mode. :func:`compile_session` builds what a
-        session actually gets.
-        """
-        rules = _unique(self._named_rules())
-        if self.network == "deny":
-            rules = _unique(rules + list(_NETWORK_TOOLS))
-            if inspect_bash:
-                rules = _unique(rules + [f"Bash({pattern})" for pattern in _NET_BASH_PATTERNS])
-        if self._writes_denied() and inspect_bash:
-            rules = _unique(rules + [f"Bash({pattern})" for pattern in _WRITE_BASH_PATTERNS])
-        for prefix in self.deny_path_prefixes:
-            text = str(prefix).rstrip("/")
-            if text:
-                rules = _unique(rules + [f"{tool}({_escape(text)}/**)"
-                                         for tool in ("Write", "Edit", "MultiEdit", "ApplyPatch")])
-        return rules
-
     # -------------------------------------------------------------- decisions ---
 
     def evaluate(self, request: PermissionRequest, *, cwd: Path | None) -> str | None:
@@ -330,8 +318,14 @@ class RuntimePolicy:
                 return "screen"
             if self._writes_denied() and _looks_like_write(command):
                 return "screen"
-        if name == "python" and self._writes_denied():
-            if _looks_like_write(str(args.get("code") or "")):
+        if name == "python":
+            # The python tool runs arbitrary code and is never sandboxed, so with shell="screened"
+            # it must be screened exactly like the shell: a code snippet that looks like a network
+            # call or a file write is a screen signal, not silently allowed.
+            code = str(args.get("code") or "")
+            if self.network == "deny" and _looks_like_network(code):
+                return "screen"
+            if self._writes_denied() and _looks_like_write(code):
                 return "screen"
         return None
 
@@ -505,19 +499,6 @@ def _looks_like_write(command: str) -> bool:
     return bool(_INTERPRETER_WRITE_RE.search(command))
 
 
-def sandbox_network_enabled(policy: RuntimePolicy | None) -> bool:
-    return bool(policy and policy.network == "allow")
-
-
-def inspect_bash_for_engine(*, on_permission, permission_mode: str) -> bool:
-    """Compile bash write/network globs only when nobody will answer a permission_request.
-
-    Auto mode never raises ``permission_request``, so the engine must deny itself.
-    An interactive staff callback must see every Bash ask, including redirects.
-    """
-    return on_permission is None or permission_mode == "auto"
-
-
 # ---------------------------------------------------------------- settings ---
 
 def permission_settings(value: PermissionPolicy | Mapping[str, Any] | None, *,
@@ -554,13 +535,14 @@ def permission_settings(value: PermissionPolicy | Mapping[str, Any] | None, *,
         raise DGCConfigError(
             "permissions.unhandled='callback' needs on_permission; pass a callback or use "
             "unhandled='deny' to deny every request")
-    return chosen, unhandled
+    return cast(PermissionMode, chosen), cast(UnhandledPolicy, unhandled)
 
 
 def sandbox_requirement(value: SandboxPolicy | Mapping[str, Any] | str | None) -> SandboxRequirement:
     """Normalise ``sandbox=...`` (a SandboxPolicy, ``{"requirement": ...}``, or the bare word)."""
     if value is None:
         return "off"
+    requirement: str
     if isinstance(value, SandboxPolicy):
         requirement = value.requirement
     elif isinstance(value, str):
@@ -575,7 +557,7 @@ def sandbox_requirement(value: SandboxPolicy | Mapping[str, Any] | str | None) -
         raise DGCConfigError(f"sandbox must be a SandboxPolicy or a mapping, not {type(value).__name__}")
     if requirement not in ("required", "preferred", "off"):
         raise DGCConfigError("sandbox.requirement must be required, preferred, or off")
-    return requirement  # type: ignore[return-value]
+    return cast(SandboxRequirement, requirement)
 
 
 def sandbox_precheck(requirement: SandboxRequirement) -> None:
@@ -609,6 +591,10 @@ class SessionPlan:
     requirement: SandboxRequirement
     policy: RuntimePolicy | None
     notes: tuple[str, ...] = ()
+    # True when the policy asks for a sandboxed shell that could still run (mode is not plan) and
+    # the caller did not accept a weaker fallback: a runtime with no OS sandbox must then refuse
+    # the session rather than silently run the shell unconfined.
+    strict_shell: bool = False
 
     @property
     def payload(self) -> str:
@@ -643,6 +629,14 @@ class SessionPlan:
             raise DGCUnsupportedError(
                 "sandbox.requirement is 'required' but the DGC runtime has no OS sandbox "
                 "(bubblewrap on Linux, sandbox-exec on macOS)")
+        if self.strict_shell and not backend:
+            raise DGCUnsupportedError(
+                "RuntimePolicy(shell=\"sandboxed\") needs an OS sandbox (bubblewrap on Linux, "
+                "sandbox-exec on macOS) but the DGC runtime has none, so shell commands would run "
+                "unconfined. Install bubblewrap (apt install bubblewrap / dnf install bubblewrap), "
+                "or accept a weaker mode on purpose: sandbox={\"requirement\": \"preferred\"} "
+                "(the shell runs unconfined outside auto mode and is refused in auto mode) or "
+                "RuntimePolicy(shell=\"screened\").")
         if self.requirement == "preferred" and not backend:
             detail = ("; in auto mode the shell is refused, and in the other modes an approved "
                       "command runs unconfined" if self.policy is not None
@@ -672,19 +666,29 @@ class SessionPlan:
 
 def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: PermissionMode,
                     on_permission: Any, sandbox: SandboxRequirement,
-                    tools: Sequence[str] = ()) -> SessionPlan:
+                    tools: Sequence[str] = (), trust_workspace: bool = False,
+                    isolated: bool = True) -> SessionPlan:
     """Turn a RuntimePolicy and sandbox choice into the runtime's per-session policy.
 
     The result travels to ``dgc serve`` in the ``DGC_SESSION_POLICY`` environment variable.
     Nothing is written to any config.json, so a policy never outlives its session and never
     touches the user's own ``~/.dgc`` (``inherit_user_state=True`` included).
+
+    ``trust_workspace`` decides whether the workspace may grant this session capabilities: its
+    own ``.dgc/permissions.json`` allow rules and its ``.dgc/agents`` definitions (which can pick
+    a model endpoint and a credential env var). It is ``False`` by default, so an isolated SDK
+    session always carries ``project_allow``/``project_agents`` false — the workspace can narrow
+    what runs, never grant it. An inherited session (``isolated=False``) with no policy and no
+    sandbox keeps the CLI's own behaviour (the user's real ``~/.dgc`` and trust store).
     """
     requirement: SandboxRequirement = sandbox
+    project = {"project_allow": bool(trust_workspace), "project_agents": bool(trust_workspace)}
     if policy is None:
-        if requirement == "off":
+        if requirement == "off" and not isolated:
             return SessionPlan(env={}, requirement="off", policy=None)
-        payload = {"version": _SESSION_POLICY_VERSION, "sandbox": requirement}
-        return SessionPlan(env={_SESSION_POLICY_ENV: _dump(payload)}, requirement=requirement,
+        base: dict[str, Any] = {"version": _SESSION_POLICY_VERSION, "sandbox": requirement,
+                                **project}
+        return SessionPlan(env={_SESSION_POLICY_ENV: _dump(base)}, requirement=requirement,
                            policy=None)
     policy.check_session_tools(tools)
     workspace = cwd.resolve()
@@ -712,10 +716,16 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
     (ask if ask_external else deny).append("ExternalDirectory")
     sandbox_read_only = False
     shell_requires_sandbox = False
+    strict_shell = False
     if policy.shell == "sandboxed":
         shell_requires_sandbox = True
         if requirement == "off":
+            # The default sandboxed shell with no explicit sandbox= choice: a runtime that cannot
+            # confine it must refuse the session (unless mode is plan, which runs no shell) rather
+            # than silently run it unconfined. An explicit sandbox={"requirement": "preferred"}
+            # opts into the weaker fallback and keeps only the warning.
             requirement = "preferred"
+            strict_shell = mode != "plan"
         sandbox_read_only = policy._writes_denied()
         exposed = [prefix for prefix in denied if not _sandbox_hides(prefix, workspace)]
         if exposed:
@@ -726,10 +736,14 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
                 notes.append(f"RuntimePolicy.deny_path_prefixes names {exposed[0]}, which the OS "
                              "sandbox cannot hide, so bash and monitor are refused in auto mode")
     else:
+        # shell="screened": the shell and the (never-sandboxed) python tool run unconfined, so in
+        # auto mode both are screened for network calls and, with writes denied, file writes.
         if policy.network == "deny":
             auto_deny += [f"Bash({pattern})" for pattern in _NET_BASH_PATTERNS]
+            auto_deny += [f"Python({pattern})" for pattern in _NET_BASH_PATTERNS]
         if policy._writes_denied():
             auto_deny += [f"Bash({pattern})" for pattern in _WRITE_BASH_PATTERNS]
+            auto_deny += [f"Python({pattern})" for pattern in _WRITE_BASH_PATTERNS]
     payload: dict[str, Any] = {
         "version": _SESSION_POLICY_VERSION,
         "deny": _unique(deny),
@@ -739,9 +753,10 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
         "sandbox_network": policy.network == "allow",
         "sandbox_read_only": sandbox_read_only,
         "shell_requires_sandbox": shell_requires_sandbox,
-        # A workspace's own .dgc/permissions.json may narrow what runs, never pre-approve it:
-        # outside auto mode every shell command still reaches on_permission.
-        "project_allow": False,
+        # A workspace's own .dgc/permissions.json may narrow what runs, never pre-approve it, and
+        # its .dgc/agents cannot pick this session's endpoint or credential, unless the app opted
+        # into workspace trust: outside auto mode every shell command still reaches on_permission.
+        **project,
     }
     text = _dump(payload)
     if len(text.encode("utf-8")) > _SESSION_POLICY_MAX_BYTES:
@@ -749,7 +764,7 @@ def compile_session(policy: RuntimePolicy | None, *, cwd: Path, mode: Permission
             "RuntimePolicy compiles to more rules than one environment variable can carry; "
             "use fewer deny_path_prefixes or broader ones")
     return SessionPlan(env={_SESSION_POLICY_ENV: text}, requirement=requirement,
-                       policy=policy, notes=tuple(notes))
+                       policy=policy, notes=tuple(notes), strict_shell=strict_shell)
 
 
 def _dump(payload: Mapping[str, Any]) -> str:

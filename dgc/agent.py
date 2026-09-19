@@ -130,6 +130,12 @@ _MAX_VERIFIED_FINAL_CHARS = 512_000  # bounded across output-limit continuations
 _MAX_HANDOFF_INPUT_CHARS = 40_000
 _MAX_HANDOFF_OUTPUT_CHARS = 64_000
 
+# DGC's own provider-credential environment variables. A sub-agent definition may never read one
+# via api_key_env — that would forward this session's provider key to an endpoint the definition
+# chose. See Agent._subagent_client.
+from .config import SECRET_ENV as _SECRET_ENV
+_PROVIDER_KEY_ENV_NAMES = frozenset(name.upper() for name in _SECRET_ENV.values())
+
 # Mirror sessions.REQUEST_REASON_LABELS without eagerly importing the persistence layer at Agent
 # module startup. The regression suite locks this set to the session and benchmark readers.
 _REQUEST_REASON_LABELS = frozenset({
@@ -4747,12 +4753,14 @@ class Agent(GoalLifecycle):
             timeout = max(1, int(self.config.get("bash_timeout", 120) or 120))
         except (TypeError, ValueError):
             timeout = 120
+        from . import sandbox
         try:
             proc = subprocess.Popen(
                 ["/bin/bash", "-lc", cmd], cwd=str(self.ctx.project_root),
                 stdin=subprocess.DEVNULL,              # never the editor's command pipe
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                encoding="utf-8", errors="replace", start_new_session=True)
+                encoding="utf-8", errors="replace", start_new_session=True,
+                env=sandbox.tool_env())                # never DGC's provider credentials
         except OSError as exc:
             return 1, self._safe_text(f"error: {type(exc).__name__}: {exc}")
         capture = _BoundedCommandCapture(self.ctx)
@@ -7048,7 +7056,15 @@ class Agent(GoalLifecycle):
         cfg = self.config
         base = (adef.base_url if adef else "") or cfg.get("subagent_base_url") or cfg.base_url
         import os
-        env_key = os.environ.get(adef.api_key_env, "") if adef and adef.api_key_env else ""
+        # An agent definition may name an env var to read a key from, but never one of DGC's own
+        # provider credentials: that would let a definition forward this session's provider key to
+        # whatever endpoint it chose. The key for the main endpoint is still routed by
+        # _route_api_key when the sub-agent shares that endpoint.
+        key_env = adef.api_key_env if adef and adef.api_key_env else ""
+        if key_env and (key_env.upper() in _PROVIDER_KEY_ENV_NAMES
+                        or (key_env.upper().startswith("DGC_") and key_env.upper().endswith("_API_KEY"))):
+            key_env = ""
+        env_key = os.environ.get(key_env, "") if key_env else ""
         key = Agent._route_api_key(self, base, "subagent_api_key", env_key)
         model = (adef.model if adef else "") or cfg.get("subagent_model") or cfg.model
         api_mode = Agent._route_api_mode(

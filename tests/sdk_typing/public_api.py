@@ -17,7 +17,8 @@ from dgc_sdk import (
     PROTOCOL, REQUIRES_CLI, AgentInfo, Artifact, AsyncDGC, AsyncRunHandle, AsyncSession, Checkpoint,
     DGC, DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError,
     DGCTimeoutError,
-    DGCUnsupportedError, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse, McpServerInfo,
+    DGCUnsupportedError, Denial, FileChange, Goal, HookInfo, McpInputRequest, McpInputResponse,
+    McpServerInfo,
     Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction, PermissionMode,
     PermissionPolicy, PermissionRequest, PermissionRule, PlanAction, PlanRequest, Pricing, Question,
     QuestionAnswer, QuestionOption, QuestionRequest, RetryPolicy, RunEvent, RunHandle, RunResult,
@@ -33,7 +34,7 @@ MINIMUM_CLI: str = REQUIRES_CLI
 MODE: PermissionMode = "plan"
 UNHANDLED: UnhandledPolicy = "deny"
 REQUIREMENT: SandboxRequirement = "off"
-TERMINAL: tuple[RunStatus, ...] = ("completed", "failed", "cancelled", "blocked")
+TERMINAL: tuple[RunStatus, ...] = ("completed", "failed", "cancelled")
 TASK: TaskStatus = "pending"
 ERRORS: tuple[type[DGCError], ...] = (DGCConfigError, DGCProtocolError, DGCRuntimeError,
                                       DGCTimeoutError, DGCUnsupportedError, DGCCommandRejectedError)
@@ -78,6 +79,7 @@ TOOL: ToolSpec = define_tool("sku_lookup", "Look up a SKU", {"type": "object"}, 
 
 def summarize(result: RunResult) -> str:
     tools: list[ToolRecord] = result.tools
+    denials: list[Denial] = result.denials
     changes: list[FileChange] = result.changes
     artifacts: list[Artifact] = result.artifacts
     tasks: list[TaskItem] = result.tasks
@@ -86,6 +88,7 @@ def summarize(result: RunResult) -> str:
     status: RunStatus = result.status
     parts = [status, result.reason, result.final_text, str(result.error), str(result.output)]
     parts += [tool.name for tool in tools] + [change.path for change in changes]
+    parts += [f"{d.name}:{d.source}:{d.reason}:{d.call_id}" for d in denials]
     parts += [item.url for item in artifacts] + [task.content for task in tasks]
     parts += [agent.id for agent in agents]
     if verification is not None:
@@ -154,7 +157,8 @@ def use_client(state: Path) -> str:
              mode="plan", pricing=Pricing(input_per_million=1.0, output_per_million=2.0),
              department="erp", policy=RuntimePolicy(network="deny", deny_tools=("write_file",)),
              retry=RetryPolicy(max_attempts=2), sandbox=SandboxPolicy(requirement=REQUIREMENT),
-             inherit_env=["LANG"], start_timeout=60.0, request_timeout=30.0,
+             inherit_env=["LANG"], trust_workspace=False, keep_state_dir=False,
+             start_timeout=60.0, request_timeout=30.0,
              extra_config={"notify": "off"}) as dgc:
         version: str = dgc.version
         where: Path = dgc.state_dir

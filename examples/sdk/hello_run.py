@@ -6,9 +6,9 @@
     python3 hello_run.py /path/to/workspace
 
 The model and endpoint come from --model/--base-url or DGC_MODEL/DGC_BASE_URL; DGC_API_KEY is
-passed through when the endpoint needs a key. The SDK runs `python -m dgc serve` from the
-Python named by DGC_PYTHON (see the SDK README). State goes to a fresh temporary directory
-unless --state-dir is given.
+passed through when the endpoint needs a key. The SDK finds a `dgc serve` to run on its own —
+`dgc` on PATH, `~/.local/bin/dgc`, or the Python named by DGC_PYTHON (see the SDK README). State
+goes to a fresh temporary directory unless --state-dir is given.
 """
 from __future__ import annotations
 

@@ -23,6 +23,34 @@ _SAFE_ENV = {
     "USER", "LOGNAME", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
 }
 
+# Provider credentials DGC consumes. They belong to the model client, never to a tool the model
+# runs, so they are stripped from every shell/python/monitor/hook subprocess environment — in
+# every mode, sandboxed or not. Without this an unsandboxed `echo -n "$DGC_API_KEY" | rev` (or a
+# read of /proc/<pid>/environ) recovers the key past output redaction.
+_PROVIDER_KEY_ENV = frozenset({
+    "DGC_API_KEY", "DGC_SEARCH_API_KEY", "DGC_SUBAGENT_API_KEY", "DGC_FALLBACK_API_KEY",
+})
+
+
+def _is_provider_key_env(name: str) -> bool:
+    up = str(name).upper()
+    if up in _PROVIDER_KEY_ENV or (up.startswith("DGC_") and up.endswith("_API_KEY")):
+        return True
+    # The launcher hands a key through DGC_<NAME>_API_KEY_FILE; the file is deleted at config load,
+    # but drop the pointer from tool environments too so it never even hints where it was.
+    return up.startswith("DGC_") and up.endswith("_API_KEY_FILE")
+
+
+def tool_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment for an UNSANDBOXED shell/python/monitor tool: the inherited environment
+    with DGC's provider credentials removed. (A sandboxed tool uses :func:`process_env`, which is
+    far more restrictive.) ``extra`` is merged on top, its provider keys stripped too."""
+    env = {k: v for k, v in os.environ.items() if not _is_provider_key_env(k)}
+    for k, v in (extra or {}).items():
+        if not _is_provider_key_env(k):
+            env[k] = v
+    return env
+
 
 @dataclass(frozen=True)
 class SandboxCapabilities:
@@ -39,6 +67,36 @@ class SandboxCapabilities:
     network_isolated: bool
 
 
+# Cache of "does this bubblewrap binary actually confine?" keyed by (path, size, mtime). Where
+# unprivileged user namespaces are disabled, or bwrap is too old, the binary is on PATH but every
+# `bwrap` invocation fails; probing keeps available()/requested() truthful without spawning a
+# probe on every permission check.
+_BWRAP_PROBE: dict[tuple[str, int, float], bool] = {}
+
+
+def _bwrap_confines(executable: Path) -> bool:
+    try:
+        info = executable.stat()
+        key = (str(executable), info.st_size, info.st_mtime)
+    except OSError:
+        return False
+    cached = _BWRAP_PROBE.get(key)
+    if cached is not None:
+        return cached
+    ok = False
+    try:
+        import subprocess
+        probe = subprocess.run(
+            [str(executable), "--unshare-all", "--ro-bind", "/", "/", "/bin/true"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=10)
+        ok = probe.returncode == 0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        ok = False
+    _BWRAP_PROBE[key] = ok
+    return ok
+
+
 def _backend() -> tuple[str, Path] | None:
     name = ("bwrap" if sys.platform.startswith("linux") else
             "sandbox-exec" if sys.platform == "darwin" else "")
@@ -50,6 +108,10 @@ def _backend() -> tuple[str, Path] | None:
         if not executable.is_file() or not os.access(executable, os.X_OK):
             return None
     except (OSError, RuntimeError, ValueError):
+        return None
+    # A bwrap on PATH is not proof it confines: unprivileged user namespaces may be disabled. Probe
+    # once (cached) so `required` cannot pass, and active never reports True, while the shell fails.
+    if name == "bwrap" and not _bwrap_confines(executable):
         return None
     return name, executable
 
@@ -162,6 +224,24 @@ def _account_home() -> Path | None:
         return None
 
 
+def _isolated_state_dir() -> Path | None:
+    """An SDK client's whole state_dir (the parent of the isolated HOME), or None.
+
+    Masking only the isolated HOME left ``state_dir/audit`` and ``state_dir/usage`` readable by a
+    sandboxed shell when the state_dir sits outside home, /tmp and /run. The SDK's HOME is
+    ``state_dir/home``, so the state_dir is its parent.
+    """
+    if os.environ.get("DGC_SDK_ISOLATED") != "1":
+        return None
+    home = os.environ.get("DGC_HOME")
+    if not home:
+        return None
+    try:
+        return Path(home).resolve(strict=False).parent
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def active(config) -> bool:
     return requested(config) and available() is not None
 
@@ -249,7 +329,9 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # HOME and the account's home differ for an SDK child (a private HOME under its state
         # directory); both hold user state, so both are hidden.
         homes = [Path.home()] + ([account] if (account := _account_home()) else [])
-        for candidate in (*homes, Path("/root"), Path("/tmp"), Path("/run")):
+        # The SDK client's whole state_dir (audit and usage logs, not just its isolated HOME).
+        extra = [state] if (state := _isolated_state_dir()) else []
+        for candidate in (*homes, *extra, Path("/root"), Path("/tmp"), Path("/run")):
             try:
                 candidate = candidate.resolve(strict=False)
             except OSError:
@@ -267,7 +349,7 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
         homes: list[Path] = []
-        for candidate in (Path.home(), _account_home()):
+        for candidate in (Path.home(), _account_home(), _isolated_state_dir()):
             if candidate is not None and candidate.resolve(strict=False) not in homes:
                 homes.append(candidate.resolve(strict=False))
         writable_project = "" if read_only else f'(subpath "{q(root)}") '

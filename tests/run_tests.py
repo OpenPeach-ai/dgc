@@ -20412,6 +20412,27 @@ def test_session_policy():
         with_policy({"version": 1, "sandbox": "off"})
         check("a session policy that does not mention project_allow keeps them",
               project_rules()["allow"] == ["Bash(*)"])
+
+        # project_agents: a project's own .dgc/agents load only when the policy permits it (and a
+        # valid policy that omits the flag, or no policy at all, keeps them). A HIGH: a workspace
+        # agent definition can otherwise choose an endpoint and this session's credential.
+        with_policy({"version": 1, "project_agents": False})
+        check("an SDK session policy can withhold project agent definitions",
+              _perm.session_project_agents_allowed() is False
+              and _perm.session_restricts_agent_routing() is True)
+        with_policy({"version": 1, "project_agents": True})
+        check("an opted-in policy allows project agents but still restricts their routing",
+              _perm.session_project_agents_allowed() is True
+              and _perm.session_restricts_agent_routing() is True)
+        with_policy({"version": 1, "project_agents": "yes"})
+        check("a non-boolean project_agents is an invalid policy",
+              bool(_perm.session_policy().error)
+              and _perm.session_project_agents_allowed() is False)
+        os.environ.pop(_perm.SESSION_POLICY_ENV, None)
+        check("without a session policy project agents load and routing is unrestricted",
+              _perm.session_project_agents_allowed() is True
+              and _perm.session_restricts_agent_routing() is False)
+
         check("session sandbox 'off' keeps the configured choice",
               _sandbox.requested({"sandbox": True}) and not _sandbox.requested({"sandbox": False}))
         raw = json.dumps({"version": 1, "deny": ["Write"]})
@@ -20428,6 +20449,85 @@ def test_session_policy():
         os.environ.pop(_perm.SESSION_POLICY_ENV, None)
         import shutil as _shutil
         _shutil.rmtree(root, ignore_errors=True)
+
+
+def test_sandbox_hardening():
+    """The OS sandbox masks the whole SDK state_dir, tool env drops provider keys, and a bwrap that
+    cannot confine is reported unavailable (findings 3, 4 and M2)."""
+    print("sandbox hardening:")
+    from unittest import mock as _mock
+    from dgc import sandbox as _sandbox
+
+    # M2(a): the environment for an unsandboxed tool never carries a provider credential.
+    with _mock.patch.dict(os.environ, {
+            "DGC_API_KEY": "sk-secret", "DGC_SUBAGENT_API_KEY": "sk-2",
+            "DGC_API_KEY_FILE": "/tmp/whatever", "OPENAI_API_KEY": "keep-app-choice",
+            "PATH": os.environ.get("PATH", ""), "SOME_VAR": "keep"}, clear=False):
+        env = _sandbox.tool_env()
+        check("tool_env drops DGC provider keys and the key-file pointer",
+              "DGC_API_KEY" not in env and "DGC_SUBAGENT_API_KEY" not in env
+              and "DGC_API_KEY_FILE" not in env, sorted(k for k in env if "KEY" in k))
+        check("tool_env keeps ordinary variables", env.get("SOME_VAR") == "keep"
+              and "PATH" in env)
+
+    # Finding 4: a bwrap on PATH that does not actually confine is reported unavailable, so
+    # `required` cannot pass and active never lies.
+    _sandbox._BWRAP_PROBE.clear()
+    with _mock.patch.object(_sandbox.sys, "platform", "linux"), \
+            _mock.patch.object(_sandbox.shutil, "which", return_value="/usr/bin/bwrap"), \
+            _mock.patch.object(_sandbox.Path, "resolve", lambda self, strict=False: self), \
+            _mock.patch.object(_sandbox, "_bwrap_confines", return_value=False):
+        check("a bwrap that cannot confine is reported unavailable", _sandbox.available() is None)
+    with _mock.patch.object(_sandbox.sys, "platform", "linux"), \
+            _mock.patch.object(_sandbox.shutil, "which", return_value="/usr/bin/bwrap"), \
+            _mock.patch.object(_sandbox.Path, "resolve", lambda self, strict=False: self), \
+            _mock.patch.object(_sandbox.Path, "is_file", lambda self: True), \
+            _mock.patch.object(_sandbox, "_bwrap_confines", return_value=True), \
+            _mock.patch("os.access", return_value=True):
+        check("a working bwrap is reported available", _sandbox.available() == "bwrap")
+
+    # Finding 3: the sandbox masks the whole SDK state_dir, not just its isolated HOME.
+    root = Path(tempfile.mkdtemp(prefix="dgc-sbx-work-")).resolve()
+    state = Path(tempfile.mkdtemp(prefix="dgc-sbx-state-")).resolve()
+    (state / "home").mkdir()
+    (state / "audit").mkdir()
+    try:
+        with _mock.patch.dict(os.environ, {"DGC_SDK_ISOLATED": "1",
+                                           "DGC_HOME": str(state / "home")}, clear=False):
+            argv = _sandbox.wrap("ls", root, None)
+        if argv is None:
+            check("state_dir masking: no sandbox backend here, skipped", True)
+        elif "bwrap" in argv[0]:
+            check("bwrap masks the whole SDK state_dir (audit and usage, not just home)",
+                  "--tmpfs" in argv and str(state) in argv, argv)
+        else:
+            check("sandbox-exec denies reads of the whole SDK state_dir",
+                  f'(subpath "{state}")' in argv[argv.index("-p") + 1], argv)
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(root, ignore_errors=True)
+        _shutil.rmtree(state, ignore_errors=True)
+        _sandbox._BWRAP_PROBE.clear()
+
+
+def test_sdk_session_key_file():
+    """The SDK hands a provider key to `dgc serve` through a 0600 file the CLI reads and deletes,
+    never through the child's environment (M2)."""
+    print("sdk session key file:")
+    from dgc import config as _config
+    key_dir = Path(tempfile.mkdtemp(prefix="dgc-keyfile-"))
+    try:
+        key_path = key_dir / ".apikey-abc"
+        key_path.write_text("sk-secret-file", encoding="utf-8")
+        os.chmod(key_path, 0o600)
+        value = _config._read_secret_file(str(key_path))
+        check("the CLI reads the key from the file", value == "sk-secret-file")
+        check("the CLI deletes the key file before any tool runs", not key_path.exists())
+        check("a missing key file is tolerated", _config._read_secret_file(str(key_path)) is None
+              and _config._read_secret_file(None) is None)
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(key_dir, ignore_errors=True)
 
 
 def main():
@@ -20509,6 +20609,8 @@ def main():
         test_serve_clear_todos_mid_turn_stdio()
         test_model_reconnect_surfaces()
         test_session_policy()
+        test_sandbox_hardening()
+        test_sdk_session_key_file()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

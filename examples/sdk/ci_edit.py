@@ -7,9 +7,10 @@
 
 Options and environment are the same as hello_run.py. WORKSPACE must be a git checkout with a
 clean tree (a fresh CI checkout is). The agent may call write_file/edit_file; every other tool
-that asks for permission, including shell commands, is denied. The patch is `git diff` of the
-checkout against HEAD after the run, new files included; the real index is not touched.
-Exit codes: 0 completed, 1 rejected, 2 usage, 3 blocked, 4 timeout, 5 failed.
+that asks for permission, including shell commands, is denied (those denials are expected and
+listed under "denials" in the output). The patch is `git diff` of the checkout against HEAD after
+the run, new files included; the real index is not touched.
+Exit codes: 0 completed, 1 rejected, 2 usage, 4 timeout, 5 failed.
 """
 from __future__ import annotations
 
@@ -22,9 +23,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-from dgc_sdk import DGC, DGCError
+from dgc_sdk import DGC, DGCError, RuntimePolicy
 
 ALLOWED = {"write_file", "edit_file"}
+
+# A CI checkout of a pull request is untrusted input. Two things keep it contained:
+#   * The client leaves trust_workspace at its default False, so the repo's own
+#     .dgc/permissions.json allow rules and .dgc/agents cannot grant the run anything — they can
+#     only narrow it. (This is what stops a planted permissions.json from pre-approving a shell.)
+#   * A RuntimePolicy confines the file tools to the checkout (a write to an absolute path outside
+#     cwd is refused before the callback sees it) and denies the network. shell="screened" avoids
+#     requiring bubblewrap here because the callback denies shell commands outright; for a run that
+#     needs the shell, use the default shell="sandboxed" with bubblewrap installed.
+POLICY = RuntimePolicy(network="deny", shell="screened")
 
 
 def git(workspace: Path, *args: str, env: dict[str, str] | None = None) -> str:
@@ -52,8 +63,6 @@ def working_tree_patch(workspace: Path) -> str:
 def exit_code(result) -> int:
     if result.status == "completed":
         return 0
-    if result.status == "blocked":
-        return 3
     if result.reason == "timeout":
         return 4
     if result.status == "failed":
@@ -86,7 +95,7 @@ def main() -> int:
     state = args.state_dir or Path(tempfile.mkdtemp(prefix="dgc-sdk-ci-edit-"))
     try:
         with DGC(state_dir=state, model=args.model, base_url=args.base_url,
-                 api_key=os.environ.get("DGC_API_KEY")) as dgc:
+                 api_key=os.environ.get("DGC_API_KEY"), policy=POLICY) as dgc:
             session = dgc.session(
                 cwd=workspace,
                 permissions={"mode": "default", "unhandled": "deny"},
@@ -105,6 +114,8 @@ def main() -> int:
         "session_id": result.session_id,
         "run_id": result.run_id,
         "changes": [{"path": change.path, "kind": change.kind} for change in result.changes],
+        "denials": [{"name": d.name, "source": d.source, "reason": d.reason}
+                    for d in result.denials],
         "patch": str(args.patch.resolve()),
         "patch_bytes": len(patch.encode("utf-8")),
     }, indent=2))

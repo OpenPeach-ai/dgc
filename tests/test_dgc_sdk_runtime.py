@@ -146,6 +146,10 @@ def _proc_env(pid: int) -> dict[str, str]:
     return {key.decode(): value.decode() for key, value in pairs}
 
 
+def raw_env_values(env: dict[str, str]) -> str:
+    return "\n".join(env.values())
+
+
 def _serve_children() -> list[int]:
     found = []
     for entry in os.listdir("/proc"):
@@ -562,7 +566,13 @@ class EnvironmentTests(_Base):
             env = _proc_env(session.raw.pid)
         self.assertNotIn("FAKE_CLOUD_SECRET", env)
         self.assertNotIn("GITHUB_TOKEN", env)
-        self.assertEqual(env["DGC_API_KEY"], "sk-local")
+        # The provider key is never in the child's environment block (which stays readable in
+        # /proc/<pid>/environ). It travels in a private 0600 file the CLI reads and deletes; only
+        # the path (in the private state_dir) is passed, never the host's DGC_API_KEY.
+        self.assertNotIn("DGC_API_KEY", env)
+        self.assertNotIn("host-key", raw_env_values(env))
+        self.assertTrue(env.get("DGC_API_KEY_FILE", "").startswith(str(self.state)),
+                        env.get("DGC_API_KEY_FILE"))
         self.assertEqual(env["HOME"], str(self.state / "home"))
         self.assertIn("PATH", env)
         # A source checkout needs only itself: not the SDK dir, not the host's PYTHONPATH. An
@@ -580,8 +590,12 @@ class EnvironmentTests(_Base):
         self.assertEqual(named.get("FAKE_CLOUD_SECRET"), "not-a-real-secret")
         self.assertNotIn("GITHUB_TOKEN", named)
         self.assertEqual(everything.get("GITHUB_TOKEN"), "ghp_x")
-        self.assertEqual(everything.get("DGC_API_KEY"), "sk-local",
-                         "isolated mode must not pass the host's DGC key")
+        # Even inherit_env=True never puts the provider key in the child's environment: it is
+        # delivered through a private file, and the host's DGC_API_KEY is stripped, not forwarded.
+        self.assertNotIn("DGC_API_KEY", everything)
+        self.assertNotIn("host-key", raw_env_values(everything))
+        self.assertTrue(everything.get("DGC_API_KEY_FILE", "").startswith(str(self.state)),
+                        everything.get("DGC_API_KEY_FILE"))
         with self.assertRaises(DGCConfigError):
             self._client(inherit_env="FAKE_CLOUD_SECRET")
 

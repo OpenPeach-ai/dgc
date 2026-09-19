@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -199,6 +200,10 @@ class SdkTests(unittest.TestCase):
         self.server.server_close()
 
     def _client(self, **kwargs):
+        # A RuntimePolicy's default sandboxed shell fails closed without a working OS sandbox;
+        # these tests check deny/path enforcement, not the sandbox, so accept the fallback.
+        if kwargs.get("policy") is not None:
+            kwargs.setdefault("sandbox", {"requirement": "preferred"})
         return DGC(state_dir=self.state, model="sdk-model", base_url=self.base_url,
                    api_key="sk-local", **kwargs)
 
@@ -549,7 +554,7 @@ class SdkTests(unittest.TestCase):
             )
             result = session.run("edit the checkout guard", timeout=60)
         self.assertFalse((self.work / "guard.py").exists())
-        self.assertIn(result.status, ("completed", "blocked", "failed", "cancelled"))
+        self.assertIn(result.status, ("completed", "failed", "cancelled"))
 
     def test_thrown_permission_callback_fails_closed(self):
         _Model.behavior = "edit"
@@ -591,8 +596,9 @@ class SdkTests(unittest.TestCase):
         with self._client() as dgc:
             session = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
             session.run("Summarize README. Do not edit files.", timeout=60)
-            rewound = session.rewind(99)
-        self.assertIn("ok", rewound)
+            # An out-of-range index raises a typed error instead of quietly returning ok=False.
+            with self.assertRaises(DGCConfigError):
+                session.rewind(99)
 
     def test_turn_budget_is_visible_on_isolated_config(self):
         with self._client() as dgc:
@@ -637,7 +643,7 @@ class SdkTests(unittest.TestCase):
                 permissions={"mode": "auto", "unhandled": "deny"},
             )
             again = restored.run("What did I just ask you to do? Do not edit files.", timeout=60)
-        self.assertIn(again.status, ("completed", "failed", "cancelled", "blocked"))
+        self.assertIn(again.status, ("completed", "failed", "cancelled"))
         self.assertEqual(self._host_snapshot(), before)
 
     def test_writes_stay_inside_session_cwd_not_git_root(self):
@@ -753,6 +759,22 @@ class SdkTests(unittest.TestCase):
         self.assertFalse((self.work / "guard.py").exists())
         self.assertEqual(result.status, "completed")
 
+    def test_denied_step_is_reported_in_denials_not_as_a_blocked_status(self):
+        # M1: a denied step no longer flips the run to a phantom "blocked" status; it is listed in
+        # result.denials (with a source), and the run completes.
+        _Model.behavior = "edit"
+        policy = RuntimePolicy(deny_tools=("write_file", "edit_file", "apply_patch"))
+        with self._client(policy=policy) as dgc:
+            session = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
+            result = session.run("edit the checkout guard", timeout=60)
+        self.assertEqual(result.status, "completed")
+        self.assertNotEqual(result.status, "blocked")   # "blocked" was removed from RunStatus
+        self.assertTrue(result.denials, "the denied write should appear in result.denials")
+        denial = result.denials[0]
+        self.assertIn(denial.name, ("write_file", "edit_file", "apply_patch"))
+        self.assertEqual(denial.source, "policy")
+        self.assertTrue(denial.reason)
+
     def test_policy_denies_write_in_auto_mode(self):
         _Model.behavior = "edit"
         policy = RuntimePolicy(deny_tools=("write_file", "edit_file", "apply_patch"))
@@ -763,7 +785,7 @@ class SdkTests(unittest.TestCase):
             )
             result = session.run("edit the checkout guard", timeout=60)
         self.assertFalse((self.work / "guard.py").exists(), "auto mode must still honour deny_tools")
-        self.assertIn(result.status, ("blocked", "completed", "failed"))
+        self.assertIn(result.status, ("completed", "failed", "cancelled"))
 
     def test_cancel_after_permission_event_drains_to_cancelled(self):
         _Model.behavior = "edit"
@@ -848,7 +870,7 @@ class SdkTests(unittest.TestCase):
             f"bash redirect must not land when write_file is denied; status={result.status}",
         )
         self.assertNotIn("permission_request", kinds)
-        self.assertIn(result.status, ("blocked", "completed", "failed"))
+        self.assertIn(result.status, ("completed", "failed", "cancelled"))
 
     def test_staff_deny_does_not_block_the_run(self):
         _Model.behavior = "edit"
@@ -917,6 +939,21 @@ class SdkTests(unittest.TestCase):
 
 
 class PolicyUnitTests(unittest.TestCase):
+    def test_deny_and_allow_tools_accept_display_and_internal_names(self):
+        # Minor: both "Bash" and "bash" (and MCP routes) are accepted and normalised to the
+        # internal name, instead of the display spelling raising.
+        policy = RuntimePolicy(deny_tools=("Bash", "write_file", "Web  Fetch".replace("  ", "")),
+                               allow_tools=("Read", "grep", "mcp__app__lookup"))
+        self.assertIn("bash", policy.deny_tools)
+        self.assertIn("write_file", policy.deny_tools)
+        self.assertIn("web_fetch", policy.deny_tools)
+        self.assertIn("read_file", policy.allow_tools)
+        self.assertIn("grep", policy.allow_tools)
+        self.assertIn("mcp__app__lookup", policy.allow_tools)
+        from dgc_sdk import DGCConfigError
+        with self.assertRaises(DGCConfigError):
+            RuntimePolicy(deny_tools=("NotATool",))
+
     def test_redact_and_cost(self):
         from dgc_sdk import cost_usd
         self.assertEqual(cost_usd(1_000_000, 500_000, 0, Pricing(1.0, 2.0)), 2.0)
@@ -952,24 +989,8 @@ class PolicyUnitTests(unittest.TestCase):
             PermissionRequest(id="r", name="bash", args={"command": "echo x > f"}),
             cwd=None,
         ))
-        rules = policy.engine_deny_rules()
-        self.assertIn("Write", rules)
-        self.assertTrue(any(row.startswith("Bash(") and "*>[!&]*" in row for row in rules), rules)
-        engine = PermissionEngine("auto", {"allow": [], "ask": [], "deny": rules})
-        denied, _reason = engine.decide("bash", {"command": "echo pwned > escaped.txt"})
-        self.assertEqual(denied, "deny")
-        allowed, _reason = engine.decide("bash", {"command": "ls"})
-        self.assertEqual(allowed, "allow")
-        still_ok, _reason = engine.decide("bash", {"command": "ls 2>&1"})
-        self.assertEqual(still_ok, "allow")
-        silent = policy.engine_deny_rules(inspect_bash=False)
-        self.assertIn("Write", silent)
-        self.assertFalse(any(row.startswith("Bash(") for row in silent), silent)
-        from dgc_sdk.policy import inspect_bash_for_engine
-        self.assertTrue(inspect_bash_for_engine(on_permission=None, permission_mode="default"))
-        self.assertTrue(inspect_bash_for_engine(on_permission=lambda _r: "once", permission_mode="auto"))
-        self.assertFalse(inspect_bash_for_engine(
-            on_permission=lambda _r: "deny", permission_mode="default"))
+        # compile_session builds what the runtime actually enforces (a session policy); the
+        # per-command screening above is what shell="screened" applies through policy.evaluate.
 
 
 class SbomGeneratorTests(unittest.TestCase):
@@ -1266,6 +1287,25 @@ class SessionFixTests(unittest.TestCase):
             self.assertEqual(os.stat(dgc.state_dir).st_mode & 0o777, 0o700)
         finally:
             dgc.close()
+
+    def test_auto_state_dir_is_removed_on_close_but_an_explicit_one_is_kept(self):
+        # A state_dir the SDK creates (state_dir unset) is removed on close, audit logs included;
+        # an explicit state_dir, or keep_state_dir=True, is left in place.
+        dgc = DGC(model="sdk-model", base_url=self.base_url)
+        auto_dir = dgc.state_dir
+        self.assertTrue(auto_dir.is_dir())
+        dgc.close()
+        self.assertFalse(auto_dir.exists(), "an auto state_dir should be removed on close")
+
+        kept = DGC(model="sdk-model", base_url=self.base_url, keep_state_dir=True)
+        kept_dir = kept.state_dir
+        kept.close()
+        self.assertTrue(kept_dir.is_dir(), "keep_state_dir=True must preserve it")
+        shutil.rmtree(kept_dir, ignore_errors=True)
+
+        explicit = DGC(state_dir=self.state, model="sdk-model", base_url=self.base_url)
+        explicit.close()
+        self.assertTrue(self.state.is_dir(), "an explicit state_dir must never be removed")
 
     def test_inherit_user_state_rejects_what_it_cannot_apply(self):
         (self.host_home / ".dgc" / "config.json").write_text(json.dumps({

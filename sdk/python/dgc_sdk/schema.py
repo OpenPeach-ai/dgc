@@ -88,8 +88,10 @@ def validate(value: Any, schema: Mapping[str, Any], path: str = "$") -> list[str
             for index, item in enumerate(value):
                 errors.extend(validate(item, item_schema, f"{path}[{index}]"))
     if isinstance(value, dict):
-        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        props_raw = schema.get("properties")
+        props = props_raw if isinstance(props_raw, dict) else {}
+        required_raw = schema.get("required")
+        required = required_raw if isinstance(required_raw, list) else []
         for key in required:
             if key not in value:
                 errors.append(f"{path}.{key} is required")

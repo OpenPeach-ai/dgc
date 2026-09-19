@@ -26,7 +26,7 @@ Invoked via the `task` tool's optional `agent` argument, or listed with `/agents
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .config import USER_AGENTS
@@ -130,17 +130,32 @@ def discover_agents(project_root, *, config=None) -> dict[str, AgentDef]:
     A project definition can select a model endpoint and an environment key. Even read-only
     automation must not load it before trust; permission-gating its later tools is too late.
     Callers without a trust-bearing config receive built-ins and personal definitions only.
+
+    A launching process's session policy (the SDK) can additionally withhold project agents from a
+    workspace it has not been told to trust, even one the isolated config marks trusted: choosing
+    an endpoint and a credential env var is exactly the workspace-supplied capability an SDK
+    session must not grant itself. Even when it opts in, a project definition under an SDK session
+    keeps only its persona (body/tools): its ``base_url``, ``api_key_env``, ``api_mode`` and
+    ``model`` are dropped, so a checkout — or the model rewriting one mid-run — cannot point a
+    sub-agent (even a built-in it shadows) at an arbitrary host with this session's credential.
     """
+    from .permissions import (session_policy, session_project_agents_allowed,
+                              session_restricts_agent_routing)
     from .trust import is_trusted
 
     agents: dict[str, AgentDef] = dict(builtin_agents())
-    bases = [USER_AGENTS]
-    if config is not None and is_trusted(config, project_root):
-        bases.append(Path(project_root) / ".dgc" / "agents")
-    for base in bases:
+    bases: list[tuple[Path, bool]] = [(USER_AGENTS, False)]
+    if (config is not None and is_trusted(config, project_root)
+            and session_project_agents_allowed()):
+        bases.append((Path(project_root) / ".dgc" / "agents", True))
+    restrict_routing = session_restricts_agent_routing()
+    for base, is_project in bases:
         if base.is_dir():
             for f in sorted(base.glob("*.md")):
                 a = _parse_agent(f)
-                if a:
-                    agents[a.name] = a   # project scanned last → overrides personal and built-ins
+                if not a:
+                    continue
+                if is_project and restrict_routing:
+                    a = replace(a, base_url="", api_key_env="", api_mode="", model="")
+                agents[a.name] = a   # project scanned last → overrides personal and built-ins
     return agents

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
+import os
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -43,6 +45,20 @@ def _seconds(value: Any, name: str, *, maximum: float) -> float:
     if not math.isfinite(number) or number <= 0 or number > maximum:
         raise DGCConfigError(f"{name} must be more than 0 and at most {maximum:g} seconds")
     return number
+
+
+def _write_key_file(path: Path, value: str) -> None:
+    """Write a provider key to a private (0600) file inside the 0700 state_dir.
+
+    The runtime is handed the path, not the key, so the key never sits in the child's initial
+    environment block (which stays readable in /proc/<pid>/environ). The runtime reads it and
+    deletes it before any tool runs.
+    """
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, value.encode("utf-8"))
+    finally:
+        os.close(fd)
 
 
 def _runtime_argv(runtime: Any) -> list[str]:
@@ -139,19 +155,32 @@ class DGC:
         retry: Any = None,
         extra_config: Mapping[str, Any] | None = None,
         inherit_env: bool | Sequence[str] = False,
+        trust_workspace: bool = False,
+        keep_state_dir: bool = False,
         start_timeout: float = 30.0,
         request_timeout: float = 15.0,
     ):
         """``state_dir`` holds this client's isolated HOME, audit and usage logs. It must be
         private (owned by you, not group/world-writable); left unset, a fresh private temporary
-        directory is used (see :attr:`state_dir`). ``extra_config`` adds DGC settings to every
-        isolated session; a config.json already in ``state_dir`` is never merged."""
+        directory is used (see :attr:`state_dir`) and removed on :meth:`close` unless
+        ``keep_state_dir=True``. ``extra_config`` adds DGC settings to every isolated session; a
+        config.json already in ``state_dir`` is never merged.
+
+        ``trust_workspace`` (default ``False``) decides whether a session's workspace may grant
+        itself capabilities — its own ``.dgc/permissions.json`` *allow* rules and its
+        ``.dgc/agents`` definitions (which choose a model endpoint and a credential env var). Left
+        off, the workspace can only narrow what runs; set it ``True`` when you trust the checkout
+        as your own machine would."""
         if policy is not None and not isinstance(policy, RuntimePolicy):
             raise DGCConfigError(f"policy must be a RuntimePolicy, not {type(policy).__name__}")
         if inherit_user_state:
             _reject_inherited(model=model, base_url=base_url, thinking=thinking, retry=retry,
                               extra_config=extra_config)
         self._state_dir = prepare_state_dir(state_dir)
+        # Only a directory the SDK created for this client is removed on close; an explicit
+        # state_dir (the app's own directory) is always left alone.
+        self._owns_state_dir = state_dir is None and not keep_state_dir
+        self._trust_workspace = bool(trust_workspace)
         self._inherit = bool(inherit_user_state)
         self._extra_config = dict(extra_config or {})
         if api_key:
@@ -243,14 +272,24 @@ class DGC:
         # environment (DGC_SESSION_POLICY); nothing is written to any config.json.
         plan = compile_session(
             self._policy, cwd=workspace, mode=perm_mode, on_permission=on_permission,
-            sandbox=requirement, tools=[spec.name for spec in tools])
+            sandbox=requirement, tools=[spec.name for spec in tools],
+            trust_workspace=self._trust_workspace, isolated=not self._inherit)
         key = api_key if api_key is not None else self._api_key
         extra = dict(self._extra_env or {})
+        key_file: Path | None = None
         if key:
-            # An environment key is process-local: DGC never saves it, including into your own
-            # ~/.dgc when inherit_user_state=True.
-            extra["DGC_API_KEY"] = str(key)
             remember_secret(key)
+            if self._inherit:
+                # inherit_user_state runs as the user's own DGC on their own machine; keep the
+                # historical env delivery. DGC still never saves it into ~/.dgc.
+                extra["DGC_API_KEY"] = str(key)
+            else:
+                # An isolated child's initial environment stays readable in /proc/<pid>/environ
+                # even after os.environ.pop, so the provider key never travels there. It goes in a
+                # 0600 file inside the 0700 state_dir; the CLI reads it and deletes it before any
+                # tool runs (see dgc/config.py). The path, not the key, is what the child sees.
+                key_file = self._state_dir / f".apikey-{_new_id('key')}"
+                extra["DGC_API_KEY_FILE"] = str(key_file)
         extra.update(plan.env)
         isolated_values: dict[str, object] | None = None
         if not self._inherit:
@@ -296,7 +335,14 @@ class DGC:
         # Config write, child startup and every save the SDK itself triggers happen under one
         # lock, so concurrent sessions never read each other's options.
         with lock.hold():
-            transport, ready = self._start(workspace, env, isolated_values, key)
+            try:
+                transport, ready = self._start(workspace, env, isolated_values, key, key_file)
+            finally:
+                # The CLI deletes the key file as it starts; remove any leftover (a failed or
+                # skipped start) so the key never lingers in the state_dir.
+                if key_file is not None:
+                    with contextlib.suppress(OSError):
+                        key_file.unlink()
             hub = None
             try:
                 sandbox_status = plan.confirm(ready)
@@ -358,7 +404,7 @@ class DGC:
 
     def _start(self, workspace: Path, env: dict[str, str],
                values: Mapping[str, object] | None,
-               key: Any) -> tuple[DGCClient, dict[str, Any]]:
+               key: Any, key_file: Path | None = None) -> tuple[DGCClient, dict[str, Any]]:
         """Write this session's config from scratch, then start ``dgc serve`` on it.
 
         A DGC child saves its whole config when it persists anything; if another session's
@@ -367,6 +413,10 @@ class DGC:
         drifts: list[list[str]] = []
         for attempt in range(_CONFIG_ATTEMPTS if values is not None else 1):
             try:
+                # The CLI reads and deletes the key file at startup, so re-write it before every
+                # (re)start, including a config-drift retry.
+                if key_file is not None and key:
+                    _write_key_file(key_file, str(key))
                 written = (write_session_config(self._state_dir, values)
                            if values is not None else None)
                 transport = DGCClient(
@@ -524,6 +574,14 @@ class DGC:
         while self._sessions:
             session = self._sessions.pop()
             session.close()
+        if self._owns_state_dir:
+            # A state_dir the SDK created (state_dir unset) holds only this client's throwaway
+            # HOME, usage and audit logs; remove it so nothing — the audit rows included — is left
+            # on disk. An explicit state_dir, or keep_state_dir=True, is never touched.
+            import shutil
+            with contextlib.suppress(OSError):
+                shutil.rmtree(self._state_dir, ignore_errors=True)
+            self._owns_state_dir = False
 
     def __enter__(self) -> "DGC":
         return self
@@ -834,6 +892,8 @@ class AsyncDGC:
         retry: Any = None,
         extra_config: Mapping[str, Any] | None = None,
         inherit_env: bool | Sequence[str] = False,
+        trust_workspace: bool = False,
+        keep_state_dir: bool = False,
         start_timeout: float = 30.0,
         request_timeout: float = 15.0,
     ):
@@ -842,7 +902,8 @@ class AsyncDGC:
             model=model, base_url=base_url, api_key=api_key, mode=mode, thinking=thinking,
             extra_env=extra_env, sandbox=sandbox, instructions=instructions, pricing=pricing,
             department=department, policy=policy, retry=retry, extra_config=extra_config,
-            inherit_env=inherit_env, start_timeout=start_timeout,
+            inherit_env=inherit_env, trust_workspace=trust_workspace,
+            keep_state_dir=keep_state_dir, start_timeout=start_timeout,
             request_timeout=request_timeout,
         )
 
