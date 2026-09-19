@@ -5,7 +5,7 @@
 Covers: a run, a custom tool (or, where the platform has no tool transport, a typed refusal),
 a policy denial, cancellation, and cleanup (no `dgc serve` or tool-bridge process outlives
 close()). No network, no secrets: the model is tests/test_dgc_sdk.py's loopback mock.
-Proposed location: tests/sdk_platform_smoke.py (draft; validated on Linux only).
+DGC_SMOKE_PIN_RUNTIME=1 passes runtime=[DGC_PYTHON, -m, dgc, serve] and skips discovery.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -75,23 +76,40 @@ def main() -> int:
     perms = {"mode": "auto", "unhandled": "deny"}
     tracked: set[int] = set()
 
+    pinned = os.environ.get("DGC_SMOKE_PIN_RUNTIME") == "1"
+
     def client(**kw):
         if kw.get("policy") is not None:
             kw.setdefault("sandbox", {"requirement": "preferred"})
+        if pinned:
+            # Skip runtime discovery (its own findings are recorded by the unpinned run) so the
+            # rest of the SDK path — handshake, run, tools, policy, cancel, cleanup — is exercised.
+            kw.setdefault("runtime", [os.environ["DGC_PYTHON"], "-m", "dgc", "serve"])
         return DGC(state_dir=state, model="sdk-model", base_url=base_url, api_key="sk-local", **kw)
 
-    try:
-        # 1. a plain run
+    def section(name: str, body) -> None:
+        """Run one section; an exception is recorded as a FAIL and the next section still runs."""
+        try:
+            body()
+        except Exception as exc:  # noqa: BLE001 - a diagnostic records every failure shape
+            lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+            print("".join(lines[-6:]).rstrip(), flush=True)
+            check(f"{name}: raised", False, f"{type(exc).__name__}: {str(exc)[:400]}")
+
+    def run_plain():
         base._Model.behavior = "text"
         with client() as dgc:
             session = dgc.session(cwd=work, permissions=perms)
+            check("session handshake (ready) completes", True)
             result = session.run("Summarize README. Do not edit files.", timeout=120)
             check("run completes", result.status == "completed", result.status)
-            check("run returns the model text", "checkout" in result.final_text.lower(), result.final_text)
+            check("run returns the model text", "checkout" in (result.final_text or "").lower(),
+                  result.final_text)
             if session.raw.pid:
-                tracked |= {session.raw.pid} | _descendants(session.raw.pid)
+                tracked.update({session.raw.pid} | _descendants(session.raw.pid))
 
-        # 2. a custom tool (host-process handler over the MCP bridge)
+    def run_tool():
+        # a custom tool (host-process handler over the MCP bridge)
         base._Model.behavior = "mcp"
         seen: list[dict] = []
         tool = define_tool("sku_lookup", "Look up a SKU",
@@ -101,17 +119,19 @@ def main() -> int:
             with client() as dgc:
                 session = dgc.session(cwd=work, permissions=perms, tools=[tool])
                 if session.raw.pid:
-                    tracked |= {session.raw.pid}
+                    tracked.add(session.raw.pid)
                 result = session.run("look up sku A-1", timeout=120)
                 if session.raw.pid:
-                    tracked |= _descendants(session.raw.pid)
+                    tracked.update(_descendants(session.raw.pid))
             check("custom tool handler ran", bool(seen) and seen[0].get("sku") == "A-1", repr(seen))
-            check("custom tool result reached the model", "widget" in result.final_text.lower(), result.final_text)
+            check("custom tool result reached the model", "widget" in (result.final_text or "").lower(),
+                  result.final_text)
         except DGCUnsupportedError as exc:
             # Honest outcome on a platform without a tool transport: a typed refusal, not a hang.
             check("custom tools refuse with DGCUnsupportedError on this platform", WINDOWS, str(exc))
 
-        # 3. a policy denial: the write tool is denied even though the callback would allow it
+    def run_policy():
+        # the write tool is denied even though the callback would allow it
         base._Model.behavior = "edit"
         policy = RuntimePolicy(deny_tools=("write_file", "edit_file", "apply_patch"))
         with client(policy=policy) as dgc:
@@ -119,16 +139,17 @@ def main() -> int:
                                   on_permission=lambda _req: "once")
             result = session.run("edit the checkout guard", timeout=120)
             if session.raw.pid:
-                tracked |= {session.raw.pid}
+                tracked.add(session.raw.pid)
         check("policy denial leaves the workspace untouched", not (work / "guard.py").exists())
         check("policy denial is reported, run still completes", result.status == "completed", result.status)
 
-        # 4. cancellation settles promptly and the session is reusable
+    def run_cancel():
+        # cancellation settles promptly and the session is reusable
         base._Model.behavior = "stall"
         with client() as dgc:
             session = dgc.session(cwd=work, permissions=perms)
             if session.raw.pid:
-                tracked |= {session.raw.pid}
+                tracked.add(session.raw.pid)
             handle = session.stream("Summarize README.", timeout=30)
             time.sleep(1.0)
             started = time.monotonic()
@@ -141,7 +162,8 @@ def main() -> int:
             again = session.run("Summarize README. Do not edit files.", timeout=120)
             check("session is reusable after cancel", again.status == "completed", again.status)
 
-        # 5. cleanup: nothing we saw start outlives close()
+    def run_cleanup():
+        # nothing we saw start outlives close()
         deadline = time.monotonic() + 10
         survivors = _alive(tracked)
         while survivors and time.monotonic() < deadline:
@@ -149,12 +171,23 @@ def main() -> int:
             survivors = _alive(tracked)
         check("no dgc serve / bridge process outlives close()", not survivors and bool(tracked),
               f"tracked={sorted(tracked)} survivors={sorted(survivors)}")
+
+    try:
+        section("1 run", run_plain)
+        section("2 custom tool", run_tool)
+        section("3 policy denial", run_policy)
+        section("4 cancel", run_cancel)
+        section("5 cleanup", run_cleanup)
     finally:
         server.shutdown()
         server.server_close()
 
     failed = [name for name, ok, _ in RESULTS if not ok]
+    print(f"M0-RESULT py-smoke platform={sys.platform} python={sys.version.split()[0]} "
+          f"pinned_runtime={'yes' if pinned else 'no'} passed={len(RESULTS) - len(failed)} "
+          f"failed={len(failed)}", flush=True)
     print(json.dumps({"platform": sys.platform, "python": sys.version.split()[0],
+                      "pinned_runtime": pinned,
                       "passed": len(RESULTS) - len(failed), "failed": failed}))
     return 1 if failed else 0
 

@@ -77,10 +77,18 @@ def _run(base_url: str, encoding: str) -> dict:
     (work / "README.md").write_text("hi\n", encoding="utf-8")
     outcome = {"encoding": encoding, "status": None, "final_text": None,
                "markers_present": None, "error": None}
+    # Pin the runtime to DGC_PYTHON so this probe measures ONLY the stdout encoding, not runtime
+    # discovery (whose probe env is a separate finding). The launched child still gets USERPROFILE
+    # from the SDK's isolated env, so it imports dgc regardless of the discovery-probe env.
+    kw = {}
+    dgc_python = os.environ.get("DGC_PYTHON")
+    if dgc_python:
+        kw["runtime"] = [dgc_python, "-m", "dgc", "serve"]
     try:
         with DGC(state_dir=state, model="sdk-model", base_url=base_url, api_key="sk-local",
                  extra_env={"PYTHONIOENCODING": encoding,
-                            "PYTHONUTF8": "1" if encoding.lower().startswith("utf") else "0"}) as dgc:
+                            "PYTHONUTF8": "1" if encoding.lower().startswith("utf") else "0"},
+                 **kw) as dgc:
             session = dgc.session(cwd=work, permissions={"mode": "auto", "unhandled": "deny"})
             result = session.run("Say the greeting exactly.", timeout=120)
             outcome["status"] = result.status

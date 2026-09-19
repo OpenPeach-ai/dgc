@@ -137,6 +137,14 @@ jobs:
           DGC_SDK_TEST_INSTALLED: "1"
         working-directory: ${{ runner.temp }}
         run: 'set -o pipefail; "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_platform_smoke.py" 2>&1 | tee "$RUNNER_TEMP/m0-logs/py-smoke.log"'
+      - name: Python smoke with the runtime pinned (skips discovery; shows handshake/run/tools/cancel)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        env:
+          DGC_SDK_TEST_INSTALLED: "1"
+          DGC_SMOKE_PIN_RUNTIME: "1"
+        working-directory: ${{ runner.temp }}
+        run: 'set -o pipefail; "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_platform_smoke.py" 2>&1 | tee "$RUNNER_TEMP/m0-logs/py-smoke-pinned.log"'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: matrix.node
         with:
@@ -154,6 +162,7 @@ jobs:
         env:
           DGC_SDK_TEST_INSTALLED: "1"
           DGC_REQUIRE_RELEASE_TOOLS: "1"
+          DGC_TEST_VERBOSITY: "2"
         working-directory: ${{ runner.temp }}
         run: |
           set -o pipefail
@@ -212,6 +221,9 @@ jobs:
           python -m pip install -r requirements.lock
           python -m pip install --no-deps -e .
           python -m pip check
+      - name: Config and session saves without os.fchmod (Windows < 3.13)
+        continue-on-error: true
+        run: 'set -o pipefail; python tests/windows/fchmod_probe.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/fchmod-${{ matrix.os }}-py${{ matrix.python }}.log"'
       - name: Run the full CLI test suite (diagnostic; failures are expected on these OSes)
         continue-on-error: true
         run: 'set -o pipefail; python tests/run_tests.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.log"'

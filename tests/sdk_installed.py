@@ -42,7 +42,9 @@ def main(paths: list[str]) -> int:
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(module))
     if Path(sys.modules["dgc_sdk"].__file__ or "").resolve() != sdk_origin:
         raise SystemExit("a test module replaced the installed dgc_sdk")
-    result = unittest.TextTestRunner(verbosity=1).run(suite)
+    # DGC_TEST_VERBOSITY=2 names every test and every skip reason (the platform diagnostics use it).
+    verbosity = int(os.environ.get("DGC_TEST_VERBOSITY") or 1)
+    result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
     return 0 if result.wasSuccessful() else 1
 
 
