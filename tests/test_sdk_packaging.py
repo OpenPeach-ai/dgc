@@ -87,8 +87,14 @@ class VersionSurfaceTests(unittest.TestCase):
         self.assertEqual(pyproject["project"]["version"], SDK_VERSION)
         self.assertEqual(package["version"], SDK_VERSION)
         self.assertIn(f'export const VERSION = "{SDK_VERSION}";', types_ts)
-        self.assertEqual(_version.REQUIRES_CLI, cli, "the SDK pairs with the CLI released beside it")
-        self.assertIn(f'export const REQUIRES_CLI = "{cli}";', types_ts)
+        # The SDK names the CLI it was released beside, its minimum. A later CLI patch release in the
+        # same line pairs with it without a new SDK (CLI 0.41.7 followed dgc-sdk 0.5.3), and the
+        # published SDK's files must not change for it.
+        required = _version.REQUIRES_CLI
+        as_tuple = lambda version: tuple(int(part) for part in version.split("."))
+        self.assertLessEqual(as_tuple(required), as_tuple(cli), "the SDK never needs a newer CLI than this one")
+        self.assertEqual(as_tuple(required)[:2], as_tuple(cli)[:2], "the SDK pairs with this CLI line")
+        self.assertIn(f'export const REQUIRES_CLI = "{required}";', types_ts)
         self.assertEqual(pyproject["project"]["urls"]["Release"],
                          f"https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v{SDK_VERSION}")
         for url in (pyproject["project"]["urls"]["Documentation"], pyproject["project"]["urls"]["Changelog"]):
@@ -103,14 +109,14 @@ class VersionSurfaceTests(unittest.TestCase):
         }
         for name, text in texts.items():
             self.assertIn(SDK_VERSION, text, f"{name} does not name SDK {SDK_VERSION}")
-            self.assertIn(cli, text, f"{name} does not name CLI {cli}")
+            self.assertIn(required, text, f"{name} does not name CLI {required}")
             for stale in ("Not published", "not on PyPI", "Until the index has this release",
                           "Frozen **0.5.2**", "Frozen 0.5.2", "Frozen cut: **0.5.2**"):
                 self.assertNotIn(stale, text, f"{name} still says {stale!r}")
         compat = (ROOT / "sdk/COMPATIBILITY.md").read_text(encoding="utf-8")
         first_row = next(line for line in compat.splitlines() if line.startswith("| **"))
         self.assertIn(f"**{SDK_VERSION}**", first_row)
-        self.assertIn(f"**{cli}**", first_row)
+        self.assertIn(f"**{required}**", first_row)
         self.assertIn("**≥ 22**", first_row)
         self.assertEqual(package["engines"]["node"], ">=22", "docs and package.json agree on Node")
         changelog = (ROOT / "sdk/CHANGELOG.md").read_text(encoding="utf-8")
