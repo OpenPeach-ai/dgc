@@ -1,9 +1,11 @@
-"""Ultra makes the lead agent delegate; the default profile delegates only when it clearly helps.
+"""Ultra runs independent parts side by side; the default profile delegates only when it clearly helps.
 
 The model can only delegate what it is offered and told about: these checks pin that the `task`
-tool, the specialist roster and the concrete delegation policy reach the top-level model under
+tool, the specialist roster and the calibrated delegation policy reach the top-level model under
 Ultra on every tool profile and permission mode, and that the default profile does not pay for
-guidance about a tool it was not offered.
+guidance about a tool it was not offered. The policy's wording was measured on real runs: split
+parts that change different files into one parallel batch; keep a single part, shared files and
+reviews of tested changes with the lead.
 """
 from __future__ import annotations
 
@@ -47,20 +49,33 @@ class UltraDelegationTests(unittest.TestCase):
                 "project-relative paths",
                 "exactly what to return",
                 "# DGC Ultra execution profile",
+                # The measured trade-off, stated so the lead can apply it.
                 "not a token-saving mode",
-                "however small the repository or the task looks",
-                "Split the task BEFORE you read any source file yourself",
-                "explorer to map it",
+                "saves time only beside other children, on work you have not done yet",
+                "never from the size of the code",
+                # Structural rules: locate, split parts that change different files, one batch.
+                "1. Locate: find the files and symbols each part touches",
+                "2. Split: when two or more parts change different files",
+                "explorer to map an area",
                 "all in ONE response",
                 f"up to {workers} parallel workers",
-                "run critic on the changed paths",
+                # A lone blocking child was measured as pure overhead: all parts or none.
+                "every part goes in that batch or none does",
+                "Parts that share a file or one investigation count as one part",
+                "3. Do it yourself when the turn has one part, when running code answers the "
+                "question, or when you already know every exact edit",
                 "run the tests yourself",
-                "Only a turn that is one question, or one edit to one file, may skip `task`",
+                # Review is not a fixed step: it cost minutes per turn and found nothing when tests
+                # already covered the change.
+                "spawn critic only when the user asks for a review or no test or command",
                 f"permission mode remains {mode}"):
             self.assertIn(needle, prompt)
-        # A size-based escape hatch is what the model used to keep every turn to itself.
-        for loophole in ("a few tool calls", "one small edit", "large, independent"):
-            self.assertNotIn(loophole, prompt)
+        # A size-based escape hatch is what the model used to keep every turn to itself; the
+        # split-first / always-review wording is what made Ultra 2-6x slower at equal quality.
+        for wording in ("a few tool calls", "one small edit", "large, independent",
+                        "BEFORE you read any source file", "however small",
+                        "once files changed, run critic"):
+            self.assertNotIn(wording, prompt)
 
     def test_ultra_offers_task_and_policy_on_every_profile_and_mode(self):
         for profile in ("adaptive", "full"):
@@ -132,6 +147,7 @@ class UltraDelegationTests(unittest.TestCase):
         text = json.dumps(task)
         self.assertNotIn("large, independent chunks", text)
         for needle in ("exploring code", "a review", "cannot see this conversation",
+                       "saves time only beside other tasks",
                        "ONE response", "never batch tasks that depend on or edit the same files",
                        "explorer", "researcher", "critic", "worker"):
             self.assertIn(needle, text)

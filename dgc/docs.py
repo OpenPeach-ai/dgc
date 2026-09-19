@@ -2254,12 +2254,14 @@ Native controls differ:
 
 `/ultra on` is an orchestration profile, not a sixth thinking level. It raises native effort to
 `xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
-effort, and makes the main agent a lead: it plans the split before reading code itself, sends
-explorers to map unfamiliar areas, gives each independent chunk its own worker in one parallel
-batch — up to `max_parallel_tasks` (default 4, at most 8; concurrent in auto mode) — has critic
-review changed files before the final answer, then integrates and runs the tests. Long work
-that does not block the rest of the turn can use `task` with `background: true`; DGC starts a
-wake turn when that child lands.
+effort, and makes the main agent a lead: it locates each part of the request, gives every part
+that changes different files its own worker (or an explorer for an area to map) in one parallel
+batch — up to `max_parallel_tasks` (default 4, at most 8; concurrent in auto mode) — then
+integrates and runs the tests. A sub-agent starts cold, so it only saves time beside others: a
+single part, parts that share files or one investigation, and edits the lead already knows stay
+with the lead. Critic reviews a change when you ask for a review or when no test can check it.
+Long work that does not block the rest of the turn can use `task` with `background: true`; DGC
+starts a wake turn when that child lands.
 
 - `/ultra` · `/ultra on|off` — toggle; the status line shows the profile while it is on.
 - `--ultra` / `--no-ultra` — the same for one `dgc` launch.

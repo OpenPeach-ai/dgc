@@ -324,9 +324,10 @@ TOOL_SCHEMAS = [
     _fn("task", "Run a sub-task in a fresh sub-agent with its own context and tools: exploring code, "
         "an independent chunk of work, or a review. It cannot see this conversation. In a Git "
         "project it works in a private checkout, then integrates only its conflict-free delta; "
-        "conflicting or incomplete work is preserved without overwriting the caller. Emit "
-        "independent task calls in ONE response (they run concurrently in auto mode); never batch "
-        "tasks that depend on or edit the same files. The user does not see its result: summarize it.",
+        "conflicting or incomplete work is preserved without overwriting the caller. It starts "
+        "cold, so it saves time only beside other tasks: emit independent task calls in ONE "
+        "response (they run concurrently in auto mode); never batch tasks that depend on or edit "
+        "the same files. The user does not see its result: summarize it.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
          "prompt": {"type": "string", "description": "Self-contained brief: goal, project-relative "
                     "paths, constraints, what is known, what to return"},
