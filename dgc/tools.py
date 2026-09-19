@@ -2302,7 +2302,9 @@ def browser_tool(args: dict, ctx) -> str:
             elif relay and saved:
                 # dgc/vision.py: a vision model can look for this one, through view_image.
                 try:
-                    shown = Path(saved).relative_to(
+                    # Both sides resolved: on macOS /var is /private/var, and a saved path that
+                    # kept one spelling was shown whole instead of relative to the project.
+                    shown = Path(saved).resolve(strict=False).relative_to(
                         Path(ctx.project_root).resolve(strict=False)).as_posix()
                 except ValueError:
                     shown = saved

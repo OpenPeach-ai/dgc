@@ -1398,6 +1398,9 @@ class SessionFixTests(unittest.TestCase):
         state.mkdir()
         original = Path(tempfile.mkdtemp(prefix="dgc-sdk-orig-"))
         subprocess.run(["cp", "-a", f"{root}/.", str(original)], check=True)
+        # A Session resolves its excluded paths (session.py); resolve here too, as macOS's /var is
+        # /private/var and an unresolved exclude never matches the resolved workspace walk.
+        state = state.resolve()
         before = _snapshot_workspace(root, (state,))
         time.sleep(0.01)
         (root / "src/home/page.tsx").write_text("export default 2;\n", encoding="utf-8")

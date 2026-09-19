@@ -4,7 +4,16 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.41.6 — 2026-09-19
+## 0.41.7 — 2026-09-19
+
+Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.
+
+- **0.41.6, released.** The v0.41.6 tag's macOS test jobs failed (two paths spelled `/var` against
+  `/private/var`), so no GitHub Release was made for it and it never reached vibedgc.com. 0.41.7
+  is that release with the fix: a screenshot handed to a vision model is named relative to the
+  project on macOS too. Everything listed under 0.41.6 below ships in 0.41.7.
+
+## 0.41.6 — 2026-09-19 (tagged, not released)
 
 Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.
 
