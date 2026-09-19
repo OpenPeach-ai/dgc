@@ -10,11 +10,12 @@ Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.
 
 ### For everyone
 
-- **Ultra delegates for real.** Ultra splits a multi-part task across sub-agents before the lead
-  reads the code (workers, explorers, researchers in one parallel batch), has a critic review the
-  changed files, then integrates and runs the tests. Sub-agents stay one level deep, the roster
-  lists your own named agents, and a `todo` update beside the `task` calls no longer makes the
-  batch run one at a time. Outside Ultra, `task` is offered when it clearly helps.
+- **Ultra delegates where it saves time.** Measured on six realistic multi-part tasks: the parts
+  of a task that change different files now go to sub-agents together in one parallel batch, and
+  the lead does single-part work itself; a critic runs when you ask for a review or no test can
+  check the change. (Splitting everything and always adding a critic was 2-6x slower at the same
+  quality.) Sub-agents stay one level deep, briefs carry project-relative paths, the roster lists
+  your own named agents, and a `todo` update beside the `task` calls no longer serialises the batch.
 - **Sub-agents get their own context window.** `subagent_context_size` (0 uses the main window), a
   named agent's `context_size:` frontmatter, `/subagent context 64k`, and Settings → Agents.
 - **The sub-agent route can change mid-turn**, as the main model can: model, host, transport, key
