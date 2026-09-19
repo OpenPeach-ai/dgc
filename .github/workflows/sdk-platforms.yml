@@ -7,7 +7,8 @@
 #   host            per OS/Python: clean venv + CLI + wheel, then the hermetic smoke(s).
 #   cli-suite       tests/run_tests.py on macOS and Windows (the CLI suite has never run there).
 #   seatbelt-probe  escape probes inside the CURRENT macOS sandbox profile (dgc/sandbox.py).
-#   windows-encoding  `dgc serve` under a cp1252 stdout: are the NDJSON frames valid UTF-8?
+#   windows-encoding  `dgc serve` with a cp1252 / native stdout, through both SDKs: is the NDJSON
+#                   valid UTF-8, and does non-ASCII text survive?
 name: SDK platforms
 
 on:
@@ -309,6 +310,17 @@ jobs:
       - name: Drive `dgc serve` under cp1252 and check the NDJSON is valid UTF-8
         continue-on-error: true
         run: 'set -o pipefail; "$DGC_PYTHON" tests/windows/serve_encoding_probe.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/windows-encoding.log"'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Same check through the Node SDK (lenient decoding hides the damage)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          (cd sdk/typescript && npm ci && npm run build)
+          node tests/windows/serve_encoding_probe.mjs sdk/typescript/dist/index.js 2>&1 | tee "$RUNNER_TEMP/m0-logs/windows-encoding-node.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

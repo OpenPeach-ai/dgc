@@ -10,6 +10,8 @@ Windows too; the Windows runner is where it counts for the release.
 
     DGC_PYTHON=<python with the dgc CLI> python tests/windows/serve_encoding_probe.py
 
+Variants: utf-8 and cp1252 (forced through PYTHONIOENCODING) and native (no override).
+
 Exit code is always 0: this is a diagnostic, and the workflow leg is non-blocking. The findings
 are the ``M0-RESULT`` lines.
 """
@@ -71,7 +73,8 @@ def _start_model():
 
 
 def _run(base_url: str, encoding: str) -> dict:
-    """One serve run with the child's stdout encoding forced to ``encoding``."""
+    """One serve run with the child's stdout encoding forced to ``encoding``; "native" forces
+    nothing, so the child uses the interpreter's own default (what a Windows user gets)."""
     state = Path(tempfile.mkdtemp(prefix="dgc-enc-state-"))
     work = Path(tempfile.mkdtemp(prefix="dgc-enc-work-"))
     (work / "README.md").write_text("hi\n", encoding="utf-8")
@@ -86,8 +89,9 @@ def _run(base_url: str, encoding: str) -> dict:
         kw["runtime"] = [dgc_python, "-m", "dgc", "serve"]
     try:
         with DGC(state_dir=state, model="sdk-model", base_url=base_url, api_key="sk-local",
-                 extra_env={"PYTHONIOENCODING": encoding,
-                            "PYTHONUTF8": "1" if encoding.lower().startswith("utf") else "0"},
+                 extra_env=({} if encoding == "native" else
+                            {"PYTHONIOENCODING": encoding,
+                             "PYTHONUTF8": "1" if encoding.lower().startswith("utf") else "0"}),
                  **kw) as dgc:
             session = dgc.session(cwd=work, permissions={"mode": "auto", "unhandled": "deny"})
             result = session.run("Say the greeting exactly.", timeout=120)
@@ -101,10 +105,21 @@ def _run(base_url: str, encoding: str) -> dict:
     return outcome
 
 
+def _safe_stdio() -> None:
+    """Never let this diagnostic die printing non-ASCII to a cp1252 console (Windows, no UTF-8
+    mode): the encoding is left alone, unencodable characters become escapes."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> int:
+    _safe_stdio()
     server, base_url = _start_model()
     try:
-        results = [_run(base_url, "utf-8"), _run(base_url, "cp1252")]
+        results = [_run(base_url, "utf-8"), _run(base_url, "cp1252"), _run(base_url, "native")]
     finally:
         server.shutdown()
         server.server_close()
@@ -114,10 +129,10 @@ def main() -> int:
         summary = (f"M0-RESULT windows-encoding platform={sys.platform} "
                    f"enc={r['encoding']} status={r['status']} "
                    f"non_ascii_intact={'YES' if intact else 'NO'} "
-                   f"markers={','.join(r['markers_present'] or [])!r} "
-                   f"error={r['error']!r}")
+                   f"markers={ascii(','.join(r['markers_present'] or []))} "
+                   f"error={ascii(r['error'])}")
         print(summary, flush=True)
-        print(f"    final_text={r['final_text']!r}", flush=True)
+        print(f"    final_text={ascii(r['final_text'])}", flush=True)
     print(json.dumps({"probe": "windows-encoding", "platform": sys.platform,
                       "results": results}, ensure_ascii=True), flush=True)
     return 0

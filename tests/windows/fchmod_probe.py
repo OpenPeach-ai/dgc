@@ -38,7 +38,18 @@ def _attempt(label: str, fn) -> str:
         return f"{type(exc).__name__}"
 
 
+def _safe_stdio() -> None:
+    """Never let this diagnostic die printing non-ASCII to a cp1252 console (Windows, no UTF-8
+    mode): the encoding is left alone, unencodable characters become escapes."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> int:
+    _safe_stdio()
     from dgc import config as dgc_config
     from dgc import sessions
 
