@@ -2222,26 +2222,33 @@ class Agent(GoalLifecycle):
                 "path before implementing, unless the user asked you to skip review.",
             ]
         from .ultra import worker_limit
-        # Measured on a real model: any size-based escape ("a few tool calls", "one small edit")
-        # is read as permission to do the whole turn in the parent once repo_map shows a small
-        # repository. The exception is structural, and the split comes before the parent reads.
+        # Calibrated on real runs (deepseek-v4.1-flash; Ollama Cloud serves concurrent requests in
+        # parallel). A size-based escape ("a few tool calls", "one small edit") made the lead never
+        # delegate; "split before reading, then always a critic" ran 2-6x slower at equal quality:
+        # every child starts cold, a lone child blocks the lead, and a critic re-read the code for
+        # ~5 min without a finding when tests covered the change. So the rules are structural:
+        # parts that change different files go out together in one batch, all or none.
         return lines + [
             "",
             "# DGC Ultra execution profile",
-            "Ultra is an orchestration profile, not a token-saving mode: you lead and sub-agents do "
-            "the work, however small the repository or the task looks. Split the task BEFORE you "
-            "read any source file yourself; the size of the code or of a part is never a reason to "
-            "skip a step:",
-            "1. Split: give each independent part (separate bugs, features, modules or areas, "
-            "backend vs UI, a long test or deploy battery) its own `task` — worker to change code, "
-            "explorer to map it, researcher to write findings — all in ONE response, so up to "
-            f"{worker_limit(self.config)} parallel workers run at once. Name the files or symbols in "
-            "each brief and let the child read them. Keep only edits coupled to the same files.",
-            "2. Review: once files changed, run critic on the changed paths with the original "
-            "requirements before your final answer; fix or report what it blocks on.",
-            "3. Integrate: reconcile every child result, then run the tests yourself. Read a file "
+            "Ultra is not a token-saving mode: it runs a turn's independent parts at the same "
+            "time. A child starts cold and re-reads what it needs, so it saves time only beside "
+            "other children, on work you have not done yet. Decide from the request's structure, "
+            "never from the size of the code:",
+            "1. Locate: find the files and symbols each part touches. Do not edit yet.",
+            "2. Split: when two or more parts change different files and none needs another's "
+            "result (separate bugs or features, backend vs UI, a long test or deploy battery), "
+            "give each part its own `task` — worker to change code, explorer to "
+            f"map an area — all in ONE response (up to {worker_limit(self.config)} parallel "
+            "workers), naming its files and symbols. `task` blocks until the batch ends, so every "
+            "part goes in that batch or none does. Parts that share a file or one investigation "
+            "count as one part.",
+            "3. Do it yourself when the turn has one part, when running code answers the question, "
+            "or when you already know every exact edit: briefing a child costs more than the edit.",
+            "4. Integrate: reconcile every child result, then run the tests yourself. Read a file "
             "yourself only to edit it or to check a child's claim.",
-            "Only a turn that is one question, or one edit to one file, may skip `task`.",
+            "5. Review: spawn critic only when the user asks for a review or no test or command "
+            "you can run checks the change.",
             f"Ultra does not change authority: permission mode remains {mode}, and every parent or "
             "child action stays inside that policy.",
         ]
