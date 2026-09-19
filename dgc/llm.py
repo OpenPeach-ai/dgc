@@ -1233,6 +1233,49 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
 _REASONING_OFF = {None, "", "off", "none"}
 _REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking", "reasoning")
 _SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p")
+# Legacy (non-adaptive) Anthropic extended-thinking budgets DGC requests per level, in tokens.
+_ANTHROPIC_THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}
+# Over-thinking watchdog (F4), "auto" schedule: the reasoning tokens a phase may spend before any
+# answer text or tool call, per level, before DGC aborts it and retries one level lower. Every
+# level's allowance is at least what DGC itself asks a provider for at that level (see
+# _ANTHROPIC_THINKING_BUDGET), so the watchdog never cuts off reasoning DGC requested; Extra high
+# (and Ultra, which raises native effort to xhigh) get room for deep work. It still ends a local
+# model that reasons without end. "off" keeps the old 8,000: a model that reasons with thinking off
+# is the runaway case this exists for. think_budget_tokens set to a number overrides every level.
+AUTO_THINK_BUDGET_TOKENS = {"off": 8000, "low": 8000, "medium": 16000, "high": 32000,
+                            "xhigh": 64000, "max": 64000}
+
+
+def resolve_think_budget(value) -> int | None:
+    """think_budget_tokens as a uniform token budget, or None for the per-level "auto" schedule.
+    0 (or a negative number) turns the watchdog off; anything unreadable falls back to "auto"."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("", "auto", "default"):
+            return None
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:                                   # NaN
+        return None
+    if number == float("inf"):
+        return 0
+    return max(0, int(number))
+
+
+def think_budget_tokens_for(level, override: int | None = None) -> int:
+    """The watchdog's token allowance for one request at thinking `level` (0 = no watchdog)."""
+    if override is not None:
+        return max(0, int(override))
+    key = "off" if level in _REASONING_OFF else str(level).lower()
+    return AUTO_THINK_BUDGET_TOKENS.get(key, AUTO_THINK_BUDGET_TOKENS["off"])
 
 
 def _provider_family(base_url: str) -> str:
@@ -1341,7 +1384,7 @@ def _reasoning_payload(family: str, model: str, level, *, max_tier: bool = True)
     if family == "anthropic":
         if off:
             return {}
-        budget = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}.get(level, 8192)
+        budget = _ANTHROPIC_THINKING_BUDGET.get(level, 8192)
         return {"thinking": {"type": "enabled", "budget_tokens": budget}}
     # unknown OpenAI-compatible host (llama.cpp / unsloth / LM Studio / …)
     return _compat_reasoning_payload(off, level)
@@ -1358,7 +1401,7 @@ class LLMClient:
     _model_metadata_lock = threading.Lock()
 
     def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
-                 think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = "",
+                 think_budget_tokens="auto", max_tokens: int = 0, ollama_keep_alive: str = "",
                  sampling: dict | None = None, api_mode: str = "auto",
                  provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
                  provider_state: str = "stateless", prompt_cache: bool = True,
@@ -1388,7 +1431,10 @@ class LLMClient:
         self.stall_route = None         # runner that delivers a notice on the caller's UI session
         self._wait_channel: WaitChannel | None = None
         self._active_watch: RequestWatch | None = None
-        self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
+        # F4 over-thinking watchdog: None = the per-level "auto" schedule, else a uniform character
+        # budget for every level (0 = off). _think_budget(level) is what each request enforces.
+        uniform = resolve_think_budget(think_budget_tokens)
+        self.think_budget_chars = None if uniform is None else uniform * 4
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
         self.context_size = max(0, int(context_size or 0))
         self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
@@ -1862,6 +1908,14 @@ class LLMClient:
             channel.close()             # nothing about this call may reach the UI after it returns
             self._wait_channel = previous
 
+    def _think_budget(self, level) -> int:
+        """Characters of reasoning the watchdog allows one request at `level` before any output
+        (0 = off): the explicit think_budget_tokens when set, else the per-level auto schedule."""
+        uniform = getattr(self, "think_budget_chars", None)
+        if uniform is not None:
+            return max(0, int(uniform))
+        return think_budget_tokens_for(level) * 4
+
     # ---- stall watcher ---------------------------------------------------------------------------
     _load_probe_interval_s = 5.0
 
@@ -2237,8 +2291,7 @@ class LLMClient:
             return {"type": "disabled"}
         if self._anthropic_adaptive_model(self.model):
             return {"type": "adaptive", "display": "summarized"}
-        target = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}.get(
-            str(level).lower(), 8192)
+        target = _ANTHROPIC_THINKING_BUDGET.get(str(level).lower(), 8192)
         # Legacy extended thinking requires budget_tokens < max_tokens. A tiny explicit output cap
         # cannot carry the minimum useful thinking budget, so honor the cap and disable thinking.
         if max_tokens <= 1024:
@@ -2825,7 +2878,7 @@ class LLMClient:
                     continue
                 raise self._answer_error(f"HTTP {status} from Anthropic Messages: {body}",
                                          status, body, f"{self.base_url}/messages", transient + 1)
-            budget = self.think_budget_chars
+            budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt(
                 str((payload.get("thinking") or {}).get("display") or "")
@@ -3407,7 +3460,7 @@ class LLMClient:
                 body = scrub_urls(_error_body(r, 400))
                 raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._ollama_url)}: {body}",
                                          status, body, self._ollama_url, transient + 1)
-            budget = self.think_budget_chars
+            budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt()
             try:
@@ -3673,7 +3726,7 @@ class LLMClient:
                 body = scrub_urls(_error_body(r, 400))
                 raise self._answer_error(f"HTTP {status} from {safe_endpoint(self._url)}: {body}",
                                          status, body, self._url, transient + 1)
-            budget = self.think_budget_chars
+            budget = self._think_budget(level)
             self._usage_opened()
             self._next_reasoning_attempt()
             if usage_retry:

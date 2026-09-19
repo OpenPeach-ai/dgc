@@ -802,7 +802,7 @@ THINK_INSTRUCTIONS = {
               "and weigh alternative approaches, verify every assumption against the actual code, "
               "and re-check each action before and after taking it."),
 }
-# prompt keywords bump the thinking level for that turn
+# prompt keywords raise thinking from Off for that turn (first match wins; never a set level)
 THINK_KEYWORDS = [
     ("ultrathink", "high"), ("think harder", "high"),
     ("think hard", "medium"), ("think", "low"),
@@ -1592,7 +1592,7 @@ class Agent(GoalLifecycle):
         """Create every primary/fallback/sub-agent client with identical reliability settings."""
         client = LLMClient(base_url, api_key, model,
                            read_timeout=int(self.config.get("request_timeout", 1800)),
-                           think_budget_tokens=int(self.config.get("think_budget_tokens", 8000)),
+                           think_budget_tokens=self.config.get("think_budget_tokens", "auto"),
                            max_tokens=int(self.config.get("max_tokens", 16384)),
                            ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")),
                            sampling=_sampling(self.config),
@@ -3143,11 +3143,16 @@ class Agent(GoalLifecycle):
     # ------------------------------------------------------------ thinking ---
     def _effective_thinking(self, user_text: str) -> str:
         level = self._effort_override or self.config.get("thinking", "off")
-        order = {name: i for i, name in enumerate(THINK_LEVELS)}
-        lower = user_text.lower()
-        for keyword, bumped in THINK_KEYWORDS:
-            if keyword in lower and order[bumped] > order.get(level, 0):
-                level = bumped
+        # A prompt word may lift thinking only from Off. A level the user chose (Low…Extra high),
+        # a sub-agent's own effort, or Ultra is never changed by what the prompt says, so "think
+        # about X" at Extra high stays Extra high and "ultrathink" cannot pull Low up to High.
+        # "I think…" at Off still turns on Low, which is accepted.
+        if not self._effort_override and str(level or "off").lower() in ("off", "none", ""):
+            lower = user_text.lower()
+            for keyword, bumped in THINK_KEYWORDS:
+                if keyword in lower:
+                    level = bumped
+                    break
         from .ultra import native_effort
         return native_effort(self.config, level)
 

@@ -4,6 +4,20 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- **Extra high and Ultra can reason deeply.** The reasoning watchdog stopped every level after
+  8,000 tokens of thinking with no answer, which is less than DGC itself asks Claude to think at
+  High (16,384) or Extra high (24,576). `think_budget_tokens` now defaults to `auto`, which scales
+  with the level: 8,000 tokens at Off and Low, 16,000 at Medium, 32,000 at High and 64,000 at
+  Extra high and Ultra. A number still applies to every level, and `0` still turns it off. A
+  stored `8000`, the old default that every config file carried, now reads as `auto`.
+  Reasoning also counts against `max_tokens` (default 16384) on most providers.
+- **Prompt words no longer change a thinking level you chose.** "think", "think hard",
+  "think harder" and "ultrathink" in a prompt turn thinking on for that turn only when it is Off.
+  Low through Extra high, Ultra and a sub-agent's own effort stay as set. "I think…" still turns
+  on Low when thinking is Off.
+
 ## 0.41.7 — 2026-09-19
 
 Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.

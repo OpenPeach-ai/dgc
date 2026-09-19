@@ -316,8 +316,11 @@ DEFAULTS: dict = {
     "thinking": "off",                          # off | low | medium | high
     "ultra_mode": False,                        # extended reasoning + proactive bounded sub-agents;
                                                  #   never broadens the selected permission mode
-    "think_budget_tokens": 8000,                # over-thinking watchdog: abort+retry-with-less if a
-                                                #   model reasons past this many tokens with no output (0=off)
+    "think_budget_tokens": "auto",              # over-thinking watchdog: abort+retry-with-less if a
+                                                #   model reasons past this many tokens with no output.
+                                                #   "auto" = per level (llm.AUTO_THINK_BUDGET_TOKENS:
+                                                #   8k off/low … 64k xhigh); a number applies to every
+                                                #   level; 0 = off
     "max_tokens": 16384,                        # output-token backstop per request; length-truncation
                                                 #   auto-continues (0=don't send, respect the server)
     # sampling knobs — "" = respect the server default. Set these to tame a LOCAL model that loops or
@@ -792,6 +795,13 @@ class Config:
         # Codex-like unlimited setting. Any other positive custom value remains an explicit backstop.
         if raw.get("max_turns") in (40, 80):
             raw["max_turns"] = 0
+            migrated = True
+        # Releases through 0.41.7 defaulted think_budget_tokens to 8000 and save() writes every
+        # default into config.json, so a stored 8000 is almost always that old default rather than
+        # a chosen cap. It cut off Extra high below the thinking budget DGC itself requests, so it
+        # becomes the per-level "auto" schedule. Any other number stays an explicit override.
+        if raw.get("think_budget_tokens") == 8000:
+            raw["think_budget_tokens"] = "auto"
             migrated = True
         self.data.update(raw)
         prior_provider_identity = _clean_provider_identity_map(

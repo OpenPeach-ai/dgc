@@ -2227,6 +2227,9 @@ uses model-specific controls and adds instructions appropriate to each profile. 
 the strongest supported tier; it cannot add a native tier a model does not offer.
 
 - `/think` — cycle, or `/think high` to set a level (persisted across restarts).
+- With thinking **Off**, a prompt containing `think`, `think hard`, `think harder` or
+  `ultrathink` turns it on for that turn (Low, Medium, High, High). A level you set (Low through
+  Extra high, or Ultra) is never changed by words in a prompt.
 - `--think <level>` — set it for one `dgc -p` run.
 - TUI: `/think` opens a picker; **Settings → General → Thinking**.
 - Editor: the composer thinking control and Settings → General → Thinking are the same dial.
@@ -2249,6 +2252,22 @@ Native controls differ:
   and Extra High/Ultra use Max, on both native and compatible transports.
 - Other providers use their supported effort fields or budgets. Unsupported controls are negotiated
   away after a precise rejection; a model without reasoning support gets DGC instructions only.
+
+## Reasoning watchdog
+
+A model that reasons without ever answering is stopped and asked again one level lower.
+`think_budget_tokens` (default `auto`) sets how far it may go. `auto` scales with the level, and
+every level allows at least the thinking budget DGC asks the provider for. Reasoning allowed
+before any answer:
+
+- Off and Low: 8,000 tokens.
+- Medium: 16,000 tokens.
+- High: 32,000 tokens.
+- Extra high (and Ultra): 64,000 tokens.
+
+A number applies to every level instead, and `0` turns the watchdog off. A stored `8000`, the
+old default, is read as `auto`. Reasoning also counts against `max_tokens` (default
+16384) on most providers, so raise that too if you want a long reasoning phase.
 
 ## Ultra
 
@@ -2524,8 +2543,9 @@ Useful keys:
   `thinking_inline_max_chars` characters (default 280, 0-1000). See **Thinking & reasoning**.
 - `think_budget_tokens`, `max_tokens` — safety backstops: a reasoning phase that
   runs away with no output is aborted + retried with less reasoning
-  (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
-  auto-continues, 0=don't send).
+  (`think_budget_tokens`, default `auto`: 8,000 tokens at Off/Low, 16,000 at Medium, 32,000 at
+  High, 64,000 at Extra high/Ultra; a number applies to every level, 0=off); output is capped at
+  `max_tokens` (length-truncation auto-continues, 0=don't send).
 - `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. `auto` selects native
   Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for
   OpenAI, and Chat Completions for compatible servers. Use `api_mode: ollama` or `api_mode:
