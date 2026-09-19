@@ -9,7 +9,7 @@
  * `git apply`-able unified diff.
  */
 import {
-  closeSync, constants as fsConstants, lstatSync, openSync, readdirSync, readSync, statSync,
+  closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readdirSync, readSync, statSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { FileChange } from "./types.ts";
@@ -29,14 +29,20 @@ function normcase(path: string): string {
   return process.platform === "win32" ? path.toLowerCase() : path;
 }
 
-function readRegular(path: string): Buffer | null {
+/**
+ * The bytes of a regular file (up to the text limit), or null. O_NONBLOCK: a workspace path
+ * swapped for a FIFO would otherwise block the open, and the whole process, forever. O_NOFOLLOW
+ * keeps a symlink from redirecting the read.
+ */
+export function readRegular(path: string): Uint8Array | null {
   let fd: number;
   try {
-    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0) | (fsConstants.O_NONBLOCK || 0));
   } catch {
     return null;
   }
   try {
+    if (!fstatSync(fd).isFile()) return null;   // a FIFO, device or socket is not a regular file
     const buffer = Buffer.alloc(TEXT_LIMIT + 1);
     let total = 0;
     while (total < buffer.length) {
@@ -94,7 +100,7 @@ export function snapshotWorkspace(root: string | null, exclude: readonly string[
         continue;
       }
       const size = Number(info.size);
-      let content: Buffer | null = null;
+      let content: Uint8Array | null = null;
       if (budget > 0 && info.isFile() && size <= TEXT_LIMIT && size <= budget) {
         content = readRegular(path);
         if (content !== null) budget -= content.length;

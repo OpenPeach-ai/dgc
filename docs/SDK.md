@@ -533,16 +533,26 @@ seconds. The package ships compiled JavaScript and type declarations. It behaves
 client in everything this guide describes:
 
 - **State and isolation.** `stateDir` is optional (a fresh private temporary directory; see
-  `dgc.stateDir`), must be private, and each session writes its isolated `config.json` from
-  scratch, so a planted or stale file is never merged and per-session options (`model`,
-  `maxTurns`, `verifyCommand`, `turnBudgetS`, `maxTokens`) never reach a later session. Extra DGC
-  settings go through `extraConfig`. The runtime child gets basic variables only
-  (`inheritEnv: false`), and a `dgc/` package in the workspace cannot replace the runtime.
+  `dgc.stateDir`, removed on `close()` unless `keepStateDir: true`), must be private, and each
+  session writes its isolated `config.json` from scratch, so a planted or stale file is never
+  merged and per-session options (`model`, `maxTurns`, `verifyCommand`, `turnBudgetS`,
+  `maxTokens`) never reach a later session. Extra DGC settings go through `extraConfig`. The
+  runtime child gets basic variables only (`inheritEnv: false`), the provider key reaches it
+  through a 0600 file in the state directory that the CLI reads and deletes (never through its
+  environment, and never into a tool's), and a `dgc/` package in the workspace cannot replace the
+  runtime.
+- **Workspace trust.** A workspace cannot grant itself capabilities: its own
+  `.dgc/permissions.json` allow rules and `.dgc/agents` definitions are not loaded unless you pass
+  `trustWorkspace: true` (its deny rules still narrow what runs).
 - **Policy and sandbox.** `policy: { network, denyTools, allowTools, extraReadDirs,
   denyPathPrefixes, shell, redactEvents }` is the `RuntimePolicy` above, compiled to the same
   per-session policy the Python client sends (`DGC_SESSION_POLICY`), enforced by the runtime in
-  every mode and never written to a config file. `sandbox: "required" | "preferred" | "off"` (or
-  `{ requirement }`) works as in Python; `session.sandbox` reports what was applied.
+  every mode and never written to a config file. `denyTools`/`allowTools` accept internal or
+  display names (`"bash"` or `"Bash"`). `sandbox: "required" | "preferred" | "off"` (or
+  `{ requirement }`) works as in Python; `session.sandbox` reports what was applied. The default
+  `shell: "sandboxed"` fails closed: with no OS sandbox the session throws `DGCUnsupportedError`
+  unless you accept a fallback (`sandbox: "preferred"` or `shell: "screened"`); plan-mode sessions
+  still start. `shell: "screened"` screens the `python` tool as well as the shell.
 - **Runs.** `stream()` returns a `RunHandle` (`for await` over its events, `result(timeoutMs?)`,
   `cancel()`). `timeoutMs: null` means no limit, and a run that hits its timeout ends
   `status: "failed"`, `reason: "timeout"`. `signal: AbortSignal` cancels a run; so does leaving a
@@ -554,7 +564,10 @@ client in everything this guide describes:
   from `pricing`; `usageReport(department?)` returns totals, `unknownUsageRuns`, `byDepartment`
   and the rows. `result.changes` lists `{ path, kind, before, after, root, diff }` with a
   `git apply`-able diff, and `result.verification` reports only the configured `verifyCommand`.
-  Failed runs carry the runtime's error in `result.error`.
+  Failed runs carry the runtime's error in `result.error`. `result.denials` lists the calls that
+  were refused (`name`, `reason`, `source`: `policy`, `callback`, `hook`, `mode` or `runtime`,
+  `callId`, `args`); a refused step does not fail the run, and there is no `blocked` status. A
+  refusal by your policy reaches the model as the application's decision, not the user's.
 - **Decisions.** `decisionTimeoutMs` (default 30 000; `null` for no limit) bounds every
   callback, `onMcpInput` included, and a cancel always wins. `permissions.unhandled: "callback"`
   requires `onPermission` and fails the run (`reason: "decision_failed"`) when it throws, times
@@ -563,7 +576,8 @@ client in everything this guide describes:
   `DGCRuntimeError`, `DGCProtocolError` (with `offeredProtocol`, `backendVersion`),
   `DGCCommandRejectedError` (with `reason`, `command`; thrown at once) and `DGCTimeoutError`. A
   failed setup never leaves `dgc serve` or the tool socket behind. Event types newer than the
-  SDK are skipped (`session.transport.ignoredEventTypes` counts them).
+  SDK are skipped (`session.transport.ignoredEventTypes` counts them). `rewind()` with an index
+  `listCheckpoints()` does not show throws `DGCConfigError`.
 - **Custom tools.** `defineTool(name, description, inputSchema, handler, { timeoutMs })`. Tools
   are served from a private, randomly named socket in a fresh 0700 directory; the relay proves a
   per-session secret on its first line, and one relay connection is served at a time.

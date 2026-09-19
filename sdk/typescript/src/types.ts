@@ -22,9 +22,10 @@ export type SandboxStatus = {
   backend: string;
   reason: string;
 };
+/** A run's state. (0.5.2 listed a "blocked" status that was never produced; see `denials`.) */
 export type RunStatus =
   | "queued" | "running" | "waiting_for_approval"
-  | "completed" | "cancelled" | "failed" | "blocked";
+  | "completed" | "cancelled" | "failed";
 
 export type PermissionRequest = {
   id: string;
@@ -134,6 +135,20 @@ export type ToolRecord = {
 };
 
 /**
+ * One tool call the run refused (`RunResult.denials`). `source` is a best-effort category of who
+ * refused it: "policy" (a RuntimePolicy or a deny rule), "callback" (your onPermission said deny,
+ * or none answered), "hook" (a PreToolUse hook), "mode" (plan mode, or a turn with nobody to
+ * approve), or "runtime" when it cannot be told apart.
+ */
+export type Denial = {
+  name: string;
+  reason: string;
+  source: "policy" | "callback" | "hook" | "mode" | "runtime";
+  callId: string;
+  args: Record<string, unknown>;
+};
+
+/**
  * One file the run changed under the session cwd. `before`/`after` hold the text (up to 1 MB; ""
  * for binary files or the missing side) and `diff` is a `git apply`-able unified diff ("" when
  * either side is not text).
@@ -191,6 +206,8 @@ export type RunResult = {
    */
   usage: Record<string, unknown>;
   tools: ToolRecord[];
+  /** Tool calls the run refused (a denied step does not fail the run; the agent is told). */
+  denials?: Denial[];
   artifacts: Artifact[];
   documents: Artifact[];
   /** Files the run added, modified or deleted under the session cwd. */
@@ -308,6 +325,15 @@ export type ClientOptions = {
   sandbox?: SandboxSetting;
   /** Extra DGC settings written into every isolated session's config (the explicit way to add them). */
   extraConfig?: Record<string, unknown>;
+  /**
+   * Whether a session's workspace may grant itself capabilities: its own `.dgc/permissions.json`
+   * allow rules and its `.dgc/agents` definitions (which choose a model endpoint and a credential
+   * variable). Default false: the workspace can only narrow what runs. Set it when you trust the
+   * checkout as your own machine would.
+   */
+  trustWorkspace?: boolean;
+  /** Keep the temporary stateDir the SDK created (stateDir unset) instead of removing it on close(). */
+  keepStateDir?: boolean;
   /** Bound on the runtime's startup handshake (default 30 000 ms). */
   startTimeoutMs?: number;
   /** Bound on each control request such as listSessions or setGoal (default 15 000 ms). */

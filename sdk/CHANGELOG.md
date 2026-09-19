@@ -143,6 +143,15 @@ Check these when you upgrade:
 - `result.usage.input_tokens` / `output_tokens` are the provider's counts or `null` (they were a
   context-size estimate and 0). `usageReport()` keeps `runs` and `rows` and adds totals.
 - `session.close()` returns a promise. `decisionTimeoutMs: null` now means no limit.
+- A workspace's own `.dgc/permissions.json` allow rules and `.dgc/agents` definitions no longer
+  load in an isolated session, policy or not; pass `trustWorkspace: true` to allow them.
+- A `policy` with the default `shell: "sandboxed"` throws `DGCUnsupportedError` at `session()`
+  when the runtime has no OS sandbox, unless you pass `sandbox: "preferred"` or
+  `shell: "screened"` (plan-mode sessions still start).
+- `RunStatus` has no `blocked` (it was never produced); refused calls are in `result.denials`.
+- The temporary `stateDir` the SDK creates when none is given is removed on `close()`, audit and
+  usage logs included; pass `keepStateDir: true` to keep it.
+- `rewind()` with an invalid index throws `DGCConfigError`.
 
 Fixes:
 
@@ -170,6 +179,14 @@ Fixes:
 - Audit and usage files are owner-only and audit rows are redacted with the Python rules.
 - The runtime is started with `python -P` where available, so a `dgc/` package in the workspace
   cannot replace it.
+- The provider key reaches the runtime through a 0600 file in the private state directory that the
+  CLI reads and deletes at startup, never through the child's environment (readable in
+  `/proc/<pid>/environ`); the agent's shell and python tools never see it.
+- `result.denials` lists refused calls with `name`, `reason`, `source`, `callId` and `args`; a
+  denial made by the application's policy is reported to the model as such.
+- `shell: "screened"` screens the `python` tool for network calls and file writes too, and
+  `denyTools`/`allowTools` accept display names (`"Bash"`, `"Write"`).
+- Reading a workspace path that became a FIFO no longer blocks the change scan.
 
 ### Packaging and release
 

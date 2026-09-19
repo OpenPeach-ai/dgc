@@ -193,7 +193,7 @@ test("policy denyTools blocks a write even if callback would allow", async () =>
   const stateDir = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-state-"));
   writeFileSync(join(work, "README.md"), "empty cart checkout\n");
   const dgc = new DGC({
-    stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local", runtime: runtime(),
+    stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local", runtime: runtime(), sandbox: "preferred",
     policy: { denyTools: ["write_file", "edit_file", "apply_patch"] },
   });
   try {
@@ -203,7 +203,7 @@ test("policy denyTools blocks a write even if callback would allow", async () =>
     });
     const result = await session.run("edit the checkout guard", { timeoutMs: 60_000 });
     assert.equal(existsSync(join(work, "guard.py")), false);
-    assert.ok(["blocked", "completed", "failed", "cancelled"].includes(result.status));
+    assert.ok(["completed", "failed", "cancelled"].includes(result.status));
   } finally {
     await dgc.close();
     server.close();
@@ -255,7 +255,7 @@ test("cancel during a permission wait settles cancelled", async () => {
     await gate;
     session.cancel();
     const result = await drained;
-    assert.ok(["cancelled", "failed", "blocked"].includes(result.status), result.status);
+    assert.ok(["cancelled", "failed"].includes(result.status), result.status);
     assert.equal(existsSync(join(work, "guard.py")), false);
   } finally {
     await dgc.close();
@@ -440,8 +440,12 @@ async function withEnv(behavior, fn) {
   writeFileSync(join(outside, "notes.txt"), "OUTSIDE-NOTES\n");
   const clients = [];
   const client = (options = {}) => {
+    // A policy's default sandboxed shell fails closed without a working OS sandbox. These tests
+    // exercise tool/path/network enforcement, so a policy-bearing client accepts the fallback
+    // unless the test says otherwise (the fail-closed path has its own tests).
+    const fallback = options.policy && !("sandbox" in options) ? { sandbox: "preferred" } : {};
     const dgc = new DGC({ stateDir, model: "sdk-model", baseUrl: model.baseUrl, apiKey: "sk-local",
-      runtime: runtime(), ...options });
+      runtime: runtime(), ...fallback, ...options });
     clients.push(dgc);
     return dgc;
   };
@@ -483,8 +487,12 @@ const BWRAP_WORKS = process.platform === "linux"
 
 // A stand-in for `dgc serve`: argv[1] picks a behaviour, argv[2] the offered protocol.
 const FAKE_SERVE = String.raw`
-import json, sys, time
+import hashlib, json, os, sys, time
 mode = sys.argv[1]
+# Like the real CLI, confirm the session policy the SDK sent (every isolated session sends one).
+raw_policy = os.environ.get("DGC_SESSION_POLICY")
+caps = {} if raw_policy is None else {"session_policy": {
+    "version": 1, "digest": hashlib.sha256(raw_policy.encode()).hexdigest(), "error": "", "sandbox": ""}}
 PROTOCOL = int(sys.argv[2]) if len(sys.argv) > 2 else 14
 seq = 0
 def emit(_type, **fields):
@@ -501,7 +509,7 @@ if mode == "silent":
     sys.exit(0)
 if mode == "unknown-first":
     emit("remote_status", state="on")
-emit("ready", version="9.9.9", protocol_version=PROTOCOL, capabilities={}, model="fixture",
+emit("ready", version="9.9.9", protocol_version=PROTOCOL, capabilities=caps, model="fixture",
      mode="default", think="off", base_url="http://127.0.0.1:1/v1", workspace_trusted=False,
      commands=[], custom_commands=[], goal={"text": "", "status": "none"}, context_size=32768,
      session_id="fixture-session")
@@ -720,7 +728,7 @@ test("policy: inheritUserState never writes the policy into the user's config", 
     const before = readFileSync(config);
     env.state.script = [["write_file", { path: "guard.py", content: "x\n" }]];
     const dgc = new DGC({
-      stateDir: env.stateDir, inheritUserState: true, apiKey: "sk-local", runtime: runtime(),
+      stateDir: env.stateDir, inheritUserState: true, apiKey: "sk-local", runtime: runtime(), sandbox: "preferred",
       extraEnv: { HOME: hostHome }, policy: { denyTools: ["write_file"], network: "deny" },
     });
     try {
@@ -745,13 +753,19 @@ test("policy: compiles to the same session policy as the Python SDK", async (t) 
   try {
     mkdirSync(join(tmp, "secrets"));
     const cases = [
-      [{}, "auto", "off", []],
-      [{ network: "allow", denyTools: ["write_file", "mcp__app__refund"], denyPathPrefixes: ["secrets", "/etc"] }, "auto", "off", ["refund"]],
-      [{ allowTools: ["read_file", "grep", "mcp__app__a*"], extraReadDirs: ["/usr/share"], shell: "screened" }, "default", "preferred", ["a1"]],
-      [{ denyPathPrefixes: [join(tmp, "secrets")], shell: "screened" }, "plan", "required", []],
+      [{}, "auto", "off", [], false, true],
+      [{ network: "allow", denyTools: ["write_file", "mcp__app__refund"], denyPathPrefixes: ["secrets", "/etc"] }, "auto", "off", ["refund"], false, true],
+      [{ allowTools: ["read_file", "grep", "mcp__app__a*"], extraReadDirs: ["/usr/share"], shell: "screened" }, "default", "preferred", ["a1"], true, true],
+      [{ denyPathPrefixes: [join(tmp, "secrets")], shell: "screened", denyTools: ["Write", "WebFetch"] }, "plan", "required", [], false, false],
+      [{ shell: "screened", network: "deny", denyTools: ["apply_patch"] }, "auto", "off", [], false, true],
+      [null, "default", "off", [], false, true],
+      [null, "default", "off", [], true, true],
+      [null, "auto", "preferred", [], false, false],
     ];
-    for (const [policy, mode, sandbox, tools] of cases) {
-      const ts = compileSession(new Policy(policy), { cwd: tmp, mode, sandbox, tools }).env.DGC_SESSION_POLICY;
+    for (const [policy, mode, sandbox, tools, trustWorkspace, isolated] of cases) {
+      const plan = compileSession(policy === null ? null : new Policy(policy),
+        { cwd: tmp, mode, sandbox, tools, trustWorkspace, isolated });
+      const ts = plan.env.DGC_SESSION_POLICY;
       const py = spawnSync(PY, ["-c", `
 import json, sys
 from pathlib import Path
@@ -759,14 +773,19 @@ from dgc_sdk.policy import RuntimePolicy, compile_session
 spec = json.loads(sys.argv[1])
 names = {"denyTools": "deny_tools", "allowTools": "allow_tools", "extraReadDirs": "extra_read_dirs",
          "denyPathPrefixes": "deny_path_prefixes", "network": "network", "shell": "shell"}
-policy = RuntimePolicy(**{names[k]: (tuple(v) if isinstance(v, list) else v) for k, v in spec["policy"].items()})
+policy = None if spec["policy"] is None else RuntimePolicy(
+    **{names[k]: (tuple(v) if isinstance(v, list) else v) for k, v in spec["policy"].items()})
 plan = compile_session(policy, cwd=Path(spec["cwd"]), mode=spec["mode"], on_permission=None,
-                       sandbox=spec["sandbox"], tools=spec["tools"])
-print(plan.env["DGC_SESSION_POLICY"])
-`, JSON.stringify({ policy, cwd: tmp, mode, sandbox, tools })],
+                       sandbox=spec["sandbox"], tools=spec["tools"],
+                       trust_workspace=spec["trust"], isolated=spec["isolated"])
+print(json.dumps({"env": plan.env.get("DGC_SESSION_POLICY"), "strict": plan.strict_shell}))
+`, JSON.stringify({ policy, cwd: tmp, mode, sandbox, tools, trust: trustWorkspace, isolated })],
       { encoding: "utf8", env: { ...process.env, PYTHONPATH: join(ROOT, "sdk", "python") } });
       assert.equal(py.status, 0, py.stderr);
-      assert.deepEqual(JSON.parse(ts), JSON.parse(py.stdout.trim()), JSON.stringify(policy));
+      const expected = JSON.parse(py.stdout.trim());
+      if (expected.env === null) assert.equal(ts, undefined, JSON.stringify(policy));
+      else assert.deepEqual(JSON.parse(ts), JSON.parse(expected.env), JSON.stringify(policy));
+      assert.equal(Boolean(plan.strictShell), expected.strict, `strict shell for ${JSON.stringify(policy)} ${mode}`);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -1451,4 +1470,185 @@ process.exit(9);
     while (Date.now() < deadline && existsSync(`/proc/${pid}`)) await sleep(100);
     assert.equal(existsSync(`/proc/${pid}`), false, `orphaned dgc serve pid ${pid}`);
   });
+});
+
+// ---- 0.5.3 hardening (B1, M1, M2, M3): the Node side of cef5976 ---------------------------------
+
+test("hardening B1: a workspace's own allow rules need no policy to be ignored; trustWorkspace opts in", async () => {
+  await withEnv("script", async (env) => {
+    mkdirSync(join(env.work, ".dgc"));
+    writeFileSync(join(env.work, ".dgc", "permissions.json"), JSON.stringify({
+      allow: ["Bash(*)", "Python(*)"], ask: [], deny: ["Read(secrets/**)"],
+    }));
+    const { asks } = await scripted(env, [
+      ["bash", { command: "echo pwned > escaped.txt" }],
+      ["python", { code: "open('py.txt', 'w').write('x')" }],
+    ], { permissions: { mode: "default" }, onPermission: () => "deny" });
+    assert.ok(asks.includes("bash"), `the workspace's Bash(*) pre-approved the shell: ${JSON.stringify(asks)}`);
+    assert.ok(asks.includes("python"), JSON.stringify(asks));
+    assert.equal(existsSync(join(env.work, "escaped.txt")), false);
+    assert.equal(existsSync(join(env.work, "py.txt")), false);
+    // Opted in, the workspace's allow rule pre-approves and the callback is not consulted.
+    const trusted = await scripted(env, [["bash", { command: "echo hi > inside.txt" }]],
+      { permissions: { mode: "default" }, onPermission: () => "deny", client: { trustWorkspace: true } });
+    assert.deepEqual(trusted.asks, [], "trustWorkspace: true should load the workspace's allow rules");
+    assert.ok(existsSync(join(env.work, "inside.txt")));
+  });
+});
+
+function procEnv(pid) {
+  const raw = readFileSync(`/proc/${pid}/environ`, "utf8");
+  return Object.fromEntries(raw.split(String.fromCharCode(0)).filter((item) => item.includes("="))
+    .map((item) => [item.slice(0, item.indexOf("=")), item.slice(item.indexOf("=") + 1)]));
+}
+
+test("hardening M2: the provider key is not in the runtime's environment or the agent's shell", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+  await withEnv("script", async (env) => {
+    const previous = process.env.DGC_API_KEY;
+    process.env.DGC_API_KEY = "host-key-0123456789";
+    try {
+      for (const inheritEnv of [false, true]) {
+        const dgc = env.client({ policy: { shell: "screened" }, inheritEnv });
+        const session = await dgc.session({ cwd: env.work, permissions: { mode: "auto" } });
+        const childEnv = procEnv(session.transport.pid);
+        assert.equal(childEnv.DGC_API_KEY, undefined, `inheritEnv ${inheritEnv}: DGC_API_KEY in /proc/<serve>/environ`);
+        const values = Object.values(childEnv).join("\n");
+        assert.ok(!values.includes("sk-local") && !values.includes("host-key-0123456789"), `inheritEnv ${inheritEnv}`);
+        assert.ok((childEnv.DGC_API_KEY_FILE || "").startsWith(env.stateDir), childEnv.DGC_API_KEY_FILE);
+        assert.equal(existsSync(childEnv.DGC_API_KEY_FILE), false, "the runtime must delete the key file at startup");
+        const sent = JSON.parse(childEnv.DGC_SESSION_POLICY);
+        assert.equal(sent.project_allow, false);
+        assert.equal(sent.project_agents, false);
+        await dgc.close();
+      }
+    } finally {
+      if (previous === undefined) delete process.env.DGC_API_KEY;
+      else process.env.DGC_API_KEY = previous;
+    }
+    const { result } = await scripted(env, [
+      ["bash", { command: "printf '%s' \"$DGC_API_KEY\"; echo REV; printf '%s' \"$DGC_API_KEY\" | rev; echo; env | grep -ci API_KEY || true" }],
+      ["python", { code: "import os; print('KEYS', sorted(k for k in os.environ if 'KEY' in k or 'SECRET' in k), 'VAL', os.environ.get('DGC_API_KEY'))" }],
+    ], { policy: { shell: "screened" } });
+    const blob = JSON.stringify(outputs(result));
+    assert.equal(result.status, "completed", result.error);
+    assert.ok(!blob.includes("sk-local"), blob);
+    assert.ok(!blob.includes("lacol-ks"), blob);
+    assert.ok(!blob.includes("DGC_API_KEY"), blob);
+    assert.ok(env.state.auth.includes("Bearer sk-local"), "the model client must still get the key");
+    assert.deepEqual(readdirSync(env.stateDir).filter((name) => name.startsWith(".apikey")), []);
+  });
+});
+
+test("hardening M1: denials list refused calls with their source, and policy denials say so", async () => {
+  await withEnv("edit", async (env) => {
+    const dgc = env.client({ policy: { denyTools: ["write_file", "edit_file", "apply_patch"] } });
+    const result = await (await dgc.session({ cwd: env.work, permissions: AUTO })).run("edit the checkout guard", { timeoutMs: 60_000 });
+    assert.equal(result.status, "completed", result.error);
+    assert.ok(result.denials?.length, "the denied write should appear in result.denials");
+    const denial = result.denials[0];
+    assert.ok(["write_file", "edit_file", "apply_patch"].includes(denial.name), denial.name);
+    assert.equal(denial.source, "policy");
+    assert.ok(denial.reason);
+    assert.equal(existsSync(join(env.work, "guard.py")), false);
+  });
+  await withEnv("script", async (env) => {
+    // A screened command the SDK itself refuses (no reviewing callback): the runtime is told why,
+    // so the model hears it was the application's policy, not "the user".
+    const { result } = await scripted(env, [["bash", { command: `curl -s -m 3 http://127.0.0.1:${env.port}/ping` }]],
+      { policy: { shell: "screened", network: "deny" }, permissions: { mode: "default", unhandled: "deny" } });
+    assert.equal(env.state.pings, 0);
+    const denial = (result.denials || []).find((item) => item.name === "bash");
+    assert.ok(denial, JSON.stringify(result.denials));
+    assert.match(denial.reason, /RuntimePolicy/);
+    assert.equal(denial.source, "policy");
+    assert.equal(denial.args.command.includes("curl"), true);
+  });
+});
+
+test("hardening M3: a sandboxed-shell policy fails closed without an OS sandbox; plan mode and preferred still start", async () => {
+  await withEnv("text", async (env) => {
+    const noSandbox = { PATH: "/nonexistent-dgc" };
+    const strict = env.client({ policy: {}, sandbox: undefined, extraEnv: noSandbox });
+    await assert.rejects(strict.session({ cwd: env.work, permissions: { mode: "default" } }), (error) => {
+      named("DGCUnsupportedError")(error);
+      assert.match(error.message, /bubblewrap/);
+      return true;
+    });
+    await sleep(300);
+    assert.deepEqual(processesWith(realpathSync(env.work)), [], "the refused session left dgc serve running");
+    const planned = await strict.session({ cwd: env.work, permissions: { mode: "plan" } });
+    assert.ok(planned.sessionId);
+    assert.equal(planned.sandbox.active, false);
+    await strict.close();
+    const fallback = env.client({ policy: {}, sandbox: "preferred", extraEnv: noSandbox });
+    const session = await fallback.session({ cwd: env.work, permissions: { mode: "default" } });
+    assert.equal(session.sandbox.active, false);
+    assert.equal(session.sandbox.requirement, "preferred");
+    assert.match(session.sandbox.reason, /no OS sandbox/);
+  });
+});
+
+test("hardening: the screened shell screens the python tool for network calls and writes", async () => {
+  await withEnv("script", async (env) => {
+    const ping = `http://127.0.0.1:${env.port}/ping`;
+    const { result } = await scripted(env, [
+      ["python", { code: `import urllib.request\nurllib.request.urlopen('${ping}', timeout=3).read()` }],
+      ["python", { code: "open('py_written.txt', 'w').write('x')" }],
+    ], { policy: { shell: "screened", network: "deny", denyTools: ["write_file"] } });
+    assert.equal(env.state.pings, 0, JSON.stringify(outputs(result)));
+    assert.equal(existsSync(join(env.work, "py_written.txt")), false, JSON.stringify(outputs(result)));
+  });
+});
+
+test("hardening: denyTools and allowTools accept display names", async () => {
+  const { Policy } = await import(join(SRC, "policy.ts"));
+  const policy = new Policy({ denyTools: ["Bash", "write_file", "WebFetch"], allowTools: ["Read", "grep", "mcp__app__lookup"] });
+  assert.deepEqual([...policy.denyTools], ["bash", "write_file", "web_fetch"]);
+  assert.deepEqual([...policy.allowTools], ["read_file", "grep", "mcp__app__lookup"]);
+  for (const bad of ["NotATool", "constructor", "toString"]) {
+    assert.throws(() => new Policy({ denyTools: [bad] }), named("DGCConfigError"), bad);
+  }
+});
+
+test("hardening: an SDK-made stateDir is removed on close unless keepStateDir; an explicit one is kept", async () => {
+  await withEnv("text", async (env) => {
+    const made = new DGC({ model: "sdk-model", baseUrl: env.baseUrl, runtime: runtime() });
+    const madeDir = made.stateDir;
+    const session = await made.session({ cwd: env.work, permissions: AUTO });
+    await session.run("Summarize README. Do not edit files.", { timeoutMs: 60_000 });
+    assert.ok(statSync(madeDir).isDirectory());
+    await made.close();
+    assert.equal(existsSync(madeDir), false, "the SDK-made stateDir (and its audit rows) should be removed");
+    const kept = new DGC({ model: "sdk-model", baseUrl: env.baseUrl, runtime: runtime(), keepStateDir: true });
+    await kept.close();
+    assert.ok(statSync(kept.stateDir).isDirectory(), "keepStateDir: true must preserve it");
+    rmSync(kept.stateDir, { recursive: true, force: true });
+    const explicit = env.client();
+    await explicit.close();
+    assert.ok(statSync(env.stateDir).isDirectory(), "an explicit stateDir must never be removed");
+  });
+});
+
+test("hardening: rewind with a bad index throws DGCConfigError", async () => {
+  await withEnv("text", async (env) => {
+    const session = await env.client().session({ cwd: env.work, permissions: AUTO });
+    await session.run("Summarize README. Do not edit files.", { timeoutMs: 60_000 });
+    await assert.rejects(session.rewind(99), named("DGCConfigError"));
+  });
+});
+
+test("hardening: reading a workspace path that is a FIFO does not block", { skip: process.platform === "win32" && "no FIFOs" }, async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-fifo-"));
+  try {
+    const fifo = join(tmp, "pipe");
+    assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+    const probe = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e",
+      `const m = await import(${JSON.stringify(join(SRC, "changes.ts"))}); console.log(String(m.readRegular(${JSON.stringify(fifo)})));`],
+    { encoding: "utf8", timeout: 10_000 });
+    assert.equal(probe.error, undefined, "reading a FIFO blocked");
+    assert.equal(probe.status, 0, probe.stderr);
+    assert.equal(probe.stdout.trim(), "null");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

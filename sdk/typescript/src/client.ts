@@ -1,5 +1,7 @@
 /** Public DGC client. Mirrors sdk/python/dgc_sdk/client.py. */
-import { realpathSync, statSync } from "node:fs";
+import {
+  closeSync, constants as fsConstants, openSync, realpathSync, rmSync, statSync, unlinkSync, writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -33,6 +35,21 @@ function milliseconds(value: unknown, name: string, maximum: number, fallback: n
     throw new DGCConfigError(`${name} must be more than 0 and at most ${maximum} milliseconds`);
   }
   return value;
+}
+
+/**
+ * Write a provider key to a private (0600) file inside the 0700 stateDir. The runtime is handed
+ * the path (DGC_API_KEY_FILE), not the key, so the key never sits in the child's initial
+ * environment block, which stays readable in /proc/<pid>/environ. The CLI reads the file and
+ * deletes it at config load, before any tool runs.
+ */
+function writeKeyFile(path: string, value: string): void {
+  const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC, 0o600);
+  try {
+    writeSync(fd, value);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function runtimeArgv(runtime: unknown): string[] {
@@ -109,6 +126,8 @@ export class DGC {
   private readonly auditLog: AuditLog;
   /** This client's private state directory (created when it was not given). */
   readonly stateDir: string;
+  private ownsStateDir: boolean;
+  private readonly trustWorkspace: boolean;
 
   constructor(options: ClientOptions = {}) {
     this.options = { ...options };
@@ -132,6 +151,10 @@ export class DGC {
     this.sandbox = sandboxRequirement(options.sandbox);
     sandboxPrecheck(this.sandbox);
     this.stateDir = prepareStateDir(options.stateDir);
+    // Only a directory the SDK created for this client is removed on close; an explicit stateDir
+    // (the application's own directory) is always left alone.
+    this.ownsStateDir = options.stateDir === undefined && !options.keepStateDir;
+    this.trustWorkspace = Boolean(options.trustWorkspace);
     if (options.apiKey) rememberSecret(options.apiKey);
     this.usageLog = new UsageLog(join(this.stateDir, "usage"));
     this.auditLog = new AuditLog(join(this.stateDir, "audit"));
@@ -172,13 +195,25 @@ export class DGC {
     const tools = options.tools ?? [];
     // The RuntimePolicy and sandbox reach this session's runtime only through its environment
     // (DGC_SESSION_POLICY); nothing is written to any config.json.
-    const plan = compileSession(this.policy, { cwd: workspace, mode, sandbox: requirement, tools: tools.map((t) => t.name) });
+    const plan = compileSession(this.policy, {
+      cwd: workspace, mode, sandbox: requirement, tools: tools.map((t) => t.name),
+      trustWorkspace: this.trustWorkspace, isolated: !inherit,
+    });
     const key = options.apiKey ?? this.options.apiKey;
     const extra: Record<string, string> = { ...(this.options.extraEnv || {}) };
+    let keyFile: string | null = null;
     if (key) {
-      // An environment key is process-local: DGC never saves it (inheritUserState included).
-      extra.DGC_API_KEY = String(key);
       rememberSecret(key);
+      if (inherit) {
+        // inheritUserState runs as the user's own DGC on their own machine; the key goes in the
+        // environment as before (DGC never saves it into ~/.dgc).
+        extra.DGC_API_KEY = String(key);
+      } else {
+        // An isolated child's environment block stays readable in /proc/<pid>/environ, so the key
+        // travels in a 0600 file inside the 0700 stateDir that the CLI reads and deletes.
+        keyFile = join(this.stateDir, `.apikey-${newId("key")}`);
+        extra.DGC_API_KEY_FILE = keyFile;
+      }
     }
     Object.assign(extra, plan.env);
     let values: Record<string, unknown> | null = null;
@@ -220,7 +255,17 @@ export class DGC {
     // Config write, child startup and every save the SDK itself triggers happen under one lock,
     // so concurrent sessions never read each other's options.
     const session = await lock.hold(async () => {
-      const { transport, ready } = await this.start(workspace, env, values, key);
+      let started: { transport: Transport; ready: Frame };
+      try {
+        started = await this.start(workspace, env, values, key, keyFile);
+      } finally {
+        // The CLI deletes the key file as it starts; remove any leftover (a failed or skipped
+        // start) so the key never lingers in the stateDir.
+        if (keyFile) {
+          try { unlinkSync(keyFile); } catch { /* already gone */ }
+        }
+      }
+      const { transport, ready } = started;
       let hub: ToolHub | null = null;
       try {
         const sandboxStatus = plan.confirm(ready);
@@ -282,12 +327,14 @@ export class DGC {
    * and our child's startup, start again.
    */
   private async start(workspace: string, env: Env, values: Record<string, unknown> | null,
-    key: unknown): Promise<{ transport: Transport; ready: Frame }> {
+    key: unknown, keyFile: string | null = null): Promise<{ transport: Transport; ready: Frame }> {
     const drifts: string[][] = [];
     const attempts = values !== null ? CONFIG_ATTEMPTS : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
       let written: Record<string, unknown> | null = null;
       try {
+        // The CLI reads and deletes the key file at startup, so write it before every (re)start.
+        if (keyFile && key) writeKeyFile(keyFile, String(key));
         written = values !== null ? writeSessionConfig(this.stateDir, values) : null;
       } catch (error) {
         throw new DGCConfigError(`could not prepare the isolated runtime home: ${String(error)}`);
@@ -403,5 +450,11 @@ export class DGC {
       if (session) closing.push(session.close());
     }
     await Promise.all(closing);
+    if (this.ownsStateDir) {
+      // A stateDir the SDK created holds only this client's throwaway HOME, usage and audit logs;
+      // remove it so nothing (the audit rows included) is left on disk.
+      this.ownsStateDir = false;
+      try { rmSync(this.stateDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
   }
 }
