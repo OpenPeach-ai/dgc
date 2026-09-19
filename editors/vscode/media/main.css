@@ -1242,10 +1242,14 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-row[aria-disabled="true"]:hover { background: transparent; }
 /* A row with no card on screen to jump to reads quieter than one that jumps (its label says why). */
 .agent-row[aria-disabled="true"] .agent-desc { color: var(--muted); }
-.agent-files { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 0 var(--sp-1) calc(6px + var(--sp-2) + var(--sp-2)); }
-.agent-files[hidden] { display: none; }
-.agent-file { border: 0; background: transparent; color: var(--accent-text); font: var(--w-reg) var(--t-xs)/1.4 var(--mono); padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+/* One path per line, left-aligned: a long path wraps under itself, never centred like a button label. */
+.agent-files { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; min-width: 0; }
+.agent-file-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); max-width: 100%; min-width: 0; }
+.agent-file, .agent-folder { font: var(--w-reg) var(--t-xs)/1.4 var(--mono); text-align: left; overflow-wrap: anywhere; min-width: 0; }
+.agent-file { border: 0; background: transparent; color: var(--accent-text); padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
 .agent-file:hover { text-decoration-color: currentColor; }
+.agent-folder { color: var(--text); }
+.agent-file-note { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .agent-dot { box-sizing: border-box; flex: none; width: 7px; height: 7px; margin-top: 6px;
   border-radius: var(--r-full); background: var(--agent-idle); }
 .agent-dot[data-state="running"] { background: var(--agent-run); }

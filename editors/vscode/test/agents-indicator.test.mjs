@@ -162,16 +162,26 @@ test("the dialog lists agents as a nested list, is keyboard driven, and Esc neve
   assert.deepEqual(errors, []);
 });
 
-test("a finished specialist lists FILES from its handoff and opens them", () => {
-  const { $, doc, start, end, posted, errors } = view();
-  start(sid(1), { description: "options research", agent_type: "researcher" });
-  end(sid(1), "finished", { message: "Wrote the options write-up.\nFILES: docs/options.md, README.md" });
+test("a finished agent's row stays a status line: no report text, no file links", () => {
+  const { $, doc, start, end, errors } = view();
+  start(sid(1), { description: "Triage the rerun", agent_type: "critic" });
+  end(sid(1), "finished", { duration_ms: 533000, tool_calls: 44, tokens: 972064,
+    message: "## Frontend authenticated rerun: 37 failures\nFILES: reports/frontend-auth.log, "
+      + "frontend/test-results/ (40 × error-context.md), frontend/tests/customer-360.spec.ts" });
   $("agents-pill").click();
-  const links = [...doc.querySelectorAll(".agent-file")];
-  assert.deepEqual(links.map((n) => n.textContent), ["docs/options.md", "README.md"]);
-  links[0].click();
-  assert.equal(posted.at(-1).type, "openFile");
-  assert.equal(posted.at(-1).path, "docs/options.md");
+  const row = doc.querySelector("#agents-tree .agent-row");
+  assert.equal(row.querySelector(".agent-meta").textContent, "Finished · critic · 8m 53s · 44 tools · 972,064 tokens");
+  assert.equal($("agentsmenu").querySelector(".agent-file, .agent-files"), null, "files live on the agent's page");
+  assert.ok(!/##|FILES/.test($("agentsmenu").textContent), $("agentsmenu").textContent);
+  assert.deepEqual(errors, []);
+});
+
+test("a failure reason in the dialog drops a markdown heading marker", () => {
+  const { $, doc, start, end, errors } = view();
+  start(sid(1));
+  end(sid(1), "failed", { message: "## Could not reach the model\nHTTP 502", duration_ms: 1000, tool_calls: 0 });
+  $("agents-pill").click();
+  assert.equal(doc.querySelector(".agent-meta").textContent, "Failed · 1s · Could not reach the model");
   assert.deepEqual(errors, []);
 });
 

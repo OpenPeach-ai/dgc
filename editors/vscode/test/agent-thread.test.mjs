@@ -113,6 +113,8 @@ test("clicking a chip opens the inner page with the child's tools, duration and 
   assert.equal($("agent-log").querySelector('.tool[data-tool-name="task"]'), null, "the parent spawn card stays off the inner page");
   const files = [...$("agent-log").querySelectorAll(".agent-file")].map((n) => n.textContent);
   assert.deepEqual(files, ["app/logo.svg", "app/hero.css"]);
+  assert.equal($("agent-log").querySelector(".agent-change-title").textContent, "Files to open",
+    "the handoff does not say which files were edited");
   $("agent-log").querySelector(".agent-file").click();
   assert.equal(posted.at(-1).type, "openFile");
   assert.equal(posted.at(-1).path, "app/logo.svg");
@@ -210,5 +212,25 @@ test("restored spawn cards after the summary pin chips there, and the inner page
   chips[0].click();
   assert.match($("agent-log").textContent, /Indexed the notes/);
   assert.ok($("agent-log").querySelector('.tool[data-tool-name="grep"]'));
+  assert.deepEqual(errors, []);
+});
+
+test("the agent page keeps a FILES note apart from its path and names a folder without a link", () => {
+  const { $, doc, event, posted, errors } = view();
+  event({ type: "turn_start", turn_id: "t1", prompt: "triage" });
+  event({ type: "tool_call", call_id: "call_0", name: "task", args: { description: "triage" }, summary: "triage" });
+  event({ type: "agent_started", id: sid(1), parent_id: null, call_id: "call_0", description: "triage",
+    agent_type: "critic", depth: 1, state: "running", started_at: 1, isolated: false, parallel: false });
+  event({ type: "agent_ended", id: sid(1), state: "finished", duration_ms: 1000, tool_calls: 2,
+    message: "Triaged.\nFILES: `reports/auth.log`, frontend/test-results/ (40 × error-context.md), a.ts (the flaky one)" });
+  doc.querySelector(".agent-chip").click();
+  const rows = [...$("agent-log").querySelectorAll(".agent-file-row")];
+  assert.deepEqual(rows.map((row) => [row.querySelector(".agent-file, .agent-folder").textContent,
+    row.querySelector(".agent-file-note")?.textContent || ""]), [
+    ["reports/auth.log", ""], ["frontend/test-results/", "(40 × error-context.md)"], ["a.ts", "(the flaky one)"]]);
+  assert.equal(rows[1].querySelector(".agent-file"), null, "a folder is not offered as a file to open");
+  rows[2].querySelector(".agent-file").click();
+  assert.equal(posted.at(-1).path, "a.ts");
+  assert.match(mainCss, /\.agent-file, \.agent-folder \{[^}]*text-align: left/);
   assert.deepEqual(errors, []);
 });

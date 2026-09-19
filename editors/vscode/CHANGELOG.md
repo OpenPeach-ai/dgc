@@ -4,6 +4,7 @@
 
 - **Conversation text one step larger.** Prompts and answers are 13px (code 12px): 12px read too small. Prompts keep the answers' line spacing.
 - **No ring around working sub-agents.** A running sub-agent's icon no longer has a pulsing coloured ring around it; the chip's "working" label shows it is running.
+- **A tidier agents list.** A finished agent's row in the agents list shows its status and stats only. Its report and the files it named are on the agent's own page, one path per line, under "Files to open" (it said "Edited" even for agents that edit nothing). A note beside a path stays plain text, and a folder is not offered as a file to open.
 
 ## 0.26.7 — 2026-09-19
 

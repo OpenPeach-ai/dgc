@@ -5145,20 +5145,27 @@
     }
   }
   function paintAgentFiles(into, record) {
-    const paths = agentHandoffFiles(record.message);
-    if (!paths.length) return;
+    const items = agentHandoffFiles(record.message);
+    if (!items.length) return;
     const card = el("div", "agent-change-card");
     const title = el("div", "agent-change-title");
-    title.textContent = paths.length === 1 ? "Edited 1 file" : `Edited ${paths.length} files`;
-    const list = el("div", "agent-files");
-    list.hidden = false;
-    for (const path of paths) {
-      const link = document.createElement("button");
-      link.type = "button";
-      link.className = "agent-file";
-      link.textContent = path;
-      link.addEventListener("click", () => vscode.postMessage({ type: "openFile", path }));
-      list.appendChild(link);
+    // The handoff names files the agent wrote or files worth opening: it does not say which.
+    title.textContent = "Files to open";
+    const list = el("ul", "agent-files");
+    for (const { path, note, folder } of items) {
+      const row = el("li", "agent-file-row");
+      if (folder) {
+        row.appendChild(el("span", "agent-folder")).textContent = path;
+      } else {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "agent-file";
+        link.textContent = path;
+        link.addEventListener("click", () => vscode.postMessage({ type: "openFile", path }));
+        row.appendChild(link);
+      }
+      if (note) row.appendChild(el("span", "agent-file-note")).textContent = note;
+      list.appendChild(row);
     }
     card.append(title, list);
     into.appendChild(card);
@@ -5492,9 +5499,10 @@
     else if (state === "waiting") parts.push(record.waiting_for === "answer" ? "waiting for your answer" : "waiting for your permission");
     else if (state === "queued") parts.push("Queued");
     else if (record.activity) parts.push(String(record.activity));
-    // An ended row's reason goes last: the meta is clamped to two lines, and what gets cut should be
-    // the tail of a long provider message (the row's label has all of it), never the stats.
-    const why = AGENT_ENDED_WORD[state] && record.message ? agentFirstLine(record.message) : "";
+    // A failed or stopped row's reason goes last: the meta is clamped to two lines, and what gets
+    // cut should be the tail of a long provider message (the row's label has all of it), never the
+    // stats. A finished agent's report is not a reason: it stays on the agent's page.
+    const why = (state === "failed" || state === "stopped") && record.message ? agentFirstLine(record.message) : "";
     if (record.restored && record.duration_ms == null && record.tokens == null) return [...parts, ...(why ? [why] : [])].join(" · ");
     if (record.agent_type) parts.push(String(record.agent_type));
     if (record.model && record.model !== curModel) parts.push(String(record.model));
@@ -5509,7 +5517,8 @@
   // A failure message can be many lines of provider JSON: the row shows one bounded line and the
   // row's label carries the whole (already redacted and URL-scrubbed) text.
   function agentFirstLine(text, limit = 120) {
-    const line = (String(text || "").split("\n").find((part) => part.trim()) || "").replace(/\s+/g, " ").trim();
+    const line = (String(text || "").split("\n").find((part) => part.trim()) || "")
+      .replace(/^\s*#{1,6}\s+/, "").replace(/\s+/g, " ").trim();
     if (line.length <= limit) return line;
     let cut = limit - 1;
     const marker = line.lastIndexOf("[REDACTED]", cut);
@@ -5546,47 +5555,31 @@
     const text = document.createElement("span"); text.className = "agent-text";
     const desc = document.createElement("span"); desc.className = "agent-desc";
     const meta = document.createElement("span"); meta.className = "agent-meta";
-    const files = document.createElement("div"); files.className = "agent-files"; files.hidden = true;
-    text.append(desc, meta); row.append(dot, text); item.append(row, files);
+    text.append(desc, meta); row.append(dot, text); item.append(row);
     const id = record.id;
     row.addEventListener("click", () => agentJump(id));
-    entry = { item, row, dot, desc, meta, files, nested: null };
+    entry = { item, row, dot, desc, meta, nested: null };
     agentRowNodes.set(id, entry);
     return entry;
   }
+  // The FILES line of an agent's handoff: files it wrote or files worth opening. A model may
+  // annotate an entry ("frontend/test-results/ (40 × error-context.md)"): the note is kept apart
+  // from the path, and a folder is named but not offered as a file to open.
   function agentHandoffFiles(message) {
     const line = String(message || "").split("\n").find((part) => /^\s*FILES:/i.test(part));
     if (!line) return [];
-    return line.split(":").slice(1).join(":").split(",").map((part) => part.trim().replace(/^`|`$/g, "")).filter(Boolean).slice(0, 8);
+    return line.split(":").slice(1).join(":").split(",").map((part) => {
+      const entry = part.trim().replace(/^`|`$/g, "");
+      const annotated = entry.match(/^(.*?\S)\s+(\(.*\))$/);
+      const path = (annotated ? annotated[1] : entry).replace(/^`|`$/g, "");
+      return { path, note: annotated ? annotated[2] : "", folder: /[\\/]$/.test(path) };
+    }).filter((item) => item.path).slice(0, 8);
   }
   function agentRowUpdate(entry, record) {
-    const { row, dot, desc, meta, files } = entry;
+    const { row, dot, desc, meta } = entry;
     if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
     agentsSetText(desc, record.description || "(no description)");
     agentsSetText(meta, agentMeta(record));
-    const paths = AGENT_ENDED_WORD[record.state] ? agentHandoffFiles(record.message) : [];
-    if (files) {
-      files.hidden = paths.length === 0;
-      if (paths.length) {
-        const wanted = paths.join("\n");
-        if (files.dataset.paths !== wanted) {
-          files.dataset.paths = wanted;
-          files.replaceChildren();
-          for (const path of paths) {
-            const link = document.createElement("button");
-            link.type = "button"; link.className = "agent-file";
-            link.textContent = path;
-            link.addEventListener("click", (ev) => {
-              ev.stopPropagation();
-              vscode.postMessage({ type: "openFile", path });
-            });
-            files.appendChild(link);
-          }
-        }
-      } else if (files.dataset.paths) {
-        files.dataset.paths = ""; files.replaceChildren();
-      }
-    }
     if (row.hasAttribute("aria-disabled")) row.removeAttribute("aria-disabled");
     const why = AGENT_ENDED_WORD[record.state] && record.message ? String(record.message).trim() : "";
     hoverTip.retitle(row, "Open this agent" + (why ? `\n${why}` : ""));
