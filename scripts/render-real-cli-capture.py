@@ -119,18 +119,27 @@ def user_state_snapshot(root: Path) -> dict[str, tuple]:
 # ignoring it cannot hide one either: a leak writes that session's .json and .recall beside the
 # heartbeat, and those still abort.
 _SESSION_HEARTBEAT = re.compile(r"^sessions/[^/]+/[^/]+\.metrics$")
+# The same holds for a running Remote Control agent (`dgc remote connect`): it rewrites its
+# presence and its sign-in state about once a minute. Only these two exact root files.
+_REMOTE_HEARTBEAT = frozenset({"remote-presence.json", "remote.json"})
 
 
 def user_state_changes(before: dict[str, tuple], after: dict[str, tuple]) -> list[str]:
     changed = [path for path in sorted(set(before) | set(after))
                if before.get(path) != after.get(path)]
-    heartbeats = {path for path in changed if _SESSION_HEARTBEAT.match(path)}
+    heartbeats = {path for path in changed
+                  if _SESSION_HEARTBEAT.match(path) or path in _REMOTE_HEARTBEAT}
     if not heartbeats:
         return changed
     # Rewriting a heartbeat bumps its session directory's mtime too. Forgive that directory only
     # when nothing else inside it moved, so a real leak sitting beside a heartbeat still aborts.
     forgiven = set(heartbeats)
     for path in heartbeats:
+        if "/" not in path:            # a root file: forgive the root only if nothing else there moved
+            if not [other for other in changed
+                    if other != "." and "/" not in other and other not in heartbeats]:
+                forgiven.add(".")
+            continue
         parent = path.rsplit("/", 1)[0]
         if not [other for other in changed
                 if other.startswith(parent + "/") and other not in heartbeats]:

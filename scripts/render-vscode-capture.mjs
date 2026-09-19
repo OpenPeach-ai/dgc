@@ -104,14 +104,21 @@ function verifyExtensionPackage() {
   return { actualSha256, buildMetadata, packageMetadata };
 }
 
+// A running Remote Control agent (`dgc remote connect`) rewrites these two root files about once a
+// minute, which also moves the root folder's mtime. They are its heartbeat, not the capture's doing;
+// every other entry, including any file added at the root, is still compared.
+const REMOTE_HEARTBEAT = new Set(["./remote-presence.json", "./remote.json"]);
+
 function userStateSnapshot(rootPath) {
   const hash = createHash("sha256");
   if (!existsSync(rootPath)) return hash.update("missing").digest("hex");
   const visit = (path, relative) => {
+    if (REMOTE_HEARTBEAT.has(relative)) return;
     let stat;
     try { stat = lstatSync(path, { bigint: true }); }
     catch { hash.update(`vanished:${relative}\n`); return; }
-    hash.update(`${relative}\0${stat.mode}\0${stat.size}\0${stat.mtimeNs}\0`);
+    if (relative === ".") hash.update(`.\0${stat.mode}\0`);
+    else hash.update(`${relative}\0${stat.mode}\0${stat.size}\0${stat.mtimeNs}\0`);
     if (stat.isSymbolicLink()) hash.update(readlinkSync(path));
     else if (stat.isFile()) hash.update(readFileSync(path));
     else if (stat.isDirectory()) {
