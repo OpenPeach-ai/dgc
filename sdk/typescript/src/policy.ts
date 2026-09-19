@@ -34,6 +34,10 @@ export const DISPLAY: Readonly<Record<string, string>> = {
 // by name: the option picker is how the agent asks the application a question.
 const UNRULED_TOOLS = new Set(["update_goal"]);
 const ALWAYS_OFFERED = new Set(["propose_options"]);
+// The display spelling permission rules use -> DGC's internal tool name, so denyTools/allowTools
+// accept either ("Bash" and "bash", "Write" and "write_file"), case-insensitively.
+const DISPLAY_TO_INTERNAL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(DISPLAY).map(([internal, display]) => [display.toLowerCase(), internal]));
 
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "apply_patch"]);
 const READ_PATH_TOOLS = new Set(["read_file", "view_image", "code_intel", "git_diff", "repo_map", "grep", "glob"]);
@@ -101,18 +105,29 @@ function asNames(value: unknown, field: string): string[] {
   if (!Array.isArray(value)) {
     throw new DGCConfigError(`RuntimePolicy.${field} must be an array of tool names, not ${JSON.stringify(value)}`);
   }
+  const normalized: string[] = [];
   for (const name of value) {
     if (typeof name !== "string" || !name) {
       throw new DGCConfigError(`RuntimePolicy.${field} must contain non-empty tool names`);
     }
-    if (name in DISPLAY || (field === "allowTools" && UNRULED_TOOLS.has(name))) continue;
-    if (MCP_EXACT.test(name) || MCP_WILDCARD.test(name)) continue;
+    if (Object.hasOwn(DISPLAY, name) || (field === "allowTools" && UNRULED_TOOLS.has(name))
+        || MCP_EXACT.test(name) || MCP_WILDCARD.test(name)) {
+      normalized.push(name);
+      continue;
+    }
+    // The display spelling ("Bash", "Write") names the same tool as the internal one.
+    const lower = name.toLowerCase();
+    const internal = Object.hasOwn(DISPLAY_TO_INTERNAL, lower) ? DISPLAY_TO_INTERNAL[lower] : undefined;
+    if (internal !== undefined || (field === "allowTools" && UNRULED_TOOLS.has(lower))) {
+      normalized.push(internal ?? lower);
+      continue;
+    }
     const hint = UNRULED_TOOLS.has(name) ? " (update_goal cannot be denied)"
       : "; known tools: " + Object.keys(DISPLAY).sort().join(", ")
         + ", and MCP routes such as mcp__app__<tool> or mcp__app__*";
     throw new DGCConfigError(`RuntimePolicy.${field} names an unknown tool ${JSON.stringify(name)}${hint}`);
   }
-  return [...value] as string[];
+  return normalized;
 }
 
 function asPaths(value: unknown, field: string): string[] {
@@ -383,7 +398,13 @@ export class Policy {
       if (this.network === "deny" && looksLikeNetwork(command)) return "screen";
       if (this.writesDenied() && looksLikeWrite(command)) return "screen";
     }
-    if (name === "python" && this.writesDenied() && looksLikeWrite(String(args.code || ""))) return "screen";
+    if (name === "python") {
+      // The python tool runs arbitrary code and is never sandboxed, so it is screened exactly
+      // like the shell: code that looks like a network call or a file write is a screen signal.
+      const code = String(args.code || "");
+      if (this.network === "deny" && looksLikeNetwork(code)) return "screen";
+      if (this.writesDenied() && looksLikeWrite(code)) return "screen";
+    }
     return null;
   }
 
@@ -546,13 +567,20 @@ export class SessionPlan {
   readonly requirement: SandboxRequirement;
   readonly policy: Policy | null;
   readonly notes: readonly string[];
+  /**
+   * The policy asks for a sandboxed shell that could still run (the mode is not plan) and the
+   * caller did not accept a weaker fallback: a runtime with no OS sandbox must then refuse the
+   * session rather than run the shell unconfined.
+   */
+  readonly strictShell: boolean;
 
   constructor(env: Record<string, string>, requirement: SandboxRequirement, policy: Policy | null,
-    notes: readonly string[] = []) {
+    notes: readonly string[] = [], strictShell = false) {
     this.env = env;
     this.requirement = requirement;
     this.policy = policy;
     this.notes = notes;
+    this.strictShell = strictShell;
   }
 
   get payload(): string {
@@ -584,6 +612,13 @@ export class SessionPlan {
       throw new DGCUnsupportedError("sandbox.requirement is 'required' but the DGC runtime has no OS sandbox "
         + "(bubblewrap on Linux, sandbox-exec on macOS)");
     }
+    if (this.strictShell && !backend) {
+      throw new DGCUnsupportedError('RuntimePolicy shell "sandboxed" needs an OS sandbox (bubblewrap on Linux, '
+        + "sandbox-exec on macOS) but the DGC runtime has none, so shell commands would run unconfined. Install "
+        + "bubblewrap (apt install bubblewrap / dnf install bubblewrap), or accept a weaker mode on purpose: "
+        + 'sandbox: "preferred" (the shell runs unconfined outside auto mode and is refused in auto mode) or '
+        + 'policy shell: "screened".');
+    }
     if (this.requirement === "preferred" && !backend) {
       const detail = this.policy !== null && this.policy.shell === "sandboxed"
         ? "; in auto mode the shell is refused, and in the other modes an approved command runs unconfined"
@@ -600,7 +635,7 @@ export class SessionPlan {
     if (policy === null || !Array.isArray(ready.tools) || policy.allowTools === null) return;
     const allowed = new Set([...policy.allowTools, ...ALWAYS_OFFERED, ...UNRULED_TOOLS]);
     const unknown = ready.tools.map(String)
-      .filter((name) => !(name in DISPLAY) && !allowed.has(name) && !name.startsWith("mcp__")).sort();
+      .filter((name) => !Object.hasOwn(DISPLAY, name) && !allowed.has(name) && !name.startsWith("mcp__")).sort();
     if (unknown.length) {
       throw new DGCUnsupportedError(`RuntimePolicy.allowTools cannot refuse the runtime's tool ${JSON.stringify(unknown[0])}, `
         + "which this SDK does not know; upgrade the SDK or allow it");
@@ -643,11 +678,20 @@ function sandboxHides(path: string, workspace: string): boolean {
  */
 export function compileSession(policy: Policy | null, options: {
   cwd: string; mode: PermissionMode; sandbox: SandboxRequirement; tools?: readonly string[];
+  /** Whether the workspace may grant this session capabilities (default false). */
+  trustWorkspace?: boolean;
+  /** False for an inheritUserState session (default true). */
+  isolated?: boolean;
 }): SessionPlan {
   let requirement = options.sandbox;
+  const trust = Boolean(options.trustWorkspace);
+  // A workspace's own .dgc/permissions.json allow rules and .dgc/agents definitions (which can
+  // pick a model endpoint and a credential variable) load only when the app trusts it; otherwise
+  // the workspace can narrow what runs, never grant it. Every isolated session says so.
+  const project = { project_allow: trust, project_agents: trust };
   if (policy === null) {
-    if (requirement === "off") return new SessionPlan({}, "off", null);
-    const payload = { version: SESSION_POLICY_VERSION, sandbox: requirement };
+    if (requirement === "off" && options.isolated === false) return new SessionPlan({}, "off", null);
+    const payload = { version: SESSION_POLICY_VERSION, sandbox: requirement, ...project };
     return new SessionPlan({ [SESSION_POLICY_ENV]: sortedJson(payload) }, requirement, null);
   }
   policy.checkSessionTools(options.tools ?? []);
@@ -676,9 +720,16 @@ export function compileSession(policy: Policy | null, options: {
   (policy.extraDirs(workspace).length ? ask : deny).push("ExternalDirectory");
   let sandboxReadOnly = false;
   let shellRequiresSandbox = false;
+  let strictShell = false;
   if (policy.shell === "sandboxed") {
     shellRequiresSandbox = true;
-    if (requirement === "off") requirement = "preferred";
+    if (requirement === "off") {
+      // The default sandboxed shell with no explicit sandbox choice: a runtime that cannot
+      // confine it must refuse the session (unless the mode is plan, which runs no shell). An
+      // explicit sandbox: "preferred" opts into the weaker fallback and keeps only the warning.
+      requirement = "preferred";
+      strictShell = options.mode !== "plan";
+    }
     sandboxReadOnly = policy.writesDenied();
     const exposed = denied.filter((prefix) => !sandboxHides(prefix, workspace));
     if (exposed.length) {
@@ -691,8 +742,16 @@ export function compileSession(policy: Policy | null, options: {
       }
     }
   } else {
-    if (policy.network === "deny") autoDeny.push(...NET_BASH_PATTERNS.map((p) => `Bash(${p})`));
-    if (policy.writesDenied()) autoDeny.push(...WRITE_BASH_PATTERNS.map((p) => `Bash(${p})`));
+    // shell "screened": the shell and the (never sandboxed) python tool run unconfined, so in auto
+    // mode both are screened for network calls and, with writes denied, file writes.
+    if (policy.network === "deny") {
+      autoDeny.push(...NET_BASH_PATTERNS.map((p) => `Bash(${p})`));
+      autoDeny.push(...NET_BASH_PATTERNS.map((p) => `Python(${p})`));
+    }
+    if (policy.writesDenied()) {
+      autoDeny.push(...WRITE_BASH_PATTERNS.map((p) => `Bash(${p})`));
+      autoDeny.push(...WRITE_BASH_PATTERNS.map((p) => `Python(${p})`));
+    }
   }
   const payload = {
     version: SESSION_POLICY_VERSION,
@@ -703,31 +762,38 @@ export function compileSession(policy: Policy | null, options: {
     sandbox_network: policy.network === "allow",
     sandbox_read_only: sandboxReadOnly,
     shell_requires_sandbox: shellRequiresSandbox,
-    // A workspace's own .dgc/permissions.json may narrow what runs, never pre-approve it.
-    project_allow: false,
+    ...project,
   };
   const text = sortedJson(payload);
   if (Buffer.byteLength(text, "utf8") > SESSION_POLICY_MAX_BYTES) {
     throw new DGCConfigError("RuntimePolicy compiles to more rules than one environment variable can carry; "
       + "use fewer denyPathPrefixes or broader ones");
   }
-  return new SessionPlan({ [SESSION_POLICY_ENV]: text }, requirement, policy, notes);
+  return new SessionPlan({ [SESSION_POLICY_ENV]: text }, requirement, policy, notes, strictShell);
 }
 
 /**
  * Answer one permission_request: the policy first, then the callback. A policy deny is final; a
  * request the policy raised only to check it ("once") is answered without the callback; command
- * screening denies unless a reviewing callback is present outside auto mode.
+ * screening denies unless a reviewing callback is present outside auto mode. A denial the policy
+ * made carries a reason, so the runtime tells the model it was the application's policy (not "the
+ * user").
  */
 export async function resolvePermission(policy: Policy | null, request: PermissionRequest, options: {
   cwd: string | null; permissionMode: string; onPermission: unknown; ask: () => Promise<unknown>;
-}): Promise<PermissionAction> {
+}): Promise<{ action: PermissionAction; reason: string }> {
   if (policy !== null) {
     const verdict = policy.evaluate(request, options.cwd);
-    if (verdict === "deny") return "deny";
-    if (verdict === "once") return "once";
-    if (verdict === "screen" && (!options.onPermission || options.permissionMode === "auto")) return "deny";
+    if (verdict === "deny") {
+      return { action: "deny", reason: "the application's RuntimePolicy does not allow this "
+        + "(a tool, path or network rule it set for this session)" };
+    }
+    if (verdict === "once") return { action: "once", reason: "" };
+    if (verdict === "screen" && (!options.onPermission || options.permissionMode === "auto")) {
+      return { action: "deny", reason: "the application's RuntimePolicy screened this as a network call "
+        + "or file write and runs unattended, so it was refused" };
+    }
   }
   const action = await options.ask();
-  return action === "once" || action === "always" || action === "deny" ? action : "deny";
+  return { action: action === "once" || action === "always" || action === "deny" ? action : "deny", reason: "" };
 }

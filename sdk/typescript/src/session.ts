@@ -16,7 +16,7 @@ import { diffWorkspace, snapshotWorkspace, type Snapshot } from "./changes.ts";
 import { resolvePermission, type Policy } from "./policy.ts";
 import type { StateLock } from "./state.ts";
 import type {
-  AbortSignalLike, AgentInfo, Artifact, Checkpoint, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
+  AbortSignalLike, AgentInfo, Artifact, Denial, Checkpoint, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
   QuestionRequest, RunEvent, RunOptions, RunResult, RunStatus, SandboxStatus, SessionInfo,
   SessionOptions, TaskItem, ToolRecord, VerificationResult,
 } from "./types.ts";
@@ -31,7 +31,7 @@ const TASK_MAP: Record<string, TaskItem["status"]> = {
   done: "completed", completed: "completed", in_progress: "in_progress", progress: "in_progress",
   blocked: "blocked", cancelled: "cancelled", canceled: "cancelled", pending: "pending", todo: "pending",
 };
-const TERMINAL = new Set<RunStatus>(["completed", "cancelled", "failed", "blocked"]);
+const TERMINAL = new Set<RunStatus>(["completed", "cancelled", "failed"]);
 const DECISION_EVENTS = new Set(["permission_request", "plan_proposal", "options_request", "mcp_input_request"]);
 const AUDIT_EVENTS = new Set([
   "turn_start", "turn_end", "tool_call", "tool_result", "tool_denied", "permission_request", "error",
@@ -84,6 +84,17 @@ function agentFromRow(row: Record<string, unknown>): AgentInfo {
     description: String(row.description || ""),
     parentId: row.parent_id ? String(row.parent_id) : null,
   };
+}
+
+/** Best-effort category for a `tool_denied` reason (see {@link Denial}). */
+export function denialSource(reason: string): Denial["source"] {
+  const low = (reason || "").toLowerCase();
+  if (low.includes("pretooluse hook") || low.includes("blocked by a pretooluse")) return "hook";
+  if (low.includes("plan mode") || low.includes("monitor event") || low.includes("approve on your next prompt")) return "mode";
+  if (low.includes("deny rule") || low.includes("session policy") || low.includes("outside the project")
+      || low.includes("application running this session") || low.includes("the application's")) return "policy";
+  if (low.includes("denied by the user") || low.includes("the user denied") || low === "denied") return "callback";
+  return "runtime";
 }
 
 function checkTimeout(timeoutMs: unknown, name = "timeoutMs"): void {
@@ -523,7 +534,7 @@ export class Session {
   private newResult(status: RunStatus): RunResult {
     return {
       sessionId: this.sessionId, runId: newId("run"), status, reason: "", finalText: "",
-      usage: {}, tools: [], artifacts: [], documents: [], changes: [], tasks: [], agents: [],
+      usage: {}, tools: [], denials: [], artifacts: [], documents: [], changes: [], tasks: [], agents: [],
     };
   }
 
@@ -560,6 +571,9 @@ export class Session {
 
   async rewind(index: number): Promise<Record<string, unknown>> {
     const event = await this.request({ type: "rewind", index, request_id: newId("rw") }, "rewound");
+    if (!event.ok) {
+      throw new DGCConfigError(`could not rewind to checkpoint ${index}; listCheckpoints() shows the valid indexes`);
+    }
     await this.discardIdle();
     return event;
   }
@@ -1280,8 +1294,12 @@ export class Session {
     if (mine) run.result.status = "waiting_for_approval";
     try {
       if (kind === "permission_request") {
-        const action = run.cancelReason || repairing ? "deny" : await this.permission(run, event, mine);
-        this.respond({ type: "permission_response", id: event.id, decision: action }, run);
+        const { action, reason } = run.cancelReason || repairing
+          ? { action: "deny" as const, reason: "" } : await this.permission(run, event, mine);
+        const command: Frame = { type: "permission_response", id: event.id, decision: action };
+        // So the runtime does not report the application's policy denial as "Denied by the user".
+        if (action === "deny" && reason) command.reason = reason;
+        this.respond(command, run);
       } else if (kind === "plan_proposal") {
         const decision = repairing || run.cancelReason ? "reject" : await this.plan(run, event, mine);
         this.respond({ type: "plan_response", id: event.id, decision }, run);
@@ -1350,7 +1368,7 @@ export class Session {
     return (outcome as { value: T }).value;
   }
 
-  private async permission(run: Run, event: Frame, mine: boolean): Promise<PermissionAction> {
+  private async permission(run: Run, event: Frame, mine: boolean): Promise<{ action: PermissionAction; reason: string }> {
     const request: PermissionRequest = {
       id: String(event.id || ""),
       name: String(event.name || ""),
@@ -1427,6 +1445,7 @@ export class Session {
 class Accumulator {
   readonly result: RunResult;
   tools = new Map<string, ToolRecord>();
+  denials: Denial[] = [];
   text: string[] = [];
   blocks = new Map<string, string>();
   answerIds: string[] = [];
@@ -1503,9 +1522,10 @@ class Accumulator {
       }
     } else if (kind === "tool_denied") {
       const callId = String(event.call_id || "");
-      this.tools.set(callId, {
-        name: String(event.name || ""), callId, output: String(event.reason || "denied"), isError: true,
-      });
+      const name = String(event.name || "");
+      const reason = String(event.reason || "denied");
+      this.tools.set(callId, { name, callId, output: reason, isError: true });
+      this.denials.push({ name, reason, source: denialSource(reason), callId, args: mapping(event.args) });
     } else if (kind === "artifact_ready") {
       const art: Artifact = {
         id: String(event.id || ""), name: String(event.name || ""), url: String(event.url || ""), rel: String(event.rel || ""),
@@ -1608,6 +1628,7 @@ class Accumulator {
   settle(run: Run): RunStatus {
     const result = this.result;
     result.tools = [...this.tools.values()];
+    result.denials = [...this.denials];
     result.artifacts = [...this.artifacts.values()];
     result.documents = [...this.documents.values()];
     result.tasks = this.tasks;
