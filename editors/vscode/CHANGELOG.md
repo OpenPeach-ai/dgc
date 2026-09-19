@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Conversation text one step larger.** Prompts and answers are 13px (code 12px): 12px read too small. Prompts keep the answers' line spacing.
+
 ## 0.26.7 — 2026-09-19
 
 - Requires CLI 0.41.6; editor protocol remains v14.

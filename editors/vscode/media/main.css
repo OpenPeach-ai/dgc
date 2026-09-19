@@ -54,7 +54,7 @@
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
   --t-xs: 11px; --t-sm: 12px; --t-base: 14px; --t-lg: 16px; --t-xl: 18px;
   /* The conversation itself: your prompts, the answers, and what you're typing. */
-  --t-chat: 12px;
+  --t-chat: 13px;
   --w-reg: 400; --w-med: 500; --w-semi: 600; --w-bold: 700;
   --control: 28px;               /* every button, chip and field lands on this height */
   --control-sm: 20px;
