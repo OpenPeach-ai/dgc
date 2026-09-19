@@ -2266,8 +2266,12 @@ before any answer:
 - Extra high (and Ultra): 64,000 tokens.
 
 A number applies to every level instead, and `0` turns the watchdog off. A stored `8000`, the
-old default, is read as `auto`. Reasoning also counts against `max_tokens` (default
-16384) on most providers, so raise that too if you want a long reasoning phase.
+old default, is read as `auto`.
+
+Reasoning counts against the output cap on most providers, so a request that asks for reasoning
+may produce `max_tokens` (default 16384) of answer plus that level's allowance. The cap never
+exceeds the model's reported output limit or half the context window, so a 32K window keeps the
+16,384 cap and Extra high needs a window of about 160K to use its full 64,000.
 
 ## Ultra
 
@@ -2545,7 +2549,8 @@ Useful keys:
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, default `auto`: 8,000 tokens at Off/Low, 16,000 at Medium, 32,000 at
   High, 64,000 at Extra high/Ultra; a number applies to every level, 0=off); output is capped at
-  `max_tokens` (length-truncation auto-continues, 0=don't send).
+  `max_tokens` plus the level's reasoning allowance when reasoning is on, within the model's
+  output limit and half the context window (length-truncation auto-continues, 0=don't send).
 - `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. `auto` selects native
   Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for
   OpenAI, and Chat Completions for compatible servers. Use `api_mode: ollama` or `api_mode:

@@ -1916,6 +1916,28 @@ class LLMClient:
             return max(0, int(uniform))
         return think_budget_tokens_for(level) * 4
 
+    def _request_max_tokens(self, level, base: int | None = None) -> int:
+        """The output cap one request sends at thinking `level` (0 = send none).
+
+        Providers count reasoning against the output cap, so max_tokens alone would end an Extra
+        high phase long before the watchdog's allowance. A request that asks for reasoning may
+        produce max_tokens of answer plus the level's reasoning allowance: never more than the
+        model's reported output limit or half its context window, and never less than max_tokens.
+        """
+        base = int((self.max_tokens if base is None else base) or 0)
+        if base <= 0 or level in _REASONING_OFF or not self.reasoning_supported:
+            return max(0, base)
+        uniform = getattr(self, "think_budget_chars", None)
+        allowance = uniform // 4 if uniform else think_budget_tokens_for(level)
+        cap = base + allowance
+        output_limit = self.model_output_limit()
+        if output_limit:
+            cap = min(cap, max(base, output_limit))
+        context = self.effective_context_size()
+        if context:
+            cap = min(cap, max(base, context // 2))
+        return cap
+
     # ---- stall watcher ---------------------------------------------------------------------------
     _load_probe_interval_s = 5.0
 
@@ -2732,7 +2754,8 @@ class LLMClient:
     def _anthropic_payload(self, messages, tools, reasoning_effort,
                            disabled: set[str], max_tokens_limit: int | None = None) -> dict:
         system, wire_messages = self._anthropic_messages(messages)
-        maximum = max(1, int(self.max_tokens or 16_384))
+        thinks = "off" if "reasoning" in disabled else reasoning_effort
+        maximum = max(1, self._request_max_tokens(thinks, base=int(self.max_tokens or 16_384)))
         discovered_limit = self.model_output_limit()
         if discovered_limit:
             maximum = min(maximum, discovered_limit)
@@ -3294,7 +3317,7 @@ class LLMClient:
             payload["think"] = self._ollama_think(reasoning_effort)
         options: dict = {}
         if self.max_tokens and self._feature_supported("max_output_tokens"):
-            options["num_predict"] = self.max_tokens
+            options["num_predict"] = self._request_max_tokens(reasoning_effort)
         context_size = self.effective_context_size()
         if context_size:
             options["num_ctx"] = context_size
@@ -3526,7 +3549,7 @@ class LLMClient:
                 self.family, self.model, reasoning_effort,
                 max_tier=not self._rejection_active("think_max")))
         if self.max_tokens and self._feature_supported("max_output_tokens"):
-            payload["max_tokens"] = self.max_tokens
+            payload["max_tokens"] = self._request_max_tokens(reasoning_effort)
         if self.sampling and self._feature_supported("sampling"):
             payload.update(self.sampling)
         if self.family == "ollama" and self.keep_alive:   # D2: model residency (Ollama honours it on /v1)
@@ -4028,13 +4051,14 @@ class LLMClient:
             payload["tool_choice"] = "auto"
             if self._feature_supported("parallel_tools"):
                 payload["parallel_tool_calls"] = True
+        level = "off"
         if ("reasoning" not in disabled and self.reasoning_supported
                 and _openai_reasoning_model(self.model)):
             level = "low" if reasoning_effort in _REASONING_OFF else reasoning_effort
             payload["reasoning"] = {"effort": level, "summary": "auto"}
         if (self.max_tokens and "max_output_tokens" not in disabled
                 and self._feature_supported("max_output_tokens")):
-            payload["max_output_tokens"] = self.max_tokens
+            payload["max_output_tokens"] = self._request_max_tokens(level)
         if "sampling" not in disabled and self._feature_supported("sampling"):
             for key in ("temperature", "top_p"):
                 if key in self.sampling:

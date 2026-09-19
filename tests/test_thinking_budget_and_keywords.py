@@ -135,6 +135,15 @@ class WatchdogStreamTest(unittest.TestCase):
         self.assertNotEqual(result.finish_reason, "overthink")
         self.assertEqual(len(_Runaway.requests), 1, "the watchdog must not have retried")
 
+    def test_the_wire_cap_grows_with_the_level(self):
+        _Runaway.reasoning_tokens = 0
+        client = self.client(max_tokens=16_384, context_size=400_000)
+        client.model_context_limit = lambda: 0
+        client.chat([{"role": "user", "content": "hi"}], reasoning_effort="off")
+        client.chat([{"role": "user", "content": "hard task"}], reasoning_effort="xhigh")
+        caps = [request.get("max_tokens") for request in _Runaway.requests]
+        self.assertEqual(caps, [16_384, 16_384 + 64_000])
+
     def test_off_still_stops_a_runaway_model(self):
         _Runaway.reasoning_tokens = 12_000
         result = self.client().chat([{"role": "user", "content": "hi"}],
@@ -150,6 +159,69 @@ class WatchdogStreamTest(unittest.TestCase):
         # xhigh overthinks, steps down level by level, and ends at off still over budget.
         self.assertEqual(result.finish_reason, "overthink")
         self.assertGreater(len(_Runaway.requests), 1)
+
+
+class RequestOutputCapTest(unittest.TestCase):
+    """Reasoning counts against a provider's output cap, so a request that asks for reasoning
+    sends max_tokens plus the level's reasoning allowance, bounded by what the model can take."""
+
+    def client(self, *, context_size=0, output_limit=0, reasoning=True, **kwargs) -> LLMClient:
+        client = LLMClient("http://127.0.0.1:9/v1", "k", "m", api_mode="chat_completions",
+                           provider_capabilities={"reasoning": reasoning},
+                           context_size=context_size, **kwargs)
+        client.model_output_limit = lambda: output_limit
+        client.model_context_limit = lambda: 0
+        return client
+
+    def test_off_keeps_max_tokens(self):
+        client = self.client(max_tokens=16_384, context_size=400_000)
+        for level in ("off", "none", None, ""):
+            self.assertEqual(client._request_max_tokens(level), 16_384, level)
+
+    def test_each_level_adds_its_reasoning_allowance(self):
+        client = self.client(max_tokens=16_384, context_size=400_000)
+        for level in ("low", "medium", "high", "xhigh", "max"):
+            self.assertEqual(client._request_max_tokens(level),
+                             16_384 + llm_mod.AUTO_THINK_BUDGET_TOKENS[level], level)
+        # Extra high can now reason past the old 16,384 output cap.
+        self.assertGreater(client._request_max_tokens("xhigh"), 64_000)
+
+    def test_a_small_context_window_keeps_the_old_cap(self):
+        client = self.client(max_tokens=16_384, context_size=32_768)
+        self.assertEqual(client._request_max_tokens("xhigh"), 16_384)
+        client = self.client(max_tokens=16_384, context_size=131_072)
+        self.assertEqual(client._request_max_tokens("xhigh"), 65_536)
+
+    def test_the_model_output_limit_bounds_it_but_never_below_max_tokens(self):
+        client = self.client(max_tokens=16_384, context_size=400_000, output_limit=32_000)
+        self.assertEqual(client._request_max_tokens("xhigh"), 32_000)
+        client = self.client(max_tokens=16_384, context_size=400_000, output_limit=8_000)
+        self.assertEqual(client._request_max_tokens("xhigh"), 16_384)
+
+    def test_zero_sends_nothing_and_no_reasoning_support_adds_nothing(self):
+        self.assertEqual(self.client(max_tokens=0)._request_max_tokens("xhigh"), 0)
+        client = self.client(max_tokens=16_384, context_size=400_000, reasoning=False)
+        self.assertEqual(client._request_max_tokens("xhigh"), 16_384)
+
+    def test_a_uniform_watchdog_number_sets_the_allowance(self):
+        client = self.client(max_tokens=16_384, context_size=400_000, think_budget_tokens=10_000)
+        self.assertEqual(client._request_max_tokens("xhigh"), 26_384)
+        client = self.client(max_tokens=16_384, context_size=400_000, think_budget_tokens=0)
+        self.assertEqual(client._request_max_tokens("xhigh"), 16_384 + 64_000)
+
+    def test_anthropic_legacy_thinking_gets_its_full_xhigh_budget(self):
+        client = LLMClient("https://api.anthropic.com", "k", "claude-sonnet-4-5",
+                           max_tokens=16_384, context_size=200_000)
+        client.model_output_limit = lambda: 64_000
+        client.model_context_limit = lambda: 0
+        payload = client._anthropic_payload([{"role": "user", "content": "hi"}], None, "xhigh",
+                                            set())
+        self.assertEqual(payload["max_tokens"], 64_000)
+        # Legacy extended thinking: before, the 16,384 cap held xhigh to 12,288 of its 24,576.
+        self.assertEqual(payload["thinking"], {"type": "enabled", "budget_tokens":
+                                               llm_mod._ANTHROPIC_THINKING_BUDGET["xhigh"]})
+        off = client._anthropic_payload([{"role": "user", "content": "hi"}], None, "off", set())
+        self.assertEqual(off["max_tokens"], 16_384)
 
 
 class LegacyDefaultMigrationTest(unittest.TestCase):

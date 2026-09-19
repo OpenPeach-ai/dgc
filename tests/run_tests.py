@@ -17871,7 +17871,8 @@ def test_anthropic_adapter():
           and payload["tool_choice"] == {"type": "auto"}
           and payload["thinking"] == {"type": "adaptive", "display": "summarized"}
           and payload["output_config"] == {"effort": "high"}
-          and payload["max_tokens"] == 16384
+          # Reasoning counts against the cap: 16,384 of answer plus High's 32,000 allowance.
+          and payload["max_tokens"] == 16384 + 32000
           and not any(key in payload for key in ("temperature", "top_p", "top_k", "min_p")))
     sonnet_five = LLMClient(
         "https://api.anthropic.com/v1", "k", "claude-sonnet-5", api_mode="anthropic")
@@ -17883,10 +17884,15 @@ def test_anthropic_adapter():
     legacy = LLMClient(
         "https://api.anthropic.com/v1", "k", "claude-3-5-sonnet-20241022",
         max_tokens=4096, sampling={"temperature": 0.3})
+    legacy_room = legacy._anthropic_payload([{"role": "user", "content": "x"}], None, "high", set())
+    legacy.model_output_limit = lambda: 4096          # a model that can only emit 4,096 tokens
+    legacy_tight = legacy._anthropic_payload([{"role": "user", "content": "x"}], None, "high", set())
     check("legacy Anthropic thinking stays below max_tokens and sampling is omitted",
-          legacy._anthropic_payload(
-              [{"role": "user", "content": "x"}], None, "high", set())["thinking"]
-          == {"type": "enabled", "budget_tokens": 2048})
+          legacy_room["max_tokens"] == 4096 + 32000
+          and legacy_room["thinking"] == {"type": "enabled", "budget_tokens": 16384}
+          and legacy_tight["max_tokens"] == 4096
+          and legacy_tight["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+          and not any(key in legacy_room for key in ("temperature", "top_p", "top_k", "min_p")))
 
     class _AnthropicStream:
         status_code = 200

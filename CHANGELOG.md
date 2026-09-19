@@ -12,7 +12,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   with the level: 8,000 tokens at Off and Low, 16,000 at Medium, 32,000 at High and 64,000 at
   Extra high and Ultra. A number still applies to every level, and `0` still turns it off. A
   stored `8000`, the old default that every config file carried, now reads as `auto`.
-  Reasoning also counts against `max_tokens` (default 16384) on most providers.
+- **The output cap makes room for that reasoning.** Providers count reasoning against the
+  output cap, so the 16,384-token `max_tokens` ended an Extra high phase long before 64,000. A
+  request that asks for reasoning now sends `max_tokens` plus the level's allowance, never more
+  than the model's reported output limit or half the context window (a 32K window keeps 16,384).
+  Claude's legacy extended thinking gets its full Extra high budget (24,576, was 12,288).
 - **Prompt words no longer change a thinking level you chose.** "think", "think hard",
   "think harder" and "ultrathink" in a prompt turn thinking on for that turn only when it is Off.
   Low through Extra high, Ultra and a sub-agent's own effort stay as set. "I think…" still turns
