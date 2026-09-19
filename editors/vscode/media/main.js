@@ -4965,8 +4965,8 @@
   let agentPageScroll = 0;
   let agentPageTick = null;
   // Pack B identity marks in media/agents/. Same file on light and dark (they hold on #141414).
-  // Always the still frame: the -animated swirl reads as a colour smear at chip size. Live agents
-  // keep `.is-live` so CSS can pulse a ring around the same face.
+  // Always the still frame: the -animated swirl reads as a colour smear at chip size. The face is
+  // drawn bare, with no ring around it, live or finished (`.is-live` is state only).
   const AGENT_MARK_NAMES = ["seafoam", "lagoon", "coral", "violet", "amber", "slate", "lime", "rose"];
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");

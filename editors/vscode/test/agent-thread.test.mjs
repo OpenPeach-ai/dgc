@@ -50,6 +50,9 @@ test("agent-mark CSS does not clip or bloom the SVG face", () => {
     (mainCss.match(/\.agent-mark\[data-mark="0"\]\s*\{[^}]*clip-path/g) || []).length, 0,
     "clip-path on [data-mark] must not win over the SVG img",
   );
+  // No ring around the face while an agent works: no pseudo-element, box-shadow or outline.
+  assert.doesNotMatch(mainCss, /\.agent-mark[^{]*::(?:after|before)/);
+  assert.doesNotMatch(mainCss, /\.agent-mark[^{]*\{[^}]*(?:box-shadow|outline)/);
 });
 
 test("a live chip and its inner page share the still identity face", () => {

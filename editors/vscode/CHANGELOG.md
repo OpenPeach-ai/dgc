@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Conversation text one step larger.** Prompts and answers are 13px (code 12px): 12px read too small. Prompts keep the answers' line spacing.
+- **No ring around working sub-agents.** A running sub-agent's icon no longer has a pulsing coloured ring around it; the chip's "working" label shows it is running.
 
 ## 0.26.7 — 2026-09-19
 
