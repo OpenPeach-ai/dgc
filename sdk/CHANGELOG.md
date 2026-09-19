@@ -19,9 +19,37 @@ Pairs with CLI 0.41.6 over editor protocol v14. A `RuntimePolicy` or a sandbox s
 - A `RuntimePolicy` sandboxes the shell by default (`shell="sandboxed"`). With a write tool denied
   the workspace is read-only to the shell, and hosts without bubblewrap warn at `session()`. Pass
   `shell="screened"` or `network="allow"` to keep the 0.5.2 behaviour.
-- A permission you deny no longer marks the whole run `blocked`: the agent is told and carries on,
-  and the run ends `completed` unless something else fails. Staff callbacks now see every `bash`
-  request instead of some being denied by a pattern before they are asked.
+- **`RunStatus` no longer has `blocked`** (it was documented and used by an example but never
+  emitted). A denied step is reported in the new `RunResult.denials` — a list of `Denial`
+  (`name`, `reason`, `source`, `call_id`, `args`), where `source` is `policy`, `callback`, `hook`,
+  `mode` or `runtime`. A denied step no longer flips the status; the run ends `completed` unless
+  something else fails. `ci_review.py` and `ci_edit.py` use `denials`. Staff callbacks now see
+  every `bash` request instead of some being denied by a pattern before they are asked.
+- **The workspace can no longer grant an SDK session capabilities.** By default a session's
+  `cwd` is untrusted: its own `.dgc/permissions.json` *allow* rules and its `.dgc/agents`
+  definitions (which pick a model endpoint and a credential env var) are not loaded — the
+  workspace can only *narrow* what runs. Set `DGC(trust_workspace=True)` to opt in; even then a
+  project agent file keeps only its persona, never an endpoint or key, and no agent definition may
+  read a `DGC_*_API_KEY`. This holds with no `RuntimePolicy` set and under `inherit_user_state`,
+  where your own `~/.dgc` allow rules also stop pre-approving once a policy reviews permissions.
+- **`RuntimePolicy(shell="sandboxed")` fails closed.** A host with no working OS sandbox now
+  refuses to start a shell-capable session (`DGCUnsupportedError`) rather than run the shell
+  unconfined; plan/no-shell sessions still start. Pass `sandbox={"requirement": "preferred"}` (or
+  `shell="screened"`) to accept the weaker mode on purpose. `available()` now probes that
+  bubblewrap actually confines (unprivileged user namespaces can be disabled), so `required` no
+  longer passes on a bwrap that cannot run.
+- The provider key never reaches a shell/`python`/`monitor`/hook subprocess environment, in any
+  mode, and the SDK hands it to `dgc serve` through a private 0600 file the CLI reads and deletes
+  before any tool runs (not the child's environment, whose initial block stays readable in
+  `/proc`). `printf %s "$DGC_API_KEY" | rev` no longer recovers it. In `shell="screened"` the
+  `python` tool is screened for network and (with writes denied) file writes, like the shell.
+- `deny_tools`/`allow_tools` accept both the internal name and the display spelling (`"bash"` or
+  `"Bash"`, `"write_file"` or `"Write"`); unknown names still raise `DGCConfigError`.
+- `RetryPolicy(max_attempts=...)` outside 1–11 raises `DGCConfigError` (it is not clamped), and a
+  `permissions=` mapping with a key other than `mode`/`unhandled` raises `DGCConfigError`.
+- An unset `state_dir` (a temporary directory the SDK creates) is removed on `close()`, audit and
+  usage logs included; pass `keep_state_dir=True`, or an explicit `state_dir`, to keep it.
+  `rewind()` on an out-of-range index raises `DGCConfigError` instead of returning `{ok: False}`.
 - Examples and the quickstart no longer seed a model into `state_dir`; pass `model` and
   `base_url` (or `extra_config`), since a `config.json` already in `state_dir` is not merged.
 
@@ -81,9 +109,15 @@ Pairs with CLI 0.41.6 over editor protocol v14. A `RuntimePolicy` or a sandbox s
   File tools stay inside the workspace and off `deny_path_prefixes`; `deny_tools` and
   `allow_tools` cover custom and MCP tools, and unknown names raise.
 - Shell commands run in the OS sandbox by default (`shell="sandboxed"`); in `auto` mode the shell
-  runs only there. `shell="screened"` keeps the older pattern screen, documented as best effort.
-- Outside `auto` mode every shell command reaches `on_permission`: with a `RuntimePolicy`, allow
-  rules the workspace brings (`.dgc/permissions.json`) are not loaded.
+  runs only there, and a host with no working sandbox refuses the session unless the app accepts
+  the weaker mode (`sandbox={"requirement": "preferred"}` or `shell="screened"`). The sandbox
+  masks the client's whole `state_dir` (audit and usage logs, not just the isolated HOME).
+  `shell="screened"` keeps the older pattern screen — covering the `python` tool too — documented
+  as best effort.
+- Outside `auto` mode every shell command reaches `on_permission`. The workspace's own
+  `.dgc/permissions.json` *allow* rules and `.dgc/agents` are not loaded unless
+  `trust_workspace=True`; a `deny_path_prefixes` refusal now tells the model it was the
+  application's policy, not "the user".
 - Custom tools are served on a private, randomly named socket that answers only the session's
   own relay, which proves a per-session secret; on Linux the relay hides that secret from other
   processes of the same user.

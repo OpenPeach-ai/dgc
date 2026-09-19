@@ -9,7 +9,7 @@ PermissionMode = Literal["default", "acceptEdits", "plan", "auto"]
 UnhandledPolicy = Literal["deny", "callback"]
 SandboxRequirement = Literal["required", "preferred", "off"]
 RunStatus = Literal[
-    "queued", "running", "waiting_for_approval", "completed", "cancelled", "failed", "blocked",
+    "queued", "running", "waiting_for_approval", "completed", "cancelled", "failed",
 ]
 PermissionAction = Literal["once", "always", "deny"]
 PlanAction = Literal["auto", "acceptEdits", "default", "reject"]
@@ -130,6 +130,24 @@ class ToolSpec:
     input_schema: Mapping[str, Any]
     handler: Callable[[Mapping[str, Any]], Any]
     timeout: float | None = 30.0
+
+
+@dataclass(frozen=True)
+class Denial:
+    """One tool call the run refused, in ``RunResult.denials``.
+
+    ``source`` is a best-effort category of who refused it: ``"policy"`` (a RuntimePolicy or a
+    deny rule), ``"callback"`` (your ``on_permission`` said deny, or none answered), ``"hook"`` (a
+    PreToolUse hook), ``"mode"`` (plan mode, or a monitor turn with nobody to approve), or
+    ``"runtime"`` when it cannot be told apart. ``name`` is the tool, ``reason`` the runtime's
+    explanation, ``call_id`` its id, and ``args`` the arguments it was called with.
+    """
+
+    name: str
+    reason: str = ""
+    source: str = "runtime"
+    call_id: str = ""
+    args: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -281,6 +299,7 @@ class RunResult:
     output: Any = None
     usage: dict[str, Any] = field(default_factory=dict)
     tools: list[ToolRecord] = field(default_factory=list)
+    denials: list[Denial] = field(default_factory=list)
     changes: list[FileChange] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
     documents: list[Artifact] = field(default_factory=list)

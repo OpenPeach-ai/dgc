@@ -838,7 +838,7 @@ class MonitorHub:
                 cwd=str(root), stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
                 start_new_session=True,
-                env=sandbox.process_env(config) if sandbox_requested else None)
+                env=sandbox.process_env(config) if sandbox_requested else sandbox.tool_env())
         except OSError as exc:
             return f"error: could not start the monitor: {exc}"
         finally:

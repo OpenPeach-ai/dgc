@@ -274,7 +274,7 @@ class DGCClient:
                     or any(not isinstance(key, str) or not isinstance(value, str)
                            or "\0" in key or "\0" in value for key, value in env.items())):
                 raise ValueError("env must map strings to strings")
-            self._env = dict(env)
+            self._env: dict[str, str] | None = dict(env)
         else:
             self._env = None
 
@@ -428,12 +428,13 @@ class DGCClient:
         """Validate and send one command, enforcing correlated decision lifecycles."""
         wire, frame = self._serialize_command(command)
         command_type = wire["type"]
-        request_id = wire.get("id") if isinstance(wire.get("id"), str) else None
+        wire_id = wire.get("id")
+        request_id: str = wire_id if isinstance(wire_id, str) else ""
 
         with self._condition:
             self._require_live_locked()
             if command_type in _RESPONSE_COMMANDS:
-                expected = self._active_requests.get(request_id or "")
+                expected = self._active_requests.get(request_id)
                 if expected != command_type or request_id in self._responded_requests:
                     raise DGCCommandError(
                         "stale, duplicate, or mismatched approval response")
@@ -819,14 +820,16 @@ class DGCClient:
                     raise DGCProtocolError("backend emitted more than one ready event")
                 if event["protocol_version"] != PROTOCOL_VERSION:
                     offered = event["protocol_version"]
-                    version = event.get("version") if isinstance(event.get("version"), str) else ""
+                    version_raw = event.get("version")
+                    version = version_raw if isinstance(version_raw, str) else ""
                     raise DGCProtocolError(
                         f"backend offered protocol v{offered}; client requires v{PROTOCOL_VERSION}",
                         offered_protocol=offered, backend_version=version[:64])
                 self._ready = copy.deepcopy(event)
 
             expected = _REQUEST_RESPONSES.get(event_type)
-            request_id = event.get("id") if isinstance(event.get("id"), str) else ""
+            event_id = event.get("id")
+            request_id = event_id if isinstance(event_id, str) else ""
             if expected:
                 if not request_id or request_id in self._active_requests:
                     raise DGCProtocolError("backend reused an active approval request ID")

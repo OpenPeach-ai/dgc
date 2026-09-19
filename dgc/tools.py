@@ -1493,7 +1493,7 @@ def bash(args: dict, ctx) -> str:
     popen_kw = dict(cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                    env=sandbox.process_env(ctx.config) if sandbox_requested else None)
+                    env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
     try:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
@@ -1656,7 +1656,7 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
-                        env=sandbox.process_env(ctx.config) if sandbox_requested else None)
+                        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
@@ -1947,7 +1947,10 @@ class _PythonKernel:
         # so put the package parent on PYTHONPATH while running IN the project root (user file ops are
         # then project-relative, like bash).
         repo_parent = str(Path(__file__).resolve().parent.parent)
-        env = dict(os.environ)
+        # The python tool runs arbitrary user code, so its interpreter never gets DGC's provider
+        # credentials (the model client's, not the tool's). It is never OS-sandboxed either.
+        from . import sandbox
+        env = sandbox.tool_env()
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = repo_parent + (os.pathsep + existing if existing else "")
         self.proc = subprocess.Popen(

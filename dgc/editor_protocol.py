@@ -675,7 +675,7 @@ def command_error(value) -> str | None:
 def _json_type(field: dict) -> dict:
     kinds = field["types"]
     def branch(kind: str) -> dict:
-        value = {"type": kind}
+        value: dict = {"type": kind}
         if kind in ("integer", "number"):
             value.update(minimum=-MAX_SAFE_INTEGER, maximum=MAX_SAFE_INTEGER)
         return value
@@ -691,7 +691,7 @@ def _json_type(field: dict) -> dict:
 
 
 def _message_schema(name: str, fields: dict[str, dict], *, sequence: bool) -> dict:
-    properties = {"type": {"const": name}}
+    properties: dict = {"type": {"const": name}}
     required = ["type"]
     if sequence:
         properties["seq"] = {"type": "integer", "minimum": 0,
