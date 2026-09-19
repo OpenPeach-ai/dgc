@@ -1,0 +1,305 @@
+# M0 diagnostic: run the CLI and SDK on REAL GitHub-hosted macOS and Windows runners and record
+# exactly what fails. Every job and every diagnostic step is continue-on-error, permissions are
+# read-only, and this workflow is NOT a `needs` of release.yml — a flaky Mac/Windows runner must
+# never block a CLI release. The findings are the uploaded logs and the `M0-RESULT ...` lines.
+#
+#   dist            builds the wheel + npm tarball once on Linux, so every OS tests identical bytes.
+#   host            per OS/Python: clean venv + CLI + wheel, then the hermetic smoke(s).
+#   cli-suite       tests/run_tests.py on macOS and Windows (the CLI suite has never run there).
+#   seatbelt-probe  escape probes inside the CURRENT macOS sandbox profile (dgc/sandbox.py).
+#   windows-encoding  `dgc serve` under a cp1252 stdout: are the NDJSON frames valid UTF-8?
+name: SDK platforms
+
+on:
+  push:
+    branches: ["sdk-platforms/**"]
+    paths:
+      - "sdk/**"
+      - "dgc/**"
+      - "tests/test_dgc_sdk*"
+      - "tests/test_sdk_*"
+      - "tests/sdk_*"
+      - "tests/macos/**"
+      - "tests/windows/**"
+      - "requirements.lock"
+      - "pyproject.toml"
+      - ".github/workflows/sdk-platforms.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - "dgc/**"
+      - "tests/test_dgc_sdk*"
+      - "tests/test_sdk_*"
+      - "tests/sdk_*"
+      - "tests/macos/**"
+      - "tests/windows/**"
+      - "requirements.lock"
+      - "pyproject.toml"
+      - ".github/workflows/sdk-platforms.yml"
+  schedule:
+    - cron: "41 4 * * 1"          # weekly: catches runner-image drift (macos-latest / windows-latest moves)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-platforms-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  dist:
+    name: Build the SDK artifacts once
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: |
+          python -m pip install -r sdk/scripts/requirements-release.txt
+          python -m build sdk/python --outdir "$RUNNER_TEMP/sdk-dist"
+          (cd sdk/typescript && npm ci && npm pack --pack-destination "$RUNNER_TEMP/sdk-dist")
+          python sdk/scripts/check_dist.py "$RUNNER_TEMP/sdk-dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-dist
+          path: ${{ runner.temp }}/sdk-dist/*
+          if-no-files-found: error
+
+  host:
+    name: SDK · ${{ matrix.os }} · Python ${{ matrix.python }}${{ matrix.full && ' · full suites' || '' }}
+    needs: dist
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS arm64: two full legs (newest Python on macOS 26 and macOS 15) + a floor smoke.
+          - { os: macos-latest,     python: "3.13", node: true,  full: true  }
+          - { os: macos-latest,     python: "3.10", node: false, full: false }
+          - { os: macos-15,         python: "3.13", node: true,  full: true  }
+          # macOS Intel: smoke, so "Intel" is proven rather than assumed.
+          - { os: macos-15-intel,   python: "3.13", node: false, full: false }
+          # Windows x64: smoke on 3.12 and 3.13 (no 3.10 leg — python.org ships no patched 3.10
+          # Windows build, and Python < 3.12.4 predates the CVE-2024-4030 temp-dir ACL fix).
+          - { os: windows-latest,   python: "3.12", node: false, full: false }
+          - { os: windows-latest,   python: "3.13", node: true,  full: false }
+          # Windows ARM64: smoke, so ARM64 is proven rather than assumed.
+          - { os: windows-11-arm,   python: "3.13", node: false, full: false }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sdk-dist
+          path: ${{ runner.temp }}/sdk-dist
+      - name: Install the CLI and the SDK wheel into a clean venv
+        id: install
+        continue-on-error: true
+        run: |
+          set -x
+          mkdir -p "$RUNNER_TEMP/m0-logs"
+          python -m venv "$RUNNER_TEMP/app"
+          if [ "$RUNNER_OS" = "Windows" ]; then py="$RUNNER_TEMP/app/Scripts/python.exe"; else py="$RUNNER_TEMP/app/bin/python"; fi
+          echo "DGC_PYTHON=$py" >> "$GITHUB_ENV"
+          "$py" -m pip install -r requirements.lock
+          "$py" -m pip install --no-deps .
+          "$py" -m pip install --no-deps "$RUNNER_TEMP"/sdk-dist/dgc_sdk-*.whl
+          "$py" -m pip check
+          "$py" -m dgc --version 2>&1 | tee "$RUNNER_TEMP/m0-logs/cli-version.log"
+      - name: Python smoke against the installed wheel (run, tool, policy, cancel, cleanup)
+        continue-on-error: true
+        env:
+          DGC_SDK_TEST_INSTALLED: "1"
+        working-directory: ${{ runner.temp }}
+        run: 'set -o pipefail; "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_platform_smoke.py" 2>&1 | tee "$RUNNER_TEMP/m0-logs/py-smoke.log"'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.node
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Node smoke from the packed tarball
+        if: matrix.node
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}
+        run: 'set -o pipefail; node "$GITHUB_WORKSPACE/tests/sdk_platform_smoke.mjs" "$(ls "$RUNNER_TEMP"/sdk-dist/*.tgz)" 2>&1 | tee "$RUNNER_TEMP/m0-logs/node-smoke.log"'
+      - name: Full Python SDK suites against the installed wheel
+        if: matrix.full
+        continue-on-error: true
+        env:
+          DGC_SDK_TEST_INSTALLED: "1"
+          DGC_REQUIRE_RELEASE_TOOLS: "1"
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -o pipefail
+          "$DGC_PYTHON" -m pip install -r "$GITHUB_WORKSPACE/sdk/scripts/requirements-release.txt"
+          "$DGC_PYTHON" "$GITHUB_WORKSPACE/tests/sdk_installed.py" \
+            "$GITHUB_WORKSPACE"/tests/test_dgc_sdk*.py "$GITHUB_WORKSPACE"/tests/test_sdk_*.py \
+            2>&1 | tee "$RUNNER_TEMP/m0-logs/py-full-suite.log"
+      - name: Full Node SDK suites (source and packed tarball)
+        if: matrix.full
+        continue-on-error: true
+        env:
+          DGC_REQUIRE_TS_PACKAGE: "1"
+        run: |
+          set -o pipefail
+          (cd sdk/typescript && npm ci)
+          node --experimental-strip-types --test tests/test_dgc_sdk_ts.mjs tests/test_dgc_sdk_ts_package.mjs \
+            2>&1 | tee "$RUNNER_TEMP/m0-logs/node-full-suite.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: m0-host-${{ matrix.os }}-py${{ matrix.python }}
+          path: ${{ runner.temp }}/m0-logs/*
+          if-no-files-found: warn
+
+  cli-suite:
+    name: CLI suite · ${{ matrix.os }} · Python ${{ matrix.python }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,   python: "3.13" }
+          - { os: macos-15,       python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
+          # Windows 3.10: os.fchmod does not exist there, so config/session saves may crash.
+          - { os: windows-latest, python: "3.10" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install the CLI
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/m0-logs"
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+          python -m pip check
+      - name: Run the full CLI test suite (diagnostic; failures are expected on these OSes)
+        continue-on-error: true
+        run: 'set -o pipefail; python tests/run_tests.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.log"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: m0-cli-suite-${{ matrix.os }}-py${{ matrix.python }}
+          path: ${{ runner.temp }}/m0-logs/*
+          if-no-files-found: warn
+
+  seatbelt-probe:
+    name: Seatbelt escape probe · ${{ matrix.os }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the CLI (so dgc.sandbox builds the real profile)
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/m0-logs"
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+      - name: Probe the CURRENT macOS sandbox profile, network denied and allowed
+        continue-on-error: true
+        env:
+          DGC_PYTHON: python
+          DGC_REPO_ROOT: ${{ github.workspace }}
+        run: 'set -o pipefail; bash tests/macos/seatbelt_probe.sh "${{ matrix.os }}" both 2>&1 | tee "$RUNNER_TEMP/m0-logs/seatbelt-${{ matrix.os }}.log"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: m0-seatbelt-${{ matrix.os }}
+          path: ${{ runner.temp }}/m0-logs/*
+          if-no-files-found: warn
+
+  windows-encoding:
+    name: Windows serve stdout encoding (cp1252)
+    continue-on-error: true
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "0"          # deliberately NOT UTF-8 mode: the fix must survive the ANSI code page
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the CLI + SDK from source into a clean venv
+        continue-on-error: true
+        run: |
+          set -x
+          mkdir -p "$RUNNER_TEMP/m0-logs"
+          python -m venv "$RUNNER_TEMP/app"
+          py="$RUNNER_TEMP/app/Scripts/python.exe"
+          echo "DGC_PYTHON=$py" >> "$GITHUB_ENV"
+          "$py" -m pip install -r requirements.lock
+          "$py" -m pip install --no-deps .
+          "$py" -m pip check
+      - name: Drive `dgc serve` under cp1252 and check the NDJSON is valid UTF-8
+        continue-on-error: true
+        run: 'set -o pipefail; "$DGC_PYTHON" tests/windows/serve_encoding_probe.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/windows-encoding.log"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: m0-windows-encoding
+          path: ${{ runner.temp }}/m0-logs/*
+          if-no-files-found: warn
