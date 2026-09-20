@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -75,8 +76,8 @@ def track(proc, *, register: bool = False) -> object | None:
         return None
     if os.name == "posix":
         if register:
-            # Off the caller's thread: reading a start time costs a `ps` on macOS, which has no
-            # /proc, and a tool command must not wait on a best-effort bookkeeping file.
+            # Off the caller's thread: a tool command must never wait on a best-effort
+            # bookkeeping file, and the append itself can block on a slow disk.
             threading.Thread(target=register_group, args=(proc.pid,),
                              name="dgc-group-registry", daemon=True).start()
         return None
@@ -217,6 +218,10 @@ def start_time(pid: int) -> str:
             return fields[19]
         except (OSError, IndexError, ValueError):
             return ""
+    if sys.platform == "darwin":
+        stamp = _darwin_start_time(pid)
+        if stamp:
+            return stamp
     try:
         done = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
@@ -230,6 +235,35 @@ def start_time(pid: int) -> str:
         return str(int(time.mktime(time.strptime(row[0].strip(), "%a %b %d %H:%M:%S %Y"))))
     except (ValueError, OverflowError):
         return ""
+
+
+def _darwin_start_time(pid: int) -> str:
+    """When ``pid`` started, in whole seconds since the epoch, read from its ``kinfo_proc``.
+
+    macOS has no /proc, and the obvious alternative — ``ps -o lstart=`` — costs a process for
+    every command DGC runs. ``sysctl(CTL_KERN, KERN_PROC, KERN_PROC_PID, pid)`` answers from the
+    kernel directly. ``struct kinfo_proc`` begins with ``struct extern_proc``, whose first member
+    is a union carrying ``p_starttime``, so the process's start time is the first ``timeval`` of
+    the reply and its seconds are the first 8 bytes. The value is sanity-checked before it is
+    trusted: a layout that ever changed would produce a number that is obviously not a date, and
+    the caller then falls back to ``ps``.
+    """
+    import struct
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        names = (ctypes.c_int * 4)(1, 14, 1, int(pid))     # CTL_KERN, KERN_PROC, KERN_PROC_PID
+        size = ctypes.c_size_t(1024)
+        buffer = ctypes.create_string_buffer(size.value)
+        if libc.sysctl(names, 4, buffer, ctypes.byref(size), None, 0) != 0 or size.value < 8:
+            return ""
+        seconds = struct.unpack_from("<q", buffer.raw, 0)[0]
+    except (ImportError, AttributeError, OSError, ValueError, struct.error):
+        return ""
+    # A plausible date: after 2001 and not in the future. Anything else means the layout moved.
+    if not 1_000_000_000 < seconds < time.time() + 60:
+        return ""
+    return str(int(seconds))
 
 
 def process_owner(pid: int) -> int | None:
