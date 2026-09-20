@@ -49,6 +49,7 @@ fi
 # --- fixtures every probe references -------------------------------------------------------
 W=$(mktemp -d); W=$(cd "$W" && pwd -P)                    # canonical workspace (writable)
 echo "workspace fixture" > "$W/inside.txt"
+cp "$(dirname "$0")/kinfo_probe.py" "$W/kinfo_probe.py" 2>/dev/null
 mkdir -p "$HOME/.dgc" 2>/dev/null; echo "state-secret" > "$HOME/.dgc/seatbelt-probe.txt" 2>/dev/null
 echo "home-secret" > "$HOME/.seatbelt-home-probe" 2>/dev/null
 TMP_OUTSIDE=$(mktemp /tmp/dgc-seatbelt-outside.XXXXXX); echo "tmp-secret" > "$TMP_OUTSIDE"
@@ -207,7 +208,7 @@ run_probes_for_mode() {
   #    allow-by-default profile too), so the sysctl route is untested. kern.proc.pid. is
   #    on the allow-list.
   probe sysctl_kinfo    "outside-process-visible" \
-                        "/usr/bin/python3 '$REPO_ROOT/tests/macos/kinfo_probe.py' $FOREIGN_PID"
+                        "/usr/bin/python3 ./kinfo_probe.py $FOREIGN_PID"
   probe sysctl_cli      ""              "sysctl kern.proc.pid.$FOREIGN_PID"
   # 3. dslocal is denied, but DarwinDirectory (its macOS 15+ successor) is a read root.
   probe darwin_directory ""             "ls -la /private/var/db/DarwinDirectory/local"
