@@ -58,6 +58,9 @@ const TOOL_ICONS = {
   // are the same route by another name and used to land on the wrench.
   mcp__github__search_issues: "blocks", mcp: "blocks", "linear.create_issue": "blocks",
   mcp_call: "blocks", mcp_search: "blocks",
+  // A server the user named after a domain. DGC's own server-name field allows dots
+  // ([A-Za-z0-9][A-Za-z0-9_.-]{0,63}), so one dot was never the bound the regex needed.
+  "sentry.io.list_issues": "blocks", "api.github.com.search": "blocks",
   // Nothing DGC has a better word for.
   screenshot: "wrench", some_new_tool: "wrench", tool: "wrench", SlashCommand: "wrench",
 };
@@ -273,6 +276,45 @@ test("no transcript icon is painted in a translucent token", () => {
   assert.match(mainCss, /\.compaction > summary > \.ic \{[^}]*color: var\(--muted\)/);
   // Every step's mark is the same grey, whatever became of the step.
   assert.doesNotMatch(mainCss, /\.tool\[data-status="denied"\] \.glyph/);
+});
+
+test("a step the header has a word for does not call itself \"Used tool\"", () => {
+  // Giving these three a mark exposed the other half of the same gap: the card said "Used tool
+  // multi edit" under a header that said "Edited 1 file". The icon and the words come from the
+  // same reading of the step, so they have to agree.
+  const rows = [["MultiEdit", "m1", /^Edited\b/], ["create_file", "c1", /^Created\b/],
+    ["code_intel", "i1", /^Read code structure\b/]];
+  for (const [n, [name, id, verb]] of rows.entries()) {
+    const { doc, event, errors } = panel();
+    start(event, `t${n}`);
+    call(event, name, id);
+    result(event, name, id);
+    event({ type: "turn_end", turn_id: `t${n}`, reason: "completed", final_message_id: null });
+    const text = doc.querySelector(`.tool[data-call-id="${id}"] .verb`).textContent;
+    assert.match(text, verb, `${name} verb`);
+    assert.doesNotMatch(text, /Used tool/, `${name} has a word of its own`);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("every icon name the panel asks for is one the panel actually has", () => {
+  // icon() resolves the key before it writes data-icon, so a typo can no longer paint the wrench
+  // while claiming to be a book — but it would still ship a wrench. This catches it a step
+  // earlier, at the name, and covers the ~30 literal call sites the two tables do not.
+  const main = readFileSync(new URL("../media/main.js", import.meta.url), "utf8");
+  const section = (start) => main.split(start)[1].split("\n  };")[0];
+  const have = new Set([...section("const ICON_PATHS = {").matchAll(/^\s*"([a-z0-9-]+)":/gm)].map((m) => m[1]));
+  const asked = new Map();
+  const want = (name, where) => { if (!asked.has(name)) asked.set(name, where); };
+  for (const m of main.matchAll(/\bicon\("([a-z0-9-]+)"/g)) want(m[1], "an icon() call");
+  for (const m of main.matchAll(/\bsetIcon\([^,)]*,\s*"([a-z0-9-]+)"/g)) want(m[1], "a setIcon() call");
+  for (const m of main.matchAll(/\bdata-icon="([a-z0-9-]+)"/g)) want(m[1], "a wrapper's data-icon");
+  for (const table of ["const TOOL_ICON = {", "const BUCKET_ICON = {"]) {
+    for (const m of section(table).matchAll(/:\s*"([a-z0-9-]+)"/g)) want(m[1], table.split(" ")[1]);
+  }
+  for (const m of section("const IMAGE_FAILURES = {").matchAll(/\[\s*"([a-z0-9-]+)"/g)) want(m[1], "IMAGE_FAILURES");
+  assert.ok(asked.size > 30, `the scan found the call sites (${asked.size})`);
+  for (const [name, where] of asked) assert.ok(have.has(name), `${where} asks for "${name}", which ICON_PATHS has not got`);
 });
 
 test("the licence notice lists exactly the icons that ship", () => {

@@ -1596,7 +1596,12 @@ body.ask-docked #tasks-panel { display: none; }
 /* Where each reasoning block came from, muted beside its header: "Thought for 9s · summarized by
    Anthropic". Short provider summaries render inline as a .thought-note (only the last paragraph
    shares a line with the " · summarized" hint); a withheld block is a static, non-interactive row. */
-.disclosure .thought-chev, .thought-static .thought-chev { display: inline-block; width: 1.1em; }
+/* --faint, like every other disclosure mark (.tool .chev, the group summary's "›", the diff
+   toggle). It inherited --muted from .disclosure, which is the token the new outline set paints
+   in, so this triangle was the one text glyph left reading as a row's ICON: same grey, same left
+   column, four times the ink of the hairline book on the row below it. Colour demotes it to a
+   control without pre-empting the full chevron pass. */
+.disclosure .thought-chev, .thought-static .thought-chev { display: inline-block; width: 1.1em; color: var(--faint); }
 .thought-prov, .thought-agent { white-space: nowrap; }
 .reasoning .thought-cut { display: block; margin-top: var(--sp-1); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--muted); white-space: normal; }
 .reasoning .thought-cut.alone { margin-top: 0; }

@@ -329,8 +329,14 @@
   const ICON_STROKE = { md: 2, xs: 2, lg: 1.5 };   // painted 1.167 / 1.000 / 1.250 CSS px
   // The box is sized in CSS (--icon / --icon-xs / --icon-lg), so the stroke scales with it.
   function icon(name, size = "md") {
-    const body = ICON_PATHS[name] || ICON_PATHS.wrench;
-    return `<svg class="ic ic-${size}" data-icon="${name}" viewBox="0 0 24 24"`
+    // Resolve the key BEFORE writing it. data-icon is the handle everything else goes by — the
+    // tests, the render census, a reader's grep — so it has to name the artwork actually drawn.
+    // Emitting the name that was ASKED for meant a typo in one of the tables or at one of the
+    // call sites would paint the fallback while still claiming to be the icon it missed, and
+    // every assertion in the suite would pass.
+    const key = ICON_PATHS[name] ? name : ICON_FALLBACK;
+    const body = ICON_PATHS[key];
+    return `<svg class="ic ic-${size}" data-icon="${key}" viewBox="0 0 24 24"`
       + ` fill="none" stroke="currentColor" stroke-width="${ICON_STROKE[size] || 2}"`
       + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
   }
@@ -338,9 +344,10 @@
   // on every event would restart the running group's CSS pulse and make the header stutter.
   // Every wrapper that repaints is a --icon one; a size here would only ever be wrong silently.
   function setIcon(wrap, name) {
-    if (!wrap || wrap.dataset.icon === name) return wrap;
-    wrap.dataset.icon = name;
-    wrap.innerHTML = icon(name);
+    const key = ICON_PATHS[name] ? name : ICON_FALLBACK;   // the wrapper's handle never lies either
+    if (!wrap || wrap.dataset.icon === key) return wrap;
+    wrap.dataset.icon = key;
+    wrap.innerHTML = icon(key);
     return wrap;
   }
   // What kind of step this is. The header of a group and the cards under it speak the same
@@ -380,17 +387,23 @@
   }
   // An MCP server's tool, however the engine spells it: DGC's mcp__server__tool, the bare name
   // "mcp", or the Codex engine's server.tool. The dotted form only ever applies to a name DGC has
-  // no mapping for, so it can never shadow a real tool.
+  // no mapping for, so it can never shadow a real tool. More than one dot, because a server is
+  // named by the user against [A-Za-z0-9][A-Za-z0-9_.-]{0,63} and "sentry.io" or "api.github.com"
+  // are perfectly ordinary names — "sentry.io.list_issues" is still one server's tool.
   function isMcpName(name) {
     const plain = canonicalTool(name);
     return plain === "mcp" || String(name || "").startsWith("mcp__")
-      || (!TOOL_ICON[plain] && /^[a-z0-9_-]+\.[a-z0-9_-]+$/.test(plain));
+      || (!TOOL_ICON[plain] && /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/.test(plain));
   }
   const iconForTool = (name) => TOOL_ICON[canonicalTool(name)] || (isMcpName(name) ? "blocks" : ICON_FALLBACK);
   const TOOL_COPY = {
     read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
+    // The CLI's own word for it (dgc/ui.py's activity verbs), so both surfaces name the step alike.
+    code_intel: ["Reading code structure", "Read code structure"],
     git_diff: ["Inspecting changes", "Inspected changes"],
-    write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
+    write_file: ["Writing", "Wrote"], create_file: ["Creating", "Created"],
+    edit_file: ["Editing", "Edited"], multi_edit: ["Editing", "Edited"],
+    apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
     view_image: ["Viewing image", "Viewed image"], browser: ["Using browser", "Used browser"],
