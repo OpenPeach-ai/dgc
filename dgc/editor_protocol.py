@@ -473,6 +473,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "cancel": {},
     "interrupt": {},
+    # The editor says it is still there. Additive and capability-gated ("editor_liveness"),
+    # so a newer editor talking to an older backend just collects one command_rejected and
+    # carries on -- no protocol version bump, and no fixture/capture churn.
+    "ping": {},
     "set_mode": {
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
         "live": _B(False),
