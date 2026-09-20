@@ -112,6 +112,17 @@ the current turn; press **Enter** again on a new prompt to queue it.
 `/docs` opens this library in the terminal (searchable; the same pages as
 docs.vibedgc.com). `#a fact` appends to project memory — see **Memory**. `@path`
 attaches one file; `$skill` applies a workflow.
+
+## How DGC writes back
+
+Answers are plain professional text. DGC does not decorate them with emoji or
+other ornamental symbols — not in headings, not as list markers, not as status
+marks — unless you ask for them, or the file it is editing already uses them.
+Files in your workspace are written as links that open at the right line, and
+sources as ordinary links.
+
+Ask for a different style in the prompt and you get it for that turn. To change
+it for a project, say so in `DGC.md` — see **Memory**.
 """.strip()),
 
     ("Keyboard shortcuts", "essential key bindings in the composer + transcript", """

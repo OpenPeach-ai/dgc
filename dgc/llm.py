@@ -501,6 +501,30 @@ def _raw_chunks(raw, response):
         yield chunk
 
 
+def _until_watcher_closes(chunks, response):
+    """Yield a chunked body's bytes, ending quietly when the stall watcher closes it mid-read.
+
+    `_raw_chunks` guards the non-chunked path itself. A chunked body is read through urllib3 and
+    http.client instead, and there the watcher's `close()` drops the socket under an in-flight
+    read: `_safe_read` then finds `self.fp` already set to None. That is the watcher doing its
+    job, not a transport fault, so the stream ends the way an EOF ends it and the stall error the
+    watcher raised is what the caller sees.
+    """
+    stream = iter(chunks)
+    while True:
+        try:
+            chunk = next(stream)
+        except StopIteration:
+            return
+        except (ValueError, AttributeError, requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ConnectionError):
+            if getattr(response, "_dgc_closed", False) or getattr(
+                    getattr(response, "raw", None), "closed", False):
+                return          # the watcher closed the response under this read
+            raise
+        yield chunk
+
+
 def _bounded_stream_lines(response, maximum: int, label: str):
     """Yield decoded lines while bounding real streamed bodies before line buffering."""
     iterator = getattr(response, "iter_content", None)
@@ -519,7 +543,8 @@ def _bounded_stream_lines(response, maximum: int, label: str):
     if callable(getattr(body, "read1", None)) and getattr(body, "chunked", None) is False:
         chunks = _raw_chunks(body, response)          # a real, non-chunked urllib3 body
     else:
-        chunks = iterator(chunk_size=65_536)          # chunked bodies and injected doubles
+        # chunked bodies and injected doubles
+        chunks = _until_watcher_closes(iterator(chunk_size=65_536), response)
     total = 0
     pending = bytearray()
     for chunk in chunks:

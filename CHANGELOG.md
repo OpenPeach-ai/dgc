@@ -4,6 +4,21 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.41.9 — 2026-09-20
+
+- **A model that goes quiet is reported, not a traceback.** When a model opens a stream and then
+  sends nothing, DGC's stall watcher closes the request and reports *No response from the model*,
+  then tries again. On a chunked response — which is what real streaming endpoints send — that
+  close landed inside the HTTP client while a read was still in flight, and the read raised
+  `AttributeError: 'NoneType' object has no attribute 'read'` instead. The watcher's own message
+  and its retry were lost behind it. Both of DGC's body readers now end the stream the way
+  end-of-file ends it when the watcher is what closed it; a genuine transport fault still raises.
+  Only the non-chunked reader was guarded before, so this had been reachable since the stall
+  watcher shipped in 0.39.0.
+- **The response style rule is documented.** 0.41.8 told the model to write plain professional
+  text with no emoji or decorative symbols unless you ask for them; that reached the changelog but
+  not `/docs`. It is now in **Getting started**.
+
 ## 0.41.8 — 2026-09-20
 
 - **Extra high and Ultra can reason deeply.** The reasoning watchdog stopped every level after
