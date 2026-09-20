@@ -282,6 +282,23 @@ class StrictProfileLive(unittest.TestCase):
         except (subprocess.TimeoutExpired, OSError) as exc:
             return subprocess.CompletedProcess(argv, 124, "", f"{type(exc).__name__}: {exc}")
 
+    def assertNoEffect(self, command: str, marker: Path, *, network=False):
+        """A side-effecting command: blocked inside, and the control proves it could have worked.
+
+        The control runs the command for real, so its effect must be checked BEFORE it runs and
+        cleaned up after — otherwise the control's own file is read as the sandbox's escape.
+        """
+        confined, _ = self.run_confined(command, network=network)
+        self.assertNotEqual(confined.returncode, 0,
+                            f"LEAK: {command!r} succeeded inside the sandbox")
+        self.assertFalse(marker.exists(),
+                         f"LEAK: {command!r} wrote {marker} from inside the sandbox")
+        control = self.run_free(command)
+        self.assertEqual(control.returncode, 0,
+                         f"untestable: the control failed too: {control.stderr[:200]}")
+        self.assertTrue(marker.exists(), "untestable: the control wrote nothing either")
+        marker.unlink(missing_ok=True)
+
     def assertBlocked(self, command: str, *, network=False, expect_in_control=""):
         confined, _ = self.run_confined(command, network=network)
         control = self.run_free(command)
@@ -321,7 +338,7 @@ class StrictProfileLive(unittest.TestCase):
     # --- the private temporary folder ---------------------------------------------------------
     def test_home_and_tmpdir_are_a_private_folder_removed_after_the_call(self):
         done, box = self.run_confined(
-            'printf "%s|%s" "$HOME" "$TMPDIR"; echo secret > "$TMPDIR/f" && echo WROTE')
+            'printf "%s|%s\n" "$HOME" "$TMPDIR"; echo secret > "$TMPDIR/f" && echo WROTE')
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.strip(), f"{box}/t|{box}/t\nWROTE")
         self.assertFalse(Path(box).exists(), "the private folder survived the call")
@@ -352,8 +369,7 @@ class StrictProfileLive(unittest.TestCase):
             self.assertBlocked(f"ls {path}")
         marker = Path("/private/tmp") / f"dgc-seatbelt-live-{os.getpid()}"
         self.addCleanup(marker.unlink, True)
-        self.assertBlocked(f"echo x > {marker}")
-        self.assertFalse(marker.exists(), "LEAK: a write reached the host's shared /tmp")
+        self.assertNoEffect(f"echo x > {marker}", marker)
 
     def test_the_home_folder_and_dgc_state_are_hidden(self):
         home = Path.home()
@@ -364,8 +380,7 @@ class StrictProfileLive(unittest.TestCase):
         self.assertBlocked(f"ls {home}")
         escape = home / f".dgc-seatbelt-live-write-{os.getpid()}"
         self.addCleanup(escape.unlink, True)
-        self.assertBlocked(f"echo x > {escape}")
-        self.assertFalse(escape.exists(), "LEAK: a write reached the home folder")
+        self.assertNoEffect(f"echo x > {escape}", escape)
 
     def test_outside_processes_cannot_be_listed_inspected_or_signalled(self):
         victim = subprocess.Popen(["/bin/sleep", "600"],
@@ -398,7 +413,9 @@ class StrictProfileLive(unittest.TestCase):
         self.run_confined(f"defaults write {domain} k v")
         self.assertNotEqual(self.host(["/usr/bin/defaults", "read", domain, "k"]).returncode, 0,
                             "LEAK: a preference written inside the sandbox reached cfprefsd")
-        self.assertBlocked(f"launchctl submit -l dgc.live.{os.getpid()} -- /usr/bin/true")
+        label = f"dgc.live.{os.getpid()}"
+        self.addCleanup(self.host, ["/bin/launchctl", "remove", label])   # the control submits it
+        self.assertBlocked(f"launchctl submit -l {label} -- /usr/bin/true")
 
     def test_a_sandbox_cannot_be_nested_from_inside(self):
         self.assertBlocked("/usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true")
