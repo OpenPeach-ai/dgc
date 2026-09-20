@@ -23,7 +23,9 @@ from pathlib import Path
 # before the check that uses it. The product does not depend on this (dgc's own writes name
 # their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
 # so ask for it once, here, rather than in every caller.
-_WATCHDOG_DEFAULT_S = {"nt": 28 * 60}.get(os.name, 32 * 60 if sys.platform == "darwin" else 0)
+# 34 minutes: inside the 40-minute job limit the CI legs use, with room left for the steps that
+# summarise the log and upload it.
+_WATCHDOG_DEFAULT_S = {"nt": 34 * 60}.get(os.name, 34 * 60 if sys.platform == "darwin" else 0)
 if int(os.environ.get("DGC_TESTS_WATCHDOG_S") or _WATCHDOG_DEFAULT_S):
     # A suite that hangs on a CI runner is killed by the job's own time limit, which discards the
     # log and every artifact with it — so the one thing nobody can see is where it stopped. Dump
