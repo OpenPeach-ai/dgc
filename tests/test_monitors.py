@@ -35,7 +35,7 @@ else:
 from dgc import monitors as monitors_mod    # noqa: E402  (after the redirect above)
 from dgc import sessions, tools             # noqa: E402
 from dgc.agent import Agent                 # noqa: E402
-from dgc.config import Config               # noqa: E402
+from dgc.config import Config, DEFAULTS     # noqa: E402
 from dgc.editor_protocol import COMMAND_FIELDS, EVENT_FIELDS, event_error  # noqa: E402
 from dgc.llm import ChatResult, ToolCall    # noqa: E402
 from dgc.monitors import MonitorHub, WakePolicy  # noqa: E402
@@ -644,7 +644,14 @@ class ExposureTests(unittest.TestCase):
         return {tool["function"]["name"] for tool in agent._tool_schemas()}
 
     def test_schema_guidance_and_exit_sentence_follow_exposure(self):
-        agent = self.agent()
+        # The wording gate belongs to the adaptive profile; the guidance follows the tool on every
+        # profile, and the blockers below (plan mode, a subscription engine, a sub-agent) are the
+        # ones that hold everywhere.
+        default = self.agent()
+        default._activate_tool_intents("rename the helper in utils.py", replace=True)
+        self.assertIn("monitor", self.names(default), "the default profile needs no watch words")
+        self.assertIn("# Background monitors", default.system_prompt())
+        agent = self.agent(tool_profile="adaptive")
         self.assertNotIn("monitor", self.names(agent))
         self.assertNotIn("# Background monitors", agent.system_prompt())
         agent._activate_tool_intents("watch the deploy log and tell me when it finishes", replace=True)
@@ -757,7 +764,11 @@ class AgentDeliveryTests(unittest.TestCase):
         after = next(c for c in calls if notice_kind(c["last"]))
         self.assertEqual(after["reason"], "monitor_event")
         self.assertEqual(calls[0]["reason"], "user_turn")
-        self.assertNotIn("web_fetch", after["tools"], "command output activates no tools")
+        # "look up the latest docs" is command output, not a request: it must not be read as one.
+        # (The default profile offers web_fetch either way, so the turn's intent set -- kept for
+        # the next wake turn -- is where this shows.)
+        self.assertIn("monitor", agent._last_turn_tool_intents, "the prompt's own intent is there")
+        self.assertNotIn("web", agent._last_turn_tool_intents, "command output activates no tools")
         self.assertEqual(after["effort"], calls[0]["effort"], "nor a thinking bump")
         self.assertFalse(any("<user-interjection>" in str(m.get("content")) for m in agent.messages))
         self.assertEqual(agent.goal_status, "none")
@@ -894,12 +905,18 @@ class AgentDeliveryTests(unittest.TestCase):
 
     def test_background_exit_notice_is_on_wherever_events_are_delivered(self):
         """The real gating: an adaptive-profile request that never mentions watching still gets it."""
-        agent = self.agent(mode="auto")
-        self.assertEqual(agent.config.get("tool_profile", "adaptive"), "adaptive")
+        agent = self.agent(mode="auto", tool_profile="adaptive")
+        self.assertEqual(agent.config.get("tool_profile"), "adaptive")
         calls = scripted(agent, [call("bash", command="echo BUILD-OK; sleep 0.3", background=True),
                                  ChatResult(content="started it")])
         self.assertTrue(agent.run_turn("run the build in the background"))
-        self.assertNotIn("monitor", calls[0]["tools"], "the monitor tool itself stays intent-gated")
+        self.assertNotIn("monitor", calls[0]["tools"],
+                         "under adaptive the monitor tool itself stays intent-gated")
+        # The shipped default offers the tool to the same request; the exit notice is unrelated.
+        self.assertEqual(DEFAULTS["tool_profile"], "standard")
+        default = self.agent(mode="auto")
+        default._activate_tool_intents("run the build in the background", replace=True)
+        self.assertIn("monitor", {t["function"]["name"] for t in default._tool_schemas()})
         result = next(m["content"] for m in agent.messages if m.get("role") == "tool")
         self.assertIn("notified once when it exits", result)
         bash = next(t for t in agent._tool_schemas() if t["function"]["name"] == "bash")
@@ -1776,11 +1793,17 @@ class ServeTests(unittest.TestCase):
         with MockModel(script) as model:
             serve = Serve(self, model, monitor_wake_delay_s=1, monitor_wake_cooldown_s=1)
             serve.auto()
+            # The adaptive profile is the one that withholds the tool, and it is picked at runtime:
+            # a stored "adaptive" in config.json is migrated to "standard" on load.
+            serve.send({"type": "set_config", "values": {"tool_profile": "adaptive"},
+                        "request_id": "profile"})
+            self.assertTrue(serve.wait(lambda e: e["type"] == "config"
+                                       and e.get("request_id") == "profile", 30))
             serve.send({"type": "prompt", "text": "run the build in the background", "request_id": "p1"})
             self.assertTrue(serve.wait(lambda e: e["type"] == "turn_end" and e["turn_id"] == "t1", 60))
             first = model.requests[0]
             names = {t["function"]["name"] for t in first.get("tools") or []}
-            self.assertNotIn("monitor", names, "the default adaptive profile; no watch words")
+            self.assertNotIn("monitor", names, "the adaptive profile; no watch words")
             bash = next(t for t in first["tools"] if t["function"]["name"] == "bash")
             self.assertIn("notified once when it exits", bash["function"]["description"])
             woke = serve.wait(lambda e: e["type"] == "turn_start" and e.get("kind") == "monitor", 30)

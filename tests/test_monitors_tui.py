@@ -359,8 +359,11 @@ class TuiMonitorTests(unittest.TestCase):
         monitors = pages["Background monitors"]
         self.assertNotIn("They stop on `/new`", monitors)
         self.assertIn("In the terminal `/new` opens another agent", monitors)
-        self.assertIn("watch or wait for something", monitors)
-        self.assertIn("`tool_profile` is `full`", monitors)
+        self.assertIn("offered on every request under the standard (default) and full tool profiles",
+                      monitors)
+        self.assertIn("`tool_profile: adaptive` it appears only when the request asks DGC to "
+                      "watch or wait for something", monitors)
+        self.assertIn("Plan mode never offers it", monitors)
         usage = pages["Token usage"]
         self.assertNotIn("for the rest of the session", usage)
         self.assertIn("until DGC restarts", usage)

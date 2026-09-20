@@ -2,8 +2,8 @@
 
 The model can only delegate what it is offered and told about: these checks pin that the `task`
 tool, the specialist roster and the calibrated delegation policy reach the top-level model under
-Ultra on every tool profile and permission mode, and that the default profile does not pay for
-guidance about a tool it was not offered. The policy's wording was measured on real runs: split
+Ultra on every tool profile and permission mode, and that no profile pays for guidance about a
+tool it was not offered. The policy's wording was measured on real runs: split
 parts that change different files into one parallel batch; keep a single part, shared files and
 reviews of tested changes with the lead.
 """
@@ -78,7 +78,7 @@ class UltraDelegationTests(unittest.TestCase):
             self.assertNotIn(wording, prompt)
 
     def test_ultra_offers_task_and_policy_on_every_profile_and_mode(self):
-        for profile in ("adaptive", "full"):
+        for profile in ("standard", "adaptive", "full"):
             for mode in ("default", "acceptEdits", "auto"):
                 with self.subTest(profile=profile, mode=mode):
                     agent = self.agent(ultra_mode=True, tool_profile=profile, mode=mode,
@@ -125,8 +125,16 @@ class UltraDelegationTests(unittest.TestCase):
         self.assertNotIn("task", self.names(agent))
         self.assertNotIn("# DGC Ultra execution profile", agent.system_prompt())
 
-    def test_default_profile_pays_for_guidance_only_when_task_is_offered(self):
-        agent = self.agent(ultra_mode=False, mode="default")
+    def test_guidance_is_paid_for_only_when_task_is_offered(self):
+        # The default `standard` profile offers `task` on every top-level turn, so the guidance
+        # always travels with it. The adaptive profile is where the tool can be withheld, and the
+        # guidance must not be sent about a tool that is not there.
+        default = self.agent(ultra_mode=False, mode="default")
+        default._activate_tool_intents("Rename the helper in utils.py.", replace=True)
+        self.assertIn("task", self.names(default))
+        self.assertIn("# Delegating work", default.system_prompt())
+
+        agent = self.agent(ultra_mode=False, mode="default", tool_profile="adaptive")
         agent._activate_tool_intents("Rename the helper in utils.py.", replace=True)
         self.assertNotIn("task", self.names(agent))
         self.assertNotIn("# Delegating work", agent.system_prompt())

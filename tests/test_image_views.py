@@ -972,9 +972,13 @@ class ViewImageToolTests(unittest.TestCase):
         self.assertEqual(tools.take_pending_images("view-image-test", ""), [], "a text file is not queued as an image")
 
     def test_offered_only_with_vision_and_intent(self):
+        # Vision is the hard gate on every profile. The wording gate is the adaptive profile's
+        # alone: the shipped default offers view_image to any vision model, asked or not.
         (self.root / "logo.png").write_bytes(png())
-        agent = make_agent(self.root, vision=True)
-        text_only = make_agent(self.root, vision=False)
+        agent = make_agent(self.root, vision=True, tool_profile="adaptive")
+        text_only = make_agent(self.root, vision=False, tool_profile="adaptive")
+        default = make_agent(self.root, vision=True)
+        default_text_only = make_agent(self.root, vision=False)
         try:
             names = lambda a: {t["function"]["name"] for t in a._tool_schemas()}
             self.assertNotIn("view_image", names(agent))
@@ -985,13 +989,18 @@ class ViewImageToolTests(unittest.TestCase):
             agent._activate_tool_intents("fix the failing test and figure out why", replace=True)
             self.assertNotIn("view_image", names(agent))
 
+            default._activate_tool_intents("fix the failing test and figure out why", replace=True)
+            self.assertIn("view_image", names(default), "the default profile needs no magic words")
+            default_text_only._activate_tool_intents("what does logo.png look like?", replace=True)
+            self.assertNotIn("view_image", names(default_text_only), "no vision, no view_image")
+
             agent._activate_tool_intents("fix the header", replace=True)
             agent._handle_call(ToolCall("r1", "read_file", {"path": "logo.png"}))
             self.assertIn("image", agent._active_tool_intents)
             self.assertIn("view_image", names(agent), "an image read turns view_image on for the turn")
         finally:
-            agent.mcp.stop_all()
-            text_only.mcp.stop_all()
+            for made in (agent, text_only, default, default_text_only):
+                made.mcp.stop_all()
 
     def test_parallel_reads_attribute_each_image(self):
         (self.root / "a.png").write_bytes(png(10, 10))

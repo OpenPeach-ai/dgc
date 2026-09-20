@@ -11405,18 +11405,31 @@ def test_benchmark_integrity():
         check("edit metamorphic gate rejects an incomplete corpus group",
               _missing_edit_base_rejected)
         _prompt_probe = _PS.run_probe()
+        from dgc.tools import TOOL_SCHEMAS as _options_tool_schemas
+        # The probe must report the SHIPPED surface. Under the default `standard` profile that is
+        # every product tool and every bundled skill; the only tools withheld are the ones with
+        # nothing to act on in this run (no background process, no monitor delivery, no notes, no
+        # active goal, code_action off, not plan mode) plus the question tool (`dgc -p` has nobody
+        # to answer it). Isolation still means no skill from the operator's HOME leaked in.
+        from dgc.config import BUILTIN_SKILLS as _bundled_skills_dir
+        _bundled_skill_names = {entry.name for entry in _bundled_skills_dir.iterdir()
+                                if (entry / "SKILL.md").is_file()}
+        _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
+                           "present_plan", "propose_options", "python", "update_goal"}
+        # Measured at 6,070 on this release; the ceiling is a bloat gate, not a target.
+        _PROBE_TOKEN_CEILING = 6400
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
-              and _prompt_probe.get("active_skills") == []
-              and len(_prompt_probe.get("tools", [])) == 9
-              and not ({"skill", "repo_map", "code_intel"}
-                       & {tool.get("name") for tool in _prompt_probe.get("tools", [])})
-              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2800
+              and set(_prompt_probe.get("active_skills") or []) == _bundled_skill_names
+              and len(_prompt_probe.get("tools", [])) == 22
+              and ({tool.get("name") for tool in _prompt_probe.get("tools", [])}
+                   == {t["function"]["name"] for t in _options_tool_schemas} - _probe_withheld)
+              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
-                      "# Permission mode: auto"})
-        from dgc.tools import TOOL_SCHEMAS as _options_tool_schemas
+                      "# Permission mode: auto"},
+              _prompt_probe.get("estimated_wire_tokens"))
         _options_tool = next(t for t in _options_tool_schemas if t["function"]["name"] == "propose_options")
         _options_text = json.dumps(_options_tool, separators=(",", ":"))
         _options_description = _options_tool["function"]["description"]
@@ -11455,10 +11468,10 @@ def test_benchmark_integrity():
                 _unguarded_names = {tool.get("name") for tool in _PS.run_probe().get("tools", [])}
         check("benchmark probe never offers questions",
               _PS._QuietUI.non_interactive is True
-              and len(_guarded_probe.get("tools", [])) == 9
+              and len(_guarded_probe.get("tools", [])) == 22
               and "propose_options" not in {tool.get("name") for tool in _guarded_probe.get("tools", [])}
               and "propose_options" in _unguarded_names
-              and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < 2800,
+              and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING,
               _guarded_probe.get("estimated_wire_tokens"))
         # The probe reports section sizes only; read the cadence section itself off the same
         # isolated agent the probe measures, so the two restored bullets cannot silently go again.
