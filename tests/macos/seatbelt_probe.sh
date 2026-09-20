@@ -285,7 +285,7 @@ run_compat() {
   compat python_venv "/usr/bin/python3 -m venv venv && ./venv/bin/python -c 'import sys; print(sys.version)'"
   compat pip_install "./venv/bin/python -m pip install --quiet --disable-pip-version-check six && ./venv/bin/python -c 'import six; print(six.__version__)'"
   compat node       "node --version"
-  compat npm_ci     "mkdir -p npmproj && cd npmproj && printf '{\"name\":\"p\",\"version\":\"1.0.0\",\"dependencies\":{\"left-pad\":\"1.3.0\"}}\n' > package.json && npm install --no-audit --no-fund --silent && node -e \"require('left-pad')\""
+  compat npm_ci     "mkdir -p npmproj && cd npmproj && printf '{\"name\":\"p\",\"version\":\"1.0.0\",\"dependencies\":{\"left-pad\":\"1.3.0\"}}\n' > package.json && npm install --no-audit --no-fund --no-progress 2>&1 | tail -5 && node -e \"require('left-pad')\""
   compat brew       "command -v brew >/dev/null && brew --version | head -1 || echo 'no brew on this runner'"
   compat curl_tls   "curl -sS -m 20 https://registry.npmjs.org/left-pad -o /dev/null && echo tls-ok"
 

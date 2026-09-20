@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -328,13 +329,17 @@ class StrictProfileLive(unittest.TestCase):
         victim = subprocess.Popen(["/bin/sleep", "600"],
                                   env={**os.environ, "DGC_LIVE_MARK": "foreign-env"})
         self.addCleanup(victim.kill)
-        try:
-            self.assertBlocked(f"ps -Eww -p {victim.pid}", expect_in_control="DGC_LIVE_MARK")
-            self.assertBlocked(f"ps -A -o pid= | tr -d ' ' | grep -qx {victim.pid}")
-            self.assertBlocked(f"kill -TERM {victim.pid}")
-        finally:
-            still_running = victim.poll() is None
-        self.assertTrue(still_running, "LEAK: a signal reached a process outside the sandbox")
+        self.assertBlocked(f"ps -Eww -p {victim.pid}", expect_in_control="DGC_LIVE_MARK")
+        self.assertBlocked(f"ps -A -o pid= | tr -d ' ' | grep -qx {victim.pid}")
+        # The signal is checked before its control, because the control kills the victim.
+        confined, _ = self.run_confined(f"kill -TERM {victim.pid}")
+        self.assertNotEqual(confined.returncode, 0, "LEAK: kill succeeded inside the sandbox")
+        time.sleep(0.5)
+        self.assertIsNone(victim.poll(), "LEAK: a signal reached a process outside the sandbox")
+        self.assertEqual(self.run_free(f"kill -TERM {victim.pid}").returncode, 0)
+        time.sleep(0.5)
+        self.assertIsNotNone(victim.poll(),
+                             "untestable: the control could not signal it either")
 
     def test_apps_jobs_and_preferences_cannot_be_started_from_inside(self):
         # `open` and `defaults` are judged by their effect outside the sandbox, not by their exit

@@ -28,11 +28,21 @@
 ; Nothing here replaces DGC's approval prompts: confinement never turns an arbitrary shell
 ; string into a trusted read-only operation.
 ;
-; Attribution: the sysctl allow-list, the pseudo-tty/device rules and the network-mode service
-; list are adapted from the Seatbelt policies of openai/codex (Apache-2.0):
-; https://github.com/openai/codex — see THIRD_PARTY_NOTICES.md. Changes: deny-by-default with an
-; explicit system read-list instead of read-everywhere, a private per-call temporary folder, and
-; the parameterised workspace/temporary/extra-read rules DGC appends.
+; Attribution. The sysctl allow-list, the pseudo-tty/device rules and the network-mode service
+; list are adapted from the Seatbelt policies of openai/codex (which in turn credit Chromium's
+; macOS sandbox policies):
+;
+;   Copyright 2025 OpenAI — https://github.com/openai/codex
+;   Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+;   except in compliance with the License. You may obtain a copy of the License at
+;   http://www.apache.org/licenses/LICENSE-2.0 — distributed on an "AS IS" BASIS, WITHOUT
+;   WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;
+; Changed by DGC: deny-by-default with an explicit system read-list instead of read-everywhere,
+; a private per-call temporary folder, parameterised workspace/temporary/extra-read rules, IP-only
+; networking, and extra denies for the keychain files, dslocal, /private/etc/ssh, the TCC database
+; and the kern.procargs sysctls. The full notice is in THIRD_PARTY_NOTICES.md in the DGC source
+; repository (https://github.com/OpenPeach-ai/dgc).
 
 (version 1)
 
