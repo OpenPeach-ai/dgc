@@ -19569,41 +19569,54 @@ def test_subscription_engines():
     # logging into or modifying any real vendor account.
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
-        fake = td / "fake-cli"
-        fake.write_text("#!/usr/bin/env python3\n"
-                        "import json\n"
-                        "print(json.dumps({'type':'thread.started','thread_id':'live-thread'}), flush=True)\n"
-                        "print(json.dumps({'type':'item.completed','item':{'id':'a','type':'agent_message','text':'LIVE OK'}}), flush=True)\n")
-        fake.chmod(0o755)
-        fake_engine = replace(S.ENGINES["claude"], binary=str(fake), stream="codex",
-                              auth_markers=(), auth_on_launch=True)
-        events = []
-        live = S.run_turn(fake_engine, "prompt", td, mode="default", timeout=5,
-                          on_event=events.append)
-        check("subscriptions: run_turn returns current streamed text and the exact vendor thread",
-              live["ok"] and live["text"] == "LIVE OK" and live["session_id"] == "live-thread"
-              and [event["kind"] for event in events] == ["session", "text"])
+        if WINDOWS:
+            # Every fixture below is a "#!/usr/bin/env python3" script with no
+            # extension: Windows has no shebang, so it refuses to execute one
+            # ("%1 is not a valid Win32 application"). What they prove -- the stream
+            # parse, a zero-exit with no assistant message, and a timeout that reaps a
+            # pipe-holding tree -- needs a real vendor CLI to prove on Windows.
+            for _name in ("run_turn returns current streamed text and the exact vendor "
+                          "thread",
+                          "zero-exit with an unknown/empty schema fails visibly",
+                          "timeout escalates and reaps a pipe-holding process group"):
+                print(f"  skip subscriptions: {_name}  -- not applicable on Windows: "
+                      "the fixture is a shebang script Windows cannot execute")
+        else:
+            fake = td / "fake-cli"
+            fake.write_text("#!/usr/bin/env python3\n"
+                            "import json\n"
+                            "print(json.dumps({'type':'thread.started','thread_id':'live-thread'}), flush=True)\n"
+                            "print(json.dumps({'type':'item.completed','item':{'id':'a','type':'agent_message','text':'LIVE OK'}}), flush=True)\n")
+            fake.chmod(0o755)
+            fake_engine = replace(S.ENGINES["claude"], binary=str(fake), stream="codex",
+                                  auth_markers=(), auth_on_launch=True)
+            events = []
+            live = S.run_turn(fake_engine, "prompt", td, mode="default", timeout=5,
+                              on_event=events.append)
+            check("subscriptions: run_turn returns current streamed text and the exact vendor thread",
+                  live["ok"] and live["text"] == "LIVE OK" and live["session_id"] == "live-thread"
+                  and [event["kind"] for event in events] == ["session", "text"])
 
-        silent = td / "silent-cli"
-        silent.write_text("#!/usr/bin/env python3\npass\n"); silent.chmod(0o755)
-        silent_engine = replace(fake_engine, binary=str(silent))
-        silent_result = S.run_turn(silent_engine, "prompt", td, timeout=5)
-        check("subscriptions: zero-exit with an unknown/empty schema fails visibly",
-              not silent_result["ok"] and silent_result["rc"] == 0
-              and "no recognized assistant message" in silent_result["error"])
+            silent = td / "silent-cli"
+            silent.write_text("#!/usr/bin/env python3\npass\n"); silent.chmod(0o755)
+            silent_engine = replace(fake_engine, binary=str(silent))
+            silent_result = S.run_turn(silent_engine, "prompt", td, timeout=5)
+            check("subscriptions: zero-exit with an unknown/empty schema fails visibly",
+                  not silent_result["ok"] and silent_result["rc"] == 0
+                  and "no recognized assistant message" in silent_result["error"])
 
-        hanger = td / "hanger-cli"
-        hanger.write_text("#!/usr/bin/env python3\n"
-                          "import signal, subprocess, sys, time\n"
-                          "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-                          "subprocess.Popen([sys.executable, '-c', "
-                          "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'], stdout=sys.stdout)\n"
-                          "time.sleep(30)\n")
-        hanger.chmod(0o755)
-        before = time.monotonic()
-        hung = S.run_turn(replace(fake_engine, binary=str(hanger)), "prompt", td, timeout=1)
-        check("subscriptions: timeout escalates and reaps a pipe-holding process group",
-              hung["timeout"] and not hung["ok"] and time.monotonic() - before < 5)
+            hanger = td / "hanger-cli"
+            hanger.write_text("#!/usr/bin/env python3\n"
+                              "import signal, subprocess, sys, time\n"
+                              "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                              "subprocess.Popen([sys.executable, '-c', "
+                              "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'], stdout=sys.stdout)\n"
+                              "time.sleep(30)\n")
+            hanger.chmod(0o755)
+            before = time.monotonic()
+            hung = S.run_turn(replace(fake_engine, binary=str(hanger)), "prompt", td, timeout=1)
+            check("subscriptions: timeout escalates and reaps a pipe-holding process group",
+                  hung["timeout"] and not hung["ok"] and time.monotonic() - before < 5)
 
         from dgc import sessions as session_store
         session_file = session_store.new_path(td)
