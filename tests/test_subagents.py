@@ -337,8 +337,8 @@ class RegistryTests(unittest.TestCase):
                           len(started["model"])), (256, 200, 64, 200))
         with patch.object(subagents, "COALESCE_S", 0.01):
             reg.activity(sid(1), "a" * 120)
-            time.sleep(0.15)
-        self.assertEqual(len(rec.events[-1][1]["activity"]), 80)
+            wait_for_value(lambda: len(rec.events[-1][1].get("activity") or "") if rec.events else None,
+                           80, what="the coalesced activity to arrive clipped to 80 characters")
         reg.end(sid(1), "failed", "m" * 900)
         self.assertEqual(len(rec.events[-1][1]["message"]), 500)
 
@@ -479,14 +479,20 @@ class RegistryTests(unittest.TestCase):
 
         rec = Recorder()
         reg = SubagentRegistry(rec)
+        def settled():
+            updates = [p for kind, p in rec.events if kind == "updated"]
+            if not updates:
+                return None
+            last = updates[-1]
+            return (last["state"], last["waiting_for"], last["tool_calls"])
+
         with patch.object(subagents, "COALESCE_S", 0.05):
             reg.start(id=sid(1), description="x")
             reg.progress(sid(1), tool_calls=1, tokens=None)
             reg.waiting(sid(1), "permission")
             reg.progress(sid(1), tool_calls=2, tokens=None)
-            time.sleep(0.3)
-        last = [p for kind, p in rec.events if kind == "updated"][-1]
-        self.assertEqual((last["state"], last["waiting_for"], last["tool_calls"]), ("waiting", "permission", 2))
+            wait_for_value(settled, ("waiting", "permission", 2),
+                           what="the coalescer to emit one update carrying the final state")
 
 
 # ---------------------------------------------------------------------------------------------------

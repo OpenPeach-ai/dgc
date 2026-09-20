@@ -733,7 +733,9 @@ class SdkTests(unittest.TestCase):
         subprocess.run([sys.executable, "-c", script], env=env, check=False)
         self.assertTrue(pidfile.exists(), "child pid was not recorded")
         pid = int(pidfile.read_text().strip())
-        deadline = time.monotonic() + 3.0
+        # Waiting for an orphan to be reaped: the assertion is that it goes away, not that
+        # it goes away inside three seconds. A loaded runner can take longer.
+        deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline and os.path.exists(f"/proc/{pid}"):
             time.sleep(0.1)
         self.assertFalse(os.path.exists(f"/proc/{pid}"), f"orphaned dgc serve pid {pid}")

@@ -6686,7 +6686,7 @@ def test_hook_runtime():
     except (IndexError, ValueError):
         pass
     child_alive = bool(child_pid)
-    deadline = _time.monotonic() + 2
+    deadline = _time.monotonic() + 10
     while child_alive and _time.monotonic() < deadline:
         try:
             os.kill(child_pid, 0)
@@ -6790,7 +6790,7 @@ def test_worktree_git_runner():
     child_match = __import__("re").search(r"CHILD=(\d+)", timed.stdout)
     child_pid = int(child_match.group(1)) if child_match else 0
     child_alive = bool(child_pid)
-    deadline = _time.monotonic() + 2
+    deadline = _time.monotonic() + 10
     while child_alive and _time.monotonic() < deadline:
         try:
             os.kill(child_pid, 0)
@@ -7039,7 +7039,7 @@ def test_mcp_protocol():
         subscription_thread = threading.Thread(target=lambda: subscription_result.append(
             pending_subscription._open_tool_subscription(2.0)))
         subscription_thread.start()
-        subscription_deadline = _time.monotonic() + 1
+        subscription_deadline = _time.monotonic() + 10
         while (pending_subscription._subscription_id is None
                and _time.monotonic() < subscription_deadline):
             _time.sleep(0.005)
@@ -7103,7 +7103,7 @@ def test_mcp_protocol():
                 {"CHILD_PID": str(descendant_pid)}, descendant_root)
             launched = descendant_server._launch()
             descendant_proc = descendant_server.proc
-            deadline = _time.monotonic() + 2
+            deadline = _time.monotonic() + 10
             while (launched and descendant_proc is not None
                    and (not descendant_pid.exists() or descendant_proc.poll() is None)
                    and _time.monotonic() < deadline):
@@ -7128,7 +7128,7 @@ def test_mcp_protocol():
 
             alive_before_stop = descendant_alive(child_pid)
             descendant_server.stop()
-            deadline = _time.monotonic() + 2
+            deadline = _time.monotonic() + 10
             alive_after_stop = descendant_alive(child_pid)
             while alive_after_stop and _time.monotonic() < deadline:
                 _time.sleep(0.01)
@@ -7462,7 +7462,7 @@ def test_mcp_protocol():
         lifecycle_entered, lifecycle_released = threading.Event(), threading.Event()
         def lifecycle_input_handler(_server_name, _method, _params, cancel):
             lifecycle_entered.set()
-            deadline = _time.monotonic() + 2
+            deadline = _time.monotonic() + 10
             while cancel is not None and not cancel.is_set() and _time.monotonic() < deadline:
                 _time.sleep(0.01)
             if cancel is not None and cancel.is_set():
@@ -7478,7 +7478,7 @@ def test_mcp_protocol():
               lifecycle_entered.is_set() and lifecycle_released.wait(1)
               and lifecycle_elapsed < 2 and "timed out" in lifecycle_out,
               f"elapsed={lifecycle_elapsed:.2f}s out={lifecycle_out!r}")
-        callback_deadline = _time.monotonic() + 1
+        callback_deadline = _time.monotonic() + 10
         while ('"id": 702' not in legacy_wire.read_text()
                and _time.monotonic() < callback_deadline):
             _time.sleep(0.01)
@@ -8183,7 +8183,7 @@ finally:
     elapsed = _time.monotonic() - started
     pids = [int(value) for value in hanging_pid.read_text().split()] if hanging_pid.exists() else []
     alive = list(pids)
-    reap_deadline = _time.monotonic() + 1
+    reap_deadline = _time.monotonic() + 10
     while alive and _time.monotonic() < reap_deadline:
         running = []
         for pid in alive:

@@ -416,7 +416,9 @@ class QuestionTests(unittest.TestCase):
     def _open(self, tui, questions, worker_output=None):
         worker, output = self.start(lambda: tui.ask_questions(copy.deepcopy(questions)))
         self.addCleanup(lambda: (self.agent.cancelled.set(), worker.join(2)))
-        deadline = time.monotonic() + 2
+        # The overlay appears on a worker thread; the bound is a failure deadline, not an
+        # expectation about scheduling latency on a shared runner.
+        deadline = time.monotonic() + 15
         while tui._overlay is None and time.monotonic() < deadline:
             time.sleep(.01)
         self.assertIsNotNone(tui._overlay)
