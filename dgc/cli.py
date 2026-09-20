@@ -2778,6 +2778,10 @@ def _json_oneshot_ui(config):
         def mcp_input(self, server, kind, payload, *, cancel=None):
             return {"action": "cancel"}
 
+    # NDJSON out of `dgc -p --output-format json` is the same wire format `dgc serve` writes:
+    # UTF-8, one "\n"-terminated line per event, whatever the console's code page is.
+    from .protocol import configure_utf8_stdio
+    configure_utf8_stdio()
     return _OneShotJsonUI(Emitter(sys.stdout, sanitizer=lambda event: redact_value(
         event, secret_values(config))), PendingRequests())
 

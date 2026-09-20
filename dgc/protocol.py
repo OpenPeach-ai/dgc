@@ -9,7 +9,32 @@ from __future__ import annotations
 
 import itertools
 import json
+import sys
 import threading
+
+
+def configure_utf8_stream(stream):
+    """Make one text stream carry UTF-8 with ``\\n`` line endings, whatever the code page is.
+
+    The protocol is NDJSON: one UTF-8 line per event. On Windows a Python whose standard streams
+    default to the legacy code page (cp1252 on an English install) could not encode the ready
+    frame at all — the command registry contains "·" — and cp1252 also has no way to spell CJK or
+    an emoji, so a model's own text came out corrupted. Reconfiguring here fixes `dgc serve` run
+    from any terminal; the SDKs additionally set PYTHONUTF8/PYTHONIOENCODING on the child, which
+    fixes older runtimes too. ``newline="\\n"`` stops Windows turning every "\\n" into "\\r\\n",
+    which would put a stray byte at the end of each JSON line.
+    """
+    try:
+        stream.reconfigure(encoding="utf-8", errors="strict", newline="\n")
+    except (AttributeError, ValueError, OSError):
+        pass                  # a pipe wrapper or a test double: the Emitter still encodes safely
+    return stream
+
+
+def configure_utf8_stdio() -> None:
+    """Reconfigure this process's stdout and stderr for UTF-8 NDJSON output."""
+    configure_utf8_stream(sys.stdout)
+    configure_utf8_stream(sys.stderr)
 
 
 def strict_json_loads(value):
@@ -59,11 +84,59 @@ class Emitter:
             if len(line.encode("utf-8")) > self.max_event_bytes:
                 obj = self._too_large(obj)
                 line = json.dumps(obj, default=str, ensure_ascii=False, allow_nan=False)
+            self._write(line, obj)
+
+    def _write(self, line: str, obj: dict) -> None:
+        """Put one frame on the wire, or say why it could not go — never silently drop it.
+
+        ``UnicodeEncodeError`` is a ``ValueError``, so the old "the front-end went away" catch
+        swallowed it: on a Windows console with the legacy code page, an event carrying one
+        non-Latin-1 character disappeared, and the editor waited forever for a frame that was
+        written to nothing. A stream that cannot encode the text is not a closed pipe, so retry
+        the same frame as bytes, then as pure ASCII (``\\uXXXX`` escapes parse back to exactly the
+        same string), and only say so on stderr when even that fails.
+        """
+        try:
+            self.fp.write(line + "\n")
+            self.fp.flush()
+            return
+        except UnicodeEncodeError:
+            pass
+        except (BrokenPipeError, ValueError):
+            return  # the front-end went away — let the read loop notice on EOF
+        buffer = getattr(self.fp, "buffer", None)
+        if buffer is not None:
             try:
-                self.fp.write(line + "\n")
-                self.fp.flush()
-            except (BrokenPipeError, ValueError):
-                pass  # the front-end went away — let the read loop notice on EOF
+                buffer.write((line + "\n").encode("utf-8"))
+                buffer.flush()
+                return
+            except (BrokenPipeError, ValueError, OSError, AttributeError):
+                pass
+        try:
+            ascii_line = json.dumps(obj, default=str, ensure_ascii=True, allow_nan=False)
+            self.fp.write(ascii_line + "\n")
+            self.fp.flush()
+            return
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+        self._report_encoding_failure(obj)
+
+    _encoding_failure_reported = False
+
+    def _report_encoding_failure(self, obj: dict) -> None:
+        """Say once, on stderr, that this stream cannot carry the protocol."""
+        if Emitter._encoding_failure_reported:
+            return
+        Emitter._encoding_failure_reported = True
+        encoding = getattr(self.fp, "encoding", "?")
+        try:
+            sys.stderr.write(
+                f"[dgc] protocol output cannot be encoded as {encoding}: a "
+                f"{str(obj.get('type', 'event'))!r} event was not sent. Run dgc with "
+                "PYTHONUTF8=1 (or PYTHONIOENCODING=utf-8) so the backend can write UTF-8.\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
     # Correlation fields are what a blocked worker is waiting on. An event that carries one is a
     # question, not a notification: replacing it wholesale would leave the front-end with nothing

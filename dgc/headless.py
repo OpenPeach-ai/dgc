@@ -4847,6 +4847,11 @@ def _end_line(crash_log, line: str) -> None:
 
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
+    # Before anything is written: the protocol is UTF-8 NDJSON on every OS. A Windows console or
+    # pipe whose code page is cp1252 cannot encode the ready frame ("·" in the command registry)
+    # let alone a model's CJK or emoji output, and the frames were being dropped.
+    from .protocol import configure_utf8_stdio
+    configure_utf8_stdio()
     # FIRST, before the crash log and before Backend(): MCP servers and code intelligence start
     # child processes during init, and none of them may inherit the command pipe.
     command_stream, pipe_note = _claim_command_pipe()
