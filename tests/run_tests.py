@@ -23,14 +23,16 @@ from pathlib import Path
 # before the check that uses it. The product does not depend on this (dgc's own writes name
 # their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
 # so ask for it once, here, rather than in every caller.
-if os.name == "nt":
+_WATCHDOG_DEFAULT_S = {"nt": 28 * 60}.get(os.name, 32 * 60 if sys.platform == "darwin" else 0)
+if int(os.environ.get("DGC_TESTS_WATCHDOG_S") or _WATCHDOG_DEFAULT_S):
     # A suite that hangs on a CI runner is killed by the job's own time limit, which discards the
     # log and every artifact with it — so the one thing nobody can see is where it stopped. Dump
     # every thread's stack and exit instead, inside the job's limit, so a hang is diagnosable
-    # from the log like any other failure.
+    # from the log like any other failure. Off by default on Linux, where the suite is the slowest
+    # and the developer watching it can interrupt it themselves.
     import faulthandler as _faulthandler
-    _faulthandler.dump_traceback_later(int(os.environ.get("DGC_TESTS_WATCHDOG_S") or 28 * 60),
-                                       exit=True)
+    _faulthandler.dump_traceback_later(
+        int(os.environ.get("DGC_TESTS_WATCHDOG_S") or _WATCHDOG_DEFAULT_S), exit=True)
 
 if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF8") != "1":
     # Not os.execv: Windows has no exec, so CPython spawns a new process and exits this one with
@@ -44,7 +46,11 @@ if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF
 # defaults (tool profile, ultra mode, hooks…) and a populated config.json makes them fail
 # falsely, while others could persist state there. Redirect HOME before any dgc module computes
 # USER_HOME at import time. CI runners are unaffected; local runs become hermetic.
-_ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-tests-home-")
+_ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-tests-home-",
+                                            ignore_cleanup_errors=True)
+# ignore_cleanup_errors: Windows refuses to delete a file any process still has open, and
+# an sqlite connection left open by a test would otherwise turn a finished run into a
+# traceback at interpreter exit, after the result had already been printed.
 # realpath: macOS hands out /var/folders/… which is a symlink to /private/var/…; DGC compares
 # canonical paths, so a symlinked HOME would make private-path checks disagree with themselves.
 os.environ["HOME"] = os.path.realpath(_ISOLATED_HOME.name)
@@ -133,6 +139,8 @@ WINDOWS_SKIPS = {
         "the fixture is a '#!/bin/sh' git shim",
     "internal Git reconciles a late stdout overflow after reader completion":
         "the fixture is a '#!/bin/sh' git shim",
+    "benchmark reference mapper preserves canonical helper classes":
+        "the benchmark harness maps POSIX repository paths; it runs on Linux GPU hosts only",
 }
 
 
@@ -9974,13 +9982,18 @@ def test_isolated_subagents():
         self.ui.end_stream()
     parent.checkpoints.open(9, "parent turn")
     _Agent.run_turn = fake_turn
+    # What THIS sub-agent leaves behind, not every task worktree in the repository: an earlier
+    # case in this file deliberately retains one, and on a platform where that case cannot pass
+    # its leftover would otherwise be read as this sub-agent failing to clean up.
+    _branches_before = {str(w.get("branch", "")) for w in _list_worktrees(repo)}
     try:
         outcome = parent._run_subagent("agent lifecycle", "write the file")
     finally:
         _Agent.run_turn = original_turn
         parent.mcp.stop_all()
     task_branches = [w for w in _list_worktrees(repo)
-                     if str(w.get("branch", "")).startswith("dgc/task-")]
+                     if str(w.get("branch", "")).startswith("dgc/task-")
+                     and str(w.get("branch", "")) not in _branches_before]
     check("agent task uses a transient rooted config, fresh MCP, and shared cancellation",
           observed.get("root") != repo and observed.get("persist") is False
           and observed.get("cancel") is parent.cancelled and observed.get("mcp") is not parent.mcp)
@@ -10750,6 +10763,13 @@ def test_release_promotion_contract():
     """Public main is the tagged product commit; website is not a git promotion."""
     import importlib.util
     import shutil
+    if WINDOWS:
+        # scripts/github-release.sh and scripts/promote-release.sh are POSIX shell, run here
+        # through a bare `bash` -- which on Windows is System32\bash.exe, the WSL launcher.
+        # Releases are cut on Linux and macOS; nothing publishes from Windows.
+        print("  skip release promotion contract  -- not applicable on Windows: the release "
+              "scripts are POSIX shell and releases are never cut from Windows")
+        return
 
     def product_repo():
         td = tempfile.TemporaryDirectory()
@@ -11955,6 +11975,12 @@ def test_benchmark_integrity():
 
         interrupted = _InterruptedProcess()
         killed = []
+        if WINDOWS:
+            # bench/run_bench.py reaps with os.getpgid/os.killpg, which Windows does not have:
+            # the benchmark harness runs on Linux GPU hosts and is never driven from Windows.
+            print("  skip benchmark operator interrupts reap the harness process group  -- not "
+                  "applicable on Windows: the benchmark harness is POSIX-only")
+            return
         old_popen, old_getpgid, old_killpg = _RB.subprocess.Popen, _RB.os.getpgid, _RB.os.killpg
         _RB.subprocess.Popen = lambda *_args, **_kwargs: interrupted
         _RB.os.getpgid = lambda pid: pid

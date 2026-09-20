@@ -278,13 +278,16 @@ class ParentWatcherTests(unittest.TestCase):
         os.close(read_end)
         self.addCleanup(serve.stdout.close)
         self.addCleanup(lambda: serve.poll() is None and serve.kill())
+        # Read on a thread: readline() on a backend that writes nothing blocks for as long as the
+        # backend lives, and a deadline checked between reads is no deadline at all.
+        seen: list[bytes] = []
+        threading.Thread(target=lambda: seen.extend(serve.stdout), daemon=True).start()
         ready = False
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and not ready:
-            line = serve.stdout.readline()
-            if not line:
-                break
-            ready = json.loads(line).get("type") == "ready"
+            ready = any(json.loads(line).get("type") == "ready" for line in list(seen) if line.strip())
+            if not ready:
+                time.sleep(0.05)
         self.assertTrue(ready, "serve never became ready")
         host.kill()
         started = time.monotonic()

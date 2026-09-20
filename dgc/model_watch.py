@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import os
 import socket
 import threading
 import time
@@ -303,12 +304,21 @@ def ollama_model_listed(payload, model: str) -> bool | None:
 
 
 def _shutdown_socket(sock) -> None:
+    """Unblock a thread stalled inside recv on this socket, so a cancel is immediate."""
     if sock is None or not hasattr(sock, "shutdown"):
         return
     try:
         sock.shutdown(socket.SHUT_RDWR)
     except Exception:
         pass
+    if os.name == "nt":
+        # Winsock does not wake a thread that is already inside recv() when the socket is shut
+        # down; only closing it does. Without this, a cancelled request on Windows keeps waiting
+        # for the model's first byte — a long prefill on a big context makes Stop look ignored.
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 
 def _response_socket(response):
