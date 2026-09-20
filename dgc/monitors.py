@@ -833,12 +833,15 @@ class MonitorHub:
             return (f"error: {lease.last_error}" if lease.last_error else
                     "error: monitor was cancelled while waiting for the workspace write lease")
         try:
+            from . import shell as shell_module
             proc = subprocess.Popen(
-                argv or ["/bin/bash", "-o", "pipefail", "-c", command],
+                argv or shell_module.argv(command),
                 cwd=str(root), stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
                 start_new_session=True,
                 env=sandbox.process_env(config) if sandbox_requested else sandbox.tool_env())
+        except shell_module.ShellUnavailable as exc:
+            return f"error: could not start the monitor: {exc}"
         except OSError as exc:
             return f"error: could not start the monitor: {exc}"
         finally:

@@ -167,10 +167,16 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
              cancelled=None) -> tuple[int | None, str, str]:
     """Return ``(returncode, bounded_output, failure_kind)`` for one hook."""
     from . import sandbox
+    from . import shell as shell_module
 
     sandbox_requested = sandbox.requested(config)
-    argv = sandbox.wrap(command, cwd, config) if sandbox_requested else [
-        "/bin/bash", "-o", "pipefail", "-c", command]
+    if sandbox_requested:
+        argv = sandbox.wrap(command, cwd, config)
+    else:
+        try:
+            argv = shell_module.argv(command)
+        except shell_module.ShellUnavailable as exc:
+            return None, "", str(exc)
     if argv is None:
         return None, "", "sandbox policy cannot safely confine this hook"
     popen_kwargs = {

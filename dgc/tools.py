@@ -32,6 +32,7 @@ import requests
 
 from .codeintel import run_code_intel, symbol_records
 from . import image_views
+from . import shell as _shell
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
     WorkspaceBoundaryError,
@@ -1516,7 +1517,9 @@ def bash(args: dict, ctx) -> str:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
         else:
-            proc = subprocess.Popen(["/bin/bash", "-o", "pipefail", "-c", command], **popen_kw)
+            proc = subprocess.Popen(_shell.argv(command), **popen_kw)
+    except _shell.ShellUnavailable as e:
+        return f"error: {e}"
     except OSError as e:
         return f"error: {e}"
     capture = _BoundedCommandCapture(ctx)
@@ -1678,7 +1681,7 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
-            proc = subprocess.Popen(["/bin/bash", "-o", "pipefail", "-c", command], **popen_kw)
+            proc = subprocess.Popen(_shell.argv(command), **popen_kw)
     except Exception as e:
         return f"error: could not start background command: {e}"
     finally:

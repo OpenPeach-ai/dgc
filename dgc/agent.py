@@ -4761,13 +4761,17 @@ class Agent(GoalLifecycle):
         except (TypeError, ValueError):
             timeout = 120
         from . import sandbox
+        from . import shell as shell_module
         try:
             proc = subprocess.Popen(
-                ["/bin/bash", "-lc", cmd], cwd=str(self.ctx.project_root),
+                shell_module.argv(cmd, pipefail=False, login=True),
+                cwd=str(self.ctx.project_root),
                 stdin=subprocess.DEVNULL,              # never the editor's command pipe
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", start_new_session=True,
                 env=sandbox.tool_env())                # never DGC's provider credentials
+        except shell_module.ShellUnavailable as exc:
+            return 1, self._safe_text(f"error: {exc}")
         except OSError as exc:
             return 1, self._safe_text(f"error: {type(exc).__name__}: {exc}")
         capture = _BoundedCommandCapture(self.ctx)
