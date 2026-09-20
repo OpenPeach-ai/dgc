@@ -33,6 +33,7 @@ else:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_model_stall as stall                           # noqa: E402  (same module name discovery uses)
+from waiting import wait_until                              # noqa: E402
 
 import requests                                             # noqa: E402
 
@@ -653,9 +654,28 @@ class AgentRetryRunTests(RetryTestCase):
         self.real_backoff()
         self.server.behaviours["/chat/completions"] = status(503)
         agent, ui = self.agent()
-        timer = threading.Timer(0.2, agent.cancelled.set)
-        timer.start()
+
+        # Stop once the run is genuinely inside a backoff, which is what this test is about.
+        # A threading.Timer(0.2) did the same job until a loaded runner fired it before the first
+        # request had even gone out: the turn then ended on the cancel alone, emitted no frames,
+        # and the assertion read [] instead of the two it wanted. Waiting for the retry frame
+        # cannot lose that race, and it makes the test faster when nothing is contended.
+        stopped = []
+
+        def stop_once_retrying():
+            try:
+                wait_until(lambda: any(state == "retrying" for state, _ in ui.frames),
+                           what="the run to enter a retry backoff")
+            except AssertionError as never_retried:
+                stopped.append(never_retried)
+                return
+            agent.cancelled.set()
+
+        stopper = threading.Thread(target=stop_once_retrying, name="stop-in-backoff", daemon=True)
+        stopper.start()
         self.assertFalse(agent.run_turn("hi", reset_cancel=False))
+        stopper.join(30)
+        self.assertFalse(stopped, f"never reached a backoff to stop: {stopped}")
         self.assertEqual([s for s, _ in ui.frames], ["retrying", "cancelled"])
 
     def test_stop_during_a_continuation_backoff_appends_nothing(self):
