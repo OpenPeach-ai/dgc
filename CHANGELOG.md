@@ -6,6 +6,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The model knows what time it is.** DGC told it the date and nothing else, so a model with no
+  clock and no timezone wrote "what I completed tonight" in the middle of the afternoon, guessed
+  at deadlines, and dated files a day out. The session prompt now carries the zone alongside the
+  date — `Date: 2026-09-20 (Asia/Kolkata, UTC+05:30)`, read from this machine's own settings, with
+  the offset alone or `UTC` when it records no name, and nothing looked up online. The time of day
+  goes on each message you send instead: `Local time: 14:32 (Asia/Kolkata)`. Keeping it off the
+  session prompt is what lets two questions a minute apart still send a byte-identical prompt, so
+  the second one is still billed at cached-input rates. Sub-agents are told the same; a session
+  running past midnight is told the new date on your next message; resumed chats and `/export`
+  show what you typed, without it.
 - **Extra high and Ultra can reason deeply.** The reasoning watchdog stopped every level after
   8,000 tokens of thinking with no answer, which is less than DGC itself asks Claude to think at
   High (16,384) or Extra high (24,576). `think_budget_tokens` now defaults to `auto`, which scales

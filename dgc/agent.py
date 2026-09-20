@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import clock
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
@@ -2981,9 +2982,11 @@ class Agent(GoalLifecycle):
             "not by just describing solutions.",
             "",
             "# Environment",
-            # Keep the static prefix stable throughout a working day. Minute-level clock churn
-            # invalidates provider/local prefix caches between otherwise identical follow-up turns.
-            f"- Date: {datetime.now().strftime('%Y-%m-%d')}",
+            # Date and zone only: both change at most once a day (and on a DST shift), so the
+            # static prefix stays stable throughout a working day. Minute-level clock churn here
+            # would invalidate provider/local prefix caches between otherwise identical follow-up
+            # turns, so the hour and minute travel with each prompt instead (clock.py).
+            f"- Date: {clock.environment_date(datetime.now())}",
             f"- OS: {platform.system()} {platform.release()}",
             f"- Project root (cwd for all tools): {cfg.project_root}",
             f"- Model: {cfg.model} @ {_prompt_endpoint(cfg.base_url)}",
@@ -4974,6 +4977,8 @@ class Agent(GoalLifecycle):
         self._sync_vision()
         if wake:
             # The user's staged images belong to their next prompt, not to command output.
+            # No clock line either: a monitor notice already stamps every batch of output it
+            # carries with the time it arrived, so one here would be a second, vaguer copy.
             self._trim_session_notices(len(user_text))
             self.messages.append(self._notice_message(notification, "wake"))
             self._monitor_turn_notice_chars += len(user_text)
@@ -4981,11 +4986,17 @@ class Agent(GoalLifecycle):
         else:
             images = self._pending_images
             self._pending_images = None
+            # The time of day, attached to the prompt itself — once per turn, for this agent and
+            # for every sub-agent, and never in the system prompt, whose cached prefix must not
+            # change between two turns a minute apart. A resumed transcript carries the clock of
+            # the turn it belongs to; attach_turn_clock replaces rather than stacks, so re-sending
+            # a recovered prompt can never hand the model a stale one as if it were now.
+            prompt_text = clock.attach_turn_clock(user_text, datetime.now())
             if images:                                 # vision: OpenAI-style multimodal content
-                content: object = ([{"type": "text", "text": user_text}] +
+                content: object = ([{"type": "text", "text": prompt_text}] +
                                    [{"type": "image_url", "image_url": {"url": u}} for u in images])
             else:
-                content = user_text
+                content = prompt_text
             prompt_message = {"role": "user", "content": content}
             self.messages.append(prompt_message)
             self._drain_monitors(with_prompt=True)
