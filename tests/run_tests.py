@@ -90,9 +90,48 @@ from dgc.tools import execute  # noqa: E402
 from dgc.headless import Backend  # noqa: E402
 
 PASS = []
+WINDOWS = os.name == "nt"
+
+# Checks whose SUBJECT does not exist on native Windows, with the reason each one is skipped
+# there. A check earns a place here only when what it asserts cannot be true on Windows — a
+# POSIX mode bit, a symlink DGC restores with its mode, a process group, an OS sandbox, a
+# `#!/bin/sh` fixture. A check never lands here because it is inconvenient or flaky: those are
+# fixed or reported. Every entry prints a "skip" line, so a Windows run says plainly what it did
+# not prove, and `dgc` on Windows is documented as "supported without an OS sandbox" partly on
+# the strength of this list being short and specific.
+WINDOWS_SKIPS = {
+    "artifact registry is private and atomic":
+        "POSIX mode bits; on Windows a file's privacy comes from the folder ACL, not from 0600",
+    "handoff saving stays inside the stable session scope and uses a new private workspace file":
+        "POSIX mode bits; the path and content assertions it shares are covered on POSIX",
+    "last-good recovery restores bytes, mode, symlink, and absence exactly":
+        "restores a POSIX mode and a symlink, neither of which Windows reproduces",
+    "durable rewind restores bytes, modes, symlinks, absence, and exact compacted history":
+        "restores POSIX modes and symlinks",
+    "rewind restores binary, symlink, deletion, and mode deltas exactly":
+        "restores POSIX modes and symlinks",
+    "conflict-free task delta integrates files, binaries, modes, and symlinks":
+        "integrates POSIX modes and symlinks",
+    "sandbox backend must resolve outside the writable workspace":
+        "Windows has no OS sandbox; the SDK refuses shell='sandboxed' there instead",
+    "internal Git rejects a PATH-shadowed executable inside the writable repository":
+        "the fixture is a '#!/bin/sh' shim named `git`, which Windows will not execute; the "
+        "rule it proves is platform-independent and is covered on POSIX",
+    "internal Git is non-interactive and timeout reaps its complete POSIX process group":
+        "POSIX process groups; the Windows equivalent is the Job Object in tests/"
+        "test_cli_process_tree.py",
+    "internal Git aborts and reports stdout beyond its operation-specific ceiling":
+        "the fixture is a '#!/bin/sh' git shim",
+    "internal Git reconciles a late stdout overflow after reader completion":
+        "the fixture is a '#!/bin/sh' git shim",
+}
 
 
 def check(name: str, cond: bool, detail: str = ""):
+    reason = WINDOWS_SKIPS.get(name) if WINDOWS else None
+    if reason is not None:
+        print(f"  skip {name}  -- not applicable on Windows: {reason}")
+        return
     PASS.append(cond)
     print(f"  {'ok ' if cond else 'FAIL'} {name}" + (f"  -- {detail}" if not cond and detail else ""))
 
@@ -9944,7 +9983,8 @@ def test_isolated_subagents():
           and parent.timing_totals["builtin_tool_us"] == 4321
           and parent.timing_totals["by_tool_samples"] == {"write_file": 1}
           and parent.timing_totals["by_request_reason"] == {"subagent": 1},
-          detail=outcome)
+          detail=f"{outcome} | branches={task_branches} | usage={parent.usage_totals} "
+                 f"| activity={parent.activity_totals} | timing={parent.timing_totals}")
     check("integrated child edits participate in the parent checkpoint",
           parent.checkpoints.rewind(0) == (9, 1) and not (repo / "delegated.txt").exists())
     check("task branch names remain bounded and private",
@@ -10648,6 +10688,14 @@ def test_installer_never_overwrites_a_checkout():
     in tests/test_installer.py."""
     import pathlib
     import tempfile
+    if WINDOWS:
+        # install.sh is a POSIX shell script, and on Windows a bare `bash` is
+        # %SystemRoot%\System32\bash.exe -- the WSL launcher, which would run the installer
+        # inside a Linux distribution with a different filesystem and a different user. Windows
+        # installs come from pipx or uv instead; `dgc update` says so there.
+        print("  skip installer checkout guard  -- not applicable on Windows: install.sh is a "
+              "POSIX shell script; Windows installs with pipx or uv")
+        return
     installer = PROJECT / "install.sh"
     with tempfile.TemporaryDirectory() as tmp:
         checkout = pathlib.Path(tmp) / "checkout"

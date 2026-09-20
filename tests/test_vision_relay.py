@@ -22,7 +22,14 @@ def _real_account_home() -> Path:
     try:
         import pwd
         return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=False)
-    except (ImportError, KeyError, AttributeError):
+    except (ImportError, KeyError, AttributeError):        # no passwd database (Windows)
+        # expanduser("~") reads USERPROFILE, which this suite redirects to a temporary
+        # directory -- so on Windows it would report the isolated home as the real account and
+        # make a correctly isolated run look like a contaminating one. HOMEDRIVE/HOMEPATH are
+        # set by the OS at logon and nothing here rewrites them.
+        drive, tail = os.environ.get("HOMEDRIVE", ""), os.environ.get("HOMEPATH", "")
+        if drive and tail:
+            return Path(drive + tail).resolve(strict=False)
         return Path(os.path.expanduser("~")).resolve(strict=False)
 
 

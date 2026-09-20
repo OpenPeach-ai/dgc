@@ -1041,12 +1041,31 @@ def _write_retained_metadata(path: Path, payload: dict) -> str | None:
                 pass
 
 
+def _remove_worktree(repo: Path, path: Path) -> str:
+    """``git worktree remove --force``, retried briefly on Windows. "" when the checkout is gone.
+
+    Windows refuses to delete a file that any process still holds open, and something usually
+    does for a moment after a build: an antivirus scanner, the search indexer, or a tool the
+    agent just ran. Giving up on the first refusal leaves a checkout and a branch behind for a
+    reason that has nothing to do with the work, so retry a few times over a second.
+    """
+    attempts = 6 if os.name == "nt" else 1
+    removed = None
+    for attempt in range(attempts):
+        removed = _git(["worktree", "remove", "--force", str(path)], repo)
+        if removed.returncode == 0 or not path.exists():
+            return ""
+        if attempt + 1 < attempts:
+            time.sleep(0.15 * (attempt + 1))
+    return ((removed.stderr if removed is not None else "") or "worktree removal failed").strip()
+
+
 def _cleanup_task(repo: Path, path: Path, branch_name: str, metadata_path: Path) -> str | None:
     """Remove a generated checkout without losing its recovery record on partial failure."""
     errors = []
-    removed = _git(["worktree", "remove", "--force", str(path)], repo)
-    if removed.returncode != 0 and path.exists():
-        errors.append((removed.stderr or "worktree removal failed").strip())
+    failure = _remove_worktree(repo, path)
+    if failure:
+        errors.append(failure)
     branch = _git(["branch", "-D", branch_name], repo)
     if branch.returncode != 0 and "not found" not in (branch.stderr or "").lower():
         errors.append((branch.stderr or "branch removal failed").strip())

@@ -2269,6 +2269,13 @@ def _subcommand_help(name: str) -> int:
 
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if os.name == "nt":
+        # Windows still defaults its standard streams to the legacy code page, so a single "·"
+        # in `dgc protocol describe`, the command registry or a model's answer either raised or
+        # came out corrupted — and anything piping DGC read bytes that were not UTF-8. Ask for
+        # UTF-8 once, at the entry point, for every subcommand.
+        from .protocol import configure_utf8_stdio
+        configure_utf8_stdio()
     # A dgc started from a versioned install marks its version as in use, so an update's
     # retention never deletes the tree under a running process (no-op for any other install).
     from .install_layout import hold_runtime_lock

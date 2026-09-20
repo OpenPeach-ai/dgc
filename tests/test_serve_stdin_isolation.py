@@ -10,7 +10,6 @@ mock model, with HOME and XDG under a temporary directory.
 from __future__ import annotations
 
 import ast
-import fcntl
 import json
 import os
 import queue
@@ -23,6 +22,12 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+POSIX = os.name == "posix"
+if POSIX:
+    import fcntl
+else:                       # the pipe semantics these tests drive are POSIX; see the skips below
+    fcntl = None
 
 PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
@@ -185,6 +190,7 @@ class _Serve:
                 pass
 
 
+@unittest.skipUnless(POSIX, "the subject is POSIX pipe semantics: an inherited fd 0 flipped to O_NONBLOCK, which Windows has no equivalent of")
 class ServeCommandPipeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -383,6 +389,7 @@ class ServeCommandPipeTests(unittest.TestCase):
             self.assertIsNone(event_error(event), event)
 
 
+@unittest.skipUnless(POSIX, "the subject is POSIX pipe semantics: an inherited fd 0 flipped to O_NONBLOCK, which Windows has no equivalent of")
 class CommandReaderTests(unittest.TestCase):
     def test_command_lines_treats_nonblocking_empty_read_as_not_eof(self):
         read_fd, write_fd = os.pipe()

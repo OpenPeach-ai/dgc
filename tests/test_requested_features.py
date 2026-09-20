@@ -1,5 +1,6 @@
 """User-requested UI tools and provider controls through their actual execution boundaries."""
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -142,6 +143,7 @@ class RequestedFeatures(unittest.TestCase):
         self.assertTrue(tool_output_is_error(result.output.removeprefix('error: ')))
         self.assertFalse(tool_output_is_error("Sub-task 'ok' completed in the shared checkout. Summary:\nfine"))
 
+    @unittest.skipUnless(os.name == "posix", "install.sh is a POSIX shell script, and on Windows a bare bash is the WSL launcher; Windows installs with pipx or uv")
     def test_installer_finds_supported_python_after_an_old_system_python(self):
         root = Path(__file__).resolve().parent.parent
         # Execute the installer's actual interpreter selection, stopping before download/install.

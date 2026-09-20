@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import pwd
 import queue
 import select
 import socket
@@ -36,7 +35,23 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-_REAL_HOME = pwd.getpwuid(os.getuid()).pw_dir
+
+def _real_account_home() -> str:
+    """The real account's home, never the one this suite redirected.
+
+    Windows has no passwd database, and expanduser("~") reads the USERPROFILE the suite
+    redirects, which would make a correctly isolated run look like a contaminating one.
+    HOMEDRIVE/HOMEPATH are set by the OS at logon and nothing here rewrites them.
+    """
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError):
+        drive, tail = os.environ.get("HOMEDRIVE", ""), os.environ.get("HOMEPATH", "")
+        return (drive + tail) if drive and tail else os.path.expanduser("~")
+
+
+_REAL_HOME = _real_account_home()
 if "dgc.config" in sys.modules:
     import dgc.config as _config
     if Path(_config.USER_HOME) == Path(_REAL_HOME) or Path(_REAL_HOME) in Path(_config.USER_HOME).parents:
