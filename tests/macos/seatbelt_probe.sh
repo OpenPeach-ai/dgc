@@ -52,6 +52,8 @@ echo "workspace fixture" > "$W/inside.txt"
 mkdir -p "$HOME/.dgc" 2>/dev/null; echo "state-secret" > "$HOME/.dgc/seatbelt-probe.txt" 2>/dev/null
 echo "home-secret" > "$HOME/.seatbelt-home-probe" 2>/dev/null
 TMP_OUTSIDE=$(mktemp /tmp/dgc-seatbelt-outside.XXXXXX); echo "tmp-secret" > "$TMP_OUTSIDE"
+# The same file by its canonical path, for the firmlink review probe (/tmp -> /private/tmp).
+TMP_REAL="$(cd "$(dirname "$TMP_OUTSIDE")" && pwd -P)/$(basename "$TMP_OUTSIDE")"
 # The host's per-user temporary and cache folders, resolved OUTSIDE the sandbox: inside it,
 # getconf falls back to whatever TMPDIR says, which is the sandbox's own private folder.
 DARWIN_TMP=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)
@@ -193,6 +195,22 @@ run_probes_for_mode() {
   fi
   probe ps_other_env    "DGC_SEATBELT_MARK=foreign-env-$net" "ps -Eww -p $FOREIGN_PID"
   probe ps_list         ""              "ps -A -o pid= | tr -d ' ' | grep -qx $FOREIGN_PID"
+  # --- REVIEW PROBES (not part of the shipped script) ------------------------------------
+  # 1. The data volume is reachable at /System/Volumes/Data, and the profile grants
+  #    (subpath "/System") read. Is the home folder readable through the firmlink path?
+  probe fw_home_read    "home-secret"   "cat '/System/Volumes/Data$HOME/.seatbelt-home-probe'"
+  probe fw_home_list    ""              "ls '/System/Volumes/Data$HOME'"
+  probe fw_users_list   ""              "ls /System/Volumes/Data/Users"
+  probe fw_data_list    ""              "ls /System/Volumes/Data"
+  probe fw_tmp_read     "tmp-secret"    "cat '/System/Volumes/Data$TMP_REAL'"
+  # 2. ps is setgid and cannot be exec'd from ANY sandbox (it failed under the old
+  #    allow-by-default profile too), so the sysctl route is untested. kern.proc.pid. is
+  #    on the allow-list.
+  probe sysctl_kinfo    "outside-process-visible" \
+                        "/usr/bin/python3 '$REPO_ROOT/tests/macos/kinfo_probe.py' $FOREIGN_PID"
+  probe sysctl_cli      ""              "sysctl kern.proc.pid.$FOREIGN_PID"
+  # 3. dslocal is denied, but DarwinDirectory (its macOS 15+ successor) is a read root.
+  probe darwin_directory ""             "ls -la /private/var/db/DarwinDirectory/local"
   CONFIRM="sleep 0.5; st=\$(ps -o stat= -p $FOREIGN_PID 2>/dev/null); case \"\$st\" in ''|Z*) echo foreign-process-gone;; *) echo still-running:\$st; false;; esac"
   probe kill_other      ""              "kill -TERM $FOREIGN_PID"; CONFIRM=""
   probe launchctl       ""              "launchctl submit -l dgc.seatbelt.probe.$net -- /usr/bin/true"
