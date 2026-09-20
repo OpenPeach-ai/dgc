@@ -282,9 +282,28 @@ def register_group(pgid: int, *, path: Path | None = None) -> bool:
             os.write(fd, f"{int(pgid)} {stamp}\n".encode("utf-8"))
         finally:
             os.close(fd)
+        _arm_registry_cleanup()
         return True
     except (OSError, ValueError):
         return False
+
+
+_CLEANUP_ARMED = False
+
+
+def _arm_registry_cleanup() -> None:
+    """Remove this process's registry when it exits normally — once, and only if it wrote one.
+
+    The registry exists for the death that runs no cleanup at all, so a clean exit should leave
+    nothing behind for a later `dgc serve` to sweep. Every command-line run registers groups too,
+    and only serve clears its own file explicitly.
+    """
+    global _CLEANUP_ARMED
+    if _CLEANUP_ARMED:
+        return
+    _CLEANUP_ARMED = True
+    import atexit
+    atexit.register(clear_registry)
 
 
 def read_registry(path: Path) -> list[tuple[int, str]]:
