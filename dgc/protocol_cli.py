@@ -70,6 +70,11 @@ def describe_document() -> dict:
     return {
         "schema_version": 1,
         "dgc_version": __version__,
+        # The interpreter this DGC runs on. A launcher that found several candidate Pythons -- the
+        # ordinary case on Windows, where there is no /usr/bin/env and pipx, uv, the Store build
+        # and a venv all install one -- probes each with `dgc protocol describe` and starts
+        # `<python> -m dgc serve` directly, instead of guessing from a launcher script.
+        "python": sys.executable,
         "protocol_version": PROTOCOL_VERSION,
         "schema_id": f"urn:vibedgc:editor-protocol:v{PROTOCOL_VERSION}",
         "schema_sha256": hashlib.sha256(bundled.encode("utf-8")).hexdigest(),

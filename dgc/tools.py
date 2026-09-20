@@ -32,6 +32,7 @@ import requests
 
 from .codeintel import run_code_intel, symbol_records
 from . import image_views
+from . import proctree as _proctree
 from . import shell as _shell
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
@@ -1509,10 +1510,11 @@ def bash(args: dict, ctx) -> str:
     # slowing every later command. (subprocess.run's timeout only kills the direct child.)
     # stdin is /dev/null, never inherited: under `dgc serve` fd 0 was the editor's command pipe,
     # and a child that reads it steals the user's Stop, while a Node child flips it non-blocking.
-    popen_kw = dict(cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                    env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+    popen_kw = _proctree.spawn_kwargs(dict(
+        cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env()))
     try:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
@@ -1522,6 +1524,7 @@ def bash(args: dict, ctx) -> str:
         return f"error: {e}"
     except OSError as e:
         return f"error: {e}"
+    _proctree.track(proc)
     capture = _BoundedCommandCapture(ctx)
 
     def read_output() -> None:
@@ -1673,15 +1676,16 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
         argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
         if sandbox_requested and argv is None:
             return "error: sandbox policy cannot safely confine this workspace; background command was not run"
-        popen_kw = dict(stdin=subprocess.DEVNULL,       # never the editor's command pipe
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                        encoding="utf-8", errors="replace",
-                        cwd=str(ctx.project_root), start_new_session=True,
-                        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+        popen_kw = _proctree.spawn_kwargs(dict(
+            stdin=subprocess.DEVNULL,                   # never the editor's command pipe
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace", cwd=str(ctx.project_root),
+            env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env()))
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
             proc = subprocess.Popen(_shell.argv(command), **popen_kw)
+        _proctree.track(proc)
     except Exception as e:
         return f"error: could not start background command: {e}"
     finally:
@@ -1812,21 +1816,21 @@ def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = 
             pass
         return
     pgid = proc.pid if os.name == "posix" else None
+    if pgid is None:
+        # Windows: the tree is a Job Object, so one call ends the command and everything it
+        # started. Popen.kill() would end only the direct child and orphan the rest.
+        _proctree.terminate_tree(proc)
+        return
     try:
-        if pgid is not None and proc.poll() is None:
+        if proc.poll() is None:
             os.killpg(pgid, signal.SIGTERM)
-        elif pgid is None and proc.poll() is None:
-            proc.terminate()
         proc.wait(timeout=2)
     except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
         pass
     # The leader can exit on SIGTERM while a grandchild ignores it. Sweep the original process
     # group before returning; start_new_session makes the leader PID the stable group ID.
     try:
-        if pgid is not None:
-            os.killpg(pgid, signal.SIGKILL)
-        elif proc.poll() is None:
-            proc.kill()
+        os.killpg(pgid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:

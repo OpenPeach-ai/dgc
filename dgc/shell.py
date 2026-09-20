@@ -55,14 +55,18 @@ class Shell:
 _WSL_DIRS = ("system32", "sysnative", "syswow64")
 
 
-def _is_wsl_launcher(candidate: Path) -> bool:
-    if os.name != "nt":
+def is_wsl_launcher(candidate: Path | str) -> bool:
+    """Whether this path is Windows' own ``bash.exe``, which starts a WSL distribution.
+
+    Deliberately independent of the host OS so it can be tested anywhere: the parent directory's
+    name is the whole test, and a Windows path parses the same way everywhere.
+    """
+    import ntpath
+    text = str(candidate)
+    name = ntpath.basename(text).lower()
+    if name not in ("bash.exe", "bash", "wsl.exe"):
         return False
-    try:
-        parent = candidate.parent.name.lower()
-    except (OSError, ValueError):
-        return False
-    return parent in _WSL_DIRS
+    return ntpath.basename(ntpath.dirname(text)).lower() in _WSL_DIRS
 
 
 def _usable(candidate: Path | str | None) -> Path | None:
@@ -74,12 +78,18 @@ def _usable(candidate: Path | str | None) -> Path | None:
             return None
     except (OSError, ValueError):
         return None
-    if _is_wsl_launcher(path):
+    if os.name == "nt" and is_wsl_launcher(path):
         return None
     return path
 
 
+def windows_candidates(env) -> list[str]:
+    """Where a Git for Windows bash is looked for, in order. Pure: no filesystem is touched."""
+    return [str(item) for item in _windows_candidates(env)]
+
+
 def _windows_candidates(env) -> list[Path]:
+    import ntpath
     found: list[Path] = []
 
     def add(value) -> None:
@@ -89,18 +99,18 @@ def _windows_candidates(env) -> list[Path]:
     for variable in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
         root = env.get(variable)
         if root:
-            add(Path(root) / "Git" / "bin" / "bash.exe")
+            add(ntpath.join(root, "Git", "bin", "bash.exe"))
     local = env.get("LOCALAPPDATA")
     if local:
-        add(Path(local) / "Programs" / "Git" / "bin" / "bash.exe")
+        add(ntpath.join(local, "Programs", "Git", "bin", "bash.exe"))
     add(r"C:\Program Files\Git\bin\bash.exe")
     # Wherever git itself came from: Git for Windows installs git.exe in <root>\cmd and
     # <root>\mingw64\bin, and bash.exe in <root>\bin.
     git = shutil.which("git", path=env.get("PATH"))
     if git:
-        directory = Path(git).parent
-        for root in (directory.parent, directory.parent.parent):
-            add(root / "bin" / "bash.exe")
+        directory = ntpath.dirname(git)
+        for root in (ntpath.dirname(directory), ntpath.dirname(ntpath.dirname(directory))):
+            add(ntpath.join(root, "bin", "bash.exe"))
     # PATH last: a bash on PATH is usually the same Git for Windows one, and _usable() drops the
     # WSL launcher that Windows puts in System32.
     on_path = shutil.which("bash", path=env.get("PATH"))

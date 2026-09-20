@@ -35,7 +35,9 @@ from .permissions import Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .history_stream import HistoryEmitter
+from . import proctree
 from . import reasoning as reasoning_mod
+from . import shell as shell_module
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
@@ -1277,13 +1279,16 @@ class Backend:
         ``digest`` is the SHA-256 of the policy text it read ("" when none was set), ``error``
         says why a policy was rejected (every tool is then denied), and ``sandbox`` names the
         backend confining shell commands, or "" when they run unconfined.
+        ``sandbox_capabilities`` says what that backend actually hides; see
+        :func:`sandbox_capabilities`.
         """
         from . import sandbox
         from .permissions import session_policy
         policy = session_policy()
         backend = sandbox.available() if sandbox.requested(self.config) else None
         return {"version": 1, "digest": policy.digest if policy is not None else "",
-                "error": policy.error if policy is not None else "", "sandbox": backend or ""}
+                "error": policy.error if policy is not None else "", "sandbox": backend or "",
+                "sandbox_capabilities": sandbox_capabilities(self.config, backend)}
 
     def start(self) -> None:
         self.em.emit(
@@ -1302,7 +1307,11 @@ class Backend:
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
-                          "session_policy": self._session_policy_capability()},
+                          "session_policy": self._session_policy_capability(),
+                          # Which shell every shell tool will run, so a front-end can say
+                          # "install Git for Windows" once instead of showing [WinError 2] per
+                          # command. `kind` is null when this machine has none.
+                          "shell": shell_module.capability()},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -4845,6 +4854,125 @@ def _end_line(crash_log, line: str) -> None:
         pass
 
 
+#: Every flag of ``capabilities.session_policy.sandbox_capabilities``, in its frozen order.
+SANDBOX_CAPABILITY_FLAGS = ("process_isolated", "home_hidden", "private_temporary",
+                            "network_isolated", "keychain_hidden")
+
+
+def _no_sandbox_capabilities(backend: str | None = None) -> dict:
+    """The all-false shape. A backend with no named profile promises nothing."""
+    return {"backend": backend or None, "profile": None,
+            **{flag: False for flag in SANDBOX_CAPABILITY_FLAGS}}
+
+
+def sandbox_capabilities(config=None, backend: str | None = None) -> dict:
+    """What the OS sandbox confining this session's shell actually hides.
+
+    An SDK cannot tell "sandboxed" from "sandboxed usefully" by the backend's name. bubblewrap
+    hides the home folder, the temporary folders, other processes and the network; the macOS
+    profile hides some of those and, before dgc 0.41.9, none of them. So the ready frame reports
+    each guarantee as its own boolean, and ``profile`` names the exact ruleset they came from.
+    A runtime that does not name a profile reports every flag false, and an SDK that sees no
+    ``sandbox_capabilities`` key at all (dgc 0.41.8 and older) must assume the same.
+
+    ``dgc.sandbox`` owns the darwin profile and publishes ``capabilities_dict()`` when it has one
+    to describe; this function is the shape check and the fallback, so the two land independently.
+    """
+    from . import sandbox
+    if backend is None:
+        backend = sandbox.available() if sandbox.requested(config) else None
+    published = getattr(sandbox, "capabilities_dict", None)
+    if callable(published):
+        try:
+            block = published(config)
+        except TypeError:
+            try:
+                block = published()
+            except Exception:
+                block = None
+        except Exception:
+            block = None
+        checked = _checked_sandbox_capabilities(block)
+        if checked is not None:
+            return checked
+    if not backend:
+        return _no_sandbox_capabilities(None)
+    report = sandbox.capabilities(config)
+    if backend == "bwrap":
+        # bubblewrap gives DGC its own user, PID, IPC and UTS namespaces with a private home and
+        # temporary directories, so nothing of the user's session is reachable — including any
+        # credential agent listening on a socket under the hidden home.
+        return {"backend": "bwrap", "profile": "bwrap-v1", "process_isolated": True,
+                "home_hidden": True, "private_temporary": True,
+                "network_isolated": bool(report.network_isolated), "keychain_hidden": True}
+    # Any other backend: truthful, and deliberately unflattering, until its profile is named.
+    return _no_sandbox_capabilities(backend)
+
+
+def _checked_sandbox_capabilities(block) -> dict | None:
+    """Accept a published capability block only when it has exactly the frozen shape."""
+    if not isinstance(block, dict):
+        return None
+    backend = block.get("backend")
+    profile = block.get("profile")
+    if backend is not None and not isinstance(backend, str):
+        return None
+    if profile is not None and not isinstance(profile, str):
+        return None
+    flags = {}
+    for flag in SANDBOX_CAPABILITY_FLAGS:
+        value = block.get(flag)
+        if not isinstance(value, bool):
+            return None
+        flags[flag] = value
+    if not backend:
+        return _no_sandbox_capabilities(None)
+    return {"backend": backend, "profile": profile or None, **flags}
+
+
+def _watch_launching_process(backend, crash_log) -> None:
+    """Stop within DGC_SERVE_PARENT_PID's promised window once the launching process dies.
+
+    A host that forks (a prefork web server, a Node app that spawns workers) can die while a
+    child still holds our stdin's write end open. The usual signal — end of input — then never
+    arrives, and `dgc serve` keeps a model session, MCP servers and a code-intelligence process
+    alive indefinitely. When the SDK names its own pid we watch it directly and guarantee the
+    exit the SDKs document.
+    """
+    watched = proctree.parent_pid()
+    if watched is None:
+        return
+
+    def gone() -> None:
+        _log_crash(crash_log, f"the launching process ({watched}) exited; stopping")
+        try:
+            backend.agent.stopping = True
+        except Exception:
+            pass
+
+        def force() -> None:
+            _end_line(crash_log, "the launching process is gone and stdin is still open; exiting")
+            try:
+                backend.close(grace_s=2.0)
+            except Exception:
+                pass
+            os._exit(0)
+
+        timer = threading.Timer(proctree.PARENT_EXIT_GRACE_S, force)
+        timer.daemon = True
+        timer.start()
+        if os.name == "posix":
+            # The installed stop handler unwinds the blocked stdin read and runs the ordinary
+            # shutdown, with the session saved; the timer above is only the belt.
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+            except OSError:
+                pass
+
+    proctree.watch_parent(gone)
+    _log_crash(crash_log, f"watching the launching process {watched}")
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
     # Before anything is written: the protocol is UTF-8 NDJSON on every OS. A Windows console or
@@ -4872,6 +5000,10 @@ def serve(config: Config) -> None:
     started_at = time.monotonic()
     parent_pid = os.getppid()
     _log_crash(crash_log, f"parent pid {parent_pid}")
+    _watch_launching_process(backend, crash_log)
+    swept = proctree.sweep_stale_registries()
+    if swept:
+        _log_crash(crash_log, f"reaped {swept} process group(s) left by an earlier serve")
     commands = 0
     last_command = ""
     shutdown_requested = False
@@ -4991,6 +5123,9 @@ def serve(config: Config) -> None:
             except Exception:
                 pass
         outcome = backend.close(grace_s=grace)
+        # backend.close() reaped this session's tool groups, so the registry that would let a
+        # later serve reap them has nothing left to say.
+        proctree.clear_registry()
         # Only now: for the whole grace window the process must keep the handler that makes a
         # second SIGTERM land cleanly instead of killing the turn we are busy saving.
         termbg.restore_stop_handlers(stop_handlers)

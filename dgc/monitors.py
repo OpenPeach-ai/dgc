@@ -496,10 +496,10 @@ class Monitor:
         if first and self.pgid:
             _killpg(self.pgid, signal.SIGTERM)
         elif first:
-            try:
-                self.proc.terminate()
-            except OSError:
-                pass
+            # Windows: the monitor's whole tree is a Job Object, so one call ends the dev server
+            # and every worker it forked. terminate() would leave the workers holding the port.
+            from . import proctree
+            proctree.terminate_tree(self.proc)
         return True
 
     # ---- reading ------------------------------------------------------------------------------
@@ -640,6 +640,9 @@ class Monitor:
                     waited = now - self._kill_sent_at
                     if waited >= 1.0 and self.pgid:
                         _killpg(self.pgid, signal.SIGKILL)
+                    elif waited >= 1.0 and os.name == "nt":
+                        from . import proctree
+                        proctree.terminate_tree(self.proc, grace_s=0.5)
                     if waited >= 4.0:
                         break                            # a member is stuck; do not wait forever
         finally:
@@ -666,6 +669,9 @@ class Monitor:
         # so this can never signal a recycled process group.
         if self.pgid and proc.returncode is None:
             _killpg(self.pgid, signal.SIGKILL)
+        elif not self.pgid and proc.returncode is None:
+            from . import proctree
+            proctree.terminate_tree(proc, grace_s=1.0)
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -833,13 +839,16 @@ class MonitorHub:
             return (f"error: {lease.last_error}" if lease.last_error else
                     "error: monitor was cancelled while waiting for the workspace write lease")
         try:
+            from . import proctree
             from . import shell as shell_module
             proc = subprocess.Popen(
                 argv or shell_module.argv(command),
-                cwd=str(root), stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
-                start_new_session=True,
-                env=sandbox.process_env(config) if sandbox_requested else sandbox.tool_env())
+                **proctree.spawn_kwargs(dict(
+                    cwd=str(root), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                    env=(sandbox.process_env(config) if sandbox_requested
+                         else sandbox.tool_env()))))
+            proctree.track(proc)
         except shell_module.ShellUnavailable as exc:
             return f"error: could not start the monitor: {exc}"
         except OSError as exc:

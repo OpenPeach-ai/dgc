@@ -143,12 +143,13 @@ def _timeout_seconds(value) -> float:
 
 
 def _terminate_tree(proc: subprocess.Popen) -> None:
-    """Terminate the complete POSIX hook group, or the direct child on other platforms."""
+    """Terminate the complete hook tree: the POSIX process group, or the Windows Job Object."""
     try:
         if os.name == "posix":
             os.killpg(proc.pid, signal.SIGKILL)
-        else:  # Windows process-tree Job Object coverage remains a cross-platform evidence gap.
-            proc.kill()
+        else:
+            from . import proctree
+            proctree.terminate_tree(proc)
     except (OSError, ProcessLookupError, PermissionError):
         pass
     try:
@@ -186,14 +187,13 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
         "stderr": subprocess.STDOUT,
         "env": sandbox.process_env(config) if sandbox_requested else sandbox.tool_env(),
     }
-    if os.name == "posix":
-        popen_kwargs["start_new_session"] = True
-    elif os.name == "nt":  # pragma: no cover - Windows full-suite runner remains outstanding
-        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    from . import proctree
+    popen_kwargs = proctree.spawn_kwargs(popen_kwargs)
     try:
         proc = subprocess.Popen(argv, **popen_kwargs)
     except OSError as exc:
         return None, "", f"launch failed ({type(exc).__name__}: {str(exc)[:240]})"
+    proctree.track(proc)
 
     from .redaction import StreamingRedactor, secret_values
 
