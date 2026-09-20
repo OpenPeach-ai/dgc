@@ -5001,6 +5001,8 @@ def serve(config: Config) -> None:
     parent_pid = os.getppid()
     _log_crash(crash_log, f"parent pid {parent_pid}")
     _watch_launching_process(backend, crash_log)
+    if proctree.hold_self_job() is not None:
+        _log_crash(crash_log, "holding a kill-on-close job: nothing we start outlives us")
     swept = proctree.sweep_stale_registries()
     if swept:
         _log_crash(crash_log, f"reaped {swept} process group(s) left by an earlier serve")

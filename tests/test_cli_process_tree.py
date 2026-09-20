@@ -52,6 +52,12 @@ class SpawnShapeTests(unittest.TestCase):
             self.assertTrue(flags & 0x08000000,
                             "CREATE_NO_WINDOW: a GUI host must not flash a console per command")
 
+    def test_holding_a_self_job_is_a_no_op_off_windows_and_idempotent_on_it(self):
+        first = proctree.hold_self_job()
+        self.assertIs(proctree.hold_self_job(), first)
+        if POSIX:
+            self.assertIsNone(first, "POSIX reaps through the group and the registry instead")
+
     def test_the_parent_pid_variable_is_optional_and_never_fatal(self):
         self.assertIsNone(proctree.parent_pid({}))
         self.assertIsNone(proctree.parent_pid({proctree.PARENT_PID_ENV: ""}))

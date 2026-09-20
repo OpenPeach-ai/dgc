@@ -93,6 +93,33 @@ def track(proc, *, register: bool = False) -> object | None:
     return None
 
 
+_SELF_JOB: object | None = None
+
+
+def hold_self_job() -> object | None:
+    """Put this process in a kill-on-close Job Object, so nothing it starts can outlive it.
+
+    Windows has no process group to sweep and no parent-death signal: when `dgc serve` is killed
+    outright — the editor's host crashed, Task Manager, a forced SDK close — every build, dev
+    server and language server it started simply keeps running. Holding the job handle for the
+    life of the process makes the kernel end them all the moment that handle closes, however the
+    process died. The handle is kept in a module global on purpose: it must not be garbage
+    collected, because collecting it would kill the tree while we are still using it.
+
+    A no-op off Windows, where the process group and the registry do this job instead.
+    """
+    global _SELF_JOB
+    if os.name != "nt" or _SELF_JOB is not None:
+        return _SELF_JOB
+    from . import winjob
+    job = winjob.Job()
+    if job.ok and job.assign(os.getpid()):
+        _SELF_JOB = job
+        return job
+    job.close()                # a host that forbids nesting; per-command jobs still apply
+    return None
+
+
 def release(proc) -> None:
     """Drop a tracked job handle once its process has been reaped."""
     job = getattr(proc, "_dgc_job", None)
