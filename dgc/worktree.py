@@ -167,7 +167,7 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
         "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env,
     }
     from . import proctree
-    popen_kwargs = proctree.spawn_kwargs(popen_kwargs)
+    popen_kwargs.update(proctree.spawn_kwargs())
     try:
         proc = subprocess.Popen(argv, **popen_kwargs)
         proctree.track(proc)

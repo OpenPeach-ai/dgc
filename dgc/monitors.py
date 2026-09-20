@@ -844,13 +844,12 @@ class MonitorHub:
         try:
             from . import proctree
             from . import shell as shell_module
-            proc = subprocess.Popen(
-                argv or shell_module.argv(command),
-                **proctree.spawn_kwargs(dict(
-                    cwd=str(root), stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
-                    env=(sandbox.process_env(config) if sandbox_requested
-                         else sandbox.tool_env()))))
+            popen_kw = proctree.spawn_kwargs(
+                cwd=str(root), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                env=(sandbox.process_env(config) if sandbox_requested
+                     else sandbox.tool_env()))
+            proc = subprocess.Popen(argv or shell_module.argv(command), **popen_kw)
             proctree.track(proc, register=True)
         except shell_module.ShellUnavailable as exc:
             return f"error: could not start the monitor: {exc}"

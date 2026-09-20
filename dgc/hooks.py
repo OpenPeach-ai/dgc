@@ -188,7 +188,7 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
         "env": sandbox.process_env(config) if sandbox_requested else sandbox.tool_env(),
     }
     from . import proctree
-    popen_kwargs = proctree.spawn_kwargs(popen_kwargs)
+    popen_kwargs.update(proctree.spawn_kwargs())
     try:
         proc = subprocess.Popen(argv, **popen_kwargs)
     except OSError as exc:

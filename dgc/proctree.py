@@ -43,13 +43,17 @@ _CREATE_NO_WINDOW = 0x08000000
 
 # --------------------------------------------------------------------- spawning ---
 
-def spawn_kwargs(extra: dict | None = None) -> dict:
+def spawn_kwargs(**extra) -> dict:
     """Popen keywords that make a command's whole tree killable on this OS.
 
     On Windows this also sets ``CREATE_NO_WINDOW``: without it a GUI host (a ``pythonw`` app, an
     editor extension) flashes a console window for every command the agent runs.
+
+    Callers pass their own Popen keywords through rather than merging afterwards, so ``stdin=``
+    stays visible at the call site — the stdin-isolation guard reads the source, and a spawn
+    whose stdin it cannot see is a spawn that may inherit the editor's command pipe.
     """
-    kwargs = dict(extra or {})
+    kwargs = dict(extra)
     if os.name == "posix":
         kwargs["start_new_session"] = True
     elif os.name == "nt":

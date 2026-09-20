@@ -1510,11 +1510,11 @@ def bash(args: dict, ctx) -> str:
     # slowing every later command. (subprocess.run's timeout only kills the direct child.)
     # stdin is /dev/null, never inherited: under `dgc serve` fd 0 was the editor's command pipe,
     # and a child that reads it steals the user's Stop, while a Node child flips it non-blocking.
-    popen_kw = _proctree.spawn_kwargs(dict(
+    popen_kw = _proctree.spawn_kwargs(
         cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
-        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env()))
+        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
     try:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
@@ -1676,11 +1676,11 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
         argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
         if sandbox_requested and argv is None:
             return "error: sandbox policy cannot safely confine this workspace; background command was not run"
-        popen_kw = _proctree.spawn_kwargs(dict(
+        popen_kw = _proctree.spawn_kwargs(
             stdin=subprocess.DEVNULL,                   # never the editor's command pipe
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             encoding="utf-8", errors="replace", cwd=str(ctx.project_root),
-            env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env()))
+            env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:

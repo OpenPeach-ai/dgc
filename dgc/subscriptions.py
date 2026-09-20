@@ -841,11 +841,11 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
         # the editor's live NDJSON input pipe or the terminal REPL: some CLIs read it until EOF,
         # hanging before generation and potentially consuming DGC control/decision frames.
         from . import proctree
-        proc = subprocess.Popen(
-            argv, **proctree.spawn_kwargs(dict(
-                cwd=str(workdir), stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=False, bufsize=0, env={**os.environ, **(env or {})})))
+        popen_kw = proctree.spawn_kwargs(
+            cwd=str(workdir), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=False, bufsize=0, env={**os.environ, **(env or {})})
+        proc = subprocess.Popen(argv, **popen_kw)
         proctree.track(proc, register=True)
     except (OSError, ValueError) as exc:
         raise EngineLaunchError(
