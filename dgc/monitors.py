@@ -841,9 +841,9 @@ class MonitorHub:
         if not acquire_cancellable(lease, getattr(ctx, "cancelled", None)):
             return (f"error: {lease.last_error}" if lease.last_error else
                     "error: monitor was cancelled while waiting for the workspace write lease")
+        from . import proctree
+        from . import shell as shell_module
         try:
-            from . import proctree
-            from . import shell as shell_module
             popen_kw = proctree.spawn_kwargs(
                 cwd=str(root), stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
