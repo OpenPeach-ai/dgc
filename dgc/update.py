@@ -197,6 +197,32 @@ def _switch_to(c, location, version: str | None) -> int:
         L.release_update_lock(fd)
 
 
+def _windows_update_instructions(c, version: str | None) -> int:
+    """`dgc update` on Windows: say what to run, instead of failing inside a missing bash.
+
+    install.sh builds each release in its own virtualenv and repoints a symlink — a POSIX shell
+    script through and through. On Windows the same job belongs to the tool installer that put
+    DGC there, so print the exact command rather than pretending to do it.
+    """
+    from rich.markup import escape
+    source = _base_url() + "/dgc.tar.gz"
+    c.print("[bold]dgc update[/bold] does not run on Windows: it installs through install.sh, "
+            "which needs a POSIX shell.", highlight=False, soft_wrap=True)
+    c.print("\nUpdate with the tool that installed DGC:", highlight=False)
+    c.print(f"    pipx install --force {escape(source)}", highlight=False, markup=False,
+            soft_wrap=True)
+    c.print(f"    uv tool install --force \"dgc @ {escape(source)}\"", highlight=False,
+            markup=False, soft_wrap=True)
+    if version:
+        c.print(f"\n(There is no per-version download for {escape(str(version))}; the address "
+                "above is always the current release.)", highlight=False, soft_wrap=True)
+    c.print("\nNever `pip install dgc`: that name belongs to a different project on PyPI.",
+            highlight=False, soft_wrap=True)
+    c.print("Inside WSL2, `dgc update` works exactly as it does on Linux.", highlight=False,
+            soft_wrap=True)
+    return EXIT_FAILED
+
+
 def run_update(args: list[str] | None = None) -> int:
     """`dgc update` — install the latest release beside the current one, or switch versions.
 
@@ -218,6 +244,8 @@ def run_update(args: list[str] | None = None) -> int:
     force = os.environ.get("DGC_FORCE_OVERWRITE") == "1"
     if action == "list":                 # read-only: listing changes nothing, even from a checkout
         return _list_versions(c, location)
+    if os.name == "nt" and action in ("install", "version"):
+        return _windows_update_instructions(c, requested if action == "version" else None)
     if location.kind == "checkout" and not force:
         c.print(f"[bold red]this dgc runs from {escape(str(location.tree))}, a git checkout[/bold red] — "
                 "`dgc update` will not repoint it at a release.\n"

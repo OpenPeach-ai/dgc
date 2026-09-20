@@ -344,6 +344,48 @@ _PATH_TOOLS = {"read_file", "view_image", "write_file", "edit_file", "multi_edit
 _SEARCH_PATH_TOOLS = {"glob", "grep", "repo_map"}
 
 
+def windows_spellings(value: str, *, windows: bool | None = None) -> list[str]:
+    """The other ways Windows lets the same file be named, so one rule covers all of them.
+
+    ``fnmatch`` already folds case and slash direction on Windows.  What it does not fold is
+    everything else Windows allows, and each of those was a way past a deny rule:
+
+    * ``\\\\?\\C:\\...`` skips the path normalisation the rest of the OS applies;
+    * ``C:\\PROGRA~1\\...`` is an 8.3 short name whose components do not read like the real ones;
+    * ``secret.txt:hidden`` is an alternate data stream — a second set of bytes hanging off a
+      file whose own name looks innocent, and a rule naming the file must cover it.
+
+    Returns extra spellings only; the caller keeps matching the original too.
+    """
+    if not value:
+        return []
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return []
+    import ntpath
+    from .workspace import canonicalize_trusted_os_alias, windows_canonical_text
+    found: list[str] = []
+    text = str(value)
+    # The stream suffix first, while the spelling is still the one the model supplied: the file
+    # it hangs off is what a Read/Write rule names.
+    drive, rest = ntpath.splitdrive(text)
+    if ":" in rest:
+        found.append(drive + rest.split(":", 1)[0])
+    for spelling in [text, *found]:
+        try:
+            found.append(windows_canonical_text(spelling))
+        except (WorkspaceBoundaryError, OSError, ValueError):
+            continue
+    if os.name == "nt":
+        for spelling in list(found):
+            try:
+                found.append(str(canonicalize_trusted_os_alias(Path(spelling))))
+            except (WorkspaceBoundaryError, OSError, ValueError):
+                continue
+    return [item for item in dict.fromkeys(found) if item and item != value]
+
+
 class PermissionEngine:
     def __init__(self, mode: str, rules: dict[str, list[str]], project_root: Path | None = None):
         self.mode = mode if mode in MODES else "default"
@@ -398,6 +440,8 @@ class PermissionEngine:
             values.extend((str(target), relative_rule_value(target, self.project_root)))
         except WorkspaceBoundaryError:
             pass
+        for spelling in list(values):
+            values.extend(windows_spellings(spelling))
         key = RULE_ARG.get(tool, "")
         return any(rule.matches(tool, {**args, key: value}) for value in dict.fromkeys(values))
 

@@ -251,22 +251,43 @@ def flip_launcher(path: Path, target: Path) -> None:
 
 # ------------------------------------------------------------------ locks ---
 
-def acquire_update_lock(data_dir: Path) -> int | None:
-    """Hold <data_dir>/update.lock (the lock install.sh takes). None when someone else holds it.
+def _lock_exclusive(fd: int) -> bool:
+    """Take an exclusive, non-blocking lock on an open file. False when someone else holds it.
 
     flock(2) rather than an O_EXCL pid file: the kernel drops it when the holder dies, so a killed
-    install can never leave a stale lock behind for the next one to guess about."""
+    install can never leave a stale lock behind for the next one to guess about. Windows has no
+    fcntl; msvcrt.locking gives the same "the OS releases it when the process dies" guarantee over
+    a one-byte range, which is why the caller writes a byte before locking.
+    """
+    if os.name == "nt":
+        import msvcrt
+        try:
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\0")             # msvcrt locks a byte range that must exist
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
     import fcntl
-    Path(data_dir).mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(Path(data_dir) / "update.lock"), os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
     except OSError:
+        return False
+
+
+def acquire_update_lock(data_dir: Path) -> int | None:
+    """Hold <data_dir>/update.lock (the lock install.sh takes). None when someone else holds it."""
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(Path(data_dir) / "update.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    if not _lock_exclusive(fd):
         os.close(fd)
         return None
     try:
-        os.ftruncate(fd, 0)
-        os.write(fd, f"{os.getpid()}\n".encode())
+        if os.name != "nt":                     # the locked byte on Windows is the lock itself
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{os.getpid()}\n".encode())
     except OSError:
         pass
     return fd
@@ -281,10 +302,13 @@ def release_update_lock(fd: int | None) -> None:
 
 
 def update_lock_holder(data_dir: Path) -> str:
+    """The pid that wrote the lock file, or "" — including on Windows, where nothing writes one."""
     try:
-        return (Path(data_dir) / "update.lock").read_text(encoding="utf-8").strip().splitlines()[0]
+        first = (Path(data_dir) / "update.lock").read_text(
+            encoding="utf-8", errors="replace").strip().splitlines()[0].strip()
     except (OSError, IndexError):
         return ""
+    return first if first.isdigit() else ""
 
 
 def _process_command_line(pid: int) -> str | None:
@@ -615,6 +639,20 @@ def _update_lock_state(data_dir: Path) -> str:
     """'free', 'held by pid N' or 'held', without creating anything."""
     path = Path(data_dir) / "update.lock"
     if not path.is_file():
+        return "free"
+    if os.name == "nt":
+        import msvcrt
+        try:
+            fd = os.open(str(path), os.O_RDWR)
+        except OSError:
+            return "unknown"
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            return "held"        # Windows has no shared lock here, and no pid is written
+        finally:
+            os.close(fd)
         return "free"
     try:
         import fcntl
