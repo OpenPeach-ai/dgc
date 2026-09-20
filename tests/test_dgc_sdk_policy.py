@@ -32,9 +32,17 @@ from dgc_sdk import policy as sdk_policy  # noqa: E402
 from dgc_sdk.types import PermissionRequest  # noqa: E402
 
 HAS_BWRAP = sys.platform.startswith("linux") and shutil.which("bwrap") is not None
-# The backend DGC would use on this host (bubblewrap on Linux, sandbox-exec on macOS).
+# The backend DGC would use on this host (bubblewrap on Linux, sandbox-exec on macOS). On macOS
+# the runtime pins /usr/bin/sandbox-exec, because a `sandbox-exec` found earlier on PATH could be
+# an unconfined passthrough.
+MACOS_SEATBELT = Path("/usr/bin/sandbox-exec")
 HOST_SANDBOX = (shutil.which("bwrap") if sys.platform.startswith("linux") else
-                shutil.which("sandbox-exec") if sys.platform == "darwin" else None)
+                (str(MACOS_SEATBELT) if MACOS_SEATBELT.is_file() else None)
+                if sys.platform == "darwin" else None)
+# Several cases below give the runtime a PATH with nothing on it, to test an application whose
+# runtime has no OS sandbox. That works wherever the backend is found on PATH; since CLI 0.41.9
+# it cannot hide the pinned macOS backend, so those cases are proven on the other platforms.
+PATH_CAN_HIDE_THE_BACKEND = not (sys.platform == "darwin" and MACOS_SEATBELT.is_file())
 
 
 def _bwrap_works() -> bool:
@@ -276,6 +284,8 @@ class RuntimePolicyAutoModeTests(_E2E):
 
 
 class ShellSandboxTests(_E2E):
+    @unittest.skipUnless(PATH_CAN_HIDE_THE_BACKEND,
+                         "the macOS sandbox backend is pinned, so PATH cannot hide it")
     def test_sandboxed_shell_fails_closed_when_no_sandbox_is_available(self):
         # A default RuntimePolicy asks for a sandboxed shell. On a host with no working sandbox the
         # session must refuse to start rather than silently run the shell unconfined.
@@ -290,6 +300,8 @@ class ShellSandboxTests(_E2E):
         self.assertTrue("bubblewrap" in message or "install" in message.lower(), message)
         self.assertFalse((self.work / "shell.txt").exists())
 
+    @unittest.skipUnless(PATH_CAN_HIDE_THE_BACKEND,
+                         "the macOS sandbox backend is pinned, so PATH cannot hide it")
     def test_explicit_preferred_sandbox_falls_back_with_a_warning(self):
         # An app that opts into the weaker mode (sandbox preferred) starts and warns; in auto mode
         # the unattended shell is still refused rather than run unconfined.
@@ -315,8 +327,11 @@ class ShellSandboxTests(_E2E):
                           extra_env={"PATH": "/nonexistent-dgc"}) as dgc:
             session = dgc.session(cwd=self.work, permissions={"mode": "plan"})
             self.assertTrue(session.session_id)
-            self.assertFalse(session.sandbox.active)
+            if PATH_CAN_HIDE_THE_BACKEND:
+                self.assertFalse(session.sandbox.active)
 
+    @unittest.skipUnless(PATH_CAN_HIDE_THE_BACKEND,
+                         "the macOS sandbox backend is pinned, so PATH cannot hide it")
     def test_required_sandbox_fails_when_the_runtime_has_none(self):
         if not HOST_SANDBOX:
             # The host plainly has no backend: the client refuses before starting anything.

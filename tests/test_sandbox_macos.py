@@ -268,6 +268,20 @@ class StrictProfileLive(unittest.TestCase):
         """The same command unsandboxed: the control behind every "blocked"."""
         return self._run(["/bin/bash", "-o", "pipefail", "-c", command], timeout, "the control")
 
+    @staticmethod
+    def host(argv: list[str], timeout=30):
+        """One host-side helper command, always with a deadline.
+
+        These are the fixtures and outside confirmations (`security`, `pgrep`, `defaults`). A
+        macOS tool that decides to wait for a service that is not there must not be able to stall
+        the CLI suite, so a timeout comes back as a failed run and the caller decides.
+        """
+        try:
+            return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                  timeout=timeout)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return subprocess.CompletedProcess(argv, 124, "", f"{type(exc).__name__}: {exc}")
+
     def assertBlocked(self, command: str, *, network=False, expect_in_control=""):
         confined, _ = self.run_confined(command, network=network)
         control = self.run_free(command)
@@ -333,8 +347,7 @@ class StrictProfileLive(unittest.TestCase):
         # Resolved outside: inside the sandbox getconf falls back to TMPDIR, which is the
         # sandbox's own private folder, so asking it there would prove nothing.
         for name in ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR"):
-            path = subprocess.run(["/usr/bin/getconf", name], capture_output=True,
-                                  text=True).stdout.strip()
+            path = self.host(["/usr/bin/getconf", name]).stdout.strip()
             self.assertTrue(path.startswith("/"), f"{name} did not resolve: {path!r}")
             self.assertBlocked(f"ls {path}")
         marker = Path("/private/tmp") / f"dgc-seatbelt-live-{os.getpid()}"
@@ -374,19 +387,16 @@ class StrictProfileLive(unittest.TestCase):
         # `open` and `defaults` are judged by their effect outside the sandbox, not by their exit
         # code: the old allow-by-default profile let both exit 0, and only the outside check told
         # the launched app (a real escape) from the swallowed preference write.
-        subprocess.run(["/usr/bin/pkill", "-x", "TextEdit"], capture_output=True)
-        self.addCleanup(subprocess.run, ["/usr/bin/pkill", "-x", "TextEdit"])
+        self.host(["/usr/bin/pkill", "-x", "TextEdit"])
+        self.addCleanup(self.host, ["/usr/bin/pkill", "-x", "TextEdit"])
         self.run_confined("open -g -a TextEdit")
-        subprocess.run(["/bin/sleep", "2"])
-        self.assertEqual(subprocess.run(["/usr/bin/pgrep", "-x", "TextEdit"],
-                                        capture_output=True).returncode, 1,
+        time.sleep(2)
+        self.assertEqual(self.host(["/usr/bin/pgrep", "-x", "TextEdit"]).returncode, 1,
                          "LEAK: LaunchServices started an app outside the sandbox")
         domain = f"dgc.seatbelt.live.{os.getpid()}"
-        self.addCleanup(subprocess.run, ["/usr/bin/defaults", "delete", domain],
-                        capture_output=True)
+        self.addCleanup(self.host, ["/usr/bin/defaults", "delete", domain])
         self.run_confined(f"defaults write {domain} k v")
-        self.assertNotEqual(subprocess.run(["/usr/bin/defaults", "read", domain, "k"],
-                                           capture_output=True).returncode, 0,
+        self.assertNotEqual(self.host(["/usr/bin/defaults", "read", domain, "k"]).returncode, 0,
                             "LEAK: a preference written inside the sandbox reached cfprefsd")
         self.assertBlocked(f"launchctl submit -l dgc.live.{os.getpid()} -- /usr/bin/true")
 
@@ -422,12 +432,11 @@ class StrictProfileLive(unittest.TestCase):
 
     def test_the_keychain_is_hidden_while_network_is_denied(self):
         service = f"dgc-seatbelt-live-{os.getpid()}"
-        seeded = subprocess.run(
-            ["/usr/bin/security", "add-generic-password", "-U", "-A", "-a", "dgc",
-             "-s", service, "-w", "LIVE-SECRET-4d2"], capture_output=True)
+        seeded = self.host(["/usr/bin/security", "add-generic-password", "-U", "-A", "-a", "dgc",
+                            "-s", service, "-w", "LIVE-SECRET-4d2"])
         if seeded.returncode != 0:
-            self.skipTest("this runner has no usable login keychain")
-        self.addCleanup(subprocess.run,
+            self.skipTest(f"this runner has no usable login keychain: {seeded.stderr[:120]}")
+        self.addCleanup(self.host,
                         ["/usr/bin/security", "delete-generic-password", "-s", service])
         command = f"security find-generic-password -s {service} -w"
         self.assertBlocked(command, expect_in_control="LIVE-SECRET-4d2")
