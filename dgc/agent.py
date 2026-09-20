@@ -1614,11 +1614,19 @@ class Agent(GoalLifecycle):
 
         Managed children use the launch project's trust-bearing config, never newly written
         definitions from their scratch checkout. A changed trust state refreshes the catalog.
+
+        The launching process's session policy decides whether a project definition is loaded at
+        all and whether it may carry a route, so it belongs in the key too: a catalog read before
+        that policy was in force must never be reused under it. A policy normally arrives in the
+        environment before the first Agent exists, but the catalog is read as soon as anything
+        needs the delegation roster, and that moment moves with the tool profile.
         """
+        from .permissions import session_project_agents_allowed, session_restricts_agent_routing
         from .trust import is_trusted
 
         config = self._agent_defs_config
-        key = (str(config.project_root), is_trusted(config, config.project_root))
+        key = (str(config.project_root), is_trusted(config, config.project_root),
+               session_project_agents_allowed(), session_restricts_agent_routing())
         if key != self._agent_defs_key:
             self._agent_defs = discover_agents(config.project_root, config=config)
             self._agent_defs_key = key
