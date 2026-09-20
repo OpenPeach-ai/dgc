@@ -49,7 +49,7 @@ test("a reconnect run updates one line in place and ends in past tense", () => {
   assert.equal(label(line), "Reconnected after 2 retries");
   assert.equal(line.dataset.state, "recovered");
   assert.equal(line.querySelector(".model-retry-cause").textContent, HOST);
-  assert.ok(line.querySelector(".model-retry-icon").classList.contains("codicon-plug"));
+  assert.equal(line.querySelector(".model-retry-icon").dataset.icon, "circle-check");
   assert.equal(doc.querySelector(".thinking .verb").textContent, "Responding");
   assert.ok(line.closest(".msg.dgc"), "the line sits inside its turn");
   assert.deepEqual(errors, []);
@@ -236,7 +236,7 @@ test("every turn ending settles a live line, and only the backend can say Gave u
     event(retry());
     event({ type: "turn_end", turn_id: "t1", reason: "cancelled" });
     assert.equal(label(lines()[0]), "Stopped while reconnecting");
-    assert.ok(lines()[0].querySelector(".model-retry-icon").classList.contains("codicon-circle-slash"));
+    assert.equal(lines()[0].querySelector(".model-retry-icon").dataset.icon, "circle-slash");
   }
   // (e) a real give-up
   {

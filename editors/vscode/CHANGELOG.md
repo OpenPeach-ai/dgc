@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.26.8 — 2026-09-20
 
+- **Cleaner activity icons.** Every step, diff, card and notice in the chat now carries a thin outline icon in the same grey as its words, in place of the old `→ ✎ $ ✱ ▸` glyphs and the single wrench. The header above a run of steps shows what it actually did — a book for reading files, a pencil for edits, a terminal for commands — and steps that used to look alike (an update to the checklist, a skill, an image, an MCP call, a sub-agent) each have their own mark. An MCP form request no longer shows a blank square.
+- **Reduced motion stops the running step's dot.** With "reduce motion" on, the dot beside a running step kept pulsing; the rule meant to switch it off was overruled by a later one.
 - **Conversation text one step larger.** Prompts and answers are 13px (code 12px): 12px read too small. Prompts keep the answers' line spacing.
 - **No ring around working sub-agents.** A running sub-agent's icon no longer has a pulsing coloured ring around it; the chip's "working" label shows it is running.
 - **See the image you attached.** An image in the prompt box shows as a preview chip with its

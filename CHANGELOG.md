@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.41.8 — 2026-09-20
 
 - **Extra high and Ultra can reason deeply.** The reasoning watchdog stopped every level after
   8,000 tokens of thinking with no answer, which is less than DGC itself asks Claude to think at

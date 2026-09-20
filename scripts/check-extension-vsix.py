@@ -49,6 +49,7 @@ STATIC_MEMBERS = {
     "extension/licenses/CODICONS-CC-BY-4.0.txt": "licenses/CODICONS-CC-BY-4.0.txt",
     "extension/licenses/MARKDOWN-LICENSES.txt": "licenses/MARKDOWN-LICENSES.txt",
     "extension/licenses/MERMAID-LICENSES.txt": "licenses/MERMAID-LICENSES.txt",
+    "extension/licenses/LUCIDE-LICENSES.txt": "licenses/LUCIDE-LICENSES.txt",
 }
 GENERATED_MEMBERS = {
     "[Content_Types].xml",

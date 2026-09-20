@@ -1083,9 +1083,9 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   const tools = doc.querySelectorAll(".tool");
   assert.equal(tools.length, 3, "expected exactly 3 tool cards");
-  assert.equal(tools[0].querySelector(".glyph").textContent, "→", "read_file glyph");
+  assert.equal(tools[0].querySelector(".glyph svg").dataset.icon, "book-open", "read_file icon");
   assert.equal(tools[0].querySelector(".verb").textContent, "Read");
-  assert.equal(tools[2].querySelector(".glyph").textContent, "✎", "edit_file glyph");
+  assert.equal(tools[2].querySelector(".glyph svg").dataset.icon, "pencil", "edit_file icon");
 
   const diff = doc.querySelector(".diff");
   assert.ok(diff, "inline diff did not render");
@@ -4578,7 +4578,7 @@ test("the marker above a wake turn names a background command when one woke it",
   event({ type: "monitor_event", id: "bg1", description: "sleep 20 && echo bg-finished-ok", event_index: 0,
           lines: ["exited 0 after 20.0s", "bg-finished-ok"], kind: "background_exit", delivery: "wake", turn_id: "t1" });
   assert.equal(note().textContent, "Woke on background command · sleep 20 && echo bg-finished-ok · exited");
-  assert.ok(note().querySelector(".codicon-terminal"));
+  assert.ok(note().querySelector('.note-icon[data-icon="square-terminal"]'));
   event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
   // Two background commands, then a wake that mixes a monitor's events with a background exit.
   event({ type: "turn_start", turn_id: "t2", prompt: "2 background commands exited", kind: "monitor" });
@@ -4591,7 +4591,7 @@ test("the marker above a wake turn names a background command when one woke it",
   event({ type: "monitor_event", id: "bg4", description: "bg4", event_index: 0, lines: ["exited 0"], kind: "background_exit", delivery: "wake", turn_id: "t3" });
   event({ type: "monitor_event", id: "mon1", description: "api log", event_index: 1, lines: ["READY"], kind: "output", delivery: "wake", turn_id: "t3" });
   assert.equal(note().textContent, "Woke on monitor · 1 monitor · 1 event · 1 background command exited");
-  assert.ok(note().querySelector(".codicon-pulse"));
+  assert.ok(note().querySelector('.note-icon[data-icon="activity"]'));
   // An inline event in a turn someone typed leaves that turn's prompt alone.
   event({ type: "turn_end", turn_id: "t3", reason: "completed", final_message_id: null });
   event({ type: "turn_start", turn_id: "t4", prompt: "watch it", kind: "prompt" });
