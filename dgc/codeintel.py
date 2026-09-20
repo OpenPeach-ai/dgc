@@ -333,11 +333,13 @@ class _LSPClient:
         from .guards import mcp_process_env
         env, _ = mcp_process_env(self.spec.get("env") if isinstance(self.spec.get("env"), dict) else None)
         try:
+            from . import proctree
             self.proc = subprocess.Popen(
                 [command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, cwd=str(self.root), env=env,
-                start_new_session=True,
+                **proctree.spawn_kwargs(),
             )
+            proctree.track(self.proc, register=True)
             if os.name == "posix":
                 self._pgid = self.proc.pid
         except Exception as exc:
@@ -619,8 +621,8 @@ class _LSPClient:
                 pass
         elif proc.poll() is None:
             try:
-                proc.terminate()
-                proc.wait(timeout=1)
+                from . import proctree
+                proctree.terminate_tree(proc, grace_s=1.0)
             except Exception:
                 try:
                     proc.kill()

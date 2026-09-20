@@ -59,16 +59,19 @@ def spawn_kwargs(extra: dict | None = None) -> dict:
     return kwargs
 
 
-def track(proc) -> object | None:
-    """Put a freshly started process in its own Job Object (Windows) and remember the group.
+def track(proc, *, register: bool = False) -> object | None:
+    """Put a freshly started process in its own Job Object (Windows). Returns the job, or None.
 
-    Returns the job, or None where there is nothing to hold. Safe to call twice and safe to call
-    on a process that has already exited.
+    ``register`` additionally records the POSIX process group in this session's registry, so a
+    serve that is killed outright can be cleaned up after. Only the long-running trees ask for
+    it — a build, a dev server, an MCP or language server — because a registry line per `git
+    status` would be a busy file for no benefit. Safe to call twice, and on an exited process.
     """
     if proc is None:
         return None
     if os.name == "posix":
-        register_group(proc.pid)
+        if register:
+            register_group(proc.pid)
         return None
     if os.name != "nt":
         return None
@@ -110,9 +113,6 @@ def terminate_tree(proc, *, grace_s: float = 2.0) -> bool:
     """
     if proc is None:
         return True
-    if proc.poll() is not None and os.name != "posix":
-        release(proc)
-        return True
     if os.name == "posix":
         pgid = proc.pid
         for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -126,18 +126,19 @@ def terminate_tree(proc, *, grace_s: float = 2.0) -> bool:
             except (subprocess.TimeoutExpired, OSError):
                 continue
         return group_alive(pgid) is False
+    # The job is terminated even when the leader has already exited: a command that printed and
+    # returned can leave a grandchild holding the output pipe, which is exactly the case a
+    # timeout has to sweep. Popen.poll() says nothing about the rest of the tree.
     job = getattr(proc, "_dgc_job", None)
-    ended = False
-    if job is not None:
-        ended = bool(job.terminate())
-    if not ended:
+    ended = bool(job.terminate()) if job is not None else False
+    if not ended and proc.poll() is None:
         from . import winjob
         ended = winjob.taskkill_tree(proc.pid)
-    if not ended:
-        try:
-            proc.kill()                            # at least the direct child
-        except (OSError, ValueError):
-            pass
+        if not ended:
+            try:
+                proc.kill()                        # at least the direct child
+            except (OSError, ValueError):
+                pass
     try:
         proc.wait(timeout=max(0.1, grace_s))
     except (subprocess.TimeoutExpired, OSError):

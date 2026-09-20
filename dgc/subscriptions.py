@@ -840,10 +840,13 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
         # Prompts are already passed through the engine's argv. The vendor must never inherit
         # the editor's live NDJSON input pipe or the terminal REPL: some CLIs read it until EOF,
         # hanging before generation and potentially consuming DGC control/decision frames.
+        from . import proctree
         proc = subprocess.Popen(
-            argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=False, bufsize=0, env={**os.environ, **(env or {})}, start_new_session=True)
+            argv, **proctree.spawn_kwargs(dict(
+                cwd=str(workdir), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=False, bufsize=0, env={**os.environ, **(env or {})})))
+        proctree.track(proc, register=True)
     except (OSError, ValueError) as exc:
         raise EngineLaunchError(
             f"could not start {engine.short_label}: {type(exc).__name__}: {exc}") from exc
@@ -854,6 +857,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     process_group = proc.pid
 
     def _group_alive() -> bool:
+        if os.name != "posix":
+            return proc.poll() is None
         try:
             os.killpg(process_group, 0)
             return True
@@ -863,6 +868,13 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     def _kill() -> None:
         """Terminate the complete vendor process tree, then escalate after a short grace."""
         if not kill_lock.acquire(blocking=False):
+            return
+        if os.name != "posix":
+            try:
+                from . import proctree
+                proctree.terminate_tree(proc, grace_s=0.75)
+            finally:
+                kill_lock.release()
             return
         try:
             try:

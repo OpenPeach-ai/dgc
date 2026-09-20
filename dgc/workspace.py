@@ -18,12 +18,21 @@ class WorkspaceBoundaryError(ValueError):
     """A requested path is outside the active project boundary."""
 
 
-# Windows reports a file's identity in two widths. ``os.stat``/``os.lstat`` on a *path* return the
-# 128-bit NTFS file id and a 64-bit volume serial; ``os.fstat`` on an open *handle* returns the
-# 64-bit file index and the 32-bit serial that GetFileInformationByHandle gives. From Python 3.13
-# on Windows the two therefore disagree for the same file, and every "did this file change while I
-# read it?" check compared one against the other and said yes. Compare what both widths can
-# express, keep every other field exact, and on POSIX compare everything exactly.
+# Windows describes the same file differently depending on how it was asked, and DGC's staleness
+# checks compare a path stat with a handle stat. Two differences are real and neither means the
+# file changed:
+#   * identity width — ``os.stat``/``os.lstat`` on a *path* return the 128-bit NTFS file id and a
+#     64-bit volume serial, while ``os.fstat`` on an open *handle* returns the 64-bit file index
+#     and the 32-bit serial from GetFileInformationByHandle;
+#   * ``st_ctime`` — on Windows it is the file's CREATION time, not a change time (deprecated
+#     since Python 3.12, and its meaning changes in 3.14). On Windows Server 2025 with Python
+#     3.13 the two stat paths report it milliseconds apart for the same file, which made every
+#     read of a file DGC had just written look like a file that changed under it: reads failed,
+#     edits refused to commit, and repo_map and grep silently skipped the files they could not
+#     read. Nothing is lost by leaving it out there, because a creation time detects no change
+#     that the last-write time and the file id do not.
+# On POSIX every field is still compared exactly, ``st_ctime`` included: there it genuinely
+# reports a rename, a chmod or a new hard link that leaves the last-write time alone.
 _WINDOWS_FILE_ID_MASK = (1 << 64) - 1
 _WINDOWS_VOLUME_MASK = (1 << 32) - 1
 #: Whether identity comparison must tolerate the two widths. True exactly on Windows; a test
@@ -45,7 +54,7 @@ class FileVersion:
     _FIELDS = ("device", "inode", "file_type", "size", "modified_ns", "changed_ns")
 
     def _key(self) -> tuple:
-        return (self.file_type, self.size, self.modified_ns, self.changed_ns,
+        return (self.file_type, self.size, self.modified_ns,
                 self.inode & _WINDOWS_FILE_ID_MASK, self.device & _WINDOWS_VOLUME_MASK)
 
     def __eq__(self, other) -> bool:

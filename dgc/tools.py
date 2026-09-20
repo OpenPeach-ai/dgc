@@ -1524,7 +1524,7 @@ def bash(args: dict, ctx) -> str:
         return f"error: {e}"
     except OSError as e:
         return f"error: {e}"
-    _proctree.track(proc)
+    _proctree.track(proc, register=True)
     capture = _BoundedCommandCapture(ctx)
 
     def read_output() -> None:
@@ -1685,7 +1685,7 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
             proc = subprocess.Popen(_shell.argv(command), **popen_kw)
-        _proctree.track(proc)
+        _proctree.track(proc, register=True)
     except Exception as e:
         return f"error: could not start background command: {e}"
     finally:
@@ -1809,7 +1809,10 @@ def bash_kill(args: dict, ctx) -> str:
 
 def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = False) -> None:
     """Terminate and reap an entire background process group, including grandchildren."""
-    if proc.poll() is not None and not (sweep_exited_group and os.name == "posix"):
+    # sweep_exited_group matters on every OS: a shell that printed and exited can leave a
+    # grandchild holding the output pipe, and the reader thread then blocks until that
+    # grandchild ends. On Windows the Job Object is what ends it.
+    if proc.poll() is not None and not sweep_exited_group:
         try:
             proc.wait(timeout=0)
         except Exception:

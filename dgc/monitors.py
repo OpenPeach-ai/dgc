@@ -848,7 +848,7 @@ class MonitorHub:
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
                     env=(sandbox.process_env(config) if sandbox_requested
                          else sandbox.tool_env()))))
-            proctree.track(proc)
+            proctree.track(proc, register=True)
         except shell_module.ShellUnavailable as exc:
             return f"error: could not start the monitor: {exc}"
         except OSError as exc:

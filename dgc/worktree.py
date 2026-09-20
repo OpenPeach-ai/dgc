@@ -119,8 +119,9 @@ def _terminate_git(proc: subprocess.Popen) -> None:
     try:
         if os.name == "posix":
             os.killpg(proc.pid, signal.SIGKILL)
-        else:  # Windows Job Object coverage remains in the cross-platform soak gap.
-            proc.kill()
+        else:
+            from . import proctree
+            proctree.terminate_tree(proc)     # git spawns helpers; end the whole tree
     except (OSError, ProcessLookupError, PermissionError):
         pass
     try:
@@ -165,12 +166,11 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
         "cwd": str(cwd), "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env,
     }
-    if os.name == "posix":
-        popen_kwargs["start_new_session"] = True
-    elif os.name == "nt":  # pragma: no cover - Windows full-suite runner remains outstanding
-        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    from . import proctree
+    popen_kwargs = proctree.spawn_kwargs(popen_kwargs)
     try:
         proc = subprocess.Popen(argv, **popen_kwargs)
+        proctree.track(proc)
     except OSError as exc:
         error = os.fsencode(str(exc))
         return subprocess.CompletedProcess(

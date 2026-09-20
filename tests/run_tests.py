@@ -32,6 +32,54 @@ os.environ.pop("XDG_DATA_HOME", None)
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
+# Windows: run the whole suite in UTF-8 mode. Hundreds of fixtures are written with
+# Path.write_text() and no explicit encoding, so on an English Windows install they are encoded
+# as cp1252 and any fixture containing a bidirectional override, an emoji or CJK aborts the run
+# before the check that uses it. The product does not depend on this (dgc's own writes name
+# their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
+# so ask for it once, here, rather than in every caller.
+if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF8") != "1":
+    os.environ["DGC_TESTS_UTF8"] = "1"          # the re-exec must not re-exec again
+    os.execv(sys.executable,
+             [sys.executable, "-X", "utf8", str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+def live_process(pid: int) -> bool:
+    """Whether a pid is running — on Windows too, where os.kill(pid, 0) TERMINATES it.
+
+    CPython maps os.kill on Windows onto TerminateProcess for every signal but CTRL_C_EVENT and
+    CTRL_BREAK_EVENT, so the usual POSIX liveness probe killed the very process it was asking
+    about (and raised SystemError on 3.10). dgc.proctree.process_alive is the portable probe the
+    product itself uses.
+    """
+    from dgc.proctree import process_alive
+    if not pid:
+        return False
+    if not process_alive(pid):
+        return False
+    if os.name == "posix":
+        try:                       # a reaped-but-unwaited child is not alive for these checks
+            state = Path(f"/proc/{pid}/stat")
+            if state.exists() and state.read_text().split()[2] == "Z":
+                return False
+        except (OSError, ValueError, IndexError):
+            pass
+    return True
+
+
+def end_process(pid: int) -> None:
+    """Kill one stray test process on any OS (os.kill's signals are POSIX-only)."""
+    if not pid:
+        return
+    if os.name == "posix":
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        return
+    from dgc.winjob import taskkill_tree
+    taskkill_tree(pid)
+
 from dgc.llm import _ThinkFilter, parse_text_tool_calls  # noqa: E402
 from dgc.permissions import PermissionEngine, Rule, _is_readonly_bash, rule_for  # noqa: E402
 from dgc.skills import _parse_skill, discover_skills  # noqa: E402
@@ -786,7 +834,9 @@ def unit_tests(tmp: Path):
     check("non-dirfd repository discovery remains bounded and functional",
           len(_portable_entries[0]) == 2 and _portable_entries[1]
           and _portable_entries[2] == 2
-          and any(line.startswith("portable-discovery/portable.py  [")
+          # A repository map spells its rows with the platform's separator, so the expected
+          # prefix is written with it too rather than assuming a POSIX slash.
+          and any(line.startswith(os.path.join("portable-discovery", "portable.py") + "  [")
                   and "portable_symbol@1" in line
                   for line in _portable_map.splitlines())
           and not any(line.startswith("..") for line in _portable_map.splitlines())
@@ -896,10 +946,7 @@ def unit_tests(tmp: Path):
         if _slow_pid_match:
             try:
                 _slow_pid = int(_slow_pid_match.group(1))
-                os.kill(_slow_pid, 0)
-                _slow_stat = Path(f"/proc/{_slow_pid}/stat")
-                _slow_child_alive = not (
-                    _slow_stat.exists() and _slow_stat.read_text().split()[2] == "Z")
+                _slow_child_alive = live_process(_slow_pid)
             except (OSError, ProcessLookupError, ValueError):
                 pass
         check("search timeout reaps the complete helper process group and reports failure",
@@ -923,22 +970,16 @@ def unit_tests(tmp: Path):
     _timeout_child_alive = False
     if _timeout_pid_match:
         _timeout_pid = int(_timeout_pid_match.group(1))
-        try:
-            os.kill(_timeout_pid, 0)
-            _timeout_stat = Path(f"/proc/{_timeout_pid}/stat")
-            if _timeout_stat.exists():
-                _timeout_zombie = _timeout_stat.read_text().split()[2] == "Z"
-            else:
-                try:
-                    _timeout_ps = subprocess.run(
-                        ["ps", "-o", "stat=", "-p", str(_timeout_pid)],
-                        capture_output=True, text=True, timeout=1, check=False)
-                    _timeout_zombie = _timeout_ps.stdout.strip().startswith("Z")
-                except (OSError, subprocess.SubprocessError):
-                    _timeout_zombie = False
-            _timeout_child_alive = not _timeout_zombie
-        except (OSError, ProcessLookupError):
-            pass
+        _timeout_child_alive = live_process(_timeout_pid)
+        if _timeout_child_alive and os.name == "posix":
+            try:
+                _timeout_ps = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(_timeout_pid)],
+                    capture_output=True, text=True, timeout=1, check=False)
+                if _timeout_ps.stdout.strip().startswith("Z"):
+                    _timeout_child_alive = False
+            except (OSError, subprocess.SubprocessError):
+                pass
     _timeout_output_id = _timeout_output_match.group(1) if _timeout_output_match else ""
     _timeout_saved = execute("bash_output", {"id": _timeout_output_id,
                                               "query": "CHILD_PID="}, ctx)
@@ -952,13 +993,7 @@ def unit_tests(tmp: Path):
         alive = bool(pid)
         deadline = _time_tools.monotonic() + wait
         while alive and _time_tools.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)
-                proc_stat = Path(f"/proc/{pid}/stat")
-                if proc_stat.exists() and proc_stat.read_text().split()[2] == "Z":
-                    alive = False
-            except (OSError, ProcessLookupError, FileNotFoundError, ValueError):
-                alive = False
+            alive = live_process(pid)
             if alive:
                 _time_tools.sleep(0.02)
         return alive
@@ -990,10 +1025,7 @@ def unit_tests(tmp: Path):
           f"elapsed={_cancel_elapsed:.2f} pid={_cancel_pid} alive={_cancel_child_alive} "
           f"out={_cancel_out[-500:]}")
     if _cancel_child_alive:
-        try:
-            os.kill(_cancel_pid, 9)
-        except OSError:
-            pass
+        end_process(_cancel_pid)
 
     _detached_program = (
         "import subprocess,sys\n"
@@ -1012,10 +1044,7 @@ def unit_tests(tmp: Path):
           and (not _detached_child_alive if os.name == "posix" else True),
           f"pid={_detached_pid} alive={_detached_child_alive} out={_detached_out[-500:]}")
     if _detached_child_alive:
-        try:
-            os.kill(_detached_pid, 9)
-        except OSError:
-            pass
+        end_process(_detached_pid)
 
     from dgc.scheduler import workspace_mutation_lock as _direct_workspace_lock
     _direct_ctx = Ctx(tmp)
@@ -2261,10 +2290,7 @@ def unit_tests(tmp: Path):
           f"id={_orphan_id!r} pid={_orphan_pid} controls={_orphan_controls} "
           f"killed={_orphan_killed!r} output={_orphan_output[-300:]!r}")
     if _orphan_still_alive:
-        try:
-            os.kill(_orphan_pid, 9)
-        except OSError:
-            pass
+        end_process(_orphan_pid)
     for unsafe_url in ("file:///etc/passwd", "http://127.0.0.1/x", "http://[::1]/x",
                        "http://169.254.169.254/latest/meta-data", "https://user:pass@example.com/"):
         try:
@@ -6688,13 +6714,7 @@ def test_hook_runtime():
     child_alive = bool(child_pid)
     deadline = _time.monotonic() + 2
     while child_alive and _time.monotonic() < deadline:
-        try:
-            os.kill(child_pid, 0)
-            if sys.platform.startswith("linux"):
-                state = Path(f"/proc/{child_pid}/stat").read_text().split()[2]
-                child_alive = state != "Z"
-        except (OSError, ProcessLookupError, FileNotFoundError):
-            child_alive = False
+        child_alive = live_process(child_pid)
         if child_alive:
             _time.sleep(0.02)
     check("timed-out hooks reap their complete POSIX process group",
@@ -6792,12 +6812,7 @@ def test_worktree_git_runner():
     child_alive = bool(child_pid)
     deadline = _time.monotonic() + 2
     while child_alive and _time.monotonic() < deadline:
-        try:
-            os.kill(child_pid, 0)
-            if sys.platform.startswith("linux"):
-                child_alive = Path(f"/proc/{child_pid}/stat").read_text().split()[2] != "Z"
-        except (OSError, ProcessLookupError, FileNotFoundError):
-            child_alive = False
+        child_alive = live_process(child_pid)
         if child_alive:
             _time.sleep(0.02)
     check("internal Git is non-interactive and timeout reaps its complete POSIX process group",
@@ -7116,7 +7131,8 @@ def test_mcp_protocol():
                 try:
                     if pid <= 0:
                         return False
-                    os.kill(pid, 0)
+                    if not live_process(pid):
+                        return False
                     if sys.platform.startswith("linux"):
                         # comm is parenthesized and may contain spaces. Both Z (zombie) and X
                         # (dead) are terminal states; proc_pid_stat(5) also documents legacy x.
@@ -7555,11 +7571,7 @@ def test_mcp_protocol():
         stalled_pid_value = int(stalled_pid.read_text()) if stalled_pid.exists() else 0
         stalled_alive = False
         if stalled_pid_value:
-            try:
-                os.kill(stalled_pid_value, 0)
-                stalled_alive = True
-            except (OSError, ProcessLookupError):
-                pass
+            stalled_alive = live_process(stalled_pid_value)
         check("MCP bounds a request write when a server stops reading stdin",
               elapsed < 5 and "stdin stalled" in stalled_out
               and stalled_proc is None and not stalled_alive
@@ -8182,14 +8194,8 @@ finally:
     while alive and _time.monotonic() < reap_deadline:
         running = []
         for pid in alive:
-            try:
-                os.kill(pid, 0)
-                proc_stat = Path(f"/proc/{pid}/stat")
-                zombie = proc_stat.exists() and proc_stat.read_text().split()[2] == "Z"
-                if not zombie:
-                    running.append(pid)
-            except (OSError, ProcessLookupError):
-                pass
+            if live_process(pid):
+                running.append(pid)
         alive = running
         if alive:
             _time.sleep(0.05)
@@ -8240,11 +8246,7 @@ time.sleep(30)
     pid = int(stalled_pid.read_text()) if stalled_pid.exists() else 0
     alive = False
     if pid:
-        try:
-            os.kill(pid, 0)
-            alive = True
-        except (OSError, ProcessLookupError):
-            pass
+        alive = live_process(pid)
     check("code_intel bounds a didOpen write after a server stops reading stdin",
           elapsed < 2 and pid > 0 and not alive and "stdin stalled" in out
           and "large.py:1:1: function target" in out,

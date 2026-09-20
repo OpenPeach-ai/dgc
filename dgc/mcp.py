@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from . import proctree as _proctree
 from .config import valid_remote_mcp_url
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
@@ -668,11 +669,13 @@ class MCPServer:
             proc = subprocess.Popen(
                 [self.command, *self.args],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                env=self.env, cwd=str(self.root), text=True, bufsize=1, start_new_session=True,
+                env=self.env, cwd=str(self.root), text=True, bufsize=1,
+                **_proctree.spawn_kwargs(),
             )
         except Exception as e:
             self.error = f"could not launch: {e}"
             return False
+        _proctree.track(proc, register=True)
         self._generation += 1
         generation = self._generation
         self.proc = proc
@@ -905,22 +908,21 @@ class MCPServer:
         # descendant holding inherited stdio pipes, keeping both reader threads and arbitrary work
         # alive indefinitely.
         pgid = proc.pid if os.name == "posix" else None
-        if proc.poll() is None:
-            try:
-                if pgid is not None:
+        if pgid is None:
+            # Windows: the server and everything it started share a Job Object, so one call
+            # ends the tree. terminate() would leave a node server's workers on the port.
+            _proctree.terminate_tree(proc)
+        else:
+            if proc.poll() is None:
+                try:
                     os.killpg(pgid, signal.SIGTERM)
-                else:
-                    proc.terminate()
-                proc.wait(timeout=2)
-            except (OSError, ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
-                pass
-        try:
-            if pgid is not None:
+                    proc.wait(timeout=2)
+                except (OSError, ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+                    pass
+            try:
                 os.killpg(pgid, signal.SIGKILL)
-            elif proc.poll() is None:
-                proc.kill()
-        except (OSError, ProcessLookupError, PermissionError):
-            pass
+            except (OSError, ProcessLookupError, PermissionError):
+                pass
         try:
             proc.wait(timeout=2)
         except (OSError, subprocess.TimeoutExpired):

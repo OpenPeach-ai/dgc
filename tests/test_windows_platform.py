@@ -165,6 +165,15 @@ class FileIdentityTests(unittest.TestCase):
         with patch.object(workspace, "_TOLERATE_ID_WIDTH", True):
             self.assertEqual(handle, path)
 
+    def test_a_windows_creation_time_is_not_a_change_signal(self):
+        """st_ctime on Windows is the creation time, and the two stat paths disagree on it."""
+        with patch.object(workspace, "_TOLERATE_ID_WIDTH", True):
+            self.assertEqual(FileVersion(1, 7, stat.S_IFREG, 12, 1_000, 2_000),
+                             FileVersion(1, 7, stat.S_IFREG, 12, 1_000, 2_004_000_000))
+        with patch.object(workspace, "_TOLERATE_ID_WIDTH", False):
+            self.assertNotEqual(FileVersion(1, 7, stat.S_IFREG, 12, 1_000, 2_000),
+                                FileVersion(1, 7, stat.S_IFREG, 12, 1_000, 2_004_000_000))
+
     def test_a_different_file_is_still_a_different_file(self):
         with patch.object(workspace, "_TOLERATE_ID_WIDTH", True):
             self.assertNotEqual(self._version(1, 7), self._version(1, 8))
