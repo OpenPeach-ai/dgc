@@ -1,14 +1,26 @@
-# M0 diagnostic: run the CLI and SDK on REAL GitHub-hosted macOS and Windows runners and record
-# exactly what fails. Every job and every diagnostic step is continue-on-error, permissions are
-# read-only, and this workflow is NOT a `needs` of release.yml — a flaky Mac/Windows runner must
-# never block a CLI release. The findings are the uploaded logs and the `M0-RESULT ...` lines.
+# Platform proof for the CLI and the SDK on REAL GitHub-hosted macOS and Windows runners.
+# Every job and every diagnostic step is continue-on-error for now (the final stage removes it),
+# permissions are read-only, and this workflow is NOT a `needs` of release.yml — a flaky
+# Mac/Windows runner must never block a CLI release. The findings are the uploaded logs and the
+# `M0-RESULT` / `M0-SUMMARY` / `M0-FAIL` lines.
 #
+#   select          decides which legs this run needs, so one lane can dispatch only its own.
 #   dist            builds the wheel + npm tarball once on Linux, so every OS tests identical bytes.
 #   host            per OS/Python: clean venv + CLI + wheel, then the hermetic smoke(s).
 #   cli-suite       tests/run_tests.py on macOS and Windows (the CLI suite has never run there).
 #   seatbelt-probe  escape probes inside the CURRENT macOS sandbox profile (dgc/sandbox.py).
 #   windows-encoding  `dgc serve` with a cp1252 / native stdout, through both SDKs: is the NDJSON
 #                   valid UTF-8, and does non-ASCII text survive?
+#
+# macOS runner concurrency is capped org-wide (~5 jobs), so a push or a pull request runs only the
+# Linux dist + the Linux smoke. Lanes prove their own work with a dispatch:
+#
+#   legs=all      everything (also what the weekly schedule runs)
+#   legs=linux    dist + the ubuntu smoke              (cheap; the push/PR subset)
+#   legs=macos    dist + macOS host legs + macOS CLI suite + the seatbelt probes
+#   legs=windows  dist + Windows host legs + Windows CLI suite + the encoding probe
+#   legs=cli      the CLI-side legs only: CLI suites, seatbelt probes, encoding probe
+#   legs=sdk      dist + every host leg (the SDK smokes and full suites), no CLI-side legs
 name: SDK platforms
 
 on:
@@ -40,17 +52,104 @@ on:
   schedule:
     - cron: "41 4 * * 1"          # weekly: catches runner-image drift (macos-latest / windows-latest moves)
   workflow_dispatch:
+    inputs:
+      legs:
+        description: "Which legs to run"
+        type: choice
+        default: all
+        options: [all, macos, windows, linux, cli, sdk]
 
 permissions:
   contents: read
 
 concurrency:
-  group: sdk-platforms-${{ github.ref }}
+  # Per selection, so a Windows lane's dispatch never cancels a macOS lane's dispatch on the same branch.
+  group: sdk-platforms-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.legs || github.event_name }}
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
+  select:
+    name: Pick this run's legs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      legs: ${{ steps.pick.outputs.legs }}
+      host: ${{ steps.pick.outputs.host }}
+      host_any: ${{ steps.pick.outputs.host_any }}
+      cli: ${{ steps.pick.outputs.cli }}
+      cli_any: ${{ steps.pick.outputs.cli_any }}
+      seatbelt: ${{ steps.pick.outputs.seatbelt }}
+      encoding: ${{ steps.pick.outputs.encoding }}
+    steps:
+      - id: pick
+        env:
+          # A push or a pull request is the cheap Linux subset; the weekly schedule is everything.
+          LEGS: ${{ github.event_name == 'workflow_dispatch' && inputs.legs || (github.event_name == 'schedule' && 'all' || 'linux') }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+
+          HOST = [
+              # linux: the fast subset a push runs, and the floor every lane shares.
+              {"os": "ubuntu-latest",   "python": "3.13", "node": True,  "full": False, "family": "linux"},
+              # macOS arm64: two full legs (newest Python on macOS 26 and macOS 15) + a floor smoke.
+              {"os": "macos-latest",    "python": "3.13", "node": True,  "full": True,  "family": "macos"},
+              {"os": "macos-latest",    "python": "3.10", "node": False, "full": False, "family": "macos"},
+              {"os": "macos-15",        "python": "3.13", "node": True,  "full": True,  "family": "macos"},
+              # macOS Intel: smoke, so "Intel" is proven rather than assumed.
+              {"os": "macos-15-intel",  "python": "3.13", "node": False, "full": False, "family": "macos"},
+              # Windows x64: smoke on 3.12 and 3.13 (no 3.10 leg — python.org ships no patched 3.10
+              # Windows build, and Python < 3.12.4 predates the CVE-2024-4030 temp-dir ACL fix).
+              {"os": "windows-latest",  "python": "3.12", "node": False, "full": False, "family": "windows"},
+              {"os": "windows-latest",  "python": "3.13", "node": True,  "full": False, "family": "windows"},
+              # Windows ARM64: smoke, so ARM64 is proven rather than assumed.
+              {"os": "windows-11-arm",  "python": "3.13", "node": False, "full": False, "family": "windows"},
+          ]
+          CLI = [
+              {"os": "macos-latest",   "python": "3.13", "family": "macos"},
+              {"os": "macos-15",       "python": "3.13", "family": "macos"},
+              {"os": "windows-latest", "python": "3.13", "family": "windows"},
+              # Windows 3.10: os.fchmod does not exist there, so config/session saves may crash.
+              {"os": "windows-latest", "python": "3.10", "family": "windows"},
+          ]
+          # legs -> (host families, cli-suite families, seatbelt, encoding)
+          PLAN = {
+              "all":     ({"linux", "macos", "windows"}, {"macos", "windows"}, True,  True),
+              "linux":   ({"linux"},                     set(),                False, False),
+              "macos":   ({"macos"},                     {"macos"},            True,  False),
+              "windows": ({"windows"},                   {"windows"},          False, True),
+              "cli":     (set(),                         {"macos", "windows"}, True,  True),
+              "sdk":     ({"linux", "macos", "windows"}, set(),                False, False),
+          }
+
+          legs = os.environ.get("LEGS", "linux").strip() or "linux"
+          if legs not in PLAN:
+              legs = "linux"
+          host_families, cli_families, seatbelt, encoding = PLAN[legs]
+          host = [leg for leg in HOST if leg["family"] in host_families]
+          cli = [leg for leg in CLI if leg["family"] in cli_families]
+          out = {
+              "legs": legs,
+              "host": json.dumps({"include": host}),
+              "host_any": str(bool(host)).lower(),
+              "cli": json.dumps({"include": cli}),
+              "cli_any": str(bool(cli)).lower(),
+              "seatbelt": str(seatbelt).lower(),
+              "encoding": str(encoding).lower(),
+          }
+          with pathlib.Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              for key, value in out.items():
+                  handle.write(f"{key}={value}\n")
+          print(f"::notice title=SDK platforms::legs={legs} host={len(host)} cli-suite={len(cli)} "
+                f"seatbelt={str(seatbelt).lower()} encoding={str(encoding).lower()}")
+          PY
+
   dist:
     name: Build the SDK artifacts once
+    needs: select
+    if: needs.select.outputs.host_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -81,26 +180,14 @@ jobs:
 
   host:
     name: SDK · ${{ matrix.os }} · Python ${{ matrix.python }}${{ matrix.full && ' · full suites' || '' }}
-    needs: dist
+    needs: [select, dist]
+    if: needs.select.outputs.host_any == 'true'
     continue-on-error: true
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # macOS arm64: two full legs (newest Python on macOS 26 and macOS 15) + a floor smoke.
-          - { os: macos-latest,     python: "3.13", node: true,  full: true  }
-          - { os: macos-latest,     python: "3.10", node: false, full: false }
-          - { os: macos-15,         python: "3.13", node: true,  full: true  }
-          # macOS Intel: smoke, so "Intel" is proven rather than assumed.
-          - { os: macos-15-intel,   python: "3.13", node: false, full: false }
-          # Windows x64: smoke on 3.12 and 3.13 (no 3.10 leg — python.org ships no patched 3.10
-          # Windows build, and Python < 3.12.4 predates the CVE-2024-4030 temp-dir ACL fix).
-          - { os: windows-latest,   python: "3.12", node: false, full: false }
-          - { os: windows-latest,   python: "3.13", node: true,  full: false }
-          # Windows ARM64: smoke, so ARM64 is proven rather than assumed.
-          - { os: windows-11-arm,   python: "3.13", node: false, full: false }
+      matrix: ${{ fromJSON(needs.select.outputs.host) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -190,23 +277,22 @@ jobs:
 
   cli-suite:
     name: CLI suite · ${{ matrix.os }} · Python ${{ matrix.python }}
+    needs: select
+    if: needs.select.outputs.cli_any == 'true'
     continue-on-error: true
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: macos-latest,   python: "3.13" }
-          - { os: macos-15,       python: "3.13" }
-          - { os: windows-latest, python: "3.13" }
-          # Windows 3.10: os.fchmod does not exist there, so config/session saves may crash.
-          - { os: windows-latest, python: "3.10" }
+      matrix: ${{ fromJSON(needs.select.outputs.cli) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
       run:
         shell: bash
+    env:
+      M0_OS: ${{ matrix.os }}
+      M0_PY: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -227,7 +313,57 @@ jobs:
         run: 'set -o pipefail; python tests/windows/fchmod_probe.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/fchmod-${{ matrix.os }}-py${{ matrix.python }}.log"'
       - name: Run the full CLI test suite (diagnostic; failures are expected on these OSes)
         continue-on-error: true
-        run: 'set -o pipefail; python tests/run_tests.py 2>&1 | tee "$RUNNER_TEMP/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.log"'
+        env:
+          M0_LOG: ${{ runner.temp }}/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.log
+          M0_RC: ${{ runner.temp }}/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.rc
+        run: |
+          set +e
+          set -o pipefail
+          python tests/run_tests.py 2>&1 | tee "$M0_LOG"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$M0_RC"
+          exit "$rc"
+      - name: Summarise the CLI suite (M0-SUMMARY / M0-FAIL lines)
+        if: always()
+        continue-on-error: true
+        env:
+          M0_LOG: ${{ runner.temp }}/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.log
+          M0_RC: ${{ runner.temp }}/m0-logs/run_tests-${{ matrix.os }}-py${{ matrix.python }}.rc
+        run: |
+          python - <<'PY'
+          import os, pathlib, re
+
+          log = pathlib.Path(os.environ["M0_LOG"])
+          text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+          rc_file = pathlib.Path(os.environ["M0_RC"])
+          rc = rc_file.read_text(encoding="utf-8").strip() if rc_file.exists() else "?"
+          fails = [line[7:].strip() for line in text.splitlines() if line.startswith("  FAIL ")]
+          total = re.search(r"^(\d+)/(\d+) checks passed", text, re.M)
+          checks = f"{total.group(1)}/{total.group(2)}" if total else "none"
+          ran = re.search(r"^Ran (\d+) tests? in", text, re.M)
+          unit = re.search(r"^(OK|FAILED)\b.*$", text, re.M)
+          if total is None:
+              status = "ABORTED"                     # the run never reached its own summary line
+          elif fails or rc != "0":
+              status = "FAILED"
+          else:
+              status = "PASSED"
+          abort = ""
+          if status == "ABORTED":
+              errors = re.findall(r"^[\w.]*(?:Error|Exception|Interrupt)\b.*$", text, re.M)
+              abort = errors[-1][:160] if errors else "no summary line and no exception in the log"
+          names = [name.split("  -- ", 1)[0] for name in fails]   # the check name, without its detail
+          listed = " | ".join(names)
+          if len(listed) > 600:
+              kept = listed[:600].rsplit(" | ", 1)[0]
+              listed = f"{kept} | (+{len(names) - kept.count(' | ') - 1} more)"
+          print(f"M0-SUMMARY cli-suite os={os.environ['M0_OS']} python={os.environ['M0_PY']} "
+                f"status={status} exit={rc} checks={checks} failed={len(fails)} "
+                f"unit={unit.group(1) if unit else 'none'} tests={ran.group(1) if ran else '0'} "
+                f"abort={abort!r} fails={listed!r}")
+          for name in fails:
+              print(f"M0-FAIL cli-suite os={os.environ['M0_OS']} python={os.environ['M0_PY']} :: {name}")
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -237,6 +373,8 @@ jobs:
 
   seatbelt-probe:
     name: Seatbelt escape probe · ${{ matrix.os }}
+    needs: select
+    if: needs.select.outputs.seatbelt == 'true'
     continue-on-error: true
     permissions:
       contents: read
@@ -263,7 +401,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/m0-logs"
           python -m pip install -r requirements.lock
           python -m pip install --no-deps -e .
-      - name: Probe the CURRENT macOS sandbox profile, network denied and allowed
+      - name: Probe the macOS sandbox profile, network denied and allowed
         continue-on-error: true
         env:
           DGC_PYTHON: python
@@ -278,6 +416,8 @@ jobs:
 
   windows-encoding:
     name: Windows serve stdout encoding (cp1252)
+    needs: select
+    if: needs.select.outputs.encoding == 'true'
     continue-on-error: true
     permissions:
       contents: read
