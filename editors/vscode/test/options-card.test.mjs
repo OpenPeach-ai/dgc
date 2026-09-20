@@ -406,14 +406,14 @@ test("the answered state renders inside the tool card, identical live, replayed 
   const shape = (p) => {
     const card = p.doc.querySelector('.tool[data-call-id="call_q"]');
     return { verb: card.querySelector(".verb").textContent, arg: card.querySelector(".arg").textContent,
-      glyph: card.querySelector(".glyph").textContent, body: card.querySelector(".body").innerHTML,
+      glyph: card.querySelector(".glyph svg").dataset.icon, body: card.querySelector(".body").innerHTML,
       classes: [...card.classList].filter((c) => c !== "open").sort().join(" "), badge: card.querySelector(".badge").textContent,
       open: card.classList.contains("open") };
   };
   const expected = shape(live);
   assert.equal(expected.verb, "Asked");
   assert.equal(expected.arg, "2 questions");
-  assert.equal(expected.glyph, "?");
+  assert.equal(expected.glyph, "circle-help");
   assert.equal(expected.open, false, "collapsed by default");
   assert.equal(expected.badge, "");
   assert.deepEqual(shape(reversed), expected);

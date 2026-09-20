@@ -280,20 +280,107 @@
     + '<path class="s1" d="M32 24 L20 30 L13 72 L25 66 Z"/>'
     + '<path class="s2" d="M54 18 L42 24 L35 72 L47 66 Z"/>'
     + '<path class="s3" d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>';
-  // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
-  const GLYPH = {
-    read_file: "→", glob: "→", repo_map: "→", git_diff: "±",
-    write_file: "✎", edit_file: "✎", apply_patch: "✎", save_memory: "✎",
-    bash: "$", bash_output: "$", bash_kill: "$",
-    grep: "✱", web_search: "✱", web_fetch: "✱",
-    present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
+  // Transcript icons. One thin outline set for everything that describes WORK in the conversation:
+  // the tool-group header, every tool card, diffs, cards, notices. VS Code's own codicons stay on
+  // panel chrome (header, composer, menus, settings), where they read as the editor's furniture.
+  // The geometry is Lucide 1.24.0's, verbatim, on its 24x24 grid: fill none, stroke currentColor,
+  // round caps and joins, so an icon is exactly the colour of the words beside it and nothing else.
+  // Inline markup, not a font or a file: a <svg> in the DOM is not a CSP resource load.
+  // Lucide is ISC-licensed (some icons Feather-derived, MIT). See THIRD_PARTY_NOTICES.md and
+  // licenses/LUCIDE-ISC.txt.
+  const ICON_PATHS = {
+    "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+    "app-window": '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>',
+    "blocks": '<path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/><rect x="14" y="2" width="8" height="8" rx="1"/>',
+    "book-open": '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+    "bookmark": '<path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/>',
+    "bot": '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+    "braces": '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
+    "circle-alert": '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+    "circle-check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    "circle-help": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',  // circle-question-mark
+    "circle-slash": '<circle cx="12" cy="12" r="10"/><line x1="9" x2="15" y1="15" y2="9"/>',
+    "clipboard-list": '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
+    "code": '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+    "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+    "file-diff": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/>',
+    "file-plus": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M9 15h6"/><path d="M12 18v-6"/>',
+    "file-text": '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    "folder-tree": '<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/>',
+    "globe": '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+    "history": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+    "image": '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+    "image-off": '<line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" x2="6" y1="13.5" y2="21"/><line x1="18" x2="21" y1="12" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/>',
+    "list-todo": '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/>',
+    "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>',
+    "pencil": '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+    "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
+    "refresh-cw": '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+    "search": '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
+    "shield": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+    "shield-plus": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M9 12h6"/><path d="M12 9v6"/>',
+    "sparkle": '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>',
+    "square-pen": '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
+    "square-terminal": '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+    "target": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    "triangle-alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    "unplug": '<path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/>',
+    "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
   };
+  const ICON_STROKE = { md: 2, xs: 2, lg: 1.5 };   // painted 1.167 / 1.000 / 1.250 CSS px
+  // The box is sized in CSS (--icon / --icon-xs / --icon-lg), so the stroke scales with it.
+  function icon(name, size = "md", cls = "") {
+    const body = ICON_PATHS[name] || ICON_PATHS.wrench;
+    return `<svg class="ic ic-${size}${cls ? " " + cls : ""}" data-icon="${name}" viewBox="0 0 24 24"`
+      + ` fill="none" stroke="currentColor" stroke-width="${ICON_STROKE[size] || 2}"`
+      + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+  }
+  // Draw an icon into a stable wrapper, and only when it actually changed: re-setting the markup
+  // on every event would restart the running group's CSS pulse and make the header stutter.
+  function setIcon(wrap, name, size = "md") {
+    if (!wrap || wrap.dataset.icon === name) return wrap;
+    wrap.dataset.icon = name;
+    wrap.innerHTML = icon(name, size);
+    return wrap;
+  }
+  // What kind of step this is. The header of a group and the cards under it speak the same
+  // vocabulary, so a book in the header is visibly the same mark as the Read card beneath it.
+  const TOOL_ICON = {
+    read_file: "book-open", glob: "search", grep: "search", repo_map: "folder-tree",
+    code_intel: "braces", git_diff: "file-diff", write_file: "file-plus", create_file: "file-plus",
+    edit_file: "pencil", apply_patch: "pencil", multi_edit: "pencil", save_memory: "bookmark",
+    bash: "square-terminal", bash_output: "square-terminal", bash_kill: "square-terminal", python: "code",
+    web_search: "globe", web_fetch: "globe", browser: "globe", view_image: "image",
+    present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
+    task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
+    monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
+  };
+  // The group header's icon, per bucket (see TOOL_BUCKET): it wears the leading action of the
+  // sentence it already prints, so "Read files, ran a command" is a book and not a terminal.
+  const BUCKET_ICON = {
+    read: "book-open", edited: "pencil", created: "file-plus", ran: "square-terminal",
+    searched: "search", mapped: "folder-tree", looked: "globe", viewed: "image", web: "globe",
+    other: "wrench",
+  };
+  const ICON_FALLBACK = "wrench";        // the one deliberately generic mark: "no better word"
   function canonicalTool(name) {
     const plain = String(name || "").replace(/^functions\./, "").toLowerCase();
     return ({ read: "read_file", write: "write_file", edit: "edit_file", shell: "bash",
-      exec_command: "bash", shell_command: "bash", search: "grep" })[plain] || plain;
+      exec_command: "bash", shell_command: "bash", search: "grep",
+      // The Claude engine's own names, which used to fall through to "Used tool" and a fallback mark.
+      multiedit: "multi_edit", bashoutput: "bash_output", killshell: "bash_kill",
+      webfetch: "web_fetch", websearch: "web_search", todowrite: "todo",
+      notebookedit: "edit_file", exitplanmode: "present_plan" })[plain] || plain;
   }
-  const glyphFor = (name) => GLYPH[canonicalTool(name)] || "▸";
+  // An MCP server's tool, however the engine spells it: DGC's mcp__server__tool, the bare name
+  // "mcp", or the Codex engine's server.tool. The dotted form only ever applies to a name DGC has
+  // no mapping for, so it can never shadow a real tool.
+  function isMcpName(name) {
+    const plain = canonicalTool(name);
+    return plain === "mcp" || String(name || "").startsWith("mcp__")
+      || (!TOOL_ICON[plain] && /^[a-z0-9_-]+\.[a-z0-9_-]+$/.test(plain));
+  }
+  const iconForTool = (name) => TOOL_ICON[canonicalTool(name)] || (isMcpName(name) ? "blocks" : ICON_FALLBACK);
   const TOOL_COPY = {
     read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
     git_diff: ["Inspecting changes", "Inspected changes"],
@@ -1144,7 +1231,7 @@
     // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
     if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
-      note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
+      note.innerHTML = `<span class="note-icon" data-icon="play">${icon("play")}</span>`
         + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
@@ -1153,7 +1240,8 @@
       // specialist finished. The label is backend-written, never a "you" bubble.
       const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
       const lead = kind === "wake" ? "Woke on agent" : "Woke on monitor";
-      note.innerHTML = '<span class="codicon codicon-pulse" aria-hidden="true"></span>'
+      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : "activity"}">`
+        + `${icon(kind === "wake" ? "bot" : "activity")}</span>`
         + `<span>${lead} · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
       wakeNote = note;
@@ -1206,8 +1294,8 @@
   function paintWakeNote(wake, ev) {
     wake.kinds.push(String(ev.kind || "output")); wake.ids.add(String(ev.id || ""));
     const background = wake.kinds.every((k) => k === "background_exit");
-    const icon = wake.note.querySelector(".codicon"), text = wake.note.querySelector(".codicon + span");
-    if (icon) icon.className = `codicon codicon-${background ? "terminal" : "pulse"}`;
+    const mark = wake.note.querySelector(".note-icon"), text = wake.note.querySelector(".note-icon + span");
+    setIcon(mark, background ? "square-terminal" : "activity");
     if (text) text.textContent = `Woke on ${background ? (wake.ids.size > 1 ? "background commands" : "background command") : "monitor"} · ${wake.label}`;
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
@@ -1335,7 +1423,7 @@
     const card = el("div", "turn-summary");
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", "Files changed in this turn");
-    card.innerHTML = `<div class="ts-head"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span>`
+    card.innerHTML = `<div class="ts-head">${icon("file-diff")}`
       + `<span class="ts-title">${files.length} ${files.length === 1 ? "file" : "files"} changed</span>`
       + `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span></div>`
       + `<div class="ts-list">${files.map(([path, v], i) =>
@@ -1802,6 +1890,26 @@
       : (phrases[0] || (past ? "Worked" : "Working"));
     return sentence.charAt(0).toUpperCase() + sentence.slice(1);
   }
+  // The order toolSentence() joins its phrases in. "The first phrase" is therefore already a
+  // computed thing, and the header can wear it.
+  const BUCKET_ORDER = ["read", "edited", "created", "ran", "searched", "mapped", "looked", "viewed", "web", "other"];
+  // The header wears the leading action of the sentence it already prints — and, when one kind of
+  // tool did that action, that tool's own mark. The counts come from the same buckets that wrote
+  // the words, so the icon and the sentence can never disagree: "Read files, ran a command" is a
+  // book, "Edited a file, ran commands" a pencil, "Ran 1 command" a terminal.
+  function headerIcon(cards) {
+    const bucketOf = (card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] || "other";
+    const lead = BUCKET_ORDER.find((key) => cards.some((card) => bucketOf(card) === key));
+    if (!lead) return ICON_FALLBACK;
+    // One kind of tool led the sentence: say which one. Five tools and nine CLI names live in
+    // `other`, so without this a group that only updated the plan, or only loaded a skill, wore
+    // the same generic wrench as a genuinely mixed bag.
+    const marks = new Set(cards.filter((card) => bucketOf(card) === lead)
+      .map((card) => iconForTool(card.dataset.toolName)));
+    const only = marks.size === 1 ? [...marks][0] : null;
+    if (only && only !== ICON_FALLBACK) return only;
+    return BUCKET_ICON[lead] || ICON_FALLBACK;
+  }
   function refreshToolGroup(group) {
     if (!group) return;
     const all = [...group.querySelectorAll(":scope > .tool")];
@@ -1830,13 +1938,19 @@
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
     summary.textContent = sentence;
+    // The icon tracks what is happening NOW: running cards while any is running, then everything
+    // that actually ran. "No tools ran" keeps the denied steps' own mark — a refused `rm -rf dist`
+    // is still a command, and saying so is strictly more useful than a shrug.
+    setIcon(group.querySelector(":scope > summary > .tg-icon"),
+      headerIcon(running.length ? running : executed.length ? executed : cards));
     if (failures.length) group.open = true;
   }
   function appendTool(card) {
     if (!turn) return;
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
-      turn.toolGroup.innerHTML = '<summary><span class="codicon codicon-tools" aria-hidden="true"></span><span class="tool-group-label">Working</span></summary>';
+      turn.toolGroup.innerHTML = `<summary><span class="tg-icon" data-icon="wrench" aria-hidden="true">${icon("wrench")}</span>`
+        + '<span class="tool-group-label">Working</span></summary>';
       // Open, because work you cannot see is work you cannot check. The group collapsed itself
       // the moment it was created, so a run of twenty commands showed one grey line and the
       // reader had no idea what had just been done to their project. The summary sentence still
@@ -1848,7 +1962,7 @@
   }
 
   function openFileBtn(path, line) {
-    const b = el("button", "link open-file", "⤢ open"); b.type = "button";
+    const b = el("button", "link open-file", icon("external-link", "xs") + "<span>open</span>"); b.type = "button";
     b.dataset.path = path;
     if (line) b.dataset.line = String(line);
     b.setAttribute("aria-label", `Open ${path}${line ? ` at line ${line}` : ""}`);
@@ -1896,11 +2010,12 @@
     c.dataset.toolName = String(ev.name || "");
     c.dataset.callId = String(ev.call_id || "");
     c.dataset.summary = String(ev.summary || "");
+    c.dataset.icon = iconForTool(ev.name);
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
     const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
-    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
+    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
     const head = c.querySelector(".head");
     const toggle = c.querySelector(".tool-toggle");
     toggle.onclick = () => {
@@ -1951,7 +2066,7 @@
       return `<span class="${cls}"><span class="ln old">${oldNo}</span><span class="ln new">${newNo}</span><span class="dc">${esc(line) || " "}</span></span>`;
     }).join("");
     const bodyId = `diff-body-${++disclosureId}`;
-    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg">✎</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action sr-only">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
+    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg" aria-hidden="true">${icon("file-diff")}</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action sr-only">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
     const toggle = wrap.querySelector(".diff-toggle");
     toggle.title = "Collapse this diff";
     toggle.onclick = () => {
@@ -2056,8 +2171,8 @@
     const card = el("div", `sys recovery-card ${kind}`);
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", actionLabel);
-    card.appendChild(el("span", "codicon codicon-debug-continue"));
-    card.lastChild.setAttribute("aria-hidden", "true");
+    card.appendChild(el("span", "note-icon", icon("play")));
+    card.lastChild.dataset.icon = "play";
     card.appendChild(el("span", "recovery-text", esc(text)));
     const actions = el("span", "recovery-actions");
     const go = el("button", "act primary", esc(actionLabel)); go.type = "button";
@@ -2084,7 +2199,7 @@
     // A command run with `bash` in background mode is not a monitor; its card says what it is.
     const kind = background ? "Background command" : "Monitor";
     const state = background ? "exited" : ended ? "ended" : `event ${Math.max(0, Number(ev.event_index) || 0)}`;
-    head.innerHTML = `<span class="codicon codicon-${background ? "terminal" : "pulse"}" aria-hidden="true"></span>`
+    head.innerHTML = icon(background ? "square-terminal" : "activity")
       + `<span class="me-title">${kind} · ${esc(String(ev.description || ev.id || "").slice(0, 120))}</span>`
       + `<span class="me-meta">${esc(state)}</span>`;
     card.setAttribute("aria-label", `${kind} ${String(ev.description || ev.id || "")}, ${state}`);
@@ -2176,7 +2291,7 @@
   }
   function renderMonitorsList() {
     if (!monitorItems.length) { sysLine("No background monitors in this chat."); return; }
-    const c = decisionCard('<div class="q"><span class="codicon codicon-pulse"></span> Background monitors</div><div class="monitor-list"></div>', "Background monitors");
+    const c = decisionCard(`<div class="q">${icon("activity")} Background monitors</div><div class="monitor-list"></div>`, "Background monitors");
     const list = c.querySelector(".monitor-list");
     monitorItems.forEach((item) => {
       const row = el("div", "abtns monitor-list-row");
@@ -2194,7 +2309,15 @@
   }
   // Every error line is shown. Repeats are deduplicated where they start: the backend reports a
   // skipped unknown event type once per connection, so the webview never hides a real reason.
-  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
+  // A few notices carry a mark: the backend going away, a rule the user just granted, context
+  // being summarised. Most do not — a plain line is the quietest thing in the transcript, and that
+  // is the point of it.
+  function sysLine(msg, isErr, mark) {
+    const line = el("div", "sys" + (isErr ? " err" : "") + (mark ? " sys-marked" : ""),
+      (mark ? icon(mark) : "") + esc(msg));
+    if (isErr) line.setAttribute("role", "alert");
+    appendConversationContent(line);
+  }
 
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
@@ -3007,7 +3130,7 @@
         ensureTurn();
         const detail = ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
           : Object.keys(ev.args || {}).length ? `<pre>${esc(JSON.stringify(ev.args))}</pre>` : "";
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Permission for <b>${esc(ev.name)}</b></span></div>${detail}`, "Recorded permission decision");
+        const c = decisionCard(`<div class="q">${icon("shield")}<span>Permission for <b>${esc(ev.name)}</b></span></div>${detail}`, "Recorded permission decision");
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
         resolveCard(c, String(ev.message || "Recorded decision"));
@@ -3026,7 +3149,7 @@
           : ev.diff ? "" : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
@@ -3042,7 +3165,7 @@
         ensureTurn();
         imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
-        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
+        const c = requestCard(decisionCard(`<div class="q">${icon("clipboard-list")} Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
           if (!resolveCard(c, planDecision(b.dataset.d, feedback))) return;
@@ -3073,7 +3196,7 @@
           const question = ev.kind === "sampling_request"
             ? "Allow this server to ask your model?"
             : "Share this generated response with the server?";
-          const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
+          const c = decisionCard(`<div class="q">${icon("shield")} ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
@@ -3085,7 +3208,7 @@
         if (p.mode === "url") {
           const warning = p.suspicious_host
             ? `<div class="err">Punycode host — inspect carefully for lookalike characters.</div>` : "";
-          const c = decisionCard(`<div class="q"><span class="codicon codicon-link-external" aria-hidden="true"></span> Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
+          const c = decisionCard(`<div class="q">${icon("external-link")} Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
@@ -3126,7 +3249,7 @@
           }
           return `<div class="mcp-field"><label for="${esc(id)}">${esc(label)}${required.has(key) ? " *" : ""}</label>${desc}${control}</div>`;
         }).join("");
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-form" aria-hidden="true"></span> Information requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><form class="mcp-form">${controls}<div class="muted">Review and edit every value before submitting. Never enter passwords, API keys, access tokens, or payment credentials here.</div><div class="btns"><button type="submit" class="act primary">Submit</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div></form>`, title);
+        const c = decisionCard(`<div class="q">${icon("square-pen")} Information requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><form class="mcp-form">${controls}<div class="muted">Review and edit every value before submitting. Never enter passwords, API keys, access tokens, or payment credentials here.</div><div class="btns"><button type="submit" class="act primary">Submit</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div></form>`, title);
         requestCard(c, ev.id);
         const form = c.querySelector("form");
         form.onsubmit = (e) => {
@@ -3191,7 +3314,7 @@
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
-        c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
+        c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon("app-window")}</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
         const row = el("div", "abtns");
         const open = el("button", "abtn primary", "Open in browser"); open.type = "button";
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
@@ -3210,7 +3333,7 @@
           }
           break;
         }
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-preview"></span> Artifacts</div><div class="artifact-list"></div>`);
+        const c = decisionCard(`<div class="q">${icon("app-window")} Artifacts</div><div class="artifact-list"></div>`);
         const list = c.querySelector(".artifact-list");
         items.forEach((a) => {
           const row = el("div", "abtns artifact-list-row"); row.dataset.artifactId = String(a.id || "");
@@ -3223,7 +3346,7 @@
         break;
       }
       case "saved_plan":
-        if (ev.exists) decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Saved plan</div><pre>${esc(ev.plan)}</pre>`);
+        if (ev.exists) decisionCard(`<div class="q">${icon("clipboard-list")} Saved plan</div><pre>${esc(ev.plan)}</pre>`);
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "skill_catalog": {
@@ -3298,7 +3421,7 @@
           + (ev.ultra_mode ? " · Ultra" : "")
           + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
         break;
-      case "rule_added": sysLine("＋ rule: " + ev.rule); break;
+      case "rule_added": sysLine("rule: " + ev.rule, false, "shield-plus"); break;
       case "info":
         if (String(ev.message || "").startsWith("Switched to ")) {
           const line = el("div", "sys model-switch", esc(ev.message));
@@ -3337,7 +3460,7 @@
             : ev.strategy === "provider_native" ? "Context compacted natively"
               : ev.strategy === "mechanical" ? "Context compacted safely on-device"
                 : "Context compacted";
-        sysLine(`${lead} · ${before} → ${after} estimated tokens`);
+        sysLine(`${lead} · ${before} → ${after} estimated tokens`, false, "history");
         break;
       }
       case "error":
@@ -4615,7 +4738,7 @@
       // Earlier turns were summarised so the run could keep going. Say so plainly; the summary
       // is the model's own context, available on request rather than pasted into the chat.
       const note = el("details", "compaction hist");
-      note.innerHTML = '<summary><span class="codicon codicon-fold" aria-hidden="true"></span>'
+      note.innerHTML = `<summary>${icon("history")}`
         + "<span>Earlier conversation summarised to keep it in context</span></summary>";
       const body = el("pre", "compaction-body");
       body.textContent = String(it.text || "").slice(0, 20000);
@@ -4923,7 +5046,7 @@
         : msg.recovering
         ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
         : "dgc backend exited" + detail;
-      sysLine(exitLine, true);
+      sysLine(exitLine, true, "unplug");
       backendExitNotice = msg.recovering ? { text: exitLine, session: draftSession } : null;
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }
@@ -5148,8 +5271,8 @@
     const paths = agentHandoffFiles(record.message);
     if (!paths.length) return;
     const card = el("div", "agent-change-card");
-    const title = el("div", "agent-change-title");
-    title.textContent = paths.length === 1 ? "Edited 1 file" : `Edited ${paths.length} files`;
+    const title = el("div", "agent-change-title", icon("file-diff"));
+    title.appendChild(document.createTextNode(paths.length === 1 ? "Edited 1 file" : `Edited ${paths.length} files`));
     const list = el("div", "agent-files");
     list.hidden = false;
     for (const path of paths) {
@@ -5805,11 +5928,13 @@
   const IMAGE_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
   const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", read_file: "Workspace image", mcp: "MCP image" };
   const IMAGE_FAILURES = {
-    not_found: ["warning", "Unavailable", "DGC no longer has this image."],
-    changed: ["warning", "Unavailable", "The stored copy changed after the model viewed it."],
-    too_large: ["file-media", "Too large", "Too large to show in the panel. Open the file instead."],
-    frame: ["file-media", "Too large", "This screenshot was too large to send to the panel. It is saved in .dgc/screenshots."],
-    unreadable: ["warning", "Unavailable", "The panel could not load this image."],
+    // triangle-alert where the file itself is gone or broken; image-off where the image is fine
+    // and DGC declined to draw it.
+    not_found: ["triangle-alert", "Unavailable", "DGC no longer has this image."],
+    changed: ["triangle-alert", "Unavailable", "The stored copy changed after the model viewed it."],
+    too_large: ["image-off", "Too large", "Too large to show in the panel. Open the file instead."],
+    frame: ["image-off", "Too large", "This screenshot was too large to send to the panel. It is saved in .dgc/screenshots."],
+    unreadable: ["triangle-alert", "Unavailable", "The panel could not load this image."],
   };
   const IMAGE_CACHE_CHARS = 48_000_000;
   const IMAGE_RETRY_MS = [500, 1000, 2000];
@@ -5896,7 +6021,7 @@
     if (last && last.classList.contains("image-orphan")) return last;
     const row = el("div", "tool image-orphan");
     const bodyId = `tool-output-${++disclosureId}`;
-    row.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">›</span><span class="glyph codicon codicon-file-media" aria-hidden="true"></span><span class="verb">Viewed an image</span></button></div><div class="body" id="${bodyId}"></div>`;
+    row.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${icon("image")}</span><span class="verb">Viewed an image</span></button></div><div class="body" id="${bodyId}"></div>`;
     const toggle = row.querySelector(".tool-toggle");
     toggle.onclick = () => {
       const open = row.classList.toggle("open");
@@ -5939,7 +6064,8 @@
     const words = omitted ? `${countOf(omitted, "image")} not shown` : countOf(count, "image");
     let pill = toggle.querySelector(".tool-image-count");
     if (!pill) {
-      pill = el("span", "tool-image-count", '<span class="codicon codicon-file-media" aria-hidden="true"></span><span class="n" aria-hidden="true"></span><span class="sr-only"></span>');
+      pill = el("span", "tool-image-count", icon("image", "xs")
+        + '<span class="n" aria-hidden="true"></span><span class="sr-only"></span>');
       const arg = toggle.querySelector(".arg");
       if (arg) arg.after(pill); else toggle.appendChild(pill);
     }
@@ -5992,7 +6118,7 @@
       });
       img.src = record.src; tile.appendChild(img);
     } else if (failure) {
-      tile.appendChild(el("span", `codicon codicon-${failure[0]}`)); tile.lastChild.setAttribute("aria-hidden", "true");
+      tile.innerHTML = icon(failure[0], "lg");
     } else {
       tile.classList.add("skeleton"); tile.appendChild(el("span", "sr-only", "Loading image"));
     }
@@ -6416,7 +6542,7 @@
     const n = ++retrySeq;
     const node = el("div", "model-retry");
     node.innerHTML = `<button type="button" class="model-retry-toggle" aria-expanded="false" aria-controls="model-retry-detail-${n}">`
-      + '<span class="codicon codicon-debug-disconnect model-retry-icon" aria-hidden="true"></span>'
+      + `<span class="model-retry-icon" data-icon="refresh-cw" aria-hidden="true">${icon("refresh-cw")}</span>`
       + '<span class="model-retry-label"><span class="model-retry-prefix"></span>'
       + '<span class="model-retry-words"></span><span class="model-retry-count"></span></span>'
       + '<span class="model-retry-cause"></span>'
@@ -6483,9 +6609,11 @@
     const title = who ? `Sub-agent “${who}” · ${words}${count ? ` ${count}` : ""}${cause ? `\n${cause}` : ""}` : "";
     if (title) hoverTip.retitle(toggle, title);
     else if (toggle.hasAttribute("title")) hoverTip.retitle(toggle, "");
-    const icon = node.querySelector(".model-retry-icon");
-    icon.className = "codicon model-retry-icon codicon-" + (state === "recovered" ? "plug"
-      : state === "cancelled" || state === "unfinished" ? "circle-slash" : "debug-disconnect");
+    // Four states, one metaphor: in progress, worked, failed, stopped.
+    setIcon(node.querySelector(".model-retry-icon"),
+      state === "recovered" ? "circle-check"
+        : state === "gave_up" ? "circle-alert"
+          : state === "cancelled" || state === "unfinished" ? "circle-slash" : "refresh-cw");
     retryFacts(node.querySelector(".model-retry-facts"), retryFactRows(line));
     const list = node.querySelector(".model-retry-attempts");
     list.textContent = "";
@@ -6594,7 +6722,8 @@
     row.setAttribute("role", "alert");
     row.dataset.kind = kind;
     row.innerHTML = `<button type="button" class="model-error-toggle" aria-expanded="false" aria-controls="model-error-detail-${n}">`
-      + '<span class="codicon codicon-error model-error-icon" aria-hidden="true"></span><span class="model-error-headline"></span>'
+      + `<span class="model-error-icon" data-icon="circle-alert" aria-hidden="true">${icon("circle-alert")}</span>`
+      + '<span class="model-error-headline"></span>'
       + '<span class="codicon codicon-chevron-down model-retry-chev" aria-hidden="true"></span></button>'
       + '<p class="model-error-hint" hidden></p>'
       + `<div class="model-retry-detail model-error-detail" id="model-error-detail-${n}" hidden>`
@@ -6725,9 +6854,8 @@
     renderAskCard(state);
     const card = askToolCard(ev.call_id);
     if (card) {
-      const arg = card.querySelector(".arg"), glyph = card.querySelector(".glyph");
+      const arg = card.querySelector(".arg");
       if (arg) arg.textContent = `${askCountLabel(questions.length)}…`;
-      if (glyph) glyph.textContent = "?";
     }
     el.addEventListener("keydown", (event) => askKey(state, event));
     el.addEventListener("focusin", (event) => {
@@ -6780,7 +6908,7 @@
       + `<button type="button" class="ask-x" aria-label="Dismiss questions" title="Dismiss (Esc)"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>`
       + `<div class="ask-hint" hidden>Press Tab to answer</div>`
       + `<div class="ask-opts" role="${multi ? "group" : "radiogroup"}" aria-labelledby="ask-q-${n}">${rows}</div>`
-      + `<div class="ask-other"><span class="ask-pencil codicon codicon-edit" aria-hidden="true"></span>`
+      + `<div class="ask-other"><span class="ask-pencil" aria-hidden="true">${icon("pencil", "xs")}</span>`
       + `<textarea class="ask-field" rows="1" maxlength="${ASK_MAX_TEXT}" aria-label="Your own answer" aria-describedby="ask-k-${n}"></textarea><span class="sr-only" id="ask-k-${n}">Enter sends, Shift+Enter adds a line</span>`
       + `<button type="button" class="ask-skip" title="Skip this question" hidden>Skip</button><button type="button" class="ask-act"></button></div>`
       + pager
@@ -7167,7 +7295,6 @@
     card.classList.add("has-output");
     const badge = card.querySelector(".badge"); if (badge) badge.textContent = "";
     const arg = card.querySelector(".arg"); if (arg) arg.textContent = askedSummary(ev);
-    const glyph = card.querySelector(".glyph"); if (glyph) glyph.textContent = "?";
     // Remembered per turn and call: call ids repeat across turns (call_0 style), and a text-protocol
     // step has none, so those count within their turn. Replayed turn ids are stable across reloads.
     if (!card._askedKey) {

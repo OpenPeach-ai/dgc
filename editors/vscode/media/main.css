@@ -53,6 +53,10 @@
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
   --t-xs: 11px; --t-sm: 12px; --t-base: 14px; --t-lg: 16px; --t-xl: 18px;
+  /* Transcript icons: one box for everything that describes work, matched to the 12px rows it sits
+     in — 14px of box against a 12px cap height is the same proportion the reference set uses.
+     12px where the slot is smaller (the image pill, the question ring), 20px in the 80px tile. */
+  --icon: 14px; --icon-xs: 12px; --icon-lg: 20px;
   /* The conversation itself: your prompts, the answers, and what you're typing. */
   --t-chat: 13px;
   --w-reg: 400; --w-med: 500; --w-semi: 600; --w-bold: 700;
@@ -85,6 +89,14 @@ body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+/* A 1.167px hairline disappears at .3; a solid 6px dot does not. Outlines get their own, shallower
+   pulse, so the one row a reader most needs to find never blinks out of the transcript. */
+@keyframes icon-pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+/* Transcript icons — stroke-only, currentColor, so every one is exactly the colour of the words
+   beside it and follows a hover, a theme, or forced colors with no rule of its own. */
+.ic { width: var(--icon); height: var(--icon); flex: none; display: block; }
+.ic-xs { width: var(--icon-xs); height: var(--icon-xs); }
+.ic-lg { width: var(--icon-lg); height: var(--icon-lg); }
 
 /* thin, unobtrusive scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -129,7 +141,7 @@ body[data-agent-page] #to-latest { display: none; }
 .agent-page-meta { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 #agent-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .agent-change-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
-.agent-change-title { font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
+.agent-change-title { display: flex; align-items: center; gap: var(--sp-2); font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
 .agent-chip { display: flex; align-items: center; gap: var(--sp-2); align-self: flex-start; max-width: 100%; border: 0; background: transparent; color: var(--text); cursor: pointer; padding: var(--sp-1) 0; font: var(--w-med) var(--t-sm)/1.3 var(--sans); text-align: left; }
 .agent-chip:hover { color: var(--text-strong); }
 .agent-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
@@ -329,7 +341,7 @@ body.vscode-light, body.vscode-high-contrast-light {
    matter once an answer lands: put it back, or look at it. */
 .turn-summary { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
 .ts-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--sans); }
-.ts-head .codicon { color: var(--accent-text); font-size: var(--t-sm); }
+.ts-head .ic { color: var(--accent-text); }
 .ts-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ts-list { display: flex; flex-direction: column; max-height: 168px; overflow-y: auto; }
 .ts-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
@@ -407,16 +419,25 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool-group[open] > summary::after { content: "⌄"; }
 .tool-group > summary:hover { color: var(--text); }
 .tool-group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-group.running > summary > .codicon { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.tool-group > summary > .tg-icon { display: flex; flex: none; }
+.tool-group.running > summary > .tg-icon { color: var(--accent); animation: icon-pulse 1.4s ease-in-out infinite; }
 .tool-group > .diff { margin: var(--sp-1) 0 var(--sp-2); }
-@media (prefers-reduced-motion: reduce) { .tool-group.running > summary > .codicon { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tool-group.running > summary > .tg-icon { animation: none; } }
 .tool { border: 1px solid transparent; border-radius: var(--r-md); background: transparent; overflow: hidden; }
 .tool:hover, .tool.open { border-color: var(--border); background: var(--term); }
 .tool .head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2) 0 0; font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
 .tool .tool-toggle { min-width: 0; flex: 1; align-self: stretch; display: flex; align-items: center; gap: var(--sp-2); border: 0; padding: var(--sp-1) 0 var(--sp-1) var(--sp-2); background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.tool .chev { width: 8px; color: var(--faint); font-size: var(--t-lg); line-height: 1; flex: none; transition: transform .12s ease; }
+/* A 16px text chevron out-weighed the hairline 20px to its right and made the row read as two
+   different sets. At 14px it sits back where a disclosure mark belongs. */
+.tool .chev { width: 8px; color: var(--faint); font-size: var(--t-base); line-height: 1; flex: none; transition: transform .12s ease; }
 .tool.open .chev { transform: rotate(90deg); }
-.tool .glyph { color: var(--muted); font-weight: var(--w-bold); width: 13px; text-align: center; flex: none; }
+.tool .glyph { display: flex; align-items: center; width: var(--icon); height: var(--icon); color: var(--muted); flex: none; }
+.tool[data-status="running"] .glyph { color: var(--accent); }
+/* A refused or skipped step recedes as one unit, the way its verb already does. The token, never
+   opacity: opacity survives forced colors and would dim the mark in High Contrast. */
+.tool[data-status="denied"] .glyph,
+.tool[data-status="blocked"] .glyph,
+.tool[data-status="stopped"] .glyph { color: var(--faint); }
 .tool .verb { color: var(--text); font-weight: var(--w-semi); white-space: nowrap; }
 .tool .arg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool .badge { color: var(--faint); font-size: var(--t-xs); flex: none; }
@@ -455,7 +476,7 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .diff.open .dhead { border-bottom: 1px solid var(--border); }
 .diff .diff-toggle { min-width: 0; flex: 1; border: 0; padding: var(--sp-2) 0 var(--sp-2) var(--sp-2); background: transparent; color: inherit; display: flex; gap: var(--sp-2); align-items: center; cursor: pointer; text-align: left; }
 .diff .diff-toggle .chev { width: 9px; color: var(--faint); font-size: var(--t-base); }
-.diff .dhead .dg { color: var(--muted); font-weight: var(--w-bold); }
+.diff .dhead .dg { display: flex; flex: none; color: var(--muted); }
 .diff .dhead .f { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .diff .diff-stat { flex: none; font-weight: var(--w-bold); }
 .diff .add-stat { color: var(--good); }
@@ -487,6 +508,7 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .card { border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-3); background: var(--surface); box-shadow: none; }
 .card .q { margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) var(--sp-3); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); display: flex; align-items: center; gap: var(--sp-2); }
 .card .q .codicon { color: var(--accent-text); font-size: var(--t-sm); }
+.card .q .ic { color: var(--accent-text); }
 .card .q b { color: var(--text-strong); }
 .card pre { margin: var(--sp-1) 0 var(--sp-2); font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; background: var(--code); border: 1px solid var(--border); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-sm); }
 .card .btns { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
@@ -568,7 +590,7 @@ button.act:hover { border-color: var(--accent); }
 .monitor-event[data-kind="ended"], .monitor-event[data-kind="background_exit"] { box-shadow: inset 3px 0 0 var(--faint); }
 .monitor-event-head { display: flex; min-width: 0; align-items: center; gap: var(--sp-2);
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.monitor-event-head .codicon { flex: none; color: var(--accent-text); font-size: var(--t-sm); }
+.monitor-event-head .ic { color: var(--accent-text); }
 .monitor-event-head .me-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text); }
 .monitor-event-head .me-meta { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
@@ -580,11 +602,13 @@ button.act:hover { border-color: var(--accent); }
 .monitor-list-row { align-items: center; padding-block: 2px; }
 .monitor-list-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-.monitor-note .codicon { color: var(--accent-text); }
+.monitor-note .note-icon { color: var(--accent-text); }
 
 /* system lines */
 .sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sys.err { color: var(--err-text); }
+.sys-marked { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.sys-marked > .ic { margin-top: 1px; }
 .sys.model-switch { color: var(--muted); }
 
 /* composer */
@@ -1032,6 +1056,9 @@ button.act.danger { color: var(--err-text); }
 /* open-file link + code copy */
 button.link { font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; background: transparent; border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--muted); flex: none; }
 button.link:hover { border-color: var(--accent); color: var(--text); }
+/* The mark and the word sit on one line: the icon is a block element, so the button has to be a
+   flex row or "open" drops underneath it. */
+button.link.open-file { display: inline-flex; align-items: center; gap: var(--sp-1); }
 /* A step under the conversation's text: monospace at the prose size reads a size larger. */
 pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
 pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
@@ -1070,7 +1097,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
 .artifact.stopping { box-shadow: inset 3px 0 0 var(--lav); }
 .artifact.stopped { opacity: .72; box-shadow: inset 3px 0 0 var(--faint); }
 .artifact .ahead { display: flex; align-items: center; gap: var(--sp-2); }
-.artifact .aico { color: var(--accent-text); font: var(--w-bold) var(--t-sm)/1 var(--sans); }
+.artifact .aico { display: flex; flex: none; color: var(--accent-text); }
 .artifact .anm { font: var(--w-bold) var(--t-sm)/1 var(--sans); color: var(--text-strong); }
 .artifact .alabel { font: var(--w-reg) var(--t-sm)/1 var(--sans); color: var(--muted); }
 .artifact .aurl { display: block; width: 100%; margin: var(--sp-2) 0 var(--sp-2); padding: 0; border: 0; background: transparent; text-align: left; font: var(--w-med) var(--t-sm)/1.45 var(--mono); color: var(--accent-text); cursor: pointer; word-break: break-all; }
@@ -1170,7 +1197,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   padding: 0; color: var(--faint);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
 }
-.resume-note .codicon { font-size: var(--t-base); }
+.resume-note .note-icon, .recovery-card .note-icon { display: flex; flex: none; }
 
 /* After a backend death: one card, a DGC marker with actions, never a message from the user. */
 .recovery-card {
@@ -1190,6 +1217,7 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   padding: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--faint);
 }
 .compaction > summary:hover { color: var(--text); }
+.compaction > summary > .ic { flex: none; }
 .compaction > summary::-webkit-details-marker { display: none; }
 .compaction-body {
   margin: var(--sp-1) 0 0; padding: var(--sp-2) var(--sp-3);
@@ -1288,7 +1316,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .tool .tool-image-count { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 18px;
   padding: 0 6px; border-radius: var(--r-full); background: var(--surface2); color: var(--muted);
   font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
-.tool .tool-image-count .codicon { font-size: 12px; }
+.tool .tool-image-count .ic { flex: none; }
 /* `.has-output` keeps a collapsed card's body on screen for its clamped text; chips wait for open. */
 .tool:not(.open) .tool-images { display: none; }
 .tool-images { list-style: none; margin: 0 0 var(--sp-2); padding: 3px; display: flex; flex-wrap: nowrap;
@@ -1299,7 +1327,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: zoom-in; }
 .image-tile { position: relative; display: grid; place-items: center; width: 80px; height: 80px; box-sizing: border-box;
   overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface2); color: var(--muted); }
-.image-tile .codicon { font-size: 20px; }
+.image-tile .ic { flex: none; }
 .image-chip:hover .image-tile { border-color: var(--border-strong); }
 .image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
 .image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite;
@@ -1309,7 +1337,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
 .image-chip[data-state="failed"] .image-caption { color: var(--text); }
 .image-omitted { align-self: center; padding: 0 var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
-.tool.image-orphan .glyph.codicon { font-size: 13px; font-weight: var(--w-reg); }
+.tool.image-orphan .glyph { color: var(--muted); }
 .tool.image-orphan .verb { color: var(--muted); font-weight: var(--w-med); }
 
 #image-viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; gap: var(--sp-2);
@@ -1382,7 +1410,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   flex-wrap: nowrap; gap: var(--sp-2); margin: 0 -3px; padding: 0 3px; border: 0; border-radius: var(--r-sm); background: transparent;
   color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
 .model-retry-toggle:focus-visible, .model-error-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
-.model-retry-icon, .model-retry-chev, .model-error-icon { flex: none; font-size: 14px; line-height: 1; }
+.model-retry-icon, .model-error-icon { display: flex; flex: none; }
+.model-retry-chev { flex: none; font-size: 14px; line-height: 1; }
 .model-retry-label { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .model-retry-count { font-variant-numeric: tabular-nums; }
 .model-retry-cause { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1476,7 +1505,7 @@ body.ask-docked #tasks-panel { display: none; }
 .ask-arrow { display: none !important; }
 .ask-other { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-1) var(--sp-1) 2px var(--sp-2); }
 .ask-pencil { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--r-full);
-  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--muted); font-size: 12px; }
+  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); color: var(--muted); }
 .ask-field { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); padding: 3px 0; overflow: hidden; }
 .ask-field:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; border-radius: var(--r-sm); }
