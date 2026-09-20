@@ -1308,6 +1308,12 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
 .image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite;
   background: color-mix(in srgb, var(--text) 9%, var(--surface2)); }   /* visible on a white card too */
+/* The composer's copy of an attached image: a small tile beside its type and size, with the same
+   remove button every other chip has. */
+.image-att-chip { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-1); }
+.image-att-chip .image-tile { width: 28px; height: 28px; border-radius: var(--r-sm); }
+.image-att-chip .image-tile .codicon { font-size: 14px; }
+.image-att-chip .image-caption { max-width: 18ch; color: var(--muted); }
 .image-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .image-caption { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }

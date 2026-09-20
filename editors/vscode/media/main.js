@@ -3547,9 +3547,45 @@
       context: resources.length ? resources : undefined });
     clearComposer(); attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
   }
+  // An attached image is shown, not named: the same tile the sent prompt carries, so you can see
+  // what you are about to send (and that it is the right screenshot) before you send it.
+  function imageAttachmentChip(a, remove) {
+    const chip = el("span", "chip image-att-chip");
+    const tile = el("span", "image-tile");
+    const caption = el("span", "image-caption");
+    const kind = (String(a.data || "").match(/^data:image\/([a-z]+)/i) || [])[1];
+    const name = kind ? kind.toUpperCase() : "Image";
+    const size = imageSize(a.bytes);
+    caption.textContent = name;
+    chip.title = [name, size].filter(Boolean).join(" · ");
+    if (a.data) {
+      const img = el("img"); img.alt = ""; img.decoding = "async"; img.src = a.data;
+      img.addEventListener("load", () => {
+        // The caption stays short enough to read; the full details are the chip's hover label.
+        const dims = img.naturalWidth ? `${img.naturalWidth}×${img.naturalHeight}` : "";
+        caption.textContent = [name, dims].filter(Boolean).join(" · ");
+        chip.title = [name, dims, size].filter(Boolean).join(" · ");
+      });
+      tile.appendChild(img);
+    } else {
+      // A restored draft keeps the attachment but not its bytes: name it instead of showing it.
+      tile.appendChild(el("span", "codicon codicon-file-media"));
+      tile.lastChild.setAttribute("aria-hidden", "true");
+    }
+    chip.append(tile, caption, remove);
+    return chip;
+  }
   function renderAtts() {
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
+      if (a.img) {
+        const drop = el("button", "x", "\u00d7");
+        drop.type = "button"; drop.title = "Remove this image";
+        drop.setAttribute("aria-label", "Remove attached image");
+        drop.onclick = () => { attachments.splice(i, 1); renderAtts(); };
+        atts.appendChild(imageAttachmentChip(a, drop));
+        return;
+      }
       const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}${a.pasted ? " pasted-chip" : ""}`);
       const label = el("span", "chip-label"), remove = el("button", "x", "\u00d7");
       label.textContent = a.pasted ? `Pasted text · ${a.chars.toLocaleString()} chars` : a.label;
@@ -3848,7 +3884,7 @@
           if (typeof r.result !== "string" || !r.result.startsWith("data:image/")) {
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
-          const image = { label: "📷 image", img: true, data: r.result, bytes: file.size };
+          const image = { label: "Image", img: true, data: r.result, bytes: file.size };
           if (owner.session === draftSession) {
             attachments.push(image); renderAtts();
           } else {
@@ -4029,7 +4065,7 @@
       plan_artifact: String(cfg.plan_artifact !== false),
       artifact_autostart: String(cfg.artifact_autostart !== false),
       artifact_in_plan: String(cfg.artifact_in_plan === true),
-      tool_profile: cfg.tool_profile || "adaptive",
+      tool_profile: cfg.tool_profile || "standard",
       max_parallel_tasks: cfg.max_parallel_tasks || 4,
       subscription_engine: cfg.subscription_engine || "",
       subscription_model: cfg.subscription_model || "",

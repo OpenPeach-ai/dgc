@@ -620,7 +620,8 @@ test("an image finishing after a chat switch remains with its original draft", (
   assert.equal(doc.getElementById("attachments").textContent, "");
   send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
   assert.equal(input.value, "Inspect image");
-  assert.match(doc.getElementById("attachments").textContent, /image/);
+  assert.match(doc.getElementById("attachments").textContent, /PNG/, "an attached image shows its preview chip");
+  assert.ok(doc.querySelector("#attachments .image-att-chip img"), "with a thumbnail of what will be sent");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(posted.findLast(message => message.type === "prompt").images[0], reader.result);
   assert.deepEqual(errors, []);
@@ -653,7 +654,7 @@ test("goal actions carry selected skills, templates, images and MCP snapshots wi
     send({ type: "event", event: { type: "command_rejected", command: "start_goal", request_id: command.requestId,
       message: "Goal selection rejected" } });
     assert.equal(input.value, original);
-    assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*Image/);
+  assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*PNG/);
     assert.equal(savedState().pending.length, 0);
     send({ type: "state", state: { goal: { text: "Verify", status: "paused", attachments: {
       skills: ["verify"], templates: ["check"], images: 1, context: 1 } } } });

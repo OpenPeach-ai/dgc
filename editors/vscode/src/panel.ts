@@ -3946,7 +3946,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         plan_artifact: v.plan_artifact !== false,
         artifact_autostart: v.artifact_autostart !== false,
         artifact_in_plan: v.artifact_in_plan === true,
-        tool_profile: v.tool_profile === "full" ? "full" : "adaptive",
+        tool_profile: v.tool_profile === "full" ? "full"
+          : v.tool_profile === "adaptive" ? "adaptive" : "standard",
         max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
         // General → Thinking is the composer dial. On a subscription route it maps to
         // subscription_effort; native thinking stays the last native value so a Save does not
@@ -4691,7 +4692,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label>Wake on monitor events <span class="set-hint">When a background monitor prints while the chat is idle, DGC starts a short turn to read it. Off: events wait for your next message.</span>
       <select id="s-monitor_wake"><option value="true">enabled</option><option value="false">disabled</option></select></label>
     <label>Tool profile
-      <select id="s-tool_profile"><option value="adaptive">adaptive</option><option value="full">full catalog every turn</option></select></label>
+      <select id="s-tool_profile"><option value="standard">standard — every tool, every turn</option><option value="adaptive">adaptive — only tools the prompt asks for</option><option value="full">full catalog every turn</option></select></label>
     <label>Parallel sub-agent tasks
       <input id="s-max_parallel_tasks" type="number" min="1" max="8" step="1" placeholder="4"></label>
     </section>
