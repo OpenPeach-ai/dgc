@@ -1738,6 +1738,7 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
             proc.wait()
         finally:
             entry["finished"] = time.time()
+            _proctree.release(proc)     # Windows: drop the job handle the task no longer needs
         # Tell the model once when the task ends on its own -- never after bash_kill or shutdown,
         # and never into a conversation that replaced the one that started it (the hub's epoch).
         if hub is not None and not entry.get("killed"):

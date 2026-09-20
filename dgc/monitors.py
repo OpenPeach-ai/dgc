@@ -676,6 +676,9 @@ class Monitor:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
+        if not self.pgid:
+            from . import proctree
+            proctree.release(proc)      # Windows: the job handle outlives nothing it holds
         if self.pgid:
             _watchdog.remove(self.pgid)
         self.hub._finish(self, flood=flood)
