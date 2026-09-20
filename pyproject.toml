@@ -26,4 +26,5 @@ dgc = "dgc.cli:main"
 include = ["dgc*"]
 
 [tool.setuptools.package-data]
-dgc = ["skills_builtin/*/SKILL.md", "skills_builtin/*/agents/openai.yaml", "schemas/*.json"]
+dgc = ["skills_builtin/*/SKILL.md", "skills_builtin/*/agents/openai.yaml", "schemas/*.json",
+       "*.sbpl"]

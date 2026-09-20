@@ -424,6 +424,9 @@ DEFAULTS: dict = {
     "sandbox": False,                           # OS-confine bash; approval policy remains independent
     "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
     "sandbox_env_allow": [],                    # extra parent env names; runtime injection vars stay blocked
+    "sandbox_read_dirs": [],                    # extra directories a sandboxed command may read
+    #                                             (macOS hides your home, so name ~/.cargo, ~/.nvm,
+    #                                             ~/.pyenv here when a toolchain lives there)
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
     "thinking_inline": True,                     # short provider-summarized thinking beside tool calls
                                                 #   shows inline and muted (raw/unknown never inline)

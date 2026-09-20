@@ -1,0 +1,204 @@
+; DGC "strict-v1" — the deny-by-default macOS Seatbelt profile for sandboxed shell commands.
+;
+; dgc/sandbox.py composes the profile it hands to /usr/bin/sandbox-exec as:
+;
+;   1. this file, verbatim;
+;   2. per-call rules that reference the parameters passed with -D (WORKSPACE, SESSION_TMP,
+;      WS_ANC_<n>, TMP_ANC_<n>, READ_EXTRA_<n>) — paths are NEVER spliced into the policy text,
+;      so a workspace path containing ")" or a quote cannot end a rule early;
+;   3. the network section, only when the session allows network.
+;
+; Read the composed profile for a directory with:
+;
+;   python -m dgc.sandbox --print-profile [--workspace DIR] [--network] [--read-only]
+;
+; What this profile is meant to guarantee (each one is proven by tests/macos/seatbelt_probe.sh
+; and tests/test_sandbox_macos.py on macOS 15 and macOS 26):
+;
+;   * the user's home folder, ~/.dgc and an SDK session's state folder are unreadable;
+;   * the host's shared temporary folders (/tmp, /private/tmp, DARWIN_USER_TEMP_DIR,
+;     DARWIN_USER_CACHE_DIR) are neither readable nor writable — the command gets its own
+;     private 0700 folder as HOME/TMPDIR instead;
+;   * processes outside the sandbox cannot be listed, inspected or signalled;
+;   * no app can be launched through LaunchServices ("open"), no job submitted to launchd, and
+;     no preference written through cfprefsd ("defaults write");
+;   * the keychain is unreachable while network is denied (with network allowed, SecurityServer
+;     must stay reachable for TLS — see the sandbox docs page).
+;
+; Nothing here replaces DGC's approval prompts: confinement never turns an arbitrary shell
+; string into a trusted read-only operation.
+;
+; Attribution: the sysctl allow-list, the pseudo-tty/device rules and the network-mode service
+; list are adapted from the Seatbelt policies of openai/codex (Apache-2.0):
+; https://github.com/openai/codex — see THIRD_PARTY_NOTICES.md. Changes: deny-by-default with an
+; explicit system read-list instead of read-everywhere, a private per-call temporary folder, and
+; the parameterised workspace/temporary/extra-read rules DGC appends.
+
+(version 1)
+
+; Closed by default: every operation not named below is denied.
+(deny default)
+
+; --- processes -----------------------------------------------------------------------------
+; Children inherit this policy. Signals and process inspection stay inside the sandbox, so a
+; confined command cannot kill or read the arguments/environment of anything running outside it.
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+; --- system information --------------------------------------------------------------------
+; An allow-list, not "(allow sysctl-read)": kern.proc.all would let `ps` enumerate every process
+; of this user, and kern.procargs2 would expose their arguments and environment.
+(allow sysctl-read
+  (sysctl-name "hw.activecpu")
+  (sysctl-name "hw.busfrequency_compat")
+  (sysctl-name "hw.byteorder")
+  (sysctl-name "hw.cacheconfig")
+  (sysctl-name "hw.cachelinesize_compat")
+  (sysctl-name "hw.cpufamily")
+  (sysctl-name "hw.cpufrequency")
+  (sysctl-name "hw.cpufrequency_compat")
+  (sysctl-name "hw.cputype")
+  (sysctl-name "hw.l1dcachesize_compat")
+  (sysctl-name "hw.l1icachesize_compat")
+  (sysctl-name "hw.l2cachesize_compat")
+  (sysctl-name "hw.l3cachesize_compat")
+  (sysctl-name "hw.logicalcpu")
+  (sysctl-name "hw.logicalcpu_max")
+  (sysctl-name "hw.machine")
+  (sysctl-name "hw.memsize")
+  (sysctl-name "hw.model")
+  (sysctl-name "hw.ncpu")
+  (sysctl-name "hw.nperflevels")
+  (sysctl-name "hw.packages")
+  (sysctl-name "hw.pagesize")
+  (sysctl-name "hw.pagesize_compat")
+  (sysctl-name "hw.physicalcpu")
+  (sysctl-name "hw.physicalcpu_max")
+  (sysctl-name "hw.tbfrequency_compat")
+  (sysctl-name "hw.vectorunit")
+  (sysctl-name-prefix "hw.optional.")
+  (sysctl-name-prefix "hw.perflevel")
+  (sysctl-name "machdep.cpu.brand_string")
+  (sysctl-name "kern.argmax")
+  (sysctl-name "kern.boottime")
+  (sysctl-name "kern.hostname")
+  (sysctl-name "kern.maxfilesperproc")
+  (sysctl-name "kern.maxproc")
+  (sysctl-name "kern.osproductversion")
+  (sysctl-name "kern.osrelease")
+  (sysctl-name "kern.ostype")
+  (sysctl-name "kern.osvariant_status")
+  (sysctl-name "kern.osversion")
+  (sysctl-name "kern.safeboot")
+  (sysctl-name "kern.secure_kernel")
+  (sysctl-name "kern.sysv.semmns")
+  (sysctl-name "kern.usrstack64")
+  (sysctl-name "kern.version")
+  (sysctl-name "sysctl.proc_cputype")
+  (sysctl-name "vm.loadavg")
+  (sysctl-name "vm.swapusage")
+  (sysctl-name-prefix "kern.proc.pgrp.")
+  (sysctl-name-prefix "kern.proc.pid."))
+
+; Belt to the allow-list's braces: a numeric MIB must not reach another process's arguments.
+(deny sysctl-read
+  (sysctl-name "kern.procargs")
+  (sysctl-name "kern.procargs2"))
+
+; Java and some toolchains read CPU grading through a "write" that only passes a buffer in.
+(allow sysctl-write (sysctl-name "kern.grade_cputype"))
+
+; --- the system, read-only -------------------------------------------------------------------
+; Toolchains installed system-wide work; /Users, /Volumes, /private/tmp, /private/var/folders and
+; everything else stay invisible because they are never allowed.
+(allow file-read* file-test-existence file-map-executable
+  (subpath "/System")
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/opt")
+  (subpath "/Library")
+  (subpath "/Applications")
+  (subpath "/private/etc")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/var/db/DarwinDirectory")
+  (subpath "/private/var/db/mds/system")
+  (literal "/private/var/db/eligibilityd/eligibility.plist")
+  (literal "/"))
+
+; System secrets that live under those read roots are taken back out again (the last matching
+; rule wins in SBPL).
+(deny file-read* (subpath "/Library/Keychains"))
+(deny file-read* (subpath "/private/var/db/dslocal"))
+(deny file-read* (subpath "/private/etc/ssh"))
+(deny file-read* (literal "/private/etc/master.passwd"))
+(deny file-read* (subpath "/Library/Application Support/com.apple.TCC"))
+
+; Path components that a shell, getcwd(3) and realpath(3) stat on the way to an allowed path.
+(allow file-read-metadata file-test-existence
+  (literal "/")
+  (literal "/Users")
+  (literal "/Volumes")
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/var")
+  (literal "/private")
+  (literal "/private/var")
+  (literal "/private/tmp")
+  (literal "/private/var/folders")
+  (literal "/System/Volumes")
+  (literal "/System/Volumes/Data")
+  (path-ancestors "/System/Volumes/Data/private"))
+
+; --- devices and terminals -------------------------------------------------------------------
+(allow file-read* file-write* file-ioctl
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper")
+  (literal "/dev/ptmx")
+  (subpath "/dev/fd"))
+(allow file-read* file-test-existence
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/autofs_nowait"))
+(allow file-read-metadata (literal "/dev") (regex #"^/dev/"))
+(allow pseudo-tty)
+(allow file-read* file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))
+(allow system-fsctl (fsctl-command FSIOC_CAS_BSDFLAGS))
+(allow system-mac-syscall (mac-policy-name "vnguard"))
+(allow system-mac-syscall
+  (require-all (mac-policy-name "Sandbox") (mac-syscall-number 67)))
+
+; --- local IPC ---------------------------------------------------------------------------------
+; Python's multiprocessing semaphores, OpenMP runtime registration and the notification centre.
+(allow ipc-posix-sem)
+(allow ipc-posix-shm-read-data ipc-posix-shm-write-create ipc-posix-shm-write-unlink
+  (ipc-posix-name-regex #"^/__KMP_REGISTERED_LIB_[0-9]+$"))
+(allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center"))
+
+; Only the services a non-GUI toolchain needs. Deliberately absent, and each one is a documented
+; escape the allow-by-default profile left open:
+;   com.apple.coreservices.launchservicesd  -> `open -a TextEdit` cannot launch an app
+;   com.apple.cfprefsd.agent / .daemon      -> `defaults write` cannot reach cfprefsd
+;   com.apple.SecurityServer                -> the keychain is unreachable (added by the network
+;                                              section only, where TLS needs it)
+;   com.apple.xpc.launchd / bootstrap ports -> `launchctl submit` cannot start a job
+;   com.apple.pasteboard.*, AppleEvents     -> no clipboard, no scripting of other apps
+(allow mach-lookup
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.DirectoryService.libinfo_v1")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.logd.events")
+  (global-name "com.apple.diagnosticd")
+  (global-name "com.apple.analyticsd")
+  (global-name "com.apple.appsleep")
+  (global-name "com.apple.espd")
+  (global-name "com.apple.secinitd")
+  (global-name "com.apple.xpc.activity.unmanaged")
+  (global-name "com.apple.PowerManagement.control"))
+(allow iokit-open (iokit-registry-entry-class "RootDomainUserClient"))

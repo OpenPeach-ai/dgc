@@ -2681,9 +2681,11 @@ def unit_tests(tmp: Path):
         _sandbox_ui._handle_slash("/sandbox on")
     finally:
         _sandbox.available = _real_sandbox_available
-    check("TUI sandbox activation reports the selected backend without a private-temp overclaim",
-          "sandbox-exec" in _mac_sandbox_flash and "shared system temp" in _mac_sandbox_flash
-          and "private home/tmp" not in _mac_sandbox_flash)
+    check("TUI sandbox activation names the macOS backend, its profile and what it hides",
+          "sandbox-exec" in _mac_sandbox_flash and "strict-v1" in _mac_sandbox_flash
+          and "private home/tmp" in _mac_sandbox_flash
+          and "host temp and outside processes hidden" in _mac_sandbox_flash
+          and "shared system temp" not in _mac_sandbox_flash)
     check("TUI can disable a persisted sandbox when its backend is unavailable",
           _sandbox_disabled_without_backend)
     check("TUI cannot retain an enabled sandbox when its backend is unavailable",
@@ -7664,13 +7666,57 @@ def test_mcp_protocol():
     check("sandbox capabilities report an explicit Linux network opt-in",
           not linux_network_caps.network_isolated
           and linux_network_caps.network == "shared by explicit opt-in")
-    check("sandbox capabilities do not overclaim macOS private temporary namespaces",
-          mac_caps.backend == "sandbox-exec" and not mac_caps.private_temporary
-          and mac_caps.network_isolated and "shared system temp" in mac_description
-          and "host process namespace" in mac_caps.process)
+    check("sandbox capabilities report the macOS strict profile's private temp and isolation",
+          mac_caps.backend == "sandbox-exec" and mac_caps.profile == "strict-v1"
+          and mac_caps.private_temporary and mac_caps.home_hidden and mac_caps.process_isolated
+          and mac_caps.network_isolated and "strict-v1" in mac_description
+          and "private per-command temporary directory" in mac_caps.temporary
+          and "outside processes cannot be listed or signalled" in mac_caps.process)
     check("sandbox capabilities expose unsupported platforms as fail closed",
           not missing_caps.available and missing_caps.backend is None
+          and missing_caps.profile is None
           and "requested commands fail closed" in missing_description)
+
+    # The ready frame's additive protocol-v14 object: six booleans, never null, and no profile
+    # name at all when nothing confines (a launcher must not read "no sandbox" as strict-v1).
+    try:
+        sandbox._backend = lambda: ("bwrap", Path("/opt/dgc-test/bwrap"))
+        linux_dict = sandbox.capabilities_dict(_SCfg())
+        sandbox._backend = lambda: ("sandbox-exec", Path("/usr/bin/sandbox-exec"))
+        mac_dict = sandbox.capabilities_dict(_SCfg())
+        mac_net_dict = sandbox.capabilities_dict(_SCfg(network=True))
+        sandbox._backend = lambda: None
+        missing_dict = sandbox.capabilities_dict(_SCfg())
+    finally:
+        sandbox._backend = real_backend
+    _CAP_KEYS = {"backend", "profile", "process_isolated", "home_hidden", "private_temporary",
+                 "network_isolated", "keychain_hidden"}
+    check("sandbox_capabilities is the frozen seven-key object with boolean flags",
+          set(linux_dict) == set(mac_dict) == set(missing_dict) == _CAP_KEYS
+          and all(isinstance(mac_dict[k], bool) for k in _CAP_KEYS - {"backend", "profile"})
+          and linux_dict["backend"] == "bwrap" and linux_dict["profile"] == "bwrap-v1"
+          and mac_dict["backend"] == "sandbox-exec" and mac_dict["profile"] == "strict-v1",
+          f"{linux_dict} {mac_dict}")
+    check("sandbox_capabilities is all false with no backend, and names no profile",
+          missing_dict["backend"] is None and missing_dict["profile"] is None
+          and not any(missing_dict[k] for k in _CAP_KEYS - {"backend", "profile"}),
+          str(missing_dict))
+    # C8, frozen: keychain_hidden == bwrap or (strict-v1 and network isolated). macOS needs
+    # SecurityServer for TLS, so allowing network puts the keychain back in reach.
+    check("keychain_hidden follows the frozen formula on both backends",
+          linux_dict["keychain_hidden"] is True and mac_dict["keychain_hidden"] is True
+          and mac_net_dict["keychain_hidden"] is False
+          and mac_net_dict["network_isolated"] is False
+          and mac_net_dict["process_isolated"] is True,
+          f"{mac_dict} {mac_net_dict}")
+    # The linux half of that formula is structural: the Secret Service socket lives in
+    # /run/user/<uid> and the keyring files in the home, and bwrap replaces both with tmpfs.
+    _keyring_argv = sandbox.wrap("ls", unavailable_root, _SCfg()) or []
+    if _keyring_argv and "bwrap" in _keyring_argv[0]:
+        _masked = {_keyring_argv[i + 1] for i, a in enumerate(_keyring_argv) if a == "--tmpfs"}
+        check("bwrap masks the paths a Secret Service keyring lives in",
+              str(Path("/run").resolve()) in _masked and str(Path.home().resolve()) in _masked,
+              str(sorted(_masked)))
 
     from dgc import cli as _doctor_cli
     from dgc import llm as _doctor_llm
@@ -14082,6 +14128,13 @@ def test_oneshot_machine_readable():
         except SystemExit as exc:
             missing = "does not exist" in str(exc)
         check("a bad rule or a missing directory is refused before anything runs", bad and missing)
+        def _seatbelt_param(built: list, name: str) -> str:
+            """The value of one -D parameter (strict-v1 passes every path as a parameter)."""
+            for item in built:
+                if isinstance(item, str) and item.startswith(f"-D{name}="):
+                    return item.split("=", 1)[1]
+            return ""
+
         argv = _sandbox.wrap("ls", root / "project", cfg)
         if argv is None:
             check("sandbox unavailable here: read-only wrap skipped", True)
@@ -14089,13 +14142,20 @@ def test_oneshot_machine_readable():
             i = argv.index("/mnt") - 2
             check("read-only sandbox binds the project read-only", argv[i] == "--ro-bind" and argv[i + 1] == str(root / "project"))
         else:
-            check("read-only sandbox excludes the project from the writable subpaths",
-                  f'(subpath "{root / "project"}")' not in argv[argv.index("-p") + 1].split("(deny file-read*")[0])
+            profile = argv[argv.index("-p") + 1]
+            check("read-only sandbox never grants a write rule for the project",
+                  _seatbelt_param(argv, "WORKSPACE") == str(root / "project")
+                  and '(allow file-write* (subpath (param "WORKSPACE")))' not in profile
+                  and '(allow file-read* file-test-existence file-map-executable'
+                      ' (subpath (param "WORKSPACE")))' in profile,
+                  profile[-400:])
         cfg.data["sandbox_read_only"] = False
         argv = _sandbox.wrap("ls", root / "project", cfg)
         check("a normal sandbox still binds the project writable",
               argv is None or ("--bind" in argv and argv[argv.index("--bind") + 1] == str(root / "project"))
-              or f'(subpath "{root / "project"}")' in argv[argv.index("-p") + 1])
+              or (_seatbelt_param(argv, "WORKSPACE") == str(root / "project")
+                  and '(allow file-write* (subpath (param "WORKSPACE")))'
+                  in argv[argv.index("-p") + 1]))
 
         # --- piped input. Every case uses a REAL file descriptor: what may be read is decided by
         #     the KIND of fd, and a StringIO cannot express that.
@@ -20501,8 +20561,19 @@ def test_sandbox_hardening():
             check("bwrap masks the whole SDK state_dir (audit and usage, not just home)",
                   "--tmpfs" in argv and str(state) in argv, argv)
         else:
-            check("sandbox-exec denies reads of the whole SDK state_dir",
-                  f'(subpath "{state}")' in argv[argv.index("-p") + 1], argv)
+            # strict-v1 is deny-by-default: the SDK state_dir is hidden because nothing ever
+            # grants it, so the proof is that no rule and no -D parameter names it (the private
+            # temporary folder is the only path outside the workspace the command can reach).
+            profile = argv[argv.index("-p") + 1]
+            params = [item for item in argv if isinstance(item, str) and item.startswith("-D")]
+            box = _sandbox._private_root()
+            check("the macOS strict profile never grants the SDK state_dir",
+                  str(state) not in profile
+                  and not any(str(state) in item for item in params)
+                  and all(item.split("=", 1)[1].startswith("/") for item in params)
+                  and any(item.startswith("-DSESSION_TMP=") and box is not None
+                          and item.split("=", 1)[1].startswith(str(box)) for item in params),
+                  str(params))
     finally:
         import shutil as _shutil
         _shutil.rmtree(root, ignore_errors=True)
