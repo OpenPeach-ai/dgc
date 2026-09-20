@@ -16,6 +16,10 @@ import sys
 import tempfile
 import time
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 from pathlib import Path
 
 if "dgc.config" not in sys.modules and "dgc-tests-home-" not in os.environ.get("HOME", ""):
@@ -590,7 +594,7 @@ class ArtifactScopeEdges(unittest.TestCase):
                 except socket.timeout:
                     data = None
                 self.assertEqual(data, b"", "the server closes a request that never ends")
-                self.assertLess(time.monotonic() - started, 4)
+                self.assertLess(time.monotonic() - started, 4 + RUNNER_SLACK)
         finally:
             srv.shutdown()
 

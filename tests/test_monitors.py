@@ -17,6 +17,10 @@ import tempfile
 import threading
 import time
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -192,7 +196,7 @@ class HubTests(HubBase):
         pgid = self.hub.get(mid).pgid
         started = time.monotonic()
         self.assertTrue(self.ended(mid, 8))
-        self.assertLess(time.monotonic() - started, 6)
+        self.assertLess(time.monotonic() - started, 6 + RUNNER_SLACK)
         self.assertEqual(self.hub.get(mid).end_reason, "timeout")
         self.assertTrue(wait_for(lambda: not group_alive(pgid), 3), "no member of the group survives")
         wait_for(lambda: self.hub.pending_count(), 2)
@@ -355,7 +359,8 @@ class HubTests(HubBase):
         pgid = self.hub.get(mid).pgid
         started = time.monotonic()
         self.assertTrue(self.hub.stop(mid))
-        self.assertLess(time.monotonic() - started, 0.25, "stop never waits for the reap")
+        self.assertLess(time.monotonic() - started, 0.25 + RUNNER_SLACK,
+                        "stop never waits for the reap")
         self.assertEqual(self.hub.snapshot()[0]["state"], "stopping")
         self.assertTrue(self.ended(mid, 8))
         self.assertEqual(self.hub.get(mid).end_reason, "stopped")

@@ -511,7 +511,7 @@ class TransportRetryTests(RetryTestCase):
         started = time.monotonic()
         result = client.chat(MESSAGES, cancel=cancel)
         self.assertEqual(result.finish_reason, "cancelled")
-        self.assertLess(time.monotonic() - started, 0.15 + 0.3)
+        self.assertLess(time.monotonic() - started, 0.15 + 0.3 + stall.RUNNER_SLACK)
         self.assertNotIn("cleared", events.kinds())
 
 

@@ -25,8 +25,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from waiting import wait_for_value                       # noqa: E402  (same module name discovery uses)
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK, wait_for_value         # noqa: E402
 
 from dgc import agent as agent_mod
 from dgc import editor_protocol as ep
@@ -431,7 +432,7 @@ class RegistryTests(unittest.TestCase):
             reg.activity(sid(1), "No response from the model" if n % 2 else "")
         reg.waiting(sid(1), "permission")                       # a state change is immediate
         self.assertEqual(rec.states()[-1], "waiting")
-        self.assertLess(time.monotonic() - t0, 0.5)
+        self.assertLess(time.monotonic() - t0, 0.5 + RUNNER_SLACK)
         time.sleep(1.2)
         updates = [p for kind, p in rec.events if kind == "updated"]
         self.assertLessEqual(len(updates), 2, updates)

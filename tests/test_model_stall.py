@@ -73,10 +73,8 @@ def _client_gone(handler, cap: float = 5.0) -> float | None:
     return None
 
 
-# Hosted macOS runners schedule threads late enough to push a prompt cancel or hang-up a few
-# milliseconds past a Linux-tuned bound. Every bound here is still far below the multi-second
-# timeouts it proves were not waited on. Override with DGC_TEST_TIME_SLACK.
-RUNNER_SLACK = float(os.environ.get("DGC_TEST_TIME_SLACK", "0.6" if sys.platform == "darwin" else "0"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from waiting import RUNNER_SLACK, wait_until          # noqa: E402,F401  (shared by the suite)
 
 
 class _Server:

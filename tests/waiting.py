@@ -20,6 +20,7 @@ sleeps 0.15 s and fails on a busy one costs a release.
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Callable, TypeVar
 
@@ -63,3 +64,15 @@ def wait_for_value(read: Callable[[], T], expected: object, *, timeout: float = 
                 f"timed out after {timeout:g}s waiting for {what}: "
                 f"expected {expected!r}, last saw {value!r}")
         time.sleep(interval)
+
+
+# A bound on elapsed wall time is really a claim that some *other*, much larger timeout was not
+# waited on -- "the cancel landed, it did not sit out the 30s deadline". The bound only has to sit
+# well below that timeout, so it should be nowhere near the work's expected duration. Where a
+# bound is already tuned that way, this absorbs the scheduling noise a shared runner adds.
+#
+# It used to be 0.6 on macOS and 0 elsewhere, on the theory that only hosted macOS runners
+# deschedule a thread past a Linux-tuned bound. The 0.41.9 release run disproved that: a check
+# bounded at 0.5s came back at 0.502s, and a replay-scaling test lost the same way, both on
+# ubuntu-latest. Every shared runner does this; Linux is not exempt.
+RUNNER_SLACK = float(os.environ.get("DGC_TEST_TIME_SLACK", "0.6"))

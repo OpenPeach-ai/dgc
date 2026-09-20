@@ -13,6 +13,10 @@ import threading
 import time
 import types
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 from unittest.mock import patch
 
 from dgc import editor_protocol as ep
@@ -1127,7 +1131,8 @@ class GetImageTests(unittest.TestCase):
             started = time.monotonic()
             self.backend.dispatch({"type": "cancel"})
             self.assertTrue(self.backend.agent.cancelled.is_set())
-            self.assertLess(time.monotonic() - started, 1.0, "cancel is handled before the reads finish")
+            self.assertLess(time.monotonic() - started, 1.0 + RUNNER_SLACK,
+                        "cancel is handled before the reads finish")
             release.set()
             done = self.events(wait_for=17, timeout=15)
         self.assertEqual(len(done), 17)

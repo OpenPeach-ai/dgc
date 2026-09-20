@@ -11,6 +11,10 @@ import tempfile
 import threading
 import time
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 import types
 from unittest.mock import patch
 
@@ -166,7 +170,7 @@ class MCPContextTests(unittest.TestCase):
         started = time.monotonic()
         with self.assertRaisesRegex(MCPInputError, "timed out"):
             request_complete(server, "resources/read", {"uri": "fixture://first"}, timeout=0.08, input_handler=wait_for_input)
-        self.assertLess(time.monotonic() - started, 1)
+        self.assertLess(time.monotonic() - started, 1 + RUNNER_SLACK)
         self.assertEqual(len(calls), 1, "expired input must never be sent back to the server")
 
     def test_context_permissions_deny_before_execution_and_redact_before_preview(self):

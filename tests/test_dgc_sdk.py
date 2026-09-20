@@ -12,6 +12,10 @@ import tempfile
 import threading
 import time
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1777,7 +1781,7 @@ class SessionFixTests(unittest.TestCase):
         started = time.monotonic()
         session._answer_mcp(run, {"id": "m1", "server": "s", "kind": "elicitation",
                                   "payload": {}}, True)
-        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertLess(time.monotonic() - started, 1.5 + RUNNER_SLACK)
         self.assertEqual(pipe.sent[-1]["action"], "cancel")
 
     def test_unhandled_callback_requires_and_enforces_the_callback(self):

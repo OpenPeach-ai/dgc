@@ -16,6 +16,10 @@ import threading
 import time
 import tempfile
 import unittest
+
+import os as _os, sys as _sys                             # noqa: E402
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                          # noqa: E402  (same module name discovery uses)
 from pathlib import Path
 
 _REAL_HOME = pwd.getpwuid(os.getuid()).pw_dir
@@ -797,7 +801,7 @@ class GracefulShutdownTests(_HeadlessBackendFixture, unittest.TestCase):
         backend._busy = lambda: False
         start = time.monotonic()
         self.assertEqual(backend.close(grace_s=5), "idle")
-        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertLess(time.monotonic() - start, 1.0 + RUNNER_SLACK)
         self.assertTrue(backend.agent.stopping)
 
     def test_work_that_lands_inside_the_grace_is_not_cancelled(self):
