@@ -104,29 +104,59 @@ function verifyExtensionPackage() {
   return { actualSha256, buildMetadata, packageMetadata };
 }
 
-// A running Remote Control agent (`dgc remote connect`) rewrites these two root files about once a
-// minute, which also moves the root folder's mtime. They are its heartbeat, not the capture's doing;
-// every other entry, including any file added at the root, is still compared.
-const REMOTE_HEARTBEAT = new Set(["./remote-presence.json", "./remote.json"]);
+// What this guard is for: the capture runs against a disposable HOME, so it must never write into
+// the operator's real ~/.dgc. What it must NOT do is fail because some OTHER process wrote there
+// while it ran — a DGC backend open in another editor window, or a Remote Control agent. Treating
+// those writes as contamination made a release gate depend on nobody else using DGC for two
+// minutes, and the failure did not even say which path moved.
+//
+// So: a path appearing or disappearing is always contamination, and so is a changed file — except
+// for files a live foreign backend is known to rewrite in place, which are listed here. A new
+// session, the thing that would actually prove the capture escaped its disposable HOME, still fails.
+const FOREIGN_REWRITES = [
+  /^\.\/remote-presence\.json$/,          // `dgc remote connect` heartbeat, rewritten each minute
+  /^\.\/remote\.json$/,                   // the same agent's device state
+  /^\.\/logs\/serve\.log$/,               // one shared log, appended by every running backend
+  /^\.\/usage\.sqlite(-wal|-shm)?$/,      // usage accounting, written by any live turn
+  /^\.\/sessions\/[^/]+\/notes\.sqlite(-wal|-shm)?$/,   // a live session's per-project notes store
+  /^\.\/sessions\/[^/]+\/[^/]+\.(json|metrics)$/,       // a live session's own transcript and metrics
+];
 
-function userStateSnapshot(rootPath) {
-  const hash = createHash("sha256");
-  if (!existsSync(rootPath)) return hash.update("missing").digest("hex");
+function userStateMap(rootPath) {
+  const entries = new Map();
+  if (!existsSync(rootPath)) return entries;
   const visit = (path, relative) => {
-    if (REMOTE_HEARTBEAT.has(relative)) return;
     let stat;
     try { stat = lstatSync(path, { bigint: true }); }
-    catch { hash.update(`vanished:${relative}\n`); return; }
-    if (relative === ".") hash.update(`.\0${stat.mode}\0`);
-    else hash.update(`${relative}\0${stat.mode}\0${stat.size}\0${stat.mtimeNs}\0`);
-    if (stat.isSymbolicLink()) hash.update(readlinkSync(path));
-    else if (stat.isFile()) hash.update(readFileSync(path));
-    else if (stat.isDirectory()) {
+    catch { return; }
+    if (stat.isSymbolicLink()) {
+      entries.set(relative, `link:${readlinkSync(path)}`);
+    } else if (stat.isDirectory()) {
+      // A directory's own mtime moves whenever any child is written, including a foreign one, so
+      // only its existence and mode are recorded; its children are visited and compared themselves.
+      entries.set(relative, `dir:${stat.mode}`);
       for (const name of readdirSync(path).sort()) visit(join(path, name), `${relative}/${name}`);
+    } else {
+      const digest = createHash("sha256").update(readFileSync(path)).digest("hex");
+      entries.set(relative, `file:${stat.mode}:${stat.size}:${digest}`);
     }
   };
   visit(rootPath, ".");
-  return hash.digest("hex");
+  return entries;
+}
+
+/** The paths that prove the capture touched the operator's state, or [] when only foreign writes moved. */
+function userStateDrift(before, after) {
+  const drift = [];
+  for (const [path, fingerprint] of after) {
+    if (!before.has(path)) drift.push(`added ${path}`);
+    else if (before.get(path) !== fingerprint
+             && !FOREIGN_REWRITES.some(pattern => pattern.test(path))) {
+      drift.push(`changed ${path}`);
+    }
+  }
+  for (const path of before.keys()) if (!after.has(path)) drift.push(`removed ${path}`);
+  return drift;
 }
 
 function writeFixture(workspace) {
@@ -487,7 +517,7 @@ async function main() {
   const verifiedPackage = verifyExtensionPackage();
   const expectedCommit = run("git", ["rev-parse", "HEAD"]).stdout.trim();
   const userDgc = join(userInfo().homedir, ".dgc");
-  const userDgcBefore = userStateSnapshot(userDgc);
+  const userDgcBefore = userStateMap(userDgc);
 
   const work = mkdtempSync(join(tmpdir(), "extension-capture-state-"));
   const workspace = join(tmpdir(), "clamp-extension-demo-worktree");
@@ -745,8 +775,10 @@ async function main() {
     browser = undefined;
     await stopProcess(code);
     code = undefined;
-    if (userStateSnapshot(userDgc) !== userDgcBefore) {
-      throw new Error("capture aborted: the real ~/.dgc tree changed during the run");
+    const drift = userStateDrift(userDgcBefore, userStateMap(userDgc));
+    if (drift.length) {
+      throw new Error("capture aborted: the real ~/.dgc tree changed during the run: "
+        + drift.slice(0, 8).join("; "));
     }
     const factor = encode(
       raw, options.outputDir, rawSeconds,
@@ -793,8 +825,10 @@ async function main() {
         rmSync(workspace, { recursive: true, force: true });
       }
     }
-    if (userStateSnapshot(userDgc) !== userDgcBefore) {
-      throw new Error("capture aborted: the real ~/.dgc tree changed during the run");
+    const drift = userStateDrift(userDgcBefore, userStateMap(userDgc));
+    if (drift.length) {
+      throw new Error("capture aborted: the real ~/.dgc tree changed during the run: "
+        + drift.slice(0, 8).join("; "));
     }
   }
 }
