@@ -21,6 +21,34 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   "think harder" and "ultrathink" in a prompt turn thinking on for that turn only when it is Off.
   Low through Extra high, Ultra and a sub-agent's own effort stay as set. "I think…" still turns
   on Low when thinking is Off.
+- **Every tool, every turn.** DGC used to decide which tools the model could even see from the
+  wording of your prompt: delegation, the background monitor, web search, image reading and the
+  rest appeared only when a pattern matched. A request phrased another way was answered "that tool
+  does not exist" — the same failure behind the missing options picker and the missing watcher
+  below. The default `tool_profile` is now `standard`: every product tool is offered on every
+  request and the model chooses, while a tool with nothing to act on (no skills installed, no
+  background process, no active goal) still stays out. That is about 2,300 tokens of schema, which
+  providers cache between turns. The old catalog remains as `tool_profile: adaptive` for a small
+  local context window, and a stored `adaptive` from an earlier release is read as `standard`.
+- **The options picker survives a typo.** In full-auto, DGC only kept `propose_options` in the
+  model's tools when it recognised the exact words of an ask, so "propse options … so i can select"
+  removed the picker and the model wrote the choices in chat instead. Any mention of choosing,
+  addressed to you, now keeps the tool available; the model still decides whether to ask, and a
+  full-auto run whose prompt never mentions a choice still never stops to ask.
+- **No emoji in answers.** Models are told to write plain professional text, with no emoji or
+  decorative symbols in headings, lists or status marks, unless you ask for them or the file
+  already uses them, so an option label is plain text and the picker marks its own recommendation.
+- **Web search keeps working when DuckDuckGo blocks one door.** The keyless default now tries
+  three ways in order: the `ddgs` package if you have installed it (`pip install ddgs` — it is not
+  a DGC dependency, because it needs Rust and C extensions on every platform), then DuckDuckGo's
+  HTML endpoint, then its lite endpoint. An error now names what failed and what to switch to.
+- **"Set a watcher" now reaches the watcher.** `monitor` is DGC's background watch: every line the
+  watched command prints reaches the model between tool calls and wakes it when the turn has
+  ended. It was only offered for a few phrasings, so "set a watcher", "poll it", "check back every
+  30 minutes" and "wake up when it ends" left the model writing shell scripts that could log
+  progress but never wake it. Those phrasings are recognised now, the tool explains how to check
+  on something every few minutes, and models are told to start a long job detached instead of
+  holding a turn open in sleep loops.
 
 ## 0.41.7 — 2026-09-19
 

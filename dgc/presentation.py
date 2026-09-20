@@ -7,6 +7,9 @@ RESPONSE_GUIDANCE = (
     "Use CommonMark: blank lines between paragraphs and before lists, nested lists for hierarchy, "
     "and fenced code with a language label when code is useful. "
     "Link relevant workspace files as [name](relative/path:line) and sources as [label](https://...). "
+    "Write plain professional text: no emoji or decorative symbols anywhere, including headings, "
+    "list markers and status marks, unless the user asks for them or the file being edited already "
+    "uses them. "
     "At each phase change, briefly report findings and continue with the next required action."
 )
 

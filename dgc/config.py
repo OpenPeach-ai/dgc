@@ -338,7 +338,8 @@ DEFAULTS: dict = {
                                                 #   >0 (e.g. a benchmark cap), DGC nudges itself to land+verify
                                                 #   the fix as the clock runs down and preserves the last
                                                 #   test-passing files if it runs out of time (no 0-credit).
-    "tool_profile": "adaptive",                 # adaptive intent-aware catalog | full catalog every round
+    "tool_profile": "standard",                 # standard every product tool | adaptive intent-aware
+                                                #   catalog (small local contexts) | full catalog
     "code_action": False,                       # optional "code action" power tool: advertise a `python`
                                                 #   tool that runs code in a PERSISTENT per-session
                                                 #   interpreter (variables/imports persist across calls, so
@@ -802,6 +803,15 @@ class Config:
         # becomes the per-level "auto" schedule. Any other number stays an explicit override.
         if raw.get("think_budget_tokens") == 8000:
             raw["think_budget_tokens"] = "auto"
+            migrated = True
+        # Releases through 0.41.7 defaulted tool_profile to "adaptive", which offered tools like
+        # delegation, the options picker's siblings, the background monitor or image reading only
+        # when the prompt's wording matched a pattern — so an ask phrased differently (or with a
+        # typo) was told the tool did not exist. save() wrote that default into every config, so a
+        # stored "adaptive" is almost always the old default rather than a choice, and it becomes
+        # "standard" (every product tool, every turn). Set it back by hand for a small local context.
+        if raw.get("tool_profile") == "adaptive":
+            raw["tool_profile"] = "standard"
             migrated = True
         self.data.update(raw)
         prior_provider_identity = _clean_provider_identity_map(

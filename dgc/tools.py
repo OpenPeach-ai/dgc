@@ -180,7 +180,8 @@ TOOL_SCHEMAS = [
         "your tool calls, and wake you if you have finished. Same permissions and sandbox as bash. "
         "Returns a monitor id.",
         {"command": {"type": "string", "description": "Shell script: each stdout line is one event; "
-                     "exiting ends the watch. stderr is kept for bash_output."},
+                     "exiting ends the watch. stderr is kept for bash_output. For a periodic check, "
+                     "loop with a sleep and print one line per round (with persistent: true)."},
          "description": {"type": "string", "description": "Short label shown with every event"},
          "timeout_ms": {"type": "integer", "default": 300000, "maximum": 3600000,
                         "description": "Kill after this many ms; ignored when persistent"},

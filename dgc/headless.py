@@ -162,7 +162,7 @@ _CONFIG_ENUMS = {
                                      "chat_completions", "responses"}),
     "provider_state": frozenset({"stateless", "server"}),
     "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
-    "tool_profile": frozenset({"adaptive", "full"}),
+    "tool_profile": frozenset({"standard", "adaptive", "full"}),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
 }

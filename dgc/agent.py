@@ -317,6 +317,37 @@ class _OptionsAsk:
                 return True
         return False
 
+    # A hint that the user may want to choose, for tool AVAILABILITY only (see Agent._options_possible).
+    # `search` above needs the ask spelled out, and a misspelled verb ("propse options with your
+    # recomendation so i can select") slipped past it: full-auto then withheld the picker and the
+    # model could only write the choices in chat. This asks the smaller question — does the user's
+    # own sentence name a choice and point at the user? — and still refuses a sentence describing
+    # software being built. Offering is not using: the model decides whether to open the picker.
+    _LOOSE_NOUN = re.compile(r"\b(?:options?|choices?|alternatives?|trade-?offs?)\b", re.IGNORECASE)
+    _LOOSE_CHOOSE = re.compile(
+        r"\b(?:so\s+(?:that\s+)?(?:i|we)\s*(?:can|could|will|'ll)?\s*(?:choose|pick|select|decide)"
+        r"|let\s+(?:me|us)\s+(?:choose|pick|select|decide)"
+        r"|(?:i|we)\s*(?:can|could|will|'ll)\s+(?:choose|pick|select|decide)"
+        r"|(?:ask|give|offer|show|propose|present|list|suggest)\w*\s+(?:me|us)\b)", re.IGNORECASE)
+    _LOOSE_PERSON = re.compile(r"\b(?:me|my|i|us|our|we)\b", re.IGNORECASE)
+    # A quoted line the user pastes above their ask ends at `."`, not at the period: without this
+    # the paste and the ask are one sentence and the paste's words decide the verdict.
+    _LOOSE_SENTENCE = re.compile(r"[.!?;]+[\"'\u201d\u2019)\]]*(?=\s|$)|\n+")
+
+    @classmethod
+    def loose(cls, text: str) -> bool:
+        """Might this turn want the picker? Typo-tolerant, availability only."""
+        source = _trusted_intent_text(cls._FRAME.sub("\n", str(text or ""))).replace("\u2019", "'")
+        for sentence in cls._LOOSE_SENTENCE.split(source):
+            if not (cls._LOOSE_NOUN.search(sentence) or cls._LOOSE_CHOOSE.search(sentence)):
+                continue
+            if not cls._LOOSE_PERSON.search(sentence):
+                continue
+            if cls._SPEC.search(cls._MENTION.sub(" ", cls._PICKER_NAME.sub(" ", sentence))):
+                continue
+            return True
+        return False
+
     @classmethod
     def demo_ask(cls, text: str) -> bool:
         """The user asked to see DGC's picker itself, not to choose after other work."""
@@ -412,10 +443,16 @@ _TOOL_INTENT_PATTERNS = {
         r"\b(?:images?|screenshots?|screen[ -]shots?|pictures?|photos?|mock-?ups?|diagrams?|icons?|"
         r"logos?|figures?(?!\s+out))\b",
         re.IGNORECASE | re.DOTALL),
+    # "set a watcher", "poll it", "check back every 30 minutes" and "wake up when it ends" all mean
+    # the monitor tool. Without them the model wrote its own shell watcher, which can log progress
+    # but can never wake DGC, so the turn sat in sleep loops instead.
     "monitor": re.compile(
-        r"\b(?:monitor|watch(?:ing)?|tail(?:ing)?|keep an eye|notify me|let me know when|ping me|"
-        r"wait (?:for|until))\b|\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
-        r"crash(?:es)?|appears?|prints?|logs?)\b",
+        r"\b(?:monitor(?:s|ing)?|watch(?:es|ing|er|ers|dog)?|tail(?:ing)?|poll(?:s|ing)?|"
+        r"keep an eye|notify me|alert me|let me know when|ping me|tell me when|report when|"
+        r"check back|check (?:on|in on)|wake (?:me|you|up)|wait (?:for|until))\b|"
+        r"\bevery\s+\d+\s*(?:s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?)\b|"
+        r"\bwhen\b.{0,48}\b(?:finish(?:es|ed)?|fails?|completes?|is done|"
+        r"crash(?:es)?|appears?|prints?|logs?|ends?)\b",
         re.IGNORECASE | re.DOTALL),
     # The user asks to be offered choices on this turn. Not a single regex: see _OptionsAsk.
     "options": _OptionsAsk(),
@@ -2021,6 +2058,9 @@ class Agent(GoalLifecycle):
             r"\brecomm?end(?:ation|ations|ed|s)?\b", _trusted_intent_text(text), re.I))
         self._options_recommendation_requested = (recommendation if replace else
             recommendation or getattr(self, "_options_recommendation_requested", False))
+        loose = "options" in detected or _OptionsAsk.loose(text)
+        self._options_loose_cue = (loose if replace else
+                                   loose or getattr(self, "_options_loose_cue", False))
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
             # A goal describes the work, and it is re-read on every cycle and every later turn. An
             # ask to be offered choices is the user's on the turn they type it, so a goal never
@@ -2057,8 +2097,8 @@ class Agent(GoalLifecycle):
             self.ctx.skills = self.skills
 
     def _skill_catalog(self):
-        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
-        if profile == "full":
+        profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
+        if profile in ("full", "standard"):
             return [skill for skill in self.skills.values() if skill.enabled and
                     (skill.allow_implicit_invocation or skill.name in self._active_skill_names)]
         active = set(getattr(self, "_active_skill_names", set()))
@@ -2116,8 +2156,8 @@ class Agent(GoalLifecycle):
         return query[-40_000:]
 
     def _tool_schemas(self) -> list[dict]:
-        """Built-in/MCP tools filtered by mode, state, and explicit adaptive-tool intent."""
-        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
+        """Built-in/MCP tools filtered by mode, state, and (adaptive profile only) turn intent."""
+        profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
         lazy_mcp = False
         if self.mode == "plan":
             mcp_schemas = []  # MCP calls are mutation-unknown and never exposed in read-only plan mode.
@@ -2158,11 +2198,11 @@ class Agent(GoalLifecycle):
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
-            if self.mode == "auto" and not self._options_asked_interactively():
+            if self.mode == "auto" and not self._options_possible():
                 # Full-auto explicitly promises autonomous execution. A blocking choice prompt in
-                # this mode adds a model/UI round-trip and contradicts that boundary, unless the
-                # user asked on this very turn to be offered choices: then waiting is what they
-                # want, and withholding the picker only makes the model deny it exists.
+                # this mode adds a model/UI round-trip and contradicts that boundary, unless this
+                # turn mentions choosing at all: then waiting may be what they want, and
+                # withholding the picker only makes the model deny it exists.
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "propose_options"]
 
@@ -2174,16 +2214,28 @@ class Agent(GoalLifecycle):
                        if tool.get("function", {}).get("name") != "propose_options"]
         if profile != "full":
             active = set(getattr(self, "_active_tool_intents", set()))
-            schemas = [tool for tool in schemas
-                       if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
-                           or name not in _OPTIONAL_TOOL_INTENT
-                           or _OPTIONAL_TOOL_INTENT[name] in active
-                           or (name == "task" and self._task_exposed())
-                           or (name in {"repo_map", "code_intel"}
-                               and "narrow_scope" not in active)
-                           or (self.mode == "plan" and name in {"repo_map", "code_intel", "git_diff"})
-                           or (name == "artifact" and self.mode == "plan"
-                               and self.config.get("artifact_in_plan", False)))]
+            # Only the adaptive catalog decides a tool's existence from the prompt's wording. It
+            # keeps a small local context clear, but it also meant a request phrased another way
+            # ("set a watcher", "propse options") was answered with "that tool does not exist", so
+            # it is no longer the default: `standard` offers every product tool and lets the model
+            # choose. What stays gated everywhere is a tool that has nothing to act on.
+            if profile == "adaptive":
+                schemas = [tool for tool in schemas
+                           if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
+                               or name not in _OPTIONAL_TOOL_INTENT
+                               or _OPTIONAL_TOOL_INTENT[name] in active
+                               or (name == "task" and self._task_exposed())
+                               or (name in {"repo_map", "code_intel"}
+                                   and "narrow_scope" not in active)
+                               or (self.mode == "plan" and name in {"repo_map", "code_intel", "git_diff"})
+                               or (name == "artifact" and self.mode == "plan"
+                                   and self.config.get("artifact_in_plan", False)))]
+            else:
+                schemas = [tool for tool in schemas
+                           if (tool.get("function", {}).get("name") != "task" or self._task_exposed())]
+                if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
+                    schemas = [tool for tool in schemas
+                               if tool.get("function", {}).get("name") != "artifact"]
             if not self._skill_catalog():
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "skill"]
@@ -2220,6 +2272,18 @@ class Agent(GoalLifecycle):
         return ("options" in getattr(self, "_active_tool_intents", set())
                 and self.depth == 0 and not self._non_interactive())
 
+    def _options_possible(self) -> bool:
+        """Should full-auto keep the picker in the tool list for this turn?
+
+        A spelled-out ask (_options_asked_interactively) is not required: a typo in the ask used to
+        remove the picker entirely, and the model could then only write the choices in chat. Any
+        mention of choosing, addressed to the user, is enough to leave the tool available; the
+        model still decides, and an unattended run whose prompt never mentions a choice keeps
+        full-auto's no-round-trip promise.
+        """
+        return (getattr(self, "_options_loose_cue", False)
+                and self.depth == 0 and not self._non_interactive())
+
     def _picker_offered(self) -> bool:
         return any(tool.get("function", {}).get("name") == "propose_options"
                    for tool in self._tool_schemas())
@@ -2237,6 +2301,9 @@ class Agent(GoalLifecycle):
         agent = self
         while agent is not None:
             getattr(agent, "_active_tool_intents", set()).discard("options")
+            # The looser availability hint is withdrawn with the ask, so a full-auto goal run asks
+            # once and then keeps running unattended.
+            agent._options_loose_cue = False
             agent = getattr(agent, "_metrics_parent", None)
         if self._picker_offered() != offered:
             self._refresh_system()      # the text tool protocol lists the tools in the prompt
@@ -2293,14 +2360,14 @@ class Agent(GoalLifecycle):
     def _monitor_exposed(self) -> bool:
         """Is the `monitor` tool offered on this request?
 
-        Where events are delivered (_monitor_delivery), outside plan mode, under the full tool
-        profile or when the request asks to watch something. Background-bash exit notices do not
-        depend on this: they follow _monitor_delivery alone.
+        Where events are delivered (_monitor_delivery), outside plan mode, and under any tool
+        profile but the adaptive one, which needs the request to ask to watch something.
+        Background-bash exit notices do not depend on this: they follow _monitor_delivery alone.
         """
         if not self._monitor_delivery() or self.mode == "plan":
             return False
-        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
-        return profile == "full" or "monitor" in getattr(self, "_active_tool_intents", set())
+        profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
+        return profile != "adaptive" or "monitor" in getattr(self, "_active_tool_intents", set())
 
     def _task_exposed(self) -> bool:
         """Is the `task` tool offered on this request? The delegation guidance follows it.
@@ -2316,10 +2383,11 @@ class Agent(GoalLifecycle):
         allow = getattr(self, "_agent_tool_allowlist", None)
         if allow and "task" not in allow:
             return False
-        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
+        profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
         active = getattr(self, "_active_tool_intents", set())
         return (profile == "full" or "delegate" in active
-                or (self.depth == 0 and (bool(self.config.get("ultra_mode", False))
+                or (self.depth == 0 and (profile == "standard"
+                                         or bool(self.config.get("ultra_mode", False))
                                          or "repo_navigation" in active)))
 
     def _delegation_guidance(self, mode: str) -> list[str]:
@@ -2871,7 +2939,7 @@ class Agent(GoalLifecycle):
     def system_prompt(self) -> str:
         cfg = self.config
         mode = self.mode
-        profile = str(cfg.get("tool_profile", "adaptive") or "adaptive").lower()
+        profile = str(cfg.get("tool_profile", "standard") or "standard").lower()
         active_tools = set(getattr(self, "_active_tool_intents", set()))
         navigation_guidance = []
         if (mode == "plan" or profile == "full" or "repo_navigation" in active_tools
@@ -2884,6 +2952,20 @@ class Agent(GoalLifecycle):
             navigation_guidance.append(
                 "- Use code_intel for exact definitions, references, symbols, and diagnostics "
                 "when that is more targeted than broad text search.")
+        # A job that outlives a turn: DGC can start it detached and be woken when it prints. Without
+        # this the model sits in `sleep 570; grep ...` rounds, which holds the turn open for hours
+        # and reports nothing until it is asked again.
+        long_job_guidance = [
+            "- A command that runs for many minutes or hours: start it detached (bash with "
+            "background: true) and keep working or finish the turn. Never hold a turn open with "
+            "sleep/poll loops, and never promise to check later without arranging a wake-up.",
+        ]
+        if "monitor" in active_tools or profile == "full":
+            long_job_guidance.append(
+                "- Use `monitor` for that watch: every stdout line it prints reaches you between "
+                "tool calls and wakes you if the turn already ended. A loop that sleeps and prints "
+                "one line per round (persistent: true) is how you check something every few "
+                "minutes; a shell script that only writes to a log file can never wake you.")
         parts = [
             "You are DGC, a coding agent in the user's workspace, powered by their selected model. "
             "You help with software engineering tasks by taking real "
@@ -2914,6 +2996,7 @@ class Agent(GoalLifecycle):
             "in_progress before work, done after verification, pending next steps, blocked with why. "
             "A new user prompt replaces the previous checklist — do not keep its completed rows.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
+            *long_job_guidance,
             "",
             "# Response cadence",
             RESPONSE_GUIDANCE,

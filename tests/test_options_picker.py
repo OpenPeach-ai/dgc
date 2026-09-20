@@ -358,11 +358,35 @@ class ToolListMatrixTests(AgentTests):
                 self.assertIn("propose_options", agent._text_protocol_section(), label)
                 self.assertFalse(self.offered(agent, "now add the tests"), f"{label}: per turn only")
 
-    def test_full_auto_keeps_the_picker_out_of_a_turn_that_builds_a_ui(self):
+    def test_full_auto_never_instructs_the_model_to_ask_on_a_turn_that_builds_a_ui(self):
+        """A turn describing software is never told to open the picker.
+
+        Since 0.41.8 full-auto also keeps the tool in the list when the turn merely mentions
+        choosing (a typo in the ask used to remove it, leaving the model to write the choices in
+        chat). Availability is not use: what must never happen is DGC instructing the model to ask.
+        """
         agent = self.agent(mode="auto")
         for text in BUILDING_NOT_ASKING:
+            agent._activate_tool_intents(text, replace=True)
+            self.assertFalse(agent._options_asked_interactively(), text)
+            self.assertNotIn("# Options picker", agent.system_prompt(), text)
+
+    def test_full_auto_keeps_the_picker_out_of_a_turn_that_never_mentions_choosing(self):
+        agent = self.agent(mode="auto")
+        for text in ("fix the parser", "run the tests and report", "add a --format option to the CLI",
+                     "refactor the auth module", "deploy the site"):
             self.assertFalse(self.offered(agent, text), text)
             self.assertNotIn("# Options picker", agent.system_prompt(), text)
+
+    def test_full_auto_offers_the_picker_when_the_ask_is_misspelled(self):
+        """The founder's real turn: "propse" and "recomendation" defeated the spelled-out matcher,
+        full-auto removed the tool, and the model wrote the choices in chat instead."""
+        agent = self.agent(mode="auto")
+        for text in ('"...fill themselves on the voucher form." - ask me what it is and propse '
+                     "options with your recomendation so i can select.",
+                     "give me optoins to pick from",
+                     "which one should we do? list the alternatives and i will choose"):
+            self.assertTrue(self.offered(agent, text), text)
 
     def test_an_active_goal_never_carries_the_ask_to_later_turns(self):
         agent = self.agent(mode="auto")

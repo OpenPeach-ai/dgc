@@ -1,7 +1,8 @@
 """Web search — pluggable providers, same menu as a full assistant would offer.
 
 DuckDuckGo (keyless, the default floor) · Brave · Tavily (API key) · SearXNG (self-hosted URL).
-All are plain HTTP through `requests` (no new dependency). Configured in ~/.dgc/config.json via
+All are plain HTTP through `requests` (no new dependency); DuckDuckGo also uses the optional `ddgs`
+package when it is installed, and falls back to its own HTML and lite parsing when it is not. Configured in ~/.dgc/config.json via
 `search_provider` / `search_api_key` / `search_url`, set by `dgc setup` or the `/search` command.
 """
 from __future__ import annotations
@@ -30,7 +31,88 @@ def _fmt(results: list[tuple[str, str, str]], query: str) -> str:
     return "\n".join(out)
 
 
+def _ddgs_package(query: str, n: int) -> list[tuple[str, str, str]]:
+    """The maintained `ddgs` client, when the user has installed it.
+
+    It is optional on purpose: it pulls Rust and C extensions (primp, lxml), which every DGC
+    install on every platform would otherwise have to carry. `pip install ddgs` to use it.
+    """
+    try:
+        from ddgs import DDGS                                   # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS                  # type: ignore[import-not-found,no-redef]
+        except ImportError:
+            raise LookupError("no ddgs package installed") from None
+    with DDGS() as client:
+        rows = list(client.text(query, max_results=n) or [])
+    out: list[tuple[str, str, str]] = []
+    for row in rows[:n]:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip()
+        url = str(row.get("href") or row.get("url") or row.get("link") or "").strip()
+        body = str(row.get("body") or row.get("snippet") or row.get("description") or "").strip()
+        if title and url.startswith("http"):
+            out.append((title, url, body))
+    return out
+
+
+def _ddg_lite(query: str, n: int) -> list[tuple[str, str, str]]:
+    """DuckDuckGo's lite endpoint: a plain results table, served when the HTML one blocks us."""
+    r = requests.post("https://lite.duckduckgo.com/lite/", data={"q": query}, headers=_UA, timeout=20)
+    r.raise_for_status()
+    results: list[tuple[str, str, str]] = []
+    rows = re.split(r"<tr[^>]*>", r.text)
+    pending: tuple[str, str] | None = None
+    for row in rows:
+        # The lite page writes its attributes in either order and quotes them either way.
+        link = re.search(r"<a[^>]*class=['\"]result-link['\"][^>]*>(?P<t>.*?)</a>", row, re.S)
+        if link:
+            href = re.search(r"href=['\"](?P<u>[^'\"]+)['\"]", link.group(0))
+            url = html.unescape(href.group("u")) if href else ""
+            wrapped = re.search(r"uddg=([^&]+)", url)
+            if wrapped:
+                url = requests.utils.unquote(wrapped.group(1))
+            title = html.unescape(re.sub(r"<[^>]+>", "", link.group("t"))).strip()
+            pending = (title, url) if title and url.startswith("http") else None
+            continue
+        snippet = re.search(r"class=['\"]result-snippet['\"][^>]*>(?P<s>.*?)</td>", row, re.S)
+        if snippet and pending:
+            text = html.unescape(re.sub(r"<[^>]+>", "", snippet.group("s"))).strip()
+            results.append((pending[0], pending[1], text))
+            pending = None
+            if len(results) >= n:
+                break
+    if pending and len(results) < n:
+        results.append((pending[0], pending[1], ""))
+    return results
+
+
 def _duckduckgo(query: str, n: int) -> list[tuple[str, str, str]]:
+    """Keyless DuckDuckGo, tried three ways: the `ddgs` package if installed, then the HTML
+    endpoint DGC parses itself, then the lite endpoint. Only an empty result from all three, or
+    the last error, reaches the user."""
+    problems: list[str] = []
+    for label, attempt in (("ddgs package", _ddgs_package),
+                           ("html endpoint", _ddg_html),
+                           ("lite endpoint", _ddg_lite)):
+        try:
+            results = attempt(query, n)
+        except LookupError:
+            continue                                   # the optional package is simply not installed
+        except Exception as exc:                       # network, parse, or a package's own error
+            problems.append(f"{label}: {type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        if results:
+            return results
+        problems.append(f"{label}: no results")
+    raise SearchError(
+        "DuckDuckGo returned nothing (" + "; ".join(problems) + "). Install the `ddgs` package, "
+        "or switch provider with `/search brave|tavily|searxng`.")
+
+
+def _ddg_html(query: str, n: int) -> list[tuple[str, str, str]]:
     r = requests.post("https://html.duckduckgo.com/html/", data={"q": query}, headers=_UA, timeout=20)
     r.raise_for_status()
     text = r.text
