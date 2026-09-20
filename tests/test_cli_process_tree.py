@@ -41,8 +41,9 @@ def _ctx(root: Path):
 
 class SpawnShapeTests(unittest.TestCase):
     def test_a_command_is_spawned_in_its_own_killable_group(self):
-        kwargs = proctree.spawn_kwargs({"cwd": "/somewhere"})
+        kwargs = proctree.spawn_kwargs(cwd="/somewhere", stdin=subprocess.DEVNULL)
         self.assertEqual(kwargs["cwd"], "/somewhere")
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
         if POSIX:
             self.assertTrue(kwargs["start_new_session"])
             self.assertNotIn("creationflags", kwargs)
