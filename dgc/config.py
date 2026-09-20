@@ -809,7 +809,9 @@ class Config:
         # when the prompt's wording matched a pattern — so an ask phrased differently (or with a
         # typo) was told the tool did not exist. save() wrote that default into every config, so a
         # stored "adaptive" is almost always the old default rather than a choice, and it becomes
-        # "standard" (every product tool, every turn). Set it back by hand for a small local context.
+        # "standard" (every product tool, every turn). This runs on every load, so `adaptive` is a
+        # per-session choice (`/set tool_profile adaptive`, the editor's settings) rather than a
+        # stored one; a one-shot marker would be needed to make a stored choice survive.
         if raw.get("tool_profile") == "adaptive":
             raw["tool_profile"] = "standard"
             migrated = True

@@ -2530,7 +2530,7 @@ class Backend:
                      plan_artifact=bool(c.get("plan_artifact", True)),
                      artifact_autostart=bool(c.get("artifact_autostart", True)),
                      artifact_in_plan=bool(c.get("artifact_in_plan", False)),
-                     tool_profile=str(c.get("tool_profile", "adaptive")),
+                     tool_profile=str(c.get("tool_profile", "standard")),
                      max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
                      monitor_wake=bool(c.get("monitor_wake", True)),
                      goal=self._goal_snapshot(),

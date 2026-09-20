@@ -627,8 +627,9 @@ portable `.agents/skills` directories.
   turns. Up to eight selections share a bounded context allowance. Disabled or removed
   selections are rejected before model execution. Scripts are never executed on install.
 - The standard and full tool profiles advertise every enabled skill that permits implicit
-  invocation; the adaptive profile advertises only skills that narrowly match the request. Explicit-only skills remain
-  available through `$name`. The user request and normal permissions always take precedence.
+  invocation; the adaptive profile advertises only skills that narrowly match the request.
+  Explicit-only skills remain available through `$name`. The user request and normal
+  permissions always take precedence.
 - Project skills override personal skills, which override built-ins. Metadata refreshes
   at the next turn; use **Reload** to update the picker after external edits.
 - **dgc-design** ships by default but stays dormant for normal coding — artifact
@@ -978,9 +979,9 @@ the model choose; a tool with nothing to act on (no skills installed, no backgro
 active goal) still stays out. `tool_profile: adaptive` instead offers the core read / edit / search
 / shell surface and adds the others only when the request's wording asks for them, which keeps a
 small local context clear at the cost of a differently worded ask being told the tool does not
-exist. `tool_profile: full` offers every tool allowed by the
-current permission mode. Plan mode denies mutations. Full-auto omits the blocking options prompt
-unless you asked to choose.
+exist. `tool_profile: full` offers every tool allowed by the current permission mode. Plan mode
+denies mutations. Full-auto omits the blocking options prompt unless your request mentions
+choosing.
 
 ## Files and code
 
@@ -2427,8 +2428,8 @@ DuckDuckGo is the keyless default. `dgc setup` or `/search` picks another backen
 provider; treat that like any other web request.
 
 The standard (default) and full tool profiles offer `web_search` every turn; `tool_profile:
-adaptive` offers it when the prompt is about looking something up. Plan mode allows it. Subscription CLIs use their own
-search, not DGC's.
+adaptive` offers it when the prompt is about looking something up. Plan mode allows it.
+Subscription CLIs use their own search, not DGC's.
 """.strip()),
     ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
 # Subscriptions
@@ -2582,12 +2583,14 @@ Useful keys:
   terminal-control cleanup; treat it as sensitive. File rewind snapshots stay byte-for-byte
   intact in the owner-private session, preserving exact `/rewind` restoration.
 - `tool_profile` — `standard` (default) offers every product tool on every request and lets the
-  model decide (about 2,300 tokens of schema, cached by the provider between turns). `adaptive`
-  offers core coding tools always and adds web, artifact, skill-install, memory, delegation and
-  background-monitor tools only when the request's wording asks for them — smaller prompts for a
-  small local context window, at the cost of a differently worded ask being refused. `full` also
-  drops the state-based filters and offers every tool on every model request. A stored `adaptive`
-  from 0.41.7 or earlier is read as `standard`.
+  model decide (about 3,300 tokens of tool schema, cached by the provider between turns).
+  `adaptive` offers core coding tools always and adds web, artifact, skill-install, memory,
+  delegation and background-monitor tools only when the request's wording asks for them — about
+  1,500 tokens of schema for a small local context window, at the cost of a differently worded ask
+  being refused. `full` also drops the state-based filters and offers every tool on every model
+  request. Releases through 0.41.7 wrote their `adaptive` default into every config, so a stored
+  `adaptive` is read as `standard` on load: choose it per session with `/set tool_profile adaptive`
+  in the terminal, or in the editor's settings.
 - `code_action` — **off by default.** Opt in to the `python` tool: arbitrary code in a
   **persistent per-session interpreter**, retaining variables/imports across calls. Approval follows
   `bash` (asked in default/acceptEdits, denied in plan). It has no `/sandbox`, checkpoints, or
