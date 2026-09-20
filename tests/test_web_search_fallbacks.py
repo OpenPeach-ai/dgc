@@ -1,9 +1,9 @@
 """Keyless DuckDuckGo search is tried three ways, in order.
 
-The optional `ddgs` package first (it is maintained and handles blocks, but pulls Rust and C
-extensions, so DGC does not require it), then DGC's own parse of the HTML endpoint, then the lite
-endpoint, which keeps working when the HTML one starts refusing. Only when all three come back
-empty does the user see an error, and it names what to do next.
+The bundled `ddgs` client first (it presents itself as a browser, so it is not refused the way a
+plain scrape is), then DGC's own parse of the HTML endpoint, then the lite endpoint. An install
+without the package, or a version of it that breaks, falls through instead of failing. Only when
+all three come back empty does the user see an error, and it names what failed and what to do.
 """
 from __future__ import annotations
 
@@ -133,10 +133,10 @@ class SearchChainTest(unittest.TestCase):
             with self.assertRaises(search_mod.SearchError) as caught:
                 search_mod._duckduckgo("python", 3)
         message = str(caught.exception)
-        self.assertIn("ddgs", message)
         self.assertIn("/search brave", message)
         self.assertIn("html endpoint", message)
         self.assertIn("lite endpoint", message)
+        self.assertIn("ConnectionError", message, "the user is told what actually failed")
 
     def test_the_provider_surface_reports_the_error_without_raising(self):
         with patch.dict(sys.modules, {"ddgs": None, "duckduckgo_search": None}), \

@@ -2416,10 +2416,9 @@ text. A live page that has to run JavaScript is **Looking at a page**, not this.
 DuckDuckGo is the keyless default. `dgc setup` or `/search` picks another backend.
 
 - `/search` — show the current provider.
-- `/search duckduckgo` — keyless, and tried three ways in order: the optional `ddgs` package if
-  you have installed it (`pip install ddgs`; it is not a DGC dependency because it needs Rust and
-  C extensions), then DuckDuckGo's HTML endpoint, then its lite endpoint. The first one that
-  returns results answers; only if all three come back empty do you see an error.
+- `/search duckduckgo` — keyless, and tried three ways in order: the `ddgs` client DGC ships
+  with, then DuckDuckGo's HTML endpoint, then its lite endpoint. The first one that returns
+  results answers; only if all three come back empty do you see an error.
 - `/search brave` · `/search tavily` — prompts for an API key (masked). The value lives in
   `~/.dgc/secrets.json` or `DGC_SEARCH_API_KEY`, never in `config.json`.
 - `/search searxng <url>` — a self-hosted instance. `search_url` in config is that base URL.
@@ -2678,8 +2677,8 @@ when you want to override it.
 ## Web search
 
 - `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches.
-  DuckDuckGo needs no key: it uses the `ddgs` package when installed and its own HTML and lite
-  parsing otherwise.
+  DuckDuckGo needs no key: it uses the bundled `ddgs` client, falling back to DGC's own HTML and
+  lite parsing.
 - `search_url` — a custom endpoint for a self-hosted search backend; empty uses the provider's own.
 - `search_api_key` lives in `secrets.json` (above). Web providers use bounded transport timeouts.
 

@@ -39,9 +39,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   decorative symbols in headings, lists or status marks, unless you ask for them or the file
   already uses them, so an option label is plain text and the picker marks its own recommendation.
 - **Web search keeps working when DuckDuckGo blocks one door.** The keyless default now tries
-  three ways in order: the `ddgs` package if you have installed it (`pip install ddgs` — it is not
-  a DGC dependency, because it needs Rust and C extensions on every platform), then DuckDuckGo's
-  HTML endpoint, then its lite endpoint. An error now names what failed and what to switch to.
+  three ways in order: the `ddgs` client DGC now ships with (it presents itself as a browser, so
+  it is not refused the way a plain scrape is), then DuckDuckGo's HTML endpoint, then its lite
+  endpoint. An error now names what failed and what to switch to. DGC's install grows by about
+  27 MB for it, and its two binary components are listed in the release SBOM.
 - **"Set a watcher" now reaches the watcher.** `monitor` is DGC's background watch: every line the
   watched command prints reaches the model between tool calls and wakes it when the turn has
   ended. It was only offered for a few phrasings, so "set a watcher", "poll it", "check back every

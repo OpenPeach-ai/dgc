@@ -1,8 +1,8 @@
 """Web search — pluggable providers, same menu as a full assistant would offer.
 
 DuckDuckGo (keyless, the default floor) · Brave · Tavily (API key) · SearXNG (self-hosted URL).
-All are plain HTTP through `requests` (no new dependency); DuckDuckGo also uses the optional `ddgs`
-package when it is installed, and falls back to its own HTML and lite parsing when it is not. Configured in ~/.dgc/config.json via
+DuckDuckGo is tried three ways: the bundled `ddgs` client, then DGC's own parse of the HTML
+endpoint, then the lite endpoint. The other providers are plain HTTP through `requests`. Configured in ~/.dgc/config.json via
 `search_provider` / `search_api_key` / `search_url`, set by `dgc setup` or the `/search` command.
 """
 from __future__ import annotations
@@ -32,10 +32,11 @@ def _fmt(results: list[tuple[str, str, str]], query: str) -> str:
 
 
 def _ddgs_package(query: str, n: int) -> list[tuple[str, str, str]]:
-    """The maintained `ddgs` client, when the user has installed it.
+    """The maintained `ddgs` client, which DGC installs (see requirements.lock).
 
-    It is optional on purpose: it pulls Rust and C extensions (primp, lxml), which every DGC
-    install on every platform would otherwise have to carry. `pip install ddgs` to use it.
+    It impersonates a browser's TLS fingerprint, so it keeps working where a plain scrape is
+    refused. DGC still carries its own two fallbacks below, for an install that lacks the package
+    (an older tree, a stripped environment) or a version that breaks.
     """
     try:
         from ddgs import DDGS                                   # type: ignore[import-not-found]
@@ -100,7 +101,7 @@ def _duckduckgo(query: str, n: int) -> list[tuple[str, str, str]]:
         try:
             results = attempt(query, n)
         except LookupError:
-            continue                                   # the optional package is simply not installed
+            continue                                   # no package in this environment: fall through
         except Exception as exc:                       # network, parse, or a package's own error
             problems.append(f"{label}: {type(exc).__name__}: {str(exc)[:120]}")
             continue
@@ -108,8 +109,8 @@ def _duckduckgo(query: str, n: int) -> list[tuple[str, str, str]]:
             return results
         problems.append(f"{label}: no results")
     raise SearchError(
-        "DuckDuckGo returned nothing (" + "; ".join(problems) + "). Install the `ddgs` package, "
-        "or switch provider with `/search brave|tavily|searxng`.")
+        "DuckDuckGo returned nothing (" + "; ".join(problems) + "). Try again, or switch provider "
+        "with `/search brave|tavily|searxng`.")
 
 
 def _ddg_html(query: str, n: int) -> list[tuple[str, str, str]]:
