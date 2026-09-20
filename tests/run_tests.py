@@ -144,6 +144,10 @@ WINDOWS_SKIPS = {
         "the fixture is a '#!/bin/sh' git shim",
     "benchmark reference mapper preserves canonical helper classes":
         "the benchmark harness maps POSIX repository paths; it runs on Linux GPU hosts only",
+    "the export is private to the user":
+        "POSIX mode bits; on Windows the export's privacy comes from the folder ACL",
+    "without a target the export lands in ~/.dgc/exports, never the project tree":
+        "asserts the exports folder's POSIX 0700; where it lands is covered by the checks around it",
 }
 
 
@@ -13814,12 +13818,16 @@ def test_overnight_parity_fixes():
         check("a deep path outside home is shortened to its last two parts",
               lo._location_label() == "…" + os.sep + "workspace" + os.sep + "project")
         lo.config = SimpleNamespace(project_root=os.path.join(home, "code", "app"))
-        check("a path under home is shown with ~", lo._location_label() == "~/code/app")
+        check("a path under home is shown with ~",
+              lo._location_label() == "~" + os.sep + "code" + os.sep + "app",
+              lo._location_label())
         lo.config = SimpleNamespace(project_root=os.path.join(home, "a", "b", "c", "d"))
         lo._branch_cache = ("feature/x", _time.monotonic())
+        _cd = "…" + os.sep + "c" + os.sep + "d"
         check("the branch follows the directory, and can be left out",
-              lo._location_label() == "…/c/d · feature/x"
-              and lo._location_label(skip_branch=True) == "…/c/d")
+              lo._location_label() == _cd + " · feature/x"
+              and lo._location_label(skip_branch=True) == _cd,
+              lo._location_label())
         lo.config = None
         check("no config, no label", lo._location_label() == "")
         if _shutil.which("git"):
@@ -14230,14 +14238,22 @@ def test_oneshot_machine_readable():
         # The regression that hung a release: a supervisor, an editor or a background launcher
         # hands down an open SOCKET. It is not a terminal and it never closes, so reading it
         # blocks forever — `dgc -p` must not read it at all.
-        left, right = _socket.socketpair()
-        try:
-            as_stdin(_os.fdopen(_os.dup(left.fileno()), "r"))
-            check("an inherited socket is never read, so -p cannot hang on it",
-                  not _cli._piped_stdin() and _cli._oneshot_prompt("hi") == "hi")
-            _sys.stdin.close()
-        finally:
-            left.close(); right.close()
+        if WINDOWS:
+            # A Windows SOCKET is not a file descriptor: os.dup() of one fails, and nothing can
+            # hand a socket down as stdin the way a POSIX supervisor does. The rule the check
+            # proves -- `dgc -p` never reads a stdin that is not a pipe or a file -- is covered
+            # by the terminal and /dev/null cases above.
+            print("  skip an inherited socket is never read, so -p cannot hang on it  -- not "
+                  "applicable on Windows: a SOCKET there is not a file descriptor")
+        else:
+            left, right = _socket.socketpair()
+            try:
+                as_stdin(_os.fdopen(_os.dup(left.fileno()), "r"))
+                check("an inherited socket is never read, so -p cannot hang on it",
+                      not _cli._piped_stdin() and _cli._oneshot_prompt("hi") == "hi")
+                _sys.stdin.close()
+            finally:
+                left.close(); right.close()
         big = root / "big.txt"
         big.write_text("x" * (_cli._MAX_STDIN_BYTES + 10), encoding="utf-8")
         as_stdin(open(big, encoding="utf-8"))
@@ -15068,7 +15084,8 @@ def test_composer_marks_commands_and_goal_rail():
     goal("A very long objective " * 12, "active", 5)
     _long = RichText.from_ansi(ui._goal_pane().value).plain
     check("a long objective is truncated to the terminal width, never wrapped",
-          len(_long) <= ui._width and "\n" not in _long and _long.endswith("\u2026"))
+          len(_long) <= ui._width and "\n" not in _long and _long.endswith("\u2026"),
+          f"width={ui._width} len={len(_long)} row={_long!r}")
     ui._pane = object()
     goal("still set", "active", 5)
     check("the focus pane borrows the rail's row without clearing the goal",
