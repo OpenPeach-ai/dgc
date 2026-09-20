@@ -15,8 +15,10 @@ process, launches an app and reads the keychain) and runs in CI on macOS 15 and 
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -222,22 +224,40 @@ class StrictProfileLive(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.work, ignore_errors=True)
         (self.work / "inside.txt").write_text("workspace fixture\n")
 
+    def _run(self, argv: list[str], timeout: float, label: str):
+        """Run one argv in its own process group, killing the whole group on a timeout.
+
+        ``subprocess.run(..., timeout=)`` kills only the direct child and then blocks draining
+        pipes a surviving grandchild still holds, which turns one stuck command into a stuck
+        suite. A confined command that stalls must fail this test, not hang CI.
+        """
+        proc = subprocess.Popen(argv, cwd=str(self.work), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                start_new_session=True)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                out, err = proc.communicate(timeout=20)
+            self.fail(f"{label} did not finish within {timeout}s: {argv[-1]!r}")
+        return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
     def run_confined(self, command: str, *, network=False, read_only=False, config=None,
-                     timeout=60):
+                     timeout=120):
         argv = sandbox.wrap(command, self.work, config or _Cfg(sandbox_network=network,
                                                                sandbox_read_only=read_only))
         self.assertIsNotNone(argv, "sandbox.wrap refused to build an argv")
         box = next(item.split("=", 1)[1] for item in argv if item.startswith("-DSESSION_TMP="))
-        done = subprocess.run(argv, cwd=str(self.work), stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=timeout)
-        sandbox.release_call_dir(box)
-        return done, box
+        try:
+            return self._run(argv, timeout, "the confined command"), box
+        finally:
+            sandbox.release_call_dir(box)
 
-    def run_free(self, command: str, timeout=60):
+    def run_free(self, command: str, timeout=120):
         """The same command unsandboxed: the control behind every "blocked"."""
-        return subprocess.run(["/bin/bash", "-o", "pipefail", "-c", command], cwd=str(self.work),
-                              stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=timeout)
+        return self._run(["/bin/bash", "-o", "pipefail", "-c", command], timeout, "the control")
 
     def assertBlocked(self, command: str, *, network=False, expect_in_control=""):
         confined, _ = self.run_confined(command, network=network)
@@ -271,7 +291,7 @@ class StrictProfileLive(unittest.TestCase):
                         "printf 'int main(void){return 0;}\\n' > t.c && clang -o t.out t.c"
                         " && ./t.out"):
             with self.subTest(command=command):
-                done, _ = self.run_confined(command, timeout=180)
+                done, _ = self.run_confined(command, timeout=120)
                 self.assertEqual(done.returncode, 0,
                                  f"{command}: {(done.stdout + done.stderr)[:400]}")
 
