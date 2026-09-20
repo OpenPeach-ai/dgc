@@ -245,7 +245,7 @@ class StrictProfileLive(unittest.TestCase):
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
     def run_confined(self, command: str, *, network=False, read_only=False, config=None,
-                     timeout=120):
+                     timeout=60):
         argv = sandbox.wrap(command, self.work, config or _Cfg(sandbox_network=network,
                                                                sandbox_read_only=read_only))
         self.assertIsNotNone(argv, "sandbox.wrap refused to build an argv")
@@ -255,7 +255,7 @@ class StrictProfileLive(unittest.TestCase):
         finally:
             sandbox.release_call_dir(box)
 
-    def run_free(self, command: str, timeout=120):
+    def run_free(self, command: str, timeout=60):
         """The same command unsandboxed: the control behind every "blocked"."""
         return self._run(["/bin/bash", "-o", "pipefail", "-c", command], timeout, "the control")
 
@@ -291,7 +291,7 @@ class StrictProfileLive(unittest.TestCase):
                         "printf 'int main(void){return 0;}\\n' > t.c && clang -o t.out t.c"
                         " && ./t.out"):
             with self.subTest(command=command):
-                done, _ = self.run_confined(command, timeout=120)
+                done, _ = self.run_confined(command, timeout=90)
                 self.assertEqual(done.returncode, 0,
                                  f"{command}: {(done.stdout + done.stderr)[:400]}")
 
