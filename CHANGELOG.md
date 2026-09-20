@@ -29,8 +29,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   request and the model chooses, while a tool with nothing to act on (no skills installed, no
   background process, no active goal) still stays out. That is about 3,300 tokens of schema, which
   providers cache between turns. The old catalog remains as `tool_profile: adaptive` for a small
-  local context window (about 1,500 tokens), chosen per session with `/set tool_profile adaptive`
-  or in the editor's settings; a stored `adaptive` is read as `standard`.
+  local context window (about 1,500 tokens), chosen with `/set tool_profile adaptive` or in the
+  editor's settings and kept from then on. Upgrading rewrites a stored `adaptive` once, because
+  every config carried it as the old default rather than as a choice.
 - **The options picker survives a typo.** In full-auto, DGC only kept `propose_options` in the
   model's tools when it recognised the exact words of an ask, so "propse options … so i can select"
   removed the picker and the model wrote the choices in chat instead. Any mention of choosing,

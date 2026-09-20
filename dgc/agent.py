@@ -2968,7 +2968,7 @@ class Agent(GoalLifecycle):
             "background: true) and keep working or finish the turn. Never hold a turn open with "
             "sleep/poll loops, and never promise to check later without arranging a wake-up.",
         ]
-        if "monitor" in active_tools or profile == "full":
+        if self._monitor_exposed():
             long_job_guidance.append(
                 "- Use `monitor` for that watch: every stdout line it prints reaches you between "
                 "tool calls and wakes you if the turn already ended. A loop that sleeps and prints "
@@ -3005,6 +3005,10 @@ class Agent(GoalLifecycle):
             "A new user prompt replaces the previous checklist — do not keep its completed rows.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
             *long_job_guidance,
+            *(["- To SHOW the user a page — a dashboard, chart, report or small app — call the "
+               "`artifact` tool. That call is what makes the page live; describing it is not."]
+              if (mode != "plan" and profile != "adaptive"
+                  and bool(self.config.get("artifact_autostart", True))) else []),
             "",
             "# Response cadence",
             RESPONSE_GUIDANCE,
@@ -3165,7 +3169,7 @@ class Agent(GoalLifecycle):
         options_note = self._options_unavailable_note()
         if options_note:
             parts += ["", options_note]
-        if "document" in getattr(self, "_active_tool_intents", set()):
+        if profile != "adaptive" or "document" in getattr(self, "_active_tool_intents", set()):
             parts += ["", "# Browser document",
                       "When this turn produces a plan, design doc, spec or report the user will "
                       "read, call present_document with the complete Markdown and a short title. "

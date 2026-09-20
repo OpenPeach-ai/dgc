@@ -2588,9 +2588,9 @@ Useful keys:
   delegation and background-monitor tools only when the request's wording asks for them — about
   1,500 tokens of schema for a small local context window, at the cost of a differently worded ask
   being refused. `full` also drops the state-based filters and offers every tool on every model
-  request. Releases through 0.41.7 wrote their `adaptive` default into every config, so a stored
-  `adaptive` is read as `standard` on load: choose it per session with `/set tool_profile adaptive`
-  in the terminal, or in the editor's settings.
+  request. Releases through 0.41.7 wrote their `adaptive` default into every config, so the first
+  load after upgrading reads a stored `adaptive` as `standard`, once. Choosing `adaptive` yourself
+  afterwards — `/set tool_profile adaptive` in the terminal, or the editor's settings — is kept.
 - `code_action` — **off by default.** Opt in to the `python` tool: arbitrary code in a
   **persistent per-session interpreter**, retaining variables/imports across calls. Approval follows
   `bash` (asked in default/acceptEdits, denied in plan). It has no `/sandbox`, checkpoints, or

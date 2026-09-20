@@ -340,6 +340,8 @@ DEFAULTS: dict = {
                                                 #   test-passing files if it runs out of time (no 0-credit).
     "tool_profile": "standard",                 # standard every product tool | adaptive intent-aware
                                                 #   catalog (small local contexts) | full catalog
+    "tool_profile_chosen": False,               # the one-shot 0.41.7 "adaptive" migration has run,
+                                                #   so a later `adaptive` is the user's own choice
     "code_action": False,                       # optional "code action" power tool: advertise a `python`
                                                 #   tool that runs code in a PERSISTENT per-session
                                                 #   interpreter (variables/imports persist across calls, so
@@ -805,15 +807,15 @@ class Config:
             raw["think_budget_tokens"] = "auto"
             migrated = True
         # Releases through 0.41.7 defaulted tool_profile to "adaptive", which offered tools like
-        # delegation, the options picker's siblings, the background monitor or image reading only
-        # when the prompt's wording matched a pattern — so an ask phrased differently (or with a
-        # typo) was told the tool did not exist. save() wrote that default into every config, so a
-        # stored "adaptive" is almost always the old default rather than a choice, and it becomes
-        # "standard" (every product tool, every turn). This runs on every load, so `adaptive` is a
-        # per-session choice (`/set tool_profile adaptive`, the editor's settings) rather than a
-        # stored one; a one-shot marker would be needed to make a stored choice survive.
-        if raw.get("tool_profile") == "adaptive":
+        # delegation, the background monitor or image reading only when the prompt's wording matched
+        # a pattern — so an ask phrased differently (or with a typo) was told the tool did not
+        # exist. save() wrote that default into every config, so a stored "adaptive" is almost
+        # always the old default rather than a choice, and it becomes "standard" (every product
+        # tool, every turn). It runs ONCE: `tool_profile_chosen` then marks the value as the user's,
+        # so anyone who picks `adaptive` afterwards (a small local context window) keeps it.
+        if raw.get("tool_profile") == "adaptive" and not raw.get("tool_profile_chosen"):
             raw["tool_profile"] = "standard"
+            raw["tool_profile_chosen"] = True
             migrated = True
         self.data.update(raw)
         prior_provider_identity = _clean_provider_identity_map(
@@ -1031,6 +1033,10 @@ class Config:
                     self._stored_mcp_env.pop(name, None)
                     self._stored_mcp_identity.pop(name, None)
         self.data[key] = value
+        if key == "tool_profile":
+            # Setting it is choosing it: the one-shot 0.41.7 migration must never take it back.
+            self.data["tool_profile_chosen"] = True
+            self._explicit_keys.add("tool_profile_chosen")
         if key in _PROVIDER_SECRET_KEYS:
             identity = _provider_secret_identity(self.data, key)
             if value and identity:

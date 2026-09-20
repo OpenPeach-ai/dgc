@@ -145,5 +145,28 @@ class SearchChainTest(unittest.TestCase):
         self.assertTrue(out.startswith("error: "), out)
 
 
+class ToolProfileChoiceTest(unittest.TestCase):
+    """Upgrading rewrites the old `adaptive` default once; a choice made after that is kept."""
+
+    def test_the_old_default_migrates_once_and_a_later_choice_survives(self):
+        import json
+        import tempfile
+        from dgc import config as config_mod
+        home = Path(tempfile.mkdtemp(prefix="dgc-profile-home-"))
+        project = Path(tempfile.mkdtemp(prefix="dgc-profile-project-"))
+        (home / "config.json").write_text(json.dumps({"model": "m", "tool_profile": "adaptive"}))
+        with patch.object(config_mod, "USER_CONFIG", home / "config.json"), \
+                patch.object(config_mod, "USER_SECRETS", home / "secrets.json"):
+            first = config_mod.Config(project)
+            self.assertEqual(first.get("tool_profile"), "standard",
+                             "the 0.41.7 default is not a choice")
+            first.set("tool_profile", "adaptive")
+            self.assertEqual(json.loads((home / "config.json").read_text())["tool_profile"],
+                             "adaptive")
+            self.assertEqual(config_mod.Config(project).get("tool_profile"), "adaptive",
+                             "a chosen profile is kept")
+            self.assertEqual(config_mod.Config(project).get("tool_profile"), "adaptive")
+
+
 if __name__ == "__main__":
     unittest.main()
