@@ -23,6 +23,15 @@ from pathlib import Path
 # before the check that uses it. The product does not depend on this (dgc's own writes name
 # their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
 # so ask for it once, here, rather than in every caller.
+if os.name == "nt":
+    # A suite that hangs on a CI runner is killed by the job's own time limit, which discards the
+    # log and every artifact with it — so the one thing nobody can see is where it stopped. Dump
+    # every thread's stack and exit instead, inside the job's limit, so a hang is diagnosable
+    # from the log like any other failure.
+    import faulthandler as _faulthandler
+    _faulthandler.dump_traceback_later(int(os.environ.get("DGC_TESTS_WATCHDOG_S") or 28 * 60),
+                                       exit=True)
+
 if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF8") != "1":
     # Not os.execv: Windows has no exec, so CPython spawns a new process and exits this one with
     # code 0 — the suite's own result would be thrown away and always look green.

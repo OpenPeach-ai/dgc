@@ -431,8 +431,8 @@ def _wait_windows(pid: int) -> bool:
     if os.name != "nt":
         return False
     try:
-        import ctypes
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        from . import winjob
+        kernel32 = winjob._kernel32()       # fully declared: a HANDLE is a pointer, not an int
         synchronize = 0x00100000
         handle = kernel32.OpenProcess(synchronize, False, int(pid))
         if not handle:
@@ -442,7 +442,7 @@ def _wait_windows(pid: int) -> bool:
             return True
         finally:
             kernel32.CloseHandle(handle)
-    except (ImportError, AttributeError, OSError):                 # pragma: no cover - Windows
+    except (ImportError, AttributeError, OSError, ValueError):     # pragma: no cover - Windows
         return False
 
 
@@ -458,12 +458,14 @@ def process_alive(pid: int) -> bool:
     if os.name == "nt":                                            # pragma: no cover - Windows
         try:
             import ctypes
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+            from ctypes import wintypes
+            from . import winjob
+            kernel32 = winjob._kernel32()
             handle = kernel32.OpenProcess(0x1000, False, int(pid))     # QUERY_LIMITED_INFORMATION
             if not handle:
                 return False
             try:
-                code = ctypes.c_ulong(0)
+                code = wintypes.DWORD(0)
                 if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
                     return code.value == 259                           # STILL_ACTIVE
                 return True

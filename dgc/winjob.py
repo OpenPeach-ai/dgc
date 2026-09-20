@@ -29,9 +29,43 @@ def available() -> bool:
     return os.name == "nt"
 
 
+_KERNEL32 = None
+
+
 def _kernel32():
+    """kernel32 with every function this module calls fully declared.
+
+    Declaring the prototypes is not optional here: ctypes defaults a return value to ``c_int``,
+    and on 64-bit Windows a HANDLE is a pointer. An undeclared ``CreateJobObject`` therefore
+    hands back a truncated, sign-extended handle — one that names either nothing or, worse, some
+    other object in this process. Every call below either creates, assigns to or terminates a
+    job, so a wrong handle is not a failed call, it is a call on somebody else's object.
+    """
+    global _KERNEL32
+    if _KERNEL32 is not None:
+        return _KERNEL32
     import ctypes
-    return ctypes.WinDLL("kernel32", use_last_error=True)   # type: ignore[attr-defined]
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)   # type: ignore[attr-defined]
+    kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                                 wintypes.DWORD]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    _KERNEL32 = kernel32
+    return kernel32
 
 
 def _limit_structures():
