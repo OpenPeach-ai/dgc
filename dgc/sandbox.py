@@ -454,8 +454,8 @@ def _private_root() -> Path | None:
             if stat.S_IMODE(info.st_mode) != 0o700:
                 os.chmod(root, 0o700)
         return root.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError):
-        return None
+    except (AttributeError, OSError, RuntimeError, ValueError):
+        return None                              # no os.getuid on win32: there is no macOS sandbox
 
 
 def _reap_call_dirs() -> None:
