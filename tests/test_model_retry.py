@@ -39,7 +39,10 @@ def _real_account_home() -> str:
 _REAL_HOME = _real_account_home()
 if "dgc.config" in sys.modules:
     import dgc.config as _config
-    if Path(_config.USER_HOME) == Path(_REAL_HOME) or Path(_REAL_HOME) in Path(_config.USER_HOME).parents:
+    # Equality, not "is under": on Windows the isolated temporary home lives inside the
+    # account's own profile (%TEMP% is under %USERPROFILE%), so "under the account home"
+    # describes every correctly isolated run there.
+    if Path(_config.USER_HOME) in (Path(_REAL_HOME), Path(_REAL_HOME) / ".dgc"):
         raise RuntimeError("tests/test_model_retry.py needs HOME redirected before dgc is imported")
 else:
     _HOME = tempfile.TemporaryDirectory(prefix="dgc-retry-home-")

@@ -31,7 +31,11 @@ def _real_account_home() -> Path:
 if "dgc.config" in sys.modules:
     _user_home = Path(sys.modules["dgc.config"].USER_HOME).resolve(strict=False)
     _account_home = _real_account_home()
-    if _user_home == _account_home or _account_home in _user_home.parents:
+    # Equality, not "is under": on Windows the isolated temporary home lives inside the
+    # account's own profile (%TEMP% is under %USERPROFILE%), so "under the account home"
+    # describes every correctly isolated run there. What must never happen is DGC state
+    # landing in the real account's own .dgc.
+    if _user_home in (_account_home, _account_home / ".dgc"):
         raise RuntimeError("tests/test_screenshot_vision.py needs HOME redirected before dgc is imported")
 else:
     _ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-vision-tests-home-")
