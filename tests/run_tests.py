@@ -7731,9 +7731,12 @@ def test_mcp_protocol():
     finally:
         sandbox._backend = real_backend
     _masked = {_keyring_argv[i + 1] for i, a in enumerate(_keyring_argv) if a == "--tmpfs"}
+    # Only paths that exist are masked, so on a host without /run (macOS) the home half is what
+    # this proves; on linux, where the claim is made, both are here.
+    _keyring_homes = {str(p.resolve()) for p in (Path("/run"), Path.home()) if p.exists()}
     check("bwrap masks the paths a Secret Service keyring lives in",
-          str(Path("/run").resolve()) in _masked and str(Path.home().resolve()) in _masked,
-          str(sorted(_masked)))
+          bool(_keyring_homes) and _keyring_homes <= _masked,
+          f"{sorted(_keyring_homes)} vs {sorted(_masked)}")
 
     from dgc import cli as _doctor_cli
     from dgc import llm as _doctor_llm
