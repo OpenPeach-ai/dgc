@@ -575,6 +575,13 @@ function onPath(name) {
   return (process.env.PATH || "").split(delimiter).some((dir) => dir && existsSync(join(dir, name)));
 }
 
+// Two cases below give the runtime a PATH with nothing on it, to test an application whose
+// runtime has no OS sandbox. Since CLI 0.41.9 the macOS backend is pinned to
+// /usr/bin/sandbox-exec (a `sandbox-exec` found earlier on PATH could be an unconfined
+// passthrough), so PATH cannot hide it there; those cases stay proven on the other platforms.
+const PATH_CAN_HIDE_THE_BACKEND =
+  !(process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec"));
+
 // ---- RuntimePolicy: enforced by the runtime per session, never saved -------------------------
 
 test("policy: file tools stay inside cwd and off denied paths in auto mode", async () => {
@@ -692,7 +699,9 @@ test("policy: auto-mode shell runs inside the OS sandbox", { skip: !BWRAP_WORKS 
   });
 });
 
-test("policy: a required sandbox the runtime cannot provide refuses the session", async () => {
+test("policy: a required sandbox the runtime cannot provide refuses the session", {
+  skip: PATH_CAN_HIDE_THE_BACKEND ? false : "the macOS sandbox backend is pinned, so PATH cannot hide it",
+}, async () => {
   await withEnv("text", async (env) => {
     if (!onPath(process.platform === "darwin" ? "sandbox-exec" : "bwrap")) {
       assert.throws(() => env.client({ sandbox: { requirement: "required" } }), named("DGCUnsupportedError"));
@@ -1565,7 +1574,9 @@ test("hardening M1: denials list refused calls with their source, and policy den
   });
 });
 
-test("hardening M3: a sandboxed-shell policy fails closed without an OS sandbox; plan mode and preferred still start", async () => {
+test("hardening M3: a sandboxed-shell policy fails closed without an OS sandbox; plan mode and preferred still start", {
+  skip: PATH_CAN_HIDE_THE_BACKEND ? false : "the macOS sandbox backend is pinned, so PATH cannot hide it",
+}, async () => {
   await withEnv("text", async (env) => {
     const noSandbox = { PATH: "/nonexistent-dgc" };
     const strict = env.client({ policy: {}, sandbox: undefined, extraEnv: noSandbox });
