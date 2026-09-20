@@ -77,7 +77,13 @@ class ShellResolverTests(unittest.TestCase):
             missing = os.path.join(folder, "nope")
             resolved = shell.resolve({shell.SHELL_ENV: missing})
             self.assertIsNone(resolved.kind)
-            self.assertIn("is not a usable shell", resolved.reason)
+            # The ready frame's `reason` is the frozen sentence and nothing else; the note about
+            # the bad override travels in `detail`, where an error message picks it up.
+            self.assertEqual(resolved.reason,
+                             shell.WINDOWS_MISSING_BASH if os.name == "nt"
+                             else shell.POSIX_MISSING_BASH)
+            self.assertIn("is not a usable shell", resolved.detail)
+            self.assertEqual(resolved.capability()["reason"], resolved.reason)
             with patch.dict(os.environ, {shell.SHELL_ENV: missing}):
                 shell.reset_cache()
                 with self.assertRaises(shell.ShellUnavailable) as raised:

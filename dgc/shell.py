@@ -34,15 +34,27 @@ class ShellUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class Shell:
-    """The resolved shell: ``kind`` is None when there is none, and ``path`` is then ""."""
+    """The resolved shell: ``kind`` is None when there is none, and ``path`` is then "".
+
+    ``reason`` is the frozen sentence the platform contract fixes, so a front-end or an SDK can
+    show the same words everywhere. ``detail`` is anything extra this machine can add — today
+    only "your DGC_BASH does not name a shell" — and is kept out of the ready frame so the
+    contract's text stays exactly what it says it is.
+    """
 
     path: str
     kind: str | None
     reason: str
+    detail: str = ""
 
     @property
     def available(self) -> bool:
         return self.kind is not None
+
+    @property
+    def problem(self) -> str:
+        """The whole story for an error message: the detail first, then the frozen sentence."""
+        return f"{self.detail}; {self.reason}" if self.detail else self.reason
 
     def capability(self) -> dict:
         """The ``capabilities.shell`` object of the ready frame (protocol v14, additive)."""
@@ -136,8 +148,8 @@ def _resolve(env) -> Shell:
             kind = "git-bash" if os.name == "nt" else "bash"
             return Shell(path=str(usable), kind=kind, reason="")
         missing = WINDOWS_MISSING_BASH if os.name == "nt" else POSIX_MISSING_BASH
-        return Shell(path="", kind=None,
-                     reason=f"{SHELL_ENV}={override!r} is not a usable shell — {missing}")
+        return Shell(path="", kind=None, reason=missing,
+                     detail=f"{SHELL_ENV}={override!r} is not a usable shell")
     windows = os.name == "nt"
     candidates = _windows_candidates(env) if windows else _posix_candidates(env)
     for candidate in candidates:
@@ -189,7 +201,7 @@ def argv(command: str, *, pipefail: bool = True, login: bool = False) -> list[st
     """
     shell = resolve()
     if not shell.available:
-        raise ShellUnavailable(shell.reason)
+        raise ShellUnavailable(shell.problem)
     options = ["-o", "pipefail"] if pipefail else []
     if login:
         options = ["-l"] + options
@@ -204,4 +216,4 @@ def capability() -> dict:
 def missing_reason() -> str:
     """"" when a shell is available, otherwise the sentence explaining what to install."""
     shell = resolve()
-    return "" if shell.available else shell.reason
+    return "" if shell.available else shell.problem
