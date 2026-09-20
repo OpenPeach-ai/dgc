@@ -4881,6 +4881,9 @@ def sandbox_capabilities(config=None, backend: str | None = None) -> dict:
     from . import sandbox
     if backend is None:
         backend = sandbox.available() if sandbox.requested(config) else None
+    if not backend:
+        # No confinement for this session: nothing is hidden, whatever the host could offer.
+        return _no_sandbox_capabilities(None)
     published = getattr(sandbox, "capabilities_dict", None)
     if callable(published):
         try:
@@ -4895,16 +4898,14 @@ def sandbox_capabilities(config=None, backend: str | None = None) -> dict:
         checked = _checked_sandbox_capabilities(block)
         if checked is not None:
             return checked
-    if not backend:
-        return _no_sandbox_capabilities(None)
-    report = sandbox.capabilities(config)
     if backend == "bwrap":
         # bubblewrap gives DGC its own user, PID, IPC and UTS namespaces with a private home and
         # temporary directories, so nothing of the user's session is reachable — including any
         # credential agent listening on a socket under the hidden home.
         return {"backend": "bwrap", "profile": "bwrap-v1", "process_isolated": True,
                 "home_hidden": True, "private_temporary": True,
-                "network_isolated": bool(report.network_isolated), "keychain_hidden": True}
+                "network_isolated": bool(sandbox.capabilities(config).network_isolated),
+                "keychain_hidden": True}
     # Any other backend: truthful, and deliberately unflattering, until its profile is named.
     return _no_sandbox_capabilities(backend)
 

@@ -270,7 +270,20 @@ class SandboxCapabilityTests(unittest.TestCase):
 
     def test_a_published_block_that_raises_is_not_fatal(self):
         with patch("dgc.sandbox.capabilities_dict", create=True, side_effect=RuntimeError("no")):
+            block = headless.sandbox_capabilities(None, "bwrap")
+            self.assertEqual(block["profile"], "bwrap-v1")
             self.assertIsNone(headless.sandbox_capabilities(None, None)["backend"])
+
+    def test_a_session_with_no_sandbox_never_reports_one(self):
+        """A host that could confine says nothing when this session is not confined."""
+        published = {"backend": "bwrap", "profile": "bwrap-v1", "process_isolated": True,
+                     "home_hidden": True, "private_temporary": True, "network_isolated": True,
+                     "keychain_hidden": True}
+        with patch("dgc.sandbox.capabilities_dict", create=True, return_value=published):
+            with patch("dgc.sandbox.requested", return_value=False):
+                block = headless.sandbox_capabilities(None)
+        self.assertIsNone(block["backend"])
+        self.assertTrue(all(block[flag] is False for flag in self.FLAGS))
 
 
 @unittest.skipUnless(WINDOWS, "the Windows update path")
