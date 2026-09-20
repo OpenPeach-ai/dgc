@@ -17,6 +17,20 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+# Windows: run the whole suite in UTF-8 mode. Hundreds of fixtures are written with
+# Path.write_text() and no explicit encoding, so on an English Windows install they are encoded
+# as cp1252 and any fixture containing a bidirectional override, an emoji or CJK aborts the run
+# before the check that uses it. The product does not depend on this (dgc's own writes name
+# their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
+# so ask for it once, here, rather than in every caller.
+if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF8") != "1":
+    # Not os.execv: Windows has no exec, so CPython spawns a new process and exits this one with
+    # code 0 — the suite's own result would be thrown away and always look green.
+    os.environ["DGC_TESTS_UTF8"] = "1"          # the child must not relaunch itself again
+    sys.exit(subprocess.run(
+        [sys.executable, "-X", "utf8", str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
+
+
 # The suite must never read or write the developer's real ~/.dgc: several checks assert DGC's
 # defaults (tool profile, ultra mode, hooks…) and a populated config.json makes them fail
 # falsely, while others could persist state there. Redirect HOME before any dgc module computes
@@ -31,18 +45,6 @@ os.environ.pop("XDG_DATA_HOME", None)
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
-
-# Windows: run the whole suite in UTF-8 mode. Hundreds of fixtures are written with
-# Path.write_text() and no explicit encoding, so on an English Windows install they are encoded
-# as cp1252 and any fixture containing a bidirectional override, an emoji or CJK aborts the run
-# before the check that uses it. The product does not depend on this (dgc's own writes name
-# their encoding, and `dgc serve` reconfigures its own stdout); it is the harness that needs it,
-# so ask for it once, here, rather than in every caller.
-if os.name == "nt" and not sys.flags.utf8_mode and os.environ.get("DGC_TESTS_UTF8") != "1":
-    os.environ["DGC_TESTS_UTF8"] = "1"          # the re-exec must not re-exec again
-    os.execv(sys.executable,
-             [sys.executable, "-X", "utf8", str(Path(__file__).resolve()), *sys.argv[1:]])
-
 
 def live_process(pid: int) -> bool:
     """Whether a pid is running — on Windows too, where os.kill(pid, 0) TERMINATES it.
@@ -1512,9 +1514,14 @@ def unit_tests(tmp: Path):
     except Exception: pass
     if not _was_enabled:
         _fh.disable()
-    # Logging must never be the reason a backend fails to serve.
+    # Logging must never be the reason a backend fails to serve. A regular file as the user root
+    # is a location no OS will let us create a directory under, unlike /proc/…, which Windows
+    # happily creates as C:\proc.
+    _not_a_directory = tmp / "user-root-is-a-file"
+    _not_a_directory.write_text("not a directory")
+
     class _BadCfg:
-        user_root = "/proc/cannot-create-here/nope"
+        user_root = str(_not_a_directory / "nope")
     check("an unusable log location degrades to no log, never to a failure",
           _headless_mod2._open_crash_log(_BadCfg()) is None)
     check("and _log_crash tolerates having no handle at all",

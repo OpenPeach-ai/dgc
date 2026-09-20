@@ -223,6 +223,26 @@ class ServeStdoutEncodingTests(unittest.TestCase):
         registry = json.dumps(ready.get("commands", []), ensure_ascii=False)
         self.assertIn("·", registry, "the command registry's own non-Latin-1 text is the canary")
 
+    def test_the_ready_frame_carries_the_platform_capabilities(self):
+        """The additive v14 keys an SDK reads before it decides what it may promise."""
+        proc, lines = self._serve("utf-8")
+        capabilities = self._await(lines, lambda e: e["type"] == "ready")["capabilities"]
+        shell = capabilities["shell"]
+        self.assertEqual(set(shell), {"path", "kind", "reason"})
+        self.assertIn(shell["kind"], (None, "bash", "git-bash"))
+        sandbox = capabilities["session_policy"]["sandbox_capabilities"]
+        self.assertEqual(set(sandbox), {"backend", "profile", "process_isolated", "home_hidden",
+                                        "private_temporary", "network_isolated",
+                                        "keychain_hidden"})
+        for flag in ("process_isolated", "home_hidden", "private_temporary", "network_isolated",
+                     "keychain_hidden"):
+            self.assertIsInstance(sandbox[flag], bool)
+        if sandbox["backend"] is None:
+            self.assertIsNone(sandbox["profile"])
+            self.assertFalse(any(sandbox[flag] for flag in
+                                 ("process_isolated", "home_hidden", "private_temporary",
+                                  "network_isolated", "keychain_hidden")))
+
     def test_model_text_reaches_the_front_end_intact(self):
         proc, lines = self._serve("cp1252")
         self._await(lines, lambda e: e["type"] == "ready")

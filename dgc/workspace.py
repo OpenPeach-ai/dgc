@@ -139,10 +139,15 @@ def windows_canonical_text(value: str) -> str:
     """
     import ntpath
     text = str(value)
+    stripped = text
     if text.startswith("\\\\?\\UNC\\"):
-        text = "\\\\" + text[8:]
+        stripped = "\\\\" + text[8:]
     elif text.startswith("\\\\?\\") or text.startswith("\\\\.\\"):
-        text = text[4:]
+        stripped = text[4:]
+    # \\.\PhysicalDrive0 and friends are device names, not paths: removing the prefix would turn
+    # one into a relative path and quietly point the caller at the working directory instead.
+    if ntpath.isabs(stripped):
+        text = stripped
     text = ntpath.normpath(text)
     head = ntpath.splitdrive(text)[1]
     if ":" in head:

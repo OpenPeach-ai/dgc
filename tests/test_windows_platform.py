@@ -120,6 +120,10 @@ class PathSpellingTests(unittest.TestCase):
     def test_a_drive_letter_is_not_mistaken_for_a_stream(self):
         self.assertEqual(workspace.windows_canonical_text(r"C:\work"), r"C:\work")
 
+    def test_a_device_name_keeps_its_prefix_instead_of_becoming_relative(self):
+        self.assertEqual(workspace.windows_canonical_text(r"\\.\PhysicalDrive0"),
+                         r"\\.\PhysicalDrive0")
+
     def test_a_deny_rule_also_sees_the_stream_and_prefix_spellings(self):
         spellings = permissions.windows_spellings(r"\\?\C:\work\secret.txt:hidden", windows=True)
         self.assertIn(r"C:\work\secret.txt", spellings)

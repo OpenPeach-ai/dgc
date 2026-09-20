@@ -16,7 +16,6 @@ import copy
 import hashlib
 import json
 import os
-import pwd
 import re
 import shlex
 import shutil
@@ -30,6 +29,11 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 from collections.abc import Callable
+
+try:                       # the capture itself needs Xvfb, tmux and ffmpeg, so POSIX
+    import pwd             # only -- but its pure helpers are imported by the test
+except ModuleNotFoundError:  # suite, which also runs on Windows.
+    pwd = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
