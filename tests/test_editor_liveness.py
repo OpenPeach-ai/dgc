@@ -205,3 +205,23 @@ class ProtocolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalRemedyTest(unittest.TestCase):
+    """A refusal that offers nothing is what made the stale lease a dead end."""
+
+    def test_the_message_says_what_will_happen_and_what_to_do(self):
+        from dgc.agent import _HELD_SESSION_REMEDY
+        self.assertIn("releases the session", _HELD_SESSION_REMEDY,
+                      "say that a stranded backend now lets go by itself")
+        self.assertIn("new session", _HELD_SESSION_REMEDY,
+                      "and what the user can do right now")
+        self.assertNotIn("Wait for it to finish", _HELD_SESSION_REMEDY,
+                         "waiting was the whole problem: the other window was never coming back")
+
+    def test_the_remedy_matches_what_the_watchdog_actually_does(self):
+        from dgc.headless import ABANDONED_AFTER_S
+        from dgc.agent import _HELD_SESSION_REMEDY
+        minutes = int(ABANDONED_AFTER_S // 60)
+        self.assertIn(f"{minutes} minutes", _HELD_SESSION_REMEDY,
+                      "the promise in the message must track the constant, not drift from it")
