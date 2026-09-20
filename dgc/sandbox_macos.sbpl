@@ -108,9 +108,7 @@
   (sysctl-name "kern.version")
   (sysctl-name "sysctl.proc_cputype")
   (sysctl-name "vm.loadavg")
-  (sysctl-name "vm.swapusage")
-  (sysctl-name-prefix "kern.proc.pgrp.")
-  (sysctl-name-prefix "kern.proc.pid."))
+  (sysctl-name "vm.swapusage"))
 
 ; Belt to the allow-list's braces: a numeric MIB must not reach another process's arguments.
 (deny sysctl-read
