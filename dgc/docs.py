@@ -1162,6 +1162,26 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
 - **/rewind** — restore both the code *and* the conversation to how they were at a chosen
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
+
+## One session, one window at a time
+
+A session is held by whichever DGC is running a turn in it, so a second window opening the same
+session is told it has *an active turn in another DGC process*. That protects the transcript: two
+backends writing one session would interleave their turns.
+
+The lease is released when that turn ends, when its DGC exits, and if its DGC crashes — it is an
+operating-system lock, not a file DGC has to remember to clean up.
+
+It is also released when the editor that owned the backend goes away. An editor says it is still
+there about once a minute; a backend that was hearing that and stops hearing it treats the window
+as closed and lets the session go, within about fifteen minutes. That wait exists because a
+backend cannot otherwise tell a closed window from a user who is thinking: its input stays open
+for as long as the editor *process* lives, and an editor can leave that process behind when it
+reloads. Nothing is dropped to make this happen — a backend with a turn running, a background
+monitor armed, a detached sub-agent still working, or an open goal stays up regardless, however
+long it has been quiet.
+
+If you would rather not wait, start a new session, or close the other window.
 """.strip()),
 
     ("Checkpoints & rewind", "what a recovery point holds, /rewind, the editor's Undo, and what cannot come back", """

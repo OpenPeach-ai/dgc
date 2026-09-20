@@ -225,3 +225,32 @@ class RefusalRemedyTest(unittest.TestCase):
         minutes = int(ABANDONED_AFTER_S // 60)
         self.assertIn(f"{minutes} minutes", _HELD_SESSION_REMEDY,
                       "the promise in the message must track the constant, not drift from it")
+
+
+class DocumentedTest(unittest.TestCase):
+    """Documentation is a release gate here: a behaviour change lands in /docs with the change."""
+
+    def _sessions_page(self) -> str:
+        from dgc import docs
+        page = docs.find("Sessions & rewind")
+        self.assertIsNotNone(page, "the Sessions page must exist")
+        # Docs are wrapped prose, so a phrase can straddle a line break. Match on the words, not
+        # on where the paragraph happens to wrap.
+        return " ".join(page[2].split())
+
+    def test_the_lease_and_how_it_is_released_are_documented(self):
+        body = self._sessions_page()
+        self.assertIn("active turn in another DGC process", body,
+                      "the message a user will search for must appear in the docs")
+        self.assertIn("still there", body, "say that the editor reports liveness")
+        for promise in ("turn running", "monitor", "sub-agent", "goal"):
+            self.assertIn(promise, body,
+                          f"the docs must say a live {promise} keeps the backend up")
+
+    def test_the_documented_wait_matches_the_constant(self):
+        from dgc.headless import ABANDONED_AFTER_S
+        body = self._sessions_page()
+        # Fifteen minutes, spelled the way the page spells it.
+        self.assertEqual(ABANDONED_AFTER_S, 15 * 60.0)
+        self.assertIn("fifteen minutes", body,
+                      "the documented wait must track ABANDONED_AFTER_S, not drift from it")
