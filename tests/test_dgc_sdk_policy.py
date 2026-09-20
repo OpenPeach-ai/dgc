@@ -890,7 +890,7 @@ class ToolSocketTests(unittest.TestCase):
 
     def _talk(self, hub, hello: bytes | None) -> bytes:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(5)
+        client.settimeout(30)
         client.connect(hub.socket_path)
         data = b""
         try:

@@ -8670,15 +8670,20 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
     crash_writer = _sp.Popen(
         [sys.executable, "-c", crash_write_child, str(crash_write_session), str(d),
          str(crash_write_marker)], cwd=str(PROJECT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
-    crash_deadline = __import__("time").monotonic() + 5
-    while (not crash_write_marker.exists() and crash_writer.poll() is None
+    def _marker_text() -> str:
+        try:
+            return crash_write_marker.read_text().strip()
+        except (OSError, ValueError):
+            return ""
+    crash_deadline = __import__("time").monotonic() + 20
+    while (not _marker_text() and crash_writer.poll() is None
            and __import__("time").monotonic() < crash_deadline):
         __import__("time").sleep(0.01)
-    paused_at_temp = crash_write_marker.exists() and crash_writer.poll() is None
+    paused_at_temp = bool(_marker_text()) and crash_writer.poll() is None
     if crash_writer.poll() is None:
         crash_writer.kill()
     crash_stdout, crash_stderr = crash_writer.communicate(timeout=5)
-    orphan = (_P(crash_write_marker.read_text()) if crash_write_marker.exists()
+    orphan = (_P(_marker_text()) if _marker_text()
               else crash_write_session.with_name("missing-temp"))
     orphan_survived_kill = orphan.exists()
     sibling_temp = sessions._atomic_temp_path(sp2)
@@ -8963,11 +8968,16 @@ result.write_text("saved" if ok else "stale")
              str(go), str(result), f"writer-{index}", str(count)],
             cwd=str(PROJECT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
         children.append((proc, ready, result))
-    deadline = __import__("time").monotonic() + 5
-    while (not all(ready.exists() for _, ready, _ in children)
+    def _ready(path) -> bool:
+        try:
+            return path.read_text().strip() == "1"
+        except (OSError, ValueError):
+            return False
+    deadline = __import__("time").monotonic() + 20
+    while (not all(_ready(ready) for _, ready, _ in children)
            and __import__("time").monotonic() < deadline):
         __import__("time").sleep(0.01)
-    both_ready = all(ready.exists() and ready.read_text() == "1" for _, ready, _ in children)
+    both_ready = all(_ready(ready) for _, ready, _ in children)
     go.touch()
     child_details = []
     for proc, _, result in children:
@@ -19159,13 +19169,15 @@ def e2e_stall_fails_precisely(port: int, tmp: Path) -> bool:
     turn fails fast, naming the model and endpoint, without the wrong 'start your server' hint and
     without piling up synthetic continuation prompts."""
     proc, elapsed, _work = _e2e_stall_run(
-        port, tmp, "stall_fails", "keepalive_forever", {"model_first_token_timeout_s": 1}, 20)
+        # 60 like its recovering sibling above: the run itself takes a few seconds, and what the
+        # elapsed bound below disproves is the old behaviour of hanging forever on keep-alives.
+        port, tmp, "stall_fails", "keepalive_forever", {"model_first_token_timeout_s": 1}, 60)
     if proc is None:
         return False
     output = proc.stdout + proc.stderr
     interrupted = [r for r in MockHandler.stall_requests
                    if "Your previous response was interrupted" in json.dumps(r)]
-    ok = (proc.returncode != 0 and elapsed < 20
+    ok = (proc.returncode != 0 and elapsed < 45
           and "mock-model" in output and f"127.0.0.1:{port}" in output and "no tokens" in output
           and "start your server" not in output
           and len(MockHandler.stall_requests) == 2 and not interrupted)

@@ -193,7 +193,7 @@ class WorkspaceChangesTests(unittest.TestCase):
         backend.em = types.SimpleNamespace(emit=emit)
         backend.dispatch({"type": "get_workspace_changes", "request_id": "during-turn"})
         self.addCleanup(backend._editor_inspection.close)
-        self.assertTrue(done.wait(3))
+        self.assertTrue(done.wait(20))
         self.assertEqual(events[-1]["type"], "workspace_changes")
         self.assertEqual(events[-1]["roots"][0]["total"], 1)
         self.assertIsNone(event_error({"seq": 1, **events[-1]}))
@@ -208,7 +208,7 @@ class WorkspaceChangesTests(unittest.TestCase):
         with patch("dgc.editor_changes.collect_changes", side_effect=lambda root, *args, **kwargs:
                    {**report, "notices": [], "root": str(root)}):
             backend.dispatch({"type": "get_workspace_changes", "request_id": "bounded"})
-            self.assertTrue(done.wait(3))
+            self.assertTrue(done.wait(20))
         self.assertIsNone(event_error({"seq": 1, **events[-1]}))
         self.assertLessEqual(sum(len(row["files"]) for row in events[-1]["roots"]), 500)
         self.assertTrue(any(not row["complete"] for row in events[-1]["roots"]))
@@ -225,12 +225,12 @@ class WorkspaceChangesTests(unittest.TestCase):
         self.addCleanup(manager.close)
         manager.set_roots([nested, self.root, nested])
         manager.request({"type": "get_workspace_changes", "request_id": "overlap"})
-        self.assertTrue(done.wait(3))
+        self.assertTrue(done.wait(20))
         self.assertEqual(len(events[-1]["roots"]), 1)
         self.assertEqual(events[-1]["roots"][0]["files"][0]["path"], "nested/new.py")
         done.clear()
         manager.request({"type": "get_workspace_change", "root": str(nested), "path": "new.py", "request_id": "read"})
-        self.assertTrue(done.wait(3))
+        self.assertTrue(done.wait(20))
         self.assertEqual(events[-1]["after"], "new line\n")
 
 

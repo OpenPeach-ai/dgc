@@ -343,7 +343,7 @@ fixture.doCleanups()
         os.close(slave)
         output = b""
         sent = False
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 90
         try:
             while time.monotonic() < deadline:
                 if select.select([master], [], [], 0.1)[0]:

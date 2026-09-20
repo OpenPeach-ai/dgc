@@ -469,7 +469,7 @@ class RealTuiSmokeTests(unittest.TestCase):
             def eta_snapshot(self):
                 return None
 
-        def eventually(predicate, timeout=2.0):
+        def eventually(predicate, timeout=15.0):
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 if predicate():

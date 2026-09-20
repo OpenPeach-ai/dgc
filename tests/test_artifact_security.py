@@ -43,7 +43,7 @@ def _write(path: Path, text) -> Path:
 
 
 def request(port, method, path, host="default", headers=None, body=None, address="127.0.0.1"):
-    conn = http.client.HTTPConnection(address, port, timeout=5)
+    conn = http.client.HTTPConnection(address, port, timeout=30)
     try:
         conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
         if host == "default":

@@ -22,9 +22,14 @@ class ProcessResourceTests(unittest.TestCase):
                                          cancelled=threading.Event())
         self.processes = []
         original = subprocess.Popen
+        # tools.subprocess IS the stdlib module, so this patch is process-wide: a monitor thread
+        # or a background agent spawning anything while the test runs would land in this list and
+        # break an assertion that counts to exactly 16. Record only what this thread spawned.
+        runner = threading.current_thread()
         def launch(*args, **kwargs):
             proc = original(*args, **kwargs)
-            self.processes.append(proc)
+            if threading.current_thread() is runner:
+                self.processes.append(proc)
             return proc
         mocked = patch.object(tools.subprocess, "Popen", side_effect=launch)
         mocked.start()

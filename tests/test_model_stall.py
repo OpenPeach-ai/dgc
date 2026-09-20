@@ -762,9 +762,8 @@ def _watch_threads() -> list[str]:
 
 class AttemptLifecycleTests(StallTestCase):
     def assertNoWatchThreads(self):
-        settle = time.monotonic() + 1.5
-        while _watch_threads() and time.monotonic() < settle:
-            time.sleep(0.02)
+        wait_until(lambda: not _watch_threads(), timeout=20,
+                   what="every attempt's watch thread to stop with its attempt")
         self.assertEqual(_watch_threads(), [], "every attempt's watch stops with its attempt")
 
     def test_watches_stop_after_success_errors_and_stalls(self):

@@ -162,8 +162,12 @@ class GitReviewTests(unittest.TestCase):
         self.commit()
         calls = []
         real = subprocess.Popen
+        # Patching Popen here patches it for the whole process, so another thread's spawn would
+        # be judged against git's environment rules -- or arrive with no env kwarg at all.
+        runner = threading.current_thread()
         def observe(*args, **kwargs):
-            calls.append(kwargs["env"])
+            if threading.current_thread() is runner and "env" in kwargs:
+                calls.append(kwargs["env"])
             return real(*args, **kwargs)
         with patch("dgc.worktree.subprocess.Popen", side_effect=observe):
             self.review(view="commit")
