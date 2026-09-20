@@ -892,10 +892,16 @@ class ToolSocketTests(unittest.TestCase):
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(5)
         client.connect(hub.socket_path)
-        if hello is not None:
-            client.sendall(hello)
-        client.sendall(b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n')
         data = b""
+        try:
+            if hello is not None:
+                client.sendall(hello)
+            # A refused hello is closed at once, so this write can lose the race and break the
+            # pipe. Either way the caller wanted the same answer: the bridge said nothing.
+            client.sendall(b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n')
+        except OSError:
+            client.close()
+            return data
         try:
             while b"\n" not in data:
                 chunk = client.recv(65536)
