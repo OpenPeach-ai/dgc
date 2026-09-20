@@ -122,6 +122,9 @@
   (subpath "/Library")
   (subpath "/Applications")
   (subpath "/private/etc")
+  ; /usr/bin/clang, make, git and every other Xcode shim resolve the active developer directory
+  ; through the /var/select/developer_dir symbolic link before they exec anything.
+  (subpath "/private/var/select")
   (subpath "/private/var/db/timezone")
   (subpath "/private/var/db/DarwinDirectory")
   (subpath "/private/var/db/mds/system")

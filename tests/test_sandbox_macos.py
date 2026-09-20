@@ -118,9 +118,13 @@ class StrictProfileComposition(unittest.TestCase):
         self.assertIn('(allow network-outbound (remote ip "*:*"))', allowed)
         self.assertIn('(allow network-inbound (local ip "*:*"))', allowed)
         self.assertIn('(global-name "com.apple.SecurityServer")', allowed)
-        # A unix socket is never reachable: that is how the SDK's tool relay and the system
-        # agents behind /var/run stay out of a sandboxed command's reach in either mode.
-        self.assertNotIn("unix-socket", allowed)
+        # The only unix socket ever reachable is mDNSResponder's, and only with network allowed
+        # (macOS resolves names through it). The SDK's tool relay and every other agent behind
+        # /var/run stay out of a sandboxed command's reach in both modes.
+        sockets = [line for line in allowed.splitlines()
+                   if "unix-socket" in line and not line.strip().startswith(";")]
+        self.assertEqual(sockets, ['(allow network-outbound (remote unix-socket'
+                                   ' (literal "/private/var/run/mDNSResponder")))'])
         self.assertNotIn("unix-socket", denied)
 
     def test_extra_read_dirs_are_added_as_parameters(self):
@@ -296,8 +300,13 @@ class StrictProfileLive(unittest.TestCase):
         (outside / "secret.txt").write_text("tmp-secret\n")
         self.assertBlocked(f"cat {outside}/secret.txt", expect_in_control="tmp-secret")
         self.assertBlocked("ls /private/tmp")
-        self.assertBlocked('ls "$(getconf DARWIN_USER_TEMP_DIR)"')
-        self.assertBlocked('ls "$(getconf DARWIN_USER_CACHE_DIR)"')
+        # Resolved outside: inside the sandbox getconf falls back to TMPDIR, which is the
+        # sandbox's own private folder, so asking it there would prove nothing.
+        for name in ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR"):
+            path = subprocess.run(["/usr/bin/getconf", name], capture_output=True,
+                                  text=True).stdout.strip()
+            self.assertTrue(path.startswith("/"), f"{name} did not resolve: {path!r}")
+            self.assertBlocked(f"ls {path}")
         marker = Path("/private/tmp") / f"dgc-seatbelt-live-{os.getpid()}"
         self.addCleanup(marker.unlink, True)
         self.assertBlocked(f"echo x > {marker}")

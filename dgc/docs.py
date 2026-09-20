@@ -309,12 +309,13 @@ Subscription turns map the mode into the selected vendor CLI's own flags and pol
 and hooks; it does not confine parent-process structured file tools or delegated vendor CLIs, and
 does **not** skip normal permission prompts. Linux/bubblewrap makes the project the only persistent
 writable host path for those commands, masks ambient user state, and provides private home, temporary,
-runtime, process, and network namespaces. macOS/sandbox-exec denies ambient-home
-reads outside the project and host writes except the project and shared system
-temporary paths; its temporary and process namespaces are not private. Network is
-blocked by default on both. Unsupported platforms fail closed instead of running a
-requested sandbox without confinement. Use `/sandbox network on` only when needed.
-The **Sandbox** page covers backends, what is confined, and what is not.
+runtime, process, and network namespaces. macOS/sandbox-exec applies a deny-by-default Seatbelt
+policy: the project is writable, the rest of the disk is read-only or invisible, your home folder
+and `~/.dgc` are hidden, each command gets its own private temporary folder, and processes outside
+the sandbox cannot be listed or signalled. Network is blocked by default on both. Unsupported
+platforms fail closed instead of running a requested sandbox without confinement. Use
+`/sandbox network on` only when needed. The **Sandbox** page covers backends, what is confined,
+and what is not.
 
 ## In VS Code and Cursor
 
@@ -2058,13 +2059,36 @@ tools (`read_file`, `edit_file`, …), and does not wrap a delegated subscriptio
 
 ## Backends
 
-- **Linux** — bubblewrap (`bwrap`). The project is the only persistent writable host path for
-  those commands. Ambient user state is masked. Home, temporary, runtime, process, and network
-  namespaces are private.
-- **macOS** — `sandbox-exec`. Ambient-home reads outside the project are denied; host writes
-  except the project and shared system temporary paths are denied. Temporary and process
-  namespaces are not private.
+- **Linux** — bubblewrap (`bwrap`), profile `bwrap-v1`. The project is the only persistent
+  writable host path for those commands. Ambient user state is masked. Home, temporary, runtime,
+  process, and network namespaces are private.
+- **macOS** — `/usr/bin/sandbox-exec`, profile `strict-v1` (DGC 0.41.9 and newer). A
+  deny-by-default Seatbelt policy: the project is writable, the rest of the disk is read-only or
+  invisible, and each command gets its own private temporary folder as `HOME`/`TMPDIR`, removed
+  when the command ends. Read `python -m dgc.sandbox --print-profile` to see exactly what applies
+  to your project.
 - **Anything else** — fail closed. DGC will not pretend a requested sandbox is on.
+
+### What the macOS profile hides
+
+Your home folder, `~/.dgc` and an SDK session's state folder; the host's shared temporary folders
+(`/tmp`, `/private/tmp`, `DARWIN_USER_TEMP_DIR`, `DARWIN_USER_CACHE_DIR`); other users' files;
+`/Library/Keychains`, `/private/etc/ssh` and the TCC database. Processes outside the sandbox
+cannot be listed, inspected or signalled, no app can be launched through LaunchServices (`open`),
+no job submitted to launchd, and no preference written through `cfprefsd` (`defaults write`).
+
+Two limits worth knowing:
+
+- **The keychain is hidden only while network is denied.** macOS needs the system security server
+  for TLS, so `/sandbox network on` puts the keychain back in reach of a confined command.
+  `/sandbox` and `dgc doctor` say which of the two you are in.
+- **Toolchains under your home folder are hidden.** `~/.cargo`, `~/.nvm`, `~/.pyenv`, `~/.rustup`
+  and the like are invisible until you list them in `sandbox_read_dirs` (see the Configuration
+  page). Toolchains in `/usr`, `/opt/homebrew`, `/usr/local`, `/Library/Developer` and
+  `/Applications` work as they are.
+
+Seatbelt cannot nest: if DGC is itself already running inside a sandbox, `/sandbox` reports it as
+unavailable with the reason, and a requested sandbox fails closed rather than running free.
 
 `sandbox_env_allow` in `config.json` is the list of extra environment variable names to pass
 through. Other non-baseline host variables are withheld; DGC still supplies a small safe
@@ -2653,6 +2677,9 @@ when you want to override it.
 - `sandbox_env_allow` (default `[]`) — environment variable names to pass through to sandboxed
   commands. Other non-baseline host variables are withheld; DGC still supplies a small safe
   baseline plus sandbox-specific home, temporary, and runtime paths.
+- `sandbox_read_dirs` (default `[]`) — extra directories a sandboxed command may read. macOS
+  hides your home folder, so name a toolchain that lives there (`~/.cargo`, `~/.nvm`, `~/.pyenv`)
+  to use it from a sandboxed command. Each entry is a directory; anything missing is ignored.
 
 ## Artifacts
 

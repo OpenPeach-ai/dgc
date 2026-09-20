@@ -463,7 +463,8 @@ def _reap_call_dirs() -> None:
         return
     now = time.time()
     try:
-        entries = sorted(os.scandir(root), key=lambda e: e.name)[:_REAP_MAX_ENTRIES]
+        with os.scandir(root) as listing:
+            entries = sorted(listing, key=lambda e: e.name)[:_REAP_MAX_ENTRIES]
     except OSError:
         return
     mine = os.getpid()
@@ -489,14 +490,16 @@ def _reap_call_dirs() -> None:
         if pid != mine:
             try:
                 if now - entry.stat(follow_symlinks=False).st_mtime < _REAP_FOREIGN_AGE_S:
-                    continue
-                os.kill(pid, 0)
-                continue                         # that DGC is still alive; leave its folder alone
-            except OSError as exc:
-                if getattr(exc, "errno", None) == errno.EPERM:
-                    continue                     # alive and another user's
-            except ValueError:
-                pass
+                    continue                     # too young to judge: a pid can be recycled
+            except OSError:
+                continue
+            if pid > 0:                          # never os.kill(-1, ...): that is "every process"
+                try:
+                    os.kill(pid, 0)
+                    continue                     # that DGC is alive; leave its folder alone
+                except OSError as exc:
+                    if getattr(exc, "errno", None) == errno.EPERM:
+                        continue                 # alive, and another user's
         shutil.rmtree(path, ignore_errors=True)
 
 
@@ -610,10 +613,12 @@ def _macos_profile(root: Path, session_tmp: Path, *, network: bool, read_only: b
         lines += [
             "",
             "; --- network allowed for this session ---------------------------------------",
-            "; IP only: a unix socket is never reachable, so the SDK's tool relay and the system",
-            "; agents behind /var/run stay out of reach. SecurityServer comes back for TLS, which",
-            "; is why capabilities report keychain_hidden=false whenever network is allowed.",
+            "; IP, plus the one unix socket name resolution needs: the SDK's tool relay and every",
+            "; other agent behind /var/run stay out of reach. SecurityServer comes back for TLS,",
+            "; which is why capabilities report keychain_hidden=false whenever network is allowed.",
             '(allow network-outbound (remote ip "*:*"))',
+            '(allow network-outbound (remote unix-socket'
+            ' (literal "/private/var/run/mDNSResponder")))',
             '(allow network-inbound (local ip "*:*"))',
             '(allow network-bind (local ip "*:*"))',
             "(allow system-socket (require-all (socket-domain AF_SYSTEM) (socket-protocol 2)))",

@@ -4,6 +4,46 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+### Security — the macOS sandbox was weaker than it said
+
+**If you use `/sandbox on` (or `--sandbox`, or a session policy that turns the sandbox on) on
+macOS, read this.** Through 0.41.8 the macOS backend applied an allow-by-default `sandbox-exec`
+policy that denied writes outside the project and reads of your home folder, but allowed
+everything it did not name. Probed on macOS 15 and macOS 26, in both network modes, a sandboxed
+command could:
+
+- read and write any file under `/tmp` and `/private/tmp` outside the project;
+- list the per-user `DARWIN_USER_TEMP_DIR` and `DARWIN_USER_CACHE_DIR`;
+- signal (`kill`) any other process running as you, including DGC itself;
+- launch an app through LaunchServices (`open -a …`), outside the sandbox.
+
+Your home folder, `~/.dgc`, an SDK session's state folder, the keychain, `ps -E` of another
+process, `launchctl submit` and (with network denied) the network were already blocked, and Linux
+(bubblewrap) was never affected.
+
+This release replaces that policy with `strict-v1`, a deny-by-default Seatbelt profile
+(`dgc/sandbox_macos.sbpl`, printable with `python -m dgc.sandbox --print-profile`). Each confined
+command now gets a private 0700 folder as its `HOME`/`TMPDIR`, removed when the command ends; the
+host's shared temporary folders are invisible; processes outside the sandbox cannot be listed,
+inspected or signalled; and apps, launchd jobs and `defaults write` cannot be started from inside.
+The keychain is unreachable while network is denied — macOS needs the system security server for
+TLS, so allowing network puts it back in reach, and `/sandbox`, `dgc doctor` and the docs say so.
+
+Two things change for existing macOS users:
+
+- A toolchain installed under your home folder (`~/.cargo`, `~/.nvm`, `~/.pyenv`, `~/.rustup`) is
+  no longer visible to a sandboxed command. Add it to the new `sandbox_read_dirs` in
+  `config.json`. Toolchains in `/usr`, `/opt/homebrew`, `/usr/local`, `/Library/Developer` and
+  `/Applications` keep working.
+- A command that wrote to the host's `/tmp` now writes to its own private temporary folder, which
+  is removed when it exits. Use the project directory for anything that must outlive the command.
+
+Seatbelt cannot nest: a DGC already running inside a sandbox now reports the sandbox as
+unavailable, with the reason, instead of running commands unconfined. As before, an unsupported
+platform fails closed, and confinement never replaces an approval prompt.
+
 ## 0.41.7 — 2026-09-19
 
 Editor protocol remains v14. Pair with extension 0.26.7 and dgc-sdk 0.5.3.

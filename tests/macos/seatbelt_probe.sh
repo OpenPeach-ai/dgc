@@ -52,6 +52,10 @@ echo "workspace fixture" > "$W/inside.txt"
 mkdir -p "$HOME/.dgc" 2>/dev/null; echo "state-secret" > "$HOME/.dgc/seatbelt-probe.txt" 2>/dev/null
 echo "home-secret" > "$HOME/.seatbelt-home-probe" 2>/dev/null
 TMP_OUTSIDE=$(mktemp /tmp/dgc-seatbelt-outside.XXXXXX); echo "tmp-secret" > "$TMP_OUTSIDE"
+# The host's per-user temporary and cache folders, resolved OUTSIDE the sandbox: inside it,
+# getconf falls back to whatever TMPDIR says, which is the sandbox's own private folder.
+DARWIN_TMP=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)
+DARWIN_CACHE=$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null)
 # An SDK client's state_dir (default: a private temp dir, i.e. under DARWIN_USER_TEMP_DIR). An SDK
 # session runs with HOME=DGC_HOME=<state>/home and DGC_SDK_ISOLATED=1; its audit/usage logs sit
 # beside that HOME and must be hidden from the sandboxed shell.
@@ -179,8 +183,8 @@ run_probes_for_mode() {
   probe tmp_list        ""              "ls /private/tmp"
   probe tmp_write       "wrote"         "echo x > /private/tmp/dgc-seatbelt-w-$net && echo wrote"
   probe home_write      "wrote"         "echo x > '$HOME/.seatbelt-home-write-$net' && echo wrote"
-  probe darwin_temp     ""              'ls "$(getconf DARWIN_USER_TEMP_DIR)"'
-  probe darwin_cache    ""              'ls "$(getconf DARWIN_USER_CACHE_DIR)"'
+  probe darwin_temp     ""              "ls '$DARWIN_TMP'"
+  probe darwin_cache    ""              "ls '$DARWIN_CACHE'"
   if [ "$KEYCHAIN_READY" = 1 ]; then
     probe keychain      "$KEY_SECRET"   "security find-generic-password -s '$KEY_SERVICE' -w"
   else
