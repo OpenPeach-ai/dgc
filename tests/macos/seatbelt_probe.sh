@@ -207,8 +207,10 @@ run_probes_for_mode() {
   # 2. ps is setgid and cannot be exec'd from ANY sandbox (it failed under the old
   #    allow-by-default profile too), so the sysctl route is untested. kern.proc.pid. is
   #    on the allow-list.
-  probe sysctl_kinfo    "outside-process-visible" \
-                        "/usr/bin/python3 ./kinfo_probe.py $FOREIGN_PID"
+  probe sysctl_kinfo    "pid_record=yes" \
+                        "/usr/bin/python3 ./kinfo_probe.py $FOREIGN_PID 2>/dev/null"
+  probe sysctl_procargs "env_marker=yes" \
+                        "/usr/bin/python3 ./kinfo_probe.py $FOREIGN_PID 2>/dev/null"
   probe sysctl_cli      ""              "sysctl kern.proc.pid.$FOREIGN_PID"
   # 3. dslocal is denied, but DarwinDirectory (its macOS 15+ successor) is a read root.
   probe darwin_directory ""             "ls -la /private/var/db/DarwinDirectory/local"
