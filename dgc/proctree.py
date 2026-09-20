@@ -71,7 +71,10 @@ def track(proc, *, register: bool = False) -> object | None:
         return None
     if os.name == "posix":
         if register:
-            register_group(proc.pid)
+            # Off the caller's thread: reading a start time costs a `ps` on macOS, which has no
+            # /proc, and a tool command must not wait on a best-effort bookkeeping file.
+            threading.Thread(target=register_group, args=(proc.pid,),
+                             name="dgc-group-registry", daemon=True).start()
         return None
     if os.name != "nt":
         return None
