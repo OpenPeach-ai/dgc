@@ -20,15 +20,20 @@ Copyright © Microsoft Corporation.
 ## Lucide icons
 
 The transcript's activity icons — the mark beside a tool step, a diff, a permission card or a
-notice — are 37 [Lucide](https://lucide.dev) icons, from
+notice — are 36 [Lucide](https://lucide.dev) icons, from
 [`lucide-react` 1.24.0](https://www.npmjs.com/package/lucide-react/v/1.24.0).
 
 - Only the SVG path data is used, copied verbatim onto Lucide's 24x24 grid and embedded inline in
   `media/main.js`. No font, no icon file, and no runtime dependency on the package ships with this
   extension.
-- The icons used are: `activity`, `app-window`, `blocks`, `book-open`, `bookmark`, `bot`, `braces`, `circle-alert`, `circle-check`, `circle-help`, `circle-slash`, `clipboard-list`, `code`, `external-link`, `file-diff`, `file-plus`, `file-text`, `folder-tree`, `globe`, `history`, `image`, `image-off`, `list-todo`, `notebook-pen`, `pencil`, `play`, `refresh-cw`, `search`, `shield`, `shield-plus`, `sparkle`, `square-pen`, `square-terminal`, `target`, `triangle-alert`, `unplug`, `wrench`.
+- The icons used are: `activity`, `app-window`, `blocks`, `book-open`, `bookmark`, `bot`, `braces`, `circle-alert`, `circle-check`, `circle-help`, `circle-slash`, `clipboard-list`, `code`, `external-link`, `file-diff`, `file-plus`, `file-text`, `folder-tree`, `globe`, `history`, `image`, `image-off`, `list-todo`, `notebook-pen`, `pencil`, `play`, `refresh-cw`, `search`, `shield`, `shield-plus`, `sparkle`, `square-pen`, `square-terminal`, `target`, `triangle-alert`, `wrench`.
 - Lucide is licensed under the ISC License. Icons derived from Feather carry the MIT License.
-  Both texts are reproduced in `licenses/LUCIDE-ISC.txt`, exactly as the package publishes them.
+  Both texts are reproduced in `licenses/LUCIDE-LICENSES.txt`, exactly as the package publishes them.
+- Seven of the icons above are Feather-derived and so carry that MIT License as well:
+  `circle-alert`, `circle-help`, `code`, `external-link`, `search`, `target` and `triangle-alert`.
+  Three of them appear in the bundled Feather list under Lucide's older names for them —
+  `circle-alert` as `alert-circle`, `circle-help` as `help-circle`, and `triangle-alert` as
+  `alert-triangle` — so the two lists cannot be compared name for name.
 
 Copyright © Lucide Icons and Contributors; portions copyright © Cole Bemis (Feather).
 

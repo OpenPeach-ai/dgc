@@ -287,7 +287,7 @@
   // round caps and joins, so an icon is exactly the colour of the words beside it and nothing else.
   // Inline markup, not a font or a file: a <svg> in the DOM is not a CSP resource load.
   // Lucide is ISC-licensed (some icons Feather-derived, MIT). See THIRD_PARTY_NOTICES.md and
-  // licenses/LUCIDE-ISC.txt.
+  // licenses/LUCIDE-LICENSES.txt.
   const ICON_PATHS = {
     "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     "app-window": '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>',
@@ -324,23 +324,23 @@
     "square-terminal": '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
     "target": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
     "triangle-alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-    "unplug": '<path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/>',
     "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
   };
   const ICON_STROKE = { md: 2, xs: 2, lg: 1.5 };   // painted 1.167 / 1.000 / 1.250 CSS px
   // The box is sized in CSS (--icon / --icon-xs / --icon-lg), so the stroke scales with it.
-  function icon(name, size = "md", cls = "") {
+  function icon(name, size = "md") {
     const body = ICON_PATHS[name] || ICON_PATHS.wrench;
-    return `<svg class="ic ic-${size}${cls ? " " + cls : ""}" data-icon="${name}" viewBox="0 0 24 24"`
+    return `<svg class="ic ic-${size}" data-icon="${name}" viewBox="0 0 24 24"`
       + ` fill="none" stroke="currentColor" stroke-width="${ICON_STROKE[size] || 2}"`
       + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
   }
   // Draw an icon into a stable wrapper, and only when it actually changed: re-setting the markup
   // on every event would restart the running group's CSS pulse and make the header stutter.
-  function setIcon(wrap, name, size = "md") {
+  // Every wrapper that repaints is a --icon one; a size here would only ever be wrong silently.
+  function setIcon(wrap, name) {
     if (!wrap || wrap.dataset.icon === name) return wrap;
     wrap.dataset.icon = name;
-    wrap.innerHTML = icon(name, size);
+    wrap.innerHTML = icon(name);
     return wrap;
   }
   // What kind of step this is. The header of a group and the cards under it speak the same
@@ -354,6 +354,9 @@
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
+    // DGC's own MCP broker, exposed when a server's catalog is too large to inline (dgc/agent.py).
+    // It is the same route as an mcp__server__tool call, so it wears the same mark.
+    mcp_call: "blocks", mcp_search: "blocks",
   };
   // The group header's icon, per bucket (see TOOL_BUCKET): it wears the leading action of the
   // sentence it already prints, so "Read files, ran a command" is a book and not a terminal.
@@ -370,7 +373,10 @@
       // The Claude engine's own names, which used to fall through to "Used tool" and a fallback mark.
       multiedit: "multi_edit", bashoutput: "bash_output", killshell: "bash_kill",
       webfetch: "web_fetch", websearch: "web_search", todowrite: "todo",
-      notebookedit: "edit_file", exitplanmode: "present_plan" })[plain] || plain;
+      notebookedit: "edit_file", exitplanmode: "present_plan",
+      askuserquestion: "propose_options",
+      // A vendor engine's own name for writing a file (dgc/subscriptions.py knows it too).
+      writefile: "write_file" })[plain] || plain;
   }
   // An MCP server's tool, however the engine spells it: DGC's mcp__server__tool, the bare name
   // "mcp", or the Codex engine's server.tool. The dotted form only ever applies to a name DGC has
@@ -2010,7 +2016,6 @@
     c.dataset.toolName = String(ev.name || "");
     c.dataset.callId = String(ev.call_id || "");
     c.dataset.summary = String(ev.summary || "");
-    c.dataset.icon = iconForTool(ev.name);
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
     const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
@@ -5046,7 +5051,7 @@
         : msg.recovering
         ? "dgc backend stopped" + detail + "\u2009\u2014\u2009" + next
         : "dgc backend exited" + detail;
-      sysLine(exitLine, true, "unplug");
+      sysLine(exitLine, true, "triangle-alert");
       backendExitNotice = msg.recovering ? { text: exitLine, session: draftSession } : null;
       if (!turn) setSending(false);      // a turn still being recovered keeps its Stop button
     }

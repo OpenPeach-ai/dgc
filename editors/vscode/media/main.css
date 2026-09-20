@@ -431,13 +431,13 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
    different sets. At 14px it sits back where a disclosure mark belongs. */
 .tool .chev { width: 8px; color: var(--faint); font-size: var(--t-base); line-height: 1; flex: none; transition: transform .12s ease; }
 .tool.open .chev { transform: rotate(90deg); }
+/* Every step's mark is the same grey, whatever became of the step: a refused `rm -rf dist` is still
+   a command, and its row already says "denied" in the verb, the dot and the dot's forced-colors
+   shape. Dimming only the icon to --faint left the one landmark the layout is built around at about
+   2.2:1 on Light Modern -- under the 3:1 floor for a 1.167px hairline -- while the verb beside it
+   stayed at full strength, so the row did not recede, it just lost its icon. */
 .tool .glyph { display: flex; align-items: center; width: var(--icon); height: var(--icon); color: var(--muted); flex: none; }
 .tool[data-status="running"] .glyph { color: var(--accent); }
-/* A refused or skipped step recedes as one unit, the way its verb already does. The token, never
-   opacity: opacity survives forced colors and would dim the mark in High Contrast. */
-.tool[data-status="denied"] .glyph,
-.tool[data-status="blocked"] .glyph,
-.tool[data-status="stopped"] .glyph { color: var(--faint); }
 .tool .verb { color: var(--text); font-weight: var(--w-semi); white-space: nowrap; }
 .tool .arg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool .badge { color: var(--faint); font-size: var(--t-xs); flex: none; }
@@ -445,6 +445,10 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool .tool-time:not(:empty) { min-width: 30px; }
 .tool .dot { width: 6px; height: 6px; border-radius: var(--r-full); flex: none; background: var(--faint); }
 .tool .dot.run { background: var(--accent); animation: pulse 1s infinite; }
+/* The shared reduced-motion block above names this selector too, but at the same specificity and
+   earlier in the file, so this declaration won and the dot kept pulsing for a reader who asked it
+   not to. Switch it off here, after the rule that sets it. */
+@media (prefers-reduced-motion: reduce) { .tool .dot.run { animation: none; } }
 .tool .dot.ok { background: var(--muted); }
 .tool .dot.err { background: var(--err); }
 /* A repeat the loop guard refused: the step never ran, so it is not a failure of the command. */
@@ -507,7 +511,6 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 /* decision cards use shape and hierarchy first; DGC purple is reserved for the primary action. */
 .card { border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-3); background: var(--surface); box-shadow: none; }
 .card .q { margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) var(--sp-3); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); display: flex; align-items: center; gap: var(--sp-2); }
-.card .q .codicon { color: var(--accent-text); font-size: var(--t-sm); }
 .card .q .ic { color: var(--accent-text); }
 .card .q b { color: var(--text-strong); }
 .card pre { margin: var(--sp-1) 0 var(--sp-2); font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; background: var(--code); border: 1px solid var(--border); padding: var(--sp-2) var(--sp-2); border-radius: var(--r-sm); }
@@ -602,13 +605,20 @@ button.act:hover { border-color: var(--accent); }
 .monitor-list-row { align-items: center; padding-block: 2px; }
 .monitor-list-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-.monitor-note .note-icon { color: var(--accent-text); }
+/* Specificity, not order: the shared .resume-note rule further down the file sets a colour too. */
+.resume-note.monitor-note .note-icon { color: var(--accent-text); }
 
 /* system lines */
 .sys { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sys.err { color: var(--err-text); }
 .sys-marked { display: flex; align-items: flex-start; gap: var(--sp-2); }
-.sys-marked > .ic { margin-top: 1px; }
+/* --muted, not the row's own --faint. --faint is disabledForeground, which both default themes ship
+   translucent (rgba(204,204,204,.5) / rgba(97,97,97,.5)), and an SVG composites each <path> of a
+   mark separately: where two strokes of one icon cross -- the + of shield-plus, the arrowhead of
+   history -- those pixels paint twice and the mark reads as two different greys. A font glyph
+   painted once and never did this. Opaque is also where a 1.167px hairline belongs. */
+.sys-marked > .ic { margin-top: 1px; color: var(--muted); }
+.sys.err.sys-marked > .ic { color: var(--err-text); }
 .sys.model-switch { color: var(--muted); }
 
 /* composer */
@@ -1197,7 +1207,9 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   padding: 0; color: var(--faint);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
 }
-.resume-note .note-icon, .recovery-card .note-icon { display: flex; flex: none; }
+/* Opaque, for the reason on .sys-marked above: --faint is translucent in both default themes and a
+   stroke icon would composite its crossings twice. */
+.resume-note .note-icon, .recovery-card .note-icon { display: flex; flex: none; color: var(--muted); }
 
 /* After a backend death: one card, a DGC marker with actions, never a message from the user. */
 .recovery-card {
@@ -1217,7 +1229,10 @@ pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good);
   padding: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--faint);
 }
 .compaction > summary:hover { color: var(--text); }
-.compaction > summary > .ic { flex: none; }
+/* Opaque, for the reason on .sys-marked: the clock's arrowhead crosses its own arc, and at --faint's
+   50% those pixels composited twice. This is the first row of every reopened chat. */
+.compaction > summary > .ic { flex: none; color: var(--muted); }
+.compaction > summary:hover > .ic { color: inherit; }
 .compaction > summary::-webkit-details-marker { display: none; }
 .compaction-body {
   margin: var(--sp-1) 0 0; padding: var(--sp-2) var(--sp-3);
@@ -1337,7 +1352,6 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); font-variant-numeric: tabular-nums; }
 .image-chip[data-state="failed"] .image-caption { color: var(--text); }
 .image-omitted { align-self: center; padding: 0 var(--sp-1); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.2 var(--sans); white-space: nowrap; }
-.tool.image-orphan .glyph { color: var(--muted); }
 .tool.image-orphan .verb { color: var(--muted); font-weight: var(--w-med); }
 
 #image-viewer { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column; gap: var(--sp-2);

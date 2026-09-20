@@ -10853,7 +10853,7 @@ def test_extension_vsix_guard():
         "extension/media/agents/agent-07-lime-animated.svg",
         "extension/media/agents/agent-08-rose.svg",
         "extension/media/agents/agent-08-rose-animated.svg",
-        "extension/licenses/LUCIDE-ISC.txt",
+        "extension/licenses/LUCIDE-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
           guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 40)

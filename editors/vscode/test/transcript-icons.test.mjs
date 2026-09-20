@@ -6,6 +6,7 @@
 // assertion about what a row SAYS lives in the suites that already own that row.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { makeDom, mainCss } from "./support/webview-dom.mjs";
 
 // The old set, which must not survive anywhere a step is drawn.
@@ -31,10 +32,12 @@ const headerLabel = (doc) => [...doc.querySelectorAll(".tool-group-label")].at(-
 // that falls off this list shows the generic wrench, which is a real answer — but it should be a
 // decision someone made, not a name nobody mapped.
 const TOOL_ICONS = {
+  // "functions.read" is dotted, and DGC has a mapping for it: the MCP regex must never shadow one.
   read_file: "book-open", read: "book-open", Read: "book-open", "functions.read": "book-open",
   glob: "search", Glob: "search", grep: "search", search: "search", Grep: "search",
   repo_map: "folder-tree", code_intel: "braces", git_diff: "file-diff",
   write_file: "file-plus", write: "file-plus", Write: "file-plus", create_file: "file-plus",
+  WriteFile: "file-plus",
   edit_file: "pencil", edit: "pencil", Edit: "pencil", apply_patch: "pencil",
   multi_edit: "pencil", MultiEdit: "pencil", NotebookEdit: "pencil",
   save_memory: "bookmark",
@@ -46,15 +49,17 @@ const TOOL_ICONS = {
   web_search: "globe", WebSearch: "globe", web_fetch: "globe", WebFetch: "globe", browser: "globe",
   view_image: "image",
   present_plan: "clipboard-list", ExitPlanMode: "clipboard-list", present_document: "file-text",
-  propose_options: "circle-help", task: "bot", Task: "bot",
+  propose_options: "circle-help", AskUserQuestion: "circle-help", task: "bot", Task: "bot",
   todo: "list-todo", TodoWrite: "list-todo",
   skill: "sparkle", Skill: "sparkle", add_skill: "sparkle",
   notes: "notebook-pen", monitor: "activity", monitor_stop: "activity",
   artifact: "app-window", update_goal: "target",
-  // MCP, however the engine spells it.
+  // MCP, however the engine spells it — including DGC's own broker tools (dgc/agent.py), which
+  // are the same route by another name and used to land on the wrench.
   mcp__github__search_issues: "blocks", mcp: "blocks", "linear.create_issue": "blocks",
+  mcp_call: "blocks", mcp_search: "blocks",
   // Nothing DGC has a better word for.
-  screenshot: "wrench", some_new_tool: "wrench", tool: "wrench",
+  screenshot: "wrench", some_new_tool: "wrench", tool: "wrench", SlashCommand: "wrench",
 };
 
 test("every tool name in the transcript resolves to a known icon", () => {
@@ -65,8 +70,6 @@ test("every tool name in the transcript resolves to a known icon", () => {
   for (const [i, name] of names.entries()) {
     assert.equal(cardIcon(doc, `c${i}`), TOOL_ICONS[name], `icon for ${name}`);
   }
-  // A dotted name DGC DOES know is its own tool, never an MCP guess.
-  assert.equal(TOOL_ICONS["functions.read"], "book-open");
   assert.deepEqual(errors, []);
 });
 
@@ -217,11 +220,13 @@ test("the notices that carry a mark carry the right one", () => {
   assert.deepEqual(errors, []);
 });
 
-test("the backend going away is the one place a broken plug is literally right", () => {
+test("the backend going away is marked, and by a shape that survives 14px", () => {
   const { doc, send, errors } = makeDom();
   send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: true, resumes: "offer" });
   const line = [...doc.querySelectorAll(".sys.err")].at(-1);
-  assert.equal(line.querySelector("svg").dataset.icon, "unplug");
+  // Not `unplug`: six sub-paths, five of them short diagonals, which at 14px reads as a scribble
+  // rather than an object — on one of the most important rows the panel ever draws.
+  assert.equal(line.querySelector("svg").dataset.icon, "triangle-alert");
   assert.match(line.textContent, /dgc backend stopped \(killed by SIGKILL\)/);
   assert.equal(line.getAttribute("role"), "alert");
   assert.deepEqual(errors, []);
@@ -248,8 +253,38 @@ test("the icon set is stroke-only, sized by token, and pulses only where a group
   assert.match(mainCss, /\.tool-group\.running > summary > \.tg-icon \{[^}]*animation: icon-pulse/);
   assert.match(mainCss,
     /@media \(prefers-reduced-motion: reduce\) \{ \.tool-group\.running > summary > \.tg-icon \{ animation: none; \} \}/);
-  // Refused work recedes by token, never by opacity: opacity survives forced colors, where the
-  // user asked for maximum contrast.
-  assert.match(mainCss, /\.tool\[data-status="denied"\] \.glyph,/);
-  assert.match(mainCss, /\.tool\[data-status="stopped"\] \.glyph \{ color: var\(--faint\); \}/);
+  // The solid 6px dot keeps the deep pulse — and keeps it out of a reduced-motion session. The
+  // shared block near the top of the file names the same selector at the same specificity but
+  // earlier, so only a rule after the animation actually switches it off.
+  assert.match(mainCss, /@media \(prefers-reduced-motion: reduce\) \{ \.tool \.dot\.run \{ animation: none; \} \}/);
+});
+
+test("no transcript icon is painted in a translucent token", () => {
+  // --faint is --vscode-disabledForeground, which both default themes ship at 50% alpha. An SVG
+  // composites each <path> of a mark separately, so two crossing strokes paint their crossing
+  // twice and the icon reads as two different greys — something a codicon FONT never did.
+  for (const rule of mainCss.split("}")) {
+    if (!/\.(ic|glyph|note-icon|tg-icon|dg)\b/.test(rule.split("{")[0] || "")) continue;
+    assert.doesNotMatch(rule, /color:\s*var\(--faint\)/,
+      `a transcript icon must not take --faint: ${rule.split("{")[0].trim()}`);
+  }
+  assert.match(mainCss, /\.sys-marked > \.ic \{[^}]*color: var\(--muted\)/);
+  assert.match(mainCss, /\.resume-note \.note-icon, \.recovery-card \.note-icon \{[^}]*color: var\(--muted\)/);
+  assert.match(mainCss, /\.compaction > summary > \.ic \{[^}]*color: var\(--muted\)/);
+  // Every step's mark is the same grey, whatever became of the step.
+  assert.doesNotMatch(mainCss, /\.tool\[data-status="denied"\] \.glyph/);
+});
+
+test("the licence notice lists exactly the icons that ship", () => {
+  // The notice is the licence record for embedded artwork, so it has to name what is actually in
+  // the file — not what was in it when the set was drawn up.
+  const main = readFileSync(new URL("../media/main.js", import.meta.url), "utf8");
+  const block = main.split("const ICON_PATHS = {")[1].split("\n  };")[0];
+  const embedded = [...block.matchAll(/^\s*"([a-z0-9-]+)":/gm)].map((m) => m[1]).sort();
+  const notices = readFileSync(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8");
+  const line = notices.split("\n").find((l) => l.startsWith("- The icons used are:"));
+  const listed = [...line.matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]).sort();
+  assert.deepEqual(listed, embedded);
+  assert.match(notices, new RegExp(`are ${embedded.length} \\[Lucide\\]`));
+  assert.match(notices, /licenses\/LUCIDE-LICENSES\.txt/);
 });
