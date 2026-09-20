@@ -7722,14 +7722,18 @@ def test_mcp_protocol():
           and mac_net_dict["network_isolated"] is False
           and mac_net_dict["process_isolated"] is True,
           f"{mac_dict} {mac_net_dict}")
-    # The linux half of that formula is structural: the Secret Service socket lives in
-    # /run/user/<uid> and the keyring files in the home, and bwrap replaces both with tmpfs.
-    _keyring_argv = sandbox.wrap("ls", unavailable_root, _SCfg()) or []
-    if _keyring_argv and "bwrap" in _keyring_argv[0]:
-        _masked = {_keyring_argv[i + 1] for i, a in enumerate(_keyring_argv) if a == "--tmpfs"}
-        check("bwrap masks the paths a Secret Service keyring lives in",
-              str(Path("/run").resolve()) in _masked and str(Path.home().resolve()) in _masked,
-              str(sorted(_masked)))
+    # The linux half of that formula is structural, and is checked on every platform rather than
+    # only where bwrap is installed: the Secret Service socket lives in /run/user/<uid> and the
+    # keyring files in the home, and the bwrap argv replaces both with an empty tmpfs.
+    try:
+        sandbox._backend = lambda: ("bwrap", Path("/opt/dgc-test/bwrap"))
+        _keyring_argv = sandbox.wrap("ls", unavailable_root, _SCfg()) or []
+    finally:
+        sandbox._backend = real_backend
+    _masked = {_keyring_argv[i + 1] for i, a in enumerate(_keyring_argv) if a == "--tmpfs"}
+    check("bwrap masks the paths a Secret Service keyring lives in",
+          str(Path("/run").resolve()) in _masked and str(Path.home().resolve()) in _masked,
+          str(sorted(_masked)))
 
     from dgc import cli as _doctor_cli
     from dgc import llm as _doctor_llm
