@@ -25,6 +25,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from waiting import wait_for_value                       # noqa: E402  (same module name discovery uses)
+
 from dgc import agent as agent_mod
 from dgc import editor_protocol as ep
 from dgc import glyphs, subagents
@@ -910,14 +913,17 @@ class NestingWaitingStallTests(HarnessCase):
         kid = Agent(h.config, _SubUI(h.ui, "slow model"))
         self.addCleanup(kid.mcp.stop_all)
         kid.subagents, kid._subagent_id = reg, sid(4)
+        latest = lambda key: (rec.events[-1][1].get(key) if rec.events else None)  # noqa: E731
         with patch.object(subagents, "COALESCE_S", 0.02):
             kid._show_model_wait("No response from the model", "fixture at h · no reply for 45s+")
-            time.sleep(0.15)
-            self.assertEqual(rec.events[-1][1].get("activity"), "No response from the model")
+            wait_for_value(lambda: latest("activity"), "No response from the model",
+                           what="the child's stall notice to become its activity")
             kid._show_model_wait(None)
-            time.sleep(0.15)
-        self.assertEqual(rec.events[-1][1].get("activity"), "")
-        self.assertEqual(rec.events[-1][1]["state"], "running")
+            # Still inside the patch: the coalescer must flush at the test's interval, not the
+            # real one, and leaving the block first would race the clear against it.
+            wait_for_value(lambda: latest("activity"), "",
+                           what="the child's activity to clear")
+            self.assertEqual(latest("state"), "running")
 
 
 # ---------------------------------------------------------------------------------------------------

@@ -7920,11 +7920,16 @@ os._exit(0 if lock.acquire(timeout=1) else 2)
             return self.calls > 1
 
     race_cancelled = not acquire_cancellable(lock, CancelAfterAcquire())
-    released_after_race = lock.acquire(timeout=0.2)
+    released_after_race = lock.acquire(timeout=5)
     if released_after_race:
         lock.release()
+    # acquire_cancellable polls the lease every 0.1s and the timer above fires at 0.12s, so this
+    # returns in about 0.2s. The bound is here to catch a build that polls far too coarsely or
+    # ignores cancellation and blocks, which costs seconds or never returns -- so it only has to
+    # sit well below that, not close to 0.2s. A 0.5s bound failed CI at elapsed=0.502 on a loaded
+    # runner: two milliseconds of scheduling noise, nothing broken.
     check("workspace lease contention remains promptly cancellable",
-          held and not waited and elapsed < 0.5 and race_cancelled and released_after_race,
+          held and not waited and elapsed < 2.0 and race_cancelled and released_after_race,
           f"waited={waited} elapsed={elapsed:.3f} race={race_cancelled}")
 
     broken = WorkspaceMutationLock(f"failure-test:{root}")

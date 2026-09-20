@@ -1389,13 +1389,17 @@ class HistoryScaleTests(unittest.TestCase):
                          {"role": "assistant", "content": "ok"}]
         backend = object.__new__(Backend)
         backend.agent = types.SimpleNamespace(messages=messages, image_views=records)
-        started = time.perf_counter()
+        # CPU time, not wall time: a shared runner deschedules a process mid-measurement and
+        # inflates perf_counter by however long it waited, which has nothing to do with the
+        # algorithm under test. process_time only advances while this process is on a CPU, so a
+        # quadratic lookup still shows up and a busy machine does not.
+        started = time.process_time()
         Backend._history(backend)
-        with_images = time.perf_counter() - started
+        with_images = time.process_time() - started
         backend.agent = types.SimpleNamespace(messages=messages, image_views=[])
-        started = time.perf_counter()
+        started = time.process_time()
         Backend._history(backend)
-        without = time.perf_counter() - started
+        without = time.process_time() - started
         self.assertLess(with_images, without * 3 + 0.05, (with_images, without))
 
 
