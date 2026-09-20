@@ -299,19 +299,21 @@ def capabilities(config=None) -> SandboxCapabilities:
 def capabilities_dict(config=None) -> dict:
     """The ready frame's ``session_policy.sandbox_capabilities`` object (protocol v14, additive).
 
-    Every flag is a boolean, never null; ``backend: null`` means every flag is false and there is
-    no profile. A launching application reads this instead of guessing what an OS sandbox on this
-    platform confines.
+    What THIS session actually has, not what the host could offer: with the sandbox off, or with
+    no usable backend, every flag is false and there is no backend or profile to name. Every flag
+    is a boolean, never null. A launching application reads this instead of guessing what an OS
+    sandbox on this platform confines.
     """
     report = capabilities(config)
+    on = bool(report.available and requested(config))
     return {
-        "backend": report.backend if report.available else None,
-        "profile": report.profile if report.available else None,
-        "process_isolated": bool(report.available and report.process_isolated),
-        "home_hidden": bool(report.available and report.home_hidden),
-        "private_temporary": bool(report.available and report.private_temporary),
-        "network_isolated": bool(report.available and report.network_isolated),
-        "keychain_hidden": bool(report.available and report.keychain_hidden),
+        "backend": report.backend if on else None,
+        "profile": report.profile if on else None,
+        "process_isolated": bool(on and report.process_isolated),
+        "home_hidden": bool(on and report.home_hidden),
+        "private_temporary": bool(on and report.private_temporary),
+        "network_isolated": bool(on and report.network_isolated),
+        "keychain_hidden": bool(on and report.keychain_hidden),
     }
 
 

@@ -7685,6 +7685,13 @@ def test_mcp_protocol():
         sandbox._backend = lambda: ("sandbox-exec", Path("/usr/bin/sandbox-exec"))
         mac_dict = sandbox.capabilities_dict(_SCfg())
         mac_net_dict = sandbox.capabilities_dict(_SCfg(network=True))
+        sandbox._backend = lambda: ("sandbox-exec", Path("/usr/bin/sandbox-exec"))
+
+        class _SandboxOff(_SCfg):
+            def get(self, k, d=None):
+                return False if k == "sandbox" else super().get(k, d)
+
+        off_dict = sandbox.capabilities_dict(_SandboxOff())
         sandbox._backend = lambda: None
         missing_dict = sandbox.capabilities_dict(_SCfg())
     finally:
@@ -7701,6 +7708,12 @@ def test_mcp_protocol():
           missing_dict["backend"] is None and missing_dict["profile"] is None
           and not any(missing_dict[k] for k in _CAP_KEYS - {"backend", "profile"}),
           str(missing_dict))
+    # A usable backend is not confinement: with the sandbox off, the ready frame must claim
+    # nothing, or a launcher reads an unconfined shell as a sandboxed one.
+    check("sandbox_capabilities claims nothing while the sandbox is off",
+          off_dict["backend"] is None and off_dict["profile"] is None
+          and not any(off_dict[k] for k in _CAP_KEYS - {"backend", "profile"}),
+          str(off_dict))
     # C8, frozen: keychain_hidden == bwrap or (strict-v1 and network isolated). macOS needs
     # SecurityServer for TLS, so allowing network puts the keychain back in reach.
     check("keychain_hidden follows the frozen formula on both backends",

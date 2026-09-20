@@ -174,6 +174,15 @@ class StrictProfileComposition(unittest.TestCase):
         self.assertTrue(denied["keychain_hidden"])
         self.assertFalse(allowed["keychain_hidden"])   # TLS needs SecurityServer (frozen: C8)
         self.assertTrue(allowed["process_isolated"] and allowed["home_hidden"])
+        # A usable backend is not confinement: with the sandbox off for this session, the frame
+        # names no backend and claims nothing, or a launcher would read an unconfined shell as
+        # a sandboxed one.
+        with mock.patch.object(sandbox, "_backend",
+                               return_value=("sandbox-exec", sandbox.MACOS_BACKEND_PATH)):
+            off = sandbox.capabilities_dict(_Cfg(sandbox=False))
+        self.assertIsNone(off["backend"])
+        self.assertIsNone(off["profile"])
+        self.assertFalse(any(off[flag] for flag in keys - {"backend", "profile"}))
 
     def test_a_nested_sandbox_is_reported_unavailable_with_a_reason(self):
         """Seatbelt cannot nest: say so instead of running the command unconfined."""
