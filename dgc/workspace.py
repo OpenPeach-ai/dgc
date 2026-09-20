@@ -18,7 +18,20 @@ class WorkspaceBoundaryError(ValueError):
     """A requested path is outside the active project boundary."""
 
 
-@dataclass(frozen=True)
+# Windows reports a file's identity in two widths. ``os.stat``/``os.lstat`` on a *path* return the
+# 128-bit NTFS file id and a 64-bit volume serial; ``os.fstat`` on an open *handle* returns the
+# 64-bit file index and the 32-bit serial that GetFileInformationByHandle gives. From Python 3.13
+# on Windows the two therefore disagree for the same file, and every "did this file change while I
+# read it?" check compared one against the other and said yes. Compare what both widths can
+# express, keep every other field exact, and on POSIX compare everything exactly.
+_WINDOWS_FILE_ID_MASK = (1 << 64) - 1
+_WINDOWS_VOLUME_MASK = (1 << 32) - 1
+#: Whether identity comparison must tolerate the two widths. True exactly on Windows; a test
+#: turns it on elsewhere to prove the comparison is still strict about every other field.
+_TOLERATE_ID_WIDTH = os.name == "nt"
+
+
+@dataclass(frozen=True, eq=False)
 class FileVersion:
     """Identity used to reject a stale structured edit at its final commit point."""
 
@@ -28,6 +41,30 @@ class FileVersion:
     size: int
     modified_ns: int
     changed_ns: int
+
+    _FIELDS = ("device", "inode", "file_type", "size", "modified_ns", "changed_ns")
+
+    def _key(self) -> tuple:
+        return (self.file_type, self.size, self.modified_ns, self.changed_ns,
+                self.inode & _WINDOWS_FILE_ID_MASK, self.device & _WINDOWS_VOLUME_MASK)
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, FileVersion):
+            return NotImplemented
+        if not _TOLERATE_ID_WIDTH:
+            return all(getattr(self, name) == getattr(other, name) for name in self._FIELDS)
+        return self._key() == other._key()
+
+    def __hash__(self) -> int:
+        return hash(self._key())
+
+    def difference(self, other: "FileVersion") -> str:
+        """The fields that differ, for an error a reader can act on."""
+        if not isinstance(other, FileVersion):
+            return "not a file version"
+        return ", ".join(f"{name} {getattr(self, name)} != {getattr(other, name)}"
+                         for name in self._FIELDS
+                         if getattr(self, name) != getattr(other, name)) or "no field differs"
 
 
 _ANY_VERSION = object()
@@ -41,18 +78,90 @@ def _version(info: os.stat_result) -> FileVersion:
     )
 
 
+def _windows_long_name(path: Path) -> Path:
+    """Expand 8.3 short components (``RUNNER~1``, ``PROGRA~1``) into their real spelling.
+
+    ``GetLongPathNameW`` rewrites the spelling of each component and nothing else: unlike
+    ``resolve()`` it does not traverse a symlink or a junction, so the no-follow walk below still
+    inspects the real components. Windows hands out short names in ordinary places — ``%TEMP%``
+    under a profile whose name is longer than eight characters is one — and DGC compared such a
+    path with its own canonical form as text, so every tool refused to touch anything below it.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        expand = ctypes.windll.kernel32.GetLongPathNameW       # type: ignore[attr-defined]
+    except (ImportError, AttributeError, OSError):             # pragma: no cover - Windows only
+        return path
+    expand.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    expand.restype = wintypes.DWORD
+
+    def longest(text: str) -> str:
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = expand(text, buffer, len(buffer))
+        return buffer.value if 0 < size < len(buffer) else ""
+
+    # Only a component that actually exists can be expanded, so walk up to the deepest ancestor
+    # Windows knows and re-attach the rest exactly as it was spelled.
+    tail: list[str] = []
+    current = path
+    while True:
+        expanded = longest(str(current))
+        if expanded:
+            return Path(expanded).joinpath(*reversed(tail))
+        parent = current.parent
+        if parent == current:
+            return path
+        tail.append(current.name)
+        current = parent
+
+
+def windows_canonical_text(value: str) -> str:
+    """One spelling per file on Windows: no ``\\\\?\\`` prefix, one separator, no data stream.
+
+    A deny list, a permission rule and a workspace boundary all compare paths. Windows lets the
+    same file be spelled several ways, and each alternative spelling was a way past all three:
+    ``\\\\?\\C:\\...`` skips the normalisation the rest of the OS applies, ``C:/x`` and ``C:\\x``
+    are the same file, and ``secret.txt:hidden`` names an alternate data stream — a second set of
+    bytes hanging off a file whose own name looks innocent.
+
+    Parsing is Windows-rules regardless of the host, so this is testable everywhere; only the 8.3
+    expansion in :func:`_windows_long_name` needs a real Windows filesystem.
+    """
+    import ntpath
+    text = str(value)
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\\\" + text[8:]
+    elif text.startswith("\\\\?\\") or text.startswith("\\\\.\\"):
+        text = text[4:]
+    text = ntpath.normpath(text)
+    head = ntpath.splitdrive(text)[1]
+    if ":" in head:
+        raise WorkspaceBoundaryError(
+            f"an alternate data stream is not a file DGC will open: {value}")
+    return text
+
+
+def _windows_canonical_spelling(path: Path) -> Path:
+    """:func:`windows_canonical_text`, then the real component names from the filesystem."""
+    return _windows_long_name(Path(windows_canonical_text(str(path))))
+
+
 def canonicalize_trusted_os_alias(path: Path | str) -> Path:
-    """Rewrite one immutable, OS-owned alias directly below the filesystem anchor.
+    """Give one path exactly one spelling, without following anything a repository can change.
 
     Darwin deliberately exposes roots such as ``/var`` and ``/tmp`` as root-owned links into
     ``/private``.  Treating those stable aliases like repository-controlled links makes otherwise
     canonical tempfile workspaces unusable on macOS.  Only the first component below a
     protected filesystem anchor is eligible; links anywhere below it remain untouched and are
-    rejected by the descriptor walk or fallback validation.
+    rejected by the descriptor walk or fallback validation.  On Windows the equivalent job is
+    spelling, not links: see :func:`_windows_canonical_spelling`.
     """
     value = Path(path)
     if not value.is_absolute() or "\x00" in str(value):
         raise WorkspaceBoundaryError("a canonical absolute path is required")
+    if os.name == "nt":
+        return _windows_canonical_spelling(value)
     path = Path(os.path.normpath(str(value)))
     if os.name != "posix" or not path.anchor or len(path.parts) < 2:
         return path
@@ -166,8 +275,33 @@ def _open_parent_fd(path: Path, *, create: bool) -> int:
         raise
 
 
+# Reparse tags that redirect a name somewhere else. A junction's tag is MOUNT_POINT, which
+# S_ISLNK does not flag, so without this a junction swapped in mid-write sends the write outside
+# the workspace (critic C6). Other reparse tags — OneDrive placeholders, deduplication — name the
+# same file and are left alone.
+_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+_IO_REPARSE_TAG_SYMLINK = 0xA000000C
+
+
+def _redirects_elsewhere(info: os.stat_result) -> bool:
+    """Whether this directory entry is a Windows junction or symlink to another name."""
+    if os.name != "nt":
+        return False
+    attributes = int(getattr(info, "st_file_attributes", 0) or 0)
+    if not attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        return False
+    tag = int(getattr(info, "st_reparse_tag", 0) or 0)
+    return tag in (_IO_REPARSE_TAG_MOUNT_POINT, _IO_REPARSE_TAG_SYMLINK)
+
+
 def _fallback_parent(path: Path, *, create: bool) -> Path:
-    """Best-effort non-dirfd validation for platforms without POSIX openat semantics."""
+    """Best-effort non-dirfd validation for platforms without POSIX openat semantics.
+
+    On native Windows this is the only validation available: there is no ``openat``, so the walk
+    is check-then-use and the write boundary is best-effort rather than a guarantee. It rejects
+    every parent component that is a symlink or a junction, and rejects a parent whose canonical
+    form is a different path, which is as far as the platform allows.
+    """
     parent = path.parent
     current = Path(parent.anchor)
     for part in parent.parts[1:]:
@@ -181,11 +315,22 @@ def _fallback_parent(path: Path, *, create: bool) -> Path:
             info = current.lstat()
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise WorkspaceBoundaryError(f"path parent is not a real directory: {current}")
+        if _redirects_elsewhere(info):
+            raise WorkspaceBoundaryError(f"path parent is a junction: {current}")
+    # Compare canonical forms, not text. resolve() expands Windows 8.3 short names, so a path
+    # DGC was handed as C:\Users\RUNNER~1\... used to look like a path that "changed" — which
+    # aborted every tool below %TEMP%. canonicalize_trusted_os_alias() now gives both sides the
+    # same spelling, so a remaining difference really is a link or a swap.
     resolved = parent.resolve(strict=True)
-    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
-            os.path.normpath(str(parent))):
-        raise WorkspaceBoundaryError(f"path parent changed or contains a symlink: {parent}")
+    if _spelling_key(resolved) != _spelling_key(canonicalize_trusted_os_alias(parent)):
+        raise WorkspaceBoundaryError(
+            f"path parent changed or contains a symlink: {parent} (canonically {resolved})")
     return parent
+
+
+def _spelling_key(path: Path | str) -> str:
+    """One comparable string per path: case-folded and separator-normalised where the OS is."""
+    return os.path.normcase(os.path.normpath(str(path)))
 
 
 def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
@@ -229,10 +374,12 @@ def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
                     total += len(chunk)
                 if maximum is not None and total > maximum:
                     raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
-                after = os.fstat(fd)
-                if _version(after) != _version(info):
-                    raise WorkspaceBoundaryError(f"file changed while it was being read: {target}")
-                return b"".join(chunks), _version(after)
+                after = _version(os.fstat(fd))
+                if after != _version(info):
+                    raise WorkspaceBoundaryError(
+                        f"file changed while it was being read: {target} "
+                        f"({after.difference(_version(info))})")
+                return b"".join(chunks), after
             finally:
                 os.close(fd)
         finally:
@@ -247,9 +394,11 @@ def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
     if not stat.S_ISREG(before.st_mode) or target.is_symlink():
         raise WorkspaceBoundaryError(f"path is not a regular file: {target}")
     resolved = target.resolve(strict=True)
-    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
-            os.path.normpath(str(target))):
-        raise WorkspaceBoundaryError(f"path changed or contains a symlink: {target}")
+    if _spelling_key(resolved) != _spelling_key(canonicalize_trusted_os_alias(target)):
+        raise WorkspaceBoundaryError(
+            f"path changed or contains a symlink: {target} (canonically {resolved})")
+    if _redirects_elsewhere(before):
+        raise WorkspaceBoundaryError(f"path is a junction: {target}")
     if maximum is not None and before.st_size > maximum:
         raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
     with target.open("rb") as handle:
@@ -257,7 +406,10 @@ def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
         opened = os.fstat(handle.fileno())
     after = target.lstat()
     if _version(before) != _version(opened) or _version(after) != _version(opened):
-        raise WorkspaceBoundaryError(f"file changed while it was being read: {target}")
+        raise WorkspaceBoundaryError(
+            f"file changed while it was being read: {target} "
+            f"(open {_version(opened).difference(_version(before))}; "
+            f"after {_version(opened).difference(_version(after))})")
     if maximum is not None and len(data) > maximum:
         raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
     return data, _version(opened)

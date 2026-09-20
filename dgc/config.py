@@ -284,7 +284,9 @@ def _write_private_json(path: Path, payload: dict) -> None:
     try:
         try:
             os.fchmod(fd, 0o600)
-        except OSError:
+        except (AttributeError, OSError):
+            # Windows only grew os.fchmod in Python 3.13; before that the missing attribute
+            # escaped as an AttributeError and every config or session save crashed.
             pass
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(json.dumps(payload, indent=2) + "\n")

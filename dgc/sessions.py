@@ -183,7 +183,9 @@ def _atomic_write(path: Path, text: str) -> None:
     try:
         try:
             os.fchmod(fd, 0o600)
-        except OSError:
+        except (AttributeError, OSError):
+            # Windows only grew os.fchmod in Python 3.13; before that the missing attribute
+            # escaped as an AttributeError and every config or session save crashed.
             pass
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
