@@ -11,6 +11,10 @@ import os
 import stat
 import subprocess
 import sys
+
+import os as _wait_os, sys as _wait_sys                     # noqa: E402
+_wait_sys.path.insert(0, _wait_os.path.dirname(_wait_os.path.abspath(__file__)))
+from waiting import RUNNER_SLACK                            # noqa: E402
 import tempfile
 import threading
 import time
@@ -8174,7 +8178,8 @@ finally:
         project_root=root,
         config=Cfg({"language_servers": {"python": {
             "command": sys.executable, "args": [str(hanging_server), str(hanging_pid)]}},
-            "code_intel_timeout": 0.1, "code_intel_lsp_idle_s": 0}),
+            # Same cold-start race as the stalled-writer fixture below.
+            "code_intel_timeout": 2, "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     started = _time.monotonic()
@@ -8199,7 +8204,7 @@ finally:
         if alive:
             _time.sleep(0.05)
     check("code_intel times out and reaps an unresponsive language server",
-          elapsed < 2 and len(pids) == (2 if os.name == "posix" else 1) and not alive
+          elapsed < 10 + RUNNER_SLACK and len(pids) == (2 if os.name == "posix" else 1) and not alive
           and "language server unavailable" in out
           and "timed out" in out,
           f"elapsed={elapsed:.2f}s pids={pids} alive={alive} out={out}")
@@ -8235,7 +8240,12 @@ time.sleep(30)
         project_root=root,
         config=Cfg({"language_servers": {"python": {
             "command": sys.executable, "args": [str(stalled_server), str(stalled_pid)]}},
-            "code_intel_timeout": 0.1, "code_intel_lsp_idle_s": 0}),
+            # 2s, not 0.1s: a cold CPython fixture must boot AND answer `initialize` inside
+            # this window, and on a loaded three-core runner it cannot. When it misses, the
+            # client falls back to static analysis and never reaches the didOpen stall this
+            # check is about -- twice in five validation runs, with the pid file already
+            # written, so the fixture was alive and merely late.
+            "code_intel_timeout": 2, "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     started = _time.monotonic()
@@ -8251,7 +8261,7 @@ time.sleep(30)
         except (OSError, ProcessLookupError):
             pass
     check("code_intel bounds a didOpen write after a server stops reading stdin",
-          elapsed < 2 and pid > 0 and not alive and "stdin stalled" in out
+          elapsed < 10 + RUNNER_SLACK and pid > 0 and not alive and "stdin stalled" in out
           and "large.py:1:1: function target" in out,
           f"elapsed={elapsed:.2f}s pid={pid} alive={alive} out={out}")
 
