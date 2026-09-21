@@ -1379,18 +1379,27 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   gap: var(--sp-2); overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scroll-padding-inline: 3px;
   scrollbar-width: thin; }
 .tool-images > li { flex: none; scroll-snap-align: start; display: flex; }
-.image-chip { display: flex; flex-direction: column; gap: var(--sp-1); width: 80px; padding: 0; margin: 0; border: 0;
+/* A viewed image is shown, not sampled. An 80px tile with object-fit:cover took a tall
+   screenshot and kept a centre slice of it -- the one part of a screenshot that is never the
+   point. Bigger, and contained, so the whole picture is there to recognise. */
+.image-chip { display: flex; flex-direction: column; gap: var(--sp-1); width: 150px; padding: 0; margin: 0; border: 0;
   border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: zoom-in; }
-.image-tile { position: relative; display: grid; place-items: center; width: 80px; height: 80px; box-sizing: border-box;
+.image-tile { position: relative; display: grid; place-items: center; width: 150px; height: 150px; box-sizing: border-box;
   overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface2); color: var(--muted); }
 .image-tile .ic { flex: none; }
 .image-chip:hover .image-tile { border-color: var(--border-strong); }
-.image-tile img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+.image-tile img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+/* One image has the row to itself, so it may use the card's width rather than sit in a square. */
+.tool-images:has(> li:only-child) .image-chip,
+.tool-images:has(> li:only-child) .image-tile { width: 100%; max-width: 420px; }
+.tool-images:has(> li:only-child) .image-tile { height: auto; aspect-ratio: auto; max-height: 320px; }
+.tool-images:has(> li:only-child) .image-tile img { height: auto; max-height: 320px; }
 .image-tile.skeleton { animation: pulse 1.4s ease-in-out infinite;
   background: color-mix(in srgb, var(--text) 9%, var(--surface2)); }   /* visible on a white card too */
 /* The composer's copy of an attached image: a small tile beside its type and size, with the same
    remove button every other chip has. */
 .image-att-chip { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-1); }
+.image-att-chip, .image-att-chip .image-chip { width: auto; }
 .image-att-chip .image-tile { width: 28px; height: 28px; border-radius: var(--r-sm); }
 .image-att-chip .image-tile .codicon { font-size: 14px; }
 .image-att-chip .image-caption { max-width: 18ch; color: var(--muted); }
@@ -1442,8 +1451,9 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   #image-viewer { padding: var(--sp-2); gap: var(--sp-1); }
 }
 @media (max-width: 360px) {
-  .image-chip { width: 64px; }
-  .image-tile { width: 64px; height: 64px; }
+  /* Still smaller on a narrow panel, but scaled with the new size rather than left behind. */
+  .image-chip { width: 112px; }
+  .image-tile { width: 112px; height: 112px; }
   .tool.has-images .body { margin-left: var(--sp-3); }
 }
 @media (prefers-reduced-motion: reduce) {

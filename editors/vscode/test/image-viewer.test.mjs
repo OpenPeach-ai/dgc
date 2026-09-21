@@ -133,7 +133,12 @@ for (const width of [300, 460, 900]) {
         });
         assert.equal(row.chips, 12);
         assert.ok(row.scrollWidth > row.clientWidth, `the chip row scrolls inside itself (${row.scrollWidth} > ${row.clientWidth})`);
-        assert.equal(row.tile, width <= 360 ? 64 : 80, "tile size");
+        // A viewed image is shown, not sampled: the tile is big enough to recognise a screenshot
+        // from, and the image is contained rather than cropped to a centre slice.
+        assert.equal(row.tile, width <= 360 ? 112 : 150, "tile size");
+        const fit = await panel.page.evaluate(() =>
+          getComputedStyle(document.querySelector(".image-tile img")).objectFit);
+        assert.equal(fit, "contain", "the whole picture is in the tile, not a crop of its middle");
         assert.deepEqual(await noPageOverflow(panel), { doc: 0, body: 0 }, "the page never scrolls sideways");
 
         // Keyboard focus lands on the first chip: its ring must not be clipped by the scrolling row.

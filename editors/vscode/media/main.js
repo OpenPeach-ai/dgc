@@ -6221,8 +6221,10 @@
       tile.classList.add("skeleton"); tile.appendChild(el("span", "sr-only", "Loading image"));
     }
     chip.appendChild(tile);
-    const ext = (record.name.match(/\.([a-z0-9]{1,5})$/i) || [])[1];
-    chip.appendChild(el("span", "image-caption", esc(failure ? failure[1] : dims || (ext ? ext.toUpperCase() : "Image"))));
+    // No caption under a picture that arrived: "PNG · 320x200 · 40 KB" repeated under every tile
+    // is noise, and all of it is already in the hover label and the viewer. A FAILURE keeps its
+    // caption -- without it a broken image is just an unexplained empty square.
+    if (failure) chip.appendChild(el("span", "image-caption", esc(failure[1])));
     chip.onclick = () => openImageViewer(record, chip);
     record.chip = chip;
     return chip;
