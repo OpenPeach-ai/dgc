@@ -354,7 +354,11 @@ body.vscode-light, body.vscode-high-contrast-light {
   border-left: 3px solid var(--border-strong); border-radius: var(--r-md);
   color: var(--muted);
 }
-.text blockquote > :first-child, .surface-markdown blockquote > :first-child,
+/* :not(.copy) matters: the copy button IS the blockquote's first child, so without it the button
+   itself took this padding and was drawn 38px wide against the 20px of every other copy button,
+   with its icon pushed outside its own content box. The second selector is the real first line
+   when a button is present. */
+.text blockquote > :first-child:not(.copy), .surface-markdown blockquote > :first-child:not(.copy),
 .text blockquote > .copy + *, .surface-markdown blockquote > .copy + * {
   /* Room for the button, so a long first line stops short of it rather than running underneath. */
   margin-top: 0; padding-right: calc(var(--control-sm) + var(--sp-4));
@@ -1595,6 +1599,10 @@ body.ask-docked #tasks-panel { display: none; }
 .open-ask[data-state="folded"] .open-ask-body { display: none; }
 .open-ask[data-state="sent"] .open-ask-body { opacity: .55; pointer-events: none; }
 .open-ask[data-state="sent"] .open-ask-folded { display: none; }
+/* Why an answer came back. Shown only when the backend refused one, so the card can be used again
+   instead of sitting disabled over a question that is still open. */
+.open-ask-why { margin: var(--sp-2) 0 0; color: var(--err-text, var(--muted));
+  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .open-ask[data-state="settled"] { border-style: dashed; border-color: var(--border); background: transparent; }
 .open-ask-folded { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3);
   border: 0; background: transparent; color: var(--accent-text, var(--accent)); font: var(--w-reg) var(--t-sm)/1.4 var(--sans);

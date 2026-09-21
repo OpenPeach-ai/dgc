@@ -79,3 +79,15 @@ test("the quote's copy button is positioned like every other one", () => {
   assert.match(css, /blockquote:hover > \.copy \{[^}]*opacity: 1/);
   assert.match(css, /blockquote > \.copy:focus-visible \{[^}]*opacity: 1/);
 });
+
+test("the quote's copy button is the same size as every other one", () => {
+  // The button IS the blockquote's first child, so the "room for the button" padding rule matched
+  // the button itself: 38px wide against the 20px of a code fence's and a table's, with its icon
+  // pushed outside its own content box. Measured in Chromium: blockquote 38x20 / pr 36px, fence
+  // and table 20x20 / pr 0. The :not(.copy) is what keeps them identical.
+  const css = mainCss;
+  const rule = /\.text blockquote > :first-child(:not\(\.copy\))?/.exec(css);
+  assert.ok(rule, "the first-child rule is still there to check");
+  assert.equal(rule[1], ":not(.copy)",
+               "without :not(.copy) the padding lands on the button and widens it");
+});

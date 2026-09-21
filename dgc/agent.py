@@ -3457,6 +3457,11 @@ class Agent(GoalLifecycle):
             with self._steer_lock:
                 self.steer_queue.clear()        # drop stale interjections from a prior turn
                 self._accepting_steer = True
+            # A question that closed unanswered after the last turn had already shut its steering
+            # window. Tell the model now, before it acts on an assumption it never declared.
+            carried = self.take_carried_notes()
+            if carried:
+                user_text = "\n".join([*carried, "", str(user_text)])
             safe_user_text = self._safe_text(user_text)
             completed = None
             self._eta_begin(safe_user_text)
@@ -6438,9 +6443,28 @@ class Agent(GoalLifecycle):
                 pass
         if outcome in ("skipped", "expired"):
             went = "skipped it" if outcome == "skipped" else "never answered it"
-            self.steer(f"[DGC] You asked: \"{question}\" - the user {went}. Decide it yourself and "
-                       f"say what you assumed; do not ask it again this turn.")
+            note = (f"[DGC] You asked: \"{question}\" - the user {went}. Decide it yourself and "
+                    f"say what you assumed; do not ask it again this turn.")
+            if not self.steer(note):
+                # expire_open_asks runs AFTER run_turn has returned, and run_turn's finally has
+                # already closed steering -- so this note was accepted by nobody and the model was
+                # never told, which is the one thing this whole path exists to prevent. Carry it
+                # to the next turn instead of dropping it.
+                self._carry_note(note.replace("do not ask it again this turn",
+                                              "do not ask it again"))
         return True
+
+    def _carry_note(self, text: str) -> None:
+        """Hold a line for the next turn, for when steering is already closed."""
+        notes = self.__dict__.setdefault("_carried_notes", [])
+        if text not in notes:
+            notes.append(text)
+        del notes[:-8]                    # a stale backlog helps nobody
+
+    def take_carried_notes(self) -> list[str]:
+        notes = list(self.__dict__.get("_carried_notes") or ())
+        self.__dict__["_carried_notes"] = []
+        return notes
 
     def expire_open_asks(self) -> None:
         """At turn end an unanswered question is resolved, never silently forgotten."""

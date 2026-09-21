@@ -32,6 +32,7 @@ import requests
 
 from .codeintel import run_code_intel, symbol_records
 from . import documents, image_views
+from .attachments import DOCUMENT_SUFFIXES
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
     WorkspaceBoundaryError,
@@ -462,12 +463,17 @@ def read_file(args: dict, ctx) -> str:
         where = "; the user can see it in the chat" if _shows_images(ctx) else ""
         from .vision import SETUP_HINT
         return f"error: {p} is an image, and this model cannot read images{where}. {SETUP_HINT}"
-    if p.suffix.lower() in documents.SUPPORTED:
+    if p.suffix.lower() in DOCUMENT_SUFFIXES:
         # A document is binary but it is not opaque: read its text rather than refusing it. This
         # is the same extraction @path uses, and it is here rather than only in the attachment
         # path because the editor's file mentions leave the reading to the model -- so without it
         # a .docx dropped into the panel came back "looks like a binary file", which is true and
         # useless.
+        #
+        # DOCUMENT_SUFFIXES, not documents.SUPPORTED: that set also holds .csv and .tsv, which are
+        # text and must come back as their own bytes. Routing them through extraction returned a
+        # CSV re-serialised with tabs and its quoting stripped, so a model that then built an
+        # edit_file from what it had just read was editing text the file does not contain.
         return _read_document(p, raw, ctx, args)
     if b"\x00" in raw[:8192]:
         return f"error: {p} looks like a binary file"

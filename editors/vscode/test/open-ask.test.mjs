@@ -192,3 +192,32 @@ test("a refused answer comes back instead of sitting there", () => {
   assert.ok(bubble.classList.contains("rejected"),
             "an answer that never landed must not read as one that did");
 });
+
+test("and the card it came from can be used again", () => {
+  // Send disables the card. If the backend then refuses the answer, the question is still OPEN on
+  // the agent's side -- but nothing re-enabled the card, and the CSS keeps a "sent" card inert
+  // (`pointer-events: none`, folded button hidden). The question became unanswerable.
+  const p = panel();
+  const card = askOpened(p);
+  card.querySelector(".open-ask-input").value = "staging-2.internal";
+  card.querySelector(".open-ask-send").click();
+  assert.equal(card.dataset.state, "sent");
+  assert.equal(card.querySelector(".open-ask-input").disabled, true);
+
+  p.event({ type: "command_rejected", command: "prompt", request_id: "ask-a1",
+            reason: "steer_refused", message: "DGC could not take that answer." });
+  assert.equal(card.dataset.state, "open", "the card is live again");
+  assert.equal(card.querySelector(".open-ask-input").disabled, false);
+  assert.match(card.querySelector(".open-ask-why")?.textContent || "",
+               /could not take that answer/, "and it says why");
+});
+
+test("a refusal for some other prompt leaves the card alone", () => {
+  const p = panel();
+  const card = askOpened(p);
+  card.querySelector(".open-ask-input").value = "staging-2.internal";
+  card.querySelector(".open-ask-send").click();
+  p.event({ type: "command_rejected", command: "prompt", request_id: "p-7",
+            reason: "full", message: "the queue is full" });
+  assert.equal(card.dataset.state, "sent", "only its own refusal reopens it");
+});

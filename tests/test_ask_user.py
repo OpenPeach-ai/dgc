@@ -356,3 +356,58 @@ class AnswerMustLandTest(unittest.TestCase):
         ask_id = a.ui.shown[0]["ask_id"]
         self.assertTrue(a.resolve_open_ask(ask_id, "skipped"))
         self.assertNotIn(ask_id, a._open_asks())
+
+
+class UnansweredReachesTheModelTest(unittest.TestCase):
+    """A question that closes unanswered must reach the model, not just the screen.
+
+    expire_open_asks() runs AFTER run_turn has returned, and run_turn's finally has already set
+    _accepting_steer = False -- so the "nobody answered, decide it yourself" note was handed to a
+    steer() that refuses it, and the model was never told. Its last instruction was still
+    ASK_DELIVERED ("if they reply it arrives as an ordinary message"), so it could sit waiting for
+    an answer that will never come, or quietly guess without saying it guessed.
+    """
+
+    def _agent(self, accepting: bool):
+        import threading
+
+        a = object.__new__(Agent)
+        a.ui = _UI()
+        a.depth = 0
+        a.config = type("C", (), {"data": {}, "get": lambda s, k, d=None: d})()
+        a.steer_queue = []
+        a._steer_lock = threading.RLock()
+        a._accepting_steer = accepting
+        a.cancelled = threading.Event()
+        return a
+
+    def test_the_note_is_carried_when_steering_has_closed(self):
+        a = self._agent(accepting=False)
+        a._ask_user("c1", {"question": "which host?"}, set())
+        a.expire_open_asks()
+        self.assertEqual(a.ui.resolved[0]["outcome"], "expired")
+        carried = a.take_carried_notes()
+        self.assertEqual(len(carried), 1, "the note was dropped instead of carried")
+        self.assertIn("never answered it", carried[0])
+        self.assertNotIn("this turn", carried[0],
+                         "carried to the NEXT turn, so the wording must not say 'this turn'")
+
+    def test_it_is_steered_normally_while_the_window_is_open(self):
+        a = self._agent(accepting=True)
+        a._ask_user("c1", {"question": "which host?"}, set())
+        a.resolve_open_ask(a.ui.shown[0]["ask_id"], "skipped")
+        self.assertEqual(len(a.steer_queue), 1, "a skip mid-turn still steers")
+        self.assertEqual(a.take_carried_notes(), [], "and is not carried twice")
+
+    def test_a_carried_note_is_taken_only_once(self):
+        a = self._agent(accepting=False)
+        a._ask_user("c1", {"question": "which host?"}, set())
+        a.expire_open_asks()
+        self.assertEqual(len(a.take_carried_notes()), 1)
+        self.assertEqual(a.take_carried_notes(), [])
+
+    def test_the_next_turn_puts_it_in_front_of_the_prompt(self):
+        import inspect
+        source = inspect.getsource(Agent.run_turn)
+        self.assertIn("take_carried_notes()", source,
+                      "nothing drains the carried notes into a turn")

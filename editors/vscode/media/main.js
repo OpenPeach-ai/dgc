@@ -3561,6 +3561,13 @@
         // A refused answer re-enables its docked question with the reason, instead of a stuck "Sending…".
         if (ev.command === "options_response" && askRejected(ev)) break;
         if (ev.command === "prompt" || ev.command === "start_goal") rejectPrompt(ev.request_id);
+        // An answer the backend would not take leaves its question OPEN on the agent's side, and
+        // the card was disabled the moment Send was pressed with nothing to re-enable it: the
+        // body keeps `pointer-events: none` and the folded button stays hidden, so the question
+        // could never be answered again.
+        if (ev.command === "prompt" && String(ev.request_id || "").startsWith("ask-")) {
+          reopenOpenAsk(String(ev.request_id).slice(4), ev.message);
+        }
         // A custom slash command that was refused (busy, queue full) never started a turn.
         if (ev.command === "slash_command") settleCustomCommand();
         sysLine(ev.message || "Command unavailable while a turn is running", true); break;
@@ -7483,6 +7490,23 @@
     ask.row.dataset.state = "sent";
     ask.input.disabled = true;
     scroll();
+  }
+
+  // Put a card back in play after the backend refused its answer.
+  function reopenOpenAsk(askId, message) {
+    const ask = openAsks.get(String(askId || ""));
+    if (!ask) return;
+    ask.row.dataset.state = "open";
+    ask.input.disabled = false;
+    ask.input.focus();
+    clearTimeout(ask.timer);            // it was answered once; do not fold it out from under you
+    const said = String(message || "").trim();
+    let why = ask.row.querySelector(".open-ask-why");
+    if (!why) {
+      why = el("p", "open-ask-why");
+      ask.row.querySelector(".open-ask-body")?.appendChild(why);
+    }
+    why.textContent = said || "That answer was not accepted. Try again.";
   }
 
   function skipOpenAsk(ask) {
