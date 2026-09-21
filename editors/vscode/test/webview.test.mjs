@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  contrastRatio, mainCss, makeDom, panelSrc, rootHex,
+  contrastRatio, mainCss, mainJs, makeDom, panelSrc, rootHex,
 } from "./support/webview-dom.mjs";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
@@ -3233,11 +3233,21 @@ test("every control says what it is, in the panel's own label rather than the op
   send({ type: "event", event: { type: "ready", capabilities: {} } });
   const hover = (node) => node.dispatchEvent(new dom.window.Event("pointerover", { bubbles: true }));
   const settle = (ms) => new Promise((done) => dom.window.setTimeout(done, ms));
+  // Read from the product source so a retuned delay moves this with it.
+  const TIP_DELAY_MS = Number(/TIP_DELAY_MS = (\d+)/.exec(mainJs)?.[1] || 700);
+  // Wait for the label itself: the hover delay is a product constant, not a fact about this test.
+  const shown = async (timeout = 10000) => {
+    const tip = doc.getElementById("hover-tip"), deadline = Date.now() + timeout;
+    while (!tip || tip.hidden) {
+      if (Date.now() > deadline) throw new Error("timed out waiting for the hover label");
+      await settle(10);
+    }
+  };
 
   const attach = doc.getElementById("btn-add");
   assert.equal(attach.title, "Add files and more");
   hover(attach);
-  await settle(450);
+  await shown();
   const tip = doc.getElementById("hover-tip");
   assert.equal(tip.hidden, false, "hovering a control shows its label");
   assert.equal(tip.textContent, "Add files and more");
@@ -3257,14 +3267,16 @@ test("every control says what it is, in the panel's own label rather than the op
 
   // A control inside a hidden panel must not label itself; the composer rail is closed here.
   hover(doc.getElementById("changes-main"));
-  await settle(450);
+  // Waiting for the label would never return: this asserts that none appears. Here a duration is
+  // the right instrument, and it has to clear the delay it is proving nothing happened within.
+  await settle(TIP_DELAY_MS + 200);
   assert.equal(tip.hidden, true, "a control nobody can see has nothing to explain");
 
   // A multi-line title keeps its first line as the label and the rest as quieter detail.
   const changes = doc.getElementById("btn-ctx");
   changes.title = "Every file this chat has changed\nPartial scan: one folder was unreadable";
   hover(changes);
-  await settle(450);
+  await shown();
   assert.equal(tip.firstChild.textContent, "Every file this chat has changed");
   assert.equal(tip.querySelector(".tip-detail").textContent, "Partial scan: one folder was unreadable");
   assert.deepEqual(errors, []);

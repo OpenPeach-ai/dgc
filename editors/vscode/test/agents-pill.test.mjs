@@ -262,7 +262,8 @@ test("the pill's hover label follows its state: agents ending under the pointer 
     await startAgent(page, 1);
     await startAgent(page, 2);
     await page.hover("#agents-pill");
-    await page.waitForTimeout(500);
+    // Wait for the label, not for a duration: the delay is a product constant and has moved once.
+    await page.waitForSelector("#hover-tip:not([hidden])", { timeout: 10000 });
     const during = await page.evaluate(() => ({ tip: document.getElementById("hover-tip").textContent,
       shown: !document.getElementById("hover-tip").hidden, title: document.getElementById("agents-pill").getAttribute("title") }));
     assert.deepEqual(during, { tip: "Agents are working · Click to see the agents", shown: true, title: null });
