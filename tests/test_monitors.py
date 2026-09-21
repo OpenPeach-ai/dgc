@@ -804,7 +804,9 @@ class AgentDeliveryTests(unittest.TestCase):
         self.assertEqual(calls[0]["reason"], "user_turn")
         self.assertTrue(notice_kind(calls[0]["last"]), "the waiting events follow the prompt")
         index = next(i for i, m in enumerate(agent.messages) if notice_kind(m))
-        self.assertEqual(agent.messages[index - 1]["content"], "hello after the burst")
+        # The prompt, plus the turn's clock line (dgc/clock.py) — nothing between it and the notice.
+        self.assertTrue(agent.messages[index - 1]["content"].startswith("hello after the burst\n\n"))
+        self.assertIn("<dgc-now>", agent.messages[index - 1]["content"])
         self.assertEqual(agent.messages[index]["_dgc_notice"]["delivery"], "inline")
         self.assertEqual(hub.pending_count(), 0)
 

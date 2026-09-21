@@ -11442,7 +11442,8 @@ def test_benchmark_integrity():
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
                            "present_plan", "propose_options", "python", "update_goal"}
-        # Measured at 6,070 on this release; the ceiling is a bloat gate, not a target.
+        # Measured at 6,222 on this release (the Environment line's timezone is 7 of them);
+        # the ceiling is a bloat gate, not a target.
         _PROBE_TOKEN_CEILING = 6400
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
@@ -15259,7 +15260,10 @@ def test_steering():
         _agent_mod.datetime = _real_datetime
     check("system prompt prefix remains byte-stable across clock minutes",
           _stable_prompt_one == _stable_prompt_two
-          and "- Date: 2026-08-26\n" in _stable_prompt_one)
+          # date + zone, never the hour: the clock rides with each prompt instead (dgc/clock.py)
+          and "- Date: 2026-08-26 (" in _stable_prompt_one
+          and _stable_prompt_one.split("- Date: 2026-08-26 (", 1)[1].split("\n", 1)[0].endswith(")")
+          and "<dgc-now>" not in _stable_prompt_one)
 
     _text_protocol = a._text_protocol_section()
     _text_schema_wire = _text_protocol.split("Available tools:\n", 1)[1]

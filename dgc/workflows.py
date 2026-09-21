@@ -159,6 +159,8 @@ def stream_recovery_notice(message) -> dict | None:
 
 def display_prompt(text: str) -> str:
     """Render the user's command for human history; never used to construct execution inputs."""
+    from .clock import strip_turn_clock
+    text = strip_turn_clock(text)           # DGC's per-turn clock line, not something anyone typed
     if text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX):
         text = text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]
     start = text.find("<dgc-workflow-json>\n", 0, 1024)

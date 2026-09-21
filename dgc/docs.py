@@ -1113,6 +1113,26 @@ normal question.
 Stack, layout, build/test/lint commands, house style, durable facts. Not credentials, personal
 details, private absolute paths, or a dump of the last session — use **Handoff** for a continuation
 document, and `/export` for a transcript.
+
+## The date and the clock
+
+Memory is not the only thing DGC puts in front of the model. It also tells it what time it is,
+because a model with no clock writes "what I completed tonight" in the middle of the afternoon.
+
+- The session prompt carries the day and where this machine is:
+  `Date: 2026-09-20 (Asia/Kolkata, UTC+05:30)`. The zone name comes from the machine itself —
+  `TZ`, or the `/etc/localtime` link on Linux and macOS. A machine that records no name shows the
+  offset alone (`UTC+05:30`), and one that records nothing shows `UTC`. Nothing is looked up
+  online.
+- Every message you send carries the time of day, on its own line:
+  `Local time: 14:32 (Asia/Kolkata)`. It is on the message rather than in the session prompt so
+  that two questions a minute apart still send a byte-identical prompt, which is what lets a
+  provider charge cached-input rates for the second one. Resumed chats and `/export` show what you
+  typed, without it.
+
+A day boundary reaches the model on your next message, so an overnight session does not keep
+calling it yesterday. A sub-agent is told the same two things. A turn DGC starts by itself on a
+background monitor gets no clock line: the events it delivers are already timestamped.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """

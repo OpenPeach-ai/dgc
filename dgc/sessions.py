@@ -1201,6 +1201,7 @@ def set_name(path, name: str, project_root, *, expected_revision: int | None = N
 def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, int, str]]:
     """(path, updated_ts, first-user-message preview, message count, name), newest first."""
     from .redaction import redact_text
+    from .clock import strip_turn_clock   # DGC's clock line is not a preview
     items: list[tuple[Path, float, str, int, str]] = []
     for p in project_dir(project_root).glob("*.json"):
         try:
@@ -1208,7 +1209,8 @@ def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, 
             msgs = data.get("messages", [])
             first = next((m.get("content", "") for m in msgs if m.get("role") == "user"), "")
             preview = re.sub(
-                r"\s+", " ", redact_text(str(first), redact_secrets)).strip()[:56] or "(empty)"
+                r"\s+", " ",
+                redact_text(str(strip_turn_clock(first)), redact_secrets)).strip()[:56] or "(empty)"
             name = redact_text(str(data.get("name") or ""), redact_secrets)
             items.append((p, float(data.get("updated", p.stat().st_mtime)), preview,
                           len(msgs), name))
@@ -1221,6 +1223,7 @@ def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, 
 def listing_all(*, redact_secrets=()) -> list[tuple[Path, Path, float, str, int, str]]:
     """Private global index used by protocol adapters: path, project, time, preview, count, name."""
     from .redaction import redact_text
+    from .clock import strip_turn_clock   # DGC's clock line is not a preview
     items: list[tuple[Path, Path, float, str, int, str]] = []
     base = SESSIONS_DIR.resolve(strict=False)
     for candidate in SESSIONS_DIR.glob("*/*.json"):
@@ -1239,7 +1242,8 @@ def listing_all(*, redact_secrets=()) -> list[tuple[Path, Path, float, str, int,
                 continue
             first = next((m.get("content", "") for m in msgs if m.get("role") == "user"), "")
             preview = re.sub(
-                r"\s+", " ", redact_text(str(first), redact_secrets)).strip()[:56] or "(empty)"
+                r"\s+", " ",
+                redact_text(str(strip_turn_clock(first)), redact_secrets)).strip()[:56] or "(empty)"
             name = redact_text(str(data.get("name") or ""), redact_secrets)
             items.append((p, project, float(data.get("updated", p.stat().st_mtime)), preview,
                           len(msgs), name))
