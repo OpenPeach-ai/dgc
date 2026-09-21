@@ -31,7 +31,7 @@ from pathlib import Path
 import requests
 
 from .codeintel import run_code_intel, symbol_records
-from . import image_views
+from . import documents, image_views
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
     WorkspaceBoundaryError,
@@ -312,6 +312,23 @@ TOOL_SCHEMAS = [
                                "required": ["label"]}}},
                            "required": ["question", "options"]}}},
         ["questions"]),
+    _fn("ask_user", "Ask ONE open question you cannot answer yourself, and keep working. Unlike "
+        "propose_options this does not stop the turn and invents no options: use it when you do not "
+        "know the answers, only that you need one — a name, a value, an address, which of their "
+        "systems they meant. Their reply arrives mid-turn as an ordinary message. Ask only when a "
+        "different answer changes what you build; if a sensible default exists, take it, say which "
+        "you took, and carry on. Never for permission, for whether a plan is ready, or for anything "
+        "the code or the request already answers. Meanwhile do every part of the task that does not "
+        "depend on the answer.",
+        {"question": {"type": "string", "description": "One sentence, answerable in a few words"},
+         "context": {"type": "string",
+                     "description": "Optional: why you need it, one short sentence"},
+         "suggestions": {"type": "array", "maxItems": 4,
+                         "description": "Optional example answers to save typing. Plain strings, "
+                                        "not choices — if you can enumerate the real options, use "
+                                        "propose_options instead",
+                         "items": {"type": "string"}}},
+        ["question"]),
     _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
         "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
         "describing the page is not. First write a self-contained .html file, then call this with its "
@@ -403,6 +420,15 @@ def _safe_command_label(command: str, ctx) -> str:
             if len(safe) > MAX_BASH_COMMAND_LABEL else safe)
 
 
+_DOCUMENT_READ_CHARS = 200_000
+
+
+def _document_problem(exc: Exception) -> str:
+    """The module's own refusal, which already names the problem and the remedy."""
+    message = str(exc).strip() or "the document could not be read"
+    return message[7:].lstrip() if message.startswith("error: ") else message
+
+
 def read_file(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
@@ -434,6 +460,13 @@ def read_file(args: dict, ctx) -> str:
         where = "; the user can see it in the chat" if _shows_images(ctx) else ""
         from .vision import SETUP_HINT
         return f"error: {p} is an image, and this model cannot read images{where}. {SETUP_HINT}"
+    if p.suffix.lower() in documents.SUPPORTED:
+        # A document is binary but it is not opaque: read its text rather than refusing it. This
+        # is the same extraction @path uses, and it is here rather than only in the attachment
+        # path because the editor's file mentions leave the reading to the model -- so without it
+        # a .docx dropped into the panel came back "looks like a binary file", which is true and
+        # useless.
+        return _read_document(p, raw, ctx, args)
     if b"\x00" in raw[:8192]:
         return f"error: {p} looks like a binary file"
     lines = raw.decode("utf-8", errors="replace").splitlines()
@@ -446,6 +479,39 @@ def read_file(args: dict, ctx) -> str:
         out.append(f"… ({len(lines) - (offset - 1 + limit)} more lines)")
     body = "\n".join(out) if out else "(empty)"
     return f"sha256\t{hashlib.sha256(raw).hexdigest()}\n{body}"
+
+
+def _read_document(p, raw: bytes, ctx, args: dict) -> str:
+    """The text of a .docx/.xlsx/.pdf and friends, labelled as an extraction.
+
+    Never silently passed off as the file's own bytes: the model is told what it is reading and
+    what is missing from it, because an answer about a document's layout or images cannot come
+    from here. Line numbers are kept so offset/limit mean what they mean for any other file.
+    """
+    try:
+        found = documents.extract_text(raw, p.name, max_chars=_DOCUMENT_READ_CHARS)
+    except documents.UnsupportedDocument as exc:
+        return f"error: {_document_problem(exc)}"
+    except documents.DocumentError as exc:
+        return f"error: {_document_problem(exc)}"
+    lines = found.text.splitlines()
+    offset = max(1, int(args.get("offset") or 1))
+    limit = min(int(args.get("limit") or MAX_READ_LINES), MAX_READ_LINES)
+    chunk = lines[offset - 1: offset - 1 + limit]
+    out = [f"{i}\t{_trunc_line(_safe_output(line, ctx))}"
+           for i, line in enumerate(chunk, start=offset)]
+    if offset - 1 + limit < len(lines):
+        out.append(f"… ({len(lines) - (offset - 1 + limit)} more lines)")
+    note = [f"extracted text from a {documents.SUPPORTED.get(p.suffix.lower(), 'document')}",
+            "layout, images and embedded objects are not included"]
+    if found.truncated:
+        note.append("this is a prefix; the rest of the document was not read")
+    summary = ", ".join(f"{k}={v}" for k, v in sorted((found.summary or {}).items()))
+    if summary:
+        note.append(summary)
+    body = "\n".join(out) if out else "(no text)"
+    return (f"sha256\t{hashlib.sha256(raw).hexdigest()}\n"
+            f"note\t{'; '.join(note)}\n{body}")
 
 
 def write_file(args: dict, ctx) -> str:

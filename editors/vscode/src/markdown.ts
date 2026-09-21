@@ -144,6 +144,29 @@ parser.renderer.rules.table_open = (tokens, index) => {
 };
 parser.renderer.rules.table_close = () => "</table></div>";
 
+// A quoted block is usually the one part of a response meant to leave the panel whole -- a drafted
+// mail, a message to forward -- and it was the last block with no copy of its own, so lifting it
+// meant dragging a selection across the panel's own scroll. Only the outermost quote gets the
+// button: a nested quote inside it is part of what you are copying, not a second thing to copy.
+parser.renderer.rules.blockquote_open = (tokens, index, _options, env, self) => {
+  const source = tokens[index].level === 0 ? quoteSource(tokens[index], env) : "";
+  const copy = source
+    ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy quoted text" title="Copy quoted text"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`
+    : "";
+  return `${self.renderToken(tokens, index, _options)}${copy}`;
+};
+
+function quoteSource(token: any, env: any): string {
+  // markdown-it keeps no raw text for a quote, but it does keep the line span, and render() hands
+  // the source down in env. The quote markers come off: what belongs on the clipboard is the mail,
+  // not "> " running down its left edge.
+  const lines = typeof env?.src === "string" ? env.src.split("\n") : null;
+  if (!lines || !Array.isArray(token.map)) return "";
+  return lines.slice(token.map[0], token.map[1])
+    .map((line: string) => line.replace(/^\s{0,3}>\s?/, ""))
+    .join("\n").trim();
+}
+
 function tableSource(tokens: any[], index: number): string {
   // markdown-it does not keep the raw table text, so rebuild it from the inline tokens. Good
   // enough to paste into another markdown document, which is the whole point of the button.
@@ -184,6 +207,8 @@ parser.renderer.rules.list_item_open = (tokens, index, options, _env, self) => {
 
 export function render(source: string): string {
   // JSON can carry lone UTF-16 surrogates; URI encoding in copy controls must not crash a turn.
-  return parser.render(String(source).replace(
-    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD"));
+  const cleaned = String(source).replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+  // The env carries the source so a block rule can quote it back exactly (see quoteSource).
+  return parser.render(cleaned, { src: cleaned });
 }

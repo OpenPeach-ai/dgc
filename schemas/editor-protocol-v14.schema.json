@@ -1379,6 +1379,97 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "ask_request"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "call_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "ask_id": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "context": {
+              "type": "string"
+            },
+            "suggestions": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "ask_id",
+            "question"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ask_resolved"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "call_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "ask_id": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "answered",
+                "skipped",
+                "expired",
+                "unavailable"
+              ]
+            },
+            "question": {
+              "type": "string"
+            },
+            "answer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "ask_id",
+            "outcome",
+            "question"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "options_request"
             },
             "seq": {
@@ -3840,6 +3931,16 @@
             "request_id": {
               "type": "string"
             },
+            "answers": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array"
+                }
+              ]
+            },
             "delivery": {
               "type": "string",
               "enum": [
@@ -3897,6 +3998,9 @@
               "type": "string"
             },
             "question_forms": {
+              "type": "boolean"
+            },
+            "open_asks": {
               "type": "boolean"
             }
           },
@@ -4038,6 +4142,25 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ask_skip"
+            },
+            "ask_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "ask_id"
           ],
           "additionalProperties": false
         },

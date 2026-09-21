@@ -32,12 +32,14 @@ _DISPLAY = {
     "browser": "Browser", "todo": "Todo", "notes": "Notes", "skill": "Skill",
     "add_skill": "AddSkill", "save_memory": "SaveMemory", "mcp_search": "MCPSearch",
     "mcp_call": "MCPCall", "present_plan": "PresentPlan", "present_document": "PresentDocument",
-    "propose_options": "ProposeOptions", "artifact": "Artifact", "task": "Task",
+    "propose_options": "ProposeOptions", "ask_user": "AskUser", "artifact": "Artifact", "task": "Task",
 }
 # Tools a rule cannot name (goal bookkeeping), and tools an allowlist keeps unless it is denied
 # by name: the option picker is how the agent asks the application a question.
 _UNRULED_TOOLS = frozenset({"update_goal"})
-_ALWAYS_OFFERED = frozenset({"propose_options"})
+# Asking is never refused by a tool policy: both asking tools mutate nothing, and a policy
+# that silences them leaves a model unable to say it is stuck.
+_ALWAYS_OFFERED = frozenset({"propose_options", "ask_user"})
 # The display spelling permission rules use -> DGC's internal tool name, so deny_tools/allow_tools
 # accept either ("Bash" and "bash", "Write" and "write_file").
 _DISPLAY_TO_INTERNAL = {display.lower(): internal for internal, display in _DISPLAY.items()}

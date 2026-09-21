@@ -217,6 +217,14 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    and without this every message in the transcript is unattributed. */
 .role { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* What happened to a message sent mid-turn, said out loud. The role label above is for screen
+   readers only, and the agent stops printing its own line once a frontend claims to show this --
+   so without these a sighted user had nothing telling them the model had taken the message. */
+.msg.user[data-steer] > .bubble::after { display: block; margin-top: var(--sp-1); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right; }
+.msg.user[data-steer="pending"] > .bubble::after { content: "steering \2026"; }
+.msg.user[data-steer="queued"] > .bubble::after { content: "queued for the next turn"; }
+.msg.user[data-steer="applied"] > .bubble::after { content: "steered \2014 the model has read this"; color: var(--accent-text, var(--accent)); }
 /* A prompt opens a new exchange, so it stands a step further from the turn before it than from the
    reply it asks for. Nothing sits above the first one. */
 .msg.user { align-items: flex-end; margin-top: var(--sp-2); }
@@ -243,6 +251,13 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
 .user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
 /* A prompt reads at the answer's size and spacing: it inherited the page's tight default line height. */
+/* The question, inside the answer's own bubble: the card that asked it is removed as soon as the
+   answer lands, so without this the transcript shows an answer to nothing. */
+.user .bubble .answered-q {
+  margin: 0 0 var(--sp-1); padding-left: var(--sp-2);
+  border-left: 2px solid var(--border-strong); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.45 var(--sans);
+}
 .user .bubble .prompt-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-chat); line-height: 1.62; }
 .user .bubble .prompt-atts { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .user .bubble .prompt-atts:last-child { margin-bottom: 0; }
@@ -304,7 +319,24 @@ body.vscode-light, body.vscode-high-contrast-light {
 .text :is(h5, h6), .surface-markdown :is(h5, h6) {
   font-size: var(--md-size); line-height: 1.62; margin: 0;
 }
-.text blockquote, .surface-markdown blockquote { margin: var(--sp-3) 0; padding-left: var(--sp-3); border-left: 2px solid var(--border-strong); color: var(--muted); }
+/* A quote is rarely a quote here -- it is a drafted mail or a message to send on, and it wants to
+   read as one object you can lift. A bare left rule with side padding only gave it none: the first
+   line started hard against the block's top edge and the last ran straight off its bottom, so the
+   text looked cut rather than enclosed. It gets a ground, a radius and real room at both ends, and
+   the first and last child give up their own margins so that room is even instead of doubled. */
+.text blockquote, .surface-markdown blockquote {
+  position: relative; margin: var(--sp-3) 0; padding: var(--sp-3) var(--sp-4);
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong); border-radius: var(--r-md);
+  color: var(--muted);
+}
+.text blockquote > :first-child, .surface-markdown blockquote > :first-child,
+.text blockquote > .copy + *, .surface-markdown blockquote > .copy + * {
+  /* Room for the button, so a long first line stops short of it rather than running underneath. */
+  margin-top: 0; padding-right: calc(var(--control-sm) + var(--sp-4));
+}
+.text blockquote > :last-child, .surface-markdown blockquote > :last-child { margin-bottom: 0; }
+.text blockquote blockquote, .surface-markdown blockquote blockquote { margin-block: var(--sp-2); }
 .text hr, .surface-markdown hr { border: 0; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
 .md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
 .md-link:hover { text-decoration-color: currentColor; }
@@ -1128,16 +1160,16 @@ pre.code .fold:hover { border-color: var(--accent); }
 /* One copy affordance for every copyable block: an icon in the corner of the thing it copies,
    revealed on hover or focus, confirming with a check. A table used to get the same button with
    no position rule, so it rendered as a word floating above the table instead. */
-pre.code .copy, .md-table-wrap .copy { position: absolute; top: 6px; right: 6px; z-index: 1;
+pre.code .copy, .md-table-wrap .copy, blockquote > .copy { position: absolute; top: 6px; right: 6px; z-index: 1;
   height: var(--control-sm); min-width: var(--control-sm); display: inline-flex; align-items: center;
   justify-content: center; cursor: pointer; background: var(--surface2); color: var(--muted);
   border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 0;
   opacity: 0; transition: opacity .12s, color .12s, border-color .12s; }
-pre.code .copy .codicon, .md-table-wrap .copy .codicon { font-size: var(--t-sm); }
-pre.code:hover .copy, .md-table-wrap:hover .copy { opacity: 1; }
-pre.code .copy:hover, .md-table-wrap .copy:hover { color: var(--text); border-color: var(--accent); }
-pre.code .copy:focus-visible, .md-table-wrap .copy:focus-visible { opacity: 1; }
-pre.code .copy.done, .md-table-wrap .copy.done { opacity: 1; color: var(--good); border-color: var(--good); }
+pre.code .copy .codicon, .md-table-wrap .copy .codicon, blockquote > .copy .codicon { font-size: var(--t-sm); }
+pre.code:hover .copy, .md-table-wrap:hover .copy, blockquote:hover > .copy { opacity: 1; }
+pre.code .copy:hover, .md-table-wrap .copy:hover, blockquote > .copy:hover { color: var(--text); border-color: var(--accent); }
+pre.code .copy:focus-visible, .md-table-wrap .copy:focus-visible, blockquote > .copy:focus-visible { opacity: 1; }
+pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacity: 1; color: var(--good); border-color: var(--good); }
 
 /* artifact ready card — propose opening a localhost preview */
 .artifact { margin: var(--sp-2) 0; padding: var(--sp-3) var(--sp-3); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
@@ -1530,6 +1562,40 @@ button.link.model-retry-copy { display: inline-flex; align-items: center; gap: v
    the footer (Stop, mode, model, context) stays. It has no frame of its own: #cbox is the frame. */
 #cbox.asking > .cinput, #cbox.asking > #attachments { display: none; }
 body.ask-docked #tasks-panel { display: none; }
+/* An open question: a row in the transcript, not a panel over the composer, because the turn is
+   still running behind it. Folded it is one clickable line; there is no state in which it is gone
+   without a trace. */
+.open-ask { margin: var(--sp-2) 0; border: 1px solid var(--accent-line, var(--border-strong)); border-radius: var(--r-md);
+  background: var(--surface); overflow: hidden; }
+.open-ask[data-state="open"] .open-ask-folded { display: none; }
+.open-ask[data-state="folded"] .open-ask-body { display: none; }
+.open-ask[data-state="sent"] .open-ask-body { opacity: .55; pointer-events: none; }
+.open-ask[data-state="sent"] .open-ask-folded { display: none; }
+.open-ask[data-state="settled"] { border-style: dashed; border-color: var(--border); background: transparent; }
+.open-ask-folded { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3);
+  border: 0; background: transparent; color: var(--accent-text, var(--accent)); font: var(--w-reg) var(--t-sm)/1.4 var(--sans);
+  text-align: left; cursor: pointer; }
+.open-ask-folded:hover { background: var(--surface2); }
+.open-ask-body { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); }
+.open-ask-q { margin: 0; color: var(--text-strong, var(--text)); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
+.open-ask-context { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.open-ask-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.open-ask-chip { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: transparent; color: var(--text); font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.open-ask-chip:hover { border-color: var(--accent); }
+.open-ask-input { width: 100%; box-sizing: border-box; padding: var(--sp-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); background: var(--input-bg, var(--surface2)); color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.open-ask-input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.open-ask-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.open-ask-send, .open-ask-skip { padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm);
+  font: var(--w-reg) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
+.open-ask-send { border: 0; background: var(--accent); color: var(--on-accent, #fff); }
+.open-ask-skip { border: 1px solid var(--border-strong); background: transparent; color: var(--muted); }
+.open-ask-skip:hover { color: var(--text); }
+.open-ask-settled { display: block; padding: var(--sp-2) var(--sp-3); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+
 .ask { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: var(--sp-3) var(--sp-2) var(--sp-1);
   border-bottom: 1px solid var(--border); color: var(--text); border-radius: var(--r-2xl) var(--r-2xl) 0 0; }
 .ask:focus { outline: none; }

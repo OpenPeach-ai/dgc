@@ -1286,6 +1286,30 @@ class HeadlessUI:
             self.plan_feedback = ""
         return decision if decision in _PLAN_MODES else None
 
+    def ask_open_question(self, ask_id: str, question: str, context: str,
+                          suggestions: list, call_id=None) -> bool:
+        """Show a question the turn did not stop for. Returns False when nobody could show it.
+
+        Unlike ask_questions this registers no pending request and does not block: the answer
+        comes back later as an ordinary steering prompt tagged with the ask_id.
+        """
+        if not getattr(self, "_open_asks_enabled", False):
+            return False
+        self.em.emit("ask_request", ask_id=ask_id, question=question,
+                     **({"context": context} if context else {}),
+                     **({"suggestions": list(suggestions)} if suggestions else {}),
+                     **({"call_id": call_id} if isinstance(call_id, str) else {}))
+        return True
+
+    def ask_resolved(self, ask_id: str, outcome: str, question: str, answer: str = "",
+                     call_id=None) -> None:
+        """Tell every client how an open question ended, so no card is left waiting."""
+        if not getattr(self, "_open_asks_enabled", False):
+            return
+        self.em.emit("ask_resolved", ask_id=ask_id, outcome=outcome, question=question,
+                     **({"answer": answer} if answer else {}),
+                     **({"call_id": call_id} if isinstance(call_id, str) else {}))
+
     def ask_questions(self, questions: list[dict], call_id=None) -> dict:
         """One v14 ``options_request`` for the whole batch; blocks until an answer, a dismissal,
         Stop or disconnection. An invalid response leaves the request open (the dispatcher answers
@@ -1414,6 +1438,7 @@ class Backend:
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
+                          "open_asks": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           "editor_liveness": True,
@@ -1803,6 +1828,13 @@ class Backend:
                     shutting_down = getattr(self.agent, "stopping", False) is True
                     reason = ("error" if shutting_down else "cancelled") if cancelled else (
                         "error" if failed else "completed")
+                    # A question still open when the turn ends is resolved, never quietly dropped.
+                    # Codex expires one after thirty seconds with no record at all, so neither side
+                    # knows it was ever asked; here the model is told and every card is closed.
+                    try:
+                        self.agent.expire_open_asks()
+                    except Exception:
+                        pass
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
@@ -3073,6 +3105,28 @@ class Backend:
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))
+            # A prompt that says which questions it answers is an answer, not a new instruction.
+            # The tag is required: a follow-up typed while a question happens to be open is an
+            # ordinary message, and recording it as an answer would corrupt the transcript in a
+            # way nothing later can tell apart.
+            tagged = cmd.get("answers")
+            if isinstance(tagged, list) and tagged:
+                resolved = 0
+                for entry in tagged[:4]:
+                    ask_id = str((entry or {}).get("ask_id") or "") if isinstance(entry, dict) else ""
+                    if ask_id and self.agent.resolve_open_ask(ask_id, "answered", text):
+                        resolved += 1
+                if resolved:
+                    # No prompt_accepted here: ask_resolved (emitted by resolve_open_ask) already
+                    # tells every client the question closed and with what. Widening that event's
+                    # state enum would change an existing event, which is the one change an
+                    # un-opted-in client cannot survive.
+                    return
+                self.em.emit("command_rejected", command=t, reason="unknown_ask",
+                             message="no open question with that id; it was already answered, "
+                                     "skipped, or the turn ended",
+                             **_request_fields(request_id))
+                return
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
                              message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
@@ -3460,6 +3514,14 @@ class Backend:
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
+            # A client that can draw a question the turn did not stop for says so here. Without it
+            # the backend emits no ask_* events and the model is not offered the tool at all, so an
+            # older editor never sees a question nobody could answer.
+            # On the UI, not on self: the readers are HeadlessUI.ask_open_question and
+            # .ask_resolved, and Backend does not subclass HeadlessUI. Setting it here left the
+            # flag somewhere nobody looks, so every question was refused with "nobody can answer
+            # questions here" while `ready` advertised the capability as present.
+            self.ui._open_asks_enabled = bool(cmd.get("open_asks"))
             # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
             # structured request per question batch.
             roots, visible = [], []
@@ -3499,6 +3561,13 @@ class Backend:
             watch = getattr(self, "_editor_liveness", None)
             if watch is not None:
                 watch.pinged()
+
+        elif t == "ask_skip":
+            ask_id = str(cmd.get("ask_id") or "")
+            if not self.agent.resolve_open_ask(ask_id, "skipped"):
+                self.em.emit("command_rejected", command=t, reason="unknown_ask",
+                             message="no open question with that id",
+                             **_request_fields(request_id))
 
         elif t in ("cancel", "interrupt"):
             with self._turn_state_lock():

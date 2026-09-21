@@ -9,6 +9,7 @@
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
 //   npm run shot -- /tmp/tasks.png --tasks [--light]   the Tasks rail row (+ -expanded.png, -long.png)
 //   npm run shot -- /tmp/cmd.png --command [--light]   a command mid-run, shown once (+ -waiting.png)
+//   npm run shot -- /tmp/q.png --quote [--light]      a drafted mail in a quote (+ -hover.png)
 //   npm run shot -- /tmp/mon.png --monitors [--light] [--narrow]  a monitor wake turn, event cards, the monitors rail
 //   npm run shot -- /tmp/usage.png --usage --width=300 --theme=light --usage-report=reports.json
 //                                                     the Token Usage settings tab (--empty for none)
@@ -461,6 +462,37 @@ if (process.argv.includes("--prose")) {
   ].join("") });
   await page.waitForTimeout(400);
   await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
+if (process.argv.includes("--quote")) {
+  // A drafted mail, which is what a quoted block nearly always is in practice: several paragraphs
+  // with their own structure, long enough that its top and bottom edges are what you notice.
+  const out = process.argv[2] || "/tmp/quote.png";
+  if (process.argv.includes("--light")) {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
+      --vscode-input-background:#FFFFFF; --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
+      --vscode-descriptionForeground:#616161; --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; }` });
+  }
+  await send({ type: "text_delta", text: [
+    "### The GSP mail — copy-paste ready\n\n",
+    "> **Subject:** Enrich API — request: \"Get e-invoice by Document Details\" endpoint\n>\n",
+    "> Hello [GSP contact name],\n>\n",
+    "> We integrate with your Enrich API for e-invoicing across **four GST registrations**:\n>\n",
+    "> - `06AAACP0227H1ZW` — Polylace India Pvt. Ltd. (Bawal)\n",
+    "> - `07AAACP0227H1ZU` — Polylace India Pvt. Ltd. (Delhi)\n>\n",
+    "> We currently use `Auth`, `GenerateIRN` and `CancelIRN`. When an IRN response is lost on our\n",
+    "> side the invoice later returns \"2150 – Duplicate IRN\", and your gateway offers no way to\n",
+    "> recover the number, because `GetEInvoiceDetails` requires the IRN itself.\n>\n",
+    "> Thanks,\n> Mohit\n\n",
+    "Send that as-is — the copy button on the block lifts the mail without the quote markers.\n",
+  ].join("") });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: out, fullPage: false });
+  // Again with the pointer over the block, which is when the copy button is meant to appear.
+  const quote = page.locator(".text blockquote").first();
+  if (await quote.count()) { await quote.hover(); await page.waitForTimeout(300); }
+  await page.screenshot({ path: out.replace(/\.png$/, "-hover.png"), fullPage: false });
   console.log("shot:", out); await browser.close(); process.exit(0);
 }
 if (process.argv.includes("--images")) {

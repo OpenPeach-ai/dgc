@@ -216,6 +216,15 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # v14: ``questions`` = [{id, header, question, multi_select, options: [{label, description,
     # recommended}]}], 1-4 questions of 2-6 options; ``call_id`` is the propose_options step. The
     # nested shape is validated by dgc/questions.py; the flattened question/options pair is gone.
+    # An open question the model asked mid-turn. This is NOT a request/response pair: the turn did
+    # not stop for it, `ask_id` is the answer's identity, and the answer arrives later as an
+    # ordinary steering prompt tagged with `answers`.
+    "ask_request": {"call_id": _NS(False), "ask_id": _S(), "question": _S(),
+                    "context": _S(False), "suggestions": _A(False)},
+    # How an open question ended -- for every client drawing its card, and for replay.
+    "ask_resolved": {"call_id": _NS(False), "ask_id": _S(),
+                     "outcome": _f("string", enum=("answered", "skipped", "expired", "unavailable")),
+                     "question": _S(), "answer": _S(False)},
     "options_request": {"id": _S(), "call_id": _NS(False), "questions": _A()},
     # v14: how a question request ended. ``id`` is null on replay; ``answers`` =
     # {question_id: {selected: [0-based index...], other: string}} when answered.
@@ -446,14 +455,22 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},
     "get_workspace_change": {"root": _S(), "path": _S(), "request_id": _S()},
+    # ``answers`` marks a prompt as the reply to open questions: [{"ask_id", "question"}]. Without
+    # it a message steered while a question is open is just a message -- a follow-up on another
+    # subject must never be recorded as an answer.
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
+               "answers": _NA(False),
                "delivery": _f("string", required=False, enum=("steer", "queue")),
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
     # v14: ``question_forms`` is still accepted and ignored (every v14 client takes question
     # forms); it is removed in v15.
-    "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False)},
+    # ``open_asks`` is how a client says it can show a question the turn did not stop for. The
+    # backend never emits ask_request/ask_resolved to a client that did not ask for them, and the
+    # model is not offered the tool when no frontend can show one.
+    "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False),
+                            "open_asks": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False), "reason": _S(False),
@@ -473,6 +490,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "cancel": {},
     "interrupt": {},
+    # The user waved the question away. The model is told, at the next context boundary, so it
+    # decides and says what it assumed rather than waiting for an answer that is not coming.
+    "ask_skip": {"ask_id": _S(), "request_id": _S(False)},
     # The editor says it is still there. Additive and capability-gated ("editor_liveness"),
     # so a newer editor talking to an older backend just collects one command_rejected and
     # carries on -- no protocol version bump, and no fixture/capture churn.

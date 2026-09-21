@@ -862,7 +862,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const revision = this.workspaceRootsRevision;
     const command = this.stateCommand(
-      "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots() });
+      // open_asks says this panel can show a question the turn did not stop for, and keep its
+      // card alive after the turn moves past it. A backend never emits ask_* to a client that did
+      // not say so, and withholds the tool entirely when nobody can show one.
+      "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
+                           open_asks: true });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);
@@ -2190,8 +2194,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.scheduleWorkspaceChanges(0);
         break;
       }
+      case "askSkip": {
+        // Waving a question away is an answer of a kind: the backend tells the model to decide
+        // and say what it assumed, rather than leaving it waiting.
+        const askId = String(msg.askId ?? "");
+        if (askId && this.lastReadyEvent?.capabilities?.open_asks) {
+          this.backend?.send({ type: "ask_skip", ask_id: askId });
+        }
+        return;
+      }
       case "prompt": {
         let text = String(msg.text ?? "");
+        const answers = (Array.isArray(msg.answers) ? msg.answers : [])
+          .filter((a: any) => a && typeof a === "object" && typeof a.ask_id === "string")
+          .slice(0, 4)
+          .map((a: any) => ({ ask_id: String(a.ask_id), question: String(a.question ?? "") }));
         const prefixWorkflow = /^\/(plan|review|init)(?:\s+([\s\S]*))?$/i.exec(text.trim());
         const suffixWorkflow = /^([\s\S]*\S)\s+\/(plan|review|init)$/i.exec(text.trim());
         const workflow = (prefixWorkflow?.[1] || suffixWorkflow?.[2] || "").toLowerCase();
@@ -2230,7 +2247,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    context: [...attached, ...live].slice(0, 64), ...selections,
                                    ...(this.lastReadyEvent?.capabilities?.live_steering
                                      ? { delivery: msg.delivery === "queue" ? "queue" : "steer" } : {}),
-                                   ...(workflow ? { workflow: workflow as "plan" | "review" | "init" } : {}) });
+                                   ...(workflow ? { workflow: workflow as "plan" | "review" | "init" } : {}),
+                                   // A reply to open questions says which ones it answers. Without
+                                   // the tag this is an ordinary message, and the backend treats it
+                                   // as one -- a follow-up typed while a question is open must
+                                   // never be recorded as its answer.
+                                   ...(answers.length && this.lastReadyEvent?.capabilities?.open_asks
+                                     ? { answers } : {}) });
         if (!accepted) {
           this.post({ type: "prompt_rejected", requestId });
         } else {

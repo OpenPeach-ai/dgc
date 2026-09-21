@@ -3941,10 +3941,18 @@ def unit_tests(tmp: Path):
     _roots_cap = _Capture(); _roots = object.__new__(Backend)
     _roots.em = _roots_cap; _roots._worker = None
     _roots.config = type("RootsCfg", (), {"project_root": tmp})()
-    _roots.dispatch({"type": "set_workspace_roots", "roots": [str(tmp), str(_extra_root)]})
+    # A real Backend always has one; this hand-built stand-in needs it because set_workspace_roots
+    # writes the open-question opt-in onto the UI. Leaving it off would hide the very mistake that
+    # made the feature dead on arrival: the flag written to one object and read from another.
+    _roots.ui = type("RootsUI", (), {})()
+    _roots.dispatch({"type": "set_workspace_roots", "roots": [str(tmp), str(_extra_root)],
+                     "open_asks": True})
     check("headless multi-root approvals are session-scoped",
           _roots.config.session_permissions["allow"] == [f"ExternalDirectory({_extra_root.resolve()})"]
           and _roots_cap.events[-1]["type"] == "workspace_roots")
+    check("the open-question opt-in lands on the UI, which is what reads it",
+          getattr(_roots.ui, "_open_asks_enabled", None) is True
+          and not hasattr(_roots, "_open_asks_enabled"))
 
     # --- llm: a stalled stream (model prefilling a huge context, no first token) must be
     #     interruptible by cancel — Esc/Stop can't wait on iter_lines() forever
@@ -11441,7 +11449,7 @@ def test_benchmark_integrity():
         _bundled_skill_names = {entry.name for entry in _bundled_skills_dir.iterdir()
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
-                           "present_plan", "propose_options", "python", "update_goal"}
+                           "present_plan", "propose_options", "ask_user", "python", "update_goal"}
         # Measured at 6,222 on this release (the Environment line's timezone is 7 of them);
         # the ceiling is a bloat gate, not a target.
         _PROBE_TOKEN_CEILING = 6400

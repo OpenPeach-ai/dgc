@@ -2228,9 +2228,16 @@ class Agent(GoalLifecycle):
         # Nobody can answer a question in a sub-agent (its rows replay only after it finishes) or in
         # a non-interactive run. Identity check, like _monitor_delivery: a permissive fixture's
         # __getattr__ must not count as `dgc -p`.
+        # An open question needs somebody who could answer it, exactly as the picker does, AND a
+        # frontend that can keep a card alive after the turn moves past it. The identity check on
+        # non_interactive matters for both: a permissive fixture's __getattr__ must not read as an
+        # interactive session, and must not make `ask_open_question` look implemented either.
         if self.depth > 0 or getattr(self.ui, "non_interactive", False) is True:
             schemas = [tool for tool in schemas
-                       if tool.get("function", {}).get("name") != "propose_options"]
+                       if tool.get("function", {}).get("name") not in ("propose_options", "ask_user")]
+        if not callable(getattr(type(self.ui), "ask_open_question", None)):
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "ask_user"]
         if profile != "full":
             active = set(getattr(self, "_active_tool_intents", set()))
             # Only the adaptive catalog decides a tool's existence from the prompt's wording. It
@@ -6339,6 +6346,107 @@ class Agent(GoalLifecycle):
                 and all(isinstance(row, dict) and isinstance(row.get("content"), str)
                         and isinstance(row.get("status"), str) for row in rows))
 
+    # ---- open questions (ask_user) ------------------------------------------------------------
+    # A question the turn does not stop for. propose_options blocks by construction -- it is in
+    # _WAITS_ON_USER_CALLS, its executor parks on the frontend, and a dismissal ends the batch --
+    # and the whole point of this one is that work carries on while the user reads it.
+    #
+    # The answer comes back through steering, because an answer IS a mid-turn user message: it
+    # folds into context at the next tool-loop boundary, renders as one bubble in every frontend,
+    # and survives reload, resume and compaction without a new transcript concept.
+    MAX_OPEN_ASKS = 2
+
+    ASK_DELIVERED = ("Your question is on the user's screen. This did NOT pause the turn and there "
+                     "is no answer yet: carry on with every part of the task that does not depend "
+                     "on it, do not guess the answer, and do not ask it again. If they reply it "
+                     "arrives as an ordinary message quoting your question.")
+    ASK_TOO_MANY = ("error: you already have {n} questions open and unanswered. Wait for those, or "
+                    "proceed on your own assumption and say so.")
+
+    def _open_asks(self) -> dict:
+        table = getattr(self, "_open_ask_table", None)
+        if table is None:
+            table = self._open_ask_table = {}
+        return table
+
+    def _ask_user(self, call_id, args, secrets) -> str:
+        """The ask_user executor: hand the question to the frontend and return at once."""
+        from .questions import UNAVAILABLE_RESULT, cut_cells, one_line
+        self.ui.tool_call("ask_user", redact_value(args, secrets), call_id)
+
+        def finish(out: str) -> str:
+            self.ui.tool_result("ask_user", out, call_id)
+            return out
+
+        safe = redact_value(args, secrets) if isinstance(args, dict) else {}
+        question = one_line(cut_cells(str(safe.get("question") or "").strip(), 2000))
+        if not question:
+            return finish("error: give a question to ask.")
+        context = one_line(cut_cells(str(safe.get("context") or "").strip(), 400))
+        raw = safe.get("suggestions")
+        cleaned = [one_line(cut_cells(str(item), 120)) for item in raw] if isinstance(raw, list) else []
+        suggestions = [item for item in cleaned if item][:4]   # drop blanks, THEN take four
+
+        show = getattr(self.ui, "ask_open_question", None)
+        if self.depth > 0 or not callable(show):
+            return finish(UNAVAILABLE_RESULT)
+
+        open_now = self._open_asks()
+        if len(open_now) >= self.MAX_OPEN_ASKS:
+            return finish(self.ASK_TOO_MANY.format(n=len(open_now)))
+
+        ask_id = f"ask{uuid.uuid4().hex[:12]}"
+        try:
+            delivered = show(ask_id, question, context, suggestions, call_id)
+        except Exception:
+            delivered = False
+        if not delivered:
+            return finish(UNAVAILABLE_RESULT)
+        open_now[ask_id] = {"question": question, "call_id": call_id}
+        return finish(self.ASK_DELIVERED)
+
+    def resolve_open_ask(self, ask_id: str, outcome: str, answer: str = "") -> bool:
+        """Close one open question. Returns False for an id nobody is waiting on.
+
+        Every outcome tells the model something. Codex's Skip emits nothing, which leaves a model
+        believing an answer may still arrive -- or quietly picking one without saying it guessed.
+        """
+        asks = self._open_asks()
+        record = asks.get(str(ask_id or ""))
+        if record is None:
+            return False
+        question = record["question"]
+        # Steer FIRST, and only close the question if the answer actually landed. steer() refuses
+        # once the turn has closed its steering window (the final answer is streaming) or the
+        # steer budget is spent. Closing first and steering second meant a refused answer vanished
+        # completely: the record popped, the card removed by ask_resolved, and the text nowhere --
+        # not in the model's context, not in the transcript, not on screen.
+        if outcome == "answered":
+            text = str(answer or "").strip()
+            # The request_id matters: _drain_steer only suppresses its own "\u21b3 steering:" line
+            # for messages the frontend was told about by id. Without one the editor drew the
+            # answer as a bubble AND the agent echoed the question under it, clipped at 80 chars.
+            if not text or not self.steer(f"> {question}\n\n{text}",
+                                          request_id=f"ask-{ask_id}"):
+                return False                    # still open; the caller falls back to a new turn
+        asks.pop(str(ask_id or ""), None)
+        emit = getattr(self.ui, "ask_resolved", None)
+        if callable(emit):
+            try:
+                emit(ask_id, outcome, question, answer, record.get("call_id"))
+            except Exception:
+                pass
+        if outcome in ("skipped", "expired"):
+            went = "skipped it" if outcome == "skipped" else "never answered it"
+            self.steer(f"[DGC] You asked: \"{question}\" - the user {went}. Decide it yourself and "
+                       f"say what you assumed; do not ask it again this turn.")
+        return True
+
+    def expire_open_asks(self) -> None:
+        """At turn end an unanswered question is resolved, never silently forgotten."""
+        for ask_id in list(self._open_asks()):
+            self.resolve_open_ask(ask_id, "expired")
+
     def _ask_questions(self, call_id, args, secrets) -> str:
         """The propose_options executor: normalise, ask the frontend, report the outcome.
 
@@ -6468,6 +6576,9 @@ class Agent(GoalLifecycle):
 
         if name == "propose_options":
             return self._ask_questions(call_id, args, secrets)
+
+        if name == "ask_user":
+            return self._ask_user(call_id, args, secrets)
 
         if name == "update_goal":
             status = str(args.get("status", "")).strip().lower()

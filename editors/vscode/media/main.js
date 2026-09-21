@@ -694,6 +694,7 @@
       }
       const role = entry.node.querySelector(".role");
       if (role) role.textContent = label;
+      entry.node.dataset.steer = steering ? "pending" : "queued";
       if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
       if (steering) { entry.acknowledged = true; pendingPrompts.set(id, entry); }
       else { pendingPrompts.delete(id); queuedPrompts.set(id, entry); }
@@ -3025,9 +3026,15 @@
         const pending = pendingPrompts.get(ev.request_id);
         if (ev.state === "steered") {
           if (pending) pending.acknowledged = true;
-          if (pending?.node) pending.node.querySelector(".role").textContent = "you · steering pending";
+          if (pending?.node) {
+            pending.node.querySelector(".role").textContent = "you · steering pending";
+            pending.node.dataset.steer = "pending";
+          }
         } else {
-          if (ev.state === "queued" && pending?.node) pending.node.querySelector(".role").textContent = "you · queued";
+          if (ev.state === "queued" && pending?.node) {
+            pending.node.querySelector(".role").textContent = "you · queued";
+            pending.node.dataset.steer = "queued";
+          }
           if (ev.state === "queued" && pending) queuedPrompts.set(ev.request_id, pending);
           pendingPrompts.delete(ev.request_id);
         }
@@ -3042,6 +3049,11 @@
         } else {
           if (pending?.node) {
             pending.node.querySelector(".role").textContent = ev.state === "applied" ? "you · steering" : "you · queued";
+            // .role is screen-reader-only, so the relabel above is invisible. The agent stops
+            // printing its own "steering:" line for a frontend that reports which messages
+            // landed (agent.py, _drain_steer), which left a sighted user with no sign at all
+            // that the model had picked the message up.
+            pending.node.dataset.steer = ev.state === "applied" ? "applied" : "queued";
             if (ev.state === "applied" && turn) placeSteering(pending.node);
           }
           // Unconsumed steering is spliced back in at the HEAD of the backend's queue.
@@ -3247,6 +3259,15 @@
         ensureTurn();
         imageViewerAttention("options_request");
         showAskCard(ev);
+        break;
+      }
+      case "ask_request": {
+        ensureTurn();
+        renderOpenAsk(ev);
+        break;
+      }
+      case "ask_resolved": {
+        settleOpenAsk(ev);
         break;
       }
       case "options_resolved": {
@@ -4832,6 +4853,7 @@
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
+      node.dataset.steer = "applied";        // it is in the transcript, so the model did read it
       const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text, parsed.attachments);
@@ -7377,6 +7399,144 @@
       return `<li><div class="asked-q">${esc(q.question)}</div><div class="asked-a">${answer}</div></li>`;
     }).join("")}</ol>`;
   }
+  // ---- an open question ------------------------------------------------------------------------
+  // The turn did not stop for this, so the card lives in the transcript rather than docking over
+  // the composer the way the picker does. After a while unanswered it folds to a single line you
+  // can click to bring it back -- the behaviour Codex has, minus the part where the question then
+  // evaporates with no record that it was ever asked.
+  const ASK_FOLD_MS = 30000;
+  const openAsks = new Map();
+
+  function sendOpenAsk(ask) {
+    const text = String(ask.input.value || "").trim();
+    if (!text) { ask.input.focus(); return; }
+    const requestId = `ask-${ask.id}`;
+    // Draw the answer as a message of yours and register it, exactly as the composer does. The
+    // card is removed the moment the backend confirms the answer, and nothing used to take its
+    // place: the only trace of what you said was the agent's own "steering:" line, which echoes
+    // the QUESTION, clipped at 80 characters, and never shows the answer at all. Registering it
+    // is what lets steering_update mark it "steered -- the model has read this", and what lets a
+    // refused answer (command_rejected -> rejectPrompt) come back instead of sitting there.
+    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    const bubble = el("div", "bubble");
+    // The question goes in the bubble because the card that asked it is about to disappear.
+    bubble.appendChild(el("p", "answered-q", esc(ask.question)));
+    bubble.appendChild(el("div", "prompt-text", esc(text)));
+    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
+    vscode.postMessage({ type: "prompt", text, requestId,
+                         answers: [{ ask_id: ask.id, question: ask.question }] });
+    ask.row.dataset.state = "sent";
+    ask.input.disabled = true;
+    scroll();
+  }
+
+  function skipOpenAsk(ask) {
+    vscode.postMessage({ type: "askSkip", askId: ask.id });
+    ask.row.dataset.state = "sent";
+  }
+
+  function foldAsk(ask) {
+    if (ask.row.dataset.state !== "open") return;
+    ask.row.dataset.state = "folded";
+    clearTimeout(ask.timer);
+  }
+
+  function unfoldAsk(ask) {
+    ask.row.dataset.state = "open";
+    clearTimeout(ask.timer);            // it was brought back on purpose; do not fold it again
+    ask.input.focus();
+  }
+
+  function renderOpenAsk(ev) {
+    const id = String(ev.ask_id || "");
+    if (!id || openAsks.has(id)) return;
+    ensureTurn();
+    const row = el("div", "open-ask");
+    row.dataset.state = "open";
+    row.dataset.askId = id;
+
+    const folded = el("button", "open-ask-folded", `${icon("circle-help")}<span>Answer question</span>`);
+    folded.type = "button";
+    folded.title = String(ev.question || "");
+
+    const body = el("div", "open-ask-body");
+    body.appendChild(el("p", "open-ask-q", esc(String(ev.question || ""))));
+    if (ev.context) body.appendChild(el("p", "open-ask-context", esc(String(ev.context))));
+
+    const input = el("input", "open-ask-input");
+    input.type = "text";
+    input.placeholder = "Answer, or skip";
+    input.setAttribute("aria-label", String(ev.question || "Answer the question"));
+
+    const ask = { id, question: String(ev.question || ""), row, input, timer: 0 };
+
+    const chips = el("div", "open-ask-chips");
+    for (const suggestion of (Array.isArray(ev.suggestions) ? ev.suggestions : []).slice(0, 4)) {
+      const chip = el("button", "open-ask-chip", esc(String(suggestion)));
+      chip.type = "button";
+      chip.onclick = () => { input.value = String(suggestion); sendOpenAsk(ask); };
+      chips.appendChild(chip);
+    }
+    if (chips.children.length) body.appendChild(chips);
+    body.appendChild(input);
+
+    const actions = el("div", "open-ask-actions");
+    const send = el("button", "open-ask-send", "Send");
+    send.type = "button"; send.onclick = () => sendOpenAsk(ask);
+    const skip = el("button", "open-ask-skip", "Skip");
+    skip.type = "button"; skip.onclick = () => skipOpenAsk(ask);
+    actions.append(skip, send);
+    body.appendChild(actions);
+
+    input.onkeydown = (event) => {
+      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendOpenAsk(ask); }
+      if (event.key === "Escape") { event.preventDefault(); foldAsk(ask); }
+    };
+    folded.onclick = () => unfoldAsk(ask);
+    // Typing is a commitment: once there are words in the box it stops folding under you.
+    input.oninput = () => clearTimeout(ask.timer);
+
+    row.append(folded, body);
+    openAsks.set(id, ask);
+    turn.block.appendChild(row);
+    ask.timer = setTimeout(() => foldAsk(ask), ASK_FOLD_MS);
+    scroll();
+  }
+
+  function settleOpenAsk(ev) {
+    const ask = openAsks.get(String(ev.ask_id || ""));
+    if (!ask) return;
+    clearTimeout(ask.timer);
+    openAsks.delete(ask.id);
+    // An answered question already shows as the user's own bubble, quoted, so the card goes. The
+    // other outcomes leave one quiet line: a question that was asked and not answered is part of
+    // what happened, and deleting it would lose that.
+    if (ev.outcome === "answered") {
+      ask.row.remove();
+      // Settle the bubble the answer left behind. ask_resolved is the ONLY event the backend
+      // sends for an answer -- resolve_open_ask steers it and returns early, so it never enters
+      // the steering bookkeeping and no steering_update ever arrives for this id. The event is
+      // emitted only after the steer was accepted into the running turn, so by the time it gets
+      // here the model has the answer; placing the bubble now puts it where it was actually said,
+      // instead of leaving it stranded under the finished reply.
+      const pending = pendingPrompts.get(`ask-${ask.id}`);
+      if (pending?.node) {
+        pending.node.querySelector(".role").textContent = "you · steering";
+        pending.node.dataset.steer = "applied";
+        if (turn) placeSteering(pending.node);
+      }
+      pendingPrompts.delete(`ask-${ask.id}`);
+      return;
+    }
+    ask.row.dataset.state = "settled";
+    ask.row.dataset.outcome = String(ev.outcome || "");
+    const said = ev.outcome === "skipped" ? "Skipped" : ev.outcome === "expired" ? "Not answered"
+      : "Could not be asked";
+    ask.row.textContent = "";
+    ask.row.appendChild(el("span", "open-ask-settled", `${said}: ${esc(ask.question)}`));
+  }
+
   function renderAsked(ev) {
     let card = askToolCard(ev.call_id);
     if (!card) {

@@ -316,6 +316,12 @@ class ResolverTableTests(unittest.TestCase):
             self.assertFalse(R.private_host(public), public)
 
     def test_r1_r2_guard_downgrades_and_logs_without_urls(self):
+        # The warning fires once per (rule, host class, channel) FOR THE LIFE OF THE PROCESS, which
+        # is the behaviour this test is checking -- so it only means anything from an empty cache.
+        # Run inside the full suite, another test reached these keys first and this one saw no logs
+        # at all: the assertion depended on test order, and passed or failed accordingly.
+        R._LOGGED.clear()
+        self.addCleanup(R._LOGGED.clear)
         with self.assertLogs("dgc.reasoning", level="WARNING") as logs:
             self.assertEqual(R.enforce_rules("summarized", "anthropic", private=True, channel="anthropic.thinking",
                                              klass="private"), ("unknown", ""))

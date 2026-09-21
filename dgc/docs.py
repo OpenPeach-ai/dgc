@@ -113,6 +113,28 @@ the current turn; press **Enter** again on a new prompt to queue it.
 docs.vibedgc.com). `#a fact` appends to project memory — see **Memory**. `@path`
 attaches one file; `$skill` applies a workflow.
 
+### Attaching a document
+
+`@path` also takes a document, not only a text file: **.docx**, **.xlsx**, **.pptx**, **.odt**,
+**.ods**, **.odp**, **.rtf** and **.pdf**. DGC reads the text out of it locally and hands that to
+the model. Nothing is uploaded, no office application is launched, no macro runs, no embedded link
+is followed, and the file is never written back.
+
+What the model gets is **extracted text**, and the attachment says so: layout, images, charts and
+anything the extractor could not reach are simply absent, so an answer about a document's
+appearance is not something it can give you. Spreadsheets come through as their cell values,
+slide decks as their text and speaker notes.
+
+Limits are the point of the feature, not an afterthought. A document is read up to 16 MB off disk
+and contributes the same bounded share of the prompt a text attachment does, so a long report is
+truncated rather than allowed to swallow the context. Encrypted files are refused — including a
+PDF with an empty user password — as are corrupt ones and archives whose structure looks unsafe;
+each refusal names the problem and what to do about it, and the rest of your message still goes
+through. Legacy **.doc/.xls/.ppt** are refused with the remedy: save them as the modern format.
+
+PDFs need `pypdf`, which DGC installs with it. If it is missing, a PDF is refused by name instead
+of being read as noise; every other format above needs nothing beyond DGC itself.
+
 ## How DGC writes back
 
 Answers are plain professional text. DGC does not decorate them with emoji or
@@ -149,6 +171,11 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 Unconsumed terminal follow-ups remain queued after interruption; a new prompt continues the queue.
 In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
+
+A message sent mid-turn says what became of it, in a muted line under the message itself:
+*steering …* while the backend holds it, *queued for the next turn* if the turn would not take it,
+and *steered — the model has read this* at the moment it actually reaches the model. Until then
+the only sign was a screen-reader-only label, so a sighted user had none.
 
 ## Files pane (`/files`)
 - **j / k · ↑ ↓** move · **h / l · ← →** parent / enter · **gg / G** top / bottom · **H / L** back / forward
@@ -998,6 +1025,11 @@ choosing.
 
 - `read_file` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` — read, overwrite,
   exact-string edit, several edits to one file, or an atomic unified diff.
+- `read_file` on a **document** (.docx, .xlsx, .pptx, .odt, .ods, .odp, .rtf, .pdf) returns the
+  text extracted from it, with a note saying so — layout, images and embedded objects are not
+  there, and an answer about how a document looks cannot come from this. Line numbers, `offset`
+  and `limit` behave as they do for any other file. See **Attaching a document**. Any other
+  binary is still refused rather than decoded into noise.
 - `view_image` — look at a PNG/JPEG/GIF/WebP in the workspace (see **Viewed images**). For a model
   without vision, a configured vision model looks and answers its `question` (see **Sub-agents**).
 - `glob` · `grep` — find files; search contents.
@@ -1696,6 +1728,12 @@ CLI; the extension updates through your editor.
   long file cannot push the answer off the screen.
 - **Tables**, also with a Copy button, which gives you the model's Markdown rather than the
   rendered DOM.
+- **Quoted blocks** — a drafted mail, a message to forward — drawn as a block of their own with
+  room at the top and bottom, and a Copy button that gives you the text without the `>` markers
+  running down its left edge. A quote nested inside another has no button of its own, because it
+  is part of what the outer one already copies.
+- **Commentary** — the short notes a model writes between tool calls — has its own Copy on hover,
+  so the most quotable line in a turn is no longer the one line you could not lift.
 - **Links**, marked with where they point — GitHub, the Marketplace, a docs site, a file in this
   workspace. A file link opens it at the right line. Nothing is fetched to work this out, so a
   URL a model mentions is never disclosed to anyone by the act of rendering it.
@@ -1709,7 +1747,9 @@ DGC ends an answer with what it changed and what you can do about it.
 - **Undo** puts those files back as they were before the turn and rewinds the conversation with
   them. It finds the recovery point by the prompt that opened it and refuses if it can no longer
   identify it, because an undo that guesses loses work you did not ask it to.
-- **Copy** takes the whole answer as Markdown.
+- **Copy** takes the whole answer as Markdown. A tool row that ran a shell command (`bash`,
+  its output, a monitor) carries its own Copy on hover, which gives you the command verbatim;
+  copying does not open the card.
 - **Tasks** — the checklist the model keeps sits above the composer and updates as it works:
   □ pending · ▶ in progress · ✓ done · ⊘ blocked. It comes back when you reopen the session;
   **Clear** drops it (the terminal's `/todo clear`). Finishing with open tasks is reported, not
@@ -1828,6 +1868,26 @@ not mock it in Markdown or ask you to reply with a number. In full-auto it is wi
 one round has been asked, so the rest of the turn (a whole goal run) goes on unattended. Only text
 you type counts: attached files, editor context, and a goal's objective never re-open the picker. A
 sentence that describes software ("the dropdown should let me choose a region") is not an ask.
+
+## A question that does not stop the turn
+
+The picker above is a decision: DGC stops and waits, because it cannot sensibly carry on without
+your answer. An **open question** is the other case — the model needs a fact it has no way to
+work out, like which of your machines you meant or what to call something, and there is plenty of
+the task it can get on with meanwhile. So it asks, and keeps working.
+
+It arrives as a card in the conversation rather than over the composer. Type an answer and press
+Enter, take one of the suggested answers if any fit, or **Skip**. Your answer is quoted back with
+the question above it, as an ordinary message, so a reopened session shows it the way it happened.
+
+Leave it and it folds to a single line reading **Answer question**; click that whenever you like
+and it opens again. Nothing is lost by ignoring it: a question still unanswered when the turn ends
+is recorded as unanswered, and the model is told so it decides for itself and says what it
+assumed. Skip does the same immediately.
+
+The model may have at most two open at once, it is never offered in a sub-agent or in a
+non-interactive `dgc -p` run, and asking a question never raises a permission prompt — nothing is
+changed by asking.
 """.strip()),
     ("Looking at a page", "drive a real browser to see a deployed or local site", """
 # Looking at a page
