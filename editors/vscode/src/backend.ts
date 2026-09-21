@@ -52,7 +52,11 @@ const REQUEST_RESPONSES = new Map<string, string>([
   ["mcp_input_request", "mcp_input_response"],
 ]);
 const RESPONSE_COMMANDS = new Set(REQUEST_RESPONSES.values());
-const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt"]);
+const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt", "ping"]);
+
+// How often we tell the backend this window still exists. Comfortably inside the backend's own
+// patience (15 minutes), so a missed tick or a slow machine never reads as a closed window.
+const LIVENESS_PING_MS = 60_000;
 const QUEUED_TURN_COMMANDS = new Set(["prompt", "slash_command"]);
 
 /**
@@ -222,6 +226,7 @@ export class DgcBackend extends EventEmitter {
         return;                                  // a launch failure, or already reported
       }
       this.life.delete(child);
+      this.stopLivenessPings();
       const info: ChildExitInfo = {
         pid: record.pid, uptimeMs: Date.now() - record.startedAt, cause: record.cause,
         transport: record.transport, framesWritten: record.framesWritten, lastFrame: record.lastFrame,
@@ -373,6 +378,14 @@ export class DgcBackend extends EventEmitter {
           }
         }
         this.ready = true;
+        // An editor that goes away without closing its backend's stdin -- a reload that leaves the
+        // old extension host running -- used to strand the session lease for as long as that host
+        // lived. Saying "still here" on a timer lets the backend tell a closed window from a
+        // thinking user. Gated on the capability: `dgc.command` can point at any CLI build, and an
+        // older one would only answer with command_rejected.
+        if ((ev as any).capabilities?.editor_liveness) {
+          this.startLivenessPings(this.proc);
+        }
         // Notify the panel first. Its synchronous ready handler sends workspace roots and
         // begins loading SecretStorage-backed settings. User commands remain held until the
         // panel explicitly releases the handshake.
@@ -572,6 +585,29 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */
+  private livenessTimer: ReturnType<typeof setInterval> | undefined;
+
+  private startLivenessPings(child: any): void {
+    this.stopLivenessPings();
+    this.livenessTimer = setInterval(() => {
+      // Only for the child we started this for; a replaced backend gets its own timer.
+      if (this.proc !== child) {
+        this.stopLivenessPings();
+        return;
+      }
+      this.send({ type: "ping" });
+    }, LIVENESS_PING_MS);
+    // Never hold the extension host open on our account.
+    (this.livenessTimer as any)?.unref?.();
+  }
+
+  private stopLivenessPings(): void {
+    if (this.livenessTimer !== undefined) {
+      clearInterval(this.livenessTimer);
+      this.livenessTimer = undefined;
+    }
+  }
+
   send(cmd: DgcCommand): boolean {
     const item = this.serialize(cmd);
     if (!item) {

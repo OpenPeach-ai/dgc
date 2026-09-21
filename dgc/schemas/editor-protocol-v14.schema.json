@@ -4045,6 +4045,18 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "ping"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "set_mode"
             },
             "mode": {

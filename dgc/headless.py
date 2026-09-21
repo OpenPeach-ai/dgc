@@ -491,6 +491,121 @@ _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "think
                    "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
 
 
+# How long a backend keeps running with no word from its editor before it decides the window is
+# gone. Only ever applied to an editor that pings in the first place, and never while there is
+# work in flight.
+#
+# This exists because a backend cannot tell "my window closed" from "my user is thinking". Its
+# stdin stays open as long as the *process* that spawned it lives, and an editor can leave that
+# process behind: a Cursor reload on 192.168.1.111 left an extension host alive for 25 hours with
+# its `dgc serve` child still holding the session lease, so every new window was refused with
+# "this session has an active turn in another DGC process" and no way out. The parent was alive,
+# so every liveness check we had said everything was fine.
+ABANDONED_AFTER_S = 15 * 60.0
+ABANDON_CHECK_EVERY_S = 30.0
+
+
+class _EditorLiveness:
+    """Ends the backend when the editor that owns it has plainly gone away.
+
+    Armed only by an editor that pings: an older build never sends one, so it keeps the previous
+    behaviour of living until its stdin closes. While armed, a window that has said nothing for
+    ``ABANDONED_AFTER_S`` is treated as closed -- but only if nothing is in flight. Anything the
+    user would be sad to lose keeps the backend alive indefinitely: a running turn, an armed
+    monitor, a detached sub-agent, an open goal.
+
+    Ending is deliberately done by closing the command stream rather than by signalling ourselves.
+    The read loop already treats that as end of input, so the usual shutdown runs, the transcript
+    is persisted and the session lease is released -- exactly as if the editor had gone.
+    """
+
+    def __init__(self, backend, stream, *, after: float = ABANDONED_AFTER_S,
+                 every: float = ABANDON_CHECK_EVERY_S) -> None:
+        self.backend = backend
+        self.stream = stream
+        self.after = after
+        self.every = every
+        self.armed = False
+        self.abandoned = False
+        self.idle_for = 0.0
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+
+    def pinged(self) -> None:
+        with self._lock:
+            self.armed = True
+            self._last = time.monotonic()
+
+    def saw_command(self) -> None:
+        """Any command at all counts as the editor being alive, not only a ping."""
+        with self._lock:
+            self._last = time.monotonic()
+
+    def working(self) -> str:
+        """Name the work that should keep this backend alive, or '' when there is none."""
+        if _safe_busy(self.backend):
+            return "a turn is running"
+        agent = getattr(self.backend, "agent", None)
+        try:
+            monitors = getattr(agent, "monitors", None)
+            if monitors is not None and (monitors.running() or monitors.pending_count()):
+                return "background monitors are live"
+        except Exception:
+            return "monitor state is unreadable"      # fail safe: stay alive rather than guess
+        try:
+            if getattr(agent, "_detached_jobs", None):
+                return "a detached sub-agent is still working"
+        except Exception:
+            return "sub-agent state is unreadable"
+        try:
+            if getattr(agent, "goal", ""):
+                return "a goal is still open"
+        except Exception:
+            return "goal state is unreadable"
+        return ""
+
+    def _expired(self) -> bool:
+        with self._lock:
+            if not self.armed:
+                return False
+            self.idle_for = time.monotonic() - self._last
+            return self.idle_for > self.after
+
+    def check(self) -> bool:
+        """One evaluation. Returns True when it ended the backend, for the tests to drive."""
+        if self.abandoned or not self._expired():
+            return False
+        if self.working():
+            return False
+        self.abandoned = True
+        try:
+            self.stream.close()          # the read loop treats this as end of input
+        except Exception:
+            pass
+        return True
+
+    def run(self) -> None:
+        while not self._stop.wait(self.every):
+            try:
+                if self.check():
+                    return
+            except Exception:
+                return                   # a watchdog must never be the thing that kills a session
+
+    def start(self) -> threading.Thread:
+        thread = threading.Thread(target=self.run, name="editor-liveness", daemon=True)
+        thread.start()
+        return thread
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def describe(self) -> str:
+        return (f"no editor traffic for {self.idle_for:.0f}s "
+                f"(gives up after {self.after:.0f}s)")
+
+
 def _safe_busy(backend) -> bool:
     """Is a turn in flight? Never let a status read break the log line that reports it."""
     try:
@@ -1301,6 +1416,7 @@ class Backend:
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
+                          "editor_liveness": True,
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability()},
             model=self.config.model, mode=self.agent.mode,
@@ -3376,6 +3492,14 @@ class Backend:
             self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
                                                   "content": cmd.get("content")})
 
+        elif t == "ping":
+            # No reply: the editor is telling us it is still there, not asking anything. Seeing one
+            # ping is also what arms the abandonment watchdog -- an editor that never pings is an
+            # older build, and must keep the old behaviour of living until its stdin closes.
+            watch = getattr(self, "_editor_liveness", None)
+            if watch is not None:
+                watch.pinged()
+
         elif t in ("cancel", "interrupt"):
             with self._turn_state_lock():
                 self.agent.cancelled.set()
@@ -4830,6 +4954,7 @@ def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
 SHUTDOWN_GRACE_S = 20.0
 
 
+
 def _end_line(crash_log, line: str) -> None:
     """The loop's last word goes to serve.log AND stderr.
 
@@ -4870,6 +4995,7 @@ def serve(config: Config) -> None:
     commands = 0
     last_command = ""
     shutdown_requested = False
+    liveness = None                        # created once the backend is up; the finally checks it
     end_cause = "the serve loop raised"
     # A SIGTERM taken at its default disposition kills us between two bytecodes: the `finally`
     # below never runs, Backend.close() never runs, and a goal that was running is left claiming
@@ -4905,6 +5031,9 @@ def serve(config: Config) -> None:
         # Inside the try on purpose: start() is where the first model metadata and context
         # estimates happen, and a parent that gives up during it must still reach the finally.
         backend.start()
+        liveness = _EditorLiveness(backend, command_stream)
+        backend._editor_liveness = liveness
+        liveness.start()
         for line, frame_problem in _command_lines(command_stream, pipe_watch):
             if frame_problem:
                 backend.em.emit("error", message=frame_problem)
@@ -4921,6 +5050,7 @@ def serve(config: Config) -> None:
                 backend.em.emit("error", message="command must be a JSON object")
                 continue
             commands += 1
+            liveness.saw_command()
             last_command = str(cmd.get("type", "?"))[:64]   # a log line, not a payload channel
             try:
                 backend.dispatch(cmd)
@@ -4952,6 +5082,9 @@ def serve(config: Config) -> None:
     else:
         if shutdown_requested:
             cause = "the editor asked us to shut down"
+        elif liveness is not None and liveness.abandoned:
+            # Say what actually happened. "stdin closed" would be true and useless: we closed it.
+            cause = f"the editor stopped talking to us: {liveness.describe()}"
         elif pipe_watch.gave_up:
             cause = (f"the command pipe kept turning non-blocking ({pipe_watch.restores} restores); "
                      "stopped reading")
@@ -4976,6 +5109,8 @@ def serve(config: Config) -> None:
     finally:
         # An editor asking us to stop is waiting on us; a pipe that closed under a running turn is
         # not, and neither is a signal. Only those get the grace period.
+        if liveness is not None:
+            liveness.stop()
         grace = 0.0 if shutdown_requested else SHUTDOWN_GRACE_S
         if grace > 0 and _safe_busy(backend):
             # If the editor is still there it should hear this from us, not infer it from silence.

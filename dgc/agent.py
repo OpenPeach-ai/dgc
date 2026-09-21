@@ -1024,6 +1024,16 @@ def _mechanical_compaction_brief(prior: str, transcript_lines: list[str]) -> str
         _COMPACT_SUMMARY_CHARS)
 
 
+# A refusal with no way out is what turned a stale lease into a dead end for 25 hours: the
+# founder's reload left a backend holding the session and every new window was told only to
+# "wait". Say what will actually happen and what can be done meanwhile.
+_HELD_SESSION_REMEDY = (
+    "Another window may still hold it; a backend whose editor has gone releases the session "
+    "by itself within about 15 minutes. To carry on now, start a new session or close the "
+    "other DGC window."
+)
+
+
 @dataclass
 class AgentContext:
     project_root: Path
@@ -3404,8 +3414,9 @@ class Agent(GoalLifecycle):
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
                 self._last_turn_error = self._last_persist_error = (
-                    "This session has an active turn in another DGC process. Wait for it to finish "
-                    "or start a new session; no model request or workspace action was started.")
+                    "This session has an active turn in another DGC process. "
+                    + _HELD_SESSION_REMEDY
+                    + " No model request or workspace action was started.")
                 self.ui.error(self._last_turn_error)
                 return False
             if self.session_file:
@@ -3692,8 +3703,9 @@ class Agent(GoalLifecycle):
         self._notes_reminded = set()   # a reminder is worth saying once per turn
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
-                message = ("This session has an active turn in another DGC process. Wait for it "
-                           "to finish or start a new session; no delegated process was started.")
+                message = ("This session has an active turn in another DGC process. "
+                           + _HELD_SESSION_REMEDY
+                           + " No delegated process was started.")
                 self._last_turn_error = self._last_persist_error = message
                 self.ui.error(message)
                 return {"ok": False, "rc": None, "text": "", "error": message,
