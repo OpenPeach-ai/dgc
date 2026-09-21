@@ -742,6 +742,10 @@
   // on focus as well as hover. `title` stays in the DOM as the source of truth — it is the
   // accessible fallback and what the tests read — and is lifted off only while ours is showing,
   // so a control never explains itself twice.
+  // A hover label should feel deliberate, not twitchy: it waits long enough that passing the
+  // pointer over a row does not summon one, and short enough that asking for one is not a chore.
+  const TIP_DELAY_MS = 700;
+  const TIP_WARM_MS = 300;
   const hoverTip = (() => {
     const node = el("div", "tip");
     node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
@@ -782,8 +786,13 @@
       if (!label || el0.closest("[hidden]")) return;
       hide();
       target = el0; native = el0.getAttribute("title") || "";
-      // Moving to a neighbouring control should not make you wait again.
-      const delay = instant || Date.now() - warm < 500 ? 0 : 380;
+      // Moving to a neighbouring control should not make you wait again -- but the window in
+      // which that holds is short, or scanning a toolbar makes every label feel instant.
+      //
+      // Both numbers are Codex's, read from its shipped webview bundle (delayDuration 700,
+      // skipDelayDuration 300). Ours were 380 and 500: twice as eager to appear, and staying in
+      // the instant mode nearly twice as long.
+      const delay = instant || Date.now() - warm < TIP_WARM_MS ? 0 : TIP_DELAY_MS;
       timer = setTimeout(() => {
         if (target !== el0 || !el0.isConnected) return;
         if (native) el0.removeAttribute("title");
@@ -1391,9 +1400,10 @@
     }
     // After a turn ends there is no third state left: every block is either the answer or the
     // commentary around it. A bare `.text` was how a gate-round answer came to look finished.
-    for (const n of nodes) if (n !== answer) n.classList.add("commentary");
+    for (const n of nodes) if (n !== answer) { n.classList.add("commentary"); commentaryCopy(n); }
     if (answer) {
       answer.classList.remove("commentary");        // the stated id outranks any earlier guess
+      answer.querySelector(":scope > .commentary-actions")?.remove();
       const complete = reason === "completed";
       if (complete) answer.classList.add("final");   // unfinished prose is not a final answer
       // The answer gets a block of its own: separated from the work above it, with room to
@@ -1631,6 +1641,26 @@
       }
     };
     return actions;
+  }
+  // The most quotable text in a transcript was the only text you could not copy: response
+  // actions attach to one block per turn, the final answer, while every mid-turn line is
+  // commentary. This gives commentary its own copy, revealed on hover and on keyboard focus --
+  // the button stays in the DOM and is only faded, so it can still be reached with Tab.
+  function commentaryCopy(textEl) {
+    if (!textEl || textEl.querySelector(":scope > .commentary-actions")) return;
+    const actions = el("div", "commentary-actions");
+    const button = el("button", "ract ract-copy",
+                      `<span class="codicon codicon-copy" aria-hidden="true"></span>`);
+    button.type = "button";
+    button.title = "Copy this line";
+    button.setAttribute("aria-label", "Copy this line");
+    actions.appendChild(button);
+    button.onclick = (event) => {
+      event.stopPropagation();          // a commentary block can sit inside a clickable card
+      vscode.postMessage({ type: "copy", text: textEl._markdown || textEl.textContent });
+      flashAction(button, "check");
+    };
+    textEl.appendChild(actions);
   }
   function flashAction(button, icon) {
     const glyph = button.querySelector(".codicon"), was = glyph.className;
@@ -1980,6 +2010,23 @@
     refreshToolGroup(turn.toolGroup);
   }
 
+  // Tools whose summary is a shell command, so there is something worth copying verbatim.
+  const COMMAND_TOOLS = new Set(["bash", "bash_output", "monitor"]);
+
+  function copyCommandBtn(command) {
+    const button = el("button", "ract tool-copy-cmd",
+                      `<span class="codicon codicon-copy" aria-hidden="true"></span>`);
+    button.type = "button";
+    button.title = "Copy command";
+    button.setAttribute("aria-label", "Copy command");
+    button.onclick = (event) => {
+      event.stopPropagation();       // the head is a toggle; copying must not open the card
+      vscode.postMessage({ type: "copy", text: String(command || "") });
+      flashAction(button, "check");
+    };
+    return button;
+  }
+
   function openFileBtn(path, line) {
     const b = el("button", "link open-file", icon("external-link", "xs") + "<span>open</span>"); b.type = "button";
     b.dataset.path = path;
@@ -2043,6 +2090,10 @@
       if (open) imagesOnCardOpen(c);          // images: the chip row is drawn on first open
     };
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
+    // The command a card ran is the thing people most often want out of a transcript -- to paste
+    // into a terminal, or into a bug report. Only for cards whose summary IS a command; a file
+    // path already has Open beside it, and copying a verb would be noise.
+    if (COMMAND_TOOLS.has(canonicalTool(ev.name)) && ev.summary) head.appendChild(copyCommandBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
     // Nothing is running in a replayed turn, so neither the pulse nor the stopwatch is started:
@@ -3017,7 +3068,7 @@
         const closed = turn?.textEl;
         if (closed) {
           if (ev.message_id) closed.dataset.messageId = String(ev.message_id);
-          if (ev.phase === "commentary") closed.classList.add("commentary");
+          if (ev.phase === "commentary") { closed.classList.add("commentary"); commentaryCopy(closed); }
         }
         breakText();
         break;
@@ -4772,7 +4823,7 @@
   // chat's steering rows both come here, so a reload draws the turn the live one drew.
   function placeSteering(node) {
     flushText(); finishReasoning();
-    if (turn.textEl) turn.textEl.classList.add("commentary");
+    if (turn.textEl) { turn.textEl.classList.add("commentary"); commentaryCopy(turn.textEl); }
     turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
     appendTurnContent(node);
   }

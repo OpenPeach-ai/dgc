@@ -29,6 +29,16 @@ function panel(options = {}) {
   return { ...dom, event, step, key, card, open, viewer, win, flush };
 }
 
+
+// The hover delay is a product constant, so poll for the label rather than sleeping past it.
+async function untilShown(win, node, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  while (node.hidden) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the hover label");
+    await new Promise((done) => win.setTimeout(done, 10));
+  }
+}
+
 test("chips sit inside the card that produced them, collapsed shows only a count", () => {
   const p = panel();
   p.step("c1");
@@ -364,7 +374,7 @@ test("no hover label covers the viewer: not on the focus it places, not over the
   assert.ok(tip.hidden, "the programmatic focus on Close raises no label");
   // A label a keyboard user raised on a bar control is taken down when the notice appears.
   p.viewer().querySelector(".iv-zoom").dispatchEvent(new p.win.Event("pointerover", { bubbles: true }));
-  await new Promise((done) => p.win.setTimeout(done, 450));
+  await untilShown(p.win, tip);
   assert.ok(!tip.hidden, "a hover label shows as usual");
   p.event({ type: "permission_request", id: "p1", name: "bash", command: "ls", args: {}, summary: "ls",
             suggested_rule: "Bash", choices: ["once", "always", "deny"] });

@@ -337,6 +337,13 @@ body.vscode-light, body.vscode-high-contrast-light {
 .ract.on { color: var(--accent-text); background: var(--accent-soft); }
 .ract .codicon { font-size: var(--t-sm); }
 
+/* Copy one mid-turn line. Faded rather than absent, so Tab still reaches it and focus reveals
+   it for anyone not using a mouse. */
+.commentary-actions { display: flex; margin-top: var(--sp-1); opacity: 0; transition: opacity .12s; }
+.text.commentary:hover .commentary-actions, .commentary-actions:focus-within { opacity: .62; }
+.text.commentary:hover .commentary-actions:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .commentary-actions { transition: none; } }
+
 /* What this turn changed — the same shell as every other card, with the two actions that
    matter once an answer lands: put it back, or look at it. */
 .turn-summary { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
@@ -469,6 +476,12 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool.no-body .body, .tool.no-body .chev { display: none; }
 .tool.no-body .tool-toggle { cursor: default; padding-left: var(--sp-3); }
 .tool.no-body .open-file { display: none; }
+/* Copy the command this card ran. Faded until the card is hovered or the button itself takes
+   focus, so a transcript is not a wall of buttons, and Tab can still reach it. */
+.tool .tool-copy-cmd { opacity: 0; transition: opacity .12s; flex: none; }
+.tool:hover .tool-copy-cmd, .tool .tool-copy-cmd:focus-visible { opacity: .62; }
+.tool .tool-copy-cmd:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .tool .tool-copy-cmd { transition: none; } }
 .tool.no-body { border-color: var(--border); background: var(--term);
   border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 0; }
 .tool.no-body + .diff { border-top-left-radius: 0; border-top-right-radius: 0; }
