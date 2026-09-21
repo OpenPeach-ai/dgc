@@ -4,6 +4,28 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.42.0 — 2026-09-21
+
+- **Attach a document.** `@path` takes a `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.rtf`
+  or `.pdf`, and `read_file` opens one too — so the model can read a report you point it at
+  instead of refusing it as binary or shelling out to unzip it. The text is extracted locally:
+  nothing is uploaded, no office application is launched, no macro runs, and the file is never
+  written back. What arrives is labelled as an extraction, because layout, images and embedded
+  objects are not in it. PDFs use `pypdf`, which now installs with DGC.
+- **A question that does not stop the turn.** A model can ask you something and carry on working
+  while it waits, instead of stopping the turn to ask. Your answer reaches it mid-turn, and a
+  question nobody answers is reported to the model rather than left hanging.
+- **Two DGCs no longer overwrite each other's settings.** Every DGC on a machine shares
+  `~/.dgc/config.json`, and a save used to write one process's whole copy of it. A model chosen in
+  one window and a thinking level chosen in another both survive now. This mattered most for
+  permission rules: a **deny** added in one window was erased by an unrelated settings change in
+  another.
+- **Images are handed over as files.** Up to 32 MB per prompt with no limit on how many, in place
+  of four images and 2 MB. The old ceilings came from the size of one protocol message, not from
+  anything a model cannot accept.
+- **The model knows what time it is.** The time zone travels with the prompt and the clock rides
+  each turn.
+
 ## 0.41.9 — 2026-09-20
 
 - **A model that goes quiet is reported, not a traceback.** When a model opens a stream and then

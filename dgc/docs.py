@@ -1225,6 +1225,20 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
 
+## Two DGCs, one settings file
+
+Every DGC on a machine reads and writes the same `~/.dgc/config.json`, so two editor windows are
+two processes sharing it. A save writes only what **that** DGC actually changed, merged into
+whatever is on disk at the moment it writes, under a lock: a model chosen in one window and a
+thinking level chosen in the other both survive, and the one that saves second adopts the other's
+change rather than reverting it.
+
+Permission rules merge the same way, rule by rule. This matters most in the direction that
+protects you: a **deny** added in one window used to be erased by an unrelated settings change in
+another, because a save rewrote the whole file from one process's memory. A rule you revoke is
+still revoked — the merge carries removals, not only additions. Rules a *workspace* brings
+(`<project>/.dgc/permissions.json`) stay live-only and are never written into your own config.
+
 ## One session, one window at a time
 
 A session is held by whichever DGC is running a turn in it, so a second window opening the same
@@ -1610,16 +1624,16 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-Current release: **dgc-sdk 0.5.3** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
-package `@vibedgc/sdk` 0.5.3, both tagged [`sdk-v0.5.3`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.5.3)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.41.6** over editor protocol
+Current release: **dgc-sdk 0.6.0** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
+package `@vibedgc/sdk` 0.6.0, both tagged [`sdk-v0.6.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.0)
+(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.42.0** over editor protocol
 v14 and are proven on Linux. The full guide and API reference is
-[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.5.3/docs/SDK.md).
+[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.0/docs/SDK.md).
 
 ## Install
 
 ```
-python3 -m pip install dgc-sdk==0.5.3
+python3 -m pip install dgc-sdk==0.6.0
 ```
 
 That installs `import dgc_sdk`. Do **not** run `pip install dgc`: PyPI's package named `dgc` is a
@@ -1681,7 +1695,7 @@ session that cannot be confined.
 `@vibedgc/sdk` (Node 22+) is attached to the GitHub release; it is not on the npm registry yet.
 
 ```
-npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vibedgc-sdk-0.5.3.tgz
+npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.0/vibedgc-sdk-0.6.0.tgz
 ```
 
 ```

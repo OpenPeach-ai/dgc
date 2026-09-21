@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import contextlib
 import json
 import os
 import re
@@ -271,6 +272,57 @@ def _read_secret_file(path: str | None) -> str | None:
     except OSError:
         pass
     return value
+
+
+@contextlib.contextmanager
+def _config_write_lock():
+    """Serialise config writes across every backend on this machine.
+
+    flock on a sidecar, so the kernel drops it if a holder is killed. A platform without fcntl
+    (Windows) still gets the read-modify-write below, which is what actually preserves another
+    backend's changes; the lock only removes the last, narrow interleaving between reading the
+    file and replacing it.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    path = USER_CONFIG.parent / "config.lock"
+    fd = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        if fd is not None:
+            try: os.close(fd)
+            except OSError: pass
+            fd = None
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try: os.close(fd)
+            except OSError: pass
+
+
+def _read_config_payload(path: Path) -> dict | None:
+    """The config as it is on disk right now, or None when there is nothing usable there.
+
+    None means "write mine whole": either the file does not exist yet, or it is unreadable. It
+    deliberately does NOT mean an empty dict, because merging into {} would silently drop every
+    key another backend had written.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
 
 
 def _write_private_json(path: Path, payload: dict) -> None:
@@ -892,8 +944,46 @@ class Config:
         from .trust import is_trusted
         if is_trusted(self, self.project_root):
             self.apply_project_permissions()
+        # AFTER the migration write, not before. load() mutates `data` as it migrates old keys,
+        # and those mutations are this process's changes: baselining first made them look like no
+        # change at all, so a migrated config was never written. With no baseline yet, save()
+        # writes everything, which is exactly right for a migration.
         if migrated:
             self.save()
+        self._rebaseline()
+
+    # ---- concurrent writers -----------------------------------------------------------------
+    # Several backends share ~/.dgc/config.json: two VS Code windows today, and one per chat once
+    # chats own their own backend. save() used to write this process's whole in-memory copy, so
+    # the last writer won and everything the other had changed since IT loaded was reverted --
+    # including permission rules. A `deny` added in one chat was erased by an unrelated settings
+    # change in another, which fails OPEN.
+    #
+    # The fix is a locked read-modify-write that applies only what THIS process changed. What it
+    # changed is computed against a baseline taken at load, so it catches direct mutation of
+    # `data` and `permissions` too, not only calls to set(). `_explicit_keys` is NOT that baseline:
+    # it is seeded with every key already on disk.
+    def _rebaseline(self) -> None:
+        import copy
+        self._baseline_data = copy.deepcopy(self.data)
+        self._baseline_permissions = copy.deepcopy(self.permissions)
+
+    def _my_changes(self) -> tuple[dict, dict, set]:
+        """(changed keys, permission rules added, permission rules removed) since the baseline."""
+        base = getattr(self, "_baseline_data", None)
+        if base is None:
+            return dict(self.data), {}, set()
+        changed = {k: v for k, v in self.data.items() if k not in base or base[k] != v}
+        dropped = {k for k in base if k not in self.data}
+        base_perms = getattr(self, "_baseline_permissions", None) or {}
+        added: dict[str, list[str]] = {}
+        removed: dict[str, list[str]] = {}
+        for action in ("allow", "ask", "deny"):
+            was = list(base_perms.get(action, []))
+            now = list(self.permissions.get(action, []))
+            added[action] = [r for r in now if r not in was]
+            removed[action] = [r for r in was if r not in now]
+        return changed, {"added": added, "removed": removed}, dropped
 
     def apply_project_permissions(self) -> bool:
         """Merge `<project>/.dgc/permissions.json` into the live rules (never persisted back).
@@ -926,14 +1016,47 @@ class Config:
             if isinstance(rules, list) and rules:
                 self.permissions[action] += [str(rule) for rule in rules]
                 merged = True
+        # These are workspace rules and are "never persisted back" -- so they must not read as
+        # rules THIS process added, or the next save would write them into the user's own config.
+        if merged and getattr(self, "_baseline_permissions", None) is not None:
+            import copy
+            self._baseline_permissions = copy.deepcopy(self.permissions)
         return merged
 
     def save(self) -> None:
         if not self._persist:
             return
-        payload = {k: v for k, v in self.data.items() if k not in SECRET_KEYS}
-        payload["permissions"] = self.permissions
-        _write_private_json(USER_CONFIG, payload)
+        with _config_write_lock():
+            on_disk = _read_config_payload(USER_CONFIG)
+            changed, perms, dropped = self._my_changes()
+            if on_disk is None:
+                payload = {k: v for k, v in self.data.items() if k not in SECRET_KEYS}
+                payload["permissions"] = self.permissions
+            else:
+                payload = {k: v for k, v in on_disk.items() if k != "permissions"}
+                for key in dropped:
+                    payload.pop(key, None)
+                payload.update({k: v for k, v in changed.items() if k not in SECRET_KEYS})
+                for key in SECRET_KEYS:
+                    payload.pop(key, None)
+                base = on_disk.get("permissions")
+                merged = {a: list((base or {}).get(a, [])) for a in ("allow", "ask", "deny")}
+                for action in merged:
+                    for rule in perms.get("removed", {}).get(action, []):
+                        while rule in merged[action]:
+                            merged[action].remove(rule)
+                    for rule in perms.get("added", {}).get(action, []):
+                        if rule not in merged[action]:
+                            merged[action].append(rule)
+                payload["permissions"] = merged
+                # What is on disk is now what this process believes; anything another backend
+                # wrote in the meantime is adopted rather than fought over.
+                for key, value in payload.items():
+                    if key != "permissions" and key not in changed and key not in self._env_secret_keys:
+                        self.data[key] = value
+                self.permissions = {a: list(merged[a]) for a in merged}
+            _write_private_json(USER_CONFIG, payload)
+            self._rebaseline()
         # Environment-provided credentials are ephemeral references. A harmless settings change
         # must never copy a CI/process secret into ~/.dgc/secrets.json. Provider credentials carry
         # the normalized endpoint identity they were issued for, so either half of an interrupted

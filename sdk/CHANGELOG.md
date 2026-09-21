@@ -1,5 +1,22 @@
 # DGC SDK changelog
 
+## 0.6.0 — 2026-09-21
+
+Pairs with CLI 0.42.0 over editor protocol v14. The protocol is unchanged: everything new in this
+CLI is announced through `ready.capabilities`, which an SDK client may ignore.
+
+### Check these when you upgrade
+
+- Nothing in the SDK's own surface changed. The version moves with the CLI line it was released
+  beside, which is what `REQUIRES_CLI` records.
+- A backend of this line reads `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.rtf` and
+  `.pdf` through `read_file`, returning extracted text with a note saying so. A session that
+  passes files to a model should expect text where it previously got
+  `error: … looks like a binary file`.
+- `ready.capabilities` gained `image_spool` (with `image_spool_dir`), `open_asks` and
+  `editor_liveness`. New keys in that object are additive by design; a client that does not read
+  them is unaffected.
+
 ## 0.5.3 — 2026-09-19
 
 Pairs with CLI 0.41.6 over editor protocol v14. A `RuntimePolicy` or a sandbox setting needs CLI

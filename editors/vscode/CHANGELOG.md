@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.27.0 — 2026-09-21
+
+- **A question you can answer without stopping the work.** When the model needs a decision it can
+  ask in the transcript and keep working while it waits: the card shows the question, why it is
+  asking and any choices it offered. Your answer stays in the chat as a message of yours, carrying
+  the question it answers, so nothing is lost when the card goes.
+- **Copy a quoted block.** A drafted mail or a message to forward now reads as a block of its own
+  with room at the top and bottom — it used to sit flush against its own edges — and a Copy button
+  appears on hover, giving you the text without the `>` markers running down its left edge.
+- **Attach a document.** Pick a `.docx`, `.xlsx`, `.pptx`, `.pdf` and the rest with `@`, and DGC
+  reads the text out of it locally. The tool row says plainly that it is extracted text, so you
+  know layout and images are not in what the model saw.
+- **The `@` picker opens on the first `@`.** It used to show nothing until you typed another
+  character, because the file list is fetched the first time it is needed.
+- **A message sent mid-turn says what became of it**, on its own line under the message: steering,
+  queued, or read by the model. It briefly sat inside the message bubble, where a status line read
+  as something you had typed.
+- **Specialists look like what they are doing.** A working specialist's mark glows in its own
+  colour and breathes; a finished one is still. The list keeps the order they were first seen in —
+  the rows used to swap places as the backend reported — and a mark whose artwork will not load
+  falls back to its own coloured shape instead of a broken-image placeholder.
+- **Paste more images.** Up to 32 MB per prompt with no count limit, when the DGC you are talking
+  to supports it.
+
 ## 0.26.8 — 2026-09-20
 
 - **Cleaner activity icons.** Every step, diff, card and notice in the chat now carries a thin outline icon in the same grey as its words, in place of the old `→ ✎ $ ✱ ▸` glyphs and the single wrench. The header above a run of steps shows what it actually did — a book for reading files, a pencil for edits, a terminal for commands — and steps that used to look alike (an update to the checklist, a skill, an image, an MCP call, a sub-agent) each have their own mark. An MCP form request no longer shows a blank square.
