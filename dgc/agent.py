@@ -5016,6 +5016,12 @@ class Agent(GoalLifecycle):
             # the turn it belongs to; attach_turn_clock replaces rather than stacks, so re-sending
             # a recovered prompt can never hand the model a stale one as if it were now.
             prompt_text = clock.attach_turn_clock(user_text, datetime.now())
+            # Who else is working here, on the prompt for the same reason as the clock: it changes
+            # between turns, and the system prompt's cached prefix must not. Only the main agent
+            # says it -- a sub-agent shares this checkout with its parent by construction, and
+            # telling it "another agent is editing these files" would be true and useless.
+            if self.depth == 0:
+                prompt_text = self._attach_peer_line(prompt_text)
             if images:                                 # vision: OpenAI-style multimodal content
                 content: object = ([{"type": "text", "text": prompt_text}] +
                                    [{"type": "image_url", "image_url": {"url": u}} for u in images])
@@ -6768,8 +6774,14 @@ class Agent(GoalLifecycle):
                     try:
                         abs_path = resolve_path(str(args["path"]), self.config.project_root,
                                                 allow_external=bool(external_paths))
-                        if not self.checkpoints.record_file(str(abs_path)):
-                            why = (getattr(self.checkpoints, "last_record_error", "")
+                        # Outside this agent's own checkout, record into the manager that can
+                        # undo it -- the parent's, for an isolated child.
+                        keeper = self.checkpoints
+                        if (not _within_own_checkout(self, args.get("path"))
+                                and getattr(self, "_external_checkpoints", None) is not None):
+                            keeper = self._external_checkpoints
+                        if not keeper.record_file(str(abs_path)):
+                            why = (getattr(keeper, "last_record_error", "")
                                    or self._last_persist_error or "the reason is not recorded")
                             path_error = ("error: the file was not changed — DGC could not capture "
                                           f"its pre-edit state first: {why}")
@@ -6852,6 +6864,19 @@ class Agent(GoalLifecycle):
             except (ValueError, TypeError):
                 pass
         out = _clamp(redact_text(out, secrets))  # credential boundary before the central ceiling
+        # Remember what DGC just left in the file. record_file above captured the state BEFORE the
+        # edit; without the after, a rewind cannot tell DGC's own work from an edit another chat or
+        # the person made since, and would silently overwrite theirs.
+        if (name in ("write_file", "edit_file", "multi_edit", "apply_patch")
+                and args.get("path") and not str(out).startswith("error:")):
+            note = getattr(self.checkpoints, "note_written", None)
+            if callable(note):
+                try:
+                    from .workspace import resolve_path
+                    note(str(resolve_path(str(args["path"]), self.config.project_root,
+                                          allow_external=True)))
+                except (ValueError, OSError):
+                    pass
         _, post = self._run_lifecycle_hooks(
             "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
             cancelled=self.cancelled)
@@ -7209,6 +7234,67 @@ class Agent(GoalLifecycle):
         return render(rows, header="Earlier in this project (context notes, most recent first):",
                       limit_chars=limit_chars)
 
+    def _peers_here(self) -> list[dict]:
+        """Other DGC agents in this checkout, or [] if the registry cannot be read."""
+        try:
+            from . import peers as _peers
+            return _peers.others(project_root=str(self.config.project_root),
+                                 git_common_dir=self._git_common_dir())
+        except Exception:
+            return []                  # peer awareness is a courtesy; never fail a turn over it
+
+    def _git_common_dir(self) -> str:
+        """The repository every worktree of this checkout shares, or "" when git is not involved.
+
+        This rather than the project root, because two worktrees of one repository really do share
+        branches and history -- they are peers even though their roots differ.
+        """
+        cached = self.__dict__.get("_git_common_dir_cache")
+        if cached is not None:
+            return cached
+        found = ""
+        try:
+            import subprocess
+            # stdin=DEVNULL, not inherited: a child that inherits this process's stdin can be
+            # handed an open socket under an agent runner, and a read on it never returns. The
+            # suite enforces that every spawn says what its stdin is, for exactly that reason.
+            out = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                 cwd=str(self.config.project_root), capture_output=True,
+                                 text=True, timeout=5, stdin=subprocess.DEVNULL)
+            if out.returncode == 0:
+                found = out.stdout.strip()
+        except Exception:
+            found = ""
+        self.__dict__["_git_common_dir_cache"] = found
+        return found
+
+    def _attach_peer_line(self, prompt_text: str) -> str:
+        """Append the <dgc-peers> line, and tell the person when who-else-is-here changes."""
+        try:
+            from . import peers as _peers
+            found = self._peers_here()
+            line = _peers.model_line(found)
+            # Say it to the person when the answer CHANGES, not every turn: "someone else is in
+            # this folder" is worth knowing once, and worth knowing again when it stops being
+            # true. Repeated on every prompt it would be noise people learn to skip.
+            signature = tuple(sorted((p.get("pid"), p.get("liveness")) for p in found))
+            if signature != self.__dict__.get("_peers_seen"):
+                self.__dict__["_peers_seen"] = signature
+                spoken = _peers.user_line(found)
+                info = getattr(self.ui, "info", None)
+                if spoken and callable(info):
+                    info(spoken)
+        except Exception:
+            return prompt_text
+        return f"{prompt_text}\n\n{line}" if line else prompt_text
+
+    def _display_path(self, path: str) -> str:
+        """A path as the person would recognise it: relative to the project when it is inside."""
+        try:
+            return str(Path(path).relative_to(self.config.project_root))
+        except (ValueError, TypeError, OSError):
+            return str(path)
+
     def rewind(self, idx: int) -> tuple[int, int]:
         """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
         with self._session_turn_scope() as reserved:
@@ -7228,6 +7314,19 @@ class Agent(GoalLifecycle):
                 msg_count, n_files, conversation = self.checkpoints.rewind_state(
                     idx, transactional=True)
                 if msg_count < 0:
+                    # Say WHY when the refusal was the guard. A bare "rewind failed" over a file
+                    # someone else has since edited reads as a bug; it is the one case where DGC
+                    # declining to act is the whole point. Reported on `info`, because adding a
+                    # field to the `rewound` event would break a client that has not opted in.
+                    clashes = list(getattr(self.checkpoints, "last_rewind_conflicts", ()) or ())
+                    if clashes:
+                        shown = ", ".join(self._display_path(c) for c in clashes[:4])
+                        more = f" and {len(clashes) - 4} more" if len(clashes) > 4 else ""
+                        info = getattr(self.ui, "info", None)
+                        if callable(info):
+                            info(f"Rewind stopped: {shown}{more} changed outside this chat since "
+                                 f"DGC last wrote {'them' if len(clashes) != 1 else 'it'}. "
+                                 "Nothing was restored, so those edits are intact.")
                     return (-1, 0)
                 rewind_pending = True
                 if conversation is not None:
@@ -7407,6 +7506,12 @@ class Agent(GoalLifecycle):
                     sub.checkpoints = self.checkpoints
                 else:
                     sub._edit_checkpoints_required = False   # disposable checkout; integration captures it
+                    # ...but a write OUTSIDE that checkout is an ordinary mutation of the user's
+                    # files, and only the parent's manager can take it back: checkpoints.open() is
+                    # top-level only, so this child's own manager never has a recovery point and
+                    # every external write was refused outright -- including the file some tasks
+                    # were created to write.
+                    sub._external_checkpoints = self.checkpoints
                 sub._metrics_parent = self
                 # One link from a child to the step that started it, shared by every 0.40 feature that
                 # attributes a child's work (the agents list, viewed images).

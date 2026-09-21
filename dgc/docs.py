@@ -1225,6 +1225,40 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
 
+## When another DGC is working here
+
+DGC runs one backend per window, so two windows on one folder are two agents editing the same
+files. They now know about each other. Each leaves a note in `~/.dgc/peers/`, refreshed while it
+runs, and every agent reads the others: you get one line when that changes — *"1 other DGC is
+working in this folder."* — and the model is told the same thing, with the instruction that
+matters: **do not revert or "fix" a change you did not make, and if their work conflicts with
+yours, stop and say so rather than choosing for you.**
+
+Two worktrees of one repository count as the same place, because they share branches and history.
+
+A note is only trusted when the process behind it can be proved to be the one that wrote it —
+process ids get reused, and a stale note whose id now belongs to something else must not read as a
+live DGC. Where that cannot be proved, DGC says the agent *may* still be running rather than
+claiming either way. A DGC that exits cleanly removes its note; one that crashes leaves it, and it
+expires.
+
+## A rewind will not undo somebody else's work
+
+Rewinding is DGC undoing DGC. If a file has changed since DGC last wrote it — another window,
+another tool, or you in your editor — the rewind stops and names the files, and **nothing** is
+restored. It is all-or-nothing on purpose: a partial rewind would leave the folder in a state
+neither you nor DGC chose.
+
+A rewind of DGC's own work is unaffected, and so is one where DGC has no record of what it left:
+the guard fires on evidence that a file was changed, never on uncertainty.
+
+## Delegated work can write outside its own checkout
+
+A delegated task runs in its own disposable worktree, so edits there need no snapshot. A write
+*outside* it — a file in your project, a script in `/tmp` — is an ordinary change to your files and
+is captured by the parent chat, which is what can undo it. Until this release those writes were
+refused outright: *"DGC could not capture its pre-edit state first"*.
+
 ## Two DGCs, one settings file
 
 Every DGC on a machine reads and writes the same `~/.dgc/config.json`, so two editor windows are

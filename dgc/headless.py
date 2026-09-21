@@ -1367,6 +1367,8 @@ class Backend:
             sys.stdout, validator=event_error,
             sanitizer=lambda event: redact_value(event, secret_values(self.config)))
         self.pending = PendingRequests()
+        self._peer_thread = None
+        self._peer_stop = None
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
         self.ui.preview_root = config.project_root   # edit previews on approval cards
@@ -1470,6 +1472,10 @@ class Backend:
         for warning in getattr(self.config, "credential_warnings", ()):
             self.em.emit("info", message=str(warning)[:1000])
         self._emit_context()
+        # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
+        # this checkout that it exists.
+        self._announce_peer("idle")
+        self._start_peer_heartbeat()
         # Publish the complete route state immediately after the ready handshake. ``config``
         # carries both native and delegated settings so editors render the route that will run.
         self._emit_config()
@@ -1613,6 +1619,42 @@ class Backend:
             self._worker = worker
             worker.start()
             return "started", 0
+
+    def _announce_peer(self, status: str = "idle") -> None:
+        """Leave (or refresh) this backend's note in the peer registry.
+
+        Best effort by design: a peer note is a courtesy to the other agents in this checkout, and
+        nothing about a turn should fail because one could not be written.
+        """
+        try:
+            from . import peers as _peers
+            agent = getattr(self, "agent", None)
+            config = getattr(self, "config", None)
+            root = str(getattr(config, "project_root", "") or "")
+            _peers.announce(
+                kind="serve",
+                session=str(getattr(agent, "session_file", "") or ""),
+                cwd=root, project_root=root,
+                git_common_dir=(agent._git_common_dir() if agent is not None
+                                and hasattr(agent, "_git_common_dir") else ""),
+                status=status)
+        except Exception:
+            pass
+
+    def _start_peer_heartbeat(self) -> None:
+        """Refresh the note periodically, so a peer that dies stops looking live within minutes."""
+        if getattr(self, "_peer_thread", None) is not None:
+            return
+        stop = threading.Event()
+        self._peer_stop = stop
+
+        def beat() -> None:
+            while not stop.wait(60.0):
+                self._announce_peer("working" if getattr(self, "_worker", None) is not None
+                                    else "idle")
+        thread = threading.Thread(target=beat, name="dgc-peer-heartbeat", daemon=True)
+        self._peer_thread = thread
+        thread.start()
 
     def _image_spool(self) -> Path:
         """The directory this backend reads spooled images from, created on first use."""
@@ -2481,6 +2523,14 @@ class Backend:
         return terminal
 
     def close(self, grace_s: float = 0.0) -> str:
+        try:
+            stop = getattr(self, "_peer_stop", None)
+            if stop is not None:
+                stop.set()
+            from . import peers as _peers
+            _peers.withdraw()          # a clean exit leaves no note; a crash leaves one to expire
+        except Exception:
+            pass
         """Stop foreground work and release pending controller decisions on backend exit.
 
         A turn in flight is given `grace_s` to reach its next safe boundary before it is cancelled

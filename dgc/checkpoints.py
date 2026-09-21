@@ -70,6 +70,12 @@ class CheckpointManager:
     def __init__(self, project_root=None, on_change: Callable[[], bool | None] | None = None):
         self.points: list[dict] = []   # {"msg_count", "preview", "files": {path: _Snapshot}}
         self.last_record_error = ""    # why the most recent record_file() refused, for the user
+        # What DGC itself last left in each file, so a rewind can tell its own work from somebody
+        # else's. Without this, _restore rewrites a file from a snapshot with no regard for what is
+        # in it now: another chat's edit, or the user's own, is silently destroyed and nothing says
+        # so. path -> sha256 of the bytes DGC left, or "" for a file DGC removed.
+        self._left: dict[str, str] = {}
+        self.last_rewind_conflicts: list[str] = []   # paths that changed outside DGC, for the user
         self.project_root = (Path(project_root).resolve(strict=False) if project_root is not None
                              else None)
         self._on_change = on_change
@@ -86,6 +92,64 @@ class CheckpointManager:
     @staticmethod
     def _hash(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    def _on_disk_hash(path: Path) -> str | None:
+        """sha256 of what is in the file now, "" when it is not there, None when unreadable.
+
+        Unreadable is deliberately distinct from absent: a file DGC cannot read is one it cannot
+        vouch for either, and the guard treats that as a conflict rather than assuming the best.
+        """
+        try:
+            if not path.exists() and not path.is_symlink():
+                return ""
+            if path.is_symlink():
+                return hashlib.sha256(os.readlink(str(path)).encode("utf-8", "surrogateescape")).hexdigest()
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def note_written(self, path: str) -> None:
+        """Remember what DGC just left in a file, so a later rewind can recognise its own work."""
+        try:
+            resolved = Path(path)
+        except (TypeError, ValueError):
+            return
+        digest = self._on_disk_hash(resolved)
+        if digest is not None:
+            self._left[str(resolved)] = digest
+
+    def _rewind_conflicts(self, restore: dict) -> list[str]:
+        """Files whose current contents DGC cannot account for.
+
+        A file is accounted for when it holds exactly what DGC last left there, or already holds
+        what the rewind would put back (so restoring it is a no-op). Anything else was written by
+        another chat, another tool or the person, and a rewind must not quietly discard it.
+        """
+        conflicts: list[str] = []
+        for path, (prior, _durable) in restore.items():
+            now = self._on_disk_hash(Path(path))
+            if now is None:
+                conflicts.append(path)
+                continue
+            snapshot = (prior if isinstance(prior, _Snapshot) else
+                        (_Snapshot("missing") if prior is None else
+                         _Snapshot("file", str(prior).encode(), 0o644)))
+            target = "" if snapshot.kind == "missing" else self._hash(snapshot.data)
+            if now == target:
+                continue                       # restoring it would change nothing
+            left = self._left.get(str(Path(path)))
+            if left is None:
+                # DGC has no record of what it left here -- an older session, a resumed one, or an
+                # edit made before this was tracked. Absence of evidence is not evidence: refusing
+                # on "I cannot tell" would refuse EVERY rewind after a restart, which is far more
+                # common than a concurrent edit and would break the feature for everyone. The guard
+                # only ever fires on POSITIVE evidence that the file is not what DGC left.
+                continue
+            if now == left:
+                continue                       # exactly what DGC left: its own work
+            conflicts.append(path)
+        return sorted(conflicts)
 
     @staticmethod
     def _valid_hash(value) -> bool:
@@ -425,6 +489,13 @@ class CheckpointManager:
             for path, prior in pt["files"].items():
                 restore.setdefault(path, (prior, bool(pt.get("durable"))))
 
+        # Refuse rather than overwrite. A rewind is DGC undoing DGC; a file somebody else has
+        # written since is not DGC's to take back, and the whole rewind stops so the person can
+        # decide -- a partial rewind would leave the workspace in a state neither side chose.
+        self.last_rewind_conflicts = self._rewind_conflicts(restore)
+        if self.last_rewind_conflicts:
+            return (-1, 0, None)
+
         # Validate every target and capture a rollback image before changing anything. In
         # particular, a project-relative path loaded from disk must not become an external write
         # merely because one of its parents was replaced with a symlink after resume.
@@ -506,6 +577,29 @@ class CheckpointManager:
         msg_count, restored, _conversation = self.rewind_state(idx)
         return msg_count, restored
 
+    def _left_state(self) -> dict:
+        """What DGC last left in each file, keyed by project-relative path.
+
+        Carried in the session so a rewind after a restart can still tell DGC's own work from
+        somebody else's. Project-relative and bounded, like every other durable field here.
+        """
+        out: dict[str, str] = {}
+        for path, digest in list(self._left.items())[-_MAX_FILES_PER_POINT:]:
+            relative = self._lexical_project_path(path)
+            if relative is not None and isinstance(digest, str) and len(digest) == 64:
+                out[relative] = digest
+        return out
+
+    def _adopt_left_state(self, value) -> None:
+        if not isinstance(value, dict):
+            return
+        for relative, digest in list(value.items())[:_MAX_FILES_PER_POINT]:
+            if not (isinstance(relative, str) and self._valid_hash(digest)):
+                continue
+            resolved = self._project_path(relative)
+            if resolved is not None:
+                self._left[str(resolved)] = digest
+
     def state(self) -> dict:
         """Validated JSON state embedded atomically in the private session transcript."""
         if len(self.points) > _MAX_POINTS:
@@ -550,6 +644,8 @@ class CheckpointManager:
                 "project": str(self.project_root) if self.project_root is not None else None,
                 "points": points,
                 "messages": serialized_messages,
+                # What DGC left in each file, so a rewind after a restart still knows its own work.
+                "left": self._left_state(),
                 "chains": {key: {"previous": value[0], "message": value[1]}
                            for key, value in self._chains.items()}}
 
@@ -660,6 +756,9 @@ class CheckpointManager:
                     return cls(project_root, on_change)
                 manager.points.append(point)
             manager._prune_conversations()
+            # What DGC left in each file, so a resumed session's rewind can still recognise its own
+            # work rather than treating every file as unaccounted for.
+            manager._adopt_left_state(state.get("left"))
             return manager
         except (KeyError, TypeError, ValueError, UnicodeError):
             return cls(project_root, on_change)
