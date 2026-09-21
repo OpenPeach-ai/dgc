@@ -323,6 +323,30 @@ body.vscode-light, body.vscode-high-contrast-light {
 .md-link[data-link-source="openvsx"]::before     { content: "\eae6"; }
 .md-link[data-link-source="npm"]::before         { content: "\eb29"; }  /* package */
 .md-link[data-link-source="stackoverflow"]::before { content: "\eb01"; }  /* no brand glyph; globe */
+
+/* A file named in an answer wears its kind, the way Codex does, instead of spelling the
+   extension out mid-sentence. The full path stays in the hover label. Same bundled codicons. */
+.md-link[data-file-kind]::before {
+  font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
+  line-height: 1; display: inline-block; vertical-align: -1px;
+  margin-right: 4px; color: var(--muted); text-decoration: none;
+  content: "\ea7b";                                        /* file */
+}
+.md-link[data-file-kind="folder"]::before   { content: "\ea83"; }  /* folder */
+.md-link[data-file-kind="python"]::before   { content: "\ea80"; }  /* symbol-namespace */
+.md-link[data-file-kind="ts"]::before,
+.md-link[data-file-kind="js"]::before,
+.md-link[data-file-kind="code"]::before     { content: "\eb4d"; }  /* code */
+.md-link[data-file-kind="json"]::before,
+.md-link[data-file-kind="config"]::before   { content: "\eb51"; }  /* settings-gear */
+.md-link[data-file-kind="doc"]::before      { content: "\ea9c"; }  /* book */
+.md-link[data-file-kind="css"]::before,
+.md-link[data-file-kind="markup"]::before   { content: "\eb8b"; }  /* symbol-color */
+.md-link[data-file-kind="shell"]::before    { content: "\ea85"; }  /* terminal */
+.md-link[data-file-kind="image"]::before    { content: "\eb47"; }  /* file-media */
+.md-link[data-file-kind="database"]::before { content: "\ea7c"; }  /* database */
+.md-link[data-file-kind="archive"]::before  { content: "\eb29"; }  /* package */
+.md-link[data-file-kind="lock"]::before     { content: "\ea75"; }  /* lock */
 .md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe */
 .md-link[data-link-kind="file"]::before {
   font-family: codicon; content: "\ea7b"; font-size: var(--t-sm); margin-right: 4px;

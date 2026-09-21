@@ -59,6 +59,34 @@ const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(^|\.)stackoverflow\.com$/i, "stackoverflow"],
 ];
 
+// Which kind of file a link points at, for the mark shown beside it. Codex names a file with its
+// icon rather than spelling the extension out in the sentence; the path stays in the hover label.
+// Bundled codicons again -- no network, nothing leaked.
+const FILE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\.(py|pyi|pyw)$/i, "python"],
+  [/\.(ts|tsx|mts|cts)$/i, "ts"],
+  [/\.(js|jsx|mjs|cjs)$/i, "js"],
+  [/\.(json|jsonc|json5)$/i, "json"],
+  [/\.(md|markdown|mdx|rst|txt)$/i, "doc"],
+  [/\.(ya?ml|toml|ini|cfg|conf|env|properties)$/i, "config"],
+  [/\.(css|scss|sass|less)$/i, "css"],
+  [/\.(html?|xml|svg)$/i, "markup"],
+  [/\.(sh|bash|zsh|fish|ps1|bat|cmd)$/i, "shell"],
+  [/\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i, "image"],
+  [/\.(rs|go|java|kt|swift|rb|php|c|h|cpp|hpp|cs)$/i, "code"],
+  [/\.(sql|db|sqlite3?)$/i, "database"],
+  [/\.(zip|tar|gz|tgz|bz2|xz|7z|whl|vsix)$/i, "archive"],
+  [/\.(lock|sum)$/i, "lock"],
+];
+
+export function fileKind(target: string): string {
+  const name = String(target || "").replace(/[\\/]+$/, "");
+  if (!name) return "file";
+  if (/[\\/]$/.test(String(target))) return "folder";
+  for (const [pattern, kind] of FILE_KINDS) { if (pattern.test(name)) return kind; }
+  return "file";
+}
+
 export function linkSource(target: string): string {
   try {
     const host = new URL(target).hostname;
@@ -75,7 +103,8 @@ parser.renderer.rules.link_open = (tokens, index) => {
   if (!target) return "<span>";
   const location = target.line ? ` data-line="${target.line}"` : "";
   const source = target.kind === "external"
-    ? ` data-link-source="${linkSource(target.target)}"` : "";
+    ? ` data-link-source="${linkSource(target.target)}"`
+    : ` data-file-kind="${fileKind(target.target)}"`;
   return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location}${source} title="${escape(target.target)}">`;
 };
 parser.renderer.rules.link_close = () => "</button>";
@@ -84,7 +113,9 @@ parser.renderer.rules.image = (tokens, index) => {
   // lets the user decide whether to view it in the browser or open a local artifact.
   const token = tokens[index], target = linkTarget(String(token.attrGet("src") || ""));
   const label = escape(token.content || "Image");
-  return target ? `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}" title="${escape(target.target)}">${label}</button>` : label;
+  if (!target) return label;
+  const kind = target.kind === "file" ? ` data-file-kind="${fileKind(target.target)}"` : "";
+  return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${kind} title="${escape(target.target)}">${label}</button>`;
 };
 parser.renderer.rules.fence = (tokens, index) => codeBlock(tokens[index].content, tokens[index].info);
 parser.renderer.rules.code_block = (tokens, index) => codeBlock(tokens[index].content, "");
