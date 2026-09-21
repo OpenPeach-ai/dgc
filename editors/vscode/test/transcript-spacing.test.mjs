@@ -141,18 +141,27 @@ function measureSpacing() {
   const box = (n) => n.getBoundingClientRect();
   // A closed <details> still lays its body out; checkVisibility() is what knows it is not drawn.
   const drawn = (n) => { const r = box(n); return r.width > 0 && r.height > 0 && n.checkVisibility?.() !== false; };
-  const ink = [...log.querySelectorAll("*")].filter((n) => !n.closest(".role") && drawn(n));
+  const ink = [...log.querySelectorAll("*")]
+    .filter((n) => !n.closest(".role") && !n.closest(".steer-note") && drawn(n));
   const bubbles = [...log.querySelectorAll(".msg.user > .bubble")].filter(drawn).map((bubble) => {
     const b = box(bubble);
+    // A steered prompt says what became of it on a line under the bubble. That line belongs to
+    // the prompt, so the block's foot is the note's bottom, not the bubble's -- measuring from
+    // the bubble read the note's own height as 23px of empty space and reported 47px where the
+    // design calls for 24px. (It briefly lived INSIDE the bubble to dodge exactly this, which
+    // made a status line look like something the user had typed.)
+    const note = bubble.parentElement.querySelector(":scope > .steer-note");
+    const foot = note && drawn(note) ? Math.max(b.bottom, box(note).bottom) : b.bottom;
     let above = null, below = null;
     for (const n of ink) {
       if (n.contains(bubble) || bubble.contains(n)) continue;
       const r = box(n);
       if (r.top < b.top) above = Math.max(above ?? -Infinity, r.bottom);
-      else below = Math.min(below ?? Infinity, r.top);
+      else if (r.top >= foot) below = Math.min(below ?? Infinity, r.top);
     }
     return { text: bubble.textContent.slice(0, 40), steered: !!bubble.parentElement.parentElement.closest(".msg"),
-      above: above === null ? null : Math.round(b.top - above), below: below === null ? null : Math.round(below - b.bottom) };
+      above: above === null ? null : Math.round(b.top - above),
+      below: below === null ? null : Math.round(below - foot) };
   });
   const blocks = [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction")]
     .filter((n) => !n.parentElement.closest(".msg") && drawn(n));

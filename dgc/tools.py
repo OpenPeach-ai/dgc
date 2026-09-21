@@ -118,7 +118,9 @@ def _fn(name, description, properties, required):
 
 
 TOOL_SCHEMAS = [
-    _fn("read_file", "Read a text file. Returns its SHA-256 and numbered lines. Use offset/limit to page.",
+    _fn("read_file", "Read a text file, or a document (.docx .xlsx .pptx .odt .ods .odp .rtf "
+        ".pdf) as its extracted text -- do NOT shell out to unzip or parse one yourself. Returns "
+        "its SHA-256 and numbered lines. Use offset/limit to page.",
         {"path": {"type": "string", "description": "File path (relative to project root or absolute)"},
          "offset": {"type": "integer", "description": "1-based start line"},
          "limit": {"type": "integer", "description": "Max lines to read"}}, ["path"]),

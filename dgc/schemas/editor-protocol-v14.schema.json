@@ -3941,6 +3941,16 @@
                 }
               ]
             },
+            "spooled_images": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array"
+                }
+              ]
+            },
             "delivery": {
               "type": "string",
               "enum": [

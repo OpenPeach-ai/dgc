@@ -6,7 +6,15 @@
   const monitorsBar = $("monitorsbar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
+  // The inline ceilings: what fits in the 4 MiB protocol frame once base64 has inflated it.
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
+  // What a backend that takes images out of band allows instead. The count limit goes entirely --
+  // it only ever existed to keep the frame small -- and the budget becomes what a model can be
+  // sent rather than what a JSON line can carry. `imageSpool` is set from ready.capabilities.
+  const SPOOL_IMAGE_TOTAL_BYTES = 32 * 1024 * 1024;
+  let imageSpool = false;
+  const imageFileCeiling = () => (imageSpool ? Infinity : MAX_IMAGE_FILES);
+  const imageByteCeiling = () => (imageSpool ? SPOOL_IMAGE_TOTAL_BYTES : MAX_IMAGE_TOTAL_BYTES);
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   const PASTED_TEXT_LIMIT = 5000;   // characters; past this a paste becomes an attachment
   let pendingImageFiles = 0, pendingImageBytes = 0;
@@ -694,7 +702,7 @@
       }
       const role = entry.node.querySelector(".role");
       if (role) role.textContent = label;
-      entry.node.dataset.steer = steering ? "pending" : "queued";
+      setSteerState(entry.node, steering ? "pending" : "queued");
       if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
       if (steering) { entry.acknowledged = true; pendingPrompts.set(id, entry); }
       else { pendingPrompts.delete(id); queuedPrompts.set(id, entry); }
@@ -877,6 +885,27 @@
     recordPin(node, height);
     return true;
   }
+  // What became of a message you sent mid-turn, as a line UNDER the bubble.
+  //
+  // It sat inside the bubble for a while, which was wrong twice over: a status line about the
+  // message read as words you had typed, and it was only in there to keep the transcript's own
+  // spacing measurements quiet. It is a real element rather than a ::after so that it is exposed
+  // to a screen reader and so the spacing check can measure the prompt's real foot.
+  const STEER_NOTE = {
+    pending: "steering \u2026",
+    queued: "queued for the next turn",
+    applied: "steered \u2014 the model has read this",
+  };
+  function setSteerState(node, state) {
+    if (!node) return;
+    node.dataset.steer = state;
+    const words = STEER_NOTE[state];
+    let note = node.querySelector(":scope > .steer-note");
+    if (!words) { if (note) note.remove(); return; }
+    if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
+    note.textContent = words;
+  }
+
   function settleBlock(node) {
     if (!node || node.classList.contains("settled")) return;
     if (!pinBlockHeight(node)) {          // not laid out yet; settle on a later frame
@@ -2907,6 +2936,7 @@
         skillManagement = ev.capabilities?.skill_management === true;
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
+        imageSpool = ev.capabilities?.image_spool === true;
         mcpContextSupported = ev.capabilities?.mcp_context === true;
         mcpManagement = ev.capabilities?.mcp_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
@@ -3028,12 +3058,12 @@
           if (pending) pending.acknowledged = true;
           if (pending?.node) {
             pending.node.querySelector(".role").textContent = "you · steering pending";
-            pending.node.dataset.steer = "pending";
+            setSteerState(pending.node, "pending");
           }
         } else {
           if (ev.state === "queued" && pending?.node) {
             pending.node.querySelector(".role").textContent = "you · queued";
-            pending.node.dataset.steer = "queued";
+            setSteerState(pending.node, "queued");
           }
           if (ev.state === "queued" && pending) queuedPrompts.set(ev.request_id, pending);
           pendingPrompts.delete(ev.request_id);
@@ -3053,7 +3083,7 @@
             // printing its own "steering:" line for a frontend that reports which messages
             // landed (agent.py, _drain_steer), which left a sighted user with no sign at all
             // that the model had picked the message up.
-            pending.node.dataset.steer = ev.state === "applied" ? "applied" : "queued";
+            setSteerState(pending.node, ev.state === "applied" ? "applied" : "queued");
             if (ev.state === "applied" && turn) placeSteering(pending.node);
           }
           // Unconsumed steering is spliced back in at the HEAD of the backend's queue.
@@ -3834,6 +3864,7 @@
   }
 
   // ---- @file / slash popover ----
+  let popAwaitingFiles = false;   // an "@" opened before the workspace file list had arrived
   function hidePop() { pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
   function showPop(items) {
     popItems = items; popIdx = 0;
@@ -4028,8 +4059,13 @@
       showPop(matches);
     }
     else if (popMode === "@") {
+      // The list is fetched lazily, so the FIRST "@" in a fresh panel has nothing to show. Note
+      // that a picker is waiting before showPop runs: with no items showPop calls hidePop, which
+      // clears popMode, and the retry in the "files" handler was guarded on popMode === "@" --
+      // so the list arrived and nothing reopened. You typed "@", saw nothing, and only got the
+      // picker by typing another character.
+      if (files.length === 0) { popAwaitingFiles = true; vscode.postMessage({ type: "reqFiles" }); }
       showPop(files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
-      if (files.length === 0) vscode.postMessage({ type: "reqFiles" });
     } else hidePop();
   }
   input.addEventListener("input", onInput);
@@ -4075,13 +4111,14 @@
           sysLine(`Unsupported pasted image type: ${file.type || "unknown"}.`, true); continue;
         }
         const current = attachments.filter((a) => a.img);
-        if (current.length + pendingImageFiles >= MAX_IMAGE_FILES) {
+        if (current.length + pendingImageFiles >= imageFileCeiling()) {
           sysLine(`At most ${MAX_IMAGE_FILES} images can be attached to one prompt.`, true); continue;
         }
         const retainedBytes = current.reduce((total, image) => total + (image.bytes || 0), 0);
-        if (file.size > MAX_IMAGE_TOTAL_BYTES
-            || retainedBytes + pendingImageBytes + file.size > MAX_IMAGE_TOTAL_BYTES) {
-          sysLine("Pasted images exceed the 2 MiB prompt limit.", true); continue;
+        const budget = imageByteCeiling();
+        if (file.size > budget || retainedBytes + pendingImageBytes + file.size > budget) {
+          sysLine(`Pasted images exceed the ${Math.round(budget / (1024 * 1024))} MiB prompt limit.`,
+                  true); continue;
         }
         pendingImageFiles += 1; pendingImageBytes += file.size;
         const owner = { session: draftSession }; pendingImages.add(owner);
@@ -4853,7 +4890,7 @@
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
-      node.dataset.steer = "applied";        // it is in the transcript, so the model did read it
+      setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text, parsed.attachments);
@@ -5092,7 +5129,9 @@
         && typeof file.label === "string" && typeof file.path === "string"
         && typeof file.uri === "string" && typeof file.relative_path === "string"
         && typeof file.workspace === "string").slice(0, 600) : [];
-      if (popMode === "@") onInput();
+      // Reopen if an "@" was waiting on this list. onInput re-reads the caret, so if the caret has
+      // since moved off the token it simply closes again -- it cannot pop open under you.
+      if (popMode === "@" || popAwaitingFiles) { popAwaitingFiles = false; onInput(); }
     }
     else if (msg.type === "continue_offer") {
       if (msg.sessionId && msg.sessionId !== draftSession) return;
@@ -5243,17 +5282,29 @@
   function paintAgentMark(node, id, live) {
     if (!node) return;
     const index = agentMarkIndex(id);
-    const animate = live === true && agentMarkMotionOk();
     node.dataset.mark = String(index);
     node.dataset.face = AGENT_MARK_NAMES[index];
-    node.classList.toggle("is-live", animate);
-    const src = agentMarkSrc(index, animate);
+    // `is-live` is STATE, not motion. It used to be set only when animation was also allowed, so
+    // with reduced motion a working agent was drawn exactly like a finished one -- the preference
+    // asks for less movement, not for less information. The stylesheet stops the pulse and keeps
+    // the glow.
+    node.classList.toggle("is-live", live === true);
+    const src = agentMarkSrc(index, live === true && agentMarkMotionOk());
     let img = node.querySelector("img");
     if (!src) { if (img) img.remove(); return; }
     if (!img) {
       img = document.createElement("img");
       img.alt = "";
       img.draggable = false;
+      // If the mark cannot be fetched, drop the <img> so the CSS fallback shape applies. The
+      // fallback is selected with :not(:has(img)), which is true of PRESENCE, not of a successful
+      // load -- so a broken mark used to show the browser's placeholder glyph on a blanked
+      // background, with the coloured shape suppressed.
+      img.addEventListener("error", () => {
+        if (img && img.parentNode === node) node.removeChild(img);
+        node.dataset.markFallback = "1";
+      });
+      img.addEventListener("load", () => { delete node.dataset.markFallback; });
       node.appendChild(img);
     }
     if (img.getAttribute("src") !== src) img.setAttribute("src", src);
@@ -5617,6 +5668,9 @@
       if (item && typeof item === "object" && item.id && !agentRecords.has(String(item.id))) {
         const record = agentRecordFrom(item, now);
         const prior = previous.get(String(item.id));
+        // Keep the position it already had. Without this every snapshot renumbered every agent in
+        // whatever order the backend happened to list them, and the rows moved around mid-turn.
+        if (prior && typeof prior.order === "number") record.order = prior.order;
         record.endedAt = prior?.endedAt;
         record.seenLive = prior?.seenLive === true && prior.epoch === agentsEpoch;
         if (prior?.epoch === agentsEpoch) record.epoch = prior.epoch;
@@ -7523,7 +7577,7 @@
       const pending = pendingPrompts.get(`ask-${ask.id}`);
       if (pending?.node) {
         pending.node.querySelector(".role").textContent = "you · steering";
-        pending.node.dataset.steer = "applied";
+        setSteerState(pending.node, "applied");
         if (turn) placeSteering(pending.node);
       }
       pendingPrompts.delete(`ask-${ask.id}`);

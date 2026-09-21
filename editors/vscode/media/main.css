@@ -180,14 +180,38 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
 }
 .agent-mark:has(img) { background: none; clip-path: none; border-radius: 0; filter: none; }
 .agent-mark img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.agent-mark:not(:has(img))[data-mark="0"] { --mark: #50E5CB; clip-path: circle(46% at 50% 50%); }
-.agent-mark:not(:has(img))[data-mark="1"] { --mark: #2BB3A8; clip-path: circle(46% at 50% 50%); }
-.agent-mark:not(:has(img))[data-mark="2"] { --mark: #EB4A4A; clip-path: polygon(50% 8%, 92% 86%, 8% 86%); }
-.agent-mark:not(:has(img))[data-mark="3"] { --mark: #8B7CFF; clip-path: polygon(25% 8%, 75% 8%, 92% 50%, 75% 92%, 25% 92%, 8% 50%); }
-.agent-mark:not(:has(img))[data-mark="4"] { --mark: #F5A524; clip-path: polygon(50% 6%, 94% 50%, 50% 94%, 6% 50%); }
-.agent-mark:not(:has(img))[data-mark="5"] { --mark: #7D8CA3; border-radius: 4px; }
-.agent-mark:not(:has(img))[data-mark="6"] { --mark: #8BD44A; border-radius: 999px; }
-.agent-mark:not(:has(img))[data-mark="7"] { --mark: #E86AA5; clip-path: ellipse(42% 48% at 50% 52%); }
+/* A working mark is drawn from its own SVG, and `:has(img)` above turns every filter off -- so an
+   agent that was actually RUNNING looked exactly like one that had finished. The glow belongs to
+   the state, not to the fallback geometry, so it is put back here for the image case and made to
+   breathe. The still frame is kept deliberately: the -animated swirl reads as a colour smear at
+   16px, so the motion is this pulse rather than the artwork. */
+.agent-mark:has(img).is-live {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mark, #7D8CA3) 85%, transparent));
+  animation: agent-mark-breathe 1.9s ease-in-out infinite;
+}
+@keyframes agent-mark-breathe {
+  0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 55%, transparent)); }
+  50%      { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--mark, #7D8CA3) 95%, transparent)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-mark:has(img).is-live { animation: none; }
+}
+.agent-mark[data-mark="0"] { --mark: #50E5CB; }
+.agent-mark:not(:has(img))[data-mark="0"] { clip-path: circle(46% at 50% 50%); }
+.agent-mark[data-mark="1"] { --mark: #2BB3A8; }
+.agent-mark:not(:has(img))[data-mark="1"] { clip-path: circle(46% at 50% 50%); }
+.agent-mark[data-mark="2"] { --mark: #EB4A4A; }
+.agent-mark:not(:has(img))[data-mark="2"] { clip-path: polygon(50% 8%, 92% 86%, 8% 86%); }
+.agent-mark[data-mark="3"] { --mark: #8B7CFF; }
+.agent-mark:not(:has(img))[data-mark="3"] { clip-path: polygon(25% 8%, 75% 8%, 92% 50%, 75% 92%, 25% 92%, 8% 50%); }
+.agent-mark[data-mark="4"] { --mark: #F5A524; }
+.agent-mark:not(:has(img))[data-mark="4"] { clip-path: polygon(50% 6%, 94% 50%, 50% 94%, 6% 50%); }
+.agent-mark[data-mark="5"] { --mark: #7D8CA3; }
+.agent-mark:not(:has(img))[data-mark="5"] { border-radius: 4px; }
+.agent-mark[data-mark="6"] { --mark: #8BD44A; }
+.agent-mark:not(:has(img))[data-mark="6"] { border-radius: 999px; }
+.agent-mark[data-mark="7"] { --mark: #E86AA5; }
+.agent-mark:not(:has(img))[data-mark="7"] { clip-path: ellipse(42% 48% at 50% 52%); }
 .agent-mark[data-mark="0"] { --mark: #50E5CB; }
 .agent-mark[data-mark="1"] { --mark: #2BB3A8; }
 .agent-mark[data-mark="2"] { --mark: #EB4A4A; }
@@ -220,11 +244,11 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 /* What happened to a message sent mid-turn, said out loud. The role label above is for screen
    readers only, and the agent stops printing its own line once a frontend claims to show this --
    so without these a sighted user had nothing telling them the model had taken the message. */
-.msg.user[data-steer] > .bubble::after { display: block; margin-top: var(--sp-1); color: var(--muted);
-  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right; }
-.msg.user[data-steer="pending"] > .bubble::after { content: "steering \2026"; }
-.msg.user[data-steer="queued"] > .bubble::after { content: "queued for the next turn"; }
-.msg.user[data-steer="applied"] > .bubble::after { content: "steered \2014 the model has read this"; color: var(--accent-text, var(--accent)); }
+.msg.user > .steer-note {
+  margin-top: var(--sp-1); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right;
+}
+.msg.user[data-steer="applied"] > .steer-note { color: var(--accent-text, var(--accent)); }
 /* A prompt opens a new exchange, so it stands a step further from the turn before it than from the
    reply it asks for. Nothing sits above the first one. */
 .msg.user { align-items: flex-end; margin-top: var(--sp-2); }

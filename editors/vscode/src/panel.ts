@@ -1946,6 +1946,40 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** Write pasted images into the backend's spool and return what to send instead of base64.
+   *
+   * Returns undefined when there is nothing to spool or the backend does not offer the
+   * capability, in which case the caller sends the data URIs as it always did. A failure to
+   * write is also undefined, not an error: falling back to the inline path costs the user
+   * nothing but the old ceiling, whereas failing the prompt would lose their message. */
+  private async spoolImages(images: unknown): Promise<Array<{ name: string; media_type: string }> | undefined> {
+    const list = Array.isArray(images) ? images : [];
+    if (!list.length) { return undefined; }
+    const caps = (this.lastReadyEvent as { capabilities?: Record<string, unknown> } | undefined)?.capabilities;
+    const dir = typeof caps?.image_spool_dir === "string" ? caps.image_spool_dir : "";
+    if (caps?.image_spool !== true || !dir) { return undefined; }
+    const out: Array<{ name: string; media_type: string }> = [];
+    try {
+      const fs = await import("node:fs/promises");
+      const crypto = await import("node:crypto");
+      const nodePath = await import("node:path");
+      await fs.mkdir(dir, { recursive: true });
+      for (const value of list) {
+        const match = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/]*={0,2})$/i.exec(String(value ?? ""));
+        if (!match) { return undefined; }        // not ours to reinterpret; let the backend judge it
+        const ext = ({ "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+                       "image/webp": "webp", "image/bmp": "bmp" } as Record<string, string>)[match[1].toLowerCase()];
+        if (!ext) { return undefined; }
+        const name = `${crypto.randomUUID()}.${ext}`;
+        await fs.writeFile(nodePath.join(dir, name), Buffer.from(match[2], "base64"), { mode: 0o600 });
+        out.push({ name, media_type: match[1].toLowerCase() });
+      }
+    } catch {
+      return undefined;            // the inline path still works; a lost prompt would not be better
+    }
+    return out.length ? out : undefined;
+  }
+
   private post(msg: any): void {
     if (process.env.DGC_EXTENSION_TEST_TOKEN) {
       const event = msg?.type === "event" && msg.event && typeof msg.event === "object"
@@ -2243,7 +2277,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             selections[key] = msg[key];
           }
         }
-        const accepted = be.send({ type: "prompt", text, images: msg.images, request_id: requestId,
+        // Out-of-band images: write them into the directory the backend named, and send the file
+        // names. The 4 MiB command frame no longer has to carry them, which is what forced the
+        // editor's 2 MiB total and its 4-image count limit in the first place. A backend that does
+        // not offer the capability is sent base64 exactly as before.
+        const spooled = await this.spoolImages(msg.images);
+        const accepted = be.send({ type: "prompt", text,
+                                   images: spooled ? undefined : msg.images,
+                                   ...(spooled ? { spooled_images: spooled } : {}),
+                                   request_id: requestId,
                                    context: [...attached, ...live].slice(0, 64), ...selections,
                                    ...(this.lastReadyEvent?.capabilities?.live_steering
                                      ? { delivery: msg.delivery === "queue" ? "queue" : "steer" } : {}),

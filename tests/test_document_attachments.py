@@ -268,3 +268,39 @@ class LoggingTest(unittest.TestCase):
         except (module.DocumentError, module.UnsupportedDocument):
             pass
         self.assertEqual(logging.getLogger("pypdf").level, level)
+
+
+class ToolAdvertisementTest(unittest.TestCase):
+    """The model has to be told read_file can open a document.
+
+    Found by watching a recording: with document support working, the model still ran three bash
+    commands and unzipped the .docx with python3 -c "import zipfile ...". It was right to, given
+    what it had been told -- the tool said "Read a text file", so a .docx was plainly out of scope.
+    A capability the model is not told about is a capability it does not have.
+    """
+
+    def test_read_file_says_it_reads_documents(self):
+        from dgc import tools
+        spec = next(t for t in tools.TOOL_SCHEMAS
+                    if (t.get("function") or t).get("name") == "read_file")
+        described = ((spec.get("function") or spec).get("description") or "")
+        for suffix in (".docx", ".xlsx", ".pdf"):
+            self.assertIn(suffix, described, f"{suffix} is not advertised on read_file")
+
+    def test_it_warns_the_model_off_shelling_out(self):
+        from dgc import tools
+        spec = next(t for t in tools.TOOL_SCHEMAS
+                    if (t.get("function") or t).get("name") == "read_file")
+        described = ((spec.get("function") or spec).get("description") or "").lower()
+        self.assertIn("shell out", described,
+                      "without this the model reaches for unzip/python instead of the tool")
+
+    def test_every_advertised_suffix_is_one_it_can_actually_read(self):
+        from dgc import tools
+        import re
+        spec = next(t for t in tools.TOOL_SCHEMAS
+                    if (t.get("function") or t).get("name") == "read_file")
+        described = (spec.get("function") or spec).get("description") or ""
+        advertised = set(re.findall(r"\.[a-z]{2,5}\b", described)) - {".sha", ".256"}
+        unreadable = advertised - set(d.SUPPORTED)
+        self.assertFalse(unreadable, f"advertised but not supported: {sorted(unreadable)}")

@@ -23,7 +23,8 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
-from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions, validate_image_data_uris
+from .attachments import (MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions,
+                          read_spooled_images, spool_root, validate_image_data_uris)
 from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
@@ -1442,6 +1443,10 @@ class Backend:
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           "editor_liveness": True,
+                          # Both the flag and where to write, inside capabilities: a new TOP-LEVEL
+                          # field on `ready` is fatal to a client that has not opted in -- the SDK
+                          # refuses the whole event with "ready has an undeclared field".
+                          "image_spool": True, "image_spool_dir": str(self._image_spool()),
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
                           "session_policy": self._session_policy_capability()},
             model=self.config.model, mode=self.agent.mode,
@@ -1608,6 +1613,14 @@ class Backend:
             self._worker = worker
             worker.start()
             return "started", 0
+
+    def _image_spool(self) -> Path:
+        """The directory this backend reads spooled images from, created on first use."""
+        cached = getattr(self, "_image_spool_dir", None)
+        if cached is None:
+            cached = spool_root(getattr(getattr(self, "config", None), "project_root", ""))
+            self._image_spool_dir = cached
+        return cached
 
     def _steering_applied(self, request_id: str) -> None:
         with self._turn_state_lock():
@@ -3166,9 +3179,17 @@ class Backend:
                                  message=str(exc), **_request_fields(request_id))
                     return
             try:
+                # Inline images keep the small ceiling the 4 MiB frame forces on them; spooled
+                # ones are files and are bounded by what a model can actually be sent.
                 images = validate_image_data_uris(
                     cmd.get("images"), maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
                     maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
+                spooled = cmd.get("spooled_images")
+                if spooled:
+                    # Only touch the spool when a prompt actually uses it: building it on every
+                    # prompt meant a mkdir per message and, for a Backend assembled without a
+                    # config (the unit harness does exactly that), an AttributeError.
+                    images = tuple(images) + read_spooled_images(spooled, self._image_spool())
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_images",
                              message=f"prompt images rejected: {exc}", **_request_fields(request_id))

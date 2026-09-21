@@ -54,29 +54,42 @@ test("a queued message says so instead", () => {
 });
 
 test("every state is drawn, and not with the screen-reader-only label", () => {
-  const css = mainCss;
-  for (const state of ["pending", "queued", "applied"]) {
-    assert.match(css, new RegExp(`\\[data-steer="${state}"\\] > \\.bubble::after`),
-                 `${state} has no visible text, so it would be invisible like .role is`);
+  // A fresh panel per state: a queued prompt is re-parented to the waiting area, so reusing one
+  // panel makes "the last .msg.user" the queued row rather than the one just sent.
+  for (const [state, words] of [["pending", /steering/], ["queued", /queued/], ["applied", /steered/]]) {
+    const p = panel();
+    const id = steerDuringTurn(p, `answer ${state}`);
+    p.event({ type: "prompt_accepted", request_id: id,
+              state: state === "queued" ? "queued" : "steered", count: 1 });
+    if (state === "applied") p.event({ type: "steering_update", request_id: id, state: "applied" });
+    const row = [...p.doc.querySelectorAll(".msg.user")].find((n) => n.dataset.steer === state);
+    assert.ok(row, `no row reached the ${state} state`);
+    const note = row.querySelector(":scope > .steer-note");
+    assert.ok(note, `${state} draws nothing, so it would be invisible like .role is`);
+    assert.match(note.textContent, words);
   }
-  // The regression in one assertion: .role must stay screen-reader-only AND not be the only
-  // thing carrying this information.
-  assert.match(css, /\.role \{[^}]*clip-path:\s*inset\(50%\)/,
+  // .role must stay screen-reader-only AND not be the only thing carrying this information.
+  assert.match(mainCss, /\.role \{[^}]*clip-path:\s*inset\(50%\)/,
                ".role is still for screen readers, as it should be");
-  assert.match(css, /\.msg\.user\[data-steer\] > \.bubble::after/, "and something visible carries it too");
+  assert.match(mainCss, /\.msg\.user > \.steer-note/, "and something visible carries it too");
 });
 
 test("the applied line is the one that stands out", () => {
-  const css = mainCss;
-  const applied = /\.msg\.user\[data-steer="applied"\] > \.bubble::after \{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(applied, /content:/);
+  const applied = /\.msg\.user\[data-steer="applied"\] > \.steer-note \{([^}]*)\}/.exec(mainCss)?.[1] ?? "";
   assert.match(applied, /color:/, "the moment the model reads it is worth a colour of its own");
 });
 
-test("the note is inside the bubble, not hung under the row", () => {
-  // Hung off .msg.user it lay outside the bubble's box, so transcript-spacing measured its height
-  // as empty space and read 47px where the design calls for 24px between a prompt and what follows.
-  const css = mainCss;
-  assert.doesNotMatch(css, /\.msg\.user\[data-steer\]::after/,
-                      "the note must not hang off the row again -- see transcript-spacing.test.mjs");
+test("the note sits under the bubble, not inside it", () => {
+  // It lived in the bubble for one release-candidate, purely to keep the transcript's spacing
+  // measurements quiet. Inside, a status line about the message reads as words the user typed --
+  // the founder caught it in a recording. The spacing check now measures the prompt's real foot.
+  const p = panel();
+  const id = steerDuringTurn(p);
+  p.event({ type: "prompt_accepted", request_id: id, state: "steered" });
+  const row = bubble(p.doc);
+  assert.ok(row.querySelector(":scope > .steer-note"), "the note is a child of the message row");
+  assert.equal(row.querySelector(".bubble .steer-note"), null,
+               "and never inside the bubble, where it would read as something you said");
+  assert.doesNotMatch(mainCss, /\.bubble::after/,
+                      "no pseudo-element route back into the bubble either");
 });

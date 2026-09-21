@@ -10,6 +10,7 @@
 //   npm run shot -- /tmp/tasks.png --tasks [--light]   the Tasks rail row (+ -expanded.png, -long.png)
 //   npm run shot -- /tmp/cmd.png --command [--light]   a command mid-run, shown once (+ -waiting.png)
 //   npm run shot -- /tmp/q.png --quote [--light]      a drafted mail in a quote (+ -hover.png)
+//   npm run shot -- /tmp/s.png --steered [--light]    a mid-turn message and what became of it
 //   npm run shot -- /tmp/mon.png --monitors [--light] [--narrow]  a monitor wake turn, event cards, the monitors rail
 //   npm run shot -- /tmp/usage.png --usage --width=300 --theme=light --usage-report=reports.json
 //                                                     the Token Usage settings tab (--empty for none)
@@ -41,7 +42,8 @@ await page.addStyleTag({ content: `
   :root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; }
   body { background: var(--bg); color: var(--text); }` });
 await page.evaluate(([mjs, mdjs]) => {
-  window.acquireVsCodeApi = () => ({ postMessage(m) { if (window.__dgcOnPost) window.__dgcOnPost(m); },
+  window.__dgcPosts = [];
+  window.acquireVsCodeApi = () => ({ postMessage(m) { window.__dgcPosts.push(m); if (window.__dgcOnPost) window.__dgcOnPost(m); },
     getState: () => undefined, setState() {} });
   eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   eval(mjs);
@@ -461,6 +463,39 @@ if (process.argv.includes("--prose")) {
     "**Both tests pass.**\n",
   ].join("") });
   await page.waitForTimeout(400);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
+if (process.argv.includes("--steered")) {
+  // A message sent mid-turn, and the line saying what became of it. That line is about the
+  // message, not part of it, so it belongs under the bubble -- inside, it read as something the
+  // user had typed.
+  const out = process.argv[2] || "/tmp/steered.png";
+  if (process.argv.includes("--light")) {
+    await page.addStyleTag({ content: `:root {
+      --vscode-sideBar-background:#F8F8F8; --vscode-editor-background:#FFFFFF;
+      --vscode-input-background:#FFFFFF; --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
+      --vscode-descriptionForeground:#616161; --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; }` });
+  }
+  await send({ type: "turn_start", turn_id: "t9", prompt: "deploy it", kind: "prompt" });
+  await send({ type: "text_delta", text: "Reading the deploy configuration before I pick a host.\n\n" });
+  await page.evaluate(() => {
+    const input = document.getElementById("input");
+    input.value = "use staging-2.internal";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("send").click();
+  });
+  await page.waitForTimeout(200);
+  // The real request id, taken from what the webview posted. A made-up one matches no pending
+  // prompt, so prompt_accepted lands on nothing and the note never appears.
+  const rid = await page.evaluate(() => (window.__dgcPosts || [])
+    .filter((m) => m && m.type === "prompt").at(-1)?.requestId || "");
+  if (!rid) { console.error("no prompt was posted; nothing to steer"); await browser.close(); process.exit(1); }
+  await send({ type: "prompt_accepted", request_id: rid, state: "steered" });
+  await page.waitForTimeout(200);
+  await send({ type: "steering_update", request_id: rid, state: "applied" });
+  await send({ type: "text_delta", text: "Using staging-2.internal.\n" });
+  await page.waitForTimeout(500);
   await page.screenshot({ path: out, fullPage: false });
   console.log("shot:", out); await browser.close(); process.exit(0);
 }

@@ -40,6 +40,17 @@ MAX_IMAGE_FILES = 4
 MAX_IMAGE_FILE_BYTES = 8_388_608
 MAX_IMAGE_TOTAL_BYTES = 20_971_520
 MAX_EDITOR_IMAGE_TOTAL_BYTES = 2_097_152
+# Out-of-band images. A pasted image used to ride inside the JSON command as a base64 data URI,
+# and the 4 MiB protocol frame (editor_protocol.MAX_COMMAND_BYTES) had to hold the prompt text,
+# the context resources AND those images inflated ~4/3 by base64 -- which is where the 2 MiB above
+# comes from. Handed over as files in a directory the BACKEND owns, none of that applies: the
+# ceiling becomes what a model can actually be sent, and the 4-image count limit, which only ever
+# existed to keep the frame small, goes away.
+MAX_SPOOLED_IMAGE_TOTAL_BYTES = 33_554_432
+MAX_SPOOLED_IMAGE_FILE_BYTES = MAX_IMAGE_FILE_BYTES
+# Not a product limit: a loop bound, so a malformed command cannot make the backend stat forever.
+# The real bound on how many images you may send is the aggregate byte budget above.
+MAX_SPOOLED_IMAGE_ENTRIES = 256
 
 _IMAGE_TYPES = {
     ".png": "image/png",
@@ -135,6 +146,90 @@ def validate_image_data_uris(values, *, maximum_files: int = MAX_IMAGE_FILES,
             raise ValueError(f"image {index + 1} media type does not match its data")
         validated.append(f"data:{mime};base64,{payload}")
     return tuple(validated)
+
+
+def spool_root(project_root: Path | str) -> Path:
+    """The directory the editor writes pasted images into, owned and created by the backend.
+
+    The backend reads only from here, never from a path the editor names of its own accord: an
+    editor-supplied path would be one more place a bug could turn into "read any file on disk".
+    """
+    root = Path(canonical_root(project_root)) if project_root else Path.home()
+    base = Path.home() / ".dgc" / "spool" / "images"
+    base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.chmod(0o700)
+    except OSError:
+        pass                       # a pre-existing directory with other permissions still works
+    del root                       # kept for signature stability; the spool is per-user, not per-project
+    return base
+
+
+def read_spooled_images(entries, root: Path | str, *,
+                        maximum_entries: int = MAX_SPOOLED_IMAGE_ENTRIES,
+                        maximum_file_bytes: int = MAX_SPOOLED_IMAGE_FILE_BYTES,
+                        maximum_total_bytes: int = MAX_SPOOLED_IMAGE_TOTAL_BYTES) -> tuple[str, ...]:
+    """Turn spooled image files into validated data URIs, then delete them.
+
+    Each entry names a file BY NAME ONLY inside the spool directory. A name with a separator, a
+    parent reference or an absolute path is refused outright rather than normalised, so there is
+    no arithmetic to get wrong. The bytes are then checked against the declared media type exactly
+    as an inline data URI would be -- the transport changed, the validation did not.
+    """
+    if entries is None:
+        return ()
+    if not isinstance(entries, list):
+        raise ValueError("spooled images must be an array")
+    if len(entries) > maximum_entries:
+        raise ValueError(f"spooled images exceed the {maximum_entries}-entry limit")
+    base = Path(root)
+    allowed = set(_IMAGE_TYPES.values())
+    total = 0
+    out: list[str] = []
+    consumed: list[Path] = []
+    try:
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(f"spooled image {index + 1} is not an object")
+            name = entry.get("name")
+            mime = str(entry.get("media_type") or "").lower()
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"spooled image {index + 1} has no name")
+            if mime not in allowed:
+                raise ValueError(f"spooled image {index + 1} has unsupported media type {mime}")
+            # A bare name, nothing else. "../", "/etc/passwd" and "a/b" are all refused here.
+            if name != os.path.basename(name) or name in (".", "..") or os.path.isabs(name):
+                raise ValueError(f"spooled image {index + 1} must name a file in the spool")
+            path = base / name
+            try:
+                captured = read_regular_bytes(path, maximum=maximum_file_bytes)
+            except FileNotFoundError:
+                raise ValueError(f"spooled image {index + 1} is no longer there") from None
+            except WorkspaceBoundaryError:
+                raise ValueError(f"spooled image {index + 1} is not a regular file") from None
+            except OSError:
+                raise ValueError(f"spooled image {index + 1} exceeds its byte limit") from None
+            if captured is None:
+                raise ValueError(f"spooled image {index + 1} is no longer there")
+            raw = captured[0]
+            consumed.append(path)
+            if len(raw) > maximum_file_bytes:
+                raise ValueError(f"spooled image {index + 1} exceeds its byte limit")
+            total += len(raw)
+            if total > maximum_total_bytes:
+                raise ValueError("spooled images exceed the aggregate byte limit")
+            if not _image_matches(raw, mime):
+                raise ValueError(f"spooled image {index + 1} media type does not match its data")
+            out.append(f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}")
+        return tuple(out)
+    finally:
+        # The spool is a hand-over, not a store. Everything read is removed, including on the way
+        # out of a rejection, so a refused batch cannot accumulate on disk.
+        for path in consumed:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
 
 def _display_label(value: str, sanitizer) -> str:

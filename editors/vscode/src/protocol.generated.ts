@@ -3364,6 +3364,13 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "spooled_images": {
+      "types": [
+        "null",
+        "array"
+      ],
+      "required": false
+    },
     "delivery": {
       "types": [
         "string"

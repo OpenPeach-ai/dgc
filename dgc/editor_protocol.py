@@ -460,6 +460,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # subject must never be recorded as an answer.
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
                "answers": _NA(False),
+               # Images handed over as files in the backend's spool rather than inlined as base64.
+               # Only sent by a client that saw capabilities.image_spool, so an older backend is
+               # never offered a field it would reject as undeclared.
+               "spooled_images": _NA(False),
                "delivery": _f("string", required=False, enum=("steer", "queue")),
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},

@@ -172,7 +172,8 @@ Unconsumed terminal follow-ups remain queued after interruption; a new prompt co
 In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
 
-A message sent mid-turn says what became of it, in a muted line under the message itself:
+A message sent mid-turn says what became of it, on its own line under the bubble (under, not in:
+what became of a message is not something you said):
 *steering …* while the backend holds it, *queued for the next turn* if the turn would not take it,
 and *steered — the model has read this* at the moment it actually reaches the model. Until then
 the only sign was a screen-reader-only label, so a sighted user had none.
@@ -893,6 +894,15 @@ request's level and uses the new level (and its guidance) from the next model ro
 records `Thinking → high`. If you stop a turn and pick a vision-capable model, the next
 turn can view images. Viewed images always appear as a chip on the tool step that produced
 them — click the chip to open the image, even when the model itself cannot see it.
+
+A working specialist's identity mark **glows and breathes**; a finished one is still. That is
+state, not decoration, so it survives a reduced-motion preference — the pulse stops, the glow
+stays. If a mark's artwork cannot be loaded it falls back to its own coloured shape rather than a
+broken-image placeholder.
+
+The list keeps the order agents were **first seen** in. A new specialist joins at the end and
+never pushes the others around, so a row you are reading does not move under you as the backend
+reports.
 
 A diamond (◆) means an agent needs you; a filled dot (●) means work is queued or running.
 The editor uses an empty ring (○) when the turn still has agents but none is working any more.
@@ -1997,6 +2007,19 @@ covers a browser screenshot, an image file from your workspace, and an image an 
 - **MCP tools** that return images.
 
 A step keeps up to eight images. More than that are counted, not kept.
+
+## Attaching images to a prompt
+
+Paste or drop images into the composer. The editor hands them to DGC as files in a directory DGC
+owns, so what you may attach is bounded by what a model can be sent rather than by what fits in
+one protocol message: **32 MB in total, with no limit on how many**. Each file is checked against
+its declared type, read once and deleted — the directory is a hand-over, not a store, and a
+refused batch is cleaned up too.
+
+An older DGC that does not offer this receives them inside the message as before, and keeps the
+old ceiling of four images and 2 MB; the editor notices which it is talking to and says the right
+limit if you go over. The terminal's `@picture.png` and other clients (ACP, Zed) are unchanged:
+four images, 8 MB each, 20 MB in total.
 
 ## In the editor
 
