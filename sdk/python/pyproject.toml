@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgc-sdk"
-version = "0.6.0"
+version = "0.6.1"
 description = "Embed the DGC coding harness in applications and CI"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -28,11 +28,11 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://vibedgc.com/sdk/"
-Documentation = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.0/docs/SDK.md"
+Documentation = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.1/docs/SDK.md"
 Repository = "https://github.com/OpenPeach-ai/dgc"
 Issues = "https://github.com/OpenPeach-ai/dgc/issues"
-Changelog = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.0/sdk/CHANGELOG.md"
-Release = "https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.0"
+Changelog = "https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.1/sdk/CHANGELOG.md"
+Release = "https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.1"
 
 [tool.setuptools.packages.find]
 include = ["dgc_sdk*"]

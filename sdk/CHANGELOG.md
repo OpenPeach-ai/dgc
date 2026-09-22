@@ -1,5 +1,22 @@
 # DGC SDK changelog
 
+## 0.6.1 — 2026-09-22
+
+Pairs with CLI 0.43.0 over editor protocol v14. The protocol is unchanged and the SDK's own API is
+unchanged; this release exists so the version the SDK names as its runtime is the one it was
+released beside, which is what `REQUIRES_CLI` records.
+
+### Check these when you upgrade
+
+- **`max_subagent_depth` bounds delegation.** How deep a `task` may nest is now a setting, counted
+  from the real parent chain, rather than something inferred from the wording of a brief. It
+  defaults to 1, which is the flat tree DGC has effectively always had: a session you drive can
+  delegate, and its sub-agents do their own work. If you relied on a sub-agent delegating further,
+  set `max_subagent_depth` to 2 or more in the session's config.
+- **A background `task` reports back on more frontends.** A detached sub-task's result now reaches
+  a host that has no callback of its own, arriving with the next turn. An SDK session that starts
+  background work and then sends another prompt will see that result in the transcript.
+
 ## 0.6.0 — 2026-09-21
 
 Pairs with CLI 0.42.0 over editor protocol v14. The protocol is unchanged: everything new in this

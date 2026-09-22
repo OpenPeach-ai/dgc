@@ -1717,16 +1717,16 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-Current release: **dgc-sdk 0.6.0** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
-package `@vibedgc/sdk` 0.6.0, both tagged [`sdk-v0.6.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.0)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.42.0** over editor protocol
+Current release: **dgc-sdk 0.6.1** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
+package `@vibedgc/sdk` 0.6.1, both tagged [`sdk-v0.6.1`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.1)
+(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.43.0** over editor protocol
 v14 and are proven on Linux. The full guide and API reference is
-[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.0/docs/SDK.md).
+[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.1/docs/SDK.md).
 
 ## Install
 
 ```
-python3 -m pip install dgc-sdk==0.6.0
+python3 -m pip install dgc-sdk==0.6.1
 ```
 
 That installs `import dgc_sdk`. Do **not** run `pip install dgc`: PyPI's package named `dgc` is a
@@ -1788,7 +1788,7 @@ session that cannot be confined.
 `@vibedgc/sdk` (Node 22+) is attached to the GitHub release; it is not on the npm registry yet.
 
 ```
-npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.0/vibedgc-sdk-0.6.0.tgz
+npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.1/vibedgc-sdk-0.6.1.tgz
 ```
 
 ```
