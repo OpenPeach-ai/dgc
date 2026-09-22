@@ -553,6 +553,13 @@ def require_loaded_ollama_model(base_url: str, model: str) -> None:
         if item.get(key)
     } if isinstance(payload, dict) else set()
     normalize = lambda value: str(value).removesuffix(":latest")
+    # A `:cloud` model runs on Ollama's servers, so it is never resident here and /api/ps never
+    # lists it. The residency check exists so a capture does not spend minutes pulling and loading
+    # weights mid-recording; a cloud model has nothing to load, which is exactly why it is the
+    # faster choice. Requiring residency of it forced the capture onto whatever local model
+    # happened to be warm -- and evicting someone else's to get there.
+    if str(model).endswith(":cloud"):
+        return
     if normalize(model) not in {normalize(value) for value in loaded}:
         available = ", ".join(sorted(loaded)) or "none"
         raise RuntimeError(

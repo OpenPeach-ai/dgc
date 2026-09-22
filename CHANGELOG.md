@@ -4,6 +4,16 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.43.3 — 2026-09-22
+
+- **Peer awareness works on macOS.** DGC tells a live peer from a dead one by checking that the
+  process behind a recorded pid is still the process that wrote the note — it read that identity
+  from `/proc/<pid>/stat`, which macOS does not have. So on a Mac the read always failed, every
+  peer's liveness came back `unknown`, and a note left by a dead session was indistinguishable
+  from a live one's. It asks `ps` for the start time there now, with a timeout so a wedged `ps`
+  cannot stall a peer check, and that child's stdin is closed rather than inherited: under
+  `dgc serve` this process's stdin is the editor protocol pipe.
+
 ## 0.43.2 — 2026-09-22
 
 - **The release pipeline is green again.** 0.43.1's own dependency-lock guard imported `tomllib`,

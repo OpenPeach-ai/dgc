@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.3 — 2026-09-22
+
+- Pairs with CLI 0.43.3. Nothing in the extension changed; the CLI floor it quotes did.
+
 ## 0.28.2 — 2026-09-22
 
 - Pairs with CLI 0.43.2. Nothing in the extension changed; the CLI floor it quotes did.

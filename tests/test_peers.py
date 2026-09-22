@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -154,3 +156,61 @@ class PeerRegistryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProcessIdentityOnMacOSTest(unittest.TestCase):
+    """macOS has no /proc, so the pid-recycling check had nothing to read there.
+
+    `_proc_start` opened /proc/<pid>/stat unconditionally. On a Mac that always raised, the
+    function returned "", and `liveness` fell through to "unknown" for every peer — so a note left
+    by a dead process and a note left by a live one were indistinguishable, and the three tests
+    above failed on every macOS CI job. That is half of why tagged releases went red.
+
+    These run on any platform: the Darwin branch is exercised with `ps` stubbed, because the
+    machine this suite usually runs on is Linux.
+    """
+
+    @staticmethod
+    def _ps(stdout, returncode=0):
+        return SimpleNamespace(returncode=returncode, stdout=stdout)
+
+    def test_a_macos_start_time_identifies_the_process(self):
+        with patch.object(peers.sys, "platform", "darwin"), \
+                patch.object(peers.subprocess, "run",
+                             return_value=self._ps("Mon Sep 22 17:11:15 2026\n")):
+            start = peers._proc_start(os.getpid())
+            self.assertEqual(start, "Mon Sep 22 17:11:15 2026", "whitespace is normalised")
+            # Inside the patch: liveness calls _proc_start again, and comparing a stubbed start
+            # time against the real /proc one would read as a recycled pid.
+            self.assertEqual(peers.liveness({"pid": os.getpid(), "proc_start": start}), "live")
+
+    def test_a_recycled_pid_is_caught_on_macos_too(self):
+        with patch.object(peers.sys, "platform", "darwin"), \
+                patch.object(peers.subprocess, "run",
+                             return_value=self._ps("Mon Sep 22 17:11:15 2026\n")):
+            verdict = peers.liveness({"pid": os.getpid(), "proc_start": "Sun Sep 21 09:00:00 2026"})
+        self.assertEqual(verdict, "gone", "a different start time is a different process")
+
+    def test_a_failing_ps_is_unknown_not_a_guess(self):
+        for outcome in (self._ps("", 1), self._ps("")):
+            with self.subTest(outcome=outcome.returncode):
+                with patch.object(peers.sys, "platform", "darwin"), \
+                        patch.object(peers.subprocess, "run", return_value=outcome):
+                    self.assertEqual(peers._proc_start(os.getpid()), "")
+
+    def test_ps_never_hangs_the_caller(self):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(argv=argv, timeout=kwargs.get("timeout"))
+            return self._ps("Mon Sep 22 17:11:15 2026\n")
+
+        with patch.object(peers.sys, "platform", "darwin"), \
+                patch.object(peers.subprocess, "run", fake_run):
+            peers._proc_start(4321)
+        self.assertEqual(seen["argv"], ["ps", "-o", "lstart=", "-p", "4321"])
+        self.assertIsNotNone(seen["timeout"], "a peer check must not block on a wedged ps")
+
+    def test_linux_still_reads_proc(self):
+        with patch.object(peers.sys, "platform", "linux"):
+            self.assertTrue(peers._proc_start(os.getpid()), "the /proc path is unchanged")

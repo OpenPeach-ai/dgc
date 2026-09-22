@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import subprocess
 import time
 from pathlib import Path
 
@@ -54,9 +56,21 @@ def _is_zombie(pid: int) -> bool:
 def _proc_start(pid: int) -> str:
     """A stable identity for a running process, so a recycled pid is not mistaken for it.
 
-    Linux: field 22 of /proc/<pid>/stat, the start time in clock ticks. Empty when it cannot be
-    read, which is what makes the verdict ``unknown`` rather than a guess.
+    Linux: field 22 of /proc/<pid>/stat, the start time in clock ticks. macOS has no /proc, so it
+    asks ps for the start time instead -- without it, every verdict on a Mac degraded to
+    ``unknown``, and a peer's note could never be told apart from a recycled pid's. Empty when it
+    cannot be read on either, which is what makes the verdict ``unknown`` rather than a guess.
     """
+    if sys.platform == "darwin":
+        try:
+            # stdin=DEVNULL, never inherited: under `dgc serve` this process's stdin is the
+            # editor protocol pipe, and a child that inherits it can steal protocol frames.
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
+                                 stdin=subprocess.DEVNULL, capture_output=True,
+                                 text=True, timeout=5)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return ""
+        return " ".join(out.stdout.split()) if out.returncode == 0 else ""
     try:
         with open(f"/proc/{int(pid)}/stat", "rb") as handle:
             raw = handle.read()
