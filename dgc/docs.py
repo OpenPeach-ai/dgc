@@ -96,12 +96,19 @@ untouched and install an extension later from the editor page.
 dgc
 ```
 
-On the very first run DGC asks you to pick a provider and a model. You can
-change either at any time:
+DGC starts on its defaults — a local Ollama at `http://localhost:11434/v1` — and
+does not interrupt you with a questionnaire. If that is where your model lives,
+the first run just works. If it is not, the first turn says so: the endpoint or
+the model name comes back in the error, with the command that fixes it.
 
+To choose deliberately instead:
+
+- `dgc setup` — walk through providers and models once, before you start.
 - `/connect` — pick a provider (Ollama, LM Studio, OpenAI, OpenRouter, …) or a
-  custom LAN host.
+  custom LAN host, at any point.
 - `/model` — switch the model on the current host.
+- `dgc doctor` — check the endpoint is reachable and the model is offered. It
+  exits non-zero when it is not, so a script can gate on it.
 
 ## Talking to the agent
 

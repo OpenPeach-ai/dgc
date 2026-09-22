@@ -2371,9 +2371,11 @@ def main(argv: list[str] | None = None) -> int | None:
         if raw_argv[0] == "trust":
             from .trust import handle_trust_command
             cfg = Config()
-            Console().print(render.render_markdown(
-                handle_trust_command(cfg, cfg.project_root, " ".join(raw_argv[1:]))))
-            return 0
+            message = handle_trust_command(cfg, cfg.project_root, " ".join(raw_argv[1:]))
+            Console().print(render.render_markdown(message))
+            # `dgc trust here` is a usage error — the working form is `dgc trust revoke here` —
+            # and it exited 0, so a script could not tell it from a folder that was forgotten.
+            return 2 if message.lstrip().lower().startswith("usage:") else 0
         if raw_argv[0] == "export":
             return run_export(raw_argv[1:])
         if raw_argv[0] == "serve":
