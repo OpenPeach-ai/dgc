@@ -54,6 +54,24 @@ if command -v timeout >/dev/null 2>&1; then
 else
   "$PYTHON" tests/run_tests.py < /dev/null
 fi
+# `pip check` is only worth anything if it is checking THIS checkout. The release venv had dgc
+# installed editable from a different tree, registering 0.37.0 -- so the gate passed here while CI
+# failed on the very thing it exists to catch (0.42.0 declared pypdf and requirements.lock never
+# got it; 0.37.0 declares no such dependency, so there was nothing for pip to find missing).
+"$PYTHON" - "$ROOT" <<'PY'
+import sys, pathlib, re
+from importlib.metadata import distribution, PackageNotFoundError
+root = pathlib.Path(sys.argv[1]).resolve()
+declared = re.search(r'__version__\s*=\s*"([^"]+)"',
+                     (root / "dgc" / "__init__.py").read_text(encoding="utf-8")).group(1)
+try:
+    installed = distribution("dgc")
+except PackageNotFoundError:
+    sys.exit("preflight: dgc is not installed in this interpreter; `pip install --no-deps -e .`")
+if installed.version != declared:
+    sys.exit(f"preflight: this interpreter has dgc {installed.version}, but {root}/dgc/__init__.py "
+             f"says {declared} -- pip check would be inspecting a different checkout")
+PY
 "$PYTHON" -m pip check
 SBOM_TMP=$(mktemp)
 EDIT_GATE_TMP=

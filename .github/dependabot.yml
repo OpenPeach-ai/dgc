@@ -32,6 +32,15 @@ updates:
       # Raising it drops every older VS Code and Cursor, which is a product
       # decision — and check-extension-vsix.py asserts the floor in two places.
       - dependency-name: "@types/vscode"
+  # The PUBLISHED TypeScript SDK. Its own npm tree was watched by nothing, although it ships to
+  # users from GitHub release tarballs exactly as the extension ships to the Marketplace.
+  # lockfile-only for the same reason as the extension: never rewrite a declared range.
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
     schedule:
