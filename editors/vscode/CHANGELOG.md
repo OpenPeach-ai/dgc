@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.1 — 2026-09-22
+
+- **Chats start again on a CLI older than 0.42.0.** 0.27.0 sent `open_asks` on every
+  `set_workspace_roots`. That field arrived in CLI 0.42.0, and the editor protocol rejects a
+  command carrying a field the CLI does not declare — so against an older CLI the handshake command
+  was refused with *"invalid command: set_workspace_roots has undeclared field 'open_asks'"* and no
+  chat could start at all. In Cursor it showed as *"DGC timed out waiting for sessions"*, and
+  Resume reported *"No past DGC sessions in this project"*: one bug, three faces. The field is now
+  sent only to a CLI that declared the capability.
+- **The automatic CLI update works again.** It asked the installer for the exact CLI version this
+  extension was built against, and the installer publishes exactly one build — the latest — and
+  refuses any other by name. So the update could only fail, which is why it could not pull anyone
+  forward onto the CLI that fixes the above. It now installs what is published.
+- The minimum CLI is stated correctly (0.42.0) in the handshake, the walkthrough and the README.
+  Nothing in the release scripts bumped that field, which is how it drifted to 0.41.6; a test now
+  fails when it disagrees with the CLI in the checkout.
+- A new test loads the schema of the oldest CLI this extension claims to support and fails if the
+  extension would send anything that CLI cannot parse. Run against 0.27.0 it names `open_asks`.
+
 ## 0.27.0 — 2026-09-21
 
 - **A question you can answer without stopping the work.** When the model needs a decision it can

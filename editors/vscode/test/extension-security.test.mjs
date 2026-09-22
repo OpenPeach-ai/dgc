@@ -270,9 +270,37 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
   assert.match(panel, /cli_outdated/, "the panel reacts to it");
   // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
-  assert.match(panel, /runCliUpdate\(executable, token, \{ targetVersion: this\.context\.extension\.packageJSON\.dgcCliVersion \}\)/, "the offer runs the CLI's update");
+  assert.match(panel, /runCliUpdate\(executable, token\)/, "the offer runs the CLI's update");
+  // …and asks for no particular version. install.sh publishes exactly one build and refuses any
+  // other by name, so pinning could only fail the update — which left every user on an older CLI
+  // disconnected, and unable to reach the CLI that would have fixed them.
+  assert.doesNotMatch(panel, /runCliUpdate\([^)]*targetVersion/,
+    "the automatic update must not pin a version the installer cannot serve");
   assert.match(panel, /updateCliWithProgress\(/, "manual recovery also captures the actual installer error");
   assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
+});
+
+test("the CLI version this extension demands is one that exists", () => {
+  // dgcCliVersion is the handshake minimum AND the version the walkthrough and README quote.
+  // Nothing in the release scripts bumped it, so it drifted: shipped 0.27.0 asked for 0.41.6 while
+  // the CLI was 0.42.0 — and 0.27.0 then sent a field only 0.42.0 declares, so an older CLI was
+  // told it was new enough and immediately rejected the handshake command.
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  const pinned = String(manifest.dgcCliVersion || "");
+  assert.match(pinned, /^[0-9]+\.[0-9]+\.[0-9]+$/, "dgcCliVersion is a release version");
+  const cliSource = readFileSync(join(here, "../../../dgc/__init__.py"), "utf8");
+  const shipped = /^__version__\s*=\s*["']([^"']+)["']/m.exec(cliSource)?.[1] || "";
+  assert.equal(pinned, shipped,
+    `dgcCliVersion (${pinned}) must be the CLI version in this checkout (${shipped})`);
+  for (const [file, text] of [
+    ["package.json", readFileSync(join(here, "../package.json"), "utf8")],
+    ["README.md", readFileSync(join(here, "../README.md"), "utf8")],
+  ]) {
+    const quoted = [...text.matchAll(/CLI \(?([0-9]+\.[0-9]+\.[0-9]+) or newer/g)].map((m) => m[1]);
+    for (const version of quoted) {
+      assert.equal(version, pinned, `${file} quotes CLI ${version}; the handshake requires ${pinned}`);
+    }
+  }
 });
 
 test("a workspace-scope dgc.command edit does not restart the backend; a user-scope change does", () => {

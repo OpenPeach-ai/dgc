@@ -861,12 +861,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const revision = this.workspaceRootsRevision;
+    // open_asks says this panel can show a question the turn did not stop for, and keep its card
+    // alive after the turn moves past it. A backend never emits ask_* to a client that did not say
+    // so, and withholds the tool entirely when nobody can show one.
+    //
+    // It is sent ONLY to a CLI that declared it. The field arrived in CLI 0.42.0, and the command
+    // schema rejects a field it does not declare -- so 0.27.0 sending it unconditionally made
+    // every chat fail against an older CLI with "invalid command: set_workspace_roots has
+    // undeclared field 'open_asks'". set_workspace_roots is part of the handshake, so nothing
+    // started at all: Cursor reported "timed out waiting for sessions" and Resume said there were
+    // no past sessions in the project. The authoritative sync runs from the `ready` handler, where
+    // capabilities are known.
+    const supportsOpenAsks = this.lastReadyEvent?.capabilities?.open_asks === true;
     const command = this.stateCommand(
-      // open_asks says this panel can show a question the turn did not stop for, and keep its
-      // card alive after the turn moves past it. A backend never emits ask_* to a client that did
-      // not say so, and withholds the tool entirely when nobody can show one.
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
-                           open_asks: true });
+                           ...(supportsOpenAsks ? { open_asks: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);
@@ -1895,7 +1904,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async updateCliInPlace(executable: string): Promise<void> {
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "DGC: updating the CLI to match the extension…", cancellable: true },
-      (_progress, token) => runCliUpdate(executable, token, { targetVersion: this.context.extension.packageJSON.dgcCliVersion }),
+      // No targetVersion. The installer serves exactly one version -- the latest -- and refuses
+      // any other outright, so naming the version this extension was built against could only do
+      // nothing (when they happen to match) or fail the update. It failed: every user on an older
+      // CLI was told the update failed and left disconnected, unable to reach the CLI that would
+      // have fixed them. Install what is published; the handshake still enforces the minimum.
+      (_progress, token) => runCliUpdate(executable, token),
     );
     if (result.ok) {
       this.restart("CLI updated to match the extension");
