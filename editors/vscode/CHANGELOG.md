@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.28.0 — 2026-09-22
+
+- **As many chats at once as you want.** The **+** beside the model name opens another chat with
+  its own `dgc serve`, its own model context and its own session file, so the chat you switch away
+  from keeps working. A rail above the transcript shows them all: a pulsing dot while one is
+  mid-turn, an amber square when it is waiting on a decision, a count of what it has said since
+  you last looked. Switching rebuilds the incoming chat from its own backend's snapshot, so a chat
+  you left mid-turn comes back where it is now. There is no built-in ceiling; set
+  `dgc.maxLiveChats` if you want one. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same
+  from the command palette.
+- **A chat you switch away from mid-handshake no longer wedges.** A backend that became ready
+  while you were in another chat could never finish its handshake — the roots acknowledgement is
+  one of the events a background chat drops — so it accepted nothing and every prompt you typed
+  there queued for ever. Coming back now picks the handshake up where it stopped.
+- **A chat waiting on you says so.** An open question was never recorded against the chat you left
+  (its event carries `ask_id`, and only `id` was read), so a chat stopped dead on a question
+  showed the idle dot. A chat blocked on more than one thing now keeps its marker until all of
+  them settle, instead of clearing on the first — and accepting a plan stops the marker, rather
+  than leaving it lit for the rest of a turn that is already working.
+- **A background chat no longer redraws the rail on every token.** A chat answering out of sight
+  posted one message per streamed chunk, and the webview rebuilt every tab each time — which also
+  took keyboard focus off a tab you were on. The count is now coalesced; anything needing an
+  answer still appears at once.
+- **A background chat's crash stays its own.** Its exit was recorded against whichever chat was on
+  screen, marking a healthy running turn as interrupted by another chat's kill, and charging its
+  crash to the shared recovery breaker. Closing a chat is also no longer written to the log as
+  that chat losing its backend.
+- **Capabilities no longer leak between chats.** `dgc.command` restarts only the active backend,
+  so two chats really can run different CLI builds; five flags read off `ready` kept whichever
+  chat set them last, and the panel offered an older CLI commands it rejects.
+- **Permission rules that do not parse are marked.** The engine drops them but the file keeps
+  them, so the list was showing a `deny` you could read back and believe was in force.
+
 ## 0.27.1 — 2026-09-22
 
 - **Chats start again on a CLI older than 0.42.0.** 0.27.0 sent `open_asks` on every

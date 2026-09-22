@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.43.0 — 2026-09-22
 
 - **As many chats at once as you want.** The **+** beside the model name opens another chat with its own
   `dgc serve`, its own model context and its own session file, so the chat you switch away from
