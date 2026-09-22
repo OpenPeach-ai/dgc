@@ -158,59 +158,94 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ProcessIdentityOnMacOSTest(unittest.TestCase):
-    """macOS has no /proc, so the pid-recycling check had nothing to read there.
+class ProcessIdentityWithoutProcfsTest(unittest.TestCase):
+    """macOS has no /proc, so the pid-recycling and zombie checks had nothing to read there.
 
-    `_proc_start` opened /proc/<pid>/stat unconditionally. On a Mac that always raised, the
-    function returned "", and `liveness` fell through to "unknown" for every peer — so a note left
-    by a dead process and a note left by a live one were indistinguishable, and the three tests
-    above failed on every macOS CI job. That is half of why tagged releases went red.
+    Both opened /proc/<pid>/stat unconditionally. On a Mac that always raised, so `_proc_start`
+    returned "" and every verdict degraded to `unknown`, and `_is_zombie` returned False so a
+    killed-but-unreaped DGC read as a LIVE peer -- the exact confusion it exists to prevent. Three
+    test_peers failures on every macOS job, on every tag, which is most of why tagged releases
+    went red.
 
-    These run on any platform: the Darwin branch is exercised with `ps` stubbed, because the
-    machine this suite usually runs on is Linux.
+    These drive the REAL ps path, not a mock of it: DGC_NO_PROCFS=1 is the same override
+    dgc.monitors and dgc.install_layout use so a Linux run exercises what macOS runs.
     """
 
-    @staticmethod
-    def _ps(stdout, returncode=0):
-        return SimpleNamespace(returncode=returncode, stdout=stdout)
+    def setUp(self):
+        self._env = patch.dict(os.environ, {"DGC_NO_PROCFS": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
-    def test_a_macos_start_time_identifies_the_process(self):
-        with patch.object(peers.sys, "platform", "darwin"), \
-                patch.object(peers.subprocess, "run",
-                             return_value=self._ps("Mon Sep 22 17:11:15 2026\n")):
-            start = peers._proc_start(os.getpid())
-            self.assertEqual(start, "Mon Sep 22 17:11:15 2026", "whitespace is normalised")
-            # Inside the patch: liveness calls _proc_start again, and comparing a stubbed start
-            # time against the real /proc one would read as a recycled pid.
-            self.assertEqual(peers.liveness({"pid": os.getpid(), "proc_start": start}), "live")
+    def test_ps_identifies_this_process(self):
+        start = peers._proc_start(os.getpid())
+        self.assertTrue(start, "ps must answer for a process that is running")
+        # The SHAPE proves which branch ran, and that is the whole point: /proc yields clock ticks
+        # ("130672363"), ps yields a date ("Wed Sep 23 01:11:27 2026"). Without this the test
+        # passes on Linux even if the ps branch is deleted, because the fall-through still reads
+        # /proc and still returns something true -- so it would not catch the macOS bug at all.
+        self.assertFalse(start.isdigit(),
+                         f"expected a ps date, got what looks like /proc clock ticks: {start!r}")
+        self.assertEqual(peers.liveness({"pid": os.getpid(), "proc_start": start}), "live")
 
-    def test_a_recycled_pid_is_caught_on_macos_too(self):
-        with patch.object(peers.sys, "platform", "darwin"), \
-                patch.object(peers.subprocess, "run",
-                             return_value=self._ps("Mon Sep 22 17:11:15 2026\n")):
-            verdict = peers.liveness({"pid": os.getpid(), "proc_start": "Sun Sep 21 09:00:00 2026"})
+    def test_a_recycled_pid_is_caught_without_procfs(self):
+        verdict = peers.liveness({"pid": os.getpid(), "proc_start": "Sun Sep 21 09:00:00 2026"})
         self.assertEqual(verdict, "gone", "a different start time is a different process")
 
-    def test_a_failing_ps_is_unknown_not_a_guess(self):
-        for outcome in (self._ps("", 1), self._ps("")):
-            with self.subTest(outcome=outcome.returncode):
-                with patch.object(peers.sys, "platform", "darwin"), \
-                        patch.object(peers.subprocess, "run", return_value=outcome):
-                    self.assertEqual(peers._proc_start(os.getpid()), "")
+    def test_the_two_paths_agree_on_the_same_process(self):
+        without = peers.liveness({"pid": os.getpid(), "proc_start": peers._proc_start(os.getpid())})
+        with patch.dict(os.environ, {"DGC_NO_PROCFS": "0"}):
+            procfs = peers.liveness({"pid": os.getpid(),
+                                     "proc_start": peers._proc_start(os.getpid())})
+        self.assertEqual(without, procfs, "ps and /proc must reach the same verdict")
+        self.assertEqual(without, "live")
 
-    def test_ps_never_hangs_the_caller(self):
-        seen = {}
+    def test_a_vanished_pid_reads_as_gone(self):
+        dead = 0x7FFFFFF0
+        self.assertEqual(peers._proc_start(dead), "")
+        self.assertFalse(peers._is_zombie(dead))
+        self.assertEqual(peers.liveness({"pid": dead, "proc_start": "x"}), "gone")
 
-        def fake_run(argv, **kwargs):
-            seen.update(argv=argv, timeout=kwargs.get("timeout"))
-            return self._ps("Mon Sep 22 17:11:15 2026\n")
+    def test_a_running_process_is_not_a_zombie(self):
+        self.assertFalse(peers._is_zombie(os.getpid()))
 
-        with patch.object(peers.sys, "platform", "darwin"), \
-                patch.object(peers.subprocess, "run", fake_run):
-            peers._proc_start(4321)
-        self.assertEqual(seen["argv"], ["ps", "-o", "lstart=", "-p", "4321"])
-        self.assertIsNotNone(seen["timeout"], "a peer check must not block on a wedged ps")
+    def test_the_zombie_check_asks_ps_when_there_is_no_procfs(self):
+        """Pins the branch, not just the answer: /proc happens to give the right answer on Linux,
+        so without this the ps arm could be deleted and every test here would still pass."""
+        asked = []
+        real = peers.subprocess.run
 
-    def test_linux_still_reads_proc(self):
-        with patch.object(peers.sys, "platform", "linux"):
-            self.assertTrue(peers._proc_start(os.getpid()), "the /proc path is unchanged")
+        def spy(argv, **kwargs):
+            asked.append(list(argv))
+            return real(argv, **kwargs)
+
+        with patch.object(peers.subprocess, "run", spy):
+            peers._is_zombie(os.getpid())
+        self.assertTrue(any("stat=" in " ".join(a) for a in asked),
+                        f"the zombie check must reach ps without /proc: {asked}")
+
+    def test_a_real_zombie_reads_as_gone(self):
+        """A child that exited and has not been waited on still answers kill(pid, 0)."""
+        proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not peers._is_zombie(proc.pid):
+                time.sleep(0.05)
+            self.assertTrue(peers._is_zombie(proc.pid), "the child should be an unreaped zombie")
+            self.assertEqual(peers.liveness({"pid": proc.pid, "proc_start": "x"}), "gone",
+                             "a zombie is not a live peer")
+        finally:
+            proc.wait(timeout=10)
+
+    def test_the_ps_child_cannot_inherit_the_protocol_pipe(self):
+        # Under `dgc serve` this process's stdin is the editor protocol pipe.
+        import inspect
+        source = inspect.getsource(peers._ps_field)
+        self.assertIn("stdin=subprocess.DEVNULL", source)
+        self.assertIn("timeout=", source, "a peer check must not block on a wedged ps")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the /proc path needs a real /proc")
+    def test_procfs_is_still_used_when_it_exists(self):
+        with patch.dict(os.environ, {"DGC_NO_PROCFS": "0"}):
+            self.assertTrue(peers._procfs())
+            self.assertTrue(peers._proc_start(os.getpid()).isdigit(),
+                            "/proc returns clock ticks, not a date")

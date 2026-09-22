@@ -12,9 +12,10 @@ The registry is ``~/.dgc/peers/<pid>.json``. NOT ``~/.dgc/agents/`` -- that dire
 named agent definitions (``<name>.md``) and must not be mixed with runtime state.
 
 Liveness is deliberately three-valued. A pid alone is not identity: pids are recycled, so a stale
-note whose pid now belongs to an unrelated process would otherwise read as a live DGC. On Linux the
-process start time settles it exactly. Where it cannot be read, the answer is ``unknown`` and the
-caller says so, rather than claiming a peer is live or gone on a guess.
+note whose pid now belongs to an unrelated process would otherwise read as a live DGC. The process
+start time settles it exactly -- from /proc on Linux, from ``ps`` on macOS, which has no /proc and
+where every verdict therefore used to degrade to ``unknown``. Where it cannot be read, the answer
+is ``unknown`` and the caller says so, rather than claiming a peer is live or gone on a guess.
 """
 from __future__ import annotations
 
@@ -35,12 +36,40 @@ def peers_dir() -> Path:
     return Path.home() / ".dgc" / "peers"
 
 
+def _procfs() -> bool:
+    """Same rule dgc.monitors and dgc.install_layout use, including the override.
+
+    DGC_NO_PROCFS=1 forces the ps path, so a Linux test runs exactly what macOS runs instead of
+    trusting a mock of it.
+    """
+    return os.environ.get("DGC_NO_PROCFS") != "1" and os.path.isdir("/proc")
+
+
+def _ps_field(pid: int, field: str) -> str:
+    """One `ps -o <field>=` value for pid; "" when ps cannot answer.
+
+    stdin=DEVNULL, never inherited: under `dgc serve` this process's stdin is the editor protocol
+    pipe, and a child that inherits it can steal protocol frames.
+    """
+    try:
+        out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))],
+                             stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                             timeout=5, env=dict(os.environ, LC_ALL="C"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    return " ".join(out.stdout.split()) if out.returncode == 0 else ""
+
+
 def _is_zombie(pid: int) -> bool:
     """A process that has exited but not been reaped still answers kill(pid, 0).
 
     Its parent has not collected it, so it is in the table and signallable while being, in every
     sense that matters here, gone. Without this a killed DGC reads as a live peer.
     """
+    if not _procfs():
+        # `ps -o stat=` reports Z for a zombie; anything else, including an empty answer for a pid
+        # that has gone entirely, is not one.
+        return _ps_field(pid, "stat").startswith("Z")
     try:
         with open(f"/proc/{int(pid)}/stat", "rb") as handle:
             raw = handle.read()
@@ -61,16 +90,8 @@ def _proc_start(pid: int) -> str:
     ``unknown``, and a peer's note could never be told apart from a recycled pid's. Empty when it
     cannot be read on either, which is what makes the verdict ``unknown`` rather than a guess.
     """
-    if sys.platform == "darwin":
-        try:
-            # stdin=DEVNULL, never inherited: under `dgc serve` this process's stdin is the
-            # editor protocol pipe, and a child that inherits it can steal protocol frames.
-            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
-                                 stdin=subprocess.DEVNULL, capture_output=True,
-                                 text=True, timeout=5)
-        except (OSError, ValueError, subprocess.SubprocessError):
-            return ""
-        return " ".join(out.stdout.split()) if out.returncode == 0 else ""
+    if not _procfs():
+        return _ps_field(pid, "lstart")
     try:
         with open(f"/proc/{int(pid)}/stat", "rb") as handle:
             raw = handle.read()

@@ -4,6 +4,15 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.43.4 — 2026-09-23
+
+- **A killed DGC no longer reads as a live peer on macOS.** 0.43.3 fixed the pid-identity check
+  there and missed its neighbour: `_is_zombie` also read `/proc`, which macOS does not have, so a
+  process that had exited but not been reaped — which still answers `kill(pid, 0)` — was reported
+  as a live peer, the exact confusion that check exists to prevent. Both now ask `ps` where there
+  is no `/proc`, using the same `DGC_NO_PROCFS` convention `dgc.monitors` and `dgc.install_layout`
+  already used, so the path macOS takes is exercised on every Linux test run rather than mocked.
+
 ## 0.43.3 — 2026-09-22
 
 - **Peer awareness works on macOS.** DGC tells a live peer from a dead one by checking that the
