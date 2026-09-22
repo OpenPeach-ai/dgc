@@ -3,40 +3,21 @@
 ## 0.27.1 — 2026-09-22
 
 - **Chats start again on a CLI older than 0.42.0.** 0.27.0 sent `open_asks` on every
-  `set_workspace_roots`. That field arrived in CLI 0.42.0, and the protocol rejects a command
-  carrying a field the CLI does not declare — so against 0.41.9 the handshake command was refused
-  with *"invalid command: set_workspace_roots has undeclared field 'open_asks'"* and no chat could
-  start at all. In Cursor it appeared as *"DGC timed out waiting for sessions"*, and Resume
-  reported *"No past DGC sessions in this project"*, because the handshake never completed. The
-  field is now sent only to a CLI that declared the capability, and a test refuses any
-  unconditional post-baseline field on a command.
-
-- **The automatic CLI update works again.** It asked the installer for the exact CLI version the
+  `set_workspace_roots`. That field arrived in CLI 0.42.0, and the editor protocol rejects a
+  command carrying a field the CLI does not declare — so against an older CLI the handshake command
+  was refused with *"invalid command: set_workspace_roots has undeclared field 'open_asks'"* and no
+  chat could start at all. In Cursor it showed as *"DGC timed out waiting for sessions"*, and
+  Resume reported *"No past DGC sessions in this project"*: one bug, three faces. The field is now
+  sent only to a CLI that declared the capability.
+- **The automatic CLI update works again.** It asked the installer for the exact CLI version this
   extension was built against, and the installer publishes exactly one build — the latest — and
-  refuses any other by name. So the automatic update could only ever fail: anyone on an older CLI
-  was told the update failed and left disconnected until they found the unpinned *DGC: Update CLI*
-  command. It now installs what is published, and the handshake still enforces the minimum.
-- The minimum CLI this extension needs is stated correctly. `dgcCliVersion`, the walkthrough and the
-  README all said 0.41.0 or 0.41.6 while the handshake refused anything older than the CLI this
-  extension ships with. Nothing in the release scripts bumped that field, which is why it drifted;
-  a test now fails when it does, and the release script refuses to build a mismatched pair.
-
-## Unreleased
-
-- **Run as many chats at once as you want.** The **+** beside the model name opens another chat. It is a second
-  backend with its own model context and its own session file, not a second view of one
-  conversation, so the chat you switch away from keeps working. A rail above the transcript shows
-  both, with a pulsing dot while a chat is mid-turn, an amber square when it is waiting on a
-  decision only you can make, and a count of what it has said since you last looked. Click a tab
-  to switch, **×** to close. There is no built-in limit — a backend is about 9 MB and cross-chat
-  writes are already serialised by the workspace write lease, so the ceiling is your machine and
-  your model budget. Set `dgc.maxLiveChats` if you want one anyway. Also in the palette as
-  *DGC: Open a Second Chat* and *DGC: Switch Chat*.
-- Switching rebuilds the chat you arrive at from its own backend, so a turn that was running while
-  you were elsewhere comes back exactly where it is — including the approval or question it is
-  blocked on, with its own buttons still live.
-- Closing the panel stops every chat's backend. A background chat whose backend dies says so on its
-  tab, and switching to it starts a new one on the same session instead of an empty chat.
+  refuses any other by name. So the update could only fail, which is why it could not pull anyone
+  forward onto the CLI that fixes the above. It now installs what is published.
+- The minimum CLI is stated correctly (0.42.0) in the handshake, the walkthrough and the README.
+  Nothing in the release scripts bumped that field, which is how it drifted to 0.41.6; a test now
+  fails when it disagrees with the CLI in the checkout.
+- A new test loads the schema of the oldest CLI this extension claims to support and fails if the
+  extension would send anything that CLI cannot parse. Run against 0.27.0 it names `open_asks`.
 
 ## 0.27.0 — 2026-09-21
 

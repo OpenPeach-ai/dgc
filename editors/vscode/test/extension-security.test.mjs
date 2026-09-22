@@ -272,8 +272,8 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
   // The offer runs the CLI's own `dgc update` — automatically, or in a terminal on the exact executable.
   assert.match(panel, /runCliUpdate\(executable, token\)/, "the offer runs the CLI's update");
   // …and asks for no particular version. install.sh publishes exactly one build and refuses any
-  // other by name, so pinning the version this extension was built against could only ever fail
-  // the update — which left every user on an older CLI disconnected.
+  // other by name, so pinning could only fail the update — which left every user on an older CLI
+  // disconnected, and unable to reach the CLI that would have fixed them.
   assert.doesNotMatch(panel, /runCliUpdate\([^)]*targetVersion/,
     "the automatic update must not pin a version the installer cannot serve");
   assert.match(panel, /updateCliWithProgress\(/, "manual recovery also captures the actual installer error");
@@ -281,10 +281,10 @@ test("an outdated CLI is offered the update, since the extension drives the CLI 
 });
 
 test("the CLI version this extension demands is one that exists", () => {
-  // dgcCliVersion is the minimum the handshake enforces (src/backend.ts) and the version the
-  // walkthrough and README quote. Nothing in the release scripts used to bump it, so it drifted:
-  // shipped 0.27.0 still asked for 0.41.6 while the CLI was 0.42.0. A stale value understates what
-  // the extension needs, and every copy of it in the docs then tells users the wrong minimum.
+  // dgcCliVersion is the handshake minimum AND the version the walkthrough and README quote.
+  // Nothing in the release scripts bumped it, so it drifted: shipped 0.27.0 asked for 0.41.6 while
+  // the CLI was 0.42.0 — and 0.27.0 then sent a field only 0.42.0 declares, so an older CLI was
+  // told it was new enough and immediately rejected the handshake command.
   const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
   const pinned = String(manifest.dgcCliVersion || "");
   assert.match(pinned, /^[0-9]+\.[0-9]+\.[0-9]+$/, "dgcCliVersion is a release version");

@@ -1257,11 +1257,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // so, and withholds the tool entirely when nobody can show one.
     //
     // It is sent ONLY to a CLI that declared it. The field arrived in CLI 0.42.0, and the command
-    // schema rejects a field it does not declare — so extension 0.27.0 sending it unconditionally
-    // made every chat fail on an older CLI with "invalid command: set_workspace_roots has
-    // undeclared field 'open_asks'", which surfaces in Cursor as "timed out waiting for sessions"
-    // and leaves Resume saying there are no past sessions, because the handshake never finishes.
-    // The authoritative sync runs from the `ready` handler, where capabilities are known.
+    // schema rejects a field it does not declare -- so 0.27.0 sending it unconditionally made
+    // every chat fail against an older CLI with "invalid command: set_workspace_roots has
+    // undeclared field 'open_asks'". set_workspace_roots is part of the handshake, so nothing
+    // started at all: Cursor reported "timed out waiting for sessions" and Resume said there were
+    // no past sessions in the project. The authoritative sync runs from the `ready` handler, where
+    // capabilities are known.
     const supportsOpenAsks = this.lastReadyEvent?.capabilities?.open_asks === true;
     const command = this.stateCommand(
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
@@ -2330,6 +2331,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // minimum, and offerManualCliUpdate() already covers "still older after an update".
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "DGC: updating the CLI to match the extension…", cancellable: true },
+      // No targetVersion. The installer serves exactly one version -- the latest -- and refuses
+      // any other outright, so naming the version this extension was built against could only do
+      // nothing (when they happen to match) or fail the update. It failed: every user on an older
+      // CLI was told the update failed and left disconnected, unable to reach the CLI that would
+      // have fixed them. Install what is published; the handshake still enforces the minimum.
       (_progress, token) => runCliUpdate(executable, token),
     );
     if (result.ok) {

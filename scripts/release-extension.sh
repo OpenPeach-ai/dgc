@@ -16,8 +16,8 @@ VER=$(node -p "require('$EXT/package.json').version")
 
 # Every version surface a release has to move, checked before anything is built rather than at the
 # deployment gate an hour later. These have each shipped wrong: 0.27.0 went to both registries
-# asking for CLI 0.41.6 while the CLI was 0.42.0, which made its automatic CLI update impossible
-# to satisfy, and its lockfile stayed at 0.26.8, which blocked the site deploy outright.
+# declaring it needed CLI 0.41.6 while sending a field only 0.42.0 declares -- so every chat failed
+# to start on an older CLI -- and its lockfile stayed at 0.26.8, which blocked the site deploy.
 CLI_VER=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$ROOT/dgc/__init__.py")
 PIN=$(node -p "require('$EXT/package.json').dgcCliVersion || ''")
 [ "$PIN" = "$CLI_VER" ] || {
