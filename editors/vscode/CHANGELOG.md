@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.1 — 2026-09-22
+
+- Pairs with CLI 0.43.1, which fixes an install that left a broken dependency set. Nothing in the
+  extension itself changed; the CLI floor it quotes did.
+
 ## 0.28.0 — 2026-09-22
 
 - **As many chats at once as you want.** The **+** beside the model name opens another chat with

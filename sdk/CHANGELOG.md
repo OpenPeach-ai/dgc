@@ -1,5 +1,15 @@
 # DGC SDK changelog
 
+## 0.6.2 — 2026-09-22
+
+Pairs with CLI 0.43.1 over editor protocol v14. The SDK's own API is unchanged.
+
+0.6.0 and 0.6.1 were tagged but never reached PyPI or npm: the publish workflow verifies every SDK
+file against the signed checkout manifest in `sdk/sbom/`, and that manifest still recorded 0.5.3,
+so the build refused before it started. The manifest is regenerated here, as
+`sdk/scripts/make_sbom.py` has always said it must be — "after every SDK source change, as the
+last step before tagging".
+
 ## 0.6.1 — 2026-09-22
 
 Pairs with CLI 0.43.0 over editor protocol v14. The protocol is unchanged and the SDK's own API is

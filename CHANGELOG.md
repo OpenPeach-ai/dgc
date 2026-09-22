@@ -4,6 +4,16 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.43.1 — 2026-09-22
+
+- **Installing DGC no longer leaves a broken dependency set.** `pypdf` has been a declared
+  dependency since the Documents module shipped in 0.42.0, but it was never added to
+  `requirements.lock` — which is what CI, the installer and the documented install path actually
+  install. `python -m pip check` reported `dgc requires pypdf, which is not installed` on every
+  machine that followed those instructions, and on every CI job, which is why tagged releases
+  stopped getting a GitHub Release. A test now compares the lock against the project's declared
+  dependencies, so a dependency can no longer be added to one and not the other.
+
 ## 0.43.0 — 2026-09-22
 
 - **As many chats at once as you want.** The **+** beside the model name opens another chat with its own
