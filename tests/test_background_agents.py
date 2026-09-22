@@ -392,3 +392,32 @@ class AResultForAReplacedChatIsDroppedTests(HarnessCase):
             time.sleep(0.1)
         self.assertEqual(notices, [],
                          "the cleared chat's sub-task must not wake the chat that replaced it")
+
+
+class TheTranscriptCallsItASubTaskTests(HarnessCase):
+    """The wake band and the card under it have to agree.
+
+    `wake_tag` was taught the new kind; the transcript card was not, so a real recording showed
+    the band reading "sub-task · woke on its result" above a card headed "Monitor event". Unit
+    tests on the tag passed throughout — the two labels are produced in different places.
+    """
+
+    @staticmethod
+    def block(kind):
+        from dgc.monitors import Batch
+        from dgc.tui import TUI
+        batch = Batch("sub-abc123", "map auth", kind,
+                      lines=["finished", "Auth lives in pkg/auth.py."])
+        return TUI._monitor_event_block(object.__new__(TUI), batch)
+
+    def test_a_sub_task_report_is_not_headed_monitor_event(self):
+        block = self.block("subtask_ended")
+        self.assertEqual(block["route_name"], "subtask_result")
+        from dgc.tui import TUI
+        for table in (TUI._TOOL_VERB, TUI._TOOL_ING, TUI._TOOL_ED):
+            self.assertEqual(table.get("subtask_result"), "Sub-task result")
+
+    def test_a_real_monitor_event_is_unchanged(self):
+        for kind in ("output", "ended", "background_exit"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.block(kind)["route_name"], "monitor_event")

@@ -1213,7 +1213,11 @@ class TUI:
             lines = lines[1:]
         else:
             summary = f'"{safe(batch.description)}" · {safe(batch.monitor_id)} · event {batch.event_index}'
-        block = {"kind": "tool", "name": "monitor_event", "route_name": "monitor_event",
+        # Three kinds arrive here. A sub-task's report gets its own route name, so the card is
+        # not headed "Monitor event" -- the wake band above it already says "sub-task · woke on its
+        # result", and the two disagreeing is how a real recording caught this.
+        route = "subtask_result" if batch.kind == "subtask_ended" else "monitor_event"
+        block = {"kind": "tool", "name": route, "route_name": route,
                  "call_id": None, "summary": summary[:200], "running": False, "error": False,
                  "out": "\n".join(lines), "diff": None, "exp": False, "lines": len(lines)}
         if batch.kind == "output" and batch.omitted_lines:
@@ -3972,6 +3976,7 @@ class TUI:
 
     _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
                   "monitor": "Monitor", "monitor_stop": "Stop monitor", "monitor_event": "Monitor event",
+                  "subtask_result": "Sub-task result",
                   "edit_file": "Edit", "apply_patch": "Patch", "repo_map": "Map repo",
                   "code_intel": "Inspect code",
                   "grep": "Search", "glob": "Find", "web_search": "Search",
@@ -3981,7 +3986,7 @@ class TUI:
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
                  "monitor": "Starting monitor", "monitor_stop": "Stopping monitor",
-                 "monitor_event": "Monitor event",
+                 "monitor_event": "Monitor event", "subtask_result": "Sub-task result",
                  "write_file": "Writing", "edit_file": "Editing", "apply_patch": "Patching",
                  "repo_map": "Mapping repo", "code_intel": "Inspecting code",
                  "grep": "Searching", "glob": "Finding",
@@ -3990,7 +3995,7 @@ class TUI:
                  "view_image": "Viewing image"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
-                "monitor_event": "Monitor event",
+                "monitor_event": "Monitor event", "subtask_result": "Sub-task result",
                 "edit_file": "Edited", "apply_patch": "Patched", "repo_map": "Mapped repo",
                 "code_intel": "Inspected code",
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
