@@ -2247,6 +2247,18 @@ def unit_tests(tmp: Path):
                 and _orphan_proc.poll() is not None):
             break
         _time_tools.sleep(0.02)
+    # The loop breaks on `poll() is not None`, but `_orphan_output` was fetched EARLIER in that
+    # same iteration -- before the leader's exit was observed -- so it can still say "running"
+    # while the process has in fact gone. Read the settled state once more rather than asserting
+    # against a snapshot taken a moment too early; under load that race is the difference between
+    # a green suite and a release that will not push.
+    if _orphan_pid_match:
+        _orphan_settle = _time_tools.monotonic() + 5.0
+        while _time_tools.monotonic() < _orphan_settle:
+            _orphan_output = execute("bash_output", {"id": _orphan_id}, ctx)
+            if "finishing (leader exited" in _orphan_output:
+                break
+            _time_tools.sleep(0.02)
     _orphan_pid = int(_orphan_pid_match.group(1)) if _orphan_pid_match else 0
     _orphan_was_alive = _live_process(_orphan_pid, wait=0.05)
     _orphan_controls = _tools_bg.bash_handle_tools(ctx)
