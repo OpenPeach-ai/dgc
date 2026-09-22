@@ -87,6 +87,14 @@ def write_json(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
+# Transient inter-process coordination, not user state. Every DGC on the machine takes a
+# workspace lease here -- that is what makes concurrent sessions safe -- so including it made this
+# guard assert "no other DGC ran anywhere while we recorded", which is not a property of the
+# capture and is routinely false on a machine running more than one agent. The claim being proved
+# is "no user config or session persisted"; a lock file is neither.
+IGNORED_USER_STATE = ("locks",)
+
+
 def user_state_snapshot(root: Path) -> dict[str, tuple]:
     """Record each path's mode, size, mtime and content hash without following links."""
     manifest: dict[str, tuple] = {}
@@ -94,6 +102,8 @@ def user_state_snapshot(root: Path) -> dict[str, tuple]:
         return {".": ("missing",)}
     for path in sorted((root, *root.rglob("*")), key=lambda item: item.as_posix()):
         relative = "." if path == root else path.relative_to(root).as_posix()
+        if relative.split("/", 1)[0] in IGNORED_USER_STATE:
+            continue
         try:
             stat = path.lstat()
         except FileNotFoundError:
