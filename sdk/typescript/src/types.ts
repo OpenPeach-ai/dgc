@@ -1,6 +1,6 @@
-export const VERSION = "0.6.2";
+export const VERSION = "0.6.3";
 export const PROTOCOL = 14;
-export const REQUIRES_CLI = "0.43.1";
+export const REQUIRES_CLI = "0.43.2";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto";
 export type PermissionAction = "once" | "always" | "deny";

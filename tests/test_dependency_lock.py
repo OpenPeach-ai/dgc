@@ -14,8 +14,6 @@ satisfy the package it is meant to install.
 from __future__ import annotations
 
 import re
-import sys
-import tomllib
 import unittest
 from pathlib import Path
 
@@ -29,10 +27,23 @@ def _canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+_DEPS_ARRAY = re.compile(r"^dependencies\s*=\s*\[(.*?)\]", re.M | re.S)
+_SPEC = re.compile(r"[\"\']([^\"\']+)[\"\']")
+
+
 def _declared() -> dict[str, str]:
-    data = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))
+    """The project's runtime dependencies, read without `tomllib`.
+
+    `tomllib` is standard library only from Python 3.11, and CI still builds on 3.10 — where an
+    unconditional import makes this whole module fail to import. The convention elsewhere in the
+    suite is to skip on 3.10; this guard is worth running on every interpreter instead, and the
+    dependency list is a flat array of strings, so a small regex reads it everywhere.
+    """
+    text = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+    body = _DEPS_ARRAY.search(text)
+    assert body, "pyproject.toml has no [project] dependencies array"
     out = {}
-    for spec in data["project"].get("dependencies", []):
+    for spec in _SPEC.findall(body.group(1)):
         match = _NAME.match(spec.strip())
         if match:
             out[_canonical(match.group(1))] = spec.strip()

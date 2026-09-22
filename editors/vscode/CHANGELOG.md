@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.2 — 2026-09-22
+
+- Pairs with CLI 0.43.2. Nothing in the extension changed; the CLI floor it quotes did.
+
 ## 0.28.1 — 2026-09-22
 
 - Pairs with CLI 0.43.1, which fixes an install that left a broken dependency set. Nothing in the

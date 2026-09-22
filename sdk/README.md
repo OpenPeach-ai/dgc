@@ -1,13 +1,13 @@
 # DGC SDK
 
-Embed the DGC coding agent in an application or a CI job. **0.6.2**, editor protocol **v14**,
-pairs with CLI **0.43.1**. Proven on Linux; macOS and WSL are unproven; native Windows is
-experimental. Release tag **`sdk-v0.6.2`** (not `v0.5.x`, which are historical CLI tags).
+Embed the DGC coding agent in an application or a CI job. **0.6.3**, editor protocol **v14**,
+pairs with CLI **0.43.2**. Proven on Linux; macOS and WSL are unproven; native Windows is
+experimental. Release tag **`sdk-v0.6.3`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
 | --- | --- |
-| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.6.2` |
-| Node `@vibedgc/sdk` | `npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.2/vibedgc-sdk-0.6.2.tgz` |
+| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.6.3` |
+| Node `@vibedgc/sdk` | `npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.3/vibedgc-sdk-0.6.3.tgz` |
 
 Both drive `dgc serve` from a DGC CLI install, which they find on their own; `DGC_PYTHON` pins a
 particular one (see [docs/SDK.md](../docs/SDK.md#install)). From a clone: `python3 -m pip install -e sdk/python`, and

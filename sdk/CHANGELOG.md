@@ -1,5 +1,17 @@
 # DGC SDK changelog
 
+## 0.6.3 — 2026-09-22
+
+Pairs with CLI 0.43.2 over editor protocol v14.
+
+**The TypeScript SDK's tables had fallen behind the runtime.** `ask_request` and `ask_resolved`
+were missing from the known event types, and `ask_user` — the tool behind them — was missing from
+the permission display table and from the always-offered set that mirrors the runtime's
+`READ_ONLY_TOOLS`. A client using `allowTools` was told it "cannot refuse the runtime's tool
+ask_user, which this SDK does not know". All three have been true of the CLI since 0.42.0; the
+guard test caught them, but it had never run, because the publish workflow failed earlier on a
+stale checkout manifest and CI failed earlier on `pip check`.
+
 ## 0.6.2 — 2026-09-22
 
 Pairs with CLI 0.43.1 over editor protocol v14. The SDK's own API is unchanged.

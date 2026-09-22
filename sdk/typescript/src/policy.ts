@@ -28,12 +28,12 @@ export const DISPLAY: Readonly<Record<string, string>> = {
   browser: "Browser", todo: "Todo", notes: "Notes", skill: "Skill",
   add_skill: "AddSkill", save_memory: "SaveMemory", mcp_search: "MCPSearch",
   mcp_call: "MCPCall", present_plan: "PresentPlan", present_document: "PresentDocument",
-  propose_options: "ProposeOptions", artifact: "Artifact", task: "Task",
+  propose_options: "ProposeOptions", ask_user: "AskUser", artifact: "Artifact", task: "Task",
 };
 // Tools a rule cannot name (goal bookkeeping), and tools an allowlist keeps unless it is denied
 // by name: the option picker is how the agent asks the application a question.
 const UNRULED_TOOLS = new Set(["update_goal"]);
-const ALWAYS_OFFERED = new Set(["propose_options"]);
+const ALWAYS_OFFERED = new Set(["propose_options", "ask_user"]);
 // The display spelling permission rules use -> DGC's internal tool name, so denyTools/allowTools
 // accept either ("Bash" and "bash", "Write" and "write_file"), case-insensitively.
 const DISPLAY_TO_INTERNAL: Readonly<Record<string, string>> = Object.fromEntries(

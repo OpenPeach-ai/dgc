@@ -4,6 +4,13 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.43.2 — 2026-09-22
+
+- **The release pipeline is green again.** 0.43.1's own dependency-lock guard imported `tomllib`,
+  which is standard library only from Python 3.11 — so on the 3.10 job it failed to import and took
+  the whole suite down, replacing one CI failure with another. It reads the dependency list without
+  `tomllib` now, and therefore runs on every interpreter rather than skipping on the oldest one.
+
 ## 0.43.1 — 2026-09-22
 
 - **Installing DGC no longer leaves a broken dependency set.** `pypdf` has been a declared

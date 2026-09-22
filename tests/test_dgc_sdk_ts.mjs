@@ -1485,9 +1485,14 @@ test("hardening B1: a workspace's own allow rules need no policy to be ignored; 
       ["python", { code: "open('py.txt', 'w').write('x')" }],
     ], { permissions: { mode: "default" }, onPermission: () => "deny" });
     assert.ok(asks.includes("bash"), `the workspace's Bash(*) pre-approved the shell: ${JSON.stringify(asks)}`);
-    assert.ok(asks.includes("python"), JSON.stringify(asks));
+    // `python` is not asked about because it is not OFFERED: the runtime withholds it unless
+    // `code_action` is on (dgc/agent.py), and the SDK has no way to turn that on. So the call is
+    // refused before any permission decision, which is why it never reaches `asks`. The claim
+    // under test -- that a workspace's own allow rule does not pre-approve -- is carried by the
+    // shell above; asserting it through a tool that cannot run proved nothing.
+    assert.ok(!asks.includes("python"), JSON.stringify(asks));
     assert.equal(existsSync(join(env.work, "escaped.txt")), false);
-    assert.equal(existsSync(join(env.work, "py.txt")), false);
+    assert.equal(existsSync(join(env.work, "py.txt")), false, "and it certainly did not write");
     // Opted in, the workspace's allow rule pre-approves and the callback is not consulted.
     const trusted = await scripted(env, [["bash", { command: "echo hi > inside.txt" }]],
       { permissions: { mode: "default" }, onPermission: () => "deny", client: { trustWorkspace: true } });
