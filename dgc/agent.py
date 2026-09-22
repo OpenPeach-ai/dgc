@@ -2278,8 +2278,6 @@ class Agent(GoalLifecycle):
                                or (name == "artifact" and self.mode == "plan"
                                    and self.config.get("artifact_in_plan", False)))]
             else:
-                schemas = [tool for tool in schemas
-                           if (tool.get("function", {}).get("name") != "task" or self._task_exposed())]
                 if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
                     schemas = [tool for tool in schemas
                                if tool.get("function", {}).get("name") != "artifact"]
@@ -2296,6 +2294,11 @@ class Agent(GoalLifecycle):
                        if (tool.get("function", {}).get("name") not in
                            {"bash_output", "bash_kill"}
                            or tool.get("function", {}).get("name") in useful_process_tools)]
+        # Delegation is decided in one place, for every profile. `adaptive` may put `task` BACK
+        # above when the request asks for it; nothing puts it back past the depth cap.
+        if not self._task_exposed():
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "task"]
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
@@ -2416,26 +2419,66 @@ class Agent(GoalLifecycle):
         profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
         return profile != "adaptive" or "monitor" in getattr(self, "_active_tool_intents", set())
 
+    def depth_cap_refusal(self) -> str:
+        """What a `task` call past the cap is told. One wording for both enforcement points."""
+        cap = self.max_subagent_depth()
+        return (f"Max sub-agent depth reached (depth {self.depth} of {cap}) — handle this "
+                "sub-task directly instead. If deeper nesting is genuinely needed, the user can "
+                "raise `max_subagent_depth`.")
+
+    def max_subagent_depth(self) -> int:
+        """How deep `task` may nest. 1 (the default) keeps the tree flat: the agent you are
+        talking to delegates, its children do the work themselves.
+
+        Two rules used to answer this and they disagreed. The executor refused past a hard-coded
+        depth of 3, while the catalog offered a child `task` only when its brief matched a regex
+        for delegation words -- so in practice a child almost never got the tool and the 3 was
+        unreachable. Flat is therefore the behaviour that actually shipped, and it stays the
+        default; what changes is that it is now a number anyone can see and raise.
+
+        Every serious harness bounds delegation with an integer read off the real parent chain --
+        Codex, Claude Code, Grok Build, opencode, qwen-code and OpenClaw all do exactly this, with
+        defaults between 1 and 5 -- because the depth of the agent that is running is a fact about
+        the run, not something the agent can argue its way past.
+        """
+        try:
+            return max(0, min(8, int(self.config.get("max_subagent_depth", 1))))
+        except (TypeError, ValueError):
+            return 1
+
     def _task_exposed(self) -> bool:
         """Is the `task` tool offered on this request? The delegation guidance follows it.
 
-        Outside plan mode and a child's allow-list: under the full tool profile, when the request
-        asks to delegate, or when the top-level agent leads — always in Ultra, and on a broad
-        survey of the codebase, where an explorer child clearly helps. A child is offered it only
-        when its own brief asks (Claude Code and Codex keep sub-agents one level deep by default),
-        so Ultra does not fan out recursively.
+        Two independent questions, deliberately kept apart:
+
+        MAY this agent delegate at all -- plan mode, the child's own allow-list, and how deep it
+        already sits. Depth comes from `self.depth`, which the parent sets when it spawns the
+        child, so a child cannot claim to be shallower than it is.
+
+        SHOULD it, on this request -- the tool profile and, under `adaptive`, whether the request
+        asked for something delegation serves.
+
+        It used to answer the first question with the second one's evidence: a child was offered
+        `task` only if the regex behind the `delegate` intent matched its brief, so "delegate the
+        search to a sub-agent" could nest and "split this across helpers" could not, and the depth
+        of the tree came down to the parent's choice of words. Whether a tool EXISTS is not a
+        thing to infer from phrasing -- Codex keeps `spawn_agent` present at every depth under its
+        cap and puts the restraint in the tool's own description, for the model to weigh.
         """
         if self.mode == "plan":
             return False
         allow = getattr(self, "_agent_tool_allowlist", None)
         if allow and "task" not in allow:
             return False
+        if self.depth >= self.max_subagent_depth():
+            return False
+        if self.depth > 0:
+            return True                       # inside the cap, a child delegates like the lead
         profile = str(self.config.get("tool_profile", "standard") or "standard").lower()
         active = getattr(self, "_active_tool_intents", set())
-        return (profile == "full" or "delegate" in active
-                or (self.depth == 0 and (profile == "standard"
-                                         or bool(self.config.get("ultra_mode", False))
-                                         or "repo_navigation" in active)))
+        return (profile in ("full", "standard") or "delegate" in active
+                or bool(self.config.get("ultra_mode", False))
+                or "repo_navigation" in active)
 
     def _delegation_guidance(self, mode: str) -> list[str]:
         """The lead agent's roster and delegation policy, sent only while `task` is offered."""
@@ -4231,6 +4274,16 @@ class Agent(GoalLifecycle):
             path = sessions.resolve_path(self.session_root, path, must_exist=True)
             record = sessions.load_record(path, self.session_root)
             loaded = [m for m in record.get("messages", []) if m.get("role") != "system"]
+            # A detached child belongs to the chat that asked for it, exactly as on `/new`. Its
+            # worktree integrates into `self.checkpoints`, which is replaced below -- so leaving it
+            # running hands the RESUMED chat a previous chat's file writes: a recovery point for
+            # edits nobody made there, and the earlier chat's files inside this chat's `/rewind`.
+            # Signal, not join: the reopened conversation must not block on one mid-request.
+            stopped = self.stop_detached()
+            if stopped:
+                self.ui.info(self._safe_text(
+                    f"↳ stopped {stopped} background sub-task{'s' if stopped != 1 else ''} "
+                    "that belonged to the previous chat"))
             # Monitors belong to the conversation being left; they never come back with a reopened
             # one either. Nothing is sent to the model about it; the frontend shows one line.
             self.monitors.new_epoch("shutdown")
@@ -6590,6 +6643,18 @@ class Agent(GoalLifecycle):
         # into the reply text is parsed into a real call, so any content the model reads could ask
         # for a tool the user had switched off. Refuse rather than drop, so the model is told why
         # and the transcript keeps a result for every call it made.
+        # Belt and braces, as Codex, Claude Code, opencode and Grok Build all do it: `task` is
+        # withheld from the catalog past the cap AND refused if it is called anyway. This sits
+        # ahead of the generic "not offered" answer because it is the more useful one -- it tells
+        # the model where in the tree it actually is and what the user would change.
+        if name == "task" and self.depth >= self.max_subagent_depth():
+            # Through tool_denied, not a bare return: an early return answers the model and shows
+            # the user nothing, so a sub-agent that kept trying to delegate looked idle. The
+            # executor's own copy of this check has always rendered a row.
+            refusal = self.depth_cap_refusal()
+            self.ui.tool_denied(name, display_args, refusal, call_id)
+            return refusal
+
         offered = getattr(self, "_offered_tool_names", None)
         if offered and name not in offered and _dispatchable(name):
             # Any name this method can actually ACT ON, not just the ones `execute` runs. Gating on
@@ -6886,8 +6951,8 @@ class Agent(GoalLifecycle):
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
                                 "Do not retry this exact action.")
                     if name == "task":
-                        if self.depth >= 3:
-                            out = "Max sub-agent depth reached — handle this sub-task directly instead."
+                        if self.depth >= self.max_subagent_depth():
+                            out = self.depth_cap_refusal()
                         else:
                             out = self._run_subagent(
                                 str(args.get("description", "")), str(args.get("prompt", "")),
@@ -7826,6 +7891,11 @@ class Agent(GoalLifecycle):
         jobs = self._detached_jobs
         agent_id = sub_ui.agent_id
         jobs[agent_id] = {"cancel": own_cancel, "description": description}
+        # The frontend's own callback wins; without one, the hub's pending queue is what wakes the
+        # terminal. Pin the conversation now: a child can outlive the chat that asked for it, and
+        # its result must not land in whatever chat replaced it.
+        hub = getattr(self, "monitors", None)
+        notify_epoch = getattr(hub, "epoch", None)
         # The chat this work belongs to, as it is NOW. `self.checkpoints` is replaced by a new
         # chat, and this child may outlive that; its integration belongs to the chat that asked.
         keeper = self.checkpoints
@@ -7844,25 +7914,54 @@ class Agent(GoalLifecycle):
             finally:
                 jobs.pop(agent_id, None)
                 notify = getattr(self, "on_detached_ended", None)
-                if callable(notify) and not self.stopping:
+                # A child can outlive the chat that asked for it: `/new` and `/clear` signal it and
+                # move on. Its result belongs to that chat, so if the conversation has been replaced
+                # it is dropped, for the callback exactly as for the queue -- otherwise the editor
+                # started an unprompted, billed turn in a brand-new empty chat, reporting work the
+                # user had just cleared.
+                replaced = (hub is not None and notify_epoch is not None
+                            and hub.epoch != notify_epoch)
+                if self.stopping or replaced:
+                    pass
+                elif callable(notify):
                     try:
                         notify({"id": agent_id, "description": description,
                                 "message": outcome.output,
                                 "integrated": bool(outcome.integrated)})
                     except Exception:
                         pass
+                elif hub is not None and notify_epoch is not None:
+                    try:
+                        hub.queue_subtask_ended(agent_id, description, outcome.output,
+                                                bool(outcome.integrated), notify_epoch)
+                    except Exception:
+                        pass
 
         threading.Thread(target=work, daemon=True, name=f"dgc-bg-{agent_id[-8:]}").start()
-        # Only a frontend that set `on_detached_ended` can wake the parent when this lands; the
-        # editor backend does, the terminal does not. Promising a wake everywhere meant the
-        # terminal's model was told "I will continue when it finishes" and then never heard again,
-        # so it either waited for nothing or reported work it had not seen the result of.
+        # Promise only the delivery that will actually happen. Three cases: the editor backend's
+        # callback wakes the parent; the hub's pending queue wakes the terminal when monitor wakes
+        # are on, and otherwise still hands the result to the model alongside the user's next
+        # message; a frontend with neither never hears again. Promising a wake in all three meant a
+        # model was told "I will continue when it finishes" and then either waited for nothing or
+        # reported work whose result it had never seen.
+        from .monitors import wake_settings
+        running = f"Sub-task '{description}' is running in the background (id {agent_id}). "
+        queued = hub is not None and notify_epoch is not None
         if callable(getattr(self, "on_detached_ended", None)):
-            return (f"Sub-task '{description}' is running in the background (id {agent_id}). "
-                    "I will continue when it finishes.")
-        return (f"Sub-task '{description}' is running in the background (id {agent_id}). "
-                "Nothing will wake this conversation when it lands here, so do not wait for it: "
-                "carry on, and check on it later.")
+            return running + "I will continue when it finishes."
+        # `_monitor_delivery` is the predicate for "this frontend starts turns on its own": the TUI
+        # and the editor backend set it, `dgc -p` and the classic REPL do not. Every Agent builds a
+        # hub, so a hub is NOT evidence that anything is watching it -- keying on one told `dgc -p`
+        # a result was coming, and its process then exited with the child still running.
+        if queued and self._monitor_delivery() and wake_settings(self.config)[0]:
+            return running + "I will continue when it finishes."
+        # No wake, but the next turn still carries whatever is pending (_drain_monitors with_prompt),
+        # so a frontend that will run another turn does get the result -- just not on its own.
+        if queued and getattr(self.ui, "non_interactive", False) is not True:
+            return (running + "Nothing will start a turn when it lands; its result reaches me with "
+                    "the user's next message. Do not wait for it.")
+        return (running + "Nothing will wake this conversation when it lands here, so do not wait "
+                "for it: carry on, and check on it later.")
 
     def stop_detached(self, agent_id: str | None = None) -> int:
         """Cancel one detached child, or every detached child. Returns how many were signalled."""
@@ -7906,8 +8005,11 @@ class Agent(GoalLifecycle):
             limit = max(1, min(8, int(self.config.get("max_parallel_tasks", 4))))
         except (TypeError, ValueError):
             limit = 1
+        # The same cap as everywhere else. This was a second hard-coded 3, written independently
+        # of the executor's: it is the only depth check on this path when `_offered_tool_names`
+        # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
         if (len(calls) < 2 or len(calls) > _MAX_PARALLEL_TASK_BATCH or limit < 2
-                or self.depth >= 3 or self.mode != "auto"
+                or self.depth >= self.max_subagent_depth() or self.mode != "auto"
                 or self.config.get("hooks") or self.cancelled.is_set()
                 or any(call.name != "task" or "_unparsed" in call.arguments for call in calls)
                 or repo_root(self.config.project_root) is None):

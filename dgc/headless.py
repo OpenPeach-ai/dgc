@@ -2473,7 +2473,13 @@ class Backend:
         return finish()
 
     def _emit_permissions(self, request_id: str) -> None:
-        items = [{"action": action, "rule": str(rule)[:1000]}
+        # A rule that does not parse is dropped by the engine but kept in the file, so a listing
+        # that shows it unmarked lets someone read their own `deny` back and believe it applies.
+        # Both terminal listings say so; this is the editor's, and it was showing them plain.
+        from .permissions import invalid_rules
+        broken = {(action, text) for action, text, _why in invalid_rules(self.config.permissions)}
+        items = [{"action": action, "rule": str(rule)[:1000],
+                  **({"invalid": True} if (action, str(rule)) in broken else {})}
                  for action in ("deny", "ask", "allow")
                  for rule in list(self.config.permissions.get(action, []))[:256]]
         self.em.emit("permissions", request_id=request_id, items=items, total=len(items))

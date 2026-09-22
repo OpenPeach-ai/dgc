@@ -48,6 +48,12 @@ const USAGE_RANGE_ALIASES: Record<string, string> = {
   all: "all", "all-time": "all", alltime: "all", ever: "all",
 };
 const PANEL_DISPOSED_CAUSE = "panel disposed (window reload, close or extension update)";
+/** Prefix for a backend stopped because the user closed its chat. A close is not a crash, and
+ *  the teardown handler must not log it as one or arm the dead slot to resume. */
+const CHAT_CLOSED_CAUSE = "chat closed: ";
+/** One animation frame's worth. Long enough to collapse a streamed response into a few rail
+ *  posts, short enough that an unread count still reads as live. */
+const CHAT_SLOTS_COALESCE_MS = 120;
 
 interface InterruptedTurnMark {
   scope?: string; id?: string; turnId?: string; at?: number;
@@ -275,6 +281,11 @@ const PER_CHAT_FIELDS = [
   "workspaceChanges", "chatChanges", "changesRefreshRevision",
   "backendRecoveries", "intentionalShutdown", "pendingCommandRestart",
   "imageRefs", "slashAliases", "behaviorState", "routeState", "state",
+  // Derived from `lastReadyEvent`, which IS per-chat -- but derived once, in the `ready` handler,
+  // so they are not recomputed on a switch. `dgc.command` restarts only the ACTIVE backend, so two
+  // chats really can run different CLI builds: without these, a chat on an older CLI inherited the
+  // newer one's capabilities and the panel offered it commands it rejects.
+  "composerSelections", "skillManagement", "mcpContext", "mcpManagement", "goalInputs",
 ] as const;
 
 interface ChatSlot {
@@ -290,6 +301,9 @@ interface ChatSlot {
   busy: boolean;
   /** This chat is blocked on a decision only the user can make. */
   needsYou: boolean;
+  /** WHICH decisions, by request id. A chat can be blocked on several at once, so the dot cannot
+   *  be a boolean that the first resolve clears. Mirrors the active chat's `openDecisions`. */
+  openDecisions?: Set<string>;
   /** Display events seen since the user last looked at this chat. */
   unread: number;
   /** Set when this background chat's backend died: why. Switching back starts a fresh one and
@@ -356,6 +370,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private workspaceRootsDirty = true;
   private workspaceRootsInFlight: { revision: number; requestId?: string } | undefined;
   private initializingBackend?: DgcBackend;
+  private chatSlotsTimer?: ReturnType<typeof setTimeout>;
   private nativeSettingsReady = false;
   private webviewReady = false;
   private lastReadyEvent?: DgcEvent;
@@ -542,6 +557,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.scheduleWorkspaceChanges(0);
       return;
     }
+    if (this.backend && this.initializingBackend === this.backend) {
+      // This chat was parked in the middle of its handshake, and a handshake cannot finish for a
+      // chat nobody is looking at: every door out of maybeCompleteHandshake is guarded on
+      // `this.backend === be`, and the `workspace_roots` acknowledgement that clears
+      // workspaceRootsInFlight is one of the events backgroundEvent drops. The backend therefore
+      // never releases, and every prompt typed here queues for ever. Pick it up from where it
+      // stopped, now that this chat is the one on screen.
+      this.redriveHandshake(this.backend);
+      this.postChatSlots();
+      this.postState();
+      return;
+    }
     if (!this.backend) {
       // Its backend died while we were elsewhere. Start one now; the restore candidate set when we
       // noticed the death puts it back on the same session, and its handshake repaints the panel.
@@ -604,7 +631,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const be = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
     this.slots = this.slots.filter((candidate) => candidate.id !== slot.id);
-    try { be?.dispose(`chat ${slot.label || slot.id} closed`); } catch { /* already gone */ }
+    try { be?.dispose(`${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`); } catch { /* already gone */ }
     this.postChatSlots();
   }
 
@@ -642,7 +669,52 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Tell the webview what chats exist, which one it is showing, and what the others are doing. */
+  /** Post the rail soon, not now. The webview rebuilds every tab on each message, so a streaming
+   *  background chat was costing one full rebuild per token. One frame's worth of delay collapses
+   *  a whole response into a handful of posts, and the count on the chip is no less useful for it. */
+  private scheduleChatSlotsPost(): void {
+    if (this.chatSlotsTimer !== undefined) { return; }
+    this.chatSlotsTimer = setTimeout(() => {
+      this.chatSlotsTimer = undefined;
+      this.postChatSlots();
+    }, CHAT_SLOTS_COALESCE_MS);
+  }
+
+  /** Did WE stop this backend on purpose? Those paths own their own lifecycle and must not be
+   *  logged as a crash, nor arm the slot to resume the session it was on. Closing a chat belongs
+   *  here: it was reported to the user as that chat losing its backend, in the one log they are
+   *  told to open when a chat disappears. */
+  private isDeliberateStop(cause: string): boolean {
+    return cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE
+      || cause.startsWith(CHAT_CLOSED_CAUSE);
+  }
+
+  /** What a backend's unassisted exit does to the panel's own records. Those records belong to the
+   *  chat ON SCREEN, so a background child's death must reach `backgroundBackendLost` and stop —
+   *  it was stamping its own cause onto the foreground chat's still-running turn. Returns what the
+   *  caller should report as resumable, or undefined when the death was not the active chat's. */
+  private recordExitAgainstActiveChat(slot: ChatSlot, cause: string,
+                                      lastFrame: string): string | undefined {
+    if (slot.id !== this.activeSlotId) {
+      this.backgroundBackendLost(slot, cause);
+      return undefined;
+    }
+    return this.markInterruptedWork(cause, this.recordUnassistedExit(cause, lastFrame));
+  }
+
+  /** Which decision an event is about. `ask_request`/`ask_resolved` carry `ask_id`; every other
+   *  decision event carries `id`. Reading only `id` on the add side meant an open ask was never
+   *  recorded, so switching away from a chat that was waiting on one showed it as idle. */
+  private static decisionId(ev: unknown): string {
+    const row = (ev || {}) as Record<string, unknown>;
+    return String(row.id ?? row.ask_id ?? row.request_id ?? "");
+  }
+
   private postChatSlots(): void {
+    if (this.chatSlotsTimer !== undefined) {
+      clearTimeout(this.chatSlotsTimer);
+      this.chatSlotsTimer = undefined;
+    }
     const active = this.activeSlot();
     active.label = this.chatLabel();
     active.busy = this.confirmedTurnActive;
@@ -777,22 +849,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // The real names, from schemas/editor-protocol-v14.schema.json. An earlier version of this
       // switch listed `plan_request`, `question_request` and `ask` — none of which the protocol
       // emits — so a chat blocked on a plan or a question showed no dot at all.
+      // A chat can be blocked on several decisions at once — the active path keeps a Set for
+      // exactly that reason (`openDecisions`), and a prompt can carry up to four open asks. A
+      // boolean cleared by the first resolve put the dot out while the chat was still stopped on
+      // the others, and nothing else would ever light it again.
       case "permission_request":
       case "options_request":
       case "ask_request":
-      case "plan_proposal":
+      case "plan_proposal": {
+        const id = DgcViewProvider.decisionId(ev);
+        if (!slot.openDecisions) { slot.openDecisions = new Set<string>(); }
+        if (id) { slot.openDecisions.add(id); }
         slot.needsYou = true;
         break;
+      }
       case "permission_resolved":
       case "options_resolved":
       case "ask_resolved":
-      case "request_expired":
-        slot.needsYou = false;
+      case "request_expired": {
+        slot.openDecisions?.delete(DgcViewProvider.decisionId(ev));
+        slot.needsYou = !!slot.openDecisions?.size;
         break;
+      }
       case "text_delta":
       case "tool_call":
         slot.unread++;
-        break;
+        // The chip shows a COUNT, and the CLI emits one text_delta per stream chunk. Reposting
+        // each time sent one message per token and rebuilt the whole rail DOM in the webview
+        // (replaceChildren on every tab), which also drops keyboard focus if it is on a tab.
+        // Coalesce: the count is worth showing promptly, not instantly.
+        this.scheduleChatSlotsPost();
+        return;
       default:
         return;                                      // nothing the chip shows: no repost
     }
@@ -1327,6 +1414,32 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Release queued user commands only after settings are staged and the newest workspace-root
    * grant has received its exact backend acknowledgement. */
+  /** Resume a handshake that stalled because its chat was parked. Only the two steps that can
+   *  be left dangling are redone: the native-settings promise whose `.finally` found a different
+   *  active chat, and the roots acknowledgement that was dropped as a background event. Session
+   *  restore is not touched -- it can only have started once both of those had already passed. */
+  private redriveHandshake(be: DgcBackend): void {
+    if (this.workspaceRootsInFlight !== undefined) {
+      this.workspaceRootsInFlight = undefined;
+      this.workspaceRootsDirty = true;                 // re-ask, and wait for THIS acknowledgement
+      this.syncWorkspaceRoots(be, true);               // same order the `ready` handler uses
+    }
+    if (this.nativeSettingsReady) {
+      this.maybeCompleteHandshake(be);
+      return;
+    }
+    void this.applyNativeSettings(be, true)
+      .catch((err: any) => this.post({ type: "event", event: {
+        type: "error", message: `Could not initialize DGC editor settings: ${err?.message ?? err}`,
+      } }))
+      .finally(() => {
+        if (this.backend === be) {
+          this.nativeSettingsReady = true;
+          this.maybeCompleteHandshake(be);
+        }
+      });
+  }
+
   private maybeCompleteHandshake(be: DgcBackend): void {
     if (this.backend !== be || this.initializingBackend !== be || !this.nativeSettingsReady) {
       return;
@@ -1711,7 +1824,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
       // send() start a child on it, whose own later death was then mislabelled and never recovered.
-      if (cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE) { return; }
+      if (this.isDeliberateStop(cause)) { return; }
       if (slot.id !== this.activeSlotId) { this.backgroundBackendLost(slot, cause); return; }
       if (this.backend !== be) { return; }
       this.queuedPromptsLost();
@@ -1736,9 +1849,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
       const cause = serveCause || (signal || code === null ? how : `exited with ${how}`);
       serveCause = "";
-      const recentExits = this.recordUnassistedExit(cause, facts.lastFrame || "");
-      const resumes = this.markInterruptedWork(cause, recentExits);
-      if (slot.id !== this.activeSlotId) { this.backgroundBackendLost(slot, cause); return; }
+      // Both of the calls below read and WRITE the panel's own fields, which belong to the chat
+      // on screen. Running them for a background child's death stamped that child's cause onto the
+      // foreground chat's interrupted-turn record — a turn that was still running, now marked as
+      // having died of another chat's SIGKILL.
+      const resumes = this.recordExitAgainstActiveChat(slot, cause, facts.lastFrame || "");
+      if (resumes === undefined) { return; }      // a background chat's death; already handled
       this.pendingCommandRestart = false;       // the replacement starts from the new path anyway
       if (this.backend !== be) { return; }
       this.queuedPromptsLost();
@@ -2274,15 +2390,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "plan_proposal":
         // Remembered so switching away can show this chat as waiting on you. Painting is the
         // webview's job; this is only the bookkeeping the chip needs.
-        if ((ev as any).id !== undefined) { this.openDecisions.add(String((ev as any).id)); }
+        {
+          const id = DgcViewProvider.decisionId(ev);
+          if (id) { this.openDecisions.add(id); }
+        }
         break;
       case "permission_resolved":
       case "options_resolved":
       case "ask_resolved":
-        this.openDecisions.delete(String((ev as any).id ?? (ev as any).ask_id ?? ""));
+        this.openDecisions.delete(DgcViewProvider.decisionId(ev));
         break;
       case "request_expired":
-        this.openDecisions.delete(String(ev.id));
+        this.openDecisions.delete(DgcViewProvider.decisionId(ev));
         this.mcpUrls.delete(String(ev.id));
         break;
       case "turn_end": {
@@ -2817,11 +2936,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           if (confirm !== "Enable full-auto") {
             be.send({ type: "plan_response", id: msg.id, decision: "reject",
                       feedback: msg.feedback || "Full-auto was not confirmed; offer a safer execution mode." });
+            this.openDecisions.delete(String(msg.id ?? ""));
+            this.postChatSlots();
             break;
           }
         }
         be.send({ type: "plan_response", id: msg.id, decision: msg.decision,
                   feedback: msg.feedback });
+        // `plan_response` is a COMMAND, and the CLI emits no matching event — so nothing else ever
+        // clears this id. Left in, an accepted plan kept the chat flagged "waiting for you" for
+        // the whole rest of a turn that was, in fact, working.
+        this.openDecisions.delete(String(msg.id ?? ""));
+        this.postChatSlots();
         break;
       case "options_response":
         // v14: the question card's answers ({question_id: {selected, other}}) or a dismissal.

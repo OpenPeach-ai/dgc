@@ -459,6 +459,7 @@ DEFAULTS: dict = {
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
     "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
+    "max_subagent_depth": 1,                     # how deep `task` may nest; 1 = a child cannot delegate (0-8)
     "trash_mode": "dgc",                        # /files deletes: dgc (~/.dgc/trash, 30-day) | os (system trash)
     "eta": True,                                # show a calibrated "~2–4 min left" range while a turn runs
     "notify": "off",                            # off | on — terminal/editor ping when a turn ≥20 s finishes

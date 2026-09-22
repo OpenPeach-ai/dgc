@@ -108,6 +108,7 @@ class UltraDelegationTests(unittest.TestCase):
         self.assertLess(prompt.index("- worker: "), prompt.index("- security: "))
 
     def test_children_do_not_fan_out_recursively(self):
+        """Ultra makes the LEAD delegate freely; a tree that also recursed would multiply cost."""
         agent = self.agent(ultra_mode=True)
         agent.depth = 1
         agent._activate_tool_intents("Fix the parser in src/parse.py and run its tests.",
@@ -116,9 +117,31 @@ class UltraDelegationTests(unittest.TestCase):
         self.assertNotIn("task", self.names(agent))
         self.assertNotIn("# Delegating work", prompt)
         self.assertNotIn("# DGC Ultra execution profile", prompt)
-        # A brief that itself asks for delegation still gets the tool, as before.
-        agent._activate_tool_intents("Delegate each module to a sub-agent.", replace=True)
-        self.assertIn("task", self.names(agent))
+
+    def test_a_childs_wording_cannot_buy_a_second_level_but_the_setting_can(self):
+        """What grants the exception is `max_subagent_depth`, not how the brief was phrased.
+
+        It used to be the phrasing: the child was offered `task` when a regex matched delegation
+        words in its brief, so "delegate each module to a sub-agent" fanned out and "split this up"
+        did not -- under Ultra, where fan-out is most expensive.
+        """
+        asked = self.agent(ultra_mode=True)
+        asked.depth = 1
+        asked._activate_tool_intents("Delegate each module to a sub-agent.", replace=True)
+        self.assertNotIn("task", self.names(asked), "wording must not buy a second level")
+
+        allowed = self.agent(ultra_mode=True, max_subagent_depth=2)
+        allowed.depth = 1
+        allowed._activate_tool_intents("Fix the parser in src/parse.py.", replace=True)
+        self.assertIn("task", self.names(allowed), "the setting is what grants it")
+        self.assertNotIn("task", self.names(self._at_depth(2, ultra_mode=True,
+                                                           max_subagent_depth=2)))
+
+    def _at_depth(self, depth, **data):
+        agent = self.agent(**data)
+        agent.depth = depth
+        agent._activate_tool_intents("Fix the parser in src/parse.py.", replace=True)
+        return agent
 
     def test_plan_mode_stays_read_only_under_ultra(self):
         agent = self.agent(ultra_mode=True, mode="plan")

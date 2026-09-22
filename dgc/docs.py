@@ -108,7 +108,9 @@ To choose deliberately instead:
   custom LAN host, at any point.
 - `/model` — switch the model on the current host.
 - `dgc doctor` — check the endpoint is reachable and the model is offered. It
-  exits non-zero when it is not, so a script can gate on it.
+  exits non-zero when the endpoint cannot be reached, so a script can gate on
+  it. A model the server does not list is a warning, not a failure: a proxy may
+  serve one it does not advertise, so that exits 0 and says so.
 
 ## Talking to the agent
 
@@ -275,7 +277,10 @@ is only good while the run lasts. Only a pipe or a redirected file is read — a
 - `--allow-tool RULE` — pre-approve a tool for this run, e.g. `"Bash(npm test)"` or `Edit`
   (repeatable; never saved).
 - `--sandbox on|off|read-only` — confine shell commands for this run; `read-only` mounts
-  the project read-only inside the sandbox and denies every file edit, for review runs.
+  the project read-only inside the sandbox and denies every file edit, for review runs. Any
+  setting but `off` also denies the `python` tool: the persistent interpreter runs outside the OS
+  sandbox, so leaving it available would keep exactly one tool that can write anywhere the
+  sandbox just masked. `/sandbox` does the same thing inside a session.
 - `--trust` — persist the canonical workspace in `trusted_dirs` (covering its
   subdirectories) before a non-interactive `acceptEdits`/`auto` run. Without it,
   an unattended run in an untrusted directory will not edit. `dgc trust` lists
@@ -2292,7 +2297,8 @@ supported host boundary. It does **not** skip permission prompts, does not wrap 
 tools (`read_file`, `edit_file`, …), and does not wrap a delegated subscription CLI.
 
 - `/sandbox` — report the backend and whether it is on.
-- `/sandbox on` · `/sandbox off`
+- `/sandbox on` · `/sandbox off` — turning it on also denies the `python` tool, which runs outside
+  the sandbox; turning it off takes back only the rules `/sandbox` itself added.
 - `/sandbox read-only` — the project is mounted read-only inside the sandbox and every file edit
   is denied (for review runs). `--sandbox on|off|read-only` sets it for one `dgc` launch.
 - `/sandbox network on` — allow network from sandboxed commands. Off by default.
@@ -2861,6 +2867,12 @@ Useful keys:
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
   from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive
   permission modes, mixed tool batches, and non-Git projects keep the normal serial path.
+- `max_subagent_depth` — how deep `task` may nest (default 1, maximum 8). 1 keeps the tree flat:
+  the agent you are talking to delegates, and its children do their work themselves. Raise it to 2
+  when a lead should be able to delegate research that itself fans out; 0 turns delegation off
+  entirely. Depth is counted from the real parent chain, so a sub-agent cannot talk its way past
+  it: past the limit `task` is not offered, and a call to it is refused naming the depth it is at.
+  Under DGC Ultra this is what keeps an aggressive lead from fanning out recursively.
 - `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP commands
   for definitions, references, symbols, and diagnostics. Key by language (`python`) or extension (`.py`):
   `{"language_servers":{"python":{"command":"pyright-langserver","args":["--stdio"]}}}`.

@@ -278,6 +278,7 @@ class AgentSession:
         self._req_pick = None              # the on-pick callback bound to THIS session's request
         self.pinned = False
         self.draft = ""                    # unsent composer text, restored when you switch back
+        self.pastes: dict[int, str] = {}   # the chips in THAT draft: id → the full pasted text
         self.created = time.monotonic()
         self.last_activity = time.monotonic()
         # Background monitors. Reader threads only append to the inbox; the UI loop drains it into
@@ -431,6 +432,41 @@ class TUI:
     def active(self) -> "AgentSession":
         return self._sessions[self._active_idx]
 
+    @property
+    def _pastes(self) -> dict:
+        """The collapsed pastes of the composer you are looking at: `id → the full pasted text`.
+
+        They belong to the chat whose draft holds the chips, not to the fleet. One shared dict
+        meant a draft stashed in chat A kept its `[Pasted text #1 +40 lines]` chip while sending
+        in chat B cleared the only store -- so switching back to A and pressing Enter sent the
+        model the literal placeholder and silently dropped the pasted text. Clearing is now
+        likewise scoped: emptying one composer cannot strip another chat's draft.
+        """
+        session = self._paste_owner()
+        if session is not None:
+            return session.pastes
+        store = getattr(self, "_fleet_pastes", None)
+        if store is None:
+            store = self._fleet_pastes = {}
+        return store
+
+    @_pastes.setter
+    def _pastes(self, value: dict) -> None:
+        session = self._paste_owner()
+        if session is None:
+            self._fleet_pastes = value
+        else:
+            session.pastes = value
+
+    def _paste_owner(self):
+        """The session whose composer is on screen, or None before the first one exists."""
+        sessions = getattr(self, "_sessions", None)
+        index = getattr(self, "_active_idx", 0)
+        if not sessions or not (0 <= index < len(sessions)):
+            return None
+        session = sessions[index]
+        return session if isinstance(getattr(session, "pastes", None), dict) else None
+
     def __init__(self, config, agent=None):
         self._fleet_root = Path(config.project_root).resolve(strict=False)
         self.config = config
@@ -463,7 +499,8 @@ class TUI:
         self._branch_cache = ("", 0.0)     # git branch of the project root, refreshed lazily
         self._naming = False               # inline "name this new session" prompt is active
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
-        self._pastes: dict[int, str] = {}      # collapsed pastes in the composer: id → full text
+        self._fleet_pastes: dict[int, str] = {}  # `_pastes` before any session exists (startup only)
+        self._sandbox_denies: list[str] = []   # deny rules /sandbox added, to take back on /sandbox off
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -1308,8 +1345,12 @@ class TUI:
         sess._backend_activity = None
         sess._turn_t0 = time.monotonic()
         if sess is not self.active:
-            self._flash(f"⧉ {sess.name or 'agent'} woke on "
-                        + ("a monitor event" if tag.startswith("monitor") else "a background command's exit"))
+            # `wake_tag` already names all three cases; a two-way ternary reported a sub-task's
+            # result as "a background command's exit", when no background command had run.
+            woke_on = ("a monitor event" if tag.startswith("monitor")
+                       else "a sub-task's result" if tag.startswith("sub-task")
+                       else "a background command's exit")
+            self._flash(f"⧉ {sess.name or 'agent'} woke on {woke_on}")
 
         def work():
             self._tls.session = sess
@@ -4912,6 +4953,35 @@ class TUI:
             return match[0] if body is None else body
         return self._PASTE_TOKEN.sub(swap, text)
 
+    def _send_composer_text(self, text: str) -> str:
+        """Enter on a composed prompt. Returns what the dispatch said, for the caller and tests.
+
+        The chips expand to their pasted bodies on the way to the model and stay collapsed in the
+        composer if the send did not go through, so a retry shows the same few rows the user typed
+        rather than re-inflating a 40-line paste under them.
+        """
+        result = self._dispatch_composer_text(self._expand_pastes(text))
+        if result == "full":
+            self.input_buf.insert_text(text)     # the chips stay collapsed for the retry
+        else:
+            self._pastes.clear()
+        return result
+
+    def _queue_composer_text(self, text: str) -> str:
+        """Tab on a composed prompt while a turn runs: the same message, queued behind it.
+
+        Expand the chips here, exactly as Enter does. Queuing stores the string verbatim and the
+        next turn submits it unchanged, so without this a queued follow-up reached the model as
+        the literal placeholder -- "[Pasted text #1 +40 lines] please fix this" -- and the pasted
+        text was silently dropped. Enter had always expanded; Tab is the same message taking a
+        different road to the model.
+        """
+        result = self._route_followup(self._expand_pastes(text), queue_only=True)
+        if result != "full":
+            self.input_buf.reset()
+            self._pastes.clear()
+        return result
+
     def _composer_height(self) -> int:
         # Grow vertically with WRAPPED lines, not just explicit newlines: the composer wraps
         # (wrap_lines=True), so a long line past the terminal width needs extra rows or its tail hides.
@@ -5378,10 +5448,26 @@ class TUI:
             worker.join(0.25)
         result = self._finalize_session_workspace(
             sess, "fleet session closed", retain_if_running=True)
+        closed_active = idx == self._active_idx
         if self._active_idx >= len(self._sessions):
             self._active_idx = len(self._sessions) - 1
         elif idx < self._active_idx:
             self._active_idx -= 1
+        # The composer is showing the CLOSED chat's draft, and everything it refers to went with
+        # that chat -- its paste chips above all. Leaving it there sent the surviving chat's pasted
+        # text under the closed chat's sentence, or, with no chip of that number, the literal
+        # "[Pasted text #1 +40 lines]" placeholder. Hand the composer over the same way a switch
+        # does: the incoming chat's own draft, and nothing of the outgoing one's. Any overlay stash
+        # refers to the closed chat too, so it is dropped rather than carried forward.
+        composer = getattr(self, "input_buf", None)
+        if closed_active and composer is not None:
+            overlay = getattr(self, "_overlay", None)
+            if isinstance(overlay, dict):
+                for key in ("composer_draft", "composer_palette"):
+                    overlay.pop(key, None)
+            composer.reset()
+            if self.active.draft:
+                composer.insert_text(self.active.draft)
         if result is not None:
             if result.status == "cleaned":
                 self._flash(f"closed agent · removed untouched {result.branch}")
@@ -5391,6 +5477,38 @@ class TUI:
         elif worker and worker.is_alive() and sess.workspace is not None:
             self._flash(f"agent stopping · isolated work stays at {sess.workspace.path}")
         self._invalidate()
+
+    def _sandbox_denials(self, *, read_only: bool = False, off: bool = False) -> None:
+        """Keep `/sandbox` and `--sandbox` denying the same tools.
+
+        The persistent interpreter runs OUTSIDE the OS sandbox -- bwrap wraps the shell, not the
+        kernel -- so confining the shell and leaving `python` available leaves exactly one tool
+        that can write anywhere the user can and read the home directory the sandbox just masked.
+        `dgc --sandbox on` has denied it since that flag landed (dgc/cli.py); `/sandbox on` did
+        not, so the two ways of asking for the same thing gave different tool sets and the hole
+        stayed open on the more commonly used path.
+
+        Only the rules THIS command added are taken back, so `/sandbox off` never strips a deny
+        the user wrote themselves.
+        """
+        cfg = self.config
+        mine = list(getattr(self, "_sandbox_denies", []) or [])
+        existing = getattr(cfg, "session_permissions", None) or {}
+        deny = list(existing.get("deny") or [])
+        for rule in mine:                          # take back exactly what we added last time
+            if rule in deny:
+                deny.remove(rule)
+        added: list[str] = []
+        if not off:
+            added.append("Python")
+            if read_only:                          # deny wins over every mode and rule
+                added += ["Write", "Edit", "MultiEdit", "ApplyPatch"]
+        self._sandbox_denies = added
+        cfg.session_permissions = {
+            "allow": list(existing.get("allow") or []),
+            "ask": list(existing.get("ask") or []),
+            "deny": [*deny, *added],
+        }
 
     def _cycle_mode(self) -> None:
         order = ["default", "acceptEdits", "plan", "auto"]
@@ -5748,13 +5866,27 @@ class TUI:
             from . import sandbox
             val = rest.strip().lower()
             if val in ("off", "false", "0"):
-                cfg.set("sandbox", False); self._flash("sandbox OFF")
-            elif val in ("on", "true", "1") and not sandbox.available():
+                cfg.set("sandbox", False)
+                cfg.set("sandbox_read_only", False)
+                self._sandbox_denials(off=True)
+                self._flash("sandbox OFF")
+            elif val in ("on", "true", "1", "read-only", "readonly", "read only", "ro") \
+                    and not sandbox.available():
                 cfg.set("sandbox", False)
                 self._flash("sandbox remains OFF — no supported confinement backend found")
             elif val in ("on", "true", "1"):
                 cfg.set("sandbox", True)
-                self._flash(f"sandbox ON — {sandbox.describe(cfg)}")
+                cfg.set("sandbox_read_only", False)
+                self._sandbox_denials()
+                self._flash(f"sandbox ON — {sandbox.describe(cfg)}; the python tool is denied")
+            elif val in ("read-only", "readonly", "read only", "ro"):
+                # Documented since the sandbox shipped and never implemented: the command fell
+                # through to the usage line and left the sandbox exactly as it was, so a review run
+                # someone had asked to confine went on writing.
+                cfg.set("sandbox", True)
+                cfg.set("sandbox_read_only", True)
+                self._sandbox_denials(read_only=True)
+                self._flash(f"sandbox READ-ONLY — {sandbox.describe(cfg)}; file edits denied")
             elif val in ("network on", "net on"):
                 cfg.set("sandbox_network", True)
                 self._flash("sandbox network ON — commands still require normal approval")
@@ -5763,10 +5895,11 @@ class TUI:
                 self._flash("sandbox network OFF")
             else:
                 net = "on" if cfg.get("sandbox_network", False) else "off"
-                state = "on" if cfg.get("sandbox") else "off"
+                state = ("read-only" if cfg.get("sandbox") and cfg.get("sandbox_read_only", False)
+                         else "on" if cfg.get("sandbox") else "off")
                 self._flash(
                     f"sandbox: {state}, network: {net} — {sandbox.describe(cfg)} — "
-                    "/sandbox on|off|network on|network off")
+                    "/sandbox on|off|read-only|network on|network off")
         elif cmd == "mode":
             if rest in ("default", "acceptEdits", "plan", "auto"):
                 self._request_mode(rest)
@@ -7384,10 +7517,7 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            if self._dispatch_composer_text(self._expand_pastes(text)) == "full":
-                self.input_buf.insert_text(text)     # the chips stay collapsed for the retry
-            else:
-                self._pastes.clear()
+            self._send_composer_text(text)
 
         @kb.add(Keys.BracketedPaste)
         def _(ev):
@@ -7558,15 +7688,7 @@ class TUI:
                   and self.input_buf.complete_state is None and bool(self.input_buf.text.strip())
                   and not self.input_buf.text.lstrip().startswith("/")))
         def _(ev):
-            # Expand the paste chips here, exactly as Enter does. Queuing stores the string
-            # verbatim and the next turn submits it unchanged, so without this a queued follow-up
-            # reached the model as the literal placeholder -- "[Pasted text #1 +40 lines] please
-            # fix this" -- and the pasted text was silently dropped. Enter had always expanded;
-            # Tab is the same message taking a different road to the model.
-            text = self.input_buf.text.strip()
-            if self._route_followup(self._expand_pastes(text), queue_only=True) != "full":
-                self.input_buf.reset()
-                self._pastes.clear()
+            self._queue_composer_text(self.input_buf.text.strip())
 
         question_card = Condition(lambda: self._req is not None and self._req.get("kind") == "questions"
                                   and self._input is None and self._overlay is not None)

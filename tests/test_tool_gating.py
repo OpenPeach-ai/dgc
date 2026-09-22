@@ -416,3 +416,214 @@ class DelegationAndArtifactAreGatedTests(unittest.TestCase):
         out = agent._handle_call(ToolCall("t1", "task", {
             "description": "look around", "prompt": "find the entrypoint"}))
         self.assertNotIn("was not offered", out)
+
+
+class DelegationDepthIsASettingNotAPhraseTests(unittest.TestCase):
+    """How deep `task` may nest is an integer, read off the real parent chain.
+
+    It used to come from the wording of the brief: `_task_exposed` offered a child `task` only if
+    the regex behind the `delegate` intent matched the text it was given. So "delegate the search
+    to a sub-agent" could nest and "split this across helpers" could not, and the shape of the
+    agent tree came down to the parent's choice of words.
+
+    Every harness that bounds delegation for real — Codex, Claude Code, Grok Build, opencode,
+    qwen-code, OpenClaw — uses an integer depth compared against a configured cap, and not one of
+    them reads the brief to decide it. `self.depth` is set by the parent at spawn, so a child
+    cannot claim to be shallower than it is.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-depth-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def at(self, depth, **data):
+        agent = make_agent(self.root, **data)
+        agent.depth = depth
+        return agent
+
+    def names(self, agent):
+        return {str(t.get("function", {}).get("name") or "") for t in (offer(agent) or [])}
+
+    # ---- the cap itself ----------------------------------------------------------------------
+    def test_the_lead_delegates_and_its_child_does_not(self):
+        self.assertIn("task", self.names(self.at(0)), "the agent you talk to can delegate")
+        self.assertNotIn("task", self.names(self.at(1)),
+                         "at max_subagent_depth=1 a child is a leaf")
+
+    def test_the_shipped_default_keeps_the_tree_flat(self):
+        """Flat is what actually shipped: the catalog gate, not the executor's 3, was binding."""
+        agent = make_agent(self.root)
+        self.assertEqual(agent.max_subagent_depth(), 1)
+        for depth, expected in [(0, True), (1, False), (2, False)]:
+            with self.subTest(depth=depth):
+                deep = make_agent(self.root)
+                deep.depth = depth
+                self.assertEqual("task" in self.names(deep), expected)
+
+    def test_raising_the_cap_buys_exactly_one_more_level(self):
+        self.assertIn("task", self.names(self.at(1, max_subagent_depth=2)))
+        self.assertNotIn("task", self.names(self.at(2, max_subagent_depth=2)))
+
+    def test_zero_turns_delegation_off_for_everyone(self):
+        self.assertNotIn("task", self.names(self.at(0, max_subagent_depth=0)))
+
+    def test_the_cap_is_clamped_and_a_bad_value_falls_back(self):
+        for value, expected in [(-5, 0), (99, 8), ("three", 1), (None, 1), (2.0, 2)]:
+            with self.subTest(value=value):
+                self.assertEqual(self.at(0, max_subagent_depth=value).max_subagent_depth(), expected)
+
+    # ---- the wording no longer decides -------------------------------------------------------
+    def test_a_childs_brief_cannot_talk_its_way_into_delegating(self):
+        """The exact phrasing that used to unlock it, at a depth the cap forbids."""
+        agent = self.at(1)
+        agent._active_tool_intents = {"delegate", "repo_navigation"}
+        self.assertNotIn("task", self.names(agent))
+
+    def test_a_child_that_never_says_the_word_still_delegates_inside_the_cap(self):
+        """And the mirror image: the phrasing that used to be required is no longer needed."""
+        agent = self.at(1, max_subagent_depth=2)
+        agent._active_tool_intents = set()
+        self.assertIn("task", self.names(agent))
+
+    def test_the_full_profile_does_not_buy_unlimited_nesting(self):
+        # `tool_profile: full` used to expose `task` at every depth, which is what made the cap
+        # bypassable by a setting that says nothing about delegation.
+        self.assertNotIn("task", self.names(self.at(1, tool_profile="full")))
+
+    # ---- the other gates still apply ---------------------------------------------------------
+    def test_plan_mode_and_the_allow_list_still_win(self):
+        planning = self.at(0, mode="plan")
+        self.assertNotIn("task", self.names(planning))
+        bounded = self.at(0)
+        bounded._agent_tool_allowlist = frozenset({"read_file"})
+        self.assertNotIn("task", self.names(bounded))
+
+    def test_an_adaptive_lead_still_opens_on_the_positive_ask(self):
+        quiet = self.at(0, tool_profile="adaptive")
+        quiet._active_tool_intents = set()
+        self.assertNotIn("task", self.names(quiet))
+        asked = self.at(0, tool_profile="adaptive")
+        asked._active_tool_intents = {"delegate"}
+        self.assertIn("task", self.names(asked))
+
+    # ---- and the call itself is refused, not merely unlisted ---------------------------------
+    def test_a_call_past_the_cap_is_refused_with_the_depth_and_the_setting(self):
+        agent = self.at(1)
+        offer(agent)
+        out = agent._handle_call(ToolCall("textcall_1", "task", {
+            "description": "nested", "prompt": "go deeper"}))
+        self.assertIn("Max sub-agent depth reached", out)
+        self.assertIn("depth 1 of 1", out, "the model is told where it actually is")
+        self.assertIn("max_subagent_depth", out, "and what the user would change")
+        self.assertIn("directly instead", out, "and what to do instead")
+
+    def test_a_call_inside_the_cap_is_not_refused(self):
+        agent = self.at(1, max_subagent_depth=2)
+        offer(agent)
+        out = agent._handle_call(ToolCall("t1", "task", {
+            "description": "nested", "prompt": "go deeper"}))
+        self.assertNotIn("Max sub-agent depth", out)
+
+
+class TheBatchPathUsesTheSameCapTests(unittest.TestCase):
+    """A `task` fan-out runs before `_handle_call`, so it needs the cap in its own hands.
+
+    `_parallel_task_outputs` short-circuits the per-call loop: when it returns outcomes, those
+    calls are answered from the batch and the executor's refusal is never reached. It carried its
+    own hard-coded `depth >= 3`, written independently of the executor's — and it is the only
+    depth check on that path when `_offered_tool_names` was never recorded.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-batch-depth-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def batch(self, depth, **data):
+        agent = make_agent(self.root, mode="auto", **data)
+        agent.depth = depth
+        agent._offered_tool_names = None          # the case the offered-set gate cannot cover
+        calls = [ToolCall("t1", "task", {"description": "a", "prompt": "A"}),
+                 ToolCall("t2", "task", {"description": "b", "prompt": "B"})]
+        return agent._parallel_task_outputs(calls)
+
+    def test_a_child_past_the_cap_gets_no_parallel_fan_out(self):
+        self.assertEqual(self.batch(1), {}, "the batch must fall back to the gated serial path")
+
+    def test_the_cap_the_batch_uses_is_the_configured_one(self):
+        # Under the old bare `>= 3`, raising the cap to 4 left the batch refusing at depth 3 while
+        # delegation was allowed, and lowering it to 1 left the batch running at depth 2.
+        self.assertEqual(self.batch(2, max_subagent_depth=1), {})
+        agent = make_agent(self.root, mode="auto", max_subagent_depth=4)
+        agent.depth = 3
+        self.assertEqual(agent.max_subagent_depth(), 4,
+                         "and the same number the catalog and the executor read")
+
+
+class ARefusedDelegationIsVisibleTests(unittest.TestCase):
+    """A refusal the user cannot see looks like an agent doing nothing.
+
+    The depth gate answers the model and returns. An early `return` inside `_handle_call` happens
+    before every UI hook in the method, so a sub-agent repeatedly trying to delegate rendered no
+    tool call, no result and no denial — in the terminal and in the editor panel alike. The
+    executor's own copy of this check has always drawn a row.
+    """
+
+    class RecordingUI(QuietUI):
+        def __init__(self):
+            self.denied = []
+
+        def tool_denied(self, name, args, reason, call_id=None):
+            self.denied.append((name, reason))
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-refusal-ui-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_the_user_sees_the_refusal(self):
+        client = LLMClient("http://localhost.invalid/v1", "", "fixture")
+        ui = self.RecordingUI()
+        with patch.object(Agent, "_new_client", lambda self, *a, **k: client):
+            agent = Agent(fixture_config(self.root), ui)
+        agent.depth = 1
+        offer(agent)
+        out = agent._handle_call(ToolCall("textcall_1", "task", {
+            "description": "nested", "prompt": "go deeper"}))
+        self.assertEqual(len(ui.denied), 1, "a refused call must render a row, not vanish")
+        self.assertEqual(ui.denied[0][0], "task")
+        self.assertIn("Max sub-agent depth reached", ui.denied[0][1])
+        self.assertIn("Max sub-agent depth reached", out, "and the model is told too")
+
+
+class UltraDescribesWhatItCanActuallyDoTests(unittest.TestCase):
+    """`/ultra on` reports "up to N parallel agents" from `max_parallel_tasks` alone.
+
+    That number is a WIDTH. `max_subagent_depth` decides whether there is any delegation at all,
+    so at 0 the line promised four parallel agents for a run in which `task` is not offered and
+    every call to it is refused.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-ultra-summary-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def summary(self, **data):
+        from dgc.ultra import summary
+        return summary(fixture_config(self.root, **data))
+
+    def test_delegation_off_is_not_advertised_as_four_agents(self):
+        line = self.summary(max_subagent_depth=0, max_parallel_tasks=4)
+        self.assertNotIn("up to 4 parallel agents", line)
+        self.assertIn("no sub-agents", line)
+        self.assertIn("max_subagent_depth", line, "and it names the setting that did it")
+
+    def test_the_normal_case_is_unchanged(self):
+        self.assertIn("up to 4 parallel agents", self.summary(max_parallel_tasks=4))
+        self.assertIn("up to 2 parallel agents",
+                      self.summary(max_parallel_tasks=2, max_subagent_depth=1))
+
+    def test_a_bad_depth_value_falls_back_rather_than_claiming_nothing_works(self):
+        self.assertIn("up to 4 parallel agents", self.summary(max_subagent_depth="three"))

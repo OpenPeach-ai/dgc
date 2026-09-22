@@ -79,4 +79,13 @@ def delegated_prompt(config, prompt: str, mode: str) -> str:
 
 
 def summary(config) -> str:
-    return f"Ultra · xhigh reasoning · up to {worker_limit(config)} parallel agents"
+    """What `/ultra on` reports. `max_parallel_tasks` is a width; `max_subagent_depth` decides
+    whether there is any delegation at all, so at 0 the old line promised "up to 4 parallel
+    agents" for a run that cannot spawn one."""
+    try:
+        depth = max(0, min(8, int(config.get("max_subagent_depth", 1))))
+    except (TypeError, ValueError):
+        depth = 1
+    agents = (f"up to {worker_limit(config)} parallel agents" if depth
+              else "no sub-agents (max_subagent_depth is 0)")
+    return f"Ultra · xhigh reasoning · {agents}"

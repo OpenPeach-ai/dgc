@@ -1472,7 +1472,12 @@ class CLI:
         if err:
             self.ui.error(err)
             return
-        self.ui.info(f"created worktree on branch {branch}")
+        # `create` returns an EXISTING worktree rather than refusing, which is why was_created()
+        # exists. Reporting "created" either way told the user a branch had been made for them when
+        # they had been attached to whatever the existing worktree was already checked out on.
+        made = wt.was_created(wt_path)
+        self.ui.info(f"{'created' if made else 'attached to an existing'} worktree "
+                     f"on branch {branch}")
         self._reroot(wt_path, f"worktree {branch}")
 
     def _tasks_cmd(self, rest: str) -> None:
@@ -1544,6 +1549,9 @@ class CLI:
             pass
         self.config.project_root = new_root
         self.agent.ctx.project_root = new_root
+        # The approval preview resolves relative paths against this. Left behind, /worktree made
+        # it diff the new edit against the OLD checkout's copy of the file.
+        self.ui.project_root = new_root
         self.agent.reset()
         self.agent.session_file = sessions_mod.new_path(new_root)
         self.agent.session_name = label

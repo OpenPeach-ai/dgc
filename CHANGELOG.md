@@ -23,6 +23,32 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   nobody made there, and putting the previous chat's files inside the reach of the new chat's
   `/rewind`. A new chat now stops them and says how many. A child that finishes anyway integrates
   into the chat that asked for it. Switching between two open chats stops nothing.
+- **A background sub-task now tells the terminal it finished.** `task` with `background: true`
+  reported its result only to the editor, which has a callback for it. The terminal had none, so
+  its model was told "I will continue when it finishes" and then nothing ever woke it: it either
+  waited for a result that could not arrive, or reported delegated work whose outcome it had never
+  seen. Results now arrive the way a background command's exit already does — the session wakes on
+  them, the band reads *sub-task · woke on its result*, and the notice calls it a sub-task's report
+  rather than command output. With `monitor_wake: false` nothing starts a turn on its own and the
+  model is told so plainly; the result still reaches it with your next message.
+- **How deep sub-agents may nest is a setting, not a turn of phrase.** Two rules disagreed about
+  this. The executor enforced a hard-coded depth of 3, while the tool catalog offered a child
+  `task` only when its brief happened to contain the word "delegate", "sub-agent" or "fleet" — so
+  "delegate the search to a sub-agent" could nest and "split this across helpers" could not, and
+  the shape of the agent tree came down to the parent's choice of words — and the hard-coded 3 was
+  unreachable, because the catalog gate was the binding one. `max_subagent_depth` now decides it in
+  one place, for every tool profile. It defaults to 1, which is the flat tree that actually
+  shipped, and under DGC Ultra it is what stops an aggressive lead fanning out recursively. Depth
+  is counted from the real parent chain, so a sub-agent cannot claim to be shallower than it is:
+  past the limit `task` is withheld, and a call to it is refused naming the depth it is at and the
+  setting to change. Raise it to 2 for one nested level; 0 turns delegation off.
+- **A collapsed paste belongs to the chat you pasted it in.** `[Pasted text #1 +40 lines]` chips
+  were shared across every chat in the fleet, so sending in one chat cleared the store another
+  chat's unsent draft still pointed at — and switching back sent the model the literal placeholder,
+  with the pasted text silently dropped.
+- The editor's permission surface marks a rule that is not valid, instead of listing it as though
+  it were in force.
+- `dgc doctor`'s documented exit codes match what it returns.
 
 ## 0.42.0 — 2026-09-21
 

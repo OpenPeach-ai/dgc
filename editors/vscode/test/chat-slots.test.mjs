@@ -146,6 +146,8 @@ function makeLive(provider, { sessionId, name, ready = true }) {
 }
 
 const slotsPost = (posted) => posted.filter((m) => m.type === "chat_slots").at(-1);
+/** Let the rail's coalescing timer fire (CHAT_SLOTS_COALESCE_MS in panel.ts). */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 
 test("a second chat gets its own backend and both keep running", () => {
   const { provider, spawned } = harness();
@@ -202,7 +204,7 @@ test("switching back restores the first chat's state exactly and repaints from i
   assert.equal(spawned[1].disposed, "", "the chat we left keeps running");
 });
 
-test("a background chat's stream never reaches the transcript, only its chip", () => {
+test("a background chat's stream never reaches the transcript, only its chip", async () => {
   const { provider, posted } = harness();
   makeLive(provider, { sessionId: "alpha", name: "First" });
   provider.openChatSlot();
@@ -216,11 +218,49 @@ test("a background chat's stream never reaches the transcript, only its chip", (
 
   const painted = posted.filter((m) => m.type === "event");
   assert.deepEqual(painted, [], "a chat you are not looking at must not write into the one you are");
+  await settle();                       // the unread count is coalesced, not posted per token
   const chips = slotsPost(posted);
   const chip = chips.items.find((item) => item.id === background.id);
   assert.equal(chip.busy, true, "its chip says it is working");
   assert.equal(chip.unread, 2);
   assert.equal(chip.active, false);
+});
+
+test("a streaming background chat does not rebuild the rail once per token", async () => {
+  // The webview rebuilds every tab on each chat_slots message, and the CLI emits one text_delta
+  // per stream chunk — so a 2,000-token answer in a chat you are not looking at meant 2,000 full
+  // rail rebuilds, and dropped keyboard focus if it was on a tab.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const background = provider.slots[0];
+
+  posted.length = 0;
+  for (let i = 0; i < 200; i++) {
+    provider.routeEvent(background, { type: "text_delta", text: `chunk ${i}` });
+  }
+  const during = posted.filter((m) => m.type === "chat_slots").length;
+  assert.equal(during, 0, "no rail post while the tokens are still arriving");
+  await settle();
+  const after = posted.filter((m) => m.type === "chat_slots").length;
+  assert.equal(after, 1, "one post carries the whole burst");
+  assert.equal(slotsPost(posted).items.find((i) => i.id === background.id).unread, 200,
+    "and it carries the true count");
+});
+
+test("something the user must answer still reaches the rail at once", async () => {
+  // Coalescing is for a count that ticks up. A chat stopping dead on a decision is not that.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const background = provider.slots[0];
+
+  posted.length = 0;
+  provider.routeEvent(background, { type: "permission_request", request_id: "p1" });
+  const chip = slotsPost(posted).items.find((item) => item.id === background.id);
+  assert.equal(chip.needsYou, true, "posted immediately, not a frame later");
 });
 
 test("a background chat blocked on a decision is flagged, and cleared when it settles", () => {
@@ -468,4 +508,189 @@ test("Switch Chat lists what each chat is doing", async () => {
   assert.equal(items[0].label, "First");
   assert.equal(items[0].description, "working");
   assert.match(items[1].description, /showing/);
+});
+
+test("a chat parked mid-handshake finishes it when you come back", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+
+  // Open a second chat and put it in the state a cold-starting backend leaves behind: `ready`
+  // arrived and the handshake began, but neither the native settings promise nor the roots
+  // acknowledgement has landed.
+  provider.openChatSlot();
+  const be = provider.ensureBackend();
+  provider.initializingBackend = be;
+  provider.nativeSettingsReady = false;
+  provider.workspaceRootsInFlight = { revision: 1 };
+  provider.workspaceRootsDirty = false;
+  provider.lastReadyEvent = { type: "ready", capabilities: {} };
+  const second = provider.activeSlotId;
+
+  // Switch away and back. Nothing can complete the handshake while this chat is parked: every
+  // door out of maybeCompleteHandshake is guarded on `this.backend === be`, and the roots
+  // acknowledgement is dropped as a background event.
+  provider.switchToSlot(provider.slots[0].id);
+  provider.switchToSlot(second);
+
+  const asked = be.sent.filter((c) => c && c.type === "set_workspace_roots");
+  assert.ok(asked.length >= 1, "the roots command must actually go out again");
+  assert.notDeepEqual(provider.workspaceRootsInFlight, { revision: 1 },
+    "the stale acknowledgement must not hold the handshake for ever");
+  assert.ok(provider.workspaceRootsInFlight !== undefined,
+    "and the re-ask waits for THIS backend's acknowledgement, as the setup barrier requires");
+  assert.equal(spawned.length, 2, "coming back must not spawn a third backend");
+});
+
+test("coming back to a chat that finished its handshake changes nothing", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const second = provider.activeSlotId;
+  provider.initializingBackend = undefined;      // its handshake completed
+  provider.workspaceRootsInFlight = undefined;
+  provider.workspaceRootsDirty = false;
+
+  provider.switchToSlot(provider.slots[0].id);
+  provider.switchToSlot(second);
+
+  assert.equal(provider.workspaceRootsDirty, false,
+    "a settled chat must not be dragged back through its handshake");
+});
+
+test("a chat blocked on two decisions keeps its dot until both settle", () => {
+  // The active path keeps a Set because a chat can be stopped on several things at once, and a
+  // prompt can carry up to four open asks. A boolean cleared by the first resolve put the dot out
+  // while the chat was still waiting — and nothing else would ever light it again.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const background = provider.slots[0];
+  const dot = () => slotsPost(posted).items.find((item) => item.id === background.id).needsYou;
+
+  provider.routeEvent(background, { type: "ask_request", request_id: "a1" });
+  provider.routeEvent(background, { type: "permission_request", request_id: "p1" });
+  assert.equal(dot(), true);
+
+  provider.routeEvent(background, { type: "request_expired", request_id: "a1" });
+  assert.equal(dot(), true, "still stopped on the permission request");
+
+  provider.routeEvent(background, { type: "permission_resolved", request_id: "p1" });
+  assert.equal(dot(), false, "now nothing is waiting on the user");
+});
+
+test("a background backend's death does not touch the foreground chat's records", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  provider.confirmedTurnActive = provider.turnActive = true;   // the chat ON SCREEN is mid-turn
+  const wrote = [];
+  provider.markInterruptedWork = (...a) => { wrote.push(["marked", ...a]); return "session"; };
+  provider.recordUnassistedExit = (...a) => { wrote.push(["recorded", ...a]); return 1; };
+  provider.backgroundBackendLost = () => { wrote.push(["backgrounded"]); };
+
+  const background = provider.slots[0];
+  const resumes = provider.recordExitAgainstActiveChat(background, "killed by SIGKILL", "prompt");
+
+  assert.equal(resumes, undefined, "a background death is not the active chat's to resume");
+  assert.deepEqual(wrote, [["backgrounded"]],
+    "the foreground chat's interrupted-turn record belongs to its own turn");
+});
+
+test("the active chat's own death is still recorded", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const wrote = [];
+  provider.markInterruptedWork = () => { wrote.push("marked"); return "session"; };
+  provider.recordUnassistedExit = () => { wrote.push("recorded"); return 1; };
+
+  const resumes = provider.recordExitAgainstActiveChat(
+    provider.activeSlot(), "killed by SIGKILL", "prompt");
+
+  assert.equal(resumes, "session");
+  assert.deepEqual(wrote, ["recorded", "marked"]);
+});
+
+test("a stop we asked for is not treated as a crash", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const victim = provider.slots[0];
+  provider.closeChatSlot(victim.id);
+
+  const cause = spawned[0].disposed;
+  assert.match(cause, /^chat closed: /, "the cause says plainly that the user closed it");
+  assert.equal(provider.isDeliberateStop(cause), true,
+    "so the teardown handler must not log it as a crash, nor arm the slot to resume");
+  assert.equal(provider.isDeliberateStop("killed by SIGKILL"), false, "a real crash still is one");
+  assert.equal(provider.isDeliberateStop("restart: new dgc.command"), true);
+});
+
+test("capability flags do not leak from one chat's CLI to another's", () => {
+  // `dgc.command` restarts only the ACTIVE backend, so two chats really can run different builds.
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.mcpManagement = false;                 // chat 1 is on a CLI without it
+  provider.skillManagement = false;
+  const first = provider.activeSlotId;
+
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  provider.mcpManagement = true;                  // chat 2's CLI has it
+  provider.skillManagement = true;
+
+  provider.switchToSlot(first);
+  assert.equal(provider.mcpManagement, false,
+    "the older CLI must not be offered commands it rejects");
+  assert.equal(provider.skillManagement, false);
+});
+
+test("a chat waiting on an open ask is not parked as idle", () => {
+  // `ask_request` carries `ask_id`; every other decision event carries `id`. The add side read
+  // only `id`, so an ask was never recorded — and the chat you switched away from showed the idle
+  // dot while it was in fact stopped, waiting for you. The delete side already read `ask_id`,
+  // which is what hid the asymmetry.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const first = provider.activeSlotId;
+  provider.onEvent({ type: "ask_request", ask_id: "q1", question: "Which database?" });
+  assert.equal(provider.openDecisions.size, 1, "the ask must be recorded");
+
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const chip = slotsPost(posted).items.find((item) => item.id === first);
+  assert.equal(chip.needsYou, true, "the chat you left is waiting on you, and must say so");
+});
+
+test("answering an ask clears it", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.onEvent({ type: "ask_request", ask_id: "q1", question: "Which database?" });
+  provider.onEvent({ type: "ask_resolved", ask_id: "q1", outcome: "answered" });
+  assert.equal(provider.openDecisions.size, 0);
+});
+
+test("accepting a plan stops the chat claiming it is still waiting on you", async () => {
+  // `plan_response` is a command; the CLI emits no matching event, so nothing else clears the id.
+  // The chat stayed flagged for the whole rest of a turn that was already executing the plan.
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.onEvent({ type: "plan_proposal", id: "plan1", plan: "do the thing", choices: [] });
+  assert.equal(provider.openDecisions.size, 1);
+
+  await provider.onMessage({ type: "plan_response", id: "plan1", decision: "acceptEdits" });
+
+  assert.equal(provider.openDecisions.size, 0,
+    "the plan was answered; the turn carries on working, not waiting");
+});
+
+test("a rejected plan clears it too", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.onEvent({ type: "plan_proposal", id: "plan2", plan: "do it", choices: [] });
+  await provider.onMessage({ type: "plan_response", id: "plan2", decision: "reject" });
+  assert.equal(provider.openDecisions.size, 0);
 });
