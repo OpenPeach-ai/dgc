@@ -116,3 +116,56 @@ class TuiApprovalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreviewIsBoundedAndScrubbedTests(unittest.TestCase):
+    """The card is shown BEFORE the user decides, so the preview must not disclose anything.
+
+    An external path is exactly the case that reaches this card — permissions.py sends a path
+    outside the project to ASK — so previewing it printed the current contents of, say,
+    ~/.aws/credentials to the screen as part of asking whether the model could overwrite it. The
+    executor itself refuses an external path until after approval; the preview did not.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-preview-bound-")
+        self.root = Path(self._dir.name) / "project"
+        self.root.mkdir()
+        self.addCleanup(self._dir.cleanup)
+
+    def test_a_file_outside_the_project_is_never_previewed(self):
+        outside = Path(self._dir.name) / "secrets.txt"
+        outside.write_text("aws_secret_access_key = AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+        diff = ui_mod.edit_preview("write_file", {"path": str(outside), "content": "x"}, self.root)
+        self.assertEqual(diff, "", "the preview read a file outside the project")
+        self.assertNotIn("AKIA", diff)
+
+    def test_a_traversal_out_of_the_project_is_refused_too(self):
+        outside = Path(self._dir.name) / "escape.txt"
+        outside.write_text("private\n", encoding="utf-8")
+        diff = ui_mod.edit_preview(
+            "write_file", {"path": "../escape.txt", "content": "x"}, self.root)
+        self.assertEqual(diff, "")
+
+    def test_a_file_inside_the_project_still_previews(self):
+        inside = self.root / "app.py"
+        inside.write_text(ORIGINAL, encoding="utf-8")
+        diff = ui_mod.edit_preview("write_file", {"path": str(inside), "content": REPLACEMENT}, self.root)
+        self.assertIn("-line 1", diff)
+
+    def test_both_terminals_scrub_the_preview_before_printing(self):
+        # A diff is file content. Every other file-content display in DGC goes through
+        # terminal_safe_text and the credential redaction; the preview was added without either,
+        # so control sequences and secrets in a workspace file reached the screen raw.
+        root = Path(__file__).resolve().parents[1]
+        tui = (root / "dgc" / "tui.py").read_text(encoding="utf-8")
+        start = tui.index("def approve_live(")
+        card = tui[start:tui.index('"kind": "approve"', start)]
+        self.assertIn("terminal_safe_text", card, "the TUI prints the preview unsanitised")
+        self.assertIn("redact_text", card, "the TUI prints credentials in the preview")
+
+        cli = (root / "dgc" / "cli.py").read_text(encoding="utf-8")
+        start = cli.index("def approve(self, name: str")
+        prompt = cli[start:cli.index("menu_select(", start)]
+        self.assertIn("terminal_safe_text", prompt, "the classic CLI prints the preview unsanitised")
+        self.assertIn("self.redact(", prompt, "the classic CLI prints credentials in the preview")

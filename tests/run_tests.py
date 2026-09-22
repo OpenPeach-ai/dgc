@@ -14118,7 +14118,8 @@ def test_oneshot_machine_readable():
         # could write anywhere the user can, and read the home directory bwrap had just masked.
         check("--sandbox read-only confines the shell and denies every edit AND the interpreter",
               cfg.get("sandbox") is True and cfg.get("sandbox_read_only") is True
-              and perms["deny"] == ["Write", "Edit", "MultiEdit", "ApplyPatch", "Python"])
+              and sorted(perms["deny"]) == sorted(["Write", "Edit", "MultiEdit", "ApplyPatch",
+                                                    "Python"]))
         check("per-run flags are never saved",
               _json.loads(_C.USER_CONFIG.read_text()).get("sandbox") is False
               and "session_permissions" not in _C.USER_CONFIG.read_text())

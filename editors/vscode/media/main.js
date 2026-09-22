@@ -5167,9 +5167,22 @@
     else if (msg.type === "settings_models") { fillModelList(msg); }
     else if (msg.type === "usage_unavailable") { usageUnavailable(msg); }
     else if (msg.type === "mcp_command_started") {
-      mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");
-      surfaceBody.innerHTML = '<div class="surface-empty">Working with MCP…</div>';
-      surfaceButtons("Cancel", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
+      mcpContextPending = msg.requestId;
+      openSurface("mcp");
+      if (msg.view === "servers") {
+        // Working ON a server: keep the list you are working in. Blanking it meant enable,
+        // disable and reconnect emptied the panel for as long as the attempt took.
+        mcpView = "servers";
+        renderMcp();
+        const busy = el("div", "surface-notice", "Working with MCP…");
+        surfaceBody.insertBefore(busy, surfaceBody.firstChild);
+      } else {
+        mcpView = "context";
+        surfaceBody.innerHTML = '<div class="surface-empty">Working with MCP…</div>';
+      }
+      // This is the turn's Stop, not a narrower cancel — there is no way to abandon one MCP call
+      // and leave the turn running, so the button says what it does.
+      surfaceButtons("Stop the turn", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
     }
     else if (msg.type === "surface_open") {
       if (msg.surface === "mcp") mcpView = "servers";

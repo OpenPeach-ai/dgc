@@ -100,6 +100,9 @@ class UI:
         # Where relative edit paths resolve, so the approval prompt can show the diff. Set by CLI
         # below; None falls back to the process's directory, which is where `dgc` was started.
         self.project_root = None
+        # How file content is scrubbed before it reaches the screen. CLI installs the real one;
+        # the identity default keeps a bare UI() (tests, probes) working.
+        self.redact = lambda text: text
 
     def refresh_theme(self) -> None:
         """Re-resolve this console's palette after /bg or /theme changed it.
@@ -356,7 +359,8 @@ class UI:
             except Exception:
                 preview = ""                             # never block an approval on its preview
             if preview:
-                self.console.print(render.render_diff(preview.expandtabs(4)))
+                safe = terminal_safe_text(self.redact(preview))
+                self.console.print(render.render_diff(safe.expandtabs(4)))
         rule = rule_for(name, args)
         idx = menu_select("Allow this?",
                           ["allow once", "always allow", "deny"],
@@ -750,6 +754,7 @@ class CLI:
         self.ui = ui if ui is not None else UI()
         self.ui._rule_hook = self._add_rule
         self.ui.project_root = config.project_root
+        self.ui.redact = lambda text: redact_text(text, secret_values(config))
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
 
@@ -2494,6 +2499,10 @@ def main(argv: list[str] | None = None) -> int | None:
     _persist_flags = args.prompt is None
     if args.base_url:
         config.set("base_url", args.base_url, persist=_persist_flags)
+        if not _persist_flags:
+            # persist=False only skips the save at THIS moment. save() diffs against the load-time
+            # baseline, so the next save from anywhere in the process writes it anyway.
+            config.mark_ephemeral("base_url")
     if args.api_key_env:
         if args.api_key_env not in os.environ:
             parser.error(f"environment variable {args.api_key_env!r} is not set")
@@ -2503,6 +2512,8 @@ def main(argv: list[str] | None = None) -> int | None:
             config.data["subscription_model"] = args.model
         else:
             config.set("model", args.model, persist=_persist_flags)
+            if not _persist_flags:
+                config.mark_ephemeral("model")
     # These are applied straight into `config.data`, so on a one-shot run they must be declared
     # ephemeral or the next save writes them as the user's standing configuration. That is exactly
     # what `--trust` did: `dgc -p --mode auto --trust` marked the workspace trusted AND left
@@ -2788,13 +2799,20 @@ def apply_run_flags(config, args, parser) -> None:
     if choice:
         config.set("sandbox", choice != "off", persist=False)
         config.data["sandbox_read_only"] = choice == "read-only"
+        # This function's contract is "this run only", for every surface that calls it. Without
+        # marking them, the next save in the process writes both into config.json and a one-off
+        # `--sandbox read-only` becomes the user's standing configuration.
+        config.mark_ephemeral("sandbox", "sandbox_read_only")
+        # The persistent interpreter runs OUTSIDE the OS sandbox -- bwrap wraps the shell, not the
+        # kernel -- so asking for ANY confinement and leaving python available leaves exactly one
+        # tool that can write anywhere the user can and read the home directory the sandbox just
+        # masked from bash. `--sandbox on` needs this as much as `read-only` does; only read-only
+        # additionally denies the edit tools. (permissions.UNSANDBOXED_CODE_TOOLS does the same for
+        # a session policy, which is why it is a deny rule here rather than a refusal in the tool.)
+        if choice != "off":
+            deny.append("Python")
         if choice == "read-only":                      # deny wins over every mode and rule
-            # Python too: the persistent interpreter runs OUTSIDE the OS sandbox (bwrap wraps the
-            # shell, not the kernel), so a read-only run that denied only the edit tools still had
-            # one tool that could write anywhere the user can -- and read the real home directory
-            # the sandbox had just masked from bash. The session-policy path already denies it for
-            # exactly this reason (permissions.UNSANDBOXED_CODE_TOOLS).
-            deny += ["Write", "Edit", "MultiEdit", "ApplyPatch", "Python"]
+            deny += ["Write", "Edit", "MultiEdit", "ApplyPatch"]
     if allow or deny:
         existing = getattr(config, "session_permissions", None) or {}
         config.session_permissions = {

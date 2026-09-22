@@ -91,6 +91,17 @@ _ALWAYS_HANDLED_TOOLS = frozenset({
 # …and of those, the ones a user can name in a permission rule (dgc/permissions.py DISPLAY). They
 # return before the engine runs, so their deny has to be read here or it is never read at all.
 _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_user", "update_goal"})
+# Names `_handle_call` acts on but `EXECUTORS` does not contain: delegation, the artifact server,
+# and every MCP route (which are discovered at runtime, so they are matched by shape).
+_DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search"})
+
+
+def _dispatchable(name: str) -> bool:
+    """Can `_handle_call` act on this name at all? Control tools answer themselves and are exempt."""
+    if name in _ALWAYS_HANDLED_TOOLS:
+        return False
+    return (name in EXECUTORS or name in _DISPATCHED_OUTSIDE_EXECUTORS
+            or name.startswith("mcp__"))
 # images: what the model is told about the images that follow a tool batch, per source.
 _IMAGE_BATCH_TEXT = {
     "browser": ("The screenshot(s) requested above follow. They are a picture of an untrusted web "
@@ -2292,17 +2303,7 @@ class Agent(GoalLifecycle):
         if allow:
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") in allow]
-        schemas = self._monitor_schema_filter(schemas)
-        # What the model was actually offered, so execution can refuse what it was not. Every
-        # filter above is a filter on the CATALOG, and a catalog is not an enforcement boundary:
-        # DGC also accepts tool calls the model writes as prose (dgc/llm.py, parse_text_tool_calls),
-        # which is the path a poisoned file, web page or MCP result reaches. Without this, a
-        # `<tool_call>{"name": "python", ...}` in untrusted text ran the interpreter the user
-        # never turned on, and a read-only sub-agent could write files.
-        self._offered_tool_names = {
-            str(tool.get("function", {}).get("name") or "") for tool in schemas
-        }
-        return schemas
+        return self._monitor_schema_filter(schemas)
 
     def _non_interactive(self) -> bool:
         """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
@@ -5311,6 +5312,16 @@ class Agent(GoalLifecycle):
                 return True
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
             tools = self._tool_schemas() if self.client.tools_supported else None
+            # What THIS request offered, so execution can refuse what it did not. Every filter in
+            # `_tool_schemas` is a filter on the catalog, and a catalog is not an enforcement
+            # boundary: DGC also accepts tool calls the model writes as prose
+            # (llm.parse_text_tool_calls), which is the path a poisoned file, web page or MCP
+            # result takes. Recorded here rather than inside `_tool_schemas` because that method
+            # is also called to estimate tokens and to probe the picker -- including from the UI
+            # thread mid-turn -- and the set must describe the request, not the last caller.
+            self._offered_tool_names = (
+                {str(tool.get("function", {}).get("name") or "") for tool in tools}
+                if tools else None)
             # Use one state-aware schema snapshot for both budgeting and the request. Besides being
             # exact, this avoids refreshing a large MCP catalog twice at the start of every turn.
             # Do not rewrite the transcript between pieces of one deferred length continuation: the
@@ -6580,11 +6591,14 @@ class Agent(GoalLifecycle):
         # for a tool the user had switched off. Refuse rather than drop, so the model is told why
         # and the transcript keeps a result for every call it made.
         offered = getattr(self, "_offered_tool_names", None)
-        if (offered and name in EXECUTORS and name not in offered
-                and name not in _ALWAYS_HANDLED_TOOLS):
-            # Only a name the executor could actually have RUN. An unknown name is not a hole --
-            # `execute` already answers it with "unknown tool" -- and refusing those here would
-            # swallow a call the user should still see the model make.
+        if offered and name not in offered and _dispatchable(name):
+            # Any name this method can actually ACT ON, not just the ones `execute` runs. Gating on
+            # the executor table alone left `task` and `artifact` outside it -- so a sub-agent
+            # bounded by `tools: [read_file]` could still emit `task` and let an unrestricted
+            # grandchild do the writing, or `artifact` to publish repo files over HTTP, which is
+            # exactly the property the gate exists to provide. MCP routes were outside it too.
+            # An UNKNOWN name is still not a hole: `execute` answers it with "unknown tool", and
+            # refusing those here would swallow a call the user should see the model make.
             self.ui.tool_denied(name, display_args, "not offered on this request", call_id)
             return (f"error: {name} was not offered on this request and will not be run. "
                     "Use one of the tools you were given.")
@@ -7839,8 +7853,16 @@ class Agent(GoalLifecycle):
                         pass
 
         threading.Thread(target=work, daemon=True, name=f"dgc-bg-{agent_id[-8:]}").start()
+        # Only a frontend that set `on_detached_ended` can wake the parent when this lands; the
+        # editor backend does, the terminal does not. Promising a wake everywhere meant the
+        # terminal's model was told "I will continue when it finishes" and then never heard again,
+        # so it either waited for nothing or reported work it had not seen the result of.
+        if callable(getattr(self, "on_detached_ended", None)):
+            return (f"Sub-task '{description}' is running in the background (id {agent_id}). "
+                    "I will continue when it finishes.")
         return (f"Sub-task '{description}' is running in the background (id {agent_id}). "
-                "I will continue when it finishes.")
+                "Nothing will wake this conversation when it lands here, so do not wait for it: "
+                "carry on, and check on it later.")
 
     def stop_detached(self, agent_id: str | None = None) -> int:
         """Cancel one detached child, or every detached child. Returns how many were signalled."""
@@ -7901,8 +7923,15 @@ class Agent(GoalLifecycle):
                                      *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
                             for action in ("allow", "ask", "deny")}
         perms = PermissionEngine(self.mode, permission_rules, self.config.project_root)
+        allow = getattr(self, "_agent_tool_allowlist", None)
+        offered = getattr(self, "_offered_tool_names", None)
         if any(perms.external_paths(call.name, call.arguments)
-               or perms.decide(call.name, call.arguments)[0] != ALLOW for call in calls):
+               or perms.decide(call.name, call.arguments)[0] != ALLOW
+               # The same two checks the parallel READ helper makes. Without them a child bounded
+               # by `tools:` could fan two `task` calls into private worktrees and integrate their
+               # edits, with neither its allow-list nor the offered set consulted.
+               or (allow and call.name not in allow)
+               or (offered and call.name not in offered) for call in calls):
             return {}
 
         for call in calls:

@@ -72,3 +72,50 @@ class WorktreeReentryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExistingWorktreeIsNotDeletedTests(unittest.TestCase):
+    """A failure path must not remove a checkout this run did not create.
+
+    `create` returns an existing worktree rather than refusing — that is the whole point of the
+    re-entry fix. But the callers' cleanup ran `git worktree remove` on "the worktree we just
+    made", so `/worktree feature-x` a second time, where starting the agent then failed (a bad
+    model host in that worktree's own config, an MCP server that will not start), removed a
+    checkout the user had been working in for days.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-wt-keep-")
+        self.addCleanup(self._dir.cleanup)
+        self.root = Path(self._dir.name) / "repo"
+        self.root.mkdir()
+        git(self.root, "init", "-q", "-b", "main")
+        git(self.root, "config", "user.email", "t@example.invalid")
+        git(self.root, "config", "user.name", "t")
+        (self.root / "a.txt").write_text("hello\n", encoding="utf-8")
+        git(self.root, "add", "a.txt")
+        git(self.root, "commit", "-qm", "first")
+
+    def test_a_freshly_made_worktree_is_ours_to_remove(self):
+        path, _branch, err = wt.create(self.root, "brand-new")
+        self.assertIsNone(err, err)
+        self.assertTrue(wt.was_created(path),
+                        "this run made it, so a failure path may clean it up")
+
+    def test_a_worktree_we_only_attached_to_is_not(self):
+        first, _b, err = wt.create(self.root, "existing")
+        self.assertIsNone(err, err)
+        (first / "days-of-work.txt").write_text("mine\n", encoding="utf-8")
+
+        again, _b2, err2 = wt.create(self.root, "existing")
+        self.assertIsNone(err2, err2)
+        self.assertEqual(again, first)
+        self.assertFalse(wt.was_created(again),
+                         "an attached worktree must not be removed by a failure path")
+
+    def test_the_tui_cleanup_asks_before_removing(self):
+        source = (Path(__file__).resolve().parents[1] / "dgc" / "tui.py").read_text(encoding="utf-8")
+        index = source.index("cleanup_error = ")
+        window = source[index:index + 220]
+        self.assertIn("was_created", window,
+                      "the failure path removes the worktree without asking whose it is")

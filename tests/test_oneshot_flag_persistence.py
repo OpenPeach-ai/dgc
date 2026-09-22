@@ -35,12 +35,13 @@ BASE = {"model": "fixture", "base_url": "http://127.0.0.1:1/v1", "mode": "defaul
 class OneShotFlagPersistenceTests(unittest.TestCase):
     """Drives the real CLI as a subprocess: this bug lives in argument handling, not a helper."""
 
-    def run_cli(self, *flags):
+    def run_cli(self, *flags, seed_config=True):
         home = tempfile.mkdtemp(prefix="dgc-oneshot-")
         work = Path(home) / "ws"
         work.mkdir()
         (Path(home) / ".dgc").mkdir()
-        (Path(home) / ".dgc" / "config.json").write_text(json.dumps(BASE), encoding="utf-8")
+        if seed_config:
+            (Path(home) / ".dgc" / "config.json").write_text(json.dumps(BASE), encoding="utf-8")
         env = {**os.environ, "HOME": home, "USERPROFILE": home, "PYTHONPATH": str(PROJECT)}
         subprocess.run([sys.executable, "-m", "dgc", *flags], cwd=work, env=env,
                        capture_output=True, text=True, timeout=120)
@@ -62,9 +63,45 @@ class OneShotFlagPersistenceTests(unittest.TestCase):
         self.assertNotIn("thinking", saved, "--think leaked into the saved configuration")
         self.assertNotIn("ultra_mode", saved, "--ultra leaked into the saved configuration")
 
+    def test_a_fresh_machine_with_no_config_file_is_covered_too(self):
+        """The first save has no baseline to diff against, so it writes the whole of self.data.
+
+        The first version of this fix filtered only the diff path, so on a machine that had never
+        run DGC -- every new install -- `--mode auto --trust` still wrote `mode: auto` as the
+        permanent configuration. The seeded-config tests above all passed against that.
+        """
+        saved = self.run_cli("-p", "hi", "--mode", "auto", "--trust", "--think", "high", "--ultra",
+                             seed_config=False)
+        self.assertTrue(saved.get("trusted_dirs"), "--trust must still persist the workspace")
+        self.assertNotEqual(saved.get("mode"), "auto",
+                            "a one-shot --mode became the permanent mode on a fresh install")
+        self.assertNotEqual(saved.get("thinking"), "high")
+        self.assertNotEqual(saved.get("ultra_mode"), True)
+
     def test_a_one_shot_run_without_trust_saves_nothing(self):
         saved = self.run_cli("-p", "hi", "--mode", "acceptEdits")
         self.assertEqual(saved.get("mode"), "default")
+
+
+class MoreOneShotFlagsTests(OneShotFlagPersistenceTests):
+    """The rest of the run flags, which the first pass claimed were already safe."""
+
+    def test_model_and_base_url_do_not_persist_either(self):
+        # `persist=False` only skips the save at that moment; save() diffs against the LOAD-TIME
+        # baseline, so the next save in the process writes them anyway. The first version of this
+        # batch asserted in a comment that these two were already handled. They were not.
+        saved = self.run_cli("-p", "hi", "--trust", "--model", "scratch-model",
+                             "--base-url", "http://127.0.0.2:9/v1")
+        self.assertEqual(saved.get("model"), "fixture", "a one-shot --model became the default")
+        self.assertEqual(saved.get("base_url"), "http://127.0.0.1:1/v1",
+                         "a one-shot --base-url became the default endpoint")
+
+    def test_sandbox_is_a_per_run_flag(self):
+        # apply_run_flags' own docstring says "--add-dir / --allow-tool / --sandbox apply to this
+        # run only", for every surface that calls it.
+        saved = self.run_cli("-p", "hi", "--trust", "--sandbox", "read-only")
+        self.assertNotEqual(saved.get("sandbox"), True, "--sandbox persisted")
+        self.assertNotEqual(saved.get("sandbox_read_only"), True)
 
 
 class EphemeralKeyTests(unittest.TestCase):
@@ -109,6 +146,22 @@ class EphemeralKeyTests(unittest.TestCase):
         self.assertEqual(on_disk.get("mode"), "default", "the ephemeral key was written")
         self.assertEqual(on_disk.get("model"), "changed-on-purpose",
                          "a real change beside it must still be saved")
+
+    def test_a_save_does_not_revert_an_ephemeral_value(self):
+        """The flag must keep applying for the whole run.
+
+        save() adopts back every key it did not itself change, so another DGC's settings are not
+        fought over. An ephemeral key is deliberately absent from that "changed" set — so without
+        an explicit exclusion the on-disk value was written back over the flag, and `--mode auto`
+        silently stopped applying the moment anything in the process saved.
+        """
+        cfg = self.config()
+        cfg.data["mode"] = "auto"
+        cfg.mark_ephemeral("mode")
+        cfg.data["model"] = "something-else"          # a real change, to make save() do work
+        cfg.save()
+        self.assertEqual(cfg.data["mode"], "auto",
+                         "the run lost the mode it was started with")
 
     def test_it_still_applies_in_memory(self):
         # Ephemeral means "not persisted", not "not used" — the run still gets auto.

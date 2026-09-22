@@ -39,15 +39,27 @@ class _Config:
 
 class DoctorExitCodeTests(unittest.TestCase):
     def _run(self, *, models=None, raises=None, **data):
+        code, _printed = self._run_capturing(models=models, raises=raises, **data)
+        return code
+
+    def _run_capturing(self, *, models=None, raises=None, **data):
+        """(exit code, everything printed). The wording is half of what doctor promises."""
         config = _Config(**data)
+        printed = []
 
         def list_models(_self):
             if raises is not None:
                 raise raises
             return models or []
 
-        with patch.object(LLMClient, "list_models", list_models):
-            return cli_mod.run_doctor(config)
+        class _Console:
+            def print(self, *args, **kwargs):
+                printed.append(" ".join(str(a) for a in args))
+
+        with patch.object(LLMClient, "list_models", list_models), \
+                patch.object(cli_mod, "Console", lambda *a, **k: _Console()):
+            code = cli_mod.run_doctor(config)
+        return code, "\n".join(printed)
 
     def test_an_unreachable_endpoint_exits_nonzero(self):
         code = self._run(raises=ConnectionError("connection refused"))
@@ -59,9 +71,25 @@ class DoctorExitCodeTests(unittest.TestCase):
 
     def test_a_model_the_server_does_not_offer_is_not_plain_ready(self):
         # Reachable, so not a hard failure — a proxy may serve a model it does not list — but it
-        # must not print the same unqualified "ready" a correct setup gets.
-        code = self._run(models=["something-else"])
+        # must not print the same unqualified "ready" a correct setup gets. Asserting only the
+        # exit code (as the first version of this test did) checks nothing: the OLD code also
+        # returned 0 here, and the whole point is the wording.
+        code, printed = self._run_capturing(models=["something-else"])
         self.assertEqual(code, 0, "reachable is not a failure")
+        self.assertIn("warning", printed.lower(),
+                      "a setup whose model the server does not have was called plainly ready")
+
+    def test_a_correct_setup_says_plainly_ready(self):
+        code, printed = self._run_capturing(models=["fixture-model"])
+        self.assertEqual(code, 0)
+        self.assertIn("ready", printed.lower())
+        self.assertNotIn("warning", printed.lower())
+
+    def test_an_unreachable_endpoint_says_not_ready(self):
+        code, printed = self._run_capturing(raises=ConnectionError("refused"))
+        self.assertEqual(code, 1)
+        self.assertIn("not ready", printed.lower(),
+                      "it printed the reason and then no verdict at all")
 
     def test_doctor_returns_a_code_at_all(self):
         # It returned None, which SystemExit treats as success however bad the news was.

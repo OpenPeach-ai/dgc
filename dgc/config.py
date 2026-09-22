@@ -1042,8 +1042,17 @@ class Config:
         with _config_write_lock():
             on_disk = _read_config_payload(USER_CONFIG)
             changed, perms, dropped = self._my_changes()
+            ephemeral = getattr(self, "_ephemeral_keys", None) or set()
             if on_disk is None:
-                payload = {k: v for k, v in self.data.items() if k not in SECRET_KEYS}
+                # First save on this machine: there is no baseline to diff against, so the whole
+                # of self.data is written. Ephemeral keys must still be held back, or a one-shot
+                # flag becomes the permanent configuration on exactly the machines that have none
+                # yet -- which is every new install. Fall back to the DEFAULT for such a key so the
+                # file states something true rather than omitting it.
+                ephemeral = getattr(self, "_ephemeral_keys", None) or set()
+                payload = {k: (DEFAULTS[k] if k in ephemeral and k in DEFAULTS else v)
+                           for k, v in self.data.items()
+                           if k not in SECRET_KEYS and not (k in ephemeral and k not in DEFAULTS)}
                 payload["permissions"] = self.permissions
             else:
                 payload = {k: v for k, v in on_disk.items() if k != "permissions"}
@@ -1065,7 +1074,12 @@ class Config:
                 # What is on disk is now what this process believes; anything another backend
                 # wrote in the meantime is adopted rather than fought over.
                 for key, value in payload.items():
-                    if key != "permissions" and key not in changed and key not in self._env_secret_keys:
+                    # An ephemeral key is deliberately absent from `changed`, so without this it
+                    # would be adopted back FROM DISK over the value this run was given -- a
+                    # `--mode auto` would quietly stop applying the moment anything saved, and a
+                    # stored `mode: auto` would be restored over an explicit one-shot downgrade.
+                    if (key != "permissions" and key not in changed
+                            and key not in ephemeral and key not in self._env_secret_keys):
                         self.data[key] = value
                 self.permissions = {a: list(merged[a]) for a in merged}
             _write_private_json(USER_CONFIG, payload)

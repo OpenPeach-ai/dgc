@@ -3232,7 +3232,8 @@ class TUI:
         from rich.text import Text
         th = style_mod.theme()
         groups = [
-            ("Compose", [("Enter", "send"), ("Shift+Enter", "newline"), ("Shift+Tab", "cycle permission mode"),
+            ("Compose", [("Enter", "send"), ("Ctrl+J", "newline (Shift+Enter where the terminal sends it)"),
+                         ("Shift+Tab", "cycle permission mode"),
                          ("/", "command palette"), ("@path", "attach one exact bounded file"),
                          ("Ctrl+R", "recall a past prompt"),
                          ("! command", "run a shell command"), ("# note", "save a memory")]),
@@ -4566,7 +4567,12 @@ class TUI:
         except Exception:
             preview = ""                                 # never block an approval on its preview
         if preview:
-            self._append(self._rich(render_mod.render_diff(preview.expandtabs(4))))
+            # Same treatment every other file-content display gets: strip terminal control
+            # sequences from bytes we did not write, and redact known credentials. A diff is file
+            # content, and this one is printed before the user has decided anything.
+            safe = style_mod.terminal_safe_text(
+                redact_text(preview, secret_values(self.config)))
+            self._append(self._rich(render_mod.render_diff(safe.expandtabs(4))))
         ans = self._ask({"kind": "approve", "header": header,
                          "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
                          "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"},
@@ -7086,7 +7092,11 @@ class TUI:
             new_agent = Agent(new_config, self)
             new_agent._agent_defs_config = old_agent._agent_defs_config
         except Exception as exc:
-            cleanup_error = wt.remove(root, str(wt_path))
+            # Only remove what this run made. `create` returns an existing worktree
+            # rather than refusing, so removing unconditionally would delete a checkout
+            # the user had been working in.
+            cleanup_error = (wt.remove(root, str(wt_path))
+                             if wt.was_created(wt_path) else None)
             detail = f"; checkout retained at {wt_path}: {cleanup_error}" if cleanup_error else ""
             self._flash(f"couldn't start agent in {branch}: {type(exc).__name__}: {exc}{detail}")
             return
@@ -7314,6 +7324,23 @@ class TUI:
         def _(ev):
             _ov_action("space")
 
+        @kb.add("c-j")
+        def _(ev):
+            """Ctrl+J inserts a newline.
+
+            Shift+Enter is what people reach for, and in most terminals it cannot work: the
+            terminal sends the same byte for Enter and Shift+Enter (ControlM), so nothing can tell
+            them apart, and the composer submits. A terminal that implements the kitty keyboard
+            protocol or modifyOtherKeys does distinguish them, and there Shift+Enter arrives as
+            ControlJ and lands here too. Ctrl+J is the binding that works everywhere, which is why
+            it is the one the cheatsheet and the docs name.
+            """
+            if self._overlay is not None or self._req is not None:
+                return                              # a picker or a decision owns the keyboard
+            if self.input_buf.complete_state is not None:
+                return                              # the `/` palette is open; Enter resolves it
+            self.input_buf.insert_text("\n")
+
         @kb.add("enter")
         def _(ev):
             if self._question_keys_guarded() and self._input is None:
@@ -7531,9 +7558,15 @@ class TUI:
                   and self.input_buf.complete_state is None and bool(self.input_buf.text.strip())
                   and not self.input_buf.text.lstrip().startswith("/")))
         def _(ev):
+            # Expand the paste chips here, exactly as Enter does. Queuing stores the string
+            # verbatim and the next turn submits it unchanged, so without this a queued follow-up
+            # reached the model as the literal placeholder -- "[Pasted text #1 +40 lines] please
+            # fix this" -- and the pasted text was silently dropped. Enter had always expanded;
+            # Tab is the same message taking a different road to the model.
             text = self.input_buf.text.strip()
-            if self._route_followup(text, queue_only=True) != "full":
+            if self._route_followup(self._expand_pastes(text), queue_only=True) != "full":
                 self.input_buf.reset()
+                self._pastes.clear()
 
         question_card = Condition(lambda: self._req is not None and self._req.get("kind") == "questions"
                                   and self._input is None and self._overlay is not None)

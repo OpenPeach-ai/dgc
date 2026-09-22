@@ -161,6 +161,18 @@ def edit_preview(name: str, args: dict, root) -> str:
         path = Path(raw)
         if not path.is_absolute():
             path = Path(str(root)) / path
+        # Never read outside the project to build this. The card is shown BEFORE the user decides,
+        # and an external path is exactly the case that reaches it (permissions.py sends a path
+        # outside the project to ASK). Previewing `~/.aws/credentials` or `/etc/shadow` would print
+        # that file to the screen as part of asking whether the model may overwrite it -- a
+        # disclosure the user never agreed to, and one the executor itself refuses until after
+        # approval. No preview for those: the card falls back to the argument summary, as before.
+        from .workspace import is_within
+        try:
+            if not is_within(path, Path(str(root))):
+                return ""
+        except (OSError, ValueError):
+            return ""
         old = ""
         if path.is_file():
             if path.stat().st_size > 262_144:

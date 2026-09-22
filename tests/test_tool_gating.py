@@ -53,6 +53,20 @@ def fixture_config(root: Path, **data) -> Config:
     return config
 
 
+def offer(agent):
+    """Do what sending a request does: build the catalog AND record what it offered.
+
+    `_tool_schemas` is deliberately pure — it is also called to estimate tokens and to probe the
+    options picker, including from the UI thread mid-turn, so it must not decide what the current
+    request offered. The turn loop records the set; this mirrors that for a test that is not
+    running a whole turn. `test_the_request_site_records_what_it_offered` pins the real one.
+    """
+    tools = agent._tool_schemas()
+    agent._offered_tool_names = (
+        {str(t.get("function", {}).get("name") or "") for t in tools} if tools else None)
+    return tools
+
+
 def make_agent(root: Path, **data) -> Agent:
     client = LLMClient("http://localhost.invalid/v1", "", "fixture")
     with patch.object(Agent, "_new_client", lambda self, *a, **k: client):
@@ -69,7 +83,7 @@ class ToolGatingTests(unittest.TestCase):
 
     def test_python_is_refused_at_execution_when_code_action_is_off(self):
         agent = make_agent(self.root, code_action=False)
-        offered = {t.get("function", {}).get("name") for t in agent._tool_schemas()}
+        offered = {t.get("function", {}).get("name") for t in offer(agent)}
         self.assertNotIn("python", offered, "precondition: it is not advertised")
 
         marker = self.root / "pwned.txt"
@@ -82,7 +96,7 @@ class ToolGatingTests(unittest.TestCase):
 
     def test_python_still_runs_when_the_user_did_enable_it(self):
         agent = make_agent(self.root, code_action=True)
-        offered = {t.get("function", {}).get("name") for t in agent._tool_schemas()}
+        offered = {t.get("function", {}).get("name") for t in offer(agent)}
         self.assertIn("python", offered)
         out = agent._handle_call(ToolCall("textcall_1", "python", {"code": "print(6 * 7)"}))
         self.assertNotIn("was not offered", out)
@@ -93,7 +107,7 @@ class ToolGatingTests(unittest.TestCase):
     def test_a_read_only_subagent_cannot_write_files(self):
         agent = make_agent(self.root)
         agent._agent_tool_allowlist = frozenset({"read_file", "grep"})
-        agent._tool_schemas()                              # the request the child would have made
+        offer(agent)                                       # the request the child would have made
 
         target = self.root / "written-by-a-read-only-agent.txt"
         out = agent._handle_call(ToolCall(
@@ -106,7 +120,7 @@ class ToolGatingTests(unittest.TestCase):
     def test_a_read_only_subagent_cannot_shell_out(self):
         agent = make_agent(self.root)
         agent._agent_tool_allowlist = frozenset({"read_file", "grep"})
-        agent._tool_schemas()
+        offer(agent)
         marker = self.root / "shelled.txt"
         out = agent._handle_call(ToolCall("textcall_1", "bash", {"command": f"touch {marker}"}))
         self.assertIn("not offered", out)
@@ -117,7 +131,7 @@ class ToolGatingTests(unittest.TestCase):
         source.write_text("def login():\n    return True\n", encoding="utf-8")
         agent = make_agent(self.root)
         agent._agent_tool_allowlist = frozenset({"read_file", "grep"})
-        agent._tool_schemas()
+        offer(agent)
         out = agent._handle_call(ToolCall("textcall_1", "read_file", {"path": str(source)}))
         self.assertIn("def login", out)
 
@@ -126,7 +140,7 @@ class ToolGatingTests(unittest.TestCase):
         # "unrestricted", and the gate must not read it as "nothing allowed".
         agent = make_agent(self.root)
         agent._agent_tool_allowlist = frozenset()
-        agent._tool_schemas()
+        offer(agent)
         target = self.root / "ok.txt"
         out = agent._handle_call(ToolCall(
             "textcall_1", "write_file", {"path": str(target), "content": "x"}))
@@ -138,7 +152,7 @@ class ToolGatingTests(unittest.TestCase):
         # present_plan is answered inside _handle_call and never dispatched. Its own message names
         # plan mode; the generic "not offered" would be a worse answer, not a safer one.
         agent = make_agent(self.root, mode="auto")
-        agent._tool_schemas()
+        offer(agent)
         out = agent._handle_call(ToolCall("textcall_1", "present_plan", {"plan": "do the thing"}))
         self.assertIn("plan mode", out)
 
@@ -155,6 +169,30 @@ class ToolGatingTests(unittest.TestCase):
         self.assertIn("hello", out)
 
 
+class OfferedSetIsPerRequestTests(unittest.TestCase):
+    """The set must describe the request that was sent, not the last caller of _tool_schemas."""
+
+    def test_building_a_catalog_does_not_change_what_the_last_request_offered(self):
+        # _tool_schemas is called to estimate tokens and to probe the picker — and the TUI calls
+        # the token estimate from its render thread on every status-line repaint. While it also
+        # assigned the offered set, a repaint mid-batch could replace it, and a batch following an
+        # approved plan was refused with "not offered on this request".
+        with tempfile.TemporaryDirectory(prefix="dgc-offer-") as tmp:
+            agent = make_agent(Path(tmp))
+            agent._offered_tool_names = {"sentinel"}
+            agent._tool_schemas()
+            self.assertEqual(agent._offered_tool_names, {"sentinel"},
+                             "_tool_schemas rewrote the offered set as a side effect")
+
+    def test_the_request_site_records_what_it_offered(self):
+        from pathlib import Path as _Path
+        source = (_Path(__file__).resolve().parents[1] / "dgc" / "agent.py").read_text(encoding="utf-8")
+        index = source.index("tools = self._tool_schemas() if self.client.tools_supported else None")
+        window = source[index:index + 900]
+        self.assertIn("self._offered_tool_names", window,
+                      "the turn loop must record the set for the request it is about to send")
+
+
 class SandboxCoversPythonTests(unittest.TestCase):
     """`--sandbox` confines the shell. The Python interpreter is not run through the shell."""
 
@@ -163,30 +201,48 @@ class SandboxCoversPythonTests(unittest.TestCase):
         self.root = Path(self._dir.name)
         self.addCleanup(self._dir.cleanup)
 
-    def test_python_fails_closed_when_a_sandbox_was_requested(self):
-        config = fixture_config(self.root, code_action=True, sandbox=True)
-        ctx = type("Ctx", (), {"config": config, "project_root": self.root, "tool_owner": "test"})()
-        marker = self.root / "escaped.txt"
-        out = tools.python({"code": f"open({str(marker)!r}, 'w').write('x')"}, ctx)
-        self.assertIn("cannot confine the python interpreter", out)
-        self.assertFalse(marker.exists(),
-                         "a run the user asked to confine wrote outside the sandbox")
-
-    def test_python_runs_normally_with_no_sandbox(self):
-        config = fixture_config(self.root, code_action=True, sandbox=False)
-        ctx = type("Ctx", (), {"config": config, "project_root": self.root, "tool_owner": "test2"})()
-        out = tools.python({"code": "print(1 + 1)"}, ctx)
-        self.assertIn("2", out)
-        self.assertNotIn("cannot confine", out)
+    def _sandbox_deny(self, choice):
+        """The session deny list `dgc --sandbox <choice>` installs, from the real flag handler."""
+        from types import SimpleNamespace
+        from dgc import cli as cli_mod
+        config = fixture_config(self.root)
+        config.session_permissions = {}
+        cli_mod.apply_run_flags(
+            config, SimpleNamespace(add_dir=None, allow_tool=None, sandbox=choice),
+            type("P", (), {"error": staticmethod(lambda m: (_ for _ in ()).throw(SystemExit(m)))})())
+        return list((getattr(config, "session_permissions", None) or {}).get("deny") or [])
 
     def test_read_only_denies_python_alongside_the_edit_tools(self):
-        # dgc --sandbox read-only builds its deny list in cli.py; Python belongs in it because no
-        # sandbox setting reaches the interpreter.
-        source = (Path(__file__).resolve().parents[1] / "dgc" / "cli.py").read_text(encoding="utf-8")
-        index = source.index('deny += ["Write", "Edit", "MultiEdit", "ApplyPatch"')
-        line = source[index:source.index("\n", index)]
-        self.assertIn('"Python"', line,
+        deny = self._sandbox_deny("read-only")
+        self.assertIn("Python", deny,
                       "--sandbox read-only must deny the one tool the sandbox cannot confine")
+        for tool in ("Write", "Edit", "MultiEdit", "ApplyPatch"):
+            self.assertIn(tool, deny)
+
+    def test_sandbox_on_denies_python_too(self):
+        # The interpreter is unconfined under `on` exactly as it is under `read-only`; only the
+        # edit tools differ. Leaving it available there was the other half of the same hole.
+        deny = self._sandbox_deny("on")
+        self.assertIn("Python", deny, "--sandbox on leaves the interpreter unconfined")
+        self.assertNotIn("Write", deny, "--sandbox on is not read-only; edits are still allowed")
+
+    def test_sandbox_off_denies_nothing(self):
+        self.assertEqual(self._sandbox_deny("off"), [])
+
+    def test_the_executor_does_not_override_the_host(self):
+        """python() must not refuse on its own: the permission layer owns that decision.
+
+        An SDK host is promised (sdk/python/dgc_sdk/policy.py) that python is refused in auto mode
+        — nobody is there to review — and is an ordinary permission request its `on_permission`
+        callback answers in every other mode. A refusal inside the tool overrode that host in all
+        modes, with no way to switch it off, including under the SDK's DEFAULT policy.
+        """
+        config = fixture_config(self.root, code_action=True, sandbox=True)
+        ctx = type("Ctx", (), {"config": config, "project_root": self.root, "tool_owner": "sdk"})()
+        out = tools.python({"code": "print(6 * 7)"}, ctx)
+        self.assertNotIn("cannot confine the python interpreter", out,
+                         "the executor decided something the permission layer owns")
+        self.assertIn("42", out)
 
 
 if __name__ == "__main__":
@@ -210,7 +266,7 @@ class ControlToolDenyTests(unittest.TestCase):
     def _agent(self, denied):
         agent = make_agent(self.root, mode="plan")
         agent.config.permissions = {"allow": [], "ask": [], "deny": list(denied)}
-        agent._tool_schemas()
+        offer(agent)
         return agent
 
     def test_a_denied_plan_is_refused(self):
@@ -306,3 +362,57 @@ class OllamaCloudStreamCloseTests(unittest.TestCase):
 
         with self.assertRaises(AttributeError):
             list(_until_watcher_closes(chunks(), Response()))
+
+
+class DelegationAndArtifactAreGatedTests(unittest.TestCase):
+    """A read-only sub-agent must not reach a writer by delegating to one.
+
+    The gate first checked `name in EXECUTORS`, and neither `task` nor `artifact` is in that
+    table — so a child bounded by `tools: [read_file, grep]` could still emit `task` (prose-parsed
+    like any other injected call) and let an unrestricted grandchild do the writing, or `artifact`
+    to serve repo files over HTTP. Every MCP route was outside the table for the same reason.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="dgc-delegate-")
+        self.root = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def bounded_agent(self):
+        agent = make_agent(self.root)
+        agent._agent_tool_allowlist = frozenset({"read_file", "grep"})
+        offer(agent)
+        return agent
+
+    def test_a_read_only_child_cannot_delegate(self):
+        agent = self.bounded_agent()
+        out = agent._handle_call(ToolCall("textcall_1", "task", {
+            "description": "write the file", "prompt": "create app.py"}))
+        self.assertIn("not offered", out,
+                      "a bounded child reached an unrestricted grandchild through task")
+
+    def test_a_read_only_child_cannot_publish_an_artifact(self):
+        agent = self.bounded_agent()
+        out = agent._handle_call(ToolCall("textcall_1", "artifact", {
+            "name": "leak", "path": str(self.root)}))
+        self.assertIn("not offered", out)
+
+    def test_a_read_only_child_cannot_reach_an_mcp_server(self):
+        agent = self.bounded_agent()
+        for name in ("mcp_call", "mcp__someserver__do_thing"):
+            with self.subTest(name=name):
+                out = agent._handle_call(ToolCall("textcall_1", name, {"arguments": {}}))
+                self.assertIn("not offered", out)
+
+    def test_an_unknown_name_is_still_left_to_the_executor(self):
+        # Not a hole, and refusing it here would hide a call the user should see the model make.
+        agent = self.bounded_agent()
+        out = agent._handle_call(ToolCall("textcall_1", "ls", {"path": "."}))
+        self.assertNotIn("was not offered", out)
+
+    def test_an_unbounded_agent_still_delegates(self):
+        agent = make_agent(self.root)
+        offer(agent)
+        out = agent._handle_call(ToolCall("t1", "task", {
+            "description": "look around", "prompt": "find the entrypoint"}))
+        self.assertNotIn("was not offered", out)

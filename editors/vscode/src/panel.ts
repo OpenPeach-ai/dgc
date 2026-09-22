@@ -266,7 +266,7 @@ function maxLiveChats(): number {
 const PER_CHAT_FIELDS = [
   "backend", "initializingBackend", "lastReadyEvent",
   "sessionReady", "sessionRestoreCandidate", "sessionRestoreSaved", "sessionRestoreStarted",
-  "sessionRestoreSuppressed",
+  "sessionRestoreSuppressed", "openDecisions",
   "sessionRestoreFinished", "sessionRestoreRequestId", "sessionDraftSource", "sessionHandshakeGeneration",
   "currentSessionId", "currentSessionName", "currentSessionSaved",
   "turnActive", "confirmedTurnActive", "monitorTurnActive", "liveTurn", "turnStartedAt",
@@ -295,6 +295,11 @@ interface ChatSlot {
   /** Set when this background chat's backend died: why. Switching back starts a fresh one and
    *  resumes the session it was on, so a chat you were not watching is not simply gone. */
   lost?: string;
+  /** A `ready` that arrived while this chat was in the background. The handshake it starts writes
+   *  the panel's own fields and calls completeHandshake() on the backend, so it can only run for
+   *  the chat on screen — and until it does, that backend accepts nothing: every prompt is queued
+   *  and never sent. Held here and replayed the moment the chat becomes active. */
+  pendingReady?: DgcEvent;
 }
 
 export class DgcViewProvider implements vscode.WebviewViewProvider {
@@ -367,6 +372,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  correctly refused — one session is held by whichever DGC is running a turn in it — so the
    *  second chat's first turn died on "this session has an active turn in another DGC process". */
   private sessionRestoreSuppressed = false;
+  /** Ids of this chat's still-open permission, plan, options and question requests. A chat you
+   *  switch away from keeps waiting on them, and its chip is the only place that can say so. */
+  private openDecisions = new Set<string>();
   /** Automatic backend restarts in the recent past, so a crash loop cannot spin forever. */
   private backendRecoveries: number[] = [];
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -484,6 +492,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     slot.backend = this.backend;
     slot.label = this.chatLabel();
     slot.busy = this.confirmedTurnActive;
+    // A chat blocked on a decision stays blocked after you leave it, and its chip is the only
+    // thing that can tell you. Dropping this meant the one state worth surfacing was the one
+    // state a switch erased.
+    slot.needsYou = this.openDecisions.size > 0;
     slot.unread = 0;                                 // you were just looking at it
     return slot;
   }
@@ -510,11 +522,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.activeSlotId = incoming.id;
     this.applyChatFields(saved);
     incoming.unread = 0;
-    incoming.needsYou = false;
+    incoming.needsYou = this.openDecisions.size > 0;   // still true; you are just looking at it now
+    // The window remembers ONE current chat, and it is read whenever a backend starts without
+    // suppression — including the replacement after a crash. Leaving it on the chat we just left
+    // meant a foreground restart resumed that chat's session here and died on "this session has
+    // an active turn in another DGC process": the exact collision this branch set out to fix.
+    this.rememberSession();
     this.setReadyContext(!!this.backend?.ready && this.sessionReady);
     // The transcript on screen belongs to the chat we just left. Clear it before a single event of
     // the incoming chat's can land in it, then rebuild from that backend's own snapshot.
     this.post({ type: "chat_switched", slotId: incoming.id, label: incoming.label });
+    const held = incoming.pendingReady;
+    incoming.pendingReady = undefined;
+    if (held && this.backend) {
+      // Its backend became ready while this chat was in the background. Run that handshake now,
+      // through the ordinary path, or the backend never releases and every prompt is swallowed.
+      this.onEvent(held);
+      this.postChatSlots();
+      this.scheduleWorkspaceChanges(0);
+      return;
+    }
     if (!this.backend) {
       // Its backend died while we were elsewhere. Start one now; the restore candidate set when we
       // noticed the death puts it back on the same session, and its handshake repaints the panel.
@@ -698,6 +725,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     slot.busy = false;
     slot.needsYou = false;
     slot.backend = undefined;
+    // Hand its unsent messages back, as the foreground path does. They were the user's words and
+    // were being dropped without a trace when the chat they were typed in was not on screen.
+    const parked = slot.saved;
+    if (parked) {
+      const queued = [...((parked.unstartedPrompts as Map<string, QueuedPrompt>) || new Map()).values()]
+        .filter((prompt) => prompt.queued);
+      if (queued.length) {
+        parked.unsentPrompts = [...((parked.unsentPrompts as QueuedPrompt[]) || []), ...queued];
+        (parked.unstartedPrompts as Map<string, QueuedPrompt>).clear();
+      }
+    }
     if (slot.saved) {
       const sessionId = String(slot.saved.currentSessionId || "");
       slot.saved.backend = undefined;
@@ -730,11 +768,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "session_named":
         slot.label = String((ev as any).name || "").trim() || slot.label;
         break;
+      case "ready":
+        // Hold it: the handshake it begins can only run for the active chat. Replayed on switch.
+        slot.pendingReady = ev;
+        slot.label = String((ev as any).session_name || "").trim()
+          || String((ev as any).session_id || "").slice(-6) || slot.label;
+        break;
+      // The real names, from schemas/editor-protocol-v14.schema.json. An earlier version of this
+      // switch listed `plan_request`, `question_request` and `ask` — none of which the protocol
+      // emits — so a chat blocked on a plan or a question showed no dot at all.
       case "permission_request":
-      case "plan_request":
       case "options_request":
-      case "question_request":
-      case "ask":
+      case "ask_request":
+      case "plan_proposal":
         slot.needsYou = true;
         break;
       case "permission_resolved":
@@ -2222,13 +2268,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           }
         }
         break;
+      case "permission_request":
+      case "options_request":
+      case "ask_request":
+      case "plan_proposal":
+        // Remembered so switching away can show this chat as waiting on you. Painting is the
+        // webview's job; this is only the bookkeeping the chip needs.
+        if ((ev as any).id !== undefined) { this.openDecisions.add(String((ev as any).id)); }
+        break;
+      case "permission_resolved":
+      case "options_resolved":
+      case "ask_resolved":
+        this.openDecisions.delete(String((ev as any).id ?? (ev as any).ask_id ?? ""));
+        break;
       case "request_expired":
+        this.openDecisions.delete(String(ev.id));
         this.mcpUrls.delete(String(ev.id));
         break;
       case "turn_end": {
         this.mcpUrls.clear();
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
+        this.openDecisions.clear();      // nothing can still be waiting once the turn is over
         this.postChatSlots();
         // An error end is kept for thirty seconds: when the backend is shutting down under a turn
         // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
@@ -3306,7 +3367,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (setup) { return be.sendSetup(command); }
     if (this.mcpManagement) {
       command.interactive = true;
-      this.post({ type: "mcp_command_started", requestId: command.request_id });
+      this.post({ type: "mcp_command_started", requestId: command.request_id, view: "servers" });
       try {
         const event = await be.request(command, "mcp_servers", 180000);
         this.post({ type: "event", event: { type: "mcp_command_result", request_id: command.request_id,
@@ -3656,7 +3717,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       const requestId = this.nextRequestId("mcp-command");
-      this.post({ type: "mcp_command_started", requestId });
+      // Enable, disable and reconnect act on a row in the SERVERS list. Without saying so, the
+      // webview switched to the context view and cleared the panel, so the list you were working
+      // in vanished for the length of a connection attempt — up to three minutes.
+      const verb = rest.trim().split(/\s+/, 1)[0].toLowerCase();
+      const view = ["enable", "disable", "reconnect", "remove", "add"].includes(verb) ? "servers" : "context";
+      this.post({ type: "mcp_command_started", requestId, view });
       try {
         await be.request({ type: "mcp_command", request_id: requestId, arguments: rest }, "mcp_command_result", 180000);
       } catch (error) {

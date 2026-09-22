@@ -603,7 +603,7 @@ class SerialAndParallelTests(HarnessCase):
 
 class TerminalStateTests(HarnessCase):
     def test_nested_agents_and_metrics_survive_save_and_resume(self):
-        h = self.make()
+        h = self.make(tool_profile="full")   # the child delegates; see the note above
         # Use the normal session location, so the same path validation as production applies.
         from dgc import sessions
         h.agent.session_file = sessions.new_path(h.config.project_root)
@@ -816,7 +816,14 @@ class TerminalStateTests(HarnessCase):
 
 class NestingWaitingStallTests(HarnessCase):
     def test_grandchild_links_to_its_parent_and_spawning_call(self):
-        h = self.make()
+        # tool_profile="full" so `task` is offered to the CHILD as well. By design a child is
+        # offered delegation only when its own brief asks for it (dgc/agent.py _task_exposed:
+        # "Claude Code and Codex keep sub-agents one level deep by default"), and these tests are
+        # about the LINKAGE between a grandchild and its parent, not about whether the second
+        # level is offered. Until the execution gate landed, the catalog was advisory and the
+        # grandchild spawned regardless; now an unoffered `task` is refused, so the fixture has to
+        # put the child on the supported path.
+        h = self.make(tool_profile="full")
         routes = [("GRANDCHILD", child(tool=False, summary="grandchild done")),
                   ("CHILD", calls_then([ToolCall("c1", "task", {"description": "nested",
                                                                "prompt": "GRANDCHILD dig"})],
@@ -841,7 +848,9 @@ class NestingWaitingStallTests(HarnessCase):
 
             def __getattr__(self, name):
                 return lambda *args, **kwargs: None
-        h = self.make(ui=PermissiveUI())
+        # tool_profile="full": see the note above — a child is offered `task` only when its own
+        # brief asks, and these tests exercise the second level itself.
+        h = self.make(ui=PermissiveUI(), tool_profile="full")
         rec = Recorder()
         h.agent.subagents.listener = rec
         routes = [("GRANDCHILD", child(tool=False)),

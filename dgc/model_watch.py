@@ -598,15 +598,22 @@ class RequestWatch:
         self._shutdown()
 
     def _shutdown(self) -> None:
-        _shutdown_socket(getattr(self._conn, "sock", None))
         response = self._response
+        # Mark the response BEFORE anything is torn down. A read in flight fails the instant the
+        # socket goes, and the reader decides "watcher close or genuine fault?" by this flag; if
+        # the socket died first the flag was not yet set, the reader saw a bare transport error,
+        # and the only other signal available -- `raw.closed` -- is equally true after a real
+        # IncompleteRead. Setting it first is what lets the reader tell a deliberate close from a
+        # body that was cut in transit, instead of treating a truncated response as complete.
+        if response is not None:
+            try:
+                setattr(response, "_dgc_closed", True)
+            except Exception:
+                pass
+        _shutdown_socket(getattr(self._conn, "sock", None))
         if response is None:
             return
         _shutdown_socket(_response_socket(response))
-        try:
-            setattr(response, "_dgc_closed", True)
-        except Exception:
-            pass
         try:
             response.close()
         except Exception:

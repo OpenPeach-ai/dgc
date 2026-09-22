@@ -6,7 +6,7 @@
 // It cleared only when the next message was sent.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeDom, panelSrc } from "./support/webview-dom.mjs";
+import { makeDom } from "./support/webview-dom.mjs";
 
 const TODOS = [
   { content: "read the file", status: "done" },
@@ -50,10 +50,22 @@ test("unfinished work keeps the row after the turn ends", () => {
     "an item left pending is still worth showing after the turn");
 });
 
-test("endTurn repaints the checklist", () => {
-  // Pin where the fix lives: the row can only fold in a render that happens with turn === null.
-  const src = panelSrc;      // touch the export so the harness stays wired
-  assert.ok(src.length > 0);
-  const main = makeDom();
-  assert.ok(main.doc.getElementById("tasksbar"));
+test("the row folds on the turn that finished, not on the next message", () => {
+  // The previous version of this test asserted only that the element existed — it never sent a
+  // turn, never ended one, and passed with the fix fully reverted. What matters is the ORDER:
+  // the row must be gone before anything else happens, because the gap between turns is exactly
+  // when a stale "Tasks 4/4 · all done" was sitting above the composer.
+  const { doc, send } = makeDom();
+  send({ type: "webviewReady" });
+  const bar = () => doc.getElementById("tasksbar");
+
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", kind: "prompt", prompt: "go" } });
+  send({ type: "event", event: { type: "todos", todos: TODOS } });
+  assert.equal(bar().hidden, false, "it belongs on screen while the turn runs");
+
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "done" } });
+  assert.equal(bar().hidden, true, "it must fold on turn_end itself");
+
+  // …and stay folded through the idle gap, with no further events at all.
+  assert.equal(bar().hidden, true);
 });

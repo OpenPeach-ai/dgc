@@ -522,8 +522,12 @@ def _until_watcher_closes(chunks, response):
             return
         except (ValueError, AttributeError, requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ConnectionError):
-            if getattr(response, "_dgc_closed", False) or getattr(
-                    getattr(response, "raw", None), "closed", False):
+            # ONLY the flag the stall watcher sets itself (see _close_watched, which assigns
+            # `_dgc_closed` before closing). `response.raw.closed` is also True after a genuine
+            # fault -- urllib3 closes the connection on an IncompleteRead -- so testing it here
+            # made a body cut in transit indistinguishable from a watcher close, and a truncated
+            # response was accepted as a complete one instead of being retried.
+            if getattr(response, "_dgc_closed", False):
                 return          # the watcher closed the response under this read
             raise
         yield chunk
@@ -3202,6 +3206,8 @@ class LLMClient:
                 chunk_seen = watch.progress if watch is not None else None
                 text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response",
                                           on_chunk=chunk_seen)
+                frames: list = []          # bound before any branch: an empty body reaches the
+                                           # `text == ""` case below, and used to read unbound
                 if text is None:
                     frames = [_bounded_json_response(
                         r, _MAX_OLLAMA_JSON_BYTES, "Ollama response", on_chunk=chunk_seen)]

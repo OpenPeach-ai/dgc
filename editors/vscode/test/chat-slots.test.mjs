@@ -409,6 +409,48 @@ test("a chat whose backend died resumes its OWN session, not the window's", asyn
     "and the handshake must not swap it for the window's remembered one");
 });
 
+test("a chat that became ready in the background is not left wedged", () => {
+  // The handshake a `ready` starts writes the panel's own fields and calls completeHandshake() on
+  // the backend. It can only run for the chat on screen — and until it runs, that backend accepts
+  // nothing: every prompt is enqueued and never sent. Dropping a background `ready` outright left
+  // the chat permanently mute, with no error anywhere.
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot();
+  const second = provider.activeSlot();
+  provider.switchToSlot(provider.slots[0].id);          // leave the new chat mid-handshake
+
+  const ready = { type: "ready", session_id: "beta", session_name: "Second",
+                  capabilities: { history_snapshot: true } };
+  provider.routeEvent(second, ready);
+  assert.ok(second.pendingReady, "a background ready must be held, not discarded");
+
+  let handled = null;
+  const realOnEvent = provider.onEvent.bind(provider);
+  provider.onEvent = (ev) => { if (ev.type === "ready") handled = ev; return realOnEvent(ev); };
+  provider.switchToSlot(second.id);
+
+  assert.ok(handled, "the held ready must run once the chat is on screen");
+  assert.equal(second.pendingReady, undefined, "and must not run twice");
+});
+
+test("switching chats updates what the window remembers as current", () => {
+  // The remembered id is read whenever a backend starts unsuppressed — including the replacement
+  // after a crash. Leaving it on the chat we left meant a foreground restart resumed THAT chat's
+  // session here, and died on "this session has an active turn in another DGC process".
+  const { provider, remembered } = harness();
+  remembered.scope = "";
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const first = provider.slots[0].id;
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+
+  provider.switchToSlot(first);
+
+  assert.equal(remembered.id, "alpha",
+    "the window still pointed at the chat we switched away from");
+});
+
 test("Switch Chat lists what each chat is doing", async () => {
   const { provider } = harness();
   makeLive(provider, { sessionId: "alpha", name: "First" });

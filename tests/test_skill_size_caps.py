@@ -31,12 +31,8 @@ def skill_text(body_chars: int) -> str:
 
 class SkillSizeCapTests(unittest.TestCase):
     def parse(self, body_chars: int):
-        with tempfile.TemporaryDirectory(prefix="dgc-skill-") as tmp:
-            from pathlib import Path
-            root = Path(tmp) / "big"
-            root.mkdir()
-            (root / "SKILL.md").write_text(skill_text(body_chars), encoding="utf-8")
-            return skills_mod.load_skill(root) if hasattr(skills_mod, "load_skill") else None
+        """Run the REAL parser over a skill of this size; None means it was refused."""
+        return skills_mod.parse_skill_text(skill_text(body_chars), Path("/tmp/big/SKILL.md"))
 
     def test_the_caps_move_together(self):
         # If these ever diverge again, a skill can be accepted and then truncated on the way to
@@ -62,10 +58,19 @@ class SkillSizeCapTests(unittest.TestCase):
         self.assertEqual(len(rendered), 34_378)
         self.assertTrue(rendered.endswith("z"), "the tail of the procedure must survive")
 
-    def test_over_the_cap_is_still_refused(self):
-        # Refusing is the correct behaviour: a silently truncated procedure is worse.
-        body = "w" * (skills_mod.MAX_SKILL_BODY_CHARS + 1)
-        self.assertGreater(len(body), skills_mod.MAX_SKILL_BODY_CHARS)
+    def test_a_body_at_the_cap_parses(self):
+        self.assertIsNotNone(self.parse(skills_mod.MAX_SKILL_BODY_CHARS),
+                             "a skill exactly at the cap must be accepted")
+
+    def test_one_character_over_the_cap_is_refused(self):
+        # Refusing is the correct behaviour: a silently truncated procedure is worse than none.
+        # (The previous version of this test asserted len(body) > CAP — arithmetic, not the parser.)
+        self.assertIsNone(self.parse(skills_mod.MAX_SKILL_BODY_CHARS + 1),
+                          "a skill over the cap was accepted and will be truncated")
+
+    def test_the_real_skills_that_prompted_the_raise_now_parse(self):
+        # figma-use is 35,665 characters; it was rejected outright at the old 30,000 cap.
+        self.assertIsNotNone(self.parse(35_665))
 
     def test_the_documented_number_matches_the_code(self):
         from pathlib import Path

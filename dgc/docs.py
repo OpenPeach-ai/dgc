@@ -160,7 +160,7 @@ it for a project, say so in `DGC.md` — see **Memory**.
 Press **Ctrl+G** any time for this cheatsheet as an overlay.
 
 ## Compose
-- **Enter** — send · **Shift+Enter** — newline
+- **Enter** — send · **Ctrl+J** — newline. Shift+Enter inserts one too, but only in a terminal that reports it separately (kitty's keyboard protocol, or `modifyOtherKeys`); most send the same byte for Enter and Shift+Enter, so there it sends the message.
 - **Shift+Tab** — cycle permission mode (default → acceptEdits → plan → auto)
 - **/** — command palette · **@path** — attach one exact bounded file (`@"path with spaces"`)
 - **! command** — run a bounded direct shell command · **# note** — atomically save project memory
@@ -257,7 +257,17 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
 - `--output FILE` — with `-p`: also write the final answer to FILE.
 - `--print-session-id` — with `-p`: print the session id on stderr, for `--resume ID`.
 - Piped input: `git diff | dgc -p "review this"` appends stdin to the prompt (2 MB cap);
-  `dgc -p -` reads the whole prompt from stdin. Only a pipe or a redirected file is read — a
+  `dgc -p -` reads the whole prompt from stdin.
+
+**What a one-shot run cannot do.** `-p` has nobody at the keyboard, so everything that waits for a
+person is unavailable and the model is told so rather than left hanging: no plan-approval card
+(plan mode still applies — the model writes the plan into its reply instead of calling
+`present_plan`), no options picker, no background monitors, and `@path` in the prompt text is
+ordinary text, not an attachment — the composer is what turns `@` into a bounded file, so pass the
+file another way. Permission prompts do not appear either: a tool that would ask is denied, with
+the `--allow-tool` rule that would have permitted it. A background sub-task started here is not
+waited for, and an artifact or document server started here dies when the command exits, so its URL
+is only good while the run lasts. Only a pipe or a redirected file is read — a
   terminal, `/dev/null`, and an fd inherited from a launcher (a supervisor, an editor) are left
   alone, so `-p` never waits on input nobody is going to send. A `-p` run never waits on a menu: a tool
   that would ask is denied with the rule to pre-approve, a plan is reported, not executed.

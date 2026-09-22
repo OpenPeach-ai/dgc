@@ -356,7 +356,8 @@ TOOL_SCHEMAS = [
                    "researcher (writes one findings file), critic (reviews named files or a "
                    "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
          "background": {"type": "boolean", "description": "If true, the child keeps working after "
-                        "this turn ends and the parent is woken when it finishes. Default false."}},
+                        "this turn ends. Where the frontend can deliver it, you are woken when the "
+                        "child finishes; the tool result says which you get. Default false."}},
         ["description", "prompt"]),
 ]
 
@@ -2498,16 +2499,12 @@ def _format_python_result(result: dict, ctx) -> str:
 
 
 def python(args: dict, ctx) -> str:
-    # Fail closed under a sandbox, the way bash does when it cannot be wrapped. The OS sandbox
-    # confines the SHELL: `sandbox.wrap` builds an argv for a command, and this interpreter is a
-    # long-lived worker process of DGC's own, never launched through it. So a run the user asked
-    # to confine had exactly one tool that was not confined -- able to write anywhere they can and
-    # to read the home directory bwrap had just masked. `--sandbox read-only` now denies Python
-    # outright (dgc/cli.py); this covers `--sandbox on` and every other way it is switched on.
-    from . import sandbox
-    if sandbox.requested(ctx.config):
-        return ("error: the sandbox cannot confine the python interpreter — it is not run through "
-                "the shell sandbox — so the code was not run. Use bash, which is confined.")
+    # No sandbox check here on purpose. The OS sandbox confines the SHELL and never this
+    # interpreter, which is the real hazard -- but WHO decides about it belongs to the permission
+    # layer, not to the executor. `permissions.session_policy_rules` already denies python in auto
+    # mode (nobody is there to review) and leaves every other mode a permission request, which is
+    # the contract an SDK host is given and answers through `on_permission`. An unconditional
+    # refusal here overrode that host, in every mode, with no way to switch it off.
     code = str(args.get("code", ""))
     reset = bool(args.get("reset"))
     if len(code) > MAX_PYTHON_CODE_CHARS:

@@ -311,8 +311,24 @@ def list_worktrees(path) -> list[dict]:
     return out
 
 
+# Paths `create` handed back without making them. A caller's failure path must not remove one:
+# it belongs to the user, not to this run.
+_ATTACHED: set[str] = set()
+
+
+def was_created(path) -> bool:
+    """Did THIS process create that worktree, or merely attach to an existing one?"""
+    from pathlib import Path as _Path
+    return str(_Path(str(path)).resolve(strict=False)) not in _ATTACHED
+
+
 def create(path, name: str) -> tuple[Path | None, str | None, str | None]:
-    """Create a long-lived manual worktree on ``dgc/<name>``."""
+    """Create a long-lived manual worktree on ``dgc/<name>``, or return one that already exists.
+
+    Callers that clean up on failure must ask `was_created()` first: since this returns an
+    existing worktree rather than refusing, an error path that removes "the worktree we just
+    made" would delete a checkout the user has been working in for days.
+    """
     root = repo_root(path)
     if not root:
         return None, None, "not inside a git repository — run `git init` first"
@@ -327,10 +343,12 @@ def create(path, name: str) -> tuple[Path | None, str | None, str | None]:
                          if Path(row["path"]).resolve(strict=False) == wt_path.resolve(strict=False)),
                         None)
         if existing is not None:
+            _ATTACHED.add(str(wt_path.resolve(strict=False)))
             return wt_path, str(existing.get("branch") or branch), None
         # Something else is sitting on the path. Attaching to it would be guessing.
         return None, None, (f"path already exists and is not a worktree of this repository: "
                             f"{wt_path}")
+    _ATTACHED.discard(str(wt_path.resolve(strict=False)))
     r = _git(["worktree", "add", "-b", branch, str(wt_path)], root)
     if r.returncode != 0:                       # branch may already exist → attach to it
         r2 = _git(["worktree", "add", str(wt_path), branch], root)
