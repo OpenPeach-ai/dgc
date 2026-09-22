@@ -13,6 +13,26 @@ cd "$ROOT"
 }
 
 VER=$(node -p "require('$EXT/package.json').version")
+
+# Every version surface a release has to move, checked before anything is built rather than at the
+# deployment gate an hour later. These have each shipped wrong: 0.27.0 went to both registries
+# asking for CLI 0.41.6 while the CLI was 0.42.0, which made its automatic CLI update impossible
+# to satisfy, and its lockfile stayed at 0.26.8, which blocked the site deploy outright.
+CLI_VER=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$ROOT/dgc/__init__.py")
+PIN=$(node -p "require('$EXT/package.json').dgcCliVersion || ''")
+[ "$PIN" = "$CLI_VER" ] || {
+  echo "editors/vscode/package.json dgcCliVersion is $PIN; this checkout's CLI is $CLI_VER" >&2
+  echo "  the handshake minimum, the walkthrough and the README all quote it -- bump it first" >&2
+  exit 1
+}
+LOCK_VER=$(node -p "require('$EXT/package-lock.json').version || ''")
+LOCK_ROOT=$(node -p "(require('$EXT/package-lock.json').packages || {})[''].version || ''")
+[ "$LOCK_VER" = "$VER" ] && [ "$LOCK_ROOT" = "$VER" ] || {
+  echo "editors/vscode/package-lock.json is $LOCK_VER/$LOCK_ROOT; package.json is $VER" >&2
+  echo "  run: (cd editors/vscode && npm install --package-lock-only)" >&2
+  exit 1
+}
+
 COMMIT=$(git rev-parse HEAD)
 REGISTRY="$OUT/dgc-$VER-registry.vsix"
 SELFHOST="$OUT/dgc-$VER-selfhost.vsix"

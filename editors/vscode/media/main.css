@@ -128,6 +128,38 @@ body {
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
+/* ---- running chats -------------------------------------------------------------------------- */
+/* One live `dgc serve` per chat. The rail appears only once a second chat exists, so a single-chat
+   panel carries no extra chrome; the header's + is the only permanent cost. */
+#phead .chat-add { flex: none; width: var(--control-sm); height: var(--control-sm); margin-left: var(--sp-1); border: 0; padding: 0; background: transparent; color: var(--faint); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
+#phead .chat-add:hover { background: var(--surface2); color: var(--text); }
+#phead .chat-add:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+#phead .chat-add[disabled] { opacity: .35; cursor: default; }
+#phead .chat-add[disabled]:hover { background: transparent; color: var(--faint); }
+
+.chatbar { display: flex; gap: var(--sp-1); align-items: stretch; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line); background: var(--surface); overflow-x: auto; scrollbar-width: none; }
+.chatbar::-webkit-scrollbar { display: none; }
+/* Many chats have to stay usable, so a tab shrinks rather than pushing the rest off: the rail
+   scrolls, and a tab keeps enough width to read a few characters and its state dot. */
+.chatbar .chat-tab { flex: 0 1 auto; min-width: 5.5rem; display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 14rem; border: 1px solid transparent; border-radius: var(--r-sm); padding: 2px var(--sp-2); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.chatbar .chat-tab:hover { background: var(--surface2); color: var(--text); }
+.chatbar .chat-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.chatbar .chat-tab.is-active { background: var(--surface2); border-color: var(--line); color: var(--text-strong); font-weight: var(--w-med); }
+.chatbar .chat-tab .chat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The dot is the whole point of the rail: it says whether the chat you are NOT looking at is
+   working, waiting on you, or done. Shape and text carry it too -- never colour alone. */
+.chatbar .chat-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.chatbar .chat-tab.is-busy .chat-dot { background: var(--accent); animation: chat-dot-pulse 1.6s ease-in-out infinite; }
+.chatbar .chat-tab.needs-you .chat-dot { background: var(--warn, #d1902b); border-radius: 1px; animation: none; }
+.chatbar .chat-unread { flex: none; min-width: 15px; padding: 0 4px; border-radius: 999px; background: var(--surface3, var(--line)); color: var(--text); font: var(--w-med) 10px/15px var(--sans); text-align: center; font-variant-numeric: tabular-nums; }
+.chatbar .chat-close { flex: none; width: 16px; height: 16px; border: 0; padding: 0; background: transparent; color: var(--faint); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
+.chatbar .chat-close:hover { background: var(--line); color: var(--text); }
+.chatbar .chat-close:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+@keyframes chat-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) {
+  .chatbar .chat-tab.is-busy .chat-dot { animation: none; }
+}
+
 #phead .agent-back { flex: none; width: var(--control-sm); height: var(--control-sm); border: 0; padding: 0; background: transparent; color: var(--text); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
 #phead .agent-back:hover { background: var(--surface2); }
 #phead .agent-back[hidden] { display: none; }

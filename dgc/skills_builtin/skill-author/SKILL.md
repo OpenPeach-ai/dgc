@@ -26,7 +26,7 @@ package. These owner commands are available in the CLI and skill management UI. 
 use ordinary authorized file edits to update an existing package. Model-authored changes retain file
 permissions. Do not install a generated skill globally or activate a remote service without scope.
 
-Keep SKILL.md within 64 KiB and 30,000 body characters. Local package installation is bounded to 128
+Keep SKILL.md within 64 KiB and 48,000 body characters. Local package installation is bounded to 128
 files, 4 MiB total, 512 KiB per supporting file and eight directory levels. No symlinks, credentials,
 private/generated files or unused scaffolds. Add scripts only when reusable deterministic behavior
 justifies them; test scripts with synthetic inputs before proposing installation.

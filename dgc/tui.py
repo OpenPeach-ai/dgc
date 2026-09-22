@@ -43,6 +43,7 @@ from rich.text import Text
 
 from . import (__version__, attachments as attachments_mod, glyphs, logo as logo_mod,
                render as render_mod, style as style_mod)
+from . import ui as ui_mod
 from .update import cached_update
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
@@ -3026,7 +3027,10 @@ class TUI:
 
     @staticmethod
     def _md(text: str):
-        return render_mod.render_markdown(style_mod.terminal_safe_text(text))
+        # hyperlinks=False, so a link renders as `label (target)`. The full-screen terminal cannot
+        # print an OSC 8 escape -- prompt_toolkit shows its payload as literal garbage -- and the
+        # strip that removed it also removed the path and line number the model was told to write.
+        return render_mod.render_markdown(style_mod.terminal_safe_text(text), hyperlinks=False)
 
     # ---- header (welcome card when empty, slim line when busy) ----
     def _header(self):
@@ -3267,7 +3271,7 @@ class TUI:
         c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                     width=max(20, w), height=max(1, getattr(self, "_height", 25)), highlight=False,
                     theme=render_mod.markdown_theme())
-        c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md)))
+        c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md), hyperlinks=False))
         ansi = _tui_ansi(c.file.getvalue())
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
         self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
@@ -4550,6 +4554,19 @@ class TUI:
             detail = _arg_summary(args)
             if detail:
                 header.append(Text("  " + detail, style=th.muted))
+        # Show WHAT the edit does before asking whether to allow it. A shell command is its own
+        # preview (above); an edit tool's arguments are not -- a write_file that truncates a
+        # 3,000-line file to five looked exactly like a one-character fix, because the card was the
+        # tool name and one truncated path. The editor has shown this diff all along from the same
+        # helper; only the terminal asked blind. It goes in the transcript rather than the card
+        # because the card is an overlay with a fixed height, and a 200-line diff cannot live in it.
+        preview = ""
+        try:
+            preview = ui_mod.edit_preview(name, args, self._cur_session().workspace_path)
+        except Exception:
+            preview = ""                                 # never block an approval on its preview
+        if preview:
+            self._append(self._rich(render_mod.render_diff(preview.expandtabs(4))))
         ans = self._ask({"kind": "approve", "header": header,
                          "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
                          "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"},
@@ -5963,7 +5980,17 @@ class TUI:
                     cfg.save()
                 self._flash(f"permission {action}: {rendered}")
                 return True
-            lines = [f"  [{th.accent}]{a}[/]  [{th.faint}]{_esc(', '.join(perms.get(a, [])) or '—')}[/]"
+            from .permissions import invalid_rules
+            broken = {(action, text) for action, text, _why in invalid_rules(perms)}
+
+            def _render(action: str) -> str:
+                # An unparseable rule is listed but not enforced, so mark it rather than letting
+                # it read as a guard that is in place.
+                shown = [f"{text}  (invalid — NOT in force)" if (action, str(text)) in broken
+                         else str(text) for text in perms.get(action, [])]
+                return _esc(", ".join(shown) or "—")
+
+            lines = [f"  [{th.accent}]{a}[/]  [{th.faint}]{_render(a)}[/]"
                      for a in ("allow", "ask", "deny")]
             self._append(self._rich(f"[bold {th.accent}]permission rules[/]\n" + "\n".join(lines)))
         elif cmd in ("bug", "feedback", "report", "issue"):

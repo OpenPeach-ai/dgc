@@ -27,7 +27,9 @@ def _fmt(results: list[tuple[str, str, str]], query: str) -> str:
         out.append(f"{i}. {title}\n   {url}")
         if snippet:
             out.append(f"   {snippet}")
-    out.append("\nUse read_url/web_fetch on a result URL to read the full page.")
+    # `read_url` is not a DGC tool and never has been. Naming it here sent the model looking for
+    # a tool it was never offered, which now gets a refusal from the offered-name gate.
+    out.append("\nUse web_fetch on a result URL to read the full page.")
     return "\n".join(out)
 
 

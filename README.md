@@ -17,7 +17,7 @@ DGC is an interactive coding agent that lives in your terminal and points at **t
 
 <sub>The welcome screen, pointed at your own local model — the `///` mark, the session menu, and the **mode · model** status line.</sub>
 
-Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). With a local model and local-only integrations, prompts and selected code can stay on your machine; cloud models and remote integrations receive the context or requests you direct to them. A configured language server receives workspace metadata and full text for documents queried through code intelligence.
+Pure Python 3.10+, five dependencies (`rich`, `prompt_toolkit`, `requests`, `ddgs` for web search, `pypdf` for reading PDFs). With a local model and local-only integrations, prompts and selected code can stay on your machine; cloud models and remote integrations receive the context or requests you direct to them. A configured language server receives workspace metadata and full text for documents queried through code intelligence.
 
 ![DGC docked in your editor — VS Code and Cursor](docs/screenshot.png)
 

@@ -320,7 +320,17 @@ def create(path, name: str) -> tuple[Path | None, str | None, str | None]:
     branch = f"dgc/{safe}"
     wt_path = root.parent / f"{root.name}-{safe}"
     if wt_path.exists():
-        return None, None, f"path already exists: {wt_path}"
+        # `/worktree feature-x` a second time means "take me back to feature-x", which is what a
+        # user who left it and came back expects. It used to fail with "path already exists", so
+        # the only way back into a worktree you had made was to remove it and start over.
+        existing = next((row for row in list_worktrees(root)
+                         if Path(row["path"]).resolve(strict=False) == wt_path.resolve(strict=False)),
+                        None)
+        if existing is not None:
+            return wt_path, str(existing.get("branch") or branch), None
+        # Something else is sitting on the path. Attaching to it would be guessing.
+        return None, None, (f"path already exists and is not a worktree of this repository: "
+                            f"{wt_path}")
     r = _git(["worktree", "add", "-b", branch, str(wt_path)], root)
     if r.returncode != 0:                       # branch may already exist → attach to it
         r2 = _git(["worktree", "add", str(wt_path), branch], root)

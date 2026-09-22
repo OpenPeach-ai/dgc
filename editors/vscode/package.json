@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -98,6 +98,17 @@
         "title": "New Session",
         "category": "DGC",
         "icon": "$(add)"
+      },
+      {
+        "command": "dgc.newParallelChat",
+        "title": "Open a Second Chat",
+        "category": "DGC",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "dgc.switchChat",
+        "title": "Switch Chat",
+        "category": "DGC"
       },
       {
         "command": "dgc.selectModel",
@@ -474,6 +485,12 @@
           ],
           "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
         },
+        "dgc.maxLiveChats": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "How many chats may hold a live `dgc serve` at once. **0 (the default) means no limit** — open as many as your machine and your model budget allow. Each chat is its own backend with its own model context and session, so the chat you switch away from keeps working. A backend itself is small (about 9 MB); the real cost of another chat is another model context. Set a positive number if you want DGC to stop you at a ceiling, or 1 to keep it single-chat."
+        },
         "dgc.contextSize": {
           "type": "number",
           "default": 0,
@@ -507,7 +524,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.41.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.42.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }
@@ -564,5 +581,5 @@
   "overrides": {
     "lodash-es": "^4.18.1"
   },
-  "dgcCliVersion": "0.41.6"
+  "dgcCliVersion": "0.42.0"
 }

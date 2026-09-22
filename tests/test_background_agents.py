@@ -89,6 +89,92 @@ class BackgroundTaskTests(HarnessCase):
             ended = h.of("agent_ended")[-1]
             self.assertEqual(ended["state"], "finished")
 
+    def test_a_new_chat_stops_the_background_work_the_old_one_started(self):
+        """`/new` and `/clear` used to leave a detached child running.
+
+        It kept writing files, and finished into whatever CheckpointManager the agent held by
+        then -- the new chat's. The new chat got a recovery point for edits nobody made there,
+        and its rewind reached the previous chat's files.
+        """
+        h = self.make(git=True, mode="auto")
+
+        # Long enough that only a real cancel ends it inside this test's patience: a child that
+        # simply finishes on its own would let the test pass with the fix reverted.
+        def stubborn(messages, results, cancel):
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                if cancel is not None and cancel.is_set():
+                    break
+                time.sleep(0.05)
+            return ChatResult(content="still going")
+
+        routes = [
+            ("parent: background map", calls_then([
+                ToolCall("t1", "task", {
+                    "description": "map auth",
+                    "prompt": "look at pkg/auth.py and say where login lives",
+                    "agent": "explorer",
+                    "background": True,
+                }),
+            ], final="spawned")),
+            ("look at pkg/auth.py", stubborn),
+        ]
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            try:
+                self._go(h, "parent: background map", routes)
+                agent_id = h.of("agent_started")[-1]["id"]
+                self.assertIn(agent_id, getattr(h.agent, "_detached_jobs", None) or {})
+                before = h.agent.checkpoints
+
+                h.agent.reset()                    # what /new and /clear both do
+
+                self.assertIsNot(h.agent.checkpoints, before,
+                                 "reset replaces the checkpoint manager, which is the whole risk")
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    if agent_id not in (getattr(h.agent, "_detached_jobs", None) or {}):
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("a new chat left the previous chat's background sub-task running")
+            finally:
+                h.agent.stop_detached()            # never leave a 45s thread behind on failure
+
+    def test_a_detached_child_integrates_into_the_chat_that_started_it(self):
+        """Even if it wins the race with the cancel, it must not record into the new chat."""
+        h = self.make(git=True, mode="auto")
+        captured = {}
+        original = h.agent._finalize_subagent
+
+        def spy(*args, **kwargs):
+            captured["keeper"] = kwargs.get("keeper")
+            return original(*args, **kwargs)
+
+        h.agent._finalize_subagent = spy
+        routes = [
+            ("parent: background map", calls_then([
+                ToolCall("t1", "task", {
+                    "description": "map auth",
+                    "prompt": "look at pkg/auth.py and say where login lives",
+                    "agent": "explorer",
+                    "background": True,
+                }),
+            ], final="spawned")),
+            ("look at pkg/auth.py", calls_then([], final="found it")),
+        ]
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            started = h.agent.checkpoints
+            self._go(h, "parent: background map", routes)
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and "keeper" not in captured:
+                time.sleep(0.05)
+            self.assertIn("keeper", captured, "the detached child never finalized")
+            self.assertIs(captured["keeper"], started,
+                          "the child integrates into the chat that asked for it, not whichever "
+                          "one the agent holds when it happens to finish")
+
     def test_stop_detached_cancels_the_child(self):
         h = self.make(git=True, mode="auto")
 

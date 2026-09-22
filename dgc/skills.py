@@ -31,8 +31,15 @@ from .workspace import WorkspaceBoundaryError, is_within, read_regular_bytes, sc
 
 
 MAX_SKILL_FILE_BYTES = 65_536
-MAX_SKILL_BODY_CHARS = 30_000
-MAX_SKILL_RENDER_CHARS = 32_000
+# Raised from 30,000 (body) / 32,000 (render) once real skills outgrew them: the Figma plugin's
+# figma-use is 35,665 characters, figma-generate-design 33,487, skill-creator 33,168, and all three
+# were rejected outright. Both caps move together and stay equal on purpose -- lifting only the
+# parser would accept a skill and then hand the model a procedure cut off mid-step, which is worse
+# than refusing it. 48,000 leaves real headroom over today's largest without threatening the
+# per-turn budget below: on the default 32,768-token window that budget is 65,536 characters, so
+# one skill of this size fits and a second is refused as too large, which is the intended ceiling.
+MAX_SKILL_BODY_CHARS = 48_000
+MAX_SKILL_RENDER_CHARS = 48_000
 MAX_SKILL_ARGUMENT_CHARS = 4_096
 MAX_SKILL_DESCRIPTION_CHARS = 320
 MAX_SKILLS = 256

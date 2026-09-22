@@ -4,6 +4,26 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- **As many chats at once as you want.** The **+** beside the model name opens another chat with its own
+  `dgc serve`, its own model context and its own session file, so the chat you switch away from
+  keeps working. A rail above the transcript shows them all: a pulsing dot while one is mid-turn, an
+  amber square when it is waiting on a decision, a count of what it has said since you last looked.
+  Switching rebuilds the incoming chat from its own backend's snapshot — taken under that
+  backend's turn lock, and followed by a fresh announcement of whatever approval or question it is
+  blocked on — so a chat you left mid-turn comes back where it is now, not where it was. There is
+  no built-in ceiling: a backend is about 9 MB and cross-chat writes are already serialised by the
+  workspace write lease, so the limit is your machine and your model budget. Set `dgc.maxLiveChats`
+  if you want one anyway. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same from the
+  command palette.
+- **Background work belongs to the chat that started it.** A `task` with `background: true` used to
+  outlive `/new` and `/clear`: it kept writing files, and folded its worktree back in against
+  whatever chat the agent held by then — giving a brand-new conversation a recovery point for edits
+  nobody made there, and putting the previous chat's files inside the reach of the new chat's
+  `/rewind`. A new chat now stops them and says how many. A child that finishes anyway integrates
+  into the chat that asked for it. Switching between two open chats stops nothing.
+
 ## 0.42.0 — 2026-09-21
 
 - **Attach a document.** `@path` takes a `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.rtf`

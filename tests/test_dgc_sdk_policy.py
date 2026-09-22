@@ -391,7 +391,12 @@ class ShellSandboxTests(_E2E):
                 ("python", {"code": "open('py_leak.txt', 'w').write('x')"}),
             ], policy=RuntimePolicy(), mode=mode, on_permission=lambda request: "deny")
             self.assertIn("bash", asks, mode)
-            self.assertIn("python", asks, mode)
+            # `python` is not asked about, because it is not a tool this session has: code_action
+            # defaults off, so it was never advertised to the model, and a call for it is now
+            # refused before any permission question arises. This test used to require it to reach
+            # the callback — which only made sense while the executor would run a tool the user had
+            # never enabled, i.e. while the hole existed. What matters is unchanged and stronger:
+            self.assertNotIn("python", asks, mode)
             self.assertFalse((self.work / "leaked.txt").exists(), mode)
             self.assertFalse((self.work / "py_leak.txt").exists(), mode)
         # The workspace's own deny rules still narrow what runs.
@@ -445,7 +450,7 @@ class WorkspaceTrustTests(_E2E):
 
     def test_workspace_allow_rules_need_no_policy_to_be_ignored(self):
         # BLOCKER B1: with no RuntimePolicy at all, a cloned repo's own allow rules must not
-        # pre-approve a shell command. Every step still reaches the callback.
+        # pre-approve a shell command. Every step the session actually offers reaches the callback.
         self._write_workspace_rules()
         asked = []
         result, _asks, _status = self._run([
@@ -453,7 +458,10 @@ class WorkspaceTrustTests(_E2E):
             ("python", {"code": "open('py.txt','w').write('x')"}),
         ], policy=None, mode="default", on_permission=lambda r: asked.append(r.name) or "deny")
         self.assertIn("bash", asked)
-        self.assertIn("python", asked)
+        # `Python(*)` in the repo's file cannot pre-approve anything either — but the stronger
+        # reason is that this session never offered `python` at all (code_action defaults off), so
+        # the call is refused outright rather than put to the callback.
+        self.assertNotIn("python", asked)
         self.assertFalse((self.work / "escaped.txt").exists())
         self.assertFalse((self.work / "py.txt").exists())
 

@@ -14113,9 +14113,12 @@ def test_oneshot_machine_readable():
         perms = cfg.session_permissions
         check("--add-dir and --allow-tool become session rules the engine merges",
               perms["allow"] == [f"ExternalDirectory({root / 'extra'})", "Bash(npm test)", "Edit"])
-        check("--sandbox read-only confines the shell and denies every edit for this run",
+        # Python is in the deny list because the OS sandbox wraps the SHELL, never the persistent
+        # interpreter: a read-only run that denied only the edit tools still had one tool that
+        # could write anywhere the user can, and read the home directory bwrap had just masked.
+        check("--sandbox read-only confines the shell and denies every edit AND the interpreter",
               cfg.get("sandbox") is True and cfg.get("sandbox_read_only") is True
-              and perms["deny"] == ["Write", "Edit", "MultiEdit", "ApplyPatch"])
+              and perms["deny"] == ["Write", "Edit", "MultiEdit", "ApplyPatch", "Python"])
         check("per-run flags are never saved",
               _json.loads(_C.USER_CONFIG.read_text()).get("sandbox") is False
               and "session_permissions" not in _C.USER_CONFIG.read_text())

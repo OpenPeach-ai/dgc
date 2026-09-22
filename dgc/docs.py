@@ -753,7 +753,7 @@ Creation produces an explicit-only scaffold; edit `SKILL.md` before using it.
 
 Installation never overwrites or merges an existing destination. A local package can
 contain up to 128 files/directories, 4 MiB total, eight directory levels, and 512 KiB
-per supporting file. `SKILL.md` is limited to 64 KiB and 30,000 instruction characters.
+per supporting file. `SKILL.md` is limited to 64 KiB and 48,000 instruction characters.
 Symlinks, special files, `.env` files, and generated dependency directories are rejected.
 The terminal also supports raw-URL installation of a single `SKILL.md`; use local
 package installation when supporting files are required. Installed scripts retain
@@ -836,6 +836,14 @@ and edits do not dump into the parent chat.
 The composer stays free. The agents pill remains while that specialist runs. When it
 lands, DGC starts a wake turn with the child's summary; you do not sit in a blocked turn
 polling it. Foreground `task` (the default) still waits.
+
+A background child belongs to the chat that started it. Starting a new chat — `/new`, `/clear`, or
+the editor's New Session — stops any that are still running and says how many, because the chat
+that asked for the work is gone: a child left running would keep writing files and would fold its
+worktree back in against a conversation that never asked for it, putting those edits inside the
+reach of the new chat's `/rewind`. Switching between two open chats does **not** stop anything —
+each chat has its own backend, and a background child running in the one you switched away from
+is exactly the point.
 
 Personal definitions in `~/.dgc/agents/` are available in any workspace and override a
 built-in of the same name. A project's `.dgc/agents/` definitions load only after you trust
@@ -1225,10 +1233,38 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
 
+## Two chats at once, in one panel
+
+The **+** beside the model name opens a second chat. It is a second `dgc serve` with its own model
+context, its own session file and its own turn — not a second view of the same conversation — so
+the chat you switch away from keeps working. A rail appears above the transcript with one tab per
+chat; a pulsing dot means that chat is mid-turn, a square amber dot means it is waiting on a
+decision only you can make, and a number is how much it has said since you last looked. Click a
+tab to switch, the **×** to close one. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same
+from the command palette.
+
+There is no built-in ceiling — open as many as your machine and your model budget allow. DGC does
+not pick a number for you: a backend is about 9 MB, and writes from several chats into one checkout
+are already serialised by the workspace write lease, so nothing inside DGC strains as the count
+rises. What another chat really costs is another model context — tokens on a cloud endpoint, or a
+share of a local model — and only you can judge that. If you want DGC to stop you at a ceiling, set
+`dgc.maxLiveChats` in the editor's settings; 1 keeps it single-chat.
+
+A second chat is for parking long work — a migration, a long test run — while you carry on.
+Delegation (*Sub-agents*) is still the right tool for fanning out one task across workers.
+
+Switching does not replay anything the panel kept: the chat you arrive at is rebuilt from its own
+backend's snapshot, which is taken under that backend's turn lock and is followed by a fresh
+announcement of whatever approval or question it is blocked on. So a chat you left mid-turn comes
+back exactly where it is now, not where it was when you left it.
+
+Closing the window stops both. If a background chat's backend dies while you are not watching, its
+tab says so and switching to it starts a new one on the same session rather than an empty chat.
+
 ## When another DGC is working here
 
-DGC runs one backend per window, so two windows on one folder are two agents editing the same
-files. They now know about each other. Each leaves a note in `~/.dgc/peers/`, refreshed while it
+Two chats, two windows, or a window and a terminal are all two agents editing the same files. They
+know about each other. Each leaves a note in `~/.dgc/peers/`, refreshed while it
 runs, and every agent reads the others: you get one line when that changes — *"1 other DGC is
 working in this folder."* — and the model is told the same thing, with the instruction that
 matters: **do not revert or "fix" a change you did not make, and if their work conflicts with
@@ -1273,10 +1309,11 @@ another, because a save rewrote the whole file from one process's memory. A rule
 still revoked — the merge carries removals, not only additions. Rules a *workspace* brings
 (`<project>/.dgc/permissions.json`) stay live-only and are never written into your own config.
 
-## One session, one window at a time
+## One session, one chat at a time
 
-A session is held by whichever DGC is running a turn in it, so a second window opening the same
-session is told it has *an active turn in another DGC process*. That protects the transcript: two
+A session is held by whichever DGC is running a turn in it, so a second window — or the second
+chat in this panel — opening the same session is told it has *an active turn in another DGC
+process*. That protects the transcript: two
 backends writing one session would interleave their turns.
 
 The lease is released when that turn ends, when its DGC exits, and if its DGC crashes — it is an

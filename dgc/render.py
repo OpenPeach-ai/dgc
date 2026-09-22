@@ -71,10 +71,16 @@ def _mono_markdown_class():
     return _MONO_MD
 
 
-def render_markdown(text: str):
+def render_markdown(text: str, hyperlinks: bool = True):
     """Assistant markdown, mono+purple — prose + code both monochrome, never rich's rainbow,
-    including the half-streamed code block whose closing fence hasn't arrived yet."""
-    return _mono_markdown_class()(text)
+    including the half-streamed code block whose closing fence hasn't arrived yet.
+
+    `hyperlinks=False` writes each link as `label (target)` instead of an OSC 8 escape. The
+    full-screen terminal needs that: prompt_toolkit's ANSI parser prints an OSC 8 payload as
+    visible garbage, so the TUI used to delete the escape afterwards — which also deleted the
+    target, leaving a label with no path, line number or URL behind it.
+    """
+    return _mono_markdown_class()(text, hyperlinks=hyperlinks)
 
 
 def mono_syntax(code: str, lang: str):

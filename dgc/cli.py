@@ -25,6 +25,7 @@ from rich.text import Text
 from . import (__version__, attachments as attachments_mod, glyphs, logo as logo_mod,
                memory as memory_mod, render, sessions as sessions_mod)
 from . import style as style_mod
+from . import ui as ui_mod
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs_with_custom, command_specs,
                        custom_command_names)
@@ -96,6 +97,9 @@ class UI:
         self.deny_reason = ""   # optional steer captured when the user denies a tool
         self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
         self.non_interactive = False   # `dgc -p`: never wait on a menu, answer on the spot
+        # Where relative edit paths resolve, so the approval prompt can show the diff. Set by CLI
+        # below; None falls back to the process's directory, which is where `dgc` was started.
+        self.project_root = None
 
     def refresh_theme(self) -> None:
         """Re-resolve this console's palette after /bg or /theme changed it.
@@ -342,6 +346,17 @@ class UI:
             summary = self._arg_summary(name, args)
             if summary:
                 self.console.print(f"  [{DIM}]{_markup_literal(summary)}[/]", highlight=False)
+            # A bash command is its own preview; an edit tool's arguments are not. Without this the
+            # prompt was the tool name and a truncated path, so a write_file that replaces a whole
+            # file read exactly like a one-line fix.
+            try:
+                from pathlib import Path as _Path
+                preview = ui_mod.edit_preview(
+                    name, args, self.project_root or _Path.cwd())
+            except Exception:
+                preview = ""                             # never block an approval on its preview
+            if preview:
+                self.console.print(render.render_diff(preview.expandtabs(4)))
         rule = rule_for(name, args)
         idx = menu_select("Allow this?",
                           ["allow once", "always allow", "deny"],
@@ -734,6 +749,7 @@ class CLI:
         termbg.configure(config)
         self.ui = ui if ui is not None else UI()
         self.ui._rule_hook = self._add_rule
+        self.ui.project_root = config.project_root
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
 
@@ -1530,11 +1546,19 @@ class CLI:
 
     def _permissions_cmd(self, rest: str) -> None:
         if not rest:
+            from .permissions import invalid_rules
+            broken = {(action, text): why
+                      for action, text, why in invalid_rules(self.config.permissions)}
             for action in ("allow", "ask", "deny"):
                 rules = self.config.permissions[action]
                 self.console.print(f"[bold]{action}[/bold] ({len(rules)})")
                 for r in rules:
-                    self.console.print(f"  {terminal_safe_text(r)}", markup=False, highlight=False)
+                    # A line that does not parse is not in force. Saying so here is the only place
+                    # the user finds out; it used to be listed exactly like a working rule.
+                    why = broken.get((action, str(r)))
+                    suffix = f"   (invalid — NOT in force: {why})" if why else ""
+                    self.console.print(f"  {terminal_safe_text(r)}{terminal_safe_text(suffix)}",
+                                       markup=False, highlight=False)
             return
         m = re.match(r"(allow|ask|deny)\s+(.+)", rest, re.S)
         if not m:
@@ -1852,8 +1876,13 @@ class CLI:
                               failed=outcome["failed"])
 
 
-def run_doctor(config: Config) -> None:
-    """`dgc doctor` — verify the endpoint is reachable and the model is available."""
+def run_doctor(config: Config) -> int:
+    """`dgc doctor` — verify the endpoint is reachable and the model is available.
+
+    Returns a process exit code: 0 ready, 1 not ready. It used to return nothing, so `dgc doctor`
+    exited 0 after printing "✗ cannot reach <endpoint>" — which made it useless in the one place an
+    exit code matters, a script or CI step gating on `dgc doctor && …`.
+    """
     from . import sandbox
     from .llm import LLMClient
     c = Console()
@@ -1941,7 +1970,8 @@ def run_doctor(config: Config) -> None:
                 f"{_markup_literal(type(e).__name__)}: {_markup_literal(e)}")
         c.print("    → start your server (ollama serve / llama-server / LM Studio) or fix the URL & key")
         c.print("    → run [bold]dgc setup[/bold] to reconfigure")
-        return
+        c.print("\n  [bold red]not ready[/bold red] — the endpoint could not be reached.\n")
+        return 1
     c.print(f"  [green]✓[/green] endpoint reachable — {len(models)} model(s) offered")
     if config.model in models:
         c.print(f"  [green]✓[/green] model '{_markup_literal(config.model)}' is available")
@@ -1953,10 +1983,19 @@ def run_doctor(config: Config) -> None:
         c.print("    → set one: [bold]dgc --model <name>[/bold]  or  [bold]dgc setup[/bold]")
     if active_problem:
         c.print(f"\n  [bold red]not ready[/bold red] — {terminal_safe_text(active_problem)}.\n")
-    elif sandbox_requested and not sandbox_report.available:
+        return 1
+    if sandbox_requested and not sandbox_report.available:
         c.print("\n  [bold red]not ready[/bold red] — sandboxed shell commands will fail closed.\n")
-    else:
-        c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
+        return 1
+    if config.model not in models:
+        # Not fatal: a proxy or gateway may serve a model it does not list. But it is not the
+        # unqualified "ready" this printed before, which was the same green line a correct setup
+        # got while the very next turn would ask for a model the server had never heard of.
+        c.print("\n  [bold yellow]ready, with one warning[/bold yellow] — the selected model is not "
+                "in this server's list; set one it offers if the first turn fails.\n")
+        return 0
+    c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
+    return 0
 
 
 def export_training_core(config, *, out: str = "./dgc-training.jsonl", all_projects: bool = False,
@@ -2354,8 +2393,11 @@ def main(argv: list[str] | None = None) -> int | None:
         cfg = Config()
         for warning in cfg.credential_warnings:
             print(f"warning: {warning}", file=sys.stderr)
-        (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
-        return
+        if raw_argv[0] == "setup":
+            run_setup(cfg)
+            return
+        # The exit code is the whole point of `doctor` in a script.
+        raise SystemExit(run_doctor(cfg))
 
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
@@ -2459,19 +2501,39 @@ def main(argv: list[str] | None = None) -> int | None:
             config.data["subscription_model"] = args.model
         else:
             config.set("model", args.model, persist=_persist_flags)
+    # These are applied straight into `config.data`, so on a one-shot run they must be declared
+    # ephemeral or the next save writes them as the user's standing configuration. That is exactly
+    # what `--trust` did: `dgc -p --mode auto --trust` marked the workspace trusted AND left
+    # `mode: auto` in config.json, so a flag meant for one scripted run became the permanent
+    # permission mode. `--model`/`--base-url` above already had this via `persist=_persist_flags`;
+    # these never got the same treatment.
     if args.mode:
         config.data["mode"] = args.mode
+        if not _persist_flags:
+            config.mark_ephemeral("mode")
     if args.think and not _oneshot_engine:
         if _interactive_engine:
             config.data["subscription_effort"] = "" if args.think == "off" else args.think
+            if not _persist_flags:
+                config.mark_ephemeral("subscription_effort")
         else:
             config.data["thinking"] = args.think
+            if not _persist_flags:
+                config.mark_ephemeral("thinking")
     if args.ultra is not None:
         config.data["ultra_mode"] = args.ultra
+        if not _persist_flags:
+            config.mark_ephemeral("ultra_mode")
     if args.autonomous_gate is not None:
         config.data["autonomous_gate"] = args.autonomous_gate
+        if not _persist_flags:
+            config.mark_ephemeral("autonomous_gate")
     if args.autonomous_max_turns is not None:
         config.data["autonomous_max_turns"] = args.autonomous_max_turns
+        if not _persist_flags:
+            config.mark_ephemeral("autonomous_max_turns")
+    if args.model and not _oneshot_engine and _interactive_engine and not _persist_flags:
+        config.mark_ephemeral("subscription_model")   # the one --model branch that bypassed set()
 
     if args.prompt is not None:
         from .trust import is_trusted, mark_trusted
@@ -2725,7 +2787,12 @@ def apply_run_flags(config, args, parser) -> None:
         config.set("sandbox", choice != "off", persist=False)
         config.data["sandbox_read_only"] = choice == "read-only"
         if choice == "read-only":                      # deny wins over every mode and rule
-            deny += ["Write", "Edit", "MultiEdit", "ApplyPatch"]
+            # Python too: the persistent interpreter runs OUTSIDE the OS sandbox (bwrap wraps the
+            # shell, not the kernel), so a read-only run that denied only the edit tools still had
+            # one tool that could write anywhere the user can -- and read the real home directory
+            # the sandbox had just masked from bash. The session-policy path already denies it for
+            # exactly this reason (permissions.UNSANDBOXED_CODE_TOOLS).
+            deny += ["Write", "Edit", "MultiEdit", "ApplyPatch", "Python"]
     if allow or deny:
         existing = getattr(config, "session_permissions", None) or {}
         config.session_permissions = {

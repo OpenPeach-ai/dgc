@@ -361,9 +361,14 @@ test("a queued agent that starts running restarts its clock; ended rows lead wit
 });
 
 test("panel.ts restores the list on reload and after a backend handshake, with no opt-in field", () => {
+  // A reloaded webview and a switch to another chat both repaint through one routine, so that is
+  // where the restore lives; webviewReady must still reach it.
   const ready = panelSrc.slice(panelSrc.indexOf('case "webviewReady": {'));
   const readyBlock = ready.slice(0, ready.indexOf("break;"));
-  assert.match(readyBlock, /capabilities\?\.agents\)\s*\{\s*be\.send\(\{ type: "list_agents", request_id: this\.nextRequestId\("agents-restore"\) \}\);/);
+  assert.match(readyBlock, /this\.repaintFromBackend\(\);/);
+  const repaint = panelSrc.slice(panelSrc.indexOf("private repaintFromBackend("));
+  const repaintBlock = repaint.slice(0, repaint.indexOf("\n  }\n"));
+  assert.match(repaintBlock, /capabilities\?\.agents\)\s*\{\s*be\.send\(\{ type: "list_agents", request_id: this\.nextRequestId\("agents-restore"\) \}\);/);
   const handshake = panelSrc.slice(panelSrc.indexOf("private finishSessionHandshake("));
   const handshakeBlock = handshake.slice(0, handshake.indexOf("\n  }\n"));
   assert.match(handshakeBlock, /capabilities\?\.agents\)\s*\{\s*be\.send\(\{ type: "list_agents", request_id: this\.nextRequestId\("agents-restore"\) \}\);/);

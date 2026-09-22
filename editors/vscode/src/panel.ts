@@ -243,6 +243,60 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
   return createHash("sha256").update(publicIdentity, "utf8").digest("hex");
 }
 
+/** How many chats may hold a live `dgc serve` at once. 0 -- the default -- means no limit.
+ *
+ *  DGC does not invent a number here. A backend is about 9 MB, and writes from several chats into
+ *  one checkout are already serialised by the workspace write lease rather than by a chat count, so
+ *  nothing in DGC breaks as the count rises. What another chat actually costs is another model
+ *  context -- tokens on a cloud endpoint, or a share of a local model -- which only the person
+ *  running it can judge. `dgc.maxLiveChats` exists for someone who WANTS a ceiling (set it to 1 to
+ *  keep DGC single-chat); left alone, the limit is the machine.
+ */
+function maxLiveChats(): number {
+  const raw = vscode.workspace.getConfiguration("dgc").get<number>("maxLiveChats", 0);
+  const value = Number.isFinite(raw) ? Math.floor(Number(raw)) : 0;
+  return value > 0 ? value : Infinity;
+}
+
+/** Panel fields that belong to ONE chat rather than to the panel. Switching chats moves the whole
+ *  list out to the outgoing slot and back in from the incoming one, so nothing from the chat you
+ *  left can be read as if it described the chat you are looking at. Captured and restored as a
+ *  unit by name: a field added here is automatically saved, and one that is only ever captured or
+ *  only ever restored cannot exist. */
+const PER_CHAT_FIELDS = [
+  "backend", "initializingBackend", "lastReadyEvent",
+  "sessionReady", "sessionRestoreCandidate", "sessionRestoreSaved", "sessionRestoreStarted",
+  "sessionRestoreSuppressed",
+  "sessionRestoreFinished", "sessionRestoreRequestId", "sessionDraftSource", "sessionHandshakeGeneration",
+  "currentSessionId", "currentSessionName", "currentSessionSaved",
+  "turnActive", "confirmedTurnActive", "monitorTurnActive", "liveTurn", "turnStartedAt",
+  "correlatedStateRequests", "workspaceRootsRevision", "workspaceRootsDirty", "workspaceRootsInFlight",
+  "nativeSettingsReady", "mcpUrls", "unstartedPrompts", "unsentPrompts",
+  "workspaceChanges", "chatChanges", "changesRefreshRevision",
+  "backendRecoveries", "intentionalShutdown", "pendingCommandRestart",
+  "imageRefs", "slashAliases", "behaviorState", "routeState", "state",
+] as const;
+
+interface ChatSlot {
+  /** Stable for the life of the slot; the webview names it when it asks to switch. */
+  id: string;
+  /** The chat's own name, or its session id, or "New chat" — whatever the chip can show. */
+  label: string;
+  /** Captured panel fields while this slot is in the background; undefined while it is active. */
+  saved?: Record<string, unknown>;
+  /** The backend, mirrored here so a background slot can be found without restoring it. */
+  backend?: DgcBackend;
+  /** A turn is running in this chat. */
+  busy: boolean;
+  /** This chat is blocked on a decision only the user can make. */
+  needsYou: boolean;
+  /** Display events seen since the user last looked at this chat. */
+  unread: number;
+  /** Set when this background chat's backend died: why. Switching back starts a fresh one and
+   *  resumes the session it was on, so a chat you were not watching is not simply gone. */
+  lost?: string;
+}
+
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private viewType = "dgc.chat";   // the container the chat currently lives in
@@ -308,6 +362,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionRestoreCandidate = "";
   /** The remembered chat had a file when it was remembered (older records say nothing: assume so). */
   private sessionRestoreSaved = true;
+  /** This chat was opened deliberately empty, so it must NOT adopt the workspace's remembered
+   *  session. Without it the second chat resumed the SAME session as the first, which the backend
+   *  correctly refused — one session is held by whichever DGC is running a turn in it — so the
+   *  second chat's first turn died on "this session has an active turn in another DGC process". */
+  private sessionRestoreSuppressed = false;
   /** Automatic backend restarts in the recent past, so a crash loop cannot spin forever. */
   private backendRecoveries: number[] = [];
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -343,7 +402,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private reviewDocuments = new Map<string, string>();
   private sb: vscode.StatusBarItem;
 
+  // ---- concurrent chats ------------------------------------------------------------------------
+  // Up to `dgc.maxLiveChats` chats each hold their own `dgc serve`. Exactly one is "active": its state
+  // IS the panel's own fields, so every existing call site keeps working unchanged. The others are
+  // parked as captured field sets. Their backends keep running -- that is the whole point -- and
+  // their events are read off the pipe and reduced to a chip, never painted into the transcript
+  // you are looking at. Switching repaints from the incoming backend's own history snapshot rather
+  // than from anything the panel buffered, so the chat you come back to is the backend's truth.
+  private slots: ChatSlot[] = [];
+  private activeSlotId = "";
+  private slotSeq = 0;
+  /** The value each per-chat field has before any chat has touched it, captured in the constructor
+   *  so a new chat starts from the real initializers and cannot drift from them. */
+  private pristineChatState: Record<string, unknown> = {};
+
   constructor(private readonly context: vscode.ExtensionContext) {
+    // Before anything mutates them: this is what "a chat nobody has used yet" looks like. Copied,
+    // not referenced -- the field initializers hand out live Maps, and holding those would make
+    // "pristine" track whatever the first chat did to them.
+    this.pristineChatState = {};
+    for (const field of PER_CHAT_FIELDS) {
+      this.pristineChatState[field] = this.cloneChatValue((this as any)[field]);
+    }
     this.adoptQueuedPromptsFromPreviousHost();
     // one status-bar item: `model · mode` (click to change model)
     this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -360,6 +440,317 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       watcher.onDidDelete(() => this.scheduleWorkspaceChanges());
       this.context.subscriptions.push(watcher);
     }
+  }
+
+  // ---- chat slots ------------------------------------------------------------------------------
+
+  /** One level of copying for the container fields, so a parked chat and a live one never share a
+   *  Map or an array. The values inside are treated as immutable by every writer here. */
+  private cloneChatValue(value: unknown): unknown {
+    if (value instanceof Map) { return new Map(value); }
+    if (value instanceof Set) { return new Set(value); }
+    if (Array.isArray(value)) { return value.slice(); }
+    if (value && typeof value === "object" && (value as object).constructor === Object) { return { ...(value as object) }; }
+    return value;                                   // primitives, undefined, and class instances (the backend)
+  }
+
+  private captureChatFields(): Record<string, unknown> {
+    const saved: Record<string, unknown> = {};
+    for (const field of PER_CHAT_FIELDS) { saved[field] = (this as any)[field]; }
+    return saved;
+  }
+
+  private applyChatFields(saved: Record<string, unknown>): void {
+    for (const field of PER_CHAT_FIELDS) { (this as any)[field] = saved[field]; }
+  }
+
+  /** The slot whose state the panel's fields currently are. Creates the first one on demand, so a
+   *  panel that never switches chats behaves exactly as it did before slots existed. */
+  private activeSlot(): ChatSlot {
+    let slot = this.slots.find((candidate) => candidate.id === this.activeSlotId);
+    if (!slot) {
+      slot = { id: `chat-${++this.slotSeq}`, label: "", busy: false, needsYou: false, unread: 0 };
+      this.slots.push(slot);
+      this.activeSlotId = slot.id;
+    }
+    return slot;
+  }
+
+  /** Park the panel's fields on the active slot. After this the panel's own fields are stale and
+   *  the caller must install another slot's before anything reads them. */
+  private parkActiveSlot(): ChatSlot {
+    const slot = this.activeSlot();
+    slot.saved = this.captureChatFields();
+    slot.backend = this.backend;
+    slot.label = this.chatLabel();
+    slot.busy = this.confirmedTurnActive;
+    slot.unread = 0;                                 // you were just looking at it
+    return slot;
+  }
+
+  /** What the chip shows for a chat: its name if it has one, else a short session id, else new. */
+  private chatLabel(): string {
+    return (this.currentSessionName || "").trim()
+      || (this.currentSessionId ? this.currentSessionId.slice(-6) : "")
+      || "New chat";
+  }
+
+  private slotById(id: string): ChatSlot | undefined {
+    return this.slots.find((slot) => slot.id === id);
+  }
+
+  /** Make `id` the chat the panel describes and repaint the transcript from its backend. */
+  private switchToSlot(id: string): void {
+    if (!id || id === this.activeSlotId) { return; }
+    const incoming = this.slotById(id);
+    if (!incoming || !incoming.saved) { return; }
+    this.parkActiveSlot();
+    const saved = incoming.saved;
+    incoming.saved = undefined;
+    this.activeSlotId = incoming.id;
+    this.applyChatFields(saved);
+    incoming.unread = 0;
+    incoming.needsYou = false;
+    this.setReadyContext(!!this.backend?.ready && this.sessionReady);
+    // The transcript on screen belongs to the chat we just left. Clear it before a single event of
+    // the incoming chat's can land in it, then rebuild from that backend's own snapshot.
+    this.post({ type: "chat_switched", slotId: incoming.id, label: incoming.label });
+    if (!this.backend) {
+      // Its backend died while we were elsewhere. Start one now; the restore candidate set when we
+      // noticed the death puts it back on the same session, and its handshake repaints the panel.
+      const lost = incoming.lost;
+      incoming.lost = undefined;
+      if (lost) { this.post({ type: "stderr", line: `[extension: restarting this chat — ${lost}]` }); }
+      try {
+        this.ensureBackend();
+      } catch (error: any) {
+        this.backendNote(`[extension: could not restart the chat — ${error?.message || error}]`);
+      }
+    } else {
+      this.repaintFromBackend();
+    }
+    this.postChatSlots();
+    this.postState();
+    this.scheduleWorkspaceChanges(0);
+  }
+
+  /** Start a second (or third, if the ceiling ever rises) chat with its own backend. */
+  private openChatSlot(): void {
+    const ceiling = maxLiveChats();
+    if (this.slots.length >= ceiling) {
+      // Only reachable when the user set a ceiling themselves.
+      void vscode.window.showInformationMessage(
+        `DGC is running ${this.slots.length} chats, the limit set in "dgc.maxLiveChats". `
+        + "Close one, or raise the setting.");
+      return;
+    }
+    this.parkActiveSlot();
+    const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New chat", busy: false, needsYou: false, unread: 0 };
+    this.slots.push(slot);
+    this.activeSlotId = slot.id;
+    // A brand-new chat starts from the field initializers, not from whatever the last chat left.
+    const fresh: Record<string, unknown> = {};
+    for (const field of PER_CHAT_FIELDS) { fresh[field] = this.cloneChatValue(this.pristineChatState[field]); }
+    this.applyChatFields(fresh);
+    this.sessionRestoreCandidate = "";               // a new chat resumes nothing
+    this.sessionRestoreSuppressed = true;            // …and ensureBackend must not re-add one
+    this.sessionRestoreStarted = true;
+    this.setReadyContext(false);
+    this.post({ type: "chat_switched", slotId: slot.id, label: slot.label });
+    this.postChatSlots();
+    try {
+      this.ensureBackend();                          // spawns this chat's own `dgc serve`
+    } catch (error: any) {
+      this.backendNote(`[extension: could not start a second chat — ${error?.message || error}]`);
+    }
+  }
+
+  /** Close a chat: its backend is told to stop, and the slot goes away. The last one never does. */
+  private closeChatSlot(id: string): void {
+    const slot = this.slotById(id);
+    if (!slot || this.slots.length < 2) { return; }
+    if (slot.id === this.activeSlotId) {
+      const other = this.slots.find((candidate) => candidate.id !== slot.id);
+      if (!other) { return; }
+      // Move off it first so the panel is never describing a chat that is being torn down.
+      this.switchToSlot(other.id);
+    }
+    const be = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+    this.slots = this.slots.filter((candidate) => candidate.id !== slot.id);
+    try { be?.dispose(`chat ${slot.label || slot.id} closed`); } catch { /* already gone */ }
+    this.postChatSlots();
+  }
+
+  /** Palette: DGC: Open a Second Chat. */
+  newParallelChat(): void {
+    this.focus();
+    this.inVisiblePanel(() => this.openChatSlot());
+  }
+
+  /** Palette: DGC: Switch Chat. Lists the running chats and what each is doing. */
+  async pickChat(): Promise<void> {
+    if (this.slots.length < 2) {
+      const start = "Open a second chat";
+      const choice = await vscode.window.showInformationMessage(
+        "Only one chat is running.", start);
+      if (choice === start) { this.newParallelChat(); }
+      return;
+    }
+    const active = this.activeSlot();
+    active.label = this.chatLabel();
+    const items = this.slots.map((slot) => {
+      const showing = slot.id === this.activeSlotId;
+      const busy = showing ? this.confirmedTurnActive : slot.busy;
+      const detail = slot.lost ? `stopped — ${slot.lost}`
+        : !showing && slot.needsYou ? "waiting for you"
+        : busy ? "working" : "idle";
+      return {
+        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat"),
+        description: showing ? `$(check) showing · ${detail}` : detail,
+        slotId: slot.id,
+      };
+    });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: "Switch to a running chat" });
+    if (picked) { this.focus(); this.inVisiblePanel(() => this.switchToSlot(picked.slotId)); }
+  }
+
+  /** Tell the webview what chats exist, which one it is showing, and what the others are doing. */
+  private postChatSlots(): void {
+    const active = this.activeSlot();
+    active.label = this.chatLabel();
+    active.busy = this.confirmedTurnActive;
+    this.post({
+      type: "chat_slots",
+      // 0 tells the webview there is no ceiling, so the + never disables. JSON has no Infinity.
+      max: Number.isFinite(maxLiveChats()) ? maxLiveChats() : 0,
+      activeId: this.activeSlotId,
+      items: this.slots.map((slot) => ({
+        id: slot.id,
+        label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat"),
+        active: slot.id === this.activeSlotId,
+        busy: slot.id === this.activeSlotId ? this.confirmedTurnActive : slot.busy,
+        needsYou: slot.id === this.activeSlotId ? false : slot.needsYou,
+        unread: slot.id === this.activeSlotId ? 0 : slot.unread,
+      })),
+    });
+  }
+
+  /** Rebuild everything the transcript shows from the ACTIVE backend's own snapshot.
+   *
+   *  Two callers need exactly this: a webview that just (re)loaded and knows nothing, and a switch
+   *  to another chat, whose transcript the webview has just been told to clear. Asking the backend
+   *  rather than replaying anything the panel kept is what makes both safe -- `get_history` is
+   *  taken under the backend's turn-state lock, so it carries the running turn's bytes so far and
+   *  is followed by a fresh announcement of every decision that turn is blocked on, with the same
+   *  request ids. Events that arrive after it on the pipe are exactly the ones it does not contain.
+   */
+  private repaintFromBackend(): void {
+    if (!this.webviewReady) { return; }
+    const be = this.backend;
+    if (this.lastReadyEvent) {
+      this.post({ type: "event", event: { ...this.lastReadyEvent, session_id: this.currentSessionId,
+        session_name: this.currentSessionName } });
+    }
+    if (this.sessionReady) {
+      this.post({ type: "session_ready", sessionId: this.currentSessionId });
+      if (be && this.lastReadyEvent?.capabilities?.history_snapshot) {
+        be.send({ type: "get_history", request_id: this.nextRequestId("restore-history") });
+      }
+      // A webview that knows nothing of a running turn: say so before the snapshot lands, so Stop
+      // shows and the snapshot's unfinished last turn stays the live one (the backend re-sends the
+      // question or approval it is waiting on right after it).
+      if (this.confirmedTurnActive && this.liveTurn) {
+        this.post({ type: "turn_active", ...this.liveTurn,
+                    history: this.lastReadyEvent?.capabilities?.history_snapshot === true });
+      }
+      // An empty monitors rail knows no monitor ids, so it would drop the end of one that is still
+      // running. The backend's list restores both.
+      if (be && this.lastReadyEvent?.capabilities?.monitors) {
+        be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
+      }
+      // Nor is there an agents list; the backend's snapshot brings back the pill.
+      if (be && this.lastReadyEvent?.capabilities?.agents) {
+        be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
+      }
+      // Nor the messages queued behind the running turn: without them a Stop (or the backend going
+      // away) had nothing to hand back, and the user's words were lost.
+      const queued = [...this.unstartedPrompts.values()].filter((prompt) => prompt.queued);
+      if (queued.length) { this.post({ type: "prompts_queued", items: queued }); }
+      this.surfaceUnsentPrompts();
+    }
+  }
+
+  /** Every event from a backend arrives here first, tagged with the chat that owns it. The active
+   *  chat's events take the ordinary path. A background chat's are reduced to chip state: they are
+   *  NOT painted, and nothing is buffered, because switching asks that backend for its own history
+   *  snapshot -- which re-announces whatever decision it is blocked on, with the same request ids. */
+  private routeEvent(slot: ChatSlot, ev: DgcEvent): void {
+    if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
+    this.backgroundEvent(slot, ev);
+  }
+
+  /** A chat the user is not looking at lost its backend. Nothing can be posted to the transcript
+   *  for it -- the transcript belongs to another chat -- so the chip carries the news, and the
+   *  slot is armed to resume its session in a fresh child the moment the user switches to it. */
+  private backgroundBackendLost(slot: ChatSlot, cause: string): void {
+    if (slot.id === this.activeSlotId) { return; }
+    slot.lost = cause || "the backend stopped";
+    slot.busy = false;
+    slot.needsYou = false;
+    slot.backend = undefined;
+    if (slot.saved) {
+      const sessionId = String(slot.saved.currentSessionId || "");
+      slot.saved.backend = undefined;
+      slot.saved.initializingBackend = undefined;
+      slot.saved.sessionReady = false;
+      slot.saved.turnActive = false;
+      slot.saved.confirmedTurnActive = false;
+      slot.saved.monitorTurnActive = false;
+      slot.saved.liveTurn = undefined;
+      // Resume what it was on rather than opening an empty chat under the same chip.
+      slot.saved.sessionRestoreCandidate = sessionId;
+      slot.saved.sessionRestoreSuppressed = true;    // its own session, not the workspace's
+      slot.saved.sessionRestoreStarted = false;
+      slot.saved.sessionRestoreFinished = false;
+      slot.saved.sessionRestoreSaved = true;
+    }
+    this.backendNote(`[extension: the background chat "${slot.label || slot.id}" lost its backend — ${slot.lost}]`);
+    this.postChatSlots();
+  }
+
+  private backgroundEvent(slot: ChatSlot, ev: DgcEvent): void {
+    const type = String((ev as any)?.type || "");
+    switch (type) {
+      case "turn_start": slot.busy = true; break;
+      case "turn_end": slot.busy = false; break;
+      case "session":
+        slot.label = String((ev as any).name || "").trim()
+          || String((ev as any).session_id || "").slice(-6) || "New chat";
+        break;
+      case "session_named":
+        slot.label = String((ev as any).name || "").trim() || slot.label;
+        break;
+      case "permission_request":
+      case "plan_request":
+      case "options_request":
+      case "question_request":
+      case "ask":
+        slot.needsYou = true;
+        break;
+      case "permission_resolved":
+      case "options_resolved":
+      case "ask_resolved":
+      case "request_expired":
+        slot.needsYou = false;
+        break;
+      case "text_delta":
+      case "tool_call":
+        slot.unread++;
+        break;
+      default:
+        return;                                      // nothing the chip shows: no repost
+    }
+    this.postChatSlots();
   }
 
   // ---- backend lifecycle ---------------------------------------------------
@@ -861,12 +1252,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const revision = this.workspaceRootsRevision;
+    // open_asks says this panel can show a question the turn did not stop for, and keep its card
+    // alive after the turn moves past it. A backend never emits ask_* to a client that did not say
+    // so, and withholds the tool entirely when nobody can show one.
+    //
+    // It is sent ONLY to a CLI that declared it. The field arrived in CLI 0.42.0, and the command
+    // schema rejects a field it does not declare — so extension 0.27.0 sending it unconditionally
+    // made every chat fail on an older CLI with "invalid command: set_workspace_roots has
+    // undeclared field 'open_asks'", which surfaces in Cursor as "timed out waiting for sessions"
+    // and leaves Resume saying there are no past sessions, because the handshake never finishes.
+    // The authoritative sync runs from the `ready` handler, where capabilities are known.
+    const supportsOpenAsks = this.lastReadyEvent?.capabilities?.open_asks === true;
     const command = this.stateCommand(
-      // open_asks says this panel can show a question the turn did not stop for, and keep its
-      // card alive after the turn moves past it. A backend never emits ask_* to a client that did
-      // not say so, and withholds the tool entirely when nobody can show one.
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
-                           open_asks: true });
+                           ...(supportsOpenAsks ? { open_asks: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);
@@ -1220,6 +1619,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       throw new Error("DGC is disabled until this workspace is trusted.");
     }
     if (this.backend) {
+      this.activeSlot().backend = this.backend;
       return this.backend;
     }
     const executable = resolveDgcExecutable();
@@ -1229,20 +1629,32 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
     }
     const cmd = executable.command;
-    const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
-    this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
-      ? saved.id! : "";
-    this.sessionRestoreSaved = saved?.saved !== false;
+    // A chat opened deliberately empty keeps the candidate its slot was given (none, or the
+    // session it is being restarted onto). Reading the workspace's remembered id here is right for
+    // the first chat and wrong for a second one: both would resume the same session, and the
+    // backend refuses the second because a session is held by whoever is running a turn in it.
+    if (!this.sessionRestoreSuppressed) {
+      const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
+      this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
+        ? saved.id! : "";
+      this.sessionRestoreSaved = saved?.saved !== false;
+    }
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd, this.context.extension.packageJSON.dgcCliVersion);
+    // The chat this child belongs to, captured now. Every handler below asks the slot rather than
+    // comparing against `this.backend`: with a second chat running, `this.backend` is whichever
+    // chat the user is looking at, and a background child's own death must still be handled.
+    const slot = this.activeSlot();
+    slot.backend = be;
     // The backend's own last word ("serve loop ended: <cause>; …") arrives on stderr before the
     // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
     let serveCause = "";
-    be.on("event", (ev: DgcEvent) => this.onEvent(ev));
+    be.on("event", (ev: DgcEvent) => this.routeEvent(slot, ev));
     be.on("stderr", (line: string) => {
       const ended = /serve loop ended: ([^;\n]+)/.exec(line);
       if (ended) { serveCause = ended[1].trim().slice(0, 300); }
+      if (slot.id !== this.activeSlotId) { this.backendNote(line); return; }
       this.backendNote(line); this.post({ type: "stderr", line });
     });
     be.on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
@@ -1252,7 +1664,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
       // send() start a child on it, whose own later death was then mislabelled and never recovered.
-      if (cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE || this.backend !== be) { return; }
+      if (cause.startsWith("restart: ") || cause === PANEL_DISPOSED_CAUSE) { return; }
+      if (slot.id !== this.activeSlotId) { this.backgroundBackendLost(slot, cause); return; }
+      if (this.backend !== be) { return; }
       this.queuedPromptsLost();
       this.retireBackend();
       this.post({ type: "backend_exit", code: null, signal: null, recovering: false, cause, resumes: "none" });
@@ -1269,7 +1683,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         + ` · pid ${facts.pid ?? "?"} · frames sent ${facts.framesWritten}`
         + `${facts.lastFrame ? `, last '${facts.lastFrame}'` : ""}`
         + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
-      this.mcpUrls.clear();
+      if (slot.id === this.activeSlotId) { this.mcpUrls.clear(); }
       if (facts.cause) { return; }             // our own teardown: logged above and already handled
       // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
       // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
@@ -1277,6 +1691,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       serveCause = "";
       const recentExits = this.recordUnassistedExit(cause, facts.lastFrame || "");
       const resumes = this.markInterruptedWork(cause, recentExits);
+      if (slot.id !== this.activeSlotId) { this.backgroundBackendLost(slot, cause); return; }
       this.pendingCommandRestart = false;       // the replacement starts from the new path anyway
       if (this.backend !== be) { return; }
       this.queuedPromptsLost();
@@ -1312,6 +1727,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // closed pipe and the panel could never recover on its own -- the user had to find
     // "DGC: Restart Backend" or reload the window.
     this.backend = undefined;
+    const slot = this.slots.find((candidate) => candidate.id === this.activeSlotId);
+    if (slot) { slot.backend = undefined; }
   }
 
   // ---- messages queued behind a running turn ---------------------------------------------------------
@@ -1577,7 +1994,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.sessionRestoreRequestId = undefined;
         this.sessionDraftSource = "";
         this.sessionHandshakeGeneration++;
-        {
+        if (this.sessionRestoreSuppressed) {
+          // This chat was opened deliberately empty (or is being restarted onto its own session),
+          // so it keeps the candidate its slot gave it. `ready` re-reading the workspace's
+          // remembered chat here is what made a second chat resume the FIRST chat's session and
+          // die on "this session has an active turn in another DGC process" — ensureBackend's
+          // suppression was already spent by the time this ran.
+          this.sessionRestoreSuppressed = false;
+        } else {
           const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
           this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
             ? saved.id! : "";
@@ -1652,11 +2076,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.currentSessionSaved = ev.kind === "resumed" || ev.kind === "forked"
             || (ev.kind !== "new" && ev.kind !== "cleared" && this.currentSessionSaved);
           this.rememberSession();
+          this.postChatSlots();                      // the chip carries this chat's name
         }
         break;
       case "session_named":
         this.currentSessionName = String(ev.name || "");
         if (!this.currentSessionSaved) { this.currentSessionSaved = true; this.rememberSession(); }   // naming saves it
+        this.postChatSlots();
         break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
@@ -1765,6 +2191,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.noteInterruptedTurn({ scope: this.draftScope(), id: this.currentSessionId,
                                      turnId: String(ev.turn_id || ""), at: Date.now() });
         }
+        this.postChatSlots();                        // this chat's chip shows it is working now
         break;
       case "handoff_started":
         this.turnActive = this.confirmedTurnActive = true;
@@ -1801,6 +2228,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.mcpUrls.clear();
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
+        this.postChatSlots();
         // An error end is kept for thirty seconds: when the backend is shutting down under a turn
         // the turn ends "error" first and the process exits after, and that turn WAS interrupted.
         if (ev.reason === "error") { this.noteInterruptedTurn({ endedAt: Date.now() }); }
@@ -1893,9 +2321,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Run the update with a progress notification, then restart so the panel reconnects by itself. */
   private async updateCliInPlace(executable: string): Promise<void> {
+    // No targetVersion. The installer serves exactly one version -- the latest -- and refuses any
+    // other outright ("DGC <x> was requested, but <site> publishes <y>"). Naming the version this
+    // extension was built against could therefore only ever do nothing (when they happen to match)
+    // or fail the update (whenever the CLI has shipped since), which is what it did: every user on
+    // an older CLI was told the update failed and left disconnected until they found the unpinned
+    // "Update CLI" command. Install what is published; the handshake below still enforces the
+    // minimum, and offerManualCliUpdate() already covers "still older after an update".
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: "DGC: updating the CLI to match the extension…", cancellable: true },
-      (_progress, token) => runCliUpdate(executable, token, { targetVersion: this.context.extension.packageJSON.dgcCliVersion }),
+      (_progress, token) => runCliUpdate(executable, token),
     );
     if (result.ok) {
       this.restart("CLI updated to match the extension");
@@ -2191,42 +2626,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case "webviewReady": {
         this.webviewReady = true;
-        if (this.lastReadyEvent) {
-          this.post({ type: "event", event: { ...this.lastReadyEvent, session_id: this.currentSessionId,
-            session_name: this.currentSessionName } });
-        }
-        if (this.sessionReady) {
-          this.post({ type: "session_ready", sessionId: this.currentSessionId });
-          if (this.lastReadyEvent?.capabilities?.history_snapshot) {
-            be.send({ type: "get_history", request_id: this.nextRequestId("restore-history") });
-          }
-          // A webview reloaded while a turn runs knows nothing of that turn: say so before the
-          // snapshot lands, so Stop shows and the snapshot's unfinished last turn stays the live one
-          // (the backend re-sends the question or approval it is waiting on right after it).
-          if (this.confirmedTurnActive && this.liveTurn) {
-            this.post({ type: "turn_active", ...this.liveTurn,
-                        history: this.lastReadyEvent?.capabilities?.history_snapshot === true });
-          }
-          // A reloaded webview starts with an empty monitors rail and knows no monitor ids, so
-          // it would drop the end of one that is still running. The backend's list restores both.
-          if (this.lastReadyEvent?.capabilities?.monitors) {
-            be.send({ type: "list_monitors", request_id: this.nextRequestId("monitors-restore") });
-          }
-          // A reloaded webview has no agents list; the backend's snapshot brings back the pill.
-          if (this.lastReadyEvent?.capabilities?.agents) {
-            be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
-          }
-          // Nor the messages queued behind the running turn: without them a Stop (or the backend
-          // going away) had nothing to hand back, and the user's words were lost.
-          const queued = [...this.unstartedPrompts.values()].filter((prompt) => prompt.queued);
-          if (queued.length) { this.post({ type: "prompts_queued", items: queued }); }
-          this.surfaceUnsentPrompts();
-        }
+        this.repaintFromBackend();
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
         if (this.state.model) { this.postState(); }
+        this.postChatSlots();
         this.scheduleWorkspaceChanges(0);
         break;
+      }
+      case "switchChat": {
+        this.switchToSlot(String(msg.slotId ?? ""));
+        return;
+      }
+      case "newChat": {
+        this.openChatSlot();
+        return;
+      }
+      case "closeChat": {
+        this.closeChatSlot(String(msg.slotId ?? ""));
+        return;
       }
       case "askSkip": {
         // Waving a question away is an answer of a kind: the backend tells the model to decide
@@ -3380,6 +3798,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return;
       }
     }
+    // /branch [NAME] and its /fork alias are advertised by dgc/commands.py and handled by
+    // branchChat, but nothing routed the typed form there: it fell through to the backend, which
+    // rejects it as an unknown command (built-in names are reserved, so a custom command cannot
+    // fill the gap either). The palette entry worked the whole time.
+    if (name === "branch" || name === "fork") { void this.branchChat(rest); return; }
+    // /artifact with an argument (`stop <id>`, `list`) is the backend's to interpret. The map
+    // below keys on the command name alone, so every form of it opened the artifacts list.
+    if (name === "artifact" && rest) { be.send({ type: "slash_command", text }); return; }
     const direct: Record<string, string> = {
       "view-plan": "viewPlan", artifact: "artifacts", monitors: "monitors", status: "status",
       compact: "compact",
@@ -4531,6 +4957,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
     this.backend?.dispose(PANEL_DISPOSED_CAUSE);
+    // A chat parked in the background still holds a live `dgc serve`. Closing the window must take
+    // every one of them with it, or a child outlives the editor that owns it.
+    for (const slot of this.slots) {
+      const parked = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+      if (parked && parked !== this.backend) {
+        try { parked.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
+      }
+    }
     this.sb.dispose();
     // Last: the backend's exit line arrives after this and still reaches backend.log.
     try { this.backendLog.dispose(); } catch { /* already gone */ }
@@ -4557,7 +4991,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}">
-<header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
+<header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button></header>
+<nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>
   <p id="agent-page-meta" class="agent-page-meta"></p>

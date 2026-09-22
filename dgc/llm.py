@@ -316,7 +316,11 @@ def _bounded_body_text(response, maximum: int, label: str, *, on_chunk=None) -> 
     if callable(iterator):
         try:
             body = bytearray()
-            for chunk in iterator(chunk_size=65_536):
+            # Through the watcher guard: this is the path Ollama's cloud takes (it serves a
+            # newline-delimited stream under `application/json`), and a stall-watcher close during
+            # an in-flight read surfaces from http.client as AttributeError rather than EOF. That
+            # is the watcher doing its job, and it must not bury the stall message it raised.
+            for chunk in _until_watcher_closes(iterator(chunk_size=65_536), response):
                 if not chunk:
                     continue
                 if on_chunk is not None:
@@ -359,7 +363,7 @@ def _bounded_json_response(response, maximum: int, label: str,
         iterator = getattr(response, "iter_content", None)
         if callable(iterator):
             body = bytearray()
-            for chunk in iterator(chunk_size=65_536):
+            for chunk in _until_watcher_closes(iterator(chunk_size=65_536), response):
                 check_deadline()
                 if not chunk:
                     continue

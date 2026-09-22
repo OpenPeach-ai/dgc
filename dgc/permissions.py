@@ -151,6 +151,25 @@ def parse_rules(rules: dict[str, list[str]]) -> list[Rule]:
     return out
 
 
+def invalid_rules(rules: dict[str, list[str]]) -> list[tuple[str, str, str]]:
+    """The (action, text, reason) lines `parse_rules` dropped.
+
+    It drops them silently, which is right -- one typo must not disarm a whole permission file,
+    and hard-failing would lock someone out of their own DGC over a line in a cloned repo's
+    `.dgc/permissions.json`. But the listings went on showing those lines as though they applied,
+    so a user could read their own `deny` back and believe it was in force. This is what lets the
+    listings mark them instead.
+    """
+    out: list[tuple[str, str, str]] = []
+    for action in (ALLOW, ASK, DENY):
+        for text in rules.get(action, []):
+            try:
+                Rule.parse(text, action)
+            except ValueError as exc:
+                out.append((action, str(text), str(exc)))
+    return out
+
+
 # ------------------------------------------------------------------ session policy ---
 # A process that launches `dgc serve` for one session (the SDK) can fix permission rules and
 # sandbox settings for that process only. They arrive in this environment variable as JSON, are

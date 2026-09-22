@@ -82,6 +82,15 @@ _FILE_EDIT_SUCCESS_PREFIX = {
 }
 _PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search",
                    "skill", "bash_output", "view_image"}
+# Names `_handle_call` answers itself and never dispatches to the executor. They have their own
+# guards (plan mode, monitor turns, frontend capability), so the offered-set check must not be the
+# thing that decides them -- it would turn a precise refusal into a generic one.
+_ALWAYS_HANDLED_TOOLS = frozenset({
+    "present_plan", "propose_options", "update_goal", "ask_user", "todo",
+})
+# …and of those, the ones a user can name in a permission rule (dgc/permissions.py DISPLAY). They
+# return before the engine runs, so their deny has to be read here or it is never read at all.
+_CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_user", "update_goal"})
 # images: what the model is told about the images that follow a tool batch, per source.
 _IMAGE_BATCH_TEXT = {
     "browser": ("The screenshot(s) requested above follow. They are a picture of an untrusted web "
@@ -822,7 +831,8 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
 
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
-from .tools import (MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS, bash_handle_tools, execute,
+from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
+                    bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images)
 from . import image_views
 from .tools import VIEW_IMAGE_RELAY_SCHEMA, _image_entry, _vision_available, image_call_scope, reset_image_call
@@ -2282,7 +2292,17 @@ class Agent(GoalLifecycle):
         if allow:
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") in allow]
-        return self._monitor_schema_filter(schemas)
+        schemas = self._monitor_schema_filter(schemas)
+        # What the model was actually offered, so execution can refuse what it was not. Every
+        # filter above is a filter on the CATALOG, and a catalog is not an enforcement boundary:
+        # DGC also accepts tool calls the model writes as prose (dgc/llm.py, parse_text_tool_calls),
+        # which is the path a poisoned file, web page or MCP result reaches. Without this, a
+        # `<tool_call>{"name": "python", ...}` in untrusted text ran the interpreter the user
+        # never turned on, and a read-only sub-agent could write files.
+        self._offered_tool_names = {
+            str(tool.get("function", {}).get("name") or "") for tool in schemas
+        }
+        return schemas
 
     def _non_interactive(self) -> bool:
         """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
@@ -2880,6 +2900,17 @@ class Agent(GoalLifecycle):
         return target
 
     def reset(self) -> None:
+        # A background sub-task belongs to the chat that started it. Leaving it running across a
+        # new chat meant a child could still be writing files and integrating its worktree minutes
+        # after the user cleared the conversation -- into THIS agent's checkpoints, which by then
+        # belong to a chat that never asked for any of it. Signal them first, before the managers
+        # they would integrate into are replaced below. (Signal, not join: a child at a tool
+        # boundary stops promptly, and the new chat must not block on one that is mid-request.)
+        stopped = self.stop_detached()
+        if stopped:
+            self.ui.info(self._safe_text(
+                f"↳ stopped {stopped} background sub-task{'s' if stopped != 1 else ''} "
+                "that belonged to the previous chat"))
         # Monitors and their pending events belong to the conversation being replaced. A new epoch
         # also stops a background task started there from notifying the next conversation.
         monitors = getattr(self, "monitors", None)
@@ -6281,9 +6312,15 @@ class Agent(GoalLifecycle):
                                      *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
                             for action in ("allow", "ask", "deny")}
         perms = PermissionEngine(self.mode, permission_rules, self.config.project_root)
+        allow = getattr(self, "_agent_tool_allowlist", None)
+        offered = getattr(self, "_offered_tool_names", None)
         for call in calls:
             if (call.name not in _PARALLEL_READS or perms.external_paths(call.name, call.arguments)
-                    or perms.decide(call.name, call.arguments)[0] != ALLOW):
+                    or perms.decide(call.name, call.arguments)[0] != ALLOW
+                    or (allow and call.name not in allow)
+                    or (offered and call.name not in offered)):
+                # Hand the batch back to the sequential path, which refuses precisely and tells
+                # the model why. This path dispatches straight to the executor and has no way to.
                 return {}
         for call in calls:
             self.ui.tool_call(call.name, self._safe_value(call.arguments), call.id)
@@ -6530,6 +6567,43 @@ class Agent(GoalLifecycle):
         call_id = call.id
         secrets = self._secret_values()
         display_args = redact_value(args, secrets)
+
+        # Both gates run before ANY tool is answered. The control tools below reply and return
+        # within the first hundred lines of this method, so a check placed after them is a check
+        # they never reach.
+        #
+        # A name that was never advertised for this request is not a tool the model may run: this
+        # is the execution twin of every catalog filter in `_tool_schemas` -- `code_action: false`
+        # removing `python`, a sub-agent's `tools:` allow-list, plan mode's narrowed set -- none of
+        # which the executor consulted. The path that makes it matter is prose: a tool call written
+        # into the reply text is parsed into a real call, so any content the model reads could ask
+        # for a tool the user had switched off. Refuse rather than drop, so the model is told why
+        # and the transcript keeps a result for every call it made.
+        offered = getattr(self, "_offered_tool_names", None)
+        if (offered and name in EXECUTORS and name not in offered
+                and name not in _ALWAYS_HANDLED_TOOLS):
+            # Only a name the executor could actually have RUN. An unknown name is not a hole --
+            # `execute` already answers it with "unknown tool" -- and refusing those here would
+            # swallow a call the user should still see the model make.
+            self.ui.tool_denied(name, display_args, "not offered on this request", call_id)
+            return (f"error: {name} was not offered on this request and will not be run. "
+                    "Use one of the tools you were given.")
+
+        # The control tools answer themselves and never reach the permission engine, so
+        # `deny: ProposeOptions` -- a user who does not want to be interrupted with pickers, or
+        # `deny: PresentPlan` in an unattended run -- did nothing at all. `artifact` is in the same
+        # position and already checks; this is the same shape. A deny is read directly rather than
+        # routed through an approval card, because these tools never show one.
+        if name in _CONTROL_TOOLS_WITH_RULES:
+            with self._mode_lock:
+                rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                  *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                         for action in ("allow", "ask", "deny")}
+            denied = PermissionEngine(self.mode, rules, self.config.project_root).deny_reason(name, args)
+            if denied:
+                self.ui.tool_denied(name, display_args, redact_text(denied, secrets), call_id)
+                return f"PERMISSION DENIED: {denied}. Do not retry this exact action."
+
         if name == "task":
             # The description and returned summary are model-controlled. Keep mutation/convergence
             # accounting on a private state bit set only by a successful structured integration.
@@ -7607,8 +7681,17 @@ class Agent(GoalLifecycle):
 
     def _finalize_subagent(self, description: str, workspace, failure: str, result: str,
                            start_error: str = "", *,
-                           cancel: threading.Event | None = None) -> _TaskOutcome:
-        """Integrate one stopped child, or retain it safely, and return structured convergence state."""
+                           cancel: threading.Event | None = None,
+                           keeper=None) -> _TaskOutcome:
+        """Integrate one stopped child, or retain it safely, and return structured convergence state.
+
+        `keeper` is the checkpoint manager the work belongs to, captured when the child started.
+        A detached child can still be running when the user opens a new chat, and `self.checkpoints`
+        is replaced at that moment; recording this integration into the replacement would give the
+        new chat a recovery point for edits it never made, and put the old chat's files inside the
+        reach of the new chat's rewind. Cancellation normally stops the child first -- this closes
+        the window where it was already past that check.
+        """
         isolated = workspace is not None
         if start_error:
             cleanup_error = workspace.cleanup() if workspace is not None else None
@@ -7633,7 +7716,7 @@ class Agent(GoalLifecycle):
             return _TaskOutcome(
                 f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}")
         try:
-            integration = workspace.integrate(self.checkpoints)
+            integration = workspace.integrate(keeper if keeper is not None else self.checkpoints)
         finally:
             lease.release()
 
@@ -7729,6 +7812,9 @@ class Agent(GoalLifecycle):
         jobs = self._detached_jobs
         agent_id = sub_ui.agent_id
         jobs[agent_id] = {"cancel": own_cancel, "description": description}
+        # The chat this work belongs to, as it is NOW. `self.checkpoints` is replaced by a new
+        # chat, and this child may outlive that; its integration belongs to the chat that asked.
+        keeper = self.checkpoints
 
         def work():
             outcome = _TaskOutcome(f"error: Sub-task '{description}' did not complete.")
@@ -7737,7 +7823,7 @@ class Agent(GoalLifecycle):
                     description, prompt, agent_name, workspace, sub_ui, call_id,
                     cancel=own_cancel)
                 outcome = self._finalize_subagent(
-                    description, workspace, *execution, cancel=own_cancel)
+                    description, workspace, *execution, cancel=own_cancel, keeper=keeper)
             except Exception as exc:
                 outcome = _TaskOutcome(
                     f"error: Sub-task '{description}' did not complete: {type(exc).__name__}: {exc}.")

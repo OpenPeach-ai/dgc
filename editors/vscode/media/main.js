@@ -1461,6 +1461,11 @@
       : `${outcome} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     const finished = turn.block;
     turn = null;
+    // Repaint the checklist now that no turn is live. The row hides itself only when it renders
+    // with every item done AND nothing running, and nothing re-rendered it at the end of a turn --
+    // so a finished list sat at "Tasks 4/4 · all done" above the composer for the whole idle gap,
+    // saying work was in hand when nothing was. It cleared only when the next prompt was sent.
+    renderTodos(paintedTodos);
     if (replaying) return;
     // After every mutation this turn will make, so the height that gets pinned is the final one.
     // The end of a finished turn is its result — the summary of what it changed and what you can
@@ -4274,6 +4279,95 @@
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu(); hideAgentsMenu();
     vscode.postMessage({ type: "listModels" });
   };
+  // ---- running chats ---------------------------------------------------------------------------
+  // Each chat has its own backend, so the chat you are not looking at keeps working. The rail says
+  // which chats exist and what the other one is doing; the host owns the truth and re-sends the
+  // whole list on every change, so this only ever paints what it was handed.
+  let chatSlots = { items: [], max: 2, activeId: "" };
+
+  function renderChatBar(state) {
+    chatSlots = state || chatSlots;
+    const bar = $("chatbar"), add = $("chat-add");
+    if (!bar) return;
+    const items = Array.isArray(chatSlots.items) ? chatSlots.items : [];
+    if (add) {
+      // max === 0 means no ceiling: the host only sends a positive number when the user set one.
+      const ceiling = Number(chatSlots.max) > 0 ? Number(chatSlots.max) : Infinity;
+      const full = items.length >= ceiling;
+      add.disabled = full;
+      add.title = full ? `DGC is at your limit of ${ceiling} chats (dgc.maxLiveChats)`
+        : items.length > 1 ? "Open another chat" : "Open a second chat";
+      add.setAttribute("aria-label", add.title);
+    }
+    // One chat needs no rail: the header already names it.
+    if (items.length < 2) { bar.hidden = true; bar.replaceChildren(); return; }
+    const tabs = items.map((item) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "chat-tab"
+        + (item.active ? " is-active" : "")
+        + (item.busy ? " is-busy" : "")
+        + (item.needsYou ? " needs-you" : "");
+      tab.dataset.slot = String(item.id || "");
+      const dot = document.createElement("span");
+      dot.className = "chat-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const name = document.createElement("span");
+      name.className = "chat-name";
+      name.textContent = String(item.label || "New chat");
+      tab.append(dot, name);
+      // The state is in the accessible name too, not only in the dot's colour.
+      const state = item.needsYou ? "waiting for you" : item.busy ? "working" : "idle";
+      const unread = !item.active && item.unread > 0 ? `, ${item.unread} new` : "";
+      tab.title = `${name.textContent} — ${state}${item.active ? " (showing)" : ""}`;
+      tab.setAttribute("aria-label", `Chat ${name.textContent}, ${state}${unread}${item.active ? ", showing" : ""}`);
+      if (item.active) tab.setAttribute("aria-current", "true");
+      if (!item.active && item.unread > 0) {
+        const count = document.createElement("span");
+        count.className = "chat-unread";
+        count.textContent = item.unread > 99 ? "99+" : String(item.unread);
+        count.setAttribute("aria-hidden", "true");
+        tab.append(count);
+      }
+      tab.onclick = () => { if (!item.active) vscode.postMessage({ type: "switchChat", slotId: item.id }); };
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "chat-close";
+      close.title = `Close ${name.textContent}`;
+      close.setAttribute("aria-label", `Close chat ${name.textContent}`);
+      const glyph = document.createElement("span");
+      glyph.className = "codicon codicon-close";
+      glyph.setAttribute("aria-hidden", "true");
+      close.append(glyph);
+      close.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "closeChat", slotId: item.id }); };
+      const wrap = document.createElement("span");
+      wrap.style.display = "inline-flex";
+      wrap.style.alignItems = "center";
+      wrap.append(tab, close);
+      return wrap;
+    });
+    bar.replaceChildren(...tabs);
+    bar.hidden = false;
+  }
+
+  /** Switching chats: everything on screen belongs to the chat being left. The incoming chat's
+   *  backend sends its own history snapshot right behind this, so nothing is reconstructed here. */
+  function clearForChatSwitch() {
+    discardTurn();
+    log.innerHTML = "";
+    queuedCount = 0; queuedPrompts.clear(); renderQueued();
+    setSending(false);
+    sessionResetHooks("switched");
+    settleTodoClear();
+    renderTodos([]);
+    renderMonitors({ items: [], reset: true });
+    returnedPrompts.length = 0;
+    backendExitNotice = null;
+  }
+
+  const chatAdd = $("chat-add");
+  if (chatAdd) chatAdd.onclick = () => vscode.postMessage({ type: "newChat" });
+
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
   $("thread-title").onclick = () => {
     if (agentPageId) return;
@@ -5040,6 +5134,13 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
+    else if (msg.type === "chat_slots") renderChatBar(msg);
+    else if (msg.type === "chat_switched") {
+      clearForChatSwitch();
+      // The incoming backend's own `ready` lands right behind this with the real name; until then
+      // the chip's label is the best thing to show, and an unnamed chat is a new one.
+      setThreadTitle(msg.label || "", "", true);
+    }
     else if (msg.type === "session_ready") {
       hostSessionSeen = true;
       backendExitNotice = null;          // the reconnect has finished; the line is in the transcript

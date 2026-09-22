@@ -968,12 +968,25 @@ class Config:
         self._baseline_data = copy.deepcopy(self.data)
         self._baseline_permissions = copy.deepcopy(self.permissions)
 
+    def mark_ephemeral(self, *keys: str) -> None:
+        """Hold these settings for THIS process only; no save may write them.
+
+        A one-shot run (`dgc -p`) is a script or a benchmark: `--mode auto`, `--think high` and
+        `--ultra` are for that invocation. They were applied straight into `self.data`, so the next
+        `save()` from anywhere in the process -- `--trust` marking the workspace, a permission rule,
+        a slash command -- persisted them as the user's standing configuration. Trusting a folder
+        silently made `auto` the permanent permission mode.
+        """
+        self.__dict__.setdefault("_ephemeral_keys", set()).update(k for k in keys if k)
+
     def _my_changes(self) -> tuple[dict, dict, set]:
         """(changed keys, permission rules added, permission rules removed) since the baseline."""
         base = getattr(self, "_baseline_data", None)
+        ephemeral = getattr(self, "_ephemeral_keys", None) or set()
         if base is None:
-            return dict(self.data), {}, set()
-        changed = {k: v for k, v in self.data.items() if k not in base or base[k] != v}
+            return {k: v for k, v in self.data.items() if k not in ephemeral}, {}, set()
+        changed = {k: v for k, v in self.data.items()
+                   if k not in ephemeral and (k not in base or base[k] != v)}
         dropped = {k for k in base if k not in self.data}
         base_perms = getattr(self, "_baseline_permissions", None) or {}
         added: dict[str, list[str]] = {}
