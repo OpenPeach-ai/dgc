@@ -1,5 +1,22 @@
 # DGC SDK changelog
 
+## 0.6.4 — 2026-09-23
+
+Pairs with CLI 0.43.4 over editor protocol v14.
+
+**The vendored protocol contract had fallen a release behind while still declaring v14.**
+`dgc_sdk/wire/editor_protocol.py` is a verbatim copy of the CLI's module, and it is the only
+contract an installed SDK can validate against — the CLI's own module is not importable from a
+released package. The copy was missing everything CLI 0.42.0 added: the `ask_request` and
+`ask_resolved` events, the `answers` and `spooled_images` fields on `prompt`, `open_asks` on
+`set_workspace_roots`, and the `ask_skip` and `ping` commands.
+
+So an SDK client rejected events the CLI legitimately sent, and could not send those fields at
+all, while both sides reported the same protocol version. If you use open questions, out-of-band
+images, or the editor liveness ping through the SDK, this is the release that makes them work.
+
+Nothing kept the copy in step. `tests/test_sdk_vendored_protocol.py` now fails when it drifts.
+
 ## 0.6.3 — 2026-09-22
 
 Pairs with CLI 0.43.2 over editor protocol v14.

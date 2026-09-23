@@ -2,7 +2,8 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.6.3** | **v14** | **0.43.2** | **≥ 3.10** | **≥ 22** | **Linux** |
+| **0.6.4** | **v14** | **0.43.4** | **≥ 3.10** | **≥ 22** | **Linux** |
+| 0.6.3 | v14 | 0.43.2 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.2 | v14 | 0.43.1 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.1 | v14 | 0.43.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.0 | v14 | 0.42.0 | ≥ 3.10 | ≥ 22 | Linux |
@@ -23,6 +24,6 @@ that GitHub release (one comment line and the README). From 0.5.3 the PyPI files
 release assets are the same bytes, built by one workflow from the tag.
 
 ```bash
-python3 -m pip install dgc-sdk==0.6.3
-npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.3/vibedgc-sdk-0.6.3.tgz
+python3 -m pip install dgc-sdk==0.6.4
+npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.4/vibedgc-sdk-0.6.4.tgz
 ```

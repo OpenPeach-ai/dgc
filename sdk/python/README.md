@@ -1,10 +1,10 @@
 # dgc-sdk
 
-Run the DGC coding agent inside your own Python application or CI job. Version **0.6.3**, editor
-protocol v14, pairs with DGC CLI **0.43.2**. Python 3.10+, proven on Linux.
+Run the DGC coding agent inside your own Python application or CI job. Version **0.6.4**, editor
+protocol v14, pairs with DGC CLI **0.43.4**. Python 3.10+, proven on Linux.
 
 ```bash
-python3 -m pip install dgc-sdk==0.6.3
+python3 -m pip install dgc-sdk==0.6.4
 ```
 
 This installs `import dgc_sdk`. It is not the unrelated PyPI project `dgc`.
@@ -48,11 +48,11 @@ temporary `state_dir` is removed on `close()`.
 For untrusted input (a pull request, a cloned repo) the workspace cannot grant the session
 capabilities: its own `.dgc/permissions.json` allow rules and `.dgc/agents` are ignored unless you
 pass `trust_workspace=True`. Add a `RuntimePolicy` to sandbox the shell and confine the file tools,
-and see the security model in [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.3/docs/SDK.md#security-model).
+and see the security model in [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.4/docs/SDK.md#security-model).
 
-- Guide and full API reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.3/docs/SDK.md)
-- Runnable examples: [examples/sdk](https://github.com/OpenPeach-ai/dgc/tree/sdk-v0.6.3/examples/sdk)
-- Changes: [sdk/CHANGELOG.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.3/sdk/CHANGELOG.md)
-- Verifying this package against its GitHub release: [docs/SDK.md#verifying-a-release](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.3/docs/SDK.md#verifying-a-release)
+- Guide and full API reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.4/docs/SDK.md)
+- Runnable examples: [examples/sdk](https://github.com/OpenPeach-ai/dgc/tree/sdk-v0.6.4/examples/sdk)
+- Changes: [sdk/CHANGELOG.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.4/sdk/CHANGELOG.md)
+- Verifying this package against its GitHub release: [docs/SDK.md#verifying-a-release](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.4/docs/SDK.md#verifying-a-release)
 
 Licensed under Apache-2.0.
