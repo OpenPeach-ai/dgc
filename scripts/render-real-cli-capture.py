@@ -92,7 +92,14 @@ def write_json(path: Path, value: dict) -> None:
 # guard assert "no other DGC ran anywhere while we recorded", which is not a property of the
 # capture and is routinely false on a machine running more than one agent. The claim being proved
 # is "no user config or session persisted"; a lock file is neither.
-IGNORED_USER_STATE = ("locks",)
+#
+# `peers` joined it in 0.44.0 for the same reason. Every DGC now leaves a note there saying which
+# process it is and where it is working -- that is what lets a window name whoever holds a session
+# it wants, instead of refusing with "another DGC process has an active turn" and no way out. The
+# note is written on start and removed on exit, so a recorded session necessarily writes one, and
+# the very first capture after that feature landed aborted on it. A pid and a heartbeat are not
+# user state.
+IGNORED_USER_STATE = ("locks", "peers")
 
 
 def user_state_snapshot(root: Path) -> dict[str, tuple]:
