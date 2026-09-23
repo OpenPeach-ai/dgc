@@ -1,5 +1,12 @@
 # DGC SDK changelog
 
+## 0.6.8 — 2026-09-23
+
+0.6.7 published to PyPI and failed on npm: `npm publish "artifacts/…tgz"` contains a slash and no
+leading dot, so npm read it as GitHub shorthand and refused with
+`EALLOWGIT — Refusing to fetch "github:artifacts/vibedgc-sdk-0.6.7.tgz"`. The path now starts
+`./`, and the workflow test asserts it does.
+
 ## 0.6.7 — 2026-09-23
 
 Same contents as 0.6.6. Its tag failed because `tests/test_sdk_packaging.py` pins the publish

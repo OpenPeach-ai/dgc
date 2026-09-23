@@ -1,12 +1,12 @@
 # DGC SDK
 
-Embed the DGC coding agent in an application or a CI job. **0.6.7**, editor protocol **v14**,
+Embed the DGC coding agent in an application or a CI job. **0.6.8**, editor protocol **v14**,
 pairs with CLI **0.43.4**. Proven on Linux; macOS and WSL are unproven; native Windows is
-experimental. Release tag **`sdk-v0.6.7`** (not `v0.5.x`, which are historical CLI tags).
+experimental. Release tag **`sdk-v0.6.8`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
 | --- | --- |
-| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.6.7` |
+| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.6.8` |
 | Node `@vibedgc/sdk` | `npm install @vibedgc/sdk` |
 
 Both drive `dgc serve` from a DGC CLI install, which they find on their own; `DGC_PYTHON` pins a

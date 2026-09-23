@@ -284,6 +284,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("sha256sum -c SHA256SUMS", npm_text, "publish only verified bytes")
         self.assertIn(".tgz", npm_text, "publish the built tarball, not the directory: publishing "
                                         "from the directory re-runs prepack and can differ")
+        self.assertIn("./artifacts/", npm_text,
+                      "the tarball path needs a leading ./ -- npm reads a bare path containing a "
+                      "slash as GitHub shorthand and refuses it with EALLOWGIT")
         self.assertNotIn("NODE_AUTH_TOKEN", npm_text, "trusted publishing needs no token")
         release_text = json.dumps(release)
         self.assertIn("attest-build-provenance@", release_text)

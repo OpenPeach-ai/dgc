@@ -175,7 +175,10 @@ jobs:
           # the GitHub release and SHA256SUMS all describe identical bytes -- publishing from the
           # directory would re-run prepack and could produce a different build.
           npm install -g npm@latest
-          npm publish "artifacts/vibedgc-sdk-${{ needs.build.outputs.version }}.tgz" \
+          # "./" is load-bearing: a bare "artifacts/x.tgz" contains a slash and no leading dot,
+          # so npm reads it as GitHub shorthand (owner/repo) and refuses with EALLOWGIT --
+          # 'Refusing to fetch "github:artifacts/vibedgc-sdk-0.6.7.tgz"'.
+          npm publish "./artifacts/vibedgc-sdk-${{ needs.build.outputs.version }}.tgz" \
             --access public --provenance
 
   release:
