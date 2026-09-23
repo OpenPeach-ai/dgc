@@ -2,7 +2,8 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.6.6** | **v14** | **0.43.4** | **≥ 3.10** | **≥ 22** | **Linux** |
+| **0.6.7** | **v14** | **0.43.4** | **≥ 3.10** | **≥ 22** | **Linux** |
+| 0.6.6 | v14 | 0.43.4 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.5 | v14 | 0.43.4 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.4 | v14 | 0.43.4 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.3 | v14 | 0.43.2 | ≥ 3.10 | ≥ 22 | Linux |
@@ -26,6 +27,6 @@ that GitHub release (one comment line and the README). From 0.5.3 the PyPI files
 release assets are the same bytes, built by one workflow from the tag.
 
 ```bash
-python3 -m pip install dgc-sdk==0.6.6
+python3 -m pip install dgc-sdk==0.6.7
 npm install @vibedgc/sdk
 ```

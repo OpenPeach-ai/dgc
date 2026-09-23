@@ -1,5 +1,14 @@
 # DGC SDK changelog
 
+## 0.6.7 — 2026-09-23
+
+Same contents as 0.6.6. Its tag failed because `tests/test_sdk_packaging.py` pins the publish
+workflow's exact job graph, and adding the npm job changed it — a good test doing its job. That
+test skips unless PyYAML and mypy are installed, which they were not locally, so it passed here
+and failed in CI where `DGC_REQUIRE_RELEASE_TOOLS=1` turns those skips into runs. The test now
+also asserts what the npm job must do: verify SHA256SUMS, publish the tarball rather than the
+directory, `--access public`, `--provenance`, and no stored token.
+
 ## 0.6.6 — 2026-09-23
 
 Same contents as 0.6.5, which was tagged and built nothing: the signed checkout manifest was

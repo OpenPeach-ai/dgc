@@ -1,6 +1,6 @@
 {
   "name": "@vibedgc/sdk",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Embed the DGC coding harness in applications and CI",
   "type": "module",
   "main": "./dist/index.js",

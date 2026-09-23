@@ -272,7 +272,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(publish["with"]["attestations"])
         self.assertNotIn("password", publish["with"], "trusted publishing needs no token")
         self.assertNotIn("skip-existing", publish["with"])
-        self.assertEqual(release["needs"], ["build", "pypi"])
+        self.assertEqual(release["needs"], ["build", "pypi", "npm"],
+                         "the GitHub release must wait for BOTH registries, so a release that "
+                         "advertises an install command is never attached before it works")
+        npm = flow["jobs"]["npm"]
+        self.assertEqual(npm["environment"], "npm")
+        self.assertEqual(npm["permissions"], {"id-token": "write"})
+        npm_text = json.dumps(npm)
+        self.assertIn("--access public", npm_text, "a scoped package is restricted by default")
+        self.assertIn("--provenance", npm_text)
+        self.assertIn("sha256sum -c SHA256SUMS", npm_text, "publish only verified bytes")
+        self.assertIn(".tgz", npm_text, "publish the built tarball, not the directory: publishing "
+                                        "from the directory re-runs prepack and can differ")
+        self.assertNotIn("NODE_AUTH_TOKEN", npm_text, "trusted publishing needs no token")
         release_text = json.dumps(release)
         self.assertIn("attest-build-provenance@", release_text)
         self.assertIn("--latest=false", release_text)

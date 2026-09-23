@@ -1,4 +1,4 @@
-export const VERSION = "0.6.6";
+export const VERSION = "0.6.7";
 export const PROTOCOL = 14;
 export const REQUIRES_CLI = "0.43.4";
 
