@@ -1,13 +1,13 @@
 # @vibedgc/sdk
 
 Node client for the DGC coding harness. It starts a managed `dgc serve` child with an isolated
-HOME and speaks editor protocol v14. Version 0.6.4 pairs with DGC CLI 0.43.4. Node 22 or newer.
+HOME and speaks editor protocol v14. Version 0.6.5 pairs with DGC CLI 0.43.4. Node 22 or newer.
 
-The package is attached to the GitHub release `sdk-v0.6.4` as `vibedgc-sdk-0.6.4.tgz`. It is not
-on the npm registry yet.
+The package is on the npm registry. The identical tarball is also attached to the GitHub release
+`sdk-v0.6.5` as `vibedgc-sdk-0.6.5.tgz`, for installs that pin a checksum.
 
 ```bash
-npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.4/vibedgc-sdk-0.6.4.tgz
+npm install @vibedgc/sdk
 ```
 
 ```js
@@ -49,5 +49,5 @@ The runtime child sees only basic variables (`PATH`, locale, terminal, temp and 
 locations), the isolated HOME, `apiKey` and `extraEnv`. Pass `inheritEnv: ["NAME"]` (or `true`)
 to hand it more of your environment.
 
-Full reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.4/docs/SDK.md).
+Full reference: [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.5/docs/SDK.md).
 Licensed under Apache-2.0.

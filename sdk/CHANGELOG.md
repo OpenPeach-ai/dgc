@@ -1,5 +1,18 @@
 # DGC SDK changelog
 
+## 0.6.5 — 2026-09-23
+
+`@vibedgc/sdk` is on the npm registry: `npm install @vibedgc/sdk`. It was previously installable
+only from the tarball attached to each GitHub release, which meant no version ranges, no
+discoverability and no dependency updates for anyone embedding it.
+
+Every install line in the docs now names the registry. The tarball is still attached to each
+release and is byte-identical to what npm serves, for installs that want to pin a checksum.
+
+Releases publish to npm automatically from the `sdk-v*` tag, using npm's trusted publishing
+(OIDC) rather than a stored token -- the same mechanism the PyPI upload already used -- and
+publish the verified tarball rather than rebuilding, so all three places describe identical bytes.
+
 ## 0.6.4 — 2026-09-23
 
 Pairs with CLI 0.43.4 over editor protocol v14.

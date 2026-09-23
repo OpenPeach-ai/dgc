@@ -6,8 +6,8 @@ answers its permission and question requests, and gets a structured result back.
 
 | Package | Version | Pairs with | Protocol | Runtime |
 | --- | --- | --- | --- | --- |
-| `dgc-sdk` (Python, PyPI) | **0.6.4** | CLI **0.43.4** | editor protocol v14 | Python 3.10+ |
-| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.6.4** | CLI **0.43.4** | editor protocol v14 | Node 22+ |
+| `dgc-sdk` (Python, PyPI) | **0.6.5** | CLI **0.43.4** | editor protocol v14 | Python 3.10+ |
+| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.6.5** | CLI **0.43.4** | editor protocol v14 | Node 22+ |
 
 Proven on Linux. macOS and WSL are unproven, and native Windows is experimental (custom tools need
 Unix sockets). The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
@@ -26,7 +26,7 @@ application attribute the model-token spend your provider bills you.
 ## Install
 
 ```bash
-python3 -m pip install dgc-sdk==0.6.4
+python3 -m pip install dgc-sdk==0.6.5
 ```
 
 That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named `dgc` is an
@@ -457,7 +457,7 @@ A run that fails does not raise: its `RunResult` has `status="failed"` and the r
 
 ### Constants
 
-`__version__` (`"0.6.4"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.43.4"`).
+`__version__` (`"0.6.5"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.43.4"`).
 
 ## Events
 
@@ -507,10 +507,10 @@ are skipped rather than ending the session.
 ## TypeScript
 
 `@vibedgc/sdk` is the same client for Node 22+, attached to each GitHub release as
-`vibedgc-sdk-<version>.tgz` (it is not on the npm registry yet):
+`vibedgc-sdk-<version>.tgz`, which is the same tarball the registry serves:
 
 ```bash
-npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.4/vibedgc-sdk-0.6.4.tgz
+npm install @vibedgc/sdk
 ```
 
 ```js
@@ -602,15 +602,15 @@ CycloneDX SBOM and `SHA256SUMS` to the GitHub release, each with a GitHub artifa
 
 ```bash
 # The PyPI file matches the GitHub release, and the workflow built it from the tag:
-python3 -m pip download --no-deps dgc-sdk==0.6.4 -d dl
-curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.4/SHA256SUMS
+python3 -m pip download --no-deps dgc-sdk==0.6.5 -d dl
+curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.6.5/SHA256SUMS
 (cd dl && sha256sum -c ../SHA256SUMS --ignore-missing)
-gh attestation verify dl/dgc_sdk-0.6.4-py3-none-any.whl --repo OpenPeach-ai/dgc \
+gh attestation verify dl/dgc_sdk-0.6.5-py3-none-any.whl --repo OpenPeach-ai/dgc \
   --signer-workflow OpenPeach-ai/dgc/.github/workflows/publish-dgc-sdk.yml
 ```
 
 PyPI shows the same provenance on the file's page, and
-`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.6.4-py3-none-any.whl`
+`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.6.5-py3-none-any.whl`
 checks it from the command line.
 
 The source tree also carries a checkout manifest: `sdk/sbom/SHA256SUMS` lists every SDK source
