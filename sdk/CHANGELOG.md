@@ -1,5 +1,13 @@
 # DGC SDK changelog
 
+## 0.6.6 — 2026-09-23
+
+Same contents as 0.6.5, which was tagged and built nothing: the signed checkout manifest was
+regenerated and then `npm install --package-lock-only` rewrote `sdk/typescript/package-lock.json`,
+a file the manifest covers, so the publish workflow's first step refused the tagged tree. That is
+the third release lost to a stale manifest. `tests/test_sdk_checkout_manifest.py` now runs the
+workflow's own verification locally, so it fails in a second rather than after a tag is public.
+
 ## 0.6.5 — 2026-09-23
 
 `@vibedgc/sdk` is on the npm registry: `npm install @vibedgc/sdk`. It was previously installable
