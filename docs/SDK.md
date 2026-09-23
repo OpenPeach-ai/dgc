@@ -6,8 +6,8 @@ answers its permission and question requests, and gets a structured result back.
 
 | Package | Version | Pairs with | Protocol | Runtime |
 | --- | --- | --- | --- | --- |
-| `dgc-sdk` (Python, PyPI) | **0.6.8** | CLI **0.43.4** | editor protocol v14 | Python 3.10+ |
-| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.6.8** | CLI **0.43.4** | editor protocol v14 | Node 22+ |
+| `dgc-sdk` (Python, PyPI) | **0.6.8** | CLI **0.44.0** | editor protocol v14 | Python 3.10+ |
+| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.6.8** | CLI **0.44.0** | editor protocol v14 | Node 22+ |
 
 Proven on Linux. macOS and WSL are unproven, and native Windows is experimental (custom tools need
 Unix sockets). The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
@@ -33,7 +33,7 @@ That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named
 unrelated library.
 
 The SDK does not contain the agent. It drives `dgc serve` from a DGC CLI install, so you also need
-the CLI (0.43.4 or newer, protocol v14):
+the CLI (0.44.0 or newer, protocol v14):
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -457,7 +457,7 @@ A run that fails does not raise: its `RunResult` has `status="failed"` and the r
 
 ### Constants
 
-`__version__` (`"0.6.8"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.43.4"`).
+`__version__` (`"0.6.8"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.44.0"`).
 
 ## Events
 

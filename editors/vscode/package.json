@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.28.4",
+  "version": "0.29.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -512,6 +512,12 @@
           "default": false,
           "scope": "window",
           "description": "Show a notification when a DGC turn longer than 20 seconds finishes while the DGC panel is not visible."
+        },
+        "dgc.linkFavicons": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show each site's own favicon beside a link you type in a prompt. The icon is fetched from Google's favicon service using only the link's origin, never its path or query. Turn this off to use bundled icons and make no network request."
         }
       }
     },
@@ -524,7 +530,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.43.4 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.44.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }
@@ -582,5 +588,5 @@
   "overrides": {
     "lodash-es": "^4.18.1"
   },
-  "dgcCliVersion": "0.43.4"
+  "dgcCliVersion": "0.44.0"
 }

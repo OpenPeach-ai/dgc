@@ -5179,7 +5179,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const mermaid = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "mermaid.js"));
     const agentMarks = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "agents"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
-    const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data:;`;
+    // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
+    // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
+    // markdown renderer never emits an <img> for model content -- it turns every image into a
+    // labelled link the user has to click. That renderer is the guarantee, and
+    // model-images-never-render.test.mjs is what holds it still now that the CSP no longer would.
+    const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: https:;`;
+    const favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) ? "on" : "off";
     const draftScope = this.draftScope();
     return `<!doctype html><html lang="en" data-draft-scope="${draftScope}"><head>
 <meta charset="utf-8">
@@ -5188,7 +5194,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
-</head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}">
+</head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
 <header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button></header>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>

@@ -24,7 +24,8 @@ ShellMode = Literal["sandboxed", "screened"]
 # DGC's internal tool name -> the display name its permission rules use. Mirrors
 # dgc.permissions.DISPLAY (a test keeps the two equal), minus the ExternalDirectory pseudo-tool.
 _DISPLAY = {
-    "read_file": "Read", "view_image": "ViewImage", "write_file": "Write", "edit_file": "Edit",
+    "read_file": "Read", "view_image": "ViewImage", "show_file": "ShowFile",
+    "write_file": "Write", "edit_file": "Edit",
     "multi_edit": "MultiEdit", "apply_patch": "ApplyPatch", "repo_map": "RepoMap",
     "code_intel": "CodeIntel", "git_diff": "GitDiff", "bash": "Bash", "bash_output": "BashOutput",
     "bash_kill": "BashKill", "python": "Python", "monitor": "Monitor", "monitor_stop": "MonitorStop",
@@ -45,7 +46,7 @@ _ALWAYS_OFFERED = frozenset({"propose_options", "ask_user"})
 _DISPLAY_TO_INTERNAL = {display.lower(): internal for internal, display in _DISPLAY.items()}
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "multi_edit", "apply_patch"})
-_READ_PATH_TOOLS = frozenset({"read_file", "view_image", "code_intel", "git_diff", "repo_map",
+_READ_PATH_TOOLS = frozenset({"read_file", "view_image", "show_file", "code_intel", "git_diff", "repo_map",
                               "grep", "glob"})
 _PATH_TOOLS = frozenset({*_READ_PATH_TOOLS, *_WRITE_TOOLS, "artifact"})
 # Tools that search a tree rather than open one path. A rule cannot say "this search covers a

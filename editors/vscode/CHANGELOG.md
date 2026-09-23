@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.29.0 — 2026-09-23
+
+- **Files the agent makes appear as chips you can click.** Ask it to record something or export a
+  report and the file shows up under the step that produced it, with its name, size and kind mark.
+  Clicking opens it in the editor. The chip carries a path, not the file, so size costs nothing.
+  Pairs with CLI 0.44.0, which adds the `show_file` tool the agent uses.
+
+- **Links wear the site's own favicon**, both in the prompts you type and in the agent's answers.
+  Only a link's origin is sent to fetch the icon — never its path or query — so a URL carrying a
+  token discloses its host and nothing else. Turn it off with `dgc.linkFavicons`.
+
+- **A URL you type in a prompt is now a link**, instead of plain text you had to select and copy.
+
+- **Fixed: a file named in an answer never showed its kind.** A duplicate rule of equal specificity
+  sat later in the stylesheet and won every cascade, so every file link drew one grey glyph and the
+  entire per-kind table — python, shell, json and twelve more — never reached the screen.
+
+- **Fixed: link text was below the readability minimum on both themes** (4.08:1 dark, 4.09:1 light,
+  against a 4.5:1 floor). Links now take a tone chosen per theme, and the system's own link colour
+  in high contrast. The underline under every link is gone; it appears on hover and on focus.
+
 ## 0.28.4 — 2026-09-23
 
 - Pairs with CLI 0.43.4. Nothing in the extension changed; the CLI floor it quotes did.

@@ -1,7 +1,7 @@
 # @vibedgc/sdk
 
 Node client for the DGC coding harness. It starts a managed `dgc serve` child with an isolated
-HOME and speaks editor protocol v14. Version 0.6.8 pairs with DGC CLI 0.43.4. Node 22 or newer.
+HOME and speaks editor protocol v14. Version 0.6.8 pairs with DGC CLI 0.44.0. Node 22 or newer.
 
 The package is on the npm registry. The identical tarball is also attached to the GitHub release
 `sdk-v0.6.8` as `vibedgc-sdk-0.6.8.tgz`, for installs that pin a checksum.
@@ -33,7 +33,7 @@ try {
 }
 ```
 
-The SDK needs a DGC CLI (0.43.4 or newer). It uses `DGC_PYTHON` when set, else the installed
+The SDK needs a DGC CLI (0.44.0 or newer). It uses `DGC_PYTHON` when set, else the installed
 `dgc` launcher (on `PATH` or `~/.local/bin/dgc`, where `curl -fsSL https://vibedgc.com/install.sh | bash`
 puts it), else `python3 -m dgc`. Pass `runtime: [...]` to choose explicitly.
 

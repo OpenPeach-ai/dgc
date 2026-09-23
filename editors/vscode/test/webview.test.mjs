@@ -1222,7 +1222,17 @@ test("CommonMark preserves semantic structure and only explicit safe navigation"
   assert.equal(doc.querySelectorAll(".text ol > li").length, 2);
   assert.equal(doc.querySelector(".text ol ul strong").textContent, "inputs");
   assert.match(doc.querySelector(".text blockquote").textContent, /Verified/);
-  assert.equal(doc.querySelector(".text img, .text script, .text a[href]"), null);
+  assert.equal(doc.querySelector(".text script, .text a[href]"), null);
+  // Links now carry the site's favicon, so "no <img> at all" would fail on our own mark. The
+  // guarantee is narrower and unchanged: nothing the MODEL named is ever fetched. The tracking
+  // image and the raw <img src=x> above must not render, and the favicon's src carries the
+  // origin only -- never `track.png`, never a path.
+  for (const img of doc.querySelectorAll(".text img")) {
+    assert.equal(img.className, "link-favicon", `only our own mark may render: ${img.outerHTML}`);
+    assert.ok(img.getAttribute("src").startsWith("https://www.google.com/s2/favicons?"));
+    assert.equal(img.getAttribute("src").includes("track.png"), false,
+      "a model-named image URL must never become something the panel fetches");
+  }
   assert.equal(posted.filter(m => ["openFile", "openExternal"].includes(m.type)).length, 0);
   doc.querySelector('.md-link[data-link-kind="file"]').click();
   assert.equal(posted.at(-1).path, "/project/src/app.ts");
@@ -1927,7 +1937,7 @@ test("the context meter's menu sets the context window, as Settings does", () =>
   assert.deepEqual(errors, []);
 });
 
-test("a link says where it goes, without fetching anything to find out", () => {
+test("a link says where it goes, and its mark discloses the host and nothing more", () => {
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
   event({ type: "ready", capabilities: {} });
@@ -1939,16 +1949,29 @@ test("a link says where it goes, without fetching anything to find out", () => {
     + "and [src/clamp.py](src/clamp.py)." });
   event({ type: "stream_end" });
 
+  // Classification still matters: it is what a link falls back to when the icon cannot load,
+  // when the host has none, and when dgc.linkFavicons is off. An external link parks it in
+  // data-link-fallback so the glyph and the favicon never draw at once.
   const sources = [...doc.querySelectorAll(".md-link")]
-    .map((a) => a.dataset.linkSource || `file:${a.dataset.linkKind}`);
+    .map((a) => a.dataset.linkSource || a.dataset.linkFallback || `file:${a.dataset.linkKind}`);
   assert.deepEqual(sources,
     ["github", "dgc", "marketplace", "openvsx", "web", "file:file"],
     "each link is classified by where it points");
 
-  // A favicon fetch would leak every URL a model mentions to whoever hosts it, and the panel's
-  // CSP forbids it. The marks must come from the bundled icon font only.
-  assert.equal(doc.querySelector(".md-link img"), null, "no image is fetched for a link mark");
-  assert.doesNotMatch(doc.body.innerHTML, /favicon|google\.com\/s2/, "no favicon service is used");
+  // This test used to assert that NOTHING was fetched for a link mark. That was DGC's policy and
+  // is no longer: links wear the site's real favicon, as they do in Codex, which the founder
+  // asked for after being shown what it discloses. What survives is the bound on the disclosure
+  // -- the icon service is asked about an ORIGIN, so a URL's path and query never leave, and the
+  // service fetches the site itself, so the site's operator sees Google rather than the reader.
+  const marks = [...doc.querySelectorAll(".md-link img.link-favicon")];
+  assert.equal(marks.length, 5, "every external link wears one, the workspace file does not");
+  for (const img of marks) {
+    const src = img.getAttribute("src");
+    assert.match(src, /^https:\/\/www\.google\.com\/s2\/favicons\?domain=/);
+    for (const secret of ["OpenPeach-ai", "itemName", "extension/vibedgc", "/x"]) {
+      assert.equal(src.includes(secret), false, `the mark must not carry ${secret}: ${src}`);
+    }
+  }
   assert.deepEqual(errors, []);
 });
 

@@ -60,5 +60,35 @@ class VendoredProtocolTests(unittest.TestCase):
                                  "reject a different set of messages than the CLI actually sends")
 
 
+class TypeScriptEventParityTests(unittest.TestCase):
+    """The TypeScript SDK keeps its own list of event names, and nothing compared the two.
+
+    It had already drifted once: `ask_request` and `ask_resolved` shipped in the CLI and were
+    missing from the TS tables, so a TS client silently DROPPED both. `KNOWN_EVENTS` is a
+    skip-list -- an event missing from it is not an error the user sees, it is an event that
+    quietly never arrives, which is the worst failure mode a protocol can have.
+    """
+
+    TS = PROJECT / "sdk" / "typescript" / "src" / "transport.ts"
+
+    def known_events(self) -> set[str]:
+        source = self.TS.read_text(encoding="utf-8")
+        block = re.search(r"KNOWN_EVENTS[^=]*=\s*new Set\(\[(.*?)\]\)", source, re.S)
+        self.assertIsNotNone(block, "KNOWN_EVENTS should still be a literal Set in transport.ts")
+        return set(re.findall(r'"([a-z_]+)"', block.group(1)))
+
+    def test_every_event_the_cli_sends_is_one_the_ts_sdk_keeps(self):
+        from dgc import editor_protocol as cli
+        missing = sorted(set(cli.EVENT_FIELDS) - self.known_events())
+        self.assertEqual(missing, [],
+                         "the TypeScript SDK would silently drop these events: " + ", ".join(missing))
+
+    def test_it_does_not_claim_events_the_cli_never_sends(self):
+        from dgc import editor_protocol as cli
+        extra = sorted(self.known_events() - set(cli.EVENT_FIELDS))
+        self.assertEqual(extra, [],
+                         "the TypeScript SDK lists events the CLI does not declare: " + ", ".join(extra))
+
+
 if __name__ == "__main__":
     unittest.main()

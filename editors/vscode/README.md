@@ -2,7 +2,7 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Use DGC CLI 0.43.4 or newer; this extension requires editor protocol v14. Run `dgc setup`, then use
+> Use DGC CLI 0.44.0 or newer; this extension requires editor protocol v14. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does

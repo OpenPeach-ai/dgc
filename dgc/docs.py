@@ -455,6 +455,49 @@ an active goal before starting a separate workflow. Unsupported subscription mod
 and invalid selections are rejected before starting a model request.
 """.strip()),
 
+    ("Produced files", "the agent shows you a file it made, as a chip you can click", """
+# Produced files
+
+When the agent makes something you asked to see — a screen recording, a screenshot,
+an exported report, a zip — it shows you the file itself rather than describing it.
+The file appears **as a chip under the step that produced it**. Click it and the file
+opens in the editor.
+
+- The chip carries the file's **name, size and kind mark** — the same mark a file
+  named in an answer wears, so a produced `.py` and a mentioned `.py` read alike.
+- **Nothing is copied into the conversation.** The chip carries a path, so a 300 MB
+  recording costs exactly what a one-line report costs, and the file never passes
+  through the model's context.
+- There is **no download button**, because the file is already on your machine. The
+  chip opens it where you would edit it.
+- At most **8 chips per step**, so one turn cannot bury the transcript.
+
+## How the agent does it
+
+The agent calls `show_file` with a workspace path and an optional caption:
+
+```
+show_file(path="out/demo.mp4", caption="the recording")
+```
+
+It is a way to show YOU a file, not a way for the model to read one — `read_file`
+and `view_image` do that. Because it never reads the file, size is irrelevant to it.
+
+`show_file` refuses, with a reason the agent can act on, when the path does not
+exist, names a directory, or sits outside the workspace — so you never get a chip
+that opens nothing.
+
+## In the terminal
+
+The terminal has no chips, so it prints each file's path and size instead. The agent
+is told the same thing either way: you can see the file.
+
+## If you do not see chips
+
+Chips need an extension new enough to render them; DGC negotiates this at startup
+and simply omits them for an older panel rather than sending something it cannot
+draw. Update the extension to get them back.
+""" ),
     ("Artifacts", "preview what the agent builds on a localhost URL", """
 # Artifacts
 
@@ -1719,7 +1762,7 @@ model-token spend your provider bills you.
 
 Current release: **dgc-sdk 0.6.8** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
 package `@vibedgc/sdk` 0.6.8, both tagged [`sdk-v0.6.8`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.8)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.43.4** over editor protocol
+(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.44.0** over editor protocol
 v14 and are proven on Linux. The full guide and API reference is
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.8/docs/SDK.md).
 

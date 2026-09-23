@@ -844,7 +844,8 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
                     bash_handle_tools, execute,
-                    shutdown_browsers, shutdown_python_kernels, take_pending_images)
+                    shutdown_browsers, shutdown_python_kernels, take_pending_images,
+                    take_pending_files)
 from . import image_views
 from .tools import VIEW_IMAGE_RELAY_SCHEMA, _image_entry, _vision_available, image_call_scope, reset_image_call
 
@@ -1054,6 +1055,12 @@ _HELD_SESSION_REMEDY = (
     "by itself within about 15 minutes. To carry on now, start a new session or close the "
     "other DGC window."
 )
+
+
+# How long to keep retrying after a holder agrees to stand down. It has to finish the step it is
+# on and save the session first, so the lease does not free the instant it says yes; the backend's
+# own shutdown grace is 20s, and this is that plus room for the write.
+_RECLAIM_WAIT_S = 25.0
 
 
 @dataclass
@@ -1314,6 +1321,9 @@ class _SubUI:
 
     def artifact_ready(self, art):
         return self._emit("artifact_ready", art)
+
+    def files_ready(self, call_id, items):
+        return self._emit("files_ready", call_id, items)
 
     def goal_changed(self, goal, status):
         self._emit("goal_changed", goal, status)
@@ -1601,6 +1611,8 @@ class Agent(GoalLifecycle):
         self._session_turn_lease = None
         self._session_turn_owner: int | None = None
         self._session_turn_depth = 0
+        self._held_session_note = None      # who held it when we last had to refuse, and
+        self._held_session_reason = ""      # what they said when asked to hand it over
         self._session_revision = 0
         self._session_exists = False
         self._last_persist_error = ""
@@ -3431,9 +3443,92 @@ class Agent(GoalLifecycle):
             self.steer_queue.clear()
         return [message for message in messages if message["text"].strip()]
 
+    # --------------------------------------------- reclaiming this session ---
+    def _session_holder(self):
+        """The peer note claiming this saved session, or None. Never raises: it is a courtesy."""
+        try:
+            from . import peers
+            return peers.session_holder(str(self.session_file or ""))
+        except Exception:
+            return None
+
+    def _reclaim_session_lease(self) -> tuple[float | None, str]:
+        """Ask whoever holds this session to hand it over.
+
+        Returns ``(wait_s, why)``. ``wait_s`` is how long the caller should keep retrying the
+        acquire -- ``None`` means do not bother, the holder is staying. ``why`` is what to tell
+        the person when it is staying, in the holder's own words.
+
+        Nothing here forces a lock away. The holder decides, because only the holder knows whether
+        anyone is still watching it; the worst case is the 15-minute self-heal we already had.
+        """
+        if not self.session_file:
+            return None, ""
+        note = self._session_holder()
+        if note is None:
+            # Nobody claims it. Either the holder died with the lease -- in which case the OS has
+            # already released it and this acquire raced the note's removal -- or it is a build
+            # that leaves no note. One more attempt costs nothing and is non-blocking.
+            return 0.0, ""
+        if not note.get("takeover"):
+            return None, ""              # an older DGC: it will never answer, so do not wait
+        pid = note.get("pid")
+        try:
+            from . import peers
+            if not peers.request_release(note, str(self.session_file)):
+                return None, ""
+            answer = None
+            deadline = time.monotonic() + peers.RELEASE_ANSWER_WAIT_S
+            while answer is None and time.monotonic() < deadline:
+                time.sleep(0.2)
+                answer = peers.release_answer(pid)
+            peers.forget_release(pid)
+        except Exception:
+            return None, ""
+        if answer is None:
+            return None, "it did not answer"
+        if answer.get("granted"):
+            # It is standing down, but standing down means finishing the step it is on and saving
+            # the session first, so the lease does not free the instant it agrees.
+            return _RECLAIM_WAIT_S, ""
+        return None, str(answer.get("reason") or "")
+
+    @staticmethod
+    def _retry_acquire(lease, wait_s: float) -> bool:
+        """One immediate retry, then keep trying for ``wait_s`` before giving up."""
+        if lease.acquire(blocking=False):
+            return True
+        deadline = time.monotonic() + max(0.0, float(wait_s))
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            if lease.acquire(blocking=False):
+                return True
+        return False
+
+    def _held_session_message(self, tail: str) -> str:
+        """Why the turn was refused, naming the holder and what it said when the registry knows."""
+        note = getattr(self, "_held_session_note", None)
+        reason = str(getattr(self, "_held_session_reason", "") or "")
+        if not isinstance(note, dict):
+            return ("This session has an active turn in another DGC process. "
+                    + _HELD_SESSION_REMEDY + " " + tail)
+        try:
+            from . import peers
+            who = peers.describe_holder(note)
+        except Exception:
+            return ("This session has an active turn in another DGC process. "
+                    + _HELD_SESSION_REMEDY + " " + tail)
+        said = f" It was asked to hand the session over and kept it: {reason}." if reason else ""
+        if str(note.get("kind") or "") == "tui":
+            return (f"This session is open in {who}.{said} Finish or close that terminal, or "
+                    f"start a new session here. {tail}")
+        return (f"This session is held by {who}.{said} A backend whose editor has gone releases "
+                f"the session by itself within about 15 minutes; to carry on now, start a new "
+                f"session or close the other DGC window. {tail}")
+
     # ------------------------------------------------------------- main loop ---
     @contextmanager
-    def _session_turn_scope(self, *, reentrant: bool = True):
+    def _session_turn_scope(self, *, reentrant: bool = True, reclaim: bool = False):
         """Reserve this saved session across processes for a turn or durable mutation.
 
         The OS owns crash recovery. Nested persistence on the owning thread is re-entrant without
@@ -3444,6 +3539,7 @@ class Agent(GoalLifecycle):
             return
         owner = threading.get_ident()
         entered = False
+        lease = None
         with self._session_turn_state_lock:
             if self._session_turn_lease is not None:
                 allowed = bool(reentrant and self._session_turn_owner == owner)
@@ -3462,6 +3558,20 @@ class Agent(GoalLifecycle):
                     self._session_turn_owner = owner
                     self._session_turn_depth = 1
                     entered = True
+        if reclaim and not allowed and not entered and lease is not None:
+            # DELIBERATELY outside the state lock. Reclaiming waits on another process -- for its
+            # answer, then for it to finish the step it is on and save -- and holding the
+            # in-process lock across that would stall every other thread that touches this
+            # session for half a minute. Nothing else can take the lease meanwhile: an acquire
+            # from another local thread fails against the same lock object.
+            self._held_session_note = self._session_holder()
+            wait_s, self._held_session_reason = self._reclaim_session_lease()
+            if wait_s is not None and self._retry_acquire(lease, wait_s):
+                with self._session_turn_state_lock:
+                    self._session_turn_lease = lease
+                    self._session_turn_owner = owner
+                    self._session_turn_depth = 1
+                    entered = allowed = True
         try:
             yield allowed
         finally:
@@ -3496,12 +3606,10 @@ class Agent(GoalLifecycle):
         # images: nothing an earlier turn or an idle editor action queued rides into this one.
         self._turn_images = []
         self._image_batch_open = False
-        with self._session_turn_scope(reentrant=False) as reserved:
+        with self._session_turn_scope(reentrant=False, reclaim=True) as reserved:
             if not reserved:
-                self._last_turn_error = self._last_persist_error = (
-                    "This session has an active turn in another DGC process. "
-                    + _HELD_SESSION_REMEDY
-                    + " No model request or workspace action was started.")
+                self._last_turn_error = self._last_persist_error = self._held_session_message(
+                    "No model request or workspace action was started.")
                 self.ui.error(self._last_turn_error)
                 return False
             if self.session_file:
@@ -3791,11 +3899,9 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = ""
         self._notes_reminded = set()   # a reminder is worth saying once per turn
-        with self._session_turn_scope(reentrant=False) as reserved:
+        with self._session_turn_scope(reentrant=False, reclaim=True) as reserved:
             if not reserved:
-                message = ("This session has an active turn in another DGC process. "
-                           + _HELD_SESSION_REMEDY
-                           + " No delegated process was started.")
+                message = self._held_session_message("No delegated process was started.")
                 self._last_turn_error = self._last_persist_error = message
                 self.ui.error(message)
                 return {"ok": False, "rc": None, "text": "", "error": message,
@@ -6415,6 +6521,7 @@ class Agent(GoalLifecycle):
             self.ui.tool_result(call.name, outputs[i], call.id)
             self._after_image_call(call.name, outputs[i])
             self._deliver_images(call.id, call.name, take_pending_images(owner, call.id))
+            self._deliver_files(call.id, take_pending_files(owner, call.id))
         return outputs
 
     def execute_mcp_tool(self, route: str, arguments: dict, call_id: str) -> str:
@@ -7043,10 +7150,12 @@ class Agent(GoalLifecycle):
         # An image cannot travel inside a text tool result. Drain it here, while we still know
         # which call produced it: the panel gets its own event, the model gets it after the batch.
         shots = take_pending_images(getattr(self.ctx, "tool_owner", ""))
-        reset_image_call(image_token)
+        shown = take_pending_files(getattr(self.ctx, "tool_owner", ""))
+        reset_image_call(image_token)   # both drains must precede this: they key on the call
         self._after_image_call(name, out)
         self._deliver_images(call_id, name, [*shots, *(entry for entry in mcp_images if entry)],
                              omitted=sum(1 for entry in mcp_images if entry is None))
+        self._deliver_files(call_id, shown)
         return out
 
     # ------------------------------------------------------------ viewed images ---
@@ -7179,6 +7288,24 @@ class Agent(GoalLifecycle):
             return
         self.image_views = [record for record in old_records
                             if record.compacted or record.anchor <= count]
+
+    def _deliver_files(self, call_id, entries) -> None:
+        """Show the user the files this call asked to show.
+
+        A chip is a courtesy: a frontend that has no idea what a produced file is, and any failure
+        inside one that does, must never cost the tool result that earned it.
+        """
+        items = [entry for entry in (entries or ())
+                 if isinstance(entry, dict) and entry.get("rel")]
+        if not items:
+            return
+        notify = getattr(self.ui, "files_ready", None)
+        if not callable(notify):
+            return
+        try:
+            notify(call_id, items)
+        except Exception:
+            pass
 
     def _deliver_images(self, call_id, name: str, entries, *, omitted: int = 0) -> None:
         """Record, store and show the images one call produced; queue them for the model only while

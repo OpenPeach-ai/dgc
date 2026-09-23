@@ -32,7 +32,8 @@ MODE_DESCRIPTIONS = {
 
 # internal tool name -> display name used in rules
 DISPLAY = {
-    "read_file": "Read", "view_image": "ViewImage", "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
+    "read_file": "Read", "view_image": "ViewImage", "show_file": "ShowFile",
+    "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
     "monitor": "Monitor", "monitor_stop": "MonitorStop",
@@ -49,6 +50,7 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 # which argument a rule's pattern is matched against
 RULE_ARG = {
     "bash": "command", "monitor": "command", "python": "code", "read_file": "path", "view_image": "path",
+    "show_file": "path",
     "write_file": "path",
     "edit_file": "path", "multi_edit": "path", "apply_patch": "path",
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path", "git_diff": "path",
@@ -59,7 +61,7 @@ RULE_ARG = {
     "external_directory": "path",
 }
 
-READ_ONLY_TOOLS = {"read_file", "view_image", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
+READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
                    "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule

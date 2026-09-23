@@ -61,8 +61,12 @@ test("every kind the classifier can return has a mark drawn for it", () => {
     assert.match(css, new RegExp(`\\[data-file-kind="${kind}"\\]`),
                  `${kind} has no mark, so it would silently fall back to the generic file glyph`);
   }
-  // And the generic one, so a classifier miss is never a bare link.
-  assert.match(css, /\.md-link\[data-file-kind\]::before/, "a default mark exists");
+  // And the generic one, so a classifier miss is never a bare link. The rule is shared by links
+  // and produced-file chips (`:is(.md-link, .chip.made-file)`) — it was scoped to `.md-link`
+  // alone, which left every chip with no glyph at all.
+  assert.match(css, /\[data-file-kind\]::before/, "a default mark exists");
+  assert.match(css, /:is\(\.md-link, \.chip\.made-file\)\[data-file-kind\]::before/,
+               "the default mark must cover BOTH surfaces that carry data-file-kind");
 });
 
 test("the full path stays in the hover label", () => {

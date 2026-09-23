@@ -18,6 +18,12 @@
   --muted:var(--vscode-descriptionForeground, var(--fallback-muted));
   --faint:var(--vscode-disabledForeground, var(--vscode-descriptionForeground, var(--fallback-faint)));
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
+  /* Links and their marks, which are body text and must clear 4.5:1 to be read comfortably.
+     --accent cannot do that job: at 4.08:1 on this panel's dark ground and 4.09:1 on its light
+     one it fails AA on BOTH, which is why a page of links read as harsh. No single purple fixes
+     it -- a tone light enough for the dark ground (6.5:1) collapses to 2.6:1 on the light one --
+     so the link tone follows the theme. */
+  --link:#A78BFA;                    /* on dark: 6.5:1 */
   --accent-hover:#6A4BF0; --lav:#A78BFA;
   --accent-soft:rgba(124,92,255,.12);
   /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
@@ -198,6 +204,7 @@ body[data-agent-page] #to-latest { display: none; }
     drop-shadow(0 1px 2px rgba(0,0,0,.58))
     drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 88%, transparent));
 }
+body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand's hue */
 body.vscode-light .agent-mark:not(:has(img)) {
   filter:
     drop-shadow(0 0 0.55px rgba(255,255,255,.95))
@@ -398,52 +405,77 @@ body.vscode-light, body.vscode-high-contrast-light {
 .text blockquote > :last-child, .surface-markdown blockquote > :last-child { margin-bottom: 0; }
 .text blockquote blockquote, .surface-markdown blockquote blockquote { margin-block: var(--sp-2); }
 .text hr, .surface-markdown hr { border: 0; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
-.md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-.md-link:hover { text-decoration-color: currentColor; }
+/* No rule under a link at rest. A permanent underline under every path and URL turned a paragraph
+   of an answer into a ladder of lines -- and the colour, the mark beside it and the pointer
+   already say it is a link. It appears on hover and on keyboard focus, where it confirms what is
+   about to be opened, which is the moment it is worth something. */
+.md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--link); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: none; text-underline-offset: 3px; }
+.md-link:hover, .md-link:focus-visible { text-decoration: underline; text-decoration-color: currentColor; }
 /* Where a link goes, shown beside it. Codicons are bundled with the panel, so naming the source
    costs no network request -- a favicon fetch would leak every URL a model mentions to whoever
    hosts it, and the panel's CSP forbids it anyway. */
 .md-link[data-link-source]::before {
   font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
   line-height: 1; display: inline-block; vertical-align: -1px;
-  margin-right: 4px; color: var(--muted); text-decoration: none;
+  margin-right: 4px; color: var(--link); text-decoration: none;
 }
 .md-link[data-link-source="github"]::before      { content: "\eba1"; }  /* github-inverted */
 .md-link[data-link-source="gitlab"]::before      { content: "\ea62"; }  /* repo */
-.md-link[data-link-source="dgc"]::before         { content: "\ea86"; color: var(--accent); }  /* zap, the panel’s own mark */
+.md-link[data-link-source="dgc"]::before         { content: "\ea86"; color: var(--link); }  /* zap, the panel’s own mark */
 .md-link[data-link-source="marketplace"]::before { content: "\eae6"; }  /* extensions */
 .md-link[data-link-source="openvsx"]::before     { content: "\eae6"; }
 .md-link[data-link-source="npm"]::before         { content: "\eb29"; }  /* package */
 .md-link[data-link-source="stackoverflow"]::before { content: "\eb01"; }  /* no brand glyph; globe */
+.md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe: the catch-all */
+
+/* Every external link wears the site's own favicon -- one the user typed and one an answer wrote
+   alike, which is how Codex reads. When the image cannot load, main.js puts the bundled mark back
+   (see data-link-fallback); the two are mutually exclusive by construction, because a link that
+   carries a favicon has no data-link-source for the rule above to match.
+   Sized to the text rather than to a fixed pixel count, so the mark keeps its proportion when the
+   panel's font scales, and baseline-aligned so a run of links does not look like it is bouncing. */
+.md-link .link-favicon {
+  width: 1.05em; height: 1.05em; margin-right: 5px; vertical-align: -0.17em;
+  border-radius: 3px; object-fit: contain; flex: none;
+}
 
 /* A file named in an answer wears its kind, the way Codex does, instead of spelling the
-   extension out mid-sentence. The full path stays in the hover label. Same bundled codicons. */
-.md-link[data-file-kind]::before {
+   extension out mid-sentence. The full path stays in the hover label. Same bundled codicons.
+   In the panel's own purple, the colour the file name beside it already uses: grey read as a
+   disabled or missing icon next to coloured text, which is what Codex gets right by giving each
+   kind a real brand colour. We cannot ship brand logos for every language, but one deliberate
+   colour that belongs to DGC beats a washed-out glyph. */
+:is(.md-link, .chip.made-file)[data-file-kind]::before {
   font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
   line-height: 1; display: inline-block; vertical-align: -1px;
-  margin-right: 4px; color: var(--muted); text-decoration: none;
+  margin-right: 4px; color: var(--link); text-decoration: none;
   content: "\ea7b";                                        /* file */
 }
-.md-link[data-file-kind="folder"]::before   { content: "\ea83"; }  /* folder */
-.md-link[data-file-kind="python"]::before   { content: "\ea80"; }  /* symbol-namespace */
-.md-link[data-file-kind="ts"]::before,
-.md-link[data-file-kind="js"]::before,
-.md-link[data-file-kind="code"]::before     { content: "\eb4d"; }  /* code */
-.md-link[data-file-kind="json"]::before,
-.md-link[data-file-kind="config"]::before   { content: "\eb51"; }  /* settings-gear */
-.md-link[data-file-kind="doc"]::before      { content: "\ea9c"; }  /* book */
-.md-link[data-file-kind="css"]::before,
-.md-link[data-file-kind="markup"]::before   { content: "\eb8b"; }  /* symbol-color */
-.md-link[data-file-kind="shell"]::before    { content: "\ea85"; }  /* terminal */
-.md-link[data-file-kind="image"]::before    { content: "\eb47"; }  /* file-media */
-.md-link[data-file-kind="database"]::before { content: "\ea7c"; }  /* database */
-.md-link[data-file-kind="archive"]::before  { content: "\eb29"; }  /* package */
-.md-link[data-file-kind="lock"]::before     { content: "\ea75"; }  /* lock */
-.md-link[data-link-source="web"]::before         { content: "\eb01"; }  /* globe */
-.md-link[data-link-kind="file"]::before {
-  font-family: codicon; content: "\ea7b"; font-size: var(--t-sm); margin-right: 4px;
-  color: var(--muted); display: inline-block; vertical-align: -1px; text-decoration: none;
-}
+:is(.md-link, .chip.made-file)[data-file-kind="folder"]::before   { content: "\ea83"; }  /* folder */
+:is(.md-link, .chip.made-file)[data-file-kind="python"]::before   { content: "\ea80"; }  /* symbol-namespace */
+:is(.md-link, .chip.made-file)[data-file-kind="ts"]::before,
+:is(.md-link, .chip.made-file)[data-file-kind="js"]::before,
+:is(.md-link, .chip.made-file)[data-file-kind="code"]::before     { content: "\eb4d"; }  /* code */
+:is(.md-link, .chip.made-file)[data-file-kind="json"]::before,
+:is(.md-link, .chip.made-file)[data-file-kind="config"]::before   { content: "\eb51"; }  /* settings-gear */
+:is(.md-link, .chip.made-file)[data-file-kind="doc"]::before      { content: "\ea9c"; }  /* book */
+:is(.md-link, .chip.made-file)[data-file-kind="css"]::before,
+:is(.md-link, .chip.made-file)[data-file-kind="markup"]::before   { content: "\eb8b"; }  /* symbol-color */
+:is(.md-link, .chip.made-file)[data-file-kind="shell"]::before    { content: "\ea85"; }  /* terminal */
+:is(.md-link, .chip.made-file)[data-file-kind="image"]::before    { content: "\eb47"; }  /* file-media */
+:is(.md-link, .chip.made-file)[data-file-kind="database"]::before { content: "\ea7c"; }  /* database */
+:is(.md-link, .chip.made-file)[data-file-kind="archive"]::before  { content: "\eb29"; }  /* package */
+:is(.md-link, .chip.made-file)[data-file-kind="lock"]::before     { content: "\ea75"; }  /* lock */
+/* Files the model made and asked to show, as chips under the step that made them. The kind mark
+   comes from the same [data-file-kind] table a file link uses, so a produced .py and a mentioned
+   .py read as the same kind of thing. No download button: the file is already on this machine,
+   which is why neither Codex nor Claude Code's extension offers one either. */
+.made-files { display: flex; flex-wrap: wrap; gap: var(--sp-1); list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+.chip.made-file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.chip.made-file .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.made-file .chip-size { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+.chip.made-file[data-file-kind]::before { vertical-align: -1px; margin-right: 0; }
+
 /* The row under a finished answer: copy, rate, branch, run again, edit and resend. Quiet until
    hovered, because it sits under every response and must never compete with the answer. */
 .response-actions { display: flex; align-items: center; gap: var(--sp-1); margin-top: var(--sp-2); opacity: .62; transition: opacity .12s; }
@@ -1258,7 +1290,7 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
     --bg:Canvas; --surface:Canvas; --surface2:ButtonFace; --code:Canvas; --term:Canvas;
     --border:CanvasText; --border-strong:CanvasText;
     --text:CanvasText; --text-strong:CanvasText; --muted:CanvasText; --faint:GrayText;
-    --accent:Highlight; --accent-text:LinkText; --accent-fill:Highlight;
+    --accent:Highlight; --accent-text:LinkText; --accent-fill:Highlight; --link:LinkText;
     --accent-hover:Highlight; --lav:LinkText;
     --accent-soft:transparent; --good:CanvasText; --good-soft:transparent;
     --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;

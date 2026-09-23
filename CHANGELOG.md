@@ -4,6 +4,39 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.44.0 — 2026-09-23
+
+- **A refusal to take a session now names who is holding it, and can ask for it back.** A window
+  whose editor closed mid-turn held its session's lease indefinitely: the watchdog that ends an
+  abandoned backend counts "a turn is running" as work worth keeping alive, so every new window was
+  told only that "another DGC process has an active turn". DGC now consults the peer registry, says
+  which window holds it and whether it is idle or working, and — when that holder is one of ours
+  whose own editor has gone — asks it to stand down and takes the session. The holder always
+  decides: nothing forces a lock, signals a process or deletes a lease, a terminal DGC never hands
+  a session over, and the 15-minute self-heal remains the floor. A DGC running in a terminal also
+  announces itself now, so it can be named instead of being invisible.
+
+- **`show_file`: the agent shows you a file it made.** Ask for a recording, a screenshot or an
+  export and it appears as a chip under the step that produced it; click it and the file opens in
+  the editor. The chip carries a path rather than the file, so a 300 MB recording costs what a
+  one-line report costs and never enters the model's context. At most eight per step, and
+  `show_file` refuses — with a reason the agent can act on — for a path that is missing, names a
+  directory, or sits outside the workspace.
+
+- **Links wear the site's own favicon**, in prompts you type and in the agent's answers alike. The
+  icon is fetched by origin only, so a URL's path and query never leave the machine; set
+  `dgc.linkFavicons` to `false` to use bundled marks and make no request at all.
+
+- **Fixed: a file named in an answer never showed its kind.** A duplicate stylesheet rule of equal
+  specificity sat later in the file and won every cascade, so a `.py`, a `.sh` and a `.json` all
+  drew the same grey glyph and the whole per-kind table was dead code. The classification had
+  always been correct, which is why no test saw it.
+
+- **Fixed: link text failed contrast on both themes.** The accent used for links scored 4.08:1 on
+  the dark panel and 4.09:1 on the light one, under the 4.5:1 minimum for body text. Links now take
+  a theme-aware tone — 6.5:1 on dark, 5.3:1 on light — and the system's own link colour under
+  forced colours. The permanent underline is gone; it appears on hover and on keyboard focus.
+
 ## 0.43.4 — 2026-09-23
 
 - **A killed DGC no longer reads as a live peer on macOS.** 0.43.3 fixed the pid-identity check

@@ -46,9 +46,15 @@ export function linkTarget(value: string): LinkTarget | undefined {
     ...(line && Number.isSafeInteger(line) ? { line } : {}) } : undefined;
 }
 
-// Which source a link points at, for the mark shown beside it. Bundled icons only: fetching a
-// favicon would mean a network request per link, which the panel's CSP forbids and which would
-// leak every URL a model mentions to whoever hosts it.
+// Which source a link points at. These bundled codicons cost no network and are what a link
+// falls back to: when favicons are switched off, when the icon service cannot be reached, and
+// when it has nothing for that host.
+//
+// They used to be the ONLY mark model output got, on the reasoning that a link a model wrote is
+// not a link the user chose. Codex does not draw that line -- a link in one of its answers wears
+// the site's real favicon -- and the founder asked for that behaviour, having been shown what it
+// discloses. The disclosure is bounded: the icon service is asked about an ORIGIN, it fetches the
+// site itself, so the site's operator sees a hit from Google rather than from the reader.
 const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(^|\.)github\.com$/i, "github"],
   [/(^|\.)gitlab\.com$/i, "gitlab"],
@@ -79,6 +85,24 @@ const FILE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\.(lock|sum)$/i, "lock"],
 ];
 
+// The favicon for a link the USER typed. Codex's mechanism exactly: Google's icon service, keyed
+// on the ORIGIN alone, so the path, query and fragment of the link never leave the machine -- a
+// URL carrying a token in it discloses only its host. The trade Codex makes, and we make with it,
+// is that Google learns that host. Never called for model output, which keeps the bundled marks.
+// Off switches every favicon in the panel at once, model output included, so `dgc.linkFavicons`
+// means what it says: no request leaves this machine for an icon.
+let faviconsEnabled = true;
+export function setFavicons(on: boolean): void { faviconsEnabled = !!on; }
+export function faviconsOn(): boolean { return faviconsEnabled; }
+
+export function faviconUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url.origin)}&sz=32`;
+  } catch { return; }
+}
+
 export function fileKind(target: string): string {
   const name = String(target || "").replace(/[\\/]+$/, "");
   if (!name) return "file";
@@ -102,10 +126,20 @@ parser.renderer.rules.link_open = (tokens, index) => {
   const target = linkTarget(String(tokens[index].attrGet("href") || ""));
   if (!target) return "<span>";
   const location = target.line ? ` data-line="${target.line}"` : "";
-  const source = target.kind === "external"
-    ? ` data-link-source="${linkSource(target.target)}"`
-    : ` data-file-kind="${fileKind(target.target)}"`;
-  return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location}${source} title="${escape(target.target)}">`;
+  if (target.kind !== "external") {
+    return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location}`
+         + ` data-file-kind="${fileKind(target.target)}" title="${escape(target.target)}">`;
+  }
+  const mark = linkSource(target.target);
+  const icon = faviconsEnabled ? faviconUrl(target.target) : undefined;
+  // With a favicon the bundled glyph must NOT also render, so the mark travels as
+  // data-link-fallback instead -- inert to the CSS until the one global error handler in main.js
+  // promotes it, which is what happens when the image cannot load.
+  const attr = icon ? ` data-link-fallback="${mark}"` : ` data-link-source="${mark}"`;
+  const img = icon
+    ? `<img class="link-favicon" src="${escape(icon)}" alt="" aria-hidden="true" referrerpolicy="no-referrer">`
+    : "";
+  return `<button type="button" class="md-link" data-link-kind="external" data-target="${escape(target.target)}"${location}${attr} title="${escape(target.target)}">${img}`;
 };
 parser.renderer.rules.link_close = () => "</button>";
 parser.renderer.rules.image = (tokens, index) => {

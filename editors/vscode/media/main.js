@@ -742,6 +742,9 @@
   function speak(message) { if (replaying) return; announcer.textContent = String(message || ""); }
 
   // One CommonMark renderer for live answers, history, skills, and documentation.
+  // The renderer builds an HTML string, so it cannot read the setting per call. Tell it once,
+  // before anything renders, or `dgc.linkFavicons: false` would still emit an <img> per link.
+  DgcMarkdown.setFavicons?.(document.body.dataset.linkFavicons !== "off");
   const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   // ---- hover labels ----
@@ -1094,8 +1097,78 @@
       bubble.appendChild(row);
     }
     const body = String(text || "");
-    if (body || !items.length) bubble.appendChild(el("div", "prompt-text", esc(body)));
+    if (body || !items.length) bubble.appendChild(promptText(body));
   }
+  // A URL the user typed is a link they can open, not grey text to select and copy by hand.
+  //
+  // Built out of DOM nodes rather than an escaped HTML string: this is verbatim user input, and
+  // the one place in the panel where getting escaping wrong would be an injection instead of a
+  // cosmetic bug. textContent is byte-identical to what the old `esc(body)` produced, which is
+  // what bubbleProse() compares against to avoid echoing a prompt twice.
+  //
+  // The trailing class excludes sentence punctuation, so "see https://vibedgc.com." does not
+  // swallow the full stop and "(https://x.dev)" does not swallow the bracket.
+  const PROMPT_URL = /https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/gi;
+  function promptText(body) {
+    const host = el("div", "prompt-text");
+    const text = String(body || "");
+    let at = 0;
+    for (const match of text.matchAll(PROMPT_URL)) {
+      if (match.index > at) host.appendChild(document.createTextNode(text.slice(at, match.index)));
+      host.appendChild(promptLink(match[0]));
+      at = match.index + match[0].length;
+    }
+    if (at < text.length) host.appendChild(document.createTextNode(text.slice(at)));
+    return host;
+  }
+  function promptLink(raw) {
+    const target = window.DgcMarkdown?.linkTarget?.(raw);
+    if (!target || target.kind !== "external") return document.createTextNode(raw);
+    // The same element, class and delegated click handler an answer's links use, so there is
+    // still exactly ONE route out of the panel and the extension host re-validates it there.
+    const link = el("button", "md-link prompt-link");
+    link.type = "button";
+    link.dataset.linkKind = "external";
+    link.dataset.target = target.target;
+    link.title = target.target;
+    const mark = window.DgcMarkdown.linkSource(target.target);
+    const icon = promptFavicon(target.target, link, mark);
+    if (icon) link.appendChild(icon); else link.dataset.linkSource = mark;
+    link.appendChild(document.createTextNode(raw));
+    return link;
+  }
+  function promptFavicon(url, link, mark) {
+    if (!faviconsEnabled()) return null;
+    const src = window.DgcMarkdown?.faviconUrl?.(url);
+    if (!src) return null;
+    const img = el("img", "link-favicon");
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    img.referrerPolicy = "no-referrer";
+    // The mark travels as a fallback rather than rendering now: the global handler below puts it
+    // back if the image cannot load. Setting data-link-source here would draw BOTH.
+    link.dataset.linkFallback = mark;
+    img.src = src;
+    return img;
+  }
+  function faviconsEnabled() { return document.body.dataset.linkFavicons !== "off"; }
+  // ONE fallback for every favicon in the panel, wherever it came from -- a link the user typed,
+  // a link in an answer, a link in a skill's documentation. `error` does not bubble, but it does
+  // capture, so a single listener at the document catches every one without the renderer having
+  // to attach a closure per image (it cannot: the markdown path builds an HTML string).
+  //
+  // A blank gap where a link's mark should be is worse than no favicon at all: when the icon
+  // service is unreachable, blocked, or has nothing for that host, the bundled glyph comes back.
+  document.addEventListener("error", (event) => {
+    const img = event.target;
+    if (!img || img.tagName !== "IMG" || !img.classList?.contains("link-favicon")) return;
+    const link = img.closest?.(".md-link");
+    img.remove();
+    if (link) {
+      link.dataset.linkSource = link.dataset.linkFallback || "web";
+      delete link.dataset.linkFallback;
+    }
+  }, true);
   function promptAttachmentChip(item, images, bubble) {
     if (item.img) {
       const record = {
@@ -1125,6 +1198,32 @@
     chip.setAttribute("aria-label", `Open attachment ${label}`);
     chip.onclick = () => openPromptAttachment(item);
     return chip;
+  }
+  function producedFileChip(item) {
+    const rel = String(item.rel || "");
+    const name = String(item.name || rel.split("/").pop() || "file");
+    const chip = el("button", "chip made-file");
+    chip.type = "button";
+    // The same kind mark a file link wears, from the same table, so a produced .py and a
+    // mentioned .py look like the same kind of thing.
+    chip.dataset.linkKind = "file";
+    chip.dataset.fileKind = window.DgcMarkdown?.fileKind?.(rel) || "file";
+    chip.appendChild(el("span", "chip-label", esc(name)));
+    const size = Number(item.bytes) || 0;
+    if (size) chip.appendChild(el("span", "chip-size", esc(humanSize(size))));
+    const caption = String(item.caption || "");
+    const label = caption ? `${name} — ${caption}` : name;
+    chip.title = `${rel}${caption ? ` — ${caption}` : ""}`;
+    chip.setAttribute("aria-label", `Open ${label}`);
+    // The extension host re-validates the path; the webview never opens anything itself.
+    chip.onclick = () => vscode.postMessage({ type: "openFile", path: rel });
+    return chip;
+  }
+  function humanSize(bytes) {
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes, unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
   }
   function openPromptAttachment(item) {
     if (item.pasted) { openTextAttachment("Pasted text", item.pasted); return; }
@@ -3440,6 +3539,24 @@
       case "agent_updated": applyAgentEvent(ev); break;
       case "agent_ended": applyAgentEvent(ev); break;
       case "agents": renderAgentsSnapshot(ev); break;
+      case "files_ready": {
+        // A file the model made, as a chip under the step that made it. Codex's model exactly:
+        // the event carries a PATH, and clicking asks the editor to open it -- no bytes cross the
+        // protocol, so a 300 MB recording chips just as cheaply as a one-line report.
+        const items = Array.isArray(ev.items) ? ev.items.filter((f) => f && f.rel) : [];
+        if (!items.length) break;
+        ensureTurn();
+        const row = el("ul", "made-files");
+        row.setAttribute("role", "list");
+        row.setAttribute("aria-label", "Files produced");
+        for (const item of items.slice(0, 8)) {
+          const li = el("li");
+          li.appendChild(producedFileChip(item));
+          row.appendChild(li);
+        }
+        appendTurnContent(row); breakText();
+        break;
+      }
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
@@ -7600,7 +7717,7 @@
     const bubble = el("div", "bubble");
     // The question goes in the bubble because the card that asked it is about to disappear.
     bubble.appendChild(el("p", "answered-q", esc(ask.question)));
-    bubble.appendChild(el("div", "prompt-text", esc(text)));
+    bubble.appendChild(promptText(text));
     m.appendChild(bubble); log.appendChild(m); settleBlock(m);
     pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId,

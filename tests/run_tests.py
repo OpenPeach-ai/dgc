@@ -11462,14 +11462,17 @@ def test_benchmark_integrity():
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
                            "present_plan", "propose_options", "ask_user", "python", "update_goal"}
-        # Measured at 6,222 on this release (the Environment line's timezone is 7 of them);
-        # the ceiling is a bloat gate, not a target.
+        # Measured at 6,376 on this release (6,222 before `show_file`; the Environment line's
+        # timezone is 7 of them). The ceiling is a bloat gate, not a target -- it earned its keep
+        # on 0.44.0, where `show_file`'s first description cost 206 tokens and pushed the total to
+        # 6,428. The fix was a shorter description, not a higher ceiling. Headroom is thin now:
+        # the next tool should arrive with a one-line description or a deliberate raise.
         _PROBE_TOKEN_CEILING = 6400
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
               and set(_prompt_probe.get("active_skills") or []) == _bundled_skill_names
-              and len(_prompt_probe.get("tools", [])) == 22
+              and len(_prompt_probe.get("tools", [])) == 23
               and ({tool.get("name") for tool in _prompt_probe.get("tools", [])}
                    == {t["function"]["name"] for t in _options_tool_schemas} - _probe_withheld)
               and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING
@@ -11515,7 +11518,7 @@ def test_benchmark_integrity():
                 _unguarded_names = {tool.get("name") for tool in _PS.run_probe().get("tools", [])}
         check("benchmark probe never offers questions",
               _PS._QuietUI.non_interactive is True
-              and len(_guarded_probe.get("tools", [])) == 22
+              and len(_guarded_probe.get("tools", [])) == 23
               and "propose_options" not in {tool.get("name") for tool in _guarded_probe.get("tools", [])}
               and "propose_options" in _unguarded_names
               and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING,

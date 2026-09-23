@@ -129,6 +129,11 @@ TOOL_SCHEMAS = [
         "8 MB) when the task depends on what it shows: a screenshot, mockup, diagram, icon or "
         "rendered output. The image is attached for you to see after this batch.",
         {"path": {"type": "string"}}, ["path"]),
+    _fn("show_file", "Show the user a file you made (recording, screenshot, export) as a chip they "
+        "can click to open. Any size; costs no context. Does not let YOU read the file.",
+        {"path": {"type": "string"},
+         "caption": {"type": "string", "description": "Short label, e.g. 'the recording'"}},
+        ["path"]),
     _fn("write_file", "Create or completely overwrite a file. Parent dirs are created.",
         {"path": {"type": "string"}, "content": {"type": "string", "description": "Full file content"}},
         ["path", "content"]),
@@ -2197,6 +2202,25 @@ def _queue_image(owner: str, entry: dict) -> None:
         _PENDING_IMAGES.setdefault((owner, _IMAGE_CALL.get()), []).append(entry)
 
 
+# Files the model produced and asked to show. Queued exactly like images, on the same call key, so
+# a chip lands under the step that made it. Unlike an image this carries NO BYTES: a recording can
+# be hundreds of megabytes and the protocol frame ceiling is 4 MiB. The panel gets a path and asks
+# the editor to open it, which is what Codex does and what an editor is for.
+_PENDING_FILES: dict = {}
+
+
+def take_pending_files(owner: str, call_key: str | None = None) -> list:
+    """Drain the files queued by one call. Each entry: name, rel, bytes. Never raises."""
+    key = (owner, _IMAGE_CALL.get() if call_key is None else str(call_key))
+    with _BROWSERS_LOCK:
+        return _PENDING_FILES.pop(key, [])
+
+
+def _queue_file(owner: str, entry: dict) -> None:
+    with _BROWSERS_LOCK:
+        _PENDING_FILES.setdefault((owner, _IMAGE_CALL.get()), []).append(entry)
+
+
 def _screenshot_dir(ctx) -> Path:
     """Where browser screenshots are kept: DGC's own folder, never part of the user's changes.
 
@@ -3779,6 +3803,56 @@ def _view_image_bytes(p: Path, data: bytes, ctx, *, source: str) -> str:
             "The image follows this batch, so you can look at it directly.")
 
 
+MAX_SHOWN_FILES = 8
+
+
+def show_file(args: dict, ctx) -> str:
+    """Put a file the model produced in front of the user as a chip they can click.
+
+    Deliberately path-only. `view_image` exists to let the MODEL look at an image; this exists to
+    let the USER look at anything, including the 300 MB screen recording that no tool could ever
+    put in a protocol frame.
+    """
+    raw = str(args.get("path", ""))
+    if not raw.strip():
+        return "error: path is required"
+    try:
+        p = _resolve(raw, ctx.project_root, allow_external=_allow_external(args))
+    except WorkspaceBoundaryError:
+        # The generic executor would surface this as "error: WorkspaceBoundaryError: ...". Say
+        # what to do instead, because the model can act on that and cannot act on a class name.
+        return (f"error: {raw} is outside this workspace, so the editor cannot be asked to open "
+                "it. Copy it into the workspace first, then show it.")
+    try:
+        info = os.lstat(p)
+    except FileNotFoundError:
+        return (f"error: no such file: {p}. Only show a file that exists — a chip for a missing "
+                "file is worse than no chip.")
+    except OSError as e:
+        return f"error: {e}"
+    if stat.S_ISDIR(info.st_mode):
+        return f"error: {p} is a directory; show a file, or say what is in the directory instead"
+    if not stat.S_ISREG(info.st_mode):
+        return f"error: {p} is not a regular file"
+    root = Path(ctx.project_root).resolve(strict=False)
+    try:
+        rel = p.relative_to(root).as_posix()
+    except ValueError:
+        return (f"error: {p} is outside this workspace, so the editor cannot be asked to open it. "
+                "Copy it into the workspace first.")
+    owner = _tool_owner(ctx)
+    with _BROWSERS_LOCK:
+        already = len(_PENDING_FILES.get((owner, _IMAGE_CALL.get()), []))
+    if already >= MAX_SHOWN_FILES:
+        return (f"error: already showing {MAX_SHOWN_FILES} files for this step; "
+                "say what the rest are instead of showing every one")
+    caption = str(args.get("caption") or "")[:200]
+    _queue_file(owner, {"name": p.name, "rel": rel, "bytes": int(info.st_size),
+                        "caption": _safe_output(caption, ctx) if caption else ""})
+    return (f"Showing {_safe_output(rel, ctx)} ({image_views.human_size(info.st_size)}) to the user as a chip "
+            "in the chat; they can click it to open it. Do not also paste its contents.")
+
+
 def present_document(args: dict, ctx) -> str:
     """Render only supplied text, in a private directory; never expose a project folder."""
     from .artifacts import serve_document
@@ -3796,6 +3870,7 @@ def present_document(args: dict, ctx) -> str:
 
 EXECUTORS = {
     "present_document": present_document,
+    "show_file": show_file,
     "read_file": read_file, "view_image": view_image, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,

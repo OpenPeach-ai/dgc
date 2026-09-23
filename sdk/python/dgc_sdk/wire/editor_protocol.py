@@ -171,6 +171,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "todos": {"todos": _A()},
     "artifact_ready": {"id": _S(), "name": _S(), "url": _S(), "rel": _S()},
+    # v14: files the model produced and asked to show, as chips under the step that made them.
+    # A PATH, never bytes -- a screen recording is orders of magnitude past the 4 MiB frame
+    # ceiling, and the editor already knows how to open a file. ``items[i]`` = {name, rel, bytes,
+    # caption}; ``rel`` is workspace-relative and the panel re-validates it before opening.
+    "files_ready": {"call_id": _NS(False), "items": _A(), "caption": _S(False)},
     "goal_changed": {
         "goal": _S(),
         "status": _f("string", enum=("none", "active", "paused", "completed", "blocked")),

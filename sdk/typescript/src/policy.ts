@@ -20,7 +20,7 @@ import type {
 // DGC's internal tool name -> the display name its permission rules use. Mirrors
 // dgc.permissions.DISPLAY, minus the ExternalDirectory pseudo-tool.
 export const DISPLAY: Readonly<Record<string, string>> = {
-  read_file: "Read", view_image: "ViewImage", write_file: "Write", edit_file: "Edit",
+  read_file: "Read", view_image: "ViewImage", show_file: "ShowFile", write_file: "Write", edit_file: "Edit",
   multi_edit: "MultiEdit", apply_patch: "ApplyPatch", repo_map: "RepoMap",
   code_intel: "CodeIntel", git_diff: "GitDiff", bash: "Bash", bash_output: "BashOutput",
   bash_kill: "BashKill", python: "Python", monitor: "Monitor", monitor_stop: "MonitorStop",
@@ -40,13 +40,13 @@ const DISPLAY_TO_INTERNAL: Readonly<Record<string, string>> = Object.fromEntries
   Object.entries(DISPLAY).map(([internal, display]) => [display.toLowerCase(), internal]));
 
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "apply_patch"]);
-const READ_PATH_TOOLS = new Set(["read_file", "view_image", "code_intel", "git_diff", "repo_map", "grep", "glob"]);
+const READ_PATH_TOOLS = new Set(["read_file", "view_image", "show_file", "code_intel", "git_diff", "repo_map", "grep", "glob"]);
 const PATH_TOOLS = new Set([...READ_PATH_TOOLS, ...WRITE_TOOLS, "artifact"]);
 // Tools that search a tree rather than open one path; with a denied path inside a readable tree
 // they become permission requests the SDK answers from the search root.
 const SEARCH_TOOLS = new Set(["grep", "glob", "repo_map", "code_intel", "git_diff"]);
 // Rules match these tools' `path` argument, in absolute and project-relative spellings.
-const PATH_RULE_TOOLS = ["Read", "ViewImage", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
+const PATH_RULE_TOOLS = ["Read", "ViewImage", "ShowFile", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
   "CodeIntel", "GitDiff"];
 const NETWORK_TOOLS = ["WebFetch", "WebSearch", "Browser", "AddSkill"];
 const APP_SERVER = "app";

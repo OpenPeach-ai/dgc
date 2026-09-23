@@ -649,6 +649,10 @@ class UI:
     def artifact_ready(self, art) -> None:
         self.info(f"artifact ready: {art.name} · {art.url}")
 
+    def files_ready(self, call_id, items) -> None:
+        for item in items:
+            self.info(f"file ready: {item.get('rel') or item.get('name')}")
+
     def goal_changed(self, goal: str, status: str) -> None:
         self.info(f"standing goal → {status}: {goal[:120]}")
 

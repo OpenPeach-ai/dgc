@@ -515,6 +515,8 @@ class TUI:
         self._arcade_scores = None          # lazy owner-private high scores; never enters a session
         self._refresh_task = None           # adaptive 12.5/20 FPS asyncio UI pulse
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
+        self._peer_thread = None           # peer-registry note + takeover answers (started by run)
+        self._peer_stop = None
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
             self._render_history()
@@ -4211,6 +4213,27 @@ class TUI:
 
     def goal_changed(self, goal: str, status: str) -> None:
         self._flash(f"standing goal → {status}: {goal[:70]}")
+
+    def files_ready(self, call_id, items) -> None:
+        """Name the files the model asked to show. A terminal cannot chip them, but it must not
+        stay silent either: the model has been told the user can see them."""
+        from rich.text import Text
+        from .image_views import human_size
+        th = style_mod.theme()
+        for item in items:
+            rel = str(item.get("rel") or item.get("name") or "")
+            if not rel:
+                continue
+            line = Text()
+            line.append("  \u25b8 ", style=f"bold {th.accent}")
+            line.append(style_mod.terminal_safe_text(rel), style=f"bold {th.text_strong}")
+            size = int(item.get("bytes") or 0)
+            if size:
+                line.append(f"   {human_size(size)}", style=th.muted)
+            caption = str(item.get("caption") or "")
+            if caption:
+                line.append(f"   {style_mod.terminal_safe_text(caption)}", style=th.faint)
+            self._append(self._rich(line))
 
     def artifact_ready(self, art) -> None:
         """Propose opening a freshly-served localhost artifact, right in the transcript."""
@@ -8108,6 +8131,81 @@ class TUI:
             target=work, name=f"dgc-shell-{sess.id}", daemon=True)
         sess._worker_thread.start()
 
+    # ------------------------------------------------------- peer registry ---
+    # A terminal DGC used to be invisible: only `dgc serve` left a note, so an editor window that
+    # found its session locked could not even say who was holding it, let alone ask for it back.
+    def _announce_peer(self, status: str = "idle") -> None:
+        """Leave (or refresh) this terminal's note. Best effort; never fails a turn."""
+        try:
+            from . import peers as _peers
+            agent = self.agent
+            root = str(getattr(self.config, "project_root", "") or "")
+            _peers.announce(
+                kind="tui",
+                session=str(getattr(agent, "session_file", "") or ""),
+                cwd=root, project_root=root,
+                git_common_dir=(agent._git_common_dir()
+                                if hasattr(agent, "_git_common_dir") else ""),
+                status=status, takeover=True)
+        except Exception:
+            pass
+
+    def _peer_busy(self) -> bool:
+        for sess in list(getattr(self, "_sessions", ())):
+            thread = getattr(sess, "_worker_thread", None)
+            if thread is not None and thread.is_alive():
+                return True
+        return False
+
+    def _consider_release(self) -> None:
+        """Answer a window asking for this session -- always no, and say why.
+
+        A running terminal has a person in front of it. Unlike an editor backend, nothing here can
+        tell us they have walked away, so this end never hands a session over; it answers at once
+        so the asker can name this window instead of leaving them to guess at a 15-minute wait.
+        """
+        try:
+            from . import peers as _peers
+            session = str(getattr(self.agent, "session_file", "") or "")
+            if session and _peers.pending_release(session) is not None:
+                _peers.answer_release(
+                    granted=False,
+                    reason="it is open in a DGC terminal, which does not hand sessions over")
+        except Exception:
+            pass
+
+    def _start_peer_heartbeat(self) -> None:
+        if getattr(self, "_peer_thread", None) is not None:
+            return
+        from .peers import TICK_S, ANNOUNCE_EVERY
+        stop = threading.Event()
+        self._peer_stop = stop
+        self._announce_peer("idle")
+
+        def beat() -> None:
+            ticks = 0
+            while not stop.wait(TICK_S):
+                ticks += 1
+                if ticks % ANNOUNCE_EVERY == 0:
+                    self._announce_peer("working" if self._peer_busy() else "idle")
+                try:
+                    self._consider_release()
+                except Exception:
+                    pass
+        thread = threading.Thread(target=beat, name="dgc-peer-heartbeat", daemon=True)
+        self._peer_thread = thread
+        thread.start()
+
+    def _stop_peer_heartbeat(self) -> None:
+        try:
+            stop = getattr(self, "_peer_stop", None)
+            if stop is not None:
+                stop.set()
+            from . import peers as _peers
+            _peers.withdraw()      # a clean exit leaves no note; a crash leaves one to expire
+        except Exception:
+            pass
+
     def _shutdown_fleet(self) -> None:
         """Cancel all workers and preserve every managed checkout before the TUI process exits."""
         self._pane = None  # no external resources, but make the process-local lifetime explicit
@@ -8154,11 +8252,13 @@ class TUI:
                     pass
                 time.sleep(0.5)
         threading.Thread(target=sizer, daemon=True).start()
+        self._start_peer_heartbeat()
         from . import termbg
         termbg.apply(self.config)          # dark canvas on a light terminal (idempotent; CLI may have done it)
         try:
             self.app.run()
         finally:
+            self._stop_peer_heartbeat()
             self._shutdown_fleet()
             termbg.reset()
         if getattr(self, "_pending_update", False):     # user ran /update — install on the raw TTY

@@ -30,6 +30,11 @@ from pathlib import Path
 # stopped in a way that left the file behind. Heartbeats are written far more often than this.
 STALE_AFTER_S = 15 * 60.0
 MAX_PEERS = 64                       # a listing bound, not a limit on how many may run
+# The note is a slow courtesy, but a takeover ask is someone waiting at a keyboard, so one thread
+# serves both: it ticks fast and only re-announces every ANNOUNCE_EVERY ticks. Both frontends read
+# these from here -- two copies of a number that must agree is how most of this file's bugs began.
+TICK_S = 2.0
+ANNOUNCE_EVERY = 30                  # 2.0s x 30 = a 60s note refresh
 
 
 def peers_dir() -> Path:
@@ -140,7 +145,8 @@ def liveness(record: dict, *, now: float | None = None) -> str:
 
 
 def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str = "",
-             git_common_dir: str = "", status: str = "idle") -> Path | None:
+             git_common_dir: str = "", status: str = "idle",
+             takeover: bool = False) -> Path | None:
     """Write (or refresh) this process's note. Returns the path, or None if it could not be left."""
     try:
         directory = peers_dir()
@@ -159,6 +165,10 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
             "project_root": str(project_root)[:4096],
             "git_common_dir": str(git_common_dir)[:4096],
             "status": str(status)[:32],
+            # Whether this build answers a takeover ask at all. A note from an older DGC simply
+            # lacks the key, so an asker skips it and says so, instead of waiting on a reply that
+            # is never coming.
+            "takeover": bool(takeover),
             "heartbeat": time.time(),
         }
         path = directory / f"{pid}.json"
@@ -269,3 +279,157 @@ def user_line(peers: list[dict]) -> str:
         return f"{count(len(unsure))} may still be working in this folder."
     return (f"{count(len(live))} {'is' if len(live) == 1 else 'are'} working in this folder, "
             f"and {len(unsure)} more may be.")
+
+
+# ---------------------------------------------------------------- takeover ---
+# A refusal with no way out is the whole reason this exists: a window whose editor closed mid-turn
+# holds the session lease forever, because the watchdog that would end an abandoned backend counts
+# "a turn is running" as work worth staying alive for. The registry already knows who is holding
+# it, so the asker can name the holder instead of saying "some other window" -- and, when the
+# holder is one of ours whose editor has plainly gone, ask it to stand down.
+#
+# The holder decides. Nothing here forces a lock away, signals a process, or deletes a lease: a
+# wrong takeover costs a running turn's work, and the 15-minute self-heal is always the fallback.
+RELEASE_ANSWER_WAIT_S = 6.0          # how long an asker waits for a holder to answer
+RELEASE_REQUEST_FRESH_S = 30.0       # a request older than this is ignored, not answered
+
+
+def _same_session(record: dict, session: str) -> bool:
+    if not session or not record.get("session"):
+        return False
+    return os.path.normpath(str(record["session"])) == os.path.normpath(session)
+
+
+def session_holder(session: str, *, now: float | None = None) -> dict | None:
+    """The peer note claiming this saved session, or None.
+
+    Checkout-blind on purpose: a session path identifies a session wherever it is opened from, and
+    the holder we need to name may be a terminal in a different directory.
+    """
+    if not session:
+        return None
+    for record in others(here=False, now=now):
+        if _same_session(record, session):
+            return record
+    return None
+
+
+def describe_holder(record: dict) -> str:
+    """Name the holder for a person: who, where, and what it appears to be doing."""
+    pid = record.get("pid")
+    kind = str(record.get("kind") or "")
+    where = str(record.get("cwd") or record.get("project_root") or "")
+    what = {"serve": "a DGC editor window", "tui": "a DGC running in a terminal"}.get(
+        kind, "another DGC")
+    line = f"{what} (pid {pid}"
+    if where:
+        line += f", {where}"
+    line += ")"
+    if record.get("liveness") == "unknown":
+        return line + ", which may or may not still be running"
+    if str(record.get("status") or "") == "working":
+        return line + ", which is running a turn"
+    return line
+
+
+def takeover_dir() -> Path:
+    """A SUBDIRECTORY, not a sibling of the notes.
+
+    ``others`` treats every ``*.json`` in the peers directory as a peer note and unlinks the ones
+    it judges gone -- a takeover file left beside them has no ``pid`` field and would be deleted
+    out from under the exchange by any peer that happened to list at that moment.
+    """
+    return peers_dir() / "takeover"
+
+
+def _release_path(pid: int, suffix: str) -> Path:
+    return takeover_dir() / f"{int(pid)}.{suffix}.json"
+
+
+def request_release(record: dict, session: str) -> bool:
+    """Ask the peer in ``record`` to give this session up. True when the ask was left."""
+    pid = record.get("pid")
+    if not isinstance(pid, int) or pid <= 0 or not _same_session(record, session):
+        return False
+    try:
+        directory = takeover_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = {"session": str(session)[:4096], "asker": os.getpid(),
+                   "holder": pid, "at": time.time()}
+        path = _release_path(pid, "ask")
+        tmp = directory / f".{pid}.ask.tmp"
+        tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
+        _forget_release(pid, "ans")      # never read the previous round's answer as this one's
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def pending_release(session: str, *, now: float | None = None) -> dict | None:
+    """For a holder: a fresh, well-formed ask naming THIS process and THIS session.
+
+    Stale asks are ignored rather than answered: the asker has long since given up, and answering
+    would mean standing down for a window that is no longer waiting.
+    """
+    try:
+        raw = _release_path(os.getpid(), "ask").read_text(encoding="utf-8")
+        ask = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(ask, dict) or ask.get("holder") != os.getpid():
+        return None
+    if not _same_session({"session": ask.get("session")}, session):
+        return None
+    moment = time.time() if now is None else now
+    at = ask.get("at")
+    if not isinstance(at, (int, float)) or moment - float(at) > RELEASE_REQUEST_FRESH_S:
+        _forget_release(os.getpid(), "ask")
+        return None
+    return ask
+
+
+def answer_release(*, granted: bool, reason: str = "") -> None:
+    """For a holder: say yes or no to the ask, and consume it either way."""
+    pid = os.getpid()
+    try:
+        payload = {"holder": pid, "granted": bool(granted),
+                   "reason": str(reason)[:400], "at": time.time()}
+        directory = takeover_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / f".{pid}.ans.tmp"
+        tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
+        os.replace(tmp, _release_path(pid, "ans"))
+    except OSError:
+        pass
+    _forget_release(pid, "ask")
+
+
+def release_answer(pid: int) -> dict | None:
+    """For an asker: the holder's reply, or None while it has not answered."""
+    try:
+        answer = json.loads(_release_path(pid, "ans").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return answer if isinstance(answer, dict) and answer.get("holder") == pid else None
+
+
+def _forget_release(pid: int, suffix: str) -> None:
+    try:
+        _release_path(pid, suffix).unlink()
+    except OSError:
+        pass
+
+
+def forget_release(pid: int) -> None:
+    """Tidy both sides of one exchange. Safe to call when neither file exists."""
+    _forget_release(pid, "ask")
+    _forget_release(pid, "ans")

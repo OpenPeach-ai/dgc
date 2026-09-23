@@ -599,6 +599,28 @@ class _EditorLiveness:
         thread.start()
         return thread
 
+    def editor_gone(self) -> bool:
+        """Has the editor that owns this backend plainly stopped talking to us?
+
+        The exact test the watchdog ends a backend on, exposed so a takeover request can be judged
+        by it: this backend may only be asked to stand down when nobody is watching this window.
+        """
+        return self._expired()
+
+    def stand_down(self) -> bool:
+        """End the backend because another window asked for this session.
+
+        The same ending as abandonment, without the in-flight veto that ``check`` applies. It is
+        only ever reached once the editor has already gone, so the work that veto protects has no
+        audience left -- and the alternative is that the window someone IS watching waits forever.
+        """
+        self.abandoned = True
+        try:
+            self.stream.close()          # the read loop treats this as end of input
+        except Exception:
+            pass
+        return True
+
     def stop(self) -> None:
         self._stop.set()
 
@@ -1158,6 +1180,16 @@ class HeadlessUI:
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
+    def files_ready(self, call_id, items) -> None:
+        """Chips for the files this call asked to show. Paths, never bytes."""
+        rows = [{"name": str(item.get("name") or ""), "rel": str(item.get("rel") or ""),
+                 "bytes": int(item.get("bytes") or 0),
+                 "caption": str(item.get("caption") or "")}
+                for item in items if str(item.get("rel") or "")]
+        if rows:
+            self.em.emit("files_ready", call_id=call_id or None, items=rows[:8],
+                         caption=rows[0].get("caption") or "")
+
     def goal_changed(self, goal: str, status: str) -> None:
         hook = getattr(self, "_goal_hook", None)
         if callable(hook):
@@ -1444,7 +1476,7 @@ class Backend:
                           "open_asks": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
-                          "editor_liveness": True,
+                          "editor_liveness": True, "produced_files": True,
                           # Both the flag and where to write, inside capabilities: a new TOP-LEVEL
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
@@ -1637,7 +1669,7 @@ class Backend:
                 cwd=root, project_root=root,
                 git_common_dir=(agent._git_common_dir() if agent is not None
                                 and hasattr(agent, "_git_common_dir") else ""),
-                status=status)
+                status=status, takeover=True)
         except Exception:
             pass
 
@@ -1648,13 +1680,47 @@ class Backend:
         stop = threading.Event()
         self._peer_stop = stop
 
+        from .peers import TICK_S, ANNOUNCE_EVERY
+
         def beat() -> None:
-            while not stop.wait(60.0):
-                self._announce_peer("working" if getattr(self, "_worker", None) is not None
-                                    else "idle")
+            ticks = 0
+            while not stop.wait(TICK_S):
+                ticks += 1
+                if ticks % ANNOUNCE_EVERY == 0:
+                    self._announce_peer("working" if getattr(self, "_worker", None) is not None
+                                        else "idle")
+                try:
+                    if self._consider_release():
+                        return           # we are standing down; the read loop takes it from here
+                except Exception:
+                    pass                 # a courtesy channel must never end a session by failing
         thread = threading.Thread(target=beat, name="dgc-peer-heartbeat", daemon=True)
         self._peer_thread = thread
         thread.start()
+
+    def _consider_release(self) -> bool:
+        """Answer a window asking for this session. True when we agreed and are standing down.
+
+        Yes only when this backend's own editor has gone: that is the case the asker cannot judge
+        from outside and the only one where ending costs nobody anything. Every refusal says why,
+        so the asker can tell the person something better than "wait".
+        """
+        from . import peers as _peers
+        agent = getattr(self, "agent", None)
+        session = str(getattr(agent, "session_file", "") or "")
+        if not session or _peers.pending_release(session) is None:
+            return False
+        watch = getattr(self, "_editor_liveness", None)
+        if watch is None:
+            _peers.answer_release(granted=False, reason="this backend cannot tell whether its "
+                                                        "editor is still there")
+            return False
+        if not watch.editor_gone():
+            _peers.answer_release(granted=False, reason="its editor window is still connected")
+            return False
+        _peers.answer_release(granted=True)
+        self._announce_peer("standing down")
+        return watch.stand_down()
 
     def _image_spool(self) -> Path:
         """The directory this backend reads spooled images from, created on first use."""
