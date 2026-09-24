@@ -45,6 +45,8 @@ STATIC_MEMBERS = {
     "extension/media/agents/agent-08-rose-animated.svg": "media/agents/agent-08-rose-animated.svg",
     "extension/media/codicon.ttf": "media/codicon.ttf",
     "extension/media/codicon.css": "media/codicon.css",
+    "extension/media/seti.woff": "media/seti.woff",
+    "extension/licenses/SETI-UI-MIT.txt": "licenses/SETI-UI-MIT.txt",
     "extension/licenses/CODICONS-CODE-MIT.txt": "licenses/CODICONS-CODE-MIT.txt",
     "extension/licenses/CODICONS-CC-BY-4.0.txt": "licenses/CODICONS-CC-BY-4.0.txt",
     "extension/licenses/MARKDOWN-LICENSES.txt": "licenses/MARKDOWN-LICENSES.txt",
@@ -247,6 +249,7 @@ def _validate_content_types(raw: bytes) -> None:
         ".css": "text/css", ".js": "application/javascript", ".json": "application/json",
         ".md": "text/markdown", ".png": "image/png", ".svg": "image/svg+xml",
         ".ttf": "font/ttf", ".txt": "text/plain", ".vsixmanifest": "text/xml",
+        ".woff": "font/woff",
     }
     if (actual != expected or len(actual) != len(default_nodes)
             or root.findall(f"{{{CONTENT_NS}}}Override")):

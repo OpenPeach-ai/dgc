@@ -17,6 +17,26 @@ published by Microsoft Corporation from
 
 Copyright © Microsoft Corporation.
 
+## Seti UI file icons
+
+`media/seti.woff` is the icon font from [Seti UI](https://github.com/jesseweed/seti-ui) by
+Jesse Weed, as compiled and redistributed by Microsoft in Visual Studio Code's built-in
+`theme-seti` extension. It draws the file-kind mark beside a file named in an answer and on a
+chip for a file the agent produced.
+
+- `seti.woff` SHA-256: `b127762058f89b37b08d76185e3b0558f5c28859e39a3840a27cb28b9739d6e2` (37,284 bytes)
+- The codepoints this extension uses are recorded in `media/seti-codepoints.json`, generated from
+  the upstream icon-theme definitions; `test/glyph-codepoints.test.mjs` checks the stylesheet and
+  the font against it, and fails if either drifts.
+- Licensed under the MIT License; see `licenses/SETI-UI-MIT.txt`.
+
+Some glyphs depict marks associated with programming languages, file formats and tools. They are
+used descriptively, at icon size, to identify what a file **is** — beside that file's own name —
+and imply no affiliation with or endorsement by any trademark holder. They are never used in this
+extension's own branding, icon, banner or gallery imagery.
+
+Copyright © 2014 Jesse Weed.
+
 ## Lucide icons
 
 The transcript's activity icons — the mark beside a tool step, a diff, a permission card or a

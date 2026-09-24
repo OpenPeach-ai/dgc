@@ -2,4 +2,4 @@
 
 __version__ = "0.6.8"
 PROTOCOL = 14
-REQUIRES_CLI = "0.44.0"
+REQUIRES_CLI = "0.44.1"

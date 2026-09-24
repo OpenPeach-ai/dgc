@@ -24,6 +24,12 @@
      it -- a tone light enough for the dark ground (6.5:1) collapses to 2.6:1 on the light one --
      so the link tone follows the theme. */
   --link:#A78BFA;                    /* on dark: 6.5:1 */
+  /* File-kind hues, from Seti's own palette. Icons are non-text content, so each must clear
+     WCAG 1.4.11 (3:1) on the ground it sits on. Seti's light variants for yellow, green and the
+     neutral do NOT -- 1.92, 2.36 and 1.62 on a light panel -- so those three are darkened here,
+     hue and saturation kept, until they clear it. Measured in link-contrast.test.mjs. */
+  --fk-blue:#519aba; --fk-yellow:#cbcb41; --fk-orange:#e37933; --fk-green:#8dc149;
+  --fk-violet:#a074c4; --fk-pink:#f55385; --fk-red:#cc3e44; --fk-neutral:#d4d7d6;
   --accent-hover:#6A4BF0; --lav:#A78BFA;
   --accent-soft:rgba(124,92,255,.12);
   /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
@@ -205,6 +211,11 @@ body[data-agent-page] #to-latest { display: none; }
     drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 88%, transparent));
 }
 body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand's hue */
+/* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
+body.vscode-light {
+  --fk-blue:#498ba7; --fk-yellow:#8d8d2d; --fk-orange:#cc6d2e; --fk-green:#6c9438;
+  --fk-violet:#9068b0; --fk-pink:#dd4b78; --fk-red:#b8383d; --fk-neutral:#848a88;
+}
 body.vscode-light .agent-mark:not(:has(img)) {
   filter:
     drop-shadow(0 0 0.55px rgba(255,255,255,.95))
@@ -439,39 +450,74 @@ body.vscode-light, body.vscode-high-contrast-light {
   border-radius: 3px; object-fit: contain; flex: none;
 }
 
-/* A file named in an answer wears its kind, the way Codex does, instead of spelling the
-   extension out mid-sentence. The full path stays in the hover label. Same bundled codicons.
-   In the panel's own purple, the colour the file name beside it already uses: grey read as a
-   disabled or missing icon next to coloured text, which is what Codex gets right by giving each
-   kind a real brand colour. We cannot ship brand logos for every language, but one deliberate
-   colour that belongs to DGC beats a washed-out glyph. */
-:is(.md-link, .chip.made-file)[data-file-kind]::before {
-  font-family: codicon; font-size: var(--t-sm); font-weight: normal; font-style: normal;
-  line-height: 1; display: inline-block; vertical-align: -1px;
-  margin-right: 4px; color: var(--link); text-decoration: none;
-  content: "\ea7b";                                        /* file */
+/* A file named in an answer, or a chip for one the agent made, wears its kind.
+   The glyphs are Seti (jesseweed/seti-ui, MIT) -- the same font VS Code ships as its default file
+   icon theme -- because codicons carry language marks for exactly two languages, so Go, Rust,
+   Java and C++ were one identical glyph. Every codepoint below is READ from the theme's own
+   iconDefinitions, never typed: the codicon table this replaces had six wrong glyphs (image drew
+   an RSS feed) that survived because the table was dead code and the comments were its only
+   description. glyph-codepoints.test.mjs now checks them against the font.
+   Seti declares size 150%, so the glyphs sit small in the em box and need the bump below. */
+@font-face {
+  font-family: seti;
+  src: url("./seti.woff") format("woff");
+  font-display: block;
 }
-:is(.md-link, .chip.made-file)[data-file-kind="folder"]::before   { content: "\ea83"; }  /* folder */
-:is(.md-link, .chip.made-file)[data-file-kind="python"]::before   { content: "\ea80"; }  /* symbol-namespace */
-:is(.md-link, .chip.made-file)[data-file-kind="ts"]::before,
-:is(.md-link, .chip.made-file)[data-file-kind="js"]::before,
-:is(.md-link, .chip.made-file)[data-file-kind="code"]::before     { content: "\eb4d"; }  /* code */
-:is(.md-link, .chip.made-file)[data-file-kind="json"]::before,
-:is(.md-link, .chip.made-file)[data-file-kind="config"]::before   { content: "\eb51"; }  /* settings-gear */
-:is(.md-link, .chip.made-file)[data-file-kind="doc"]::before      { content: "\ea9c"; }  /* book */
-:is(.md-link, .chip.made-file)[data-file-kind="css"]::before,
-:is(.md-link, .chip.made-file)[data-file-kind="markup"]::before   { content: "\eb8b"; }  /* symbol-color */
-:is(.md-link, .chip.made-file)[data-file-kind="shell"]::before    { content: "\ea85"; }  /* terminal */
-:is(.md-link, .chip.made-file)[data-file-kind="image"]::before    { content: "\eb47"; }  /* file-media */
-:is(.md-link, .chip.made-file)[data-file-kind="database"]::before { content: "\ea7c"; }  /* database */
-:is(.md-link, .chip.made-file)[data-file-kind="archive"]::before  { content: "\eb29"; }  /* package */
-:is(.md-link, .chip.made-file)[data-file-kind="lock"]::before     { content: "\ea75"; }  /* lock */
+:is(.md-link, .chip.made-file)[data-file-kind]::before {
+  font-family: seti; font-size: 1.32em; font-weight: normal; font-style: normal;
+  line-height: 1; display: inline-block; vertical-align: -0.17em;
+  margin-right: 4px; color: var(--fk-neutral); text-decoration: none;
+  content: "\e023";                                 /* seti _default */
+}
+/* Seti has no folder glyph ("folder": null in its theme), so this one stays a codicon. */
+:is(.md-link, .chip.made-file)[data-file-kind="folder"]::before {
+  font-family: codicon; font-size: var(--t-sm); vertical-align: -1px;
+  content: "\ea83"; color: var(--link);                     /* folder */
+}
+:is(.md-link, .chip.made-file)[data-file-kind="python"]::before { content: "\e07b"; color: var(--fk-blue); }  /* seti _python */
+:is(.md-link, .chip.made-file)[data-file-kind="ts"]::before { content: "\e099"; color: var(--fk-blue); }  /* seti _typescript */
+:is(.md-link, .chip.made-file)[data-file-kind="js"]::before { content: "\e051"; color: var(--fk-yellow); }  /* seti _javascript */
+:is(.md-link, .chip.made-file)[data-file-kind="json"]::before { content: "\e055"; color: var(--fk-yellow); }  /* seti _json */
+:is(.md-link, .chip.made-file)[data-file-kind="doc"]::before { content: "\e060"; color: var(--fk-blue); }  /* seti _markdown */
+:is(.md-link, .chip.made-file)[data-file-kind="config"]::before { content: "\e019"; color: var(--fk-link); }  /* seti _config */
+:is(.md-link, .chip.made-file)[data-file-kind="css"]::before { content: "\e01d"; color: var(--fk-blue); }  /* seti _css */
+:is(.md-link, .chip.made-file)[data-file-kind="markup"]::before { content: "\e048"; color: var(--fk-orange); }  /* seti _html_3 */
+:is(.md-link, .chip.made-file)[data-file-kind="shell"]::before { content: "\e089"; color: var(--fk-green); }  /* seti _shell */
+:is(.md-link, .chip.made-file)[data-file-kind="image"]::before { content: "\e04c"; color: var(--fk-violet); }  /* seti _image */
+:is(.md-link, .chip.made-file)[data-file-kind="database"]::before { content: "\e022"; color: var(--fk-pink); }  /* seti _db */
+:is(.md-link, .chip.made-file)[data-file-kind="archive"]::before { content: "\e0a9"; color: var(--fk-red); }  /* seti _zip */
+:is(.md-link, .chip.made-file)[data-file-kind="lock"]::before { content: "\e05d"; color: var(--fk-green); }  /* seti _lock */
+:is(.md-link, .chip.made-file)[data-file-kind="go"]::before { content: "\e03a"; color: var(--fk-blue); }  /* seti _go2 */
+:is(.md-link, .chip.made-file)[data-file-kind="rust"]::before { content: "\e082"; color: var(--fk-link); }  /* seti _rust */
+:is(.md-link, .chip.made-file)[data-file-kind="java"]::before { content: "\e050"; color: var(--fk-red); }  /* seti _java */
+:is(.md-link, .chip.made-file)[data-file-kind="kotlin"]::before { content: "\e058"; color: var(--fk-orange); }  /* seti _kotlin */
+:is(.md-link, .chip.made-file)[data-file-kind="swift"]::before { content: "\e092"; color: var(--fk-orange); }  /* seti _swift */
+:is(.md-link, .chip.made-file)[data-file-kind="ruby"]::before { content: "\e081"; color: var(--fk-red); }  /* seti _ruby */
+:is(.md-link, .chip.made-file)[data-file-kind="php"]::before { content: "\e070"; color: var(--fk-violet); }  /* seti _php */
+:is(.md-link, .chip.made-file)[data-file-kind="c"]::before { content: "\e00c"; color: var(--fk-blue); }  /* seti _c */
+:is(.md-link, .chip.made-file)[data-file-kind="cpp"]::before { content: "\e01a"; color: var(--fk-blue); }  /* seti _cpp */
+:is(.md-link, .chip.made-file)[data-file-kind="csharp"]::before { content: "\e00b"; color: var(--fk-blue); }  /* seti _c-sharp */
+:is(.md-link, .chip.made-file)[data-file-kind="react"]::before { content: "\e07d"; color: var(--fk-blue); }  /* seti _react */
+:is(.md-link, .chip.made-file)[data-file-kind="svg"]::before { content: "\e091"; color: var(--fk-orange); }  /* seti _svg */
 /* Files the model made and asked to show, as chips under the step that made them. The kind mark
    comes from the same [data-file-kind] table a file link uses, so a produced .py and a mentioned
    .py read as the same kind of thing. No download button: the file is already on this machine,
    which is why neither Codex nor Claude Code's extension offers one either. */
 .made-files { display: flex; flex-wrap: wrap; gap: var(--sp-1); list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
-.chip.made-file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+/* The full appearance, not just layout. `.chip` is NOT a base class -- the only other chip rule is
+   scoped to `.user .bubble .prompt-att.chip` -- so a bare <button class="chip"> outside a prompt
+   bubble kept the browser's default button styling and rendered as a WHITE BOX on the dark panel.
+   Shipped that way in 0.29.0. */
+.chip.made-file {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  font: var(--w-reg) var(--t-xs)/1.2 var(--sans);
+  background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer; min-width: 0; text-align: left;
+}
+.chip.made-file:hover { border-color: var(--border-strong); color: var(--text-strong); }
+.chip.made-file:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 .chip.made-file .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.made-file .chip-size { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
 .chip.made-file[data-file-kind]::before { vertical-align: -1px; margin-right: 0; }
@@ -1291,6 +1337,9 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
     --border:CanvasText; --border-strong:CanvasText;
     --text:CanvasText; --text-strong:CanvasText; --muted:CanvasText; --faint:GrayText;
     --accent:Highlight; --accent-text:LinkText; --accent-fill:Highlight; --link:LinkText;
+    /* In forced colours the user's palette wins; a hue per file kind is exactly what they turned off. */
+    --fk-blue:CanvasText; --fk-yellow:CanvasText; --fk-orange:CanvasText; --fk-green:CanvasText;
+    --fk-violet:CanvasText; --fk-pink:CanvasText; --fk-red:CanvasText; --fk-neutral:CanvasText;
     --accent-hover:Highlight; --lav:LinkText;
     --accent-soft:transparent; --good:CanvasText; --good-soft:transparent;
     --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;

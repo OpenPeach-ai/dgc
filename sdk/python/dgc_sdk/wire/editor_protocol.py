@@ -451,6 +451,16 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # The answer to list_agents, and the snapshot after a chat changes. ``items`` <= 64 (active
     # first, then the most recent ended); ``total`` and ``active`` are always exact.
     "agents": {"items": _A(), "total": _I(), "active": _I(), "request_id": _S(False)},
+    # One step of a PARALLEL child's work, live, while it is still working.
+    #
+    # A parallel child buffers its trace so the parent transcript replays each one atomically
+    # instead of interleaving four children into an unreadable stream. That is right for the
+    # parent's transcript and wrong for the child's OWN page, which is a single-agent view where
+    # interleaving cannot happen -- so that page sat empty behind a running timer for as long as
+    # the child worked (27 minutes, reported 2026-09-24). This carries the step to that page and
+    # nowhere else. `step` is a small record: {type: tool_call|tool_result|text, name, call_id,
+    # args, output, is_error, text}, already redacted by the child's own UI.
+    "agent_step": {"agent_id": _S(), "step": _O(), "seq_in_agent": _I(False)},
     # ---- end v14 sub-agents --------------------------------------------------------------------
 }
 

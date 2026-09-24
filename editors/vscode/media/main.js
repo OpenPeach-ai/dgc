@@ -3557,6 +3557,31 @@
         appendTurnContent(row); breakText();
         break;
       }
+      case "agent_step": {
+        // A parallel child's own page, live. The parent transcript still waits for the atomic
+        // replay — interleaving several children there is what buffering exists to prevent — but
+        // this page shows one agent, so it can have the step now. Without it the page sat empty
+        // behind a running timer for as long as the child worked.
+        const who = String(ev.agent_id || "");
+        const step = ev.step && typeof ev.step === "object" ? ev.step : null;
+        if (!who || !step) break;
+        const record = agentRecords.get(who);
+        if (!record) break;
+        if (!Array.isArray(record.log)) record.log = [];
+        if (record.log.length >= 400) break;                  // a page, not an archive
+        record.log.push(step);
+        // Repainting on every step is QUADRATIC: paintAgentPage clears and rebuilds the whole log,
+        // so a child that makes hundreds of calls rebuilds a growing list hundreds of times. The
+        // first cut of this ran the panel out of memory at 600 steps. Coalesce instead: one repaint
+        // per frame, however many steps landed in it.
+        if (agentPageId === who && !agentStepRepaint) {
+          agentStepRepaint = setTimeout(() => {
+            agentStepRepaint = 0;
+            if (agentPageId === who) paintAgentPage(who);
+          }, 60);
+        }
+        break;
+      }
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
@@ -5574,13 +5599,20 @@
     host.appendChild(card);
   }
   function placeAgentChip(chip, id) {
+    // A chip is placed ONCE and then stays put. `group.after(chip)` MOVES a node that is already
+    // in the document, so re-running this on every update dragged each agent's chip down to its
+    // newest tool group — and with two agents delegated, each one's next tool call yanked it below
+    // the other. They swapped places under the reader for the whole turn. Codex keeps an agent
+    // where it started, and so does this now: once anchored, it stays anchored.
+    if (chip.dataset.anchored === "1") return;
     const anchor = agentAnchor(id);
     if (anchor && anchor.isConnected) {
       const group = anchor.closest(".tool-group") || anchor;
       group.after(chip);
+      chip.dataset.anchored = "1";        // anchored to its own work; never relocate again
       return;
     }
-    if (chip.isConnected) return;
+    if (chip.isConnected) return;        // placed provisionally; a real anchor may still claim it
     if (turn) appendTurnContent(chip);
     else (appendTarget || log).appendChild(chip);
   }
@@ -5804,6 +5836,7 @@
   let agentsTurnLive = false, agentsEpoch = 0;   // pill belongs to the live turn; turn_end advances the epoch
   const agentsBatch = new Set();           // ids active since the last "working" announcement
   const agentRowNodes = new Map();         // id -> that record's dialog row, kept across renders
+  let agentStepRepaint = 0;                // coalesces live-step repaints into one per frame
   // Set by a rewind until its snapshot arrives: the replayed cards must not be claimed by records
   // the rewind is about to prune (call_0 repeats in every turn of a provider that sends no ids).
   let agentsHoldClaims = false;

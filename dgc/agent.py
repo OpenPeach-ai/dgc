@@ -1172,11 +1172,36 @@ class _SubUI:
                 else:
                     tls.session = previous
 
+    # What a buffered child sends live to its OWN page while it works. The parent's transcript
+    # still gets nothing until replay -- interleaving four children there is what buffering exists
+    # to prevent -- but the per-agent page is a single-agent view, so it can have the steps now.
+    _LIVE_STEPS = {"tool_call": ("name", "args", "call_id"),
+                   "tool_result": ("name", "output", "call_id", "is_error")}
+
     def _emit(self, name: str, *args, **kwargs):
         if self._buffered:
             self._events.append((name, args, kwargs))
+            self._emit_live_step(name, args, kwargs)
             return None
         return self._direct(name, *args, **kwargs)
+
+    def _emit_live_step(self, name: str, args: tuple, kwargs: dict) -> None:
+        """Forward one step to this child's own page. Never raises: it is a view, not the work."""
+        fields = self._LIVE_STEPS.get(name)
+        if fields is None:
+            return
+        send = getattr(self._parent, "agent_step", None)
+        if not callable(send):
+            return                      # an older frontend: it simply does not get live steps
+        try:
+            step = {"type": name}
+            for key, value in zip(fields, args):
+                step[key] = value
+            step.update({k: v for k, v in kwargs.items() if k in fields})
+            self._live_seq = getattr(self, "_live_seq", 0) + 1
+            self._routed(send, self.agent_id, step, self._live_seq)
+        except Exception:
+            pass
 
     def replay(self) -> list[str]:
         """Replay one completed child's trace atomically on the parent worker thread."""
@@ -3522,6 +3547,12 @@ class Agent(GoalLifecycle):
         if str(note.get("kind") or "") == "tui":
             return (f"This session is open in {who}.{said} Finish or close that terminal, or "
                     f"start a new session here. {tail}")
+        # A reload is the common case, and then the holder is counting down to handing over. Say
+        # that, rather than the 15-minute figure, which is about a backend ending itself.
+        if "ask again in about" in reason:
+            return (f"This session is held by {who}, whose editor stopped responding a moment ago "
+                    f"— most likely the window you just reloaded.{said.rstrip('.')}. "
+                    f"Send this again and it will be handed over. {tail}")
         return (f"This session is held by {who}.{said} A backend whose editor has gone releases "
                 f"the session by itself within about 15 minutes; to carry on now, start a new "
                 f"session or close the other DGC window. {tail}")
@@ -3618,10 +3649,26 @@ class Agent(GoalLifecycle):
                         self.session_file, self.session_root,
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists):
+                    # DELIBERATELY still a refusal, and the turn stops here.
+                    #
+                    # An earlier attempt at this reloaded the newer copy and carried on, to spare
+                    # the person a dead end. The suite refused it, correctly: an Agent whose
+                    # session moved under it must fail closed rather than silently absorb another
+                    # instance's history and keep going ("stale Agent turn stops before hooks or
+                    # another model request"). Re-syncing inside a turn is how one window quietly
+                    # overwrites another's work.
+                    #
+                    # What WAS broken is the wording. "Resume the latest generation" names no
+                    # control a person can find, so after a window reload they were told to start
+                    # over and lose the conversation -- which is not what is needed and not what
+                    # happens. Name the control, and say the conversation survives.
                     self._last_turn_error = self._last_persist_error = (
-                        "This saved session changed or was deleted in another DGC process. Resume "
-                        "the latest generation or start a new session; no hook, model request, or "
-                        "workspace action was started.")
+                        "Another DGC window saved this session after this one opened it — most "
+                        "likely the window you reloaded finishing its turn. Reopen this same "
+                        "session from the resume picker (the \u21bb control in the panel header, "
+                        "or `dgc --resume` in a terminal) and it continues from the newer copy; "
+                        "your conversation is intact and nothing was lost. No hook, model request, "
+                        "or workspace action was started.")
                     self.ui.error(self._last_turn_error)
                     return False
             # A sub-agent shares the parent's Event, so only a top-level frontend may clear stale

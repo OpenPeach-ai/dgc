@@ -32,10 +32,14 @@ test("a file is classified by what it is", () => {
     ["package.json", "json"], ["tsconfig.jsonc", "json"],
     ["NOTES.md", "doc"], ["readme.markdown", "doc"], ["notes.txt", "doc"],
     ["config.yaml", "config"], ["pyproject.toml", "config"], [".env", "config"],
-    ["main.css", "css"], ["page.html", "markup"], ["logo.svg", "markup"],
+    ["main.css", "css"], ["page.html", "markup"], ["logo.svg", "svg"],
     ["run.sh", "shell"], ["build.ps1", "shell"],
     ["shot.png", "image"], ["photo.jpeg", "image"],
-    ["main.rs", "code"], ["App.java", "code"], ["lib.cpp", "code"],
+    // One kind per language now, so the mark says something the filename did not.
+    ["main.rs", "rust"], ["App.java", "java"], ["lib.cpp", "cpp"], ["srv.go", "go"],
+    ["x.cs", "csharp"], ["a.c", "c"], ["a.h", "c"], ["m.kt", "kotlin"], ["v.swift", "swift"],
+    ["s.rb", "ruby"], ["i.php", "php"],
+    ["App.tsx", "react"], ["App.jsx", "react"], ["util.mts", "ts"], ["util.cjs", "js"],
     ["data.sqlite3", "database"], ["dump.sql", "database"],
     ["dgc.tar.gz", "archive"], ["ext.vsix", "archive"],
     ["package-lock.json", "json"],
@@ -55,8 +59,12 @@ test("an unknown extension still gets a file mark rather than nothing", () => {
 
 test("every kind the classifier can return has a mark drawn for it", () => {
   const css = mainCss;
-  const kinds = new Set(["python", "ts", "js", "json", "doc", "config", "css", "markup",
-                         "shell", "image", "code", "database", "archive", "lock", "folder"]);
+  // `code` is gone: it collapsed eleven languages into one glyph, so a .go and a .rs were
+  // indistinguishable. Each has its own kind now.
+  const kinds = new Set(["python", "ts", "js", "react", "json", "doc", "config", "css", "markup",
+                         "svg", "shell", "image", "database", "archive", "lock", "folder",
+                         "go", "rust", "java", "kotlin", "swift", "ruby", "php", "c", "cpp",
+                         "csharp"]);
   for (const kind of kinds) {
     assert.match(css, new RegExp(`\\[data-file-kind="${kind}"\\]`),
                  `${kind} has no mark, so it would silently fall back to the generic file glyph`);

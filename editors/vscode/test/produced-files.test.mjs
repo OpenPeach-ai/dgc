@@ -10,7 +10,7 @@
 // a one-line report costs, and the 4 MiB protocol frame is never in play.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeDom } from "./support/webview-dom.mjs";
+import { makeDom, mainCss } from "./support/webview-dom.mjs";
 
 function turnWith(items) {
   const harness = makeDom();
@@ -99,4 +99,20 @@ test("the name is escaped, not interpreted", () => {
   assert.equal(chip.querySelector("img"), null, "a crafted file name must never become an element");
   assert.match(chip.textContent, /<img src=x/, "it reads back as the text it is");
   assert.deepEqual(errors, []);
+});
+
+
+test("a chip is actually styled, not a bare browser button", () => {
+  // It shipped as a WHITE BOX in 0.29.0. `.chip` is not a base class — the only other chip rule is
+  // scoped to `.user .bubble .prompt-att.chip` — so a <button class="chip made-file"> outside a
+  // prompt bubble kept the user agent's default button appearance. jsdom does not cascade, so no
+  // DOM assertion could see it; this reads the stylesheet.
+  const rule = /\.chip\.made-file\s*\{([^}]*)\}/.exec(mainCss);
+  assert.ok(rule, ".chip.made-file must have its own rule");
+  for (const prop of ["background", "border", "color", "padding"]) {
+    assert.match(rule[1], new RegExp(`(^|[;\\s])${prop}\\s*:`),
+      `.chip.made-file must set ${prop} itself — inheriting means the browser's default button`);
+  }
+  assert.match(mainCss, /\.chip\.made-file:focus-visible/,
+    "a chip is a button; a keyboard user must be able to see which one is focused");
 });

@@ -9705,11 +9705,19 @@ def test_durable_checkpoints():
               and not sessions.plan_path(concurrent_path, source_root).exists()
               and "changed in another process" in stale._last_persist_error,
               detail=stale._last_persist_error)
+        # The BEHAVIOUR is the guarantee: the turn returns False, starts no session, makes no
+        # model request, and appends nothing. The wording is checked separately and loosely — it
+        # was rewritten in 0.44.1 (the old text named no control a person could find) and pinning
+        # a phrase here made a message improvement look like a safety regression.
         check("stale Agent turn stops before hooks or another model request",
               stale_turn_result is False and not stale_turn._session_started
               and not stale_turn_calls and len(stale_turn.messages) == 2
-              and any("saved session changed" in error
+              and any(("saved session changed" in error) or ("saved this session" in error)
                       for error in stale_turn_ui.errors),
+              detail=repr(stale_turn_ui.errors))
+        check("and tells the person which control resumes it, without losing the conversation",
+              any("resume" in error.lower() and "intact" in error.lower()
+                  for error in stale_turn_ui.errors),
               detail=repr(stale_turn_ui.errors))
 
         # A direct edit records its pre-image durably before mutation. If another process advanced

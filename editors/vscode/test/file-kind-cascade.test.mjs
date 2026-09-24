@@ -123,8 +123,9 @@ function matchesFileLink(selector, kind, surface = "link") {
   });
 }
 
-const KINDS = ["python", "ts", "js", "json", "config", "doc", "css", "markup",
-               "shell", "image", "database", "archive", "lock", "folder", "code",
+const KINDS = ["python", "ts", "js", "react", "json", "config", "doc", "css", "markup", "svg",
+               "shell", "image", "database", "archive", "lock", "folder",
+               "go", "rust", "java", "kotlin", "swift", "ruby", "php", "c", "cpp", "csharp",
                // what fileKind() returns for anything it does not recognise -- Makefile,
                // LICENSE -- and which only the bare [data-file-kind] rule covers
                "file"];
@@ -164,16 +165,20 @@ function winnerCheck(surface) {
   }
 }
 
-test("a mark takes the same tone as the link it sits beside", () => {
-  // --link, not --accent: the mark is read at body size on the panel background, so it needs the
-  // theme-aware tone that clears AA there (see link-contrast.test.mjs). A grey mark beside
-  // coloured link text also reads as disabled rather than deliberate.
-  for (const selector of [":is(.md-link, .chip.made-file)[data-file-kind]::before",
-                          ".md-link[data-link-source]::before"]) {
-    const rule = rules(mainCss).find((r) => r.selector === selector);
-    assert.ok(rule, `${selector} should exist`);
-    assert.match(rule.body, /color:\s*var\(--link\)/, `${selector} should take the link tone`);
-  }
+test("a mark is never left to inherit a colour", () => {
+  // This DELIBERATELY REVERSES an earlier rule. File kinds used to take `--link` — one purple for
+  // everything — on the reasoning that a grey mark beside coloured text reads as disabled. They
+  // now take a per-kind hue from Seti's palette, because one purple cannot tell a .go from a .rs,
+  // which is the whole point of a kind mark. What survives is the requirement that the colour is
+  // CHOSEN: every mark rule names a token, and link-contrast.test.mjs proves each clears 3:1.
+  const rule = rules(mainCss).find((r) =>
+    r.selector === ":is(.md-link, .chip.made-file)[data-file-kind]::before");
+  assert.ok(rule, "the base file-kind rule should exist");
+  assert.match(rule.body, /color:\s*var\(--fk-[a-z]+\)/, "the default mark takes a hue token");
+  const source = rules(mainCss).find((r) => r.selector === ".md-link[data-link-source]::before");
+  assert.ok(source, "the link-source rule should exist");
+  assert.match(source.body, /color:\s*var\(--link\)/,
+    "a host mark is not a file kind and keeps the link tone");
 });
 
 

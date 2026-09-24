@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.29.1 — 2026-09-24
+
+- **A file chip opens when you click it.** Clicking a produced PNG did nothing: the open path
+  refused binary files and swallowed the error.
+- **A chip looks like a chip**, not a white box, and stays legible on a light theme.
+- **File marks are the icons they claim to be.** Six were wrong — an image drew an RSS feed — and
+  the whole table had never actually rendered. They come from Seti now, with a mark per language:
+  Go, Rust, Java, Kotlin, Swift, Ruby, PHP, C, C++, C#, React and SVG.
+- **Two delegated agents keep their places** instead of trading rows on every tool call.
+- **A sub-agent's page fills while it works**, rather than showing a timer and nothing else.
+- Pairs with a CLI that, when another window has advanced the session, names the resume control
+  and says the conversation is intact — instead of "start a new session".
+
+Pairs with CLI 0.44.1.
+
 ## 0.29.0 — 2026-09-23
 
 - **Files the agent makes appear as chips you can click.** Ask it to record something or export a

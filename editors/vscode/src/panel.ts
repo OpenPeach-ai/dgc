@@ -3327,7 +3327,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
       }
     } catch {
-      /* file may not exist on disk */
+      // openTextDocument REFUSES a binary file, and this catch used to swallow that as "may not
+      // exist" -- so clicking a produced PNG chip did nothing at all, with no error and no hint.
+      // `vscode.open` routes to whatever editor owns the type: the image preview for a PNG, the
+      // PDF viewer for a PDF, a text editor for text. Only reached when the text path failed, so
+      // a line number was never going to apply anyway.
+      try {
+        await vscode.commands.executeCommand("vscode.open", uri);
+        return;
+      } catch {
+        void vscode.window.showInformationMessage(
+          `VS Code has no editor for ${vscode.workspace.asRelativePath(uri)}. Reveal it in the explorer to open it another way.`);
+        return;
+      }
     }
   }
 

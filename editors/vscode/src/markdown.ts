@@ -70,16 +70,29 @@ const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
 // Bundled codicons again -- no network, nothing leaked.
 const FILE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\.(py|pyi|pyw)$/i, "python"],
-  [/\.(ts|tsx|mts|cts)$/i, "ts"],
-  [/\.(js|jsx|mjs|cjs)$/i, "js"],
+  [/\.(tsx|jsx)$/i, "react"],              // before ts/js, which would otherwise claim them
+  [/\.(ts|mts|cts)$/i, "ts"],
+  [/\.(js|mjs|cjs)$/i, "js"],
   [/\.(json|jsonc|json5)$/i, "json"],
   [/\.(md|markdown|mdx|rst|txt)$/i, "doc"],
   [/\.(ya?ml|toml|ini|cfg|conf|env|properties)$/i, "config"],
   [/\.(css|scss|sass|less)$/i, "css"],
-  [/\.(html?|xml|svg)$/i, "markup"],
+  [/\.svg$/i, "svg"],
+  [/\.(html?|xml)$/i, "markup"],
   [/\.(sh|bash|zsh|fish|ps1|bat|cmd)$/i, "shell"],
   [/\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i, "image"],
-  [/\.(rs|go|java|kt|swift|rb|php|c|h|cpp|hpp|cs)$/i, "code"],
+  // One row per language, not one "code" bucket for eleven of them: collapsed, a .go and a .rs
+  // drew the same glyph and the mark told you nothing you did not already know from the filename.
+  [/\.go$/i, "go"],
+  [/\.rs$/i, "rust"],
+  [/\.java$/i, "java"],
+  [/\.kts?$/i, "kotlin"],
+  [/\.swift$/i, "swift"],
+  [/\.rb$/i, "ruby"],
+  [/\.php$/i, "php"],
+  [/\.(cpp|hpp|cc|hh|cxx)$/i, "cpp"],     // before the single-letter c/h row below
+  [/\.cs$/i, "csharp"],
+  [/\.[ch]$/i, "c"],
   [/\.(sql|db|sqlite3?)$/i, "database"],
   [/\.(zip|tar|gz|tgz|bz2|xz|7z|whl|vsix)$/i, "archive"],
   [/\.(lock|sum)$/i, "lock"],

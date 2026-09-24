@@ -10,3 +10,5 @@ tsconfig.json
 esbuild.js
 .gitignore
 **/.DS_Store
+cap-*.mjs
+media/seti-codepoints.json

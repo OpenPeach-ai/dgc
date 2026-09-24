@@ -72,3 +72,44 @@ test("forced-colors hands links back to the system", () => {
   assert.match(forced[1], /--link\s*:\s*LinkText/,
     "in high contrast the user's own LinkText wins over any hex we picked");
 });
+
+
+// A file-kind mark is non-text content: WCAG 1.4.11 asks 3:1, not 4.5:1.
+const AA_NONTEXT = 3.0;
+const HUES = ["blue", "yellow", "orange", "green", "violet", "pink", "red", "neutral"];
+
+test("every file-kind hue is legible on the dark panel", () => {
+  for (const hue of HUES) {
+    const value = token(`fk-${hue}`);
+    assert.ok(value, `--fk-${hue} should be defined on :root as a literal hex`);
+    for (const [name, bg] of Object.entries(DARK)) {
+      const ratio = contrastRatio(value, bg);
+      assert.ok(ratio >= AA_NONTEXT,
+        `--fk-${hue} ${value} on ${name} ${bg} is ${ratio.toFixed(2)}:1, under ${AA_NONTEXT}`);
+    }
+  }
+});
+
+test("every file-kind hue is legible on the light panel", () => {
+  // Seti's own light variants for yellow, green and the neutral score 1.92, 2.36 and 1.62 here --
+  // they were drawn for Atom's ground, not ours -- so those three are darkened in main.css. If
+  // someone "restores" Seti's values to match upstream, this fails and says why.
+  for (const hue of HUES) {
+    const value = token(`fk-${hue}`, "body.vscode-light");
+    assert.ok(value, `body.vscode-light should redefine --fk-${hue}`);
+    for (const [name, bg] of Object.entries(LIGHT)) {
+      const ratio = contrastRatio(value, bg);
+      assert.ok(ratio >= AA_NONTEXT,
+        `--fk-${hue} ${value} on ${name} ${bg} is ${ratio.toFixed(2)}:1, under ${AA_NONTEXT}`);
+    }
+  }
+});
+
+test("forced colours hands the marks back to the system", () => {
+  const forced = /@media \(forced-colors: active\) \{([\s\S]*?)\n  \}/.exec(mainCss);
+  assert.ok(forced, "the forced-colors block should exist");
+  for (const hue of HUES) {
+    assert.match(forced[1], new RegExp(`--fk-${hue}\\s*:\\s*CanvasText`),
+      `--fk-${hue} must yield to the user's palette in high contrast`);
+  }
+});

@@ -3845,6 +3845,37 @@
             "active"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "agent_step"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "agent_id": {
+              "type": "string"
+            },
+            "step": {
+              "type": "object"
+            },
+            "seq_in_agent": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "agent_id",
+            "step"
+          ],
+          "additionalProperties": false
         }
       ]
     },

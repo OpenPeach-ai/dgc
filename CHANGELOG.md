@@ -4,6 +4,50 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.44.1 — 2026-09-24
+
+Eight fixes, nearly all of them found by USING 0.44.0 rather than by testing it.
+
+- **Taking a held session back no longer means waiting fifteen minutes.** 0.44.0 judged a takeover
+  request with the same threshold a backend uses to end ITSELF — 15 minutes of editor silence. So
+  the case the feature exists for still failed: a window reloads after a network drop, the old
+  backend keeps the session, and the new window is told "its editor window is still connected"
+  because the old editor had been quiet for seconds. Handing over to a window that is asking is a
+  different question from ending yourself with nobody waiting, and now has its own threshold: two
+  missed 60-second pings. The refusal names the cause and tells you to send the message again.
+
+- **A parallel sub-agent's page shows its work while it works.** Parallel children buffer their
+  trace so the parent transcript can replay each one atomically instead of interleaving several;
+  that is right for the parent and wrong for the child's own page, which shows one agent and sat
+  empty behind a running timer for as long as the child ran. Steps now stream to that page.
+
+- **A file chip opens when you click it.** It called `openTextDocument`, which refuses a binary
+  file, and the error was swallowed as "may not exist" — so clicking a produced PNG did nothing at
+  all. Also repairs clicking a binary file named in an answer.
+
+- **File-kind marks are the icons they claim to be.** Six of the ten codepoints drew something
+  else: an image drew an RSS feed, a document drew an arrow, Python drew a folder. The table had
+  never rendered — a duplicate rule of equal specificity won every cascade — so its comments were
+  the only description of it and they were wrong. The marks now come from Seti (MIT, the font VS
+  Code ships), every codepoint read from the font's own metadata and checked by a test.
+
+- **Go, Rust, Java, Kotlin, Swift, Ruby, PHP, C, C++ and C# have their own marks**, instead of one
+  glyph shared by eleven languages. `.tsx` and `.svg` too.
+
+- **Two delegated agents keep their places.** Each agent's row was moved to sit after its newest
+  tool call, so two working agents traded places under the reader for the whole turn.
+
+- **A produced-file chip is a chip, not a white box**, and its mark is legible on a light theme:
+  three of the icon hues scored under 3:1 there and were darkened.
+
+- **A session another window advanced now says what to do about it.** After a reload the backend
+  being replaced often finishes its turn and saves, leaving the new window holding the older copy;
+  the next message was refused with "Resume the latest generation or start a new session", which
+  names no control a person can find and reads as "start over and lose the conversation". The turn
+  still stops — an Agent whose session moved under it must fail closed rather than absorb another
+  instance's history mid-turn — but it now names the resume picker, the `dgc --resume` equivalent,
+  and the fact that the conversation is intact.
+
 ## 0.44.0 — 2026-09-23
 
 - **A refusal to take a session now names who is holding it, and can ask for it back.** A window

@@ -504,6 +504,18 @@ _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "think
 # so every liveness check we had said everything was fine.
 ABANDONED_AFTER_S = 15 * 60.0
 ABANDON_CHECK_EVERY_S = 30.0
+# How long an editor must be silent before this backend will hand its session to a window that is
+# ASKING for it. Deliberately far shorter than ABANDONED_AFTER_S, which governs ending ourselves
+# with nobody waiting and is right to be conservative.
+#
+# 0.44.0 used the 15-minute figure for both, and that made the takeover useless for the case it
+# exists for: a window reloads (network drop, Reload Window), the old backend keeps the session,
+# and the new window is told "its editor window is still connected" because the old editor had
+# only been quiet for seconds. The founder hit exactly this on 192.168.1.111 and still had to wait.
+#
+# The editor pings every 60s (backend.ts LIVENESS_PING_MS), so a live one is never silent for two
+# whole intervals. Missing two is strong evidence it is gone, and someone is waiting.
+TAKEOVER_SILENCE_S = 125.0
 
 
 class _EditorLiveness:
@@ -602,10 +614,30 @@ class _EditorLiveness:
     def editor_gone(self) -> bool:
         """Has the editor that owns this backend plainly stopped talking to us?
 
-        The exact test the watchdog ends a backend on, exposed so a takeover request can be judged
-        by it: this backend may only be asked to stand down when nobody is watching this window.
+        The exact test the watchdog ends a backend on: it is about to end ITSELF with nobody
+        waiting, so it is right to be slow and sure.
         """
         return self._expired()
+
+    def silent_for(self) -> float:
+        """Seconds since the editor last said anything; 0.0 while it has never pinged."""
+        with self._lock:
+            if not self.armed:
+                return 0.0
+            self.idle_for = time.monotonic() - self._last
+            return self.idle_for
+
+    def editor_gone_for_takeover(self) -> tuple[bool, float]:
+        """Whether to hand this session over NOW, and how many seconds are left if not.
+
+        A different, faster question than `editor_gone`: someone is waiting at a keyboard, so the
+        15-minute figure is the wrong one. See TAKEOVER_SILENCE_S.
+        """
+        with self._lock:
+            if not self.armed:
+                return False, 0.0       # never pinged: an older editor, judged as before
+        quiet = self.silent_for()
+        return quiet > TAKEOVER_SILENCE_S, max(0.0, TAKEOVER_SILENCE_S - quiet)
 
     def stand_down(self) -> bool:
         """End the backend because another window asked for this session.
@@ -1180,6 +1212,24 @@ class HeadlessUI:
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
+    def agent_step(self, agent_id, step, seq_in_agent=0) -> None:
+        """One live step from a parallel child, for that child's own page."""
+        if not agent_id or not isinstance(step, dict):
+            return
+        trimmed = {"type": str(step.get("type") or "")}
+        for key in ("name", "call_id"):
+            if step.get(key) is not None:
+                trimmed[key] = str(step[key])[:200]
+        if isinstance(step.get("args"), dict):
+            trimmed["args"] = step["args"]
+        if step.get("output") is not None:
+            # A page shows a step, not a transcript: a 2 MB tool result must not ride the wire.
+            trimmed["output"] = str(step["output"])[:4000]
+        if "is_error" in step:
+            trimmed["is_error"] = bool(step["is_error"])
+        self.em.emit("agent_step", agent_id=str(agent_id), step=trimmed,
+                     seq_in_agent=int(seq_in_agent or 0))
+
     def files_ready(self, call_id, items) -> None:
         """Chips for the files this call asked to show. Paths, never bytes."""
         rows = [{"name": str(item.get("name") or ""), "rel": str(item.get("rel") or ""),
@@ -1476,7 +1526,7 @@ class Backend:
                           "open_asks": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
-                          "editor_liveness": True, "produced_files": True,
+                          "editor_liveness": True, "produced_files": True, "agent_steps": True,
                           # Both the flag and where to write, inside capabilities: a new TOP-LEVEL
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
@@ -1715,8 +1765,17 @@ class Backend:
             _peers.answer_release(granted=False, reason="this backend cannot tell whether its "
                                                         "editor is still there")
             return False
-        if not watch.editor_gone():
-            _peers.answer_release(granted=False, reason="its editor window is still connected")
+        gone, remaining = (watch.editor_gone_for_takeover()
+                           if hasattr(watch, "editor_gone_for_takeover")
+                           else (watch.editor_gone(), 0.0))
+        if not gone:
+            # Say how long, so the asker can tell the person something better than "no". A window
+            # that reloaded is silent from that moment, so this counts down to a real handover.
+            reason = ("its editor window is still connected"
+                      if remaining <= 0 else
+                      f"its editor has been quiet for a moment but not long enough to be sure; "
+                      f"ask again in about {int(remaining) + 1}s")
+            _peers.answer_release(granted=False, reason=reason)
             return False
         _peers.answer_release(granted=True)
         self._announce_peer("standing down")

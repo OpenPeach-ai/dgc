@@ -251,6 +251,128 @@ class TheHolderDecides(_Home):
         self.assertIn("terminal", answer["reason"])
 
 
+class AReloadedWindowGetsItBack(_Home):
+    """The case the whole feature exists for, and the one 0.44.0 still failed.
+
+    The founder's network dropped mid-turn on 192.168.1.111, he reloaded the window, typed
+    "continue", and was told "its editor window is still connected" — because the OLD backend
+    judged a takeover with the same 15-minute figure it uses to end ITSELF. Its editor had been
+    silent for seconds, so by that test it was still there. He had to wait out the full fifteen
+    minutes: exactly the dead end the feature was built to remove.
+
+    Two thresholds, because they answer different questions. Ending yourself with nobody waiting
+    can afford to be slow and sure. Handing over to someone sitting at a keyboard cannot.
+    """
+
+    def watch(self, quiet_for: float):
+        """An _EditorLiveness whose editor last spoke `quiet_for` seconds ago."""
+        import time as _time
+        from dgc.headless import _EditorLiveness
+        import io
+        watch = _EditorLiveness(SimpleNamespace(), io.StringIO())
+        watch.pinged()
+        with watch._lock:
+            watch._last = _time.monotonic() - quiet_for
+        return watch
+
+    def test_the_two_thresholds_are_not_the_same_number(self):
+        from dgc.headless import ABANDONED_AFTER_S, TAKEOVER_SILENCE_S
+        self.assertLess(TAKEOVER_SILENCE_S, ABANDONED_AFTER_S,
+                        "handing over to a waiting window must be faster than ending yourself")
+        self.assertGreater(TAKEOVER_SILENCE_S, 60.0,
+                           "the editor pings every 60s; a shorter window would rob a live editor")
+
+    def test_a_window_reloaded_a_moment_ago_does_not_get_it_yet(self):
+        gone, remaining = self.watch(5.0).editor_gone_for_takeover()
+        self.assertFalse(gone, "five seconds of quiet is not evidence an editor has gone")
+        self.assertGreater(remaining, 0, "and the asker is told how long is left")
+
+    def test_after_two_missed_pings_the_session_is_handed_over(self):
+        from dgc.headless import TAKEOVER_SILENCE_S
+        gone, remaining = self.watch(TAKEOVER_SILENCE_S + 1).editor_gone_for_takeover()
+        self.assertTrue(gone, "a live editor is never silent this long; someone is waiting")
+        self.assertEqual(remaining, 0.0)
+
+    def test_it_does_NOT_wait_the_fifteen_minutes_that_shipped(self):
+        """The regression itself. 0.44.0 answered False here and sent the founder away."""
+        from dgc.headless import ABANDONED_AFTER_S
+        watch = self.watch(200.0)                       # over three minutes of silence
+        self.assertFalse(watch.editor_gone(),
+                         "the self-termination test still says no, correctly — nothing is in flight")
+        self.assertTrue(watch.editor_gone_for_takeover()[0],
+                        "but a window that is ASKING gets it, instead of waiting "
+                        f"{ABANDONED_AFTER_S / 60:.0f} minutes")
+
+    def test_an_editor_that_never_pinged_is_judged_as_before(self):
+        from dgc.headless import _EditorLiveness
+        import io
+        watch = _EditorLiveness(SimpleNamespace(), io.StringIO())   # never armed
+        self.assertEqual(watch.editor_gone_for_takeover(), (False, 0.0),
+                         "an older editor that sends no pings must not be treated as gone")
+
+    def test_the_refusal_tells_the_person_to_try_again(self):
+        from dgc.agent import Agent
+        holder = SimpleNamespace(
+            _held_session_note=self.note(pid=321, status="working", liveness="live"),
+            _held_session_reason="its editor has been quiet for a moment but not long enough to "
+                                 "be sure; ask again in about 90s")
+        text = Agent._held_session_message.__get__(holder)("Nothing was started.")
+        self.assertIn("reloaded", text, "name the likely cause")
+        self.assertIn("Send this again", text, "and the action that works")
+        self.assertNotIn("15 minutes", text, "that figure is about a backend ending itself")
+
+
+class AMovedSessionSaysWhatToDo(_Home):
+    """The SECOND dead end the founder hit, and the fix that is actually safe.
+
+    Sequence on 192.168.1.111: network drops mid-turn, he reloads the window, the new window opens
+    the session at revision N, the backend it replaced finishes and persists N+1, and the next
+    "continue" is refused with "Resume the latest generation or start a new session."
+
+    My first attempt reloaded the newer copy and carried on. The suite rejected it, and was right:
+    `stale Agent turn stops before hooks or another model request` exists because an Agent whose
+    session moved under it must fail closed, not silently absorb another instance's history and
+    keep going. Re-syncing inside a turn is how one window quietly overwrites another's work.
+
+    So the refusal stays and the WORDING changes. "Resume the latest generation" names no control
+    a person can find; it reads as "start over and lose the conversation", which is neither
+    necessary nor true.
+    """
+
+    def message(self):
+        import inspect
+        from dgc.agent import Agent
+        source = inspect.getsource(Agent.run_turn)
+        start = source.index("Another DGC window saved this session")
+        return source[start:source.index('")', start)]
+
+    def test_it_names_a_control_the_person_can_actually_find(self):
+        text = self.message()
+        self.assertIn("resume picker", text)
+        self.assertIn("dgc --resume", text, "and the terminal equivalent")
+
+    def test_it_says_the_conversation_survives(self):
+        text = self.message()
+        self.assertIn("intact", text)
+        self.assertNotIn("start a new session", text,
+                         "starting over loses the conversation and is not what is needed")
+
+    def test_it_names_the_likely_cause(self):
+        self.assertIn("window you reloaded", self.message(),
+                      "a person who just reloaded should recognise their own situation")
+
+    def test_the_turn_still_fails_closed(self):
+        """The guarantee my first attempt broke. Do not weaken this to avoid a refusal."""
+        import inspect
+        from dgc.agent import Agent
+        source = inspect.getsource(Agent.run_turn)
+        self.assertNotIn("_reload_moved_session", source,
+                         "an Agent must not re-sync a moved session mid-turn and carry on")
+        cut = source.index("Another DGC window saved this session")
+        self.assertIn("return False", source[cut:cut + 900],
+                      "the turn stops; no hook, model request or workspace action starts")
+
+
 class TheAskerRetries(_Home):
     """`Agent._reclaim_session_lease` -- what the window that wants the session does."""
 
