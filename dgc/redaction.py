@@ -557,6 +557,30 @@ class StreamingRedactor:
         if suspicious:
             hold = max(hold, len(text) - suspicious.start())
         if hold:
+            # Never cut INTO a credential that is already complete in this buffer. The hold-back
+            # above protects a tail that merely *could* begin a secret, and it only has to look at
+            # the final characters -- so when some OTHER known secret began with them, the cut fell
+            # inside a whole secret sitting in the same buffer. Its leading part then matched
+            # nothing and streamed out in clear: four of this operator's ambient env credentials
+            # start with "6", so a buffer ending "...123456" held back "6" and published the key.
+            #
+            # Redacting before the cut would fix that case and break a worse one: on a PARTIAL
+            # secret the heuristics in redact_text (prefix-token, JWT, auth-header) fire on the
+            # fragment, so the rest of the credential arrives later matching nothing. Hence this
+            # narrower rule -- move the cut to the end of any complete secret it would split, and
+            # redact afterwards exactly as before.
+            boundary = len(text) - hold
+            for _ in range(len(secrets) + 1):
+                moved = False
+                for secret in secrets:
+                    start = text.rfind(secret, 0, boundary + len(secret))
+                    if start != -1 and start < boundary < start + len(secret):
+                        boundary = start + len(secret)
+                        moved = True
+                if not moved:
+                    break
+            hold = max(0, len(text) - boundary)
+        if hold:
             self._pending = text[-hold:]
             text = text[:-hold]
         return redact_text(text, secrets)

@@ -6,7 +6,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.44.1 — 2026-09-24
 
-Eight fixes, nearly all of them found by USING 0.44.0 rather than by testing it.
+Nine fixes. Most were found by USING 0.44.0 rather than by testing it; the last was found by the
+release gate itself, and matters more than the rest.
+
+- **A streamed API key could be published in clear.** DGC redacts credentials as they stream, and
+  holds back a tail that might be the start of one so a secret split across two provider chunks is
+  still caught. That hold-back looked only at the final characters, so when another known secret
+  began with them the cut fell INSIDE a credential already complete in the same buffer — the
+  leading part then matched nothing and went to the panel in clear. Nothing exotic triggers it: it
+  needs only a few credentials in the environment, which is the normal state of a working machine.
+  The cut now moves to the end of any complete secret it would split. This is a disclosure
+  boundary, so it is worth being precise about the blast radius: the transcript saved to disk and
+  the text sent to the provider were both redacted correctly throughout; only the stream rendered
+  to the panel was affected.
 
 - **Taking a held session back no longer means waiting fifteen minutes.** 0.44.0 judged a takeover
   request with the same threshold a backend uses to end ITSELF — 15 minutes of editor silence. So
