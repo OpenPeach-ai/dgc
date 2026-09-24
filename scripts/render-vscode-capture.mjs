@@ -113,6 +113,22 @@ function verifyExtensionPackage() {
 // So: a path appearing or disappearing is always contamination, and so is a changed file — except
 // for files a live foreign backend is known to rewrite in place, which are listed here. A new
 // session, the thing that would actually prove the capture escaped its disposable HOME, still fails.
+//
+// One directory needs more than that. `peers` holds a note per running DGC saying which process it
+// is and where it is working -- the thing that lets a window name whoever holds a session instead
+// of refusing with no way out. A note is written on start, heartbeated while the process lives,
+// and unlinked on exit, all by processes this capture neither owns nor can quiet. So peer notes
+// may appear and vanish as well as change. That is the same call `render-real-cli-capture.py`
+// already made for its own guard (IGNORED_USER_STATE) when peers landed in 0.44.0; this guard was
+// simply never brought along, and the first editor capture afterwards aborted on a live backend's
+// heartbeat. A pid and a heartbeat are not user state. The escape detector is untouched: a session,
+// a config file or a credential appearing in the real tree still fails, and those are what would
+// actually prove the capture left its disposable HOME.
+const FOREIGN_EPHEMERAL = [
+  /^\.\/peers(\/.*)?$/,                    // per-pid presence notes, incl. the takeover subdirectory
+  /^\.\/locks(\/.*)?$/,                    // workspace leases; every DGC on the machine takes one
+];
+
 const FOREIGN_REWRITES = [
   /^\.\/remote-presence\.json$/,          // `dgc remote connect` heartbeat, rewritten each minute
   /^\.\/remote\.json$/,                   // the same agent's device state
@@ -148,14 +164,18 @@ function userStateMap(rootPath) {
 /** The paths that prove the capture touched the operator's state, or [] when only foreign writes moved. */
 function userStateDrift(before, after) {
   const drift = [];
+  const ephemeral = (path) => FOREIGN_EPHEMERAL.some(pattern => pattern.test(path));
   for (const [path, fingerprint] of after) {
+    if (ephemeral(path)) continue;
     if (!before.has(path)) drift.push(`added ${path}`);
     else if (before.get(path) !== fingerprint
              && !FOREIGN_REWRITES.some(pattern => pattern.test(path))) {
       drift.push(`changed ${path}`);
     }
   }
-  for (const path of before.keys()) if (!after.has(path)) drift.push(`removed ${path}`);
+  for (const path of before.keys()) {
+    if (!after.has(path) && !ephemeral(path)) drift.push(`removed ${path}`);
+  }
   return drift;
 }
 

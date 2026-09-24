@@ -10886,7 +10886,8 @@ def test_extension_vsix_guard():
         "extension/dist/extension.js", "extension/media/walkthrough.md",
         "extension/media/main.js", "extension/media/main.css", "extension/media/dgc.svg",
         "extension/media/dgc-mark.svg", "extension/media/codicon.ttf",
-        "extension/media/codicon.css", "extension/licenses/CODICONS-CODE-MIT.txt",
+        "extension/media/codicon.css", "extension/media/seti.woff",
+        "extension/licenses/SETI-UI-MIT.txt", "extension/licenses/CODICONS-CODE-MIT.txt",
         "extension/licenses/CODICONS-CC-BY-4.0.txt",
         "extension/licenses/MARKDOWN-LICENSES.txt", "extension/dist/markdown.js",
         "extension/licenses/MERMAID-LICENSES.txt", "extension/dist/mermaid.js",
@@ -10909,7 +10910,7 @@ def test_extension_vsix_guard():
         "extension/licenses/LUCIDE-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 40)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 42)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real
