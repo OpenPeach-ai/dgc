@@ -1122,6 +1122,21 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .set-head { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-3) var(--sp-3); border-bottom: 1px solid var(--border); }
 .set-title { font: var(--w-semi) var(--t-base)/1 var(--sans); color: var(--text-strong); display: inline-flex; align-items: center; gap: var(--sp-2); }
 .set-title .codicon { color: var(--accent-text); }
+.plugin-logo { width: 16px; height: 16px; object-fit: contain; vertical-align: middle; }
+.plugin-tabs { display: flex; gap: 4px; padding: 2px 0 10px; }
+.plugin-add { display: flex; gap: 8px; margin: 0 0 8px; }
+.plugin-add input { flex: 1; min-width: 0; min-height: var(--control); padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.plugin-add input:focus { outline: none; border-color: var(--vscode-focusBorder, var(--accent)); }
+.plugin-add .act { flex: none; }
+.plugin-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--border); }
+.plugin-row-logo { width: 36px; height: 36px; border-radius: 10px; object-fit: contain; flex: 0 0 auto; background: var(--bg); }
+.plugin-row-empty { display: inline-block; border: 1px solid var(--border); }
+.plugin-copy { flex: 1; min-width: 0; }
+.plugin-copy strong { display: block; font-weight: 500; }
+.plugin-copy span { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plugin-state { color: var(--muted); font-size: 12px; }
 .settings-nav { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); overflow-x: auto; border-bottom: 1px solid var(--border); }
 /* Settings text a reader needs (tab names, hints, notes, headings, Close) uses --muted, never --faint:
    --faint is VS Code's disabledForeground, rgba(97,97,97,.5) in the light themes, which reads 2.1:1. */

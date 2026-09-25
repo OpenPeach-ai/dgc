@@ -1,3 +1,5 @@
+import { APP_CONNECTORS, connectorUrl } from "./appConnectors";
+import { COMPOSIO_CATALOG } from "./composioConnections";
 import * as vscode from "vscode";
 import { createHash, randomBytes } from "crypto";
 import { realpath } from "fs/promises";
@@ -14,6 +16,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { listEndpointModels } from "./endpointmodels";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
+import { settingsDocument } from "./settingsView";
 
 /** Where the "a goal is being pursued" marker lives, and how long it stays believable. */
 const GOAL_PURSUIT_KEY = "dgc.goalPursuit.v1";
@@ -94,6 +97,8 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
 type ManagedMcpServer = {
+  connector?: string;
+  connectorLicense?: string;
   name: string;
   transport: "stdio" | "remote";
   target: string;
@@ -345,6 +350,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, McpBrowserRequest>();
+  private settingsEditor?: vscode.WebviewPanel;
+  private pendingSignIn?: McpBrowserRequest;
+  private pendingSignInServer = "";
+  private settingsSelection = { section: "general", range: "7d" };
+  private settingsCatalog: any[] = [];
+  private settingsInstalls = new Map<string, string>();
+  private settingsPreviews = new Map<string, any>();
+  private settingsPreviewRequests = new Map<string, string>();
+  private createdPluginFiles = new Set<string>();
+  private settingsMcpOperation = 0;
   // ---- 0.40 images: refs this panel was shown, the stored path an `image` answer named for each,
   // and Open file requests waiting on a fresh answer. Never a path the webview supplies.
   private imageRefs = new Map<string, { path?: string }>();
@@ -934,6 +949,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
     }
     this.scheduleWorkspaceChanges(0);
+    if (this.settingsEditor) this.showEditorSettings();
     void this.resumeInterruptedWork(be);
   }
 
@@ -1885,6 +1901,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.workspaceRootsDirty = true;
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
+    this.settingsPreviews.clear();
+    this.settingsPreviewRequests.clear();
     // The dead child must not be handed out again. ensureBackend() returns `this.backend`
     // whenever it is set, so leaving the corpse here meant every later command went to a
     // closed pipe and the panel could never recover on its own -- the user had to find
@@ -2148,6 +2166,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
         || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"].includes(ev.command))) return;
+    // Account setup replies may contain single-use consent links. Never send them to chat.
+    if (ev.type === "composio_connection") return;
     const openImageAnswer = this.noteImageEvent(ev);
     switch (ev.type) {
       case "ready":
@@ -2308,10 +2328,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
+          this.backendNote(`[mcp sign-in prompt for ${String(ev.server || "plugin")}]`);
           this.mcpUrls.set(String(ev.id), { url: String(ev.payload.url || ""),
             ...(typeof ev.payload._dgc_bridge_callback === "string"
               ? { callbackUrl: ev.payload._dgc_bridge_callback } : {}) });
+          void this.confirmMcpBrowser(String(ev.id), String(ev.server || "this plugin"));
+          return;
         }
+        this.backendNote(`[mcp input ignored kind=${String(ev.kind || "")}]`);
         break;
       case "workspace_roots": {
         const inFlight = this.workspaceRootsInFlight;
@@ -2442,10 +2466,132 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "event", event: answer });
       return;
     }
+    if (this.settingsEditor && ["config", "usage_report", "mcp_servers", "command_rejected"].includes(ev.type)) {
+      this.settingsEditor.webview.postMessage({ type: "event", event: ev });
+    }
+    if (ev.type === "mcp_servers" && this.pendingSignInServer) {
+      const row = (ev as any).items?.find((item: any) => item.name === this.pendingSignInServer);
+      if (row && ["connected", "failed", "disabled"].includes(row.state)) {
+        this.pendingSignIn = undefined;
+        this.pendingSignInServer = "";
+        this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+      }
+    }
+    if (ev.type === "plugin_preview") {
+      const requested = this.settingsPreviewRequests.get(ev.request_id);
+      this.settingsPreviewRequests.delete(ev.request_id);
+      if (requested) {
+        const item = ev.item as any;
+        if (this.settingsPreviews.size >= 32) this.settingsPreviews.clear();
+        this.settingsPreviews.set(String(item.name), item);
+        this.settingsPreviews.set(requested, item);
+        this.settingsEditor?.webview.postMessage({ type: "pluginPreview", requested, item: { ...item, logo: this.pluginLogo(item, this.settingsEditor?.webview) } });
+      }
+      return;
+    }
+    if (ev.type === "plugin_marketplaces") {
+      this.settingsEditor?.webview.postMessage({ type: "marketplaces", items: ev.items });
+      return;
+    }
+    if (ev.type === "plugin_operation") {
+      if (ev.action === "create_plugin" && ev.path) {
+        const root = join(homedir(), ".dgc", "plugins", "authored");
+        if (path.resolve(ev.path).startsWith(root + path.sep)) this.createdPluginFiles.add(ev.path);
+      }
+      if (ev.action === "uninstall_plugin" && ev.removed_servers?.length) {
+        void this.clearUninstalledPluginServers(ev.removed_servers as string[]).then(() => {
+          this.settingsEditor?.webview.postMessage({ ...ev, type: "pluginOperation" });
+        }).catch((error: any) => {
+          this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", action: ev.action,
+            message: `Plugin removed, but its editor server records could not be cleared: ${error?.message || "storage error"}. Remove those servers in MCP settings before reloading.` });
+        });
+      } else this.settingsEditor?.webview.postMessage({ ...ev, type: "pluginOperation" });
+      return;
+    }
+    if (ev.type === "command_rejected" && ["inspect_plugin", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin", "list_plugin_marketplaces"].includes(ev.command)) {
+      const requested = this.settingsPreviewRequests.get(String(ev.request_id || ""));
+      this.settingsPreviewRequests.delete(String(ev.request_id || ""));
+      this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", requested, action: ev.command, message: ev.message });
+    }
+    if (ev.type === "command_rejected" && ev.command === "install_plugin") {
+      const name = this.settingsInstalls.get(String(ev.request_id || ""));
+      if (name) {
+        this.settingsInstalls.delete(String(ev.request_id));
+        this.pendingSignIn = undefined;
+        this.pendingSignInServer = "";
+        this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+        this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: String(ev.message || "Plugin install failed.") });
+      }
+      void vscode.window.showErrorMessage(String(ev.message || "Plugin install failed."));
+    }
+    if (ev.type === "plugin_catalog" && Array.isArray((ev as any).items)) {
+      this.settingsCatalog = (ev as any).items;
+      if (this.pendingSignInServer && this.settingsCatalog.some(row => (row.name === this.pendingSignInServer || row.server_names?.includes(this.pendingSignInServer)) && row.connected)) {
+        this.pendingSignIn = undefined;
+        this.pendingSignInServer = "";
+        this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+      }
+      const installName = this.settingsInstalls.get(String(ev.request_id || ""));
+      if (installName && !this.settingsCatalog.some(row => row.name === installName && row.opening)) {
+        this.settingsInstalls.delete(String(ev.request_id));
+        this.settingsEditor?.webview.postMessage({ type: "pluginResult", name: installName });
+        this.backend?.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
+      }
+      const items = (ev as any).items.map((item: any) => ({ ...item, logo: this.pluginLogo(item, this.view?.webview) }));
+      if (this.view) this.post({ type: "event", event: { ...ev, items } });
+      const editorItems = (ev as any).items.map((item: any) => ({
+        ...item, logo: this.pluginLogo(item, this.settingsEditor?.webview),
+      }));
+      this.settingsEditor?.webview.postMessage({ type: "plugins", items: editorItems });
+      return;
+    }
     this.post({ type: "event", event: ev });
   }
 
   /** The CLI ('dgc') is missing — offer to install it (the extension drives the CLI). */
+  private async openLatestPluginBrowser(): Promise<void> {
+    const entry = [...this.mcpUrls.entries()].at(-1);
+    if (!entry) {
+      void vscode.window.showInformationMessage("The sign-in page is not ready yet.");
+      return;
+    }
+    await this.confirmMcpBrowser(entry[0], "this plugin");
+  }
+
+  private async confirmMcpBrowser(id: string, server: string): Promise<void> {
+    const be = this.backend;
+    const request = this.mcpUrls.get(id);
+    if (!be || !request || request.opening) return;
+    request.opening = true;
+    let host = "";
+    try { host = new URL(request.url).host; } catch { host = ""; }
+    const title = server.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()) || "This plugin";
+    const current = () => this.backend === be && this.mcpUrls.get(id) === request;
+    this.pendingSignIn = request;
+    this.pendingSignInServer = server;
+    this.settingsEditor?.webview.postMessage({
+      type: "signin", title, host, server, id,
+    });
+    // Cursor draws its own "open the external website?" dialog from openExternal.
+    let action = "cancel";
+    try {
+      if (await openMcpBrowser(request, current)) action = "accept";
+    } catch (error) {
+      if (current()) {
+        void vscode.window.showErrorMessage(
+          error instanceof Error ? error.message : "The browser did not open.");
+      }
+    }
+    if (!current()) return; // an expired dialog must not clear a newer connection banner
+    if (action !== "accept") {
+      this.pendingSignIn = undefined;
+      this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+    }
+    if (this.backend !== be || !this.mcpUrls.has(id)) return;
+    this.mcpUrls.delete(id);
+    be.send({ type: "mcp_input_response", id, action });
+  }
+
   private promptInstallCli(): void {
     if (this._installPrompted) { return; }
     this._installPrompted = true;
@@ -2602,6 +2748,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private post(msg: any): void {
+    if (this.settingsMcpOperation && msg?.type === "mcp_command_started") {
+      this.settingsEditor?.webview.postMessage(msg);
+      return;
+    }
     if (process.env.DGC_EXTENSION_TEST_TOKEN) {
       const event = msg?.type === "event" && msg.event && typeof msg.event === "object"
         ? msg.event : undefined;
@@ -2705,7 +2855,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media"),
-        vscode.Uri.joinPath(this.context.extensionUri, "dist")],
+        vscode.Uri.joinPath(this.context.extensionUri, "dist"),
+        vscode.Uri.file(join(homedir(), ".dgc", "plugins", "logos"))],
     };
     view.webview.html = this.html(view.webview);
     // VS Code keeps both copies alive (retainContextWhenHidden), and it does not resolve a view a
@@ -3130,6 +3281,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "requestSkills":
         be.send({ type: "list_skills", request_id: this.nextRequestId("composer-skills") });
         break;
+      case "requestPlugins":
+        this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
+        break;
+      case "installPlugin":
+        this.openEditorSettings("plugins");
+        break;
+      case "openPluginBrowser":
+        void this.openLatestPluginBrowser();
+        break;
       case "skillsReload":
         be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
         break;
@@ -3422,7 +3582,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const logLevel = ["debug", "info", "notice", "warning", "error", "critical", "alert",
         "emergency", "off"].includes(item.logLevel) ? item.logLevel : "warning";
       safe.push({ name: item.name, transport: item.transport, target,
-                  args, envNames, logLevel });
+                  args, envNames, logLevel,
+                  ...(item.connector && APP_CONNECTORS[item.connector] && item.name === item.connector
+                    ? { connector: item.connector, connectorLicense: String(item.connectorLicense || "") } : {}) });
     }
     if (JSON.stringify(safe) !== JSON.stringify(value)) {
       // Migrate malformed or pre-hardening definitions out of durable globalState. Literal
@@ -3496,6 +3658,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async sendManagedMcp(be: DgcBackend, item: ManagedMcpServer,
                                setup = false, suppliedSecrets?: ManagedMcpSecrets,
                                waitForAck = false): Promise<boolean> {
+    if (item.connector && this.lastReadyEvent?.capabilities?.app_connectors !== true) {
+      const message = "This CLI does not include app connectors. Select the local connector build and run DGC: Restart Backend.";
+      this.settingsEditor?.webview.postMessage({type: "pluginOperationError", message});
+      // Finish the normal handshake without replaying private fields or tokens to a release CLI.
+      if (setup) return true;
+      throw new Error(message);
+    }
     const secrets = suppliedSecrets ?? await this.mcpSecrets(item);
     const env: Record<string, string> = {};
     for (const name of item.envNames.slice(0, 64)) {
@@ -3531,6 +3700,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     };
     const command: any = {
       type: "upsert_mcp_server", request_id: this.nextRequestId("mcp-config"), name: item.name,
+      ...(item.connector ? { connector: item.connector, accept_license: item.connectorLicense || "" } : {}),
       runtime: { ...common, args: runtimeArgs, env }, persisted: { ...common, args: baseArgs },
     };
     if (setup) { return be.sendSetup(command); }
@@ -3570,25 +3740,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async saveMcpServer(values: any): Promise<void> {
+  private async saveMcpServer(values: any, connector?: {id: string; license: string}): Promise<boolean> {
     const name = String(values.name || "").trim();
     const original = String(values.original_name || name).trim();
     const transport = values.transport === "remote" ? "remote" : "stdio";
     let target = String(values.target || "").trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)) {
       void vscode.window.showErrorMessage("MCP server names use 1–64 letters, digits, dots, underscores, or hyphens.");
-      return;
+      return false;
     }
     if (!target || target.length > 4096 || target.includes("\0")) {
       void vscode.window.showErrorMessage(transport === "remote" ? "Enter a valid MCP URL." : "Enter an MCP command path.");
-      return;
+      return false;
     }
     if (transport === "remote") {
       const remote = normalizedRemoteMcpUrl(target);
       if (!remote) {
         void vscode.window.showErrorMessage(
           "Remote MCP URLs must use HTTPS (or loopback HTTP) without embedded credentials.");
-        return;
+        return false;
       }
       target = remote;
     }
@@ -3596,23 +3766,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!["debug", "info", "notice", "warning", "error", "critical", "alert",
       "emergency", "off"].includes(logLevel)) {
       void vscode.window.showErrorMessage("Choose a supported MCP log level.");
-      return;
+      return false;
     }
     const existingManaged = this.managedMcpServers();
     if (!existingManaged.some((item) => item.name === original) && existingManaged.length >= 64) {
       void vscode.window.showErrorMessage("At most 64 editor-managed MCP servers are supported.");
-      return;
+      return false;
     }
     const args = String(values.args || "").split(/\r?\n/).map((line) => line.trim())
       .filter(Boolean).slice(0, 128);
     if (args.some((arg) => arg.length > 8192 || arg.includes("\0"))) {
       void vscode.window.showErrorMessage("Each MCP argument must be a bounded single line.");
-      return;
+      return false;
     }
     if (transport === "stdio" && !persistedMcpArgsSafe(args)) {
       void vscode.window.showErrorMessage(
         "Store MCP credentials as environment entries so DGC can keep them in SecretStorage.");
-      return;
+      return false;
     }
     const clearSecrets = values.clear_secrets === true;
     const previous = existingManaged.find((entry) => entry.name === original);
@@ -3620,7 +3790,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (original !== name && previousAtDestination) {
       void vscode.window.showErrorMessage(
         `An editor-managed MCP server named “${name}” already exists. Choose another name.`);
-      return;
+      return false;
     }
     let originalSecrets: ManagedMcpSecrets;
     let destinationSecrets: ManagedMcpSecrets;
@@ -3637,7 +3807,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch (err: any) {
       void vscode.window.showErrorMessage(
         err?.message || "DGC could not read the prior MCP credentials; no server was changed.");
-      return;
+      return false;
     }
     const sameCredentialBoundary = Boolean(previous
       && previous.transport === transport
@@ -3663,7 +3833,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             || value.length > 16_384 || value.includes("\0")) {
           void vscode.window.showErrorMessage(
             "MCP environment entries use KEY=value for SecretStorage or KEY for ambient lookup.");
-          return;
+          return false;
         }
         if (at < 0) { referencedEnvNames.push(key); } else { env[key] = value; }
       }
@@ -3680,13 +3850,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const item: ManagedMcpServer = {
       name, transport, target, args: transport === "stdio" ? args : [],
       envNames: declaredEnvNames, logLevel,
+      ...(connector ? {connector: connector.id, connectorLicense: connector.license} : previous?.connector ? {connector: previous.connector, connectorLicense: previous.connectorLicense} : {}),
     };
     const be = this.ensureBackend();
     try {
       await this.sendManagedMcp(be, item, false, secrets, true);
     } catch (err: any) {
       void vscode.window.showErrorMessage(err?.message || "DGC rejected that MCP server.");
-      return;
+      return false;
     }
     let managed = existingManaged.filter((entry) => entry.name !== original && entry.name !== name);
     managed.push(item);
@@ -3707,13 +3878,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           `${err?.message || "DGC could not remove the old MCP server."}${restored
             ? " The new backend entry was rolled back; local settings were not changed."
             : " DGC could not roll back the new backend entry; reload MCP servers before continuing."}`);
-        return;
+        return false;
       }
     }
     try {
       await this.context.globalState.update("dgc.managedMcpServers.v1", managed.slice(0, 64));
       await this.storeMcpSecrets(item, secrets);
       if (original !== name) { await this.context.secrets.delete(this.mcpSecretKey(original)); }
+      this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
+      return true;
     } catch (err: any) {
       let localRestored = false;
       let backendRestored = false;
@@ -3740,6 +3913,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           ? "The prior MCP settings were restored."
           : "DGC could not fully restore prior MCP state; reload MCP servers before continuing."));
     }
+    return false;
+  }
+
+  private async clearUninstalledPluginServers(names: string[]): Promise<void> {
+    const removed = new Set(names.filter(name => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)));
+    const managed = this.managedMcpServers();
+    await this.context.globalState.update("dgc.managedMcpServers.v1", managed.filter(row => !removed.has(row.name)));
+    for (const name of removed) await this.context.secrets.delete(this.mcpSecretKey(name));
   }
 
   private async removeMcpServer(name: string): Promise<void> {
@@ -3749,7 +3930,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (confirm !== "Remove server") { return; }
     const existingManaged = this.managedMcpServers();
     const previous = existingManaged.find((item) => item.name === name);
-    if (!previous) { return; }
+    if (!previous) {
+      // Servers configured by the CLI live in the same backend config, without editor metadata.
+      try {
+        await this.removeManagedMcpBackend(this.ensureBackend(), name, "mcp-remove");
+        this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
+      } catch (err: any) { void vscode.window.showErrorMessage(err?.message || "DGC could not remove that MCP server."); }
+      return;
+    }
     let previousSecrets: ManagedMcpSecrets;
     let previousRawSecret: string | undefined;
     try {
@@ -3771,6 +3959,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.context.globalState.update("dgc.managedMcpServers.v1",
         existingManaged.filter((item) => item.name !== name));
       await this.context.secrets.delete(this.mcpSecretKey(name));
+      this.settingsEditor?.webview.postMessage({ type: "mcpSaved", ok: true });
     } catch (err: any) {
       let restored = false;
       try {
@@ -4560,7 +4749,269 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // ---- in-webview settings page --------------------------------------------
   openSettings(section = "general", usageRange?: string): void {
-    this.inVisiblePanel(() => { void this.loadSettings(section, usageRange); });
+    const name = section === "extensions" ? "plugins" : section;
+    this.openEditorSettings(name, usageRange);
+  }
+
+  /** Codex-style settings: a real editor tab beside the chat, not a page inside it. */
+  openEditorSettings(section = "general", usageRange?: string): void {
+    this.settingsSelection = { section, range: usageRange || "7d" };
+    if (this.settingsEditor) {
+      this.settingsEditor.reveal(vscode.ViewColumn.Beside);
+      this.showEditorSettings();
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      "dgc.settings", "DGC Settings", vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [this.context.extensionUri] });
+    this.settingsEditor = panel;
+    panel.webview.onDidReceiveMessage((msg) => this.onSettingsMessage(msg));
+    panel.onDidDispose(() => { this.settingsEditor = undefined; });
+    const asset = (name: string) => panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, "dist", name)).toString();
+    panel.webview.html = settingsDocument(asset("settings.js"), asset("settings.css"), panel.webview.cspSource);
+    // The webview's ready message sends the initial selection after its listener exists.
+  }
+
+  private sendPluginCommand(command: any): boolean {
+    if (this.lastReadyEvent?.capabilities?.plugin_management !== true) {
+      if (this.lastReadyEvent) this.settingsEditor?.webview.postMessage({type: "pluginOperationError",
+        message: "This CLI does not include plugin management. Select the local connector build and run DGC: Restart Backend."});
+      return false;
+    }
+    return this.ensureBackend().send(command);
+  }
+
+  private showEditorSettings(): void {
+    const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
+    this.settingsEditor?.webview.postMessage({ type: "providers", providers });
+    this.settingsEditor?.webview.postMessage({ type: "show", ...this.settingsSelection });
+    const be = this.ensureBackend();
+    be.send({ type: "get_config", request_id: this.nextRequestId("config-read") });
+    this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
+    this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
+    be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
+  }
+
+  private pluginLogo(item: { name?: string; icon?: string; logo_file?: string }, webview?: vscode.Webview): string {
+    if (!webview) return "";
+    if (item.logo_file) {
+      try {
+        const root = fs.realpathSync(join(homedir(), ".dgc", "plugins", "logos"));
+        const file = fs.realpathSync(item.logo_file);
+        if (file.startsWith(root + path.sep) && file.endsWith(".png") && fs.statSync(file).size <= 512 * 1024) {
+          const data = fs.readFileSync(file);
+          if (data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) {
+            return `data:image/png;base64,${data.toString("base64")}`;
+          }
+        }
+      } catch { /* use the shipped logo when a package asset is unavailable */ }
+    }
+    const png = vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", `${item.name}.png`);
+    const shipped: Record<string,string> = {composio:"composio.svg", zapier:"zapier.ico", make:"make.ico", n8n:"n8n.ico", arcade:"arcade.svg"};
+    const mark = item.name && shipped[item.name]
+      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", shipped[item.name])
+      : item.icon === "dgc" && item.name?.startsWith("dgc-")
+      ? vscode.Uri.joinPath(this.context.extensionUri, "media", "plugin-logos", "dgc.svg")
+      : undefined;
+    const file = fs.existsSync(png.fsPath) ? png : mark && fs.existsSync(mark.fsPath) ? mark : undefined;
+    return file ? webview.asWebviewUri(file).toString() : "";
+  }
+
+  private async saveConnector(msg: any): Promise<void> {
+    const id = String(msg.name || "");
+    const def = APP_CONNECTORS[id];
+    try {
+      if (!def) throw new Error("Unknown app connector");
+      if (this.lastReadyEvent && !(this.lastReadyEvent as any).capabilities?.app_connectors)
+        throw new Error("This backend does not include the local connector build. Select the local DGC CLI and run DGC: Restart Backend.");
+      const target = connectorUrl(id, msg.url);
+      const auth = String(msg.auth || def.auth[0]);
+      if (!def.auth.includes(auth)) throw new Error("Choose a supported authentication method");
+      const token = auth === "token" ? String(msg.token || "") : "";
+      if (token.length > 16384 || /[\x00-\x20\x7f]/.test(token)) throw new Error("Enter a valid connection token");
+      const previous = this.managedMcpServers().find(s => s.name === id && s.target === target);
+      if (auth === "token" && !token && !(previous && (await this.mcpSecrets(previous)).token))
+        throw new Error("Enter the connection token from your provider");
+      if (!this.settingsCatalog.some(row => row.name === id && row.installed)) {
+        const answer = await vscode.window.showWarningMessage(
+          `Connect ${def.name} under ${def.license}?`,
+          {modal:true, detail:`${def.summary} Review the provider's terms: ${def.terms}`}, "Accept and connect");
+        if (answer !== "Accept and connect") return;
+      }
+      this.settingsMcpOperation++;
+      try {
+        const saved = await this.saveMcpServer({name:id, original_name:id, transport:"remote", target,
+          token, clear_secrets:auth === "oauth"}, {id, license:def.license});
+        if (!saved) throw new Error("Connection setup did not finish. Review the editor error, check your provider settings, and try again.");
+      } finally { this.settingsMcpOperation--; }
+      this.sendPluginCommand({ type: "list_plugins", request_id:this.nextRequestId("connectors")});
+      this.ensureBackend().send({type:"list_mcp_servers", request_id:this.nextRequestId("connectors-mcp")});
+    } catch (error: any) {
+      this.settingsEditor?.webview.postMessage({type:"connectorError", message:error?.message || "Could not connect"});
+    } finally {
+      this.settingsEditor?.webview.postMessage({type:"connectorSaveFinished"});
+    }
+  }
+
+  private async onSettingsMessage(msg: any): Promise<void> {
+    const be = this.ensureBackend();
+    if (msg?.type === "ready") {
+      this.showEditorSettings();
+    } else if (msg?.type === "saveSettings") {
+      await this.saveSettings(msg.values || {});
+    } else if (msg?.type === "saveConnector") {
+      await this.saveConnector(msg);
+    } else if (msg?.type === "connectorManage") {
+      const def = APP_CONNECTORS[String(msg.name || "")];
+      if (def) {
+        let url=def.manage || def.docs;
+        if (msg.name === "n8n") {
+          const row=this.settingsCatalog.find(r=>r.name === "n8n" && r.installed);
+          const endpoint=row?.mcps?.[0]?.url;
+          if(endpoint) try { url=connectorUrl("n8n",endpoint).replace(/\/mcp-server\/http\/?$/, "/"); } catch { /* use setup docs */ }
+        }
+        await this.openSafeExternal(url);
+      }
+    } else if (msg?.type === "composioCatalog") {
+      try {
+        if (!await vscode.env.openExternal(vscode.Uri.parse(COMPOSIO_CATALOG))) {
+          this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", message: "The browser was not opened. Choose Manage apps in Composio to try again." });
+        }
+      } catch {
+        this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", message: "Could not open Composio in your browser. Try again." });
+      }
+    } else if (["composioConnection", "composioBrowser", "composioCancel"].includes(msg?.type)) {
+      // Retired webview controls cannot initiate app setup or cancel a chat turn.
+      this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", message: "App connections are managed in Composio. Open Apps → Manage apps in Composio." });
+    } else if (msg?.type === "getUsage") {
+      const range = ["today", "7d", "30d", "month", "all"].includes(msg.range) ? msg.range : "7d";
+      const requestId = String(msg.requestId || this.nextRequestId("usage")).slice(0, 128);
+      if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.usage_ledger) {
+        this.settingsEditor?.webview.postMessage({ type: "usage_unavailable", requestId,
+          message: "Update the DGC CLI to see token usage in the editor." });
+      } else if (!be.send({ type: "get_usage", request_id: requestId, range })) {
+        this.settingsEditor?.webview.postMessage({ type: "usage_unavailable", requestId,
+          message: "DGC could not ask its backend for token usage. Try Refresh." });
+      }
+    } else if (msg?.type === "installPlugin") {
+      const name = String(msg.name || "");
+      const reviewed = this.settingsPreviews.get(name);
+      const row = reviewed || this.settingsCatalog.find((item) => item.name === name && item.installed);
+      if (!row) {
+        this.settingsEditor?.webview.postMessage({ type: "pluginResult", name,
+          error: "Open the plugin install review before installing." });
+        return;
+      }
+      let accept = "";
+      if (row?.install === "block") {
+        this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: row.block_reason || "This plugin is not offered." });
+        return;
+      }
+      if (row?.install === "accept" && reviewed) {
+        const answer = await vscode.window.showWarningMessage(
+          `Install ${row.display_name} under ${row.license}?`,
+          { modal: true, detail: `Review the publisher's terms before installing: ${row.terms_url || row.license_url || "See plugin information."}` },
+          "Accept and install");
+        if (answer !== "Accept and install") {
+          this.settingsEditor?.webview.postMessage({ type: "pluginResult", name });
+          return;
+        }
+        accept = row.license;
+      }
+      const commands = Object.entries(reviewed?.server_specs || {})
+        .filter(([key]) => !Array.isArray(msg.selectedServers) || msg.selectedServers.includes(key))
+        .map(([, spec]) => spec) as any[];
+      if (commands.some(spec => spec.transport === "stdio")) {
+        const answer = await vscode.window.showWarningMessage(
+          `Install ${row.display_name || name} and run its MCP commands?`,
+          { modal: true, detail: commands.filter(spec => spec.transport === "stdio").map(spec => spec.command + " " + (spec.args || []).join(" ")).join("\n") }, "Install and run");
+        if (answer !== "Install and run") {
+          this.settingsEditor?.webview.postMessage({ type: "pluginResult", name });
+          return;
+        }
+      }
+      const requestId = this.nextRequestId("settings-plugin");
+      this.settingsInstalls.set(requestId, String(row.name || name));
+      if (!this.sendPluginCommand({ type: "install_plugin", request_id: requestId, name, accept_license: accept, ...(Array.isArray(msg.selectedServers) ? { selected_servers: msg.selectedServers } : {}) })) {
+        this.settingsInstalls.delete(requestId);
+        this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: "DGC could not start installation. Try again." });
+      }
+    } else if (msg?.type === "openSignIn") {
+      const request = this.pendingSignIn;
+      if (request) await openMcpBrowser(request, () => this.pendingSignIn === request);
+    } else if (msg?.type === "cancelSignIn") {
+      // Revoke a not-yet-opened URL as well as stopping its foreground worker.
+      for (const [id, request] of this.mcpUrls) {
+        if (request === this.pendingSignIn) {
+          this.mcpUrls.delete(id);
+          be.send({ type: "mcp_input_response", id, action: "cancel" });
+        }
+      }
+      if (this.pendingSignIn) be.send({ type: "cancel" });
+      this.pendingSignIn = undefined;
+      this.pendingSignInServer = "";
+      this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
+    } else if (msg?.type === "inspectPlugin") {
+      const requestId = this.nextRequestId("plugin-preview");
+      const name = String(msg.name || "");
+      this.settingsPreviewRequests.set(requestId, name);
+      if (!this.sendPluginCommand({ type: "inspect_plugin", name, request_id: requestId })) {
+        this.settingsPreviewRequests.delete(requestId);
+        this.settingsEditor?.webview.postMessage({ type: "pluginOperationError", action: "inspect_plugin", requested: name, message: "DGC is not connected. Try again." });
+      }
+    } else if (msg?.type === "uninstallPlugin") {
+      const row = this.settingsCatalog.find(item => item.name === msg.name && item.installed);
+      if (!row) return;
+      const answer = await vscode.window.showWarningMessage(`Uninstall ${row.display_name}?`,
+        { modal: true, detail: "Remove this plugin's skills and its unchanged MCP server settings from DGC. This does not revoke permissions at the vendor; manage those in your vendor account." }, "Uninstall");
+      if (answer === "Uninstall") this.sendPluginCommand({ type: "uninstall_plugin", name: row.name, request_id: this.nextRequestId("plugin-uninstall") });
+      else this.settingsEditor?.webview.postMessage({ type: "pluginOperationCancelled" });
+    } else if (msg?.type === "marketplaceAction") {
+      const request_id = this.nextRequestId("plugin-marketplace");
+      if (msg.action === "add") this.sendPluginCommand({ type: "add_plugin_marketplace", source: String(msg.source || ""), request_id });
+      else if (msg.action === "remove") {
+        const answer = await vscode.window.showWarningMessage(`Remove marketplace ${String(msg.name)}?`, { modal: true, detail: "Installed plugins remain installed." }, "Remove marketplace");
+        if (answer === "Remove marketplace") this.sendPluginCommand({ type: "remove_plugin_marketplace", name: String(msg.name), request_id });
+        else this.settingsEditor?.webview.postMessage({ type: "pluginOperationCancelled" });
+      } else if (msg.action === "refresh") this.sendPluginCommand({ type: "refresh_plugin_marketplace", name: String(msg.name), request_id });
+    } else if (msg?.type === "browseMarketplace") {
+      const chosen = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, title: "Choose a plugin marketplace folder" });
+      if (chosen?.[0]) this.settingsEditor?.webview.postMessage({ type: "marketplaceFolder", path: chosen[0].fsPath });
+    } else if (msg?.type === "createPlugin") {
+      this.sendPluginCommand({ type: "create_plugin", request_id: this.nextRequestId("plugin-create"), name: String(msg.name || ""), display_name: String(msg.displayName || ""), description: String(msg.description || "") });
+    } else if (msg?.type === "editCreatedPlugin" && this.createdPluginFiles.has(String(msg.path))) {
+      const root = String(msg.path);
+      const name = path.basename(root);
+      await vscode.window.showTextDocument(vscode.Uri.file(join(root, "skills", name, "SKILL.md")));
+    } else if (msg?.type === "openPluginLink") {
+      // Metadata links may open a website, never a command/file URI.
+      try {
+        const url = new URL(String(msg.url || ""));
+        if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) {
+          await vscode.env.openExternal(vscode.Uri.parse(url.href));
+        }
+      } catch { /* malformed package link */ }
+    } else if (msg?.type === "skillToggle" && typeof msg.enabled === "boolean") {
+      be.send({ type: "set_skill_enabled", request_id: this.nextRequestId("skill-toggle"),
+                name: String(msg.name || ""), enabled: msg.enabled });
+    } else if (msg?.type === "listMcp") {
+      be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
+    } else if (msg?.type === "mcpToggle" || msg?.type === "mcpReconnect") {
+      const name = String(msg.name || "");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)) return;
+      const command = msg.type === "mcpToggle"
+        ? { type: "set_mcp_enabled" as const, name, enabled: msg.enabled === true }
+        : { type: "reconnect_mcp_server" as const, name };
+      be.send({ ...command, request_id: this.nextRequestId("settings-mcp") });
+    } else if (msg?.type === "mcpSave" || msg?.type === "mcpRemove") {
+      this.settingsMcpOperation++;
+      try { await this.onMessage(msg); }
+      finally {
+        this.settingsMcpOperation--;
+        be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
+      }
+    }
   }
 
   private async loadSettings(section: string, usageRange?: string): Promise<void> {
@@ -4801,6 +5252,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       this.routeState.subagentBaseUrl = String(v.subagent_base_url || "");
       this.routeState.fallbackBaseUrl = String(v.fallback_base_url || "");
+      this.settingsEditor?.webview.postMessage({ type: "settingsSaved", ok: true });
       void vscode.window.showInformationMessage("DGC settings saved.");
     } catch (err: any) {
       let rollbackNote = "";
@@ -4828,9 +5280,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const partial = appliedStages.length
         ? `Some settings were applied (${[...new Set(appliedStages)].join(", ")}) before the save stopped. `
         : "";
+      this.settingsEditor?.webview.postMessage({ type: "settingsSaved", ok: false, message: `${partial}${detail}${rollbackNote}` });
       void vscode.window.showErrorMessage(`${partial}${detail}${rollbackNote}`);
     } finally {
       this.settingsSaveInFlight = false;
+      this.settingsEditor?.webview.postMessage({ type: "settingsSaveFinished" });
     }
   }
 
@@ -5463,6 +5917,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div class="set-group">Agent extensions</div>
     <p class="set-note">Manage the same local DGC capabilities used by the CLI. Credentials entered for editor-managed MCP servers stay in VS Code SecretStorage.</p>
     <div class="settings-links">
+      <button type="button" class="act" id="open-plugins" title="Browse and manage supported plugins">Plugins</button>
       <button type="button" class="act" data-open-surface="mcp" title="Connect and manage Model Context Protocol servers">MCP servers</button>
       <button type="button" class="act" data-open-surface="skills" title="Reusable instructions DGC can apply to a request">Skills</button>
       <button type="button" class="act" data-open-surface="permissions" title="What DGC may run and edit without asking">Permission rules</button>

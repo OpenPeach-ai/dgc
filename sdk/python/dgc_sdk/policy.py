@@ -54,7 +54,7 @@ _PATH_TOOLS = frozenset({*_READ_PATH_TOOLS, *_WRITE_TOOLS, "artifact"})
 # the SDK answers from the search root.
 _SEARCH_TOOLS = frozenset({"grep", "glob", "repo_map", "code_intel", "git_diff"})
 # Rules match these tools' `path` argument, in absolute and project-relative spellings.
-_PATH_RULE_TOOLS = ("Read", "ViewImage", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
+_PATH_RULE_TOOLS = ("Read", "ViewImage", "ShowFile", "Write", "Edit", "MultiEdit", "ApplyPatch", "Artifact",
                     "CodeIntel", "GitDiff")
 _NETWORK_TOOLS = ("WebFetch", "WebSearch", "Browser", "AddSkill")
 _APP_SERVER = "app"

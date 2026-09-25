@@ -25,6 +25,7 @@ globalThis.__DGC_TEST_VSCODE = {
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3,
                         0: "Error", 1: "Warning", 2: "Information", 3: "Hint" },
   StatusBarAlignment: { Left: 1 },
+  ViewColumn: { Beside: 2 },
   ConfigurationTarget: { WorkspaceFolder: 1, Workspace: 2, Global: 3 },
   window: {
     activeTextEditor: undefined,
@@ -160,6 +161,7 @@ function harness({ mode = "default", engine = "", trusted = true, rejectType = "
   };
   const context = { extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } }, secrets, subscriptions: [], globalState: { get() {}, async update() {} } };
   const provider = new DgcViewProvider(context);
+  provider.lastReadyEvent={capabilities:{plugin_management:true,app_connectors:true}};
   provider.backend = backend;
   provider.correlatedStateRequests = true;
   provider.state = {
@@ -329,7 +331,9 @@ function catalogHarness(catalog) {
       async update(key, value) { updates.push({ key, value }); },
     },
   };
-  return { provider: new DgcViewProvider(context), updates };
+  const provider = new DgcViewProvider(context);
+  provider.lastReadyEvent = {capabilities:{plugin_management:true,app_connectors:true,usage_ledger:true}};
+  return { provider, updates };
 }
 
 function changesHarness() {
@@ -537,6 +541,8 @@ test("MCP sign-in ignores duplicate acceptance and cannot open after cancellatio
     api.env.asExternalUri = async uri => uri;
     provider.onEvent(event("current"));
     await provider.onMessage({ type: "mcp_input_response", id: "current", action: "accept" });
+    // The URL is opened immediately on the event, without a second acceptance surface.
+    await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(opened, [url]);
     assert.deepEqual(sent.map(command => command.action), ["cancel", "accept"]);
   } finally { api.Uri = original.Uri; api.env = original.env; }
@@ -594,6 +600,7 @@ function mcpTransactionHarness(initialCatalog = []) {
     },
   };
   const provider = new DgcViewProvider(context);
+  provider.lastReadyEvent={capabilities:{plugin_management:true,app_connectors:true}};
   provider.backend = backend;
   provider.correlatedStateRequests = true;
   return {
@@ -1189,7 +1196,8 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
   const vs = globalThis.__DGC_TEST_VSCODE;
   const savedUri = vs.Uri;
   try {
-    vs.Uri = { joinPath: (...parts) => ({ fsPath: parts.map(String).join("/") }) };
+    vs.Uri = { joinPath: (...parts) => ({ fsPath: parts.map(String).join("/") }),
+      file: value => ({ fsPath: value }) };
     const provider = new DgcViewProvider({
     extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
       extensionUri: { fsPath: "/ext" }, subscriptions: [],
@@ -1908,4 +1916,170 @@ test("a chat that never had a message is not restored on reopen, and nothing say
   named.provider.currentSessionSaved = false;
   named.provider.onEvent({ type: "session_named", name: "Kiwi" });
   assert.equal(named.saved.get("dgc.activeSession.v1").saved, true);
+});
+
+test("settings gear reveals only the editor, and ready restores the selected page", async () => {
+  const {provider} = catalogHarness([]);
+  const messages = [], commands = [], chat = [];
+  provider.settingsEditor = {reveal() {}, webview: {postMessage: m => messages.push(m)}};
+  provider.ensureBackend = () => ({send: m => {commands.push(m);return true;}});
+  provider.post = m => chat.push(m);
+  provider.openSettings();
+  assert.equal(messages.find(m => m.type === "show").section, "general");
+  assert.deepEqual(chat, []);
+  messages.length = 0;
+  await provider.onSettingsMessage({type:"ready"});
+  assert.equal(messages.find(m => m.type === "show").section, "general");
+  assert.ok(commands.some(c => c.type === "list_mcp_servers"));
+});
+
+test("editor usage preserves its request id and MCP switches do not open chat surfaces", async () => {
+  const {provider} = catalogHarness([]);
+  const commands = [], messages = [];
+  provider.ensureBackend = () => ({send: m => {commands.push(m);return true;}});
+  provider.post = m => messages.push(m);
+  await provider.onSettingsMessage({type:"getUsage", range:"30d", requestId:"editor-ledger-1"});
+  assert.deepEqual(commands.pop(), {type:"get_usage", range:"30d", request_id:"editor-ledger-1"});
+  await provider.onSettingsMessage({type:"mcpToggle", name:"fixture", enabled:false});
+  assert.equal(commands.at(-1).type, "set_mcp_enabled");
+  assert.equal(commands.at(-1).enabled, false);
+  assert.deepEqual(messages, []);
+});
+
+test("publisher terms are accepted in the host, never trusted from a webview flag", async () => {
+  const {provider} = catalogHarness([]);
+  const commands = [], messages = [];
+  provider.ensureBackend = () => ({send: m => {commands.push(m);return true;}});
+  provider.settingsEditor = {webview: {postMessage:m=>messages.push(m)}};
+  provider.settingsCatalog = [{name:"fixture", display_name:"Fixture", install:"accept", license:"Publisher-Terms", terms_url:"https://publisher.example/terms"}];
+  provider.settingsPreviews.set("fixture", provider.settingsCatalog[0]);
+  await provider.onSettingsMessage({type:"installPlugin", name:"fixture", acceptLicense:"Publisher-Terms"});
+  assert.deepEqual(commands, []);
+  assert.equal(messages.at(-1).type,"pluginResult");
+  notices.warningResponses.push("Accept and install");
+  await provider.onSettingsMessage({type:"installPlugin", name:"fixture"});
+  assert.equal(commands.at(-1).type,"install_plugin");
+  assert.equal(commands.at(-1).accept_license,"Publisher-Terms");
+});
+
+
+test("unreviewed settings messages cannot install executable packages", async () => {
+  const {provider} = catalogHarness([]);
+  const commands=[], messages=[];
+  provider.ensureBackend=()=>({send:m=>{commands.push(m);return true;}});
+  provider.settingsEditor={webview:{postMessage:m=>messages.push(m)}};
+  provider.settingsCatalog=[{name:"unreviewed",installed:false,install:"allow"}];
+  await provider.onSettingsMessage({type:"installPlugin",name:"unreviewed"});
+  assert.deepEqual(commands,[]);
+  assert.match(messages.at(-1).error,/review/);
+});
+
+test("only selected reviewed stdio commands require native execution confirmation", async () => {
+  const {provider} = catalogHarness([]);
+  const commands=[],messages=[];
+  provider.ensureBackend=()=>({send:m=>{commands.push(m);return true;}});
+  provider.settingsEditor={webview:{postMessage:m=>messages.push(m)}};
+  provider.settingsPreviews.set("fixture",{name:"fixture",display_name:"Fixture",install:"allow",server_specs:{
+    local:{transport:"stdio",command:"node",args:["server.js"]},remote:{url:"https://example.com/mcp"}}});
+  await provider.onSettingsMessage({type:"installPlugin",name:"fixture",selectedServers:["local"]});
+  assert.equal(commands.length,0);assert.match(notices.warnings.at(-1),/run its MCP commands/);
+  notices.warningResponses.push("Install and run");
+  await provider.onSettingsMessage({type:"installPlugin",name:"fixture",selectedServers:["local"]});
+  assert.equal(commands.at(-1).type,"install_plugin");
+  const count=notices.warnings.length;
+  await provider.onSettingsMessage({type:"installPlugin",name:"fixture",selectedServers:["remote"]});
+  assert.equal(notices.warnings.length,count);
+});
+
+test("uninstall clears editor server records and secrets without dropping unrelated records", async () => {
+  const {provider,secretValues}=harness({initialSecrets:{"dgc.mcp.owned":"secret", "dgc.mcp.keep":"keep"}});
+  let records=["owned","keep"].map(name=>({name,transport:"stdio",target:"node",args:["server.js"],envNames:[],logLevel:"warning"}));
+  provider.context.globalState={get:()=>records,update:async(key,value)=>{assert.equal(key,"dgc.managedMcpServers.v1");records=value;}};
+  await provider.clearUninstalledPluginServers(["owned"]);
+  assert.deepEqual(records.map(r=>r.name),["keep"]);
+  assert.equal(secretValues.has("dgc.mcp.owned"),false);
+  assert.equal(secretValues.get("dgc.mcp.keep"),"keep");
+});
+
+test("link install completion tracks the resolved plugin name",async()=>{
+ const {provider}=catalogHarness([]);const commands=[];
+ provider.ensureBackend=()=>({send:m=>{commands.push(m);return true;}});
+ provider.settingsEditor={webview:{postMessage(){}}};
+ provider.settingsPreviews.set("https://github.com/owner/package",{name:"resolved-package",install:"allow",server_specs:{}});
+ await provider.onSettingsMessage({type:"installPlugin",name:"https://github.com/owner/package"});
+ const command=commands.at(-1);assert.equal(command.name,"https://github.com/owner/package");
+ assert.equal(provider.settingsInstalls.get(command.request_id),"resolved-package");
+});
+
+function composioHarness() {
+ const {provider}=catalogHarness([]);const messages=[],opened=[],commands=[];
+ provider.settingsEditor={webview:{postMessage:m=>messages.push(m)}};
+ provider.ensureBackend=()=>({send:c=>{commands.push(c);return true;},request:async c=>{commands.push(c);throw Error('No app setup RPC expected');}});
+ globalThis.__DGC_TEST_VSCODE.Uri.parse=s=>({toString:()=>s});
+ globalThis.__DGC_TEST_VSCODE.env.openExternal=async uri=>{opened.push(uri.toString());return true;};
+ return{provider,messages,opened,commands};
+}
+test('Composio management opens the fixed dashboard URL with no setup RPC',async()=>{
+ const x=composioHarness();await x.provider.onSettingsMessage({type:'composioCatalog',url:'https://evil.invalid'});
+ assert.deepEqual(x.opened,['https://dashboard.composio.dev/~/org/connect']);assert.deepEqual(x.commands,[]);
+});
+test('retired Composio controls cannot start setup, open an auth link or cancel chat',async()=>{
+ const x=composioHarness();
+ for(const type of ['composioConnection','composioBrowser','composioCancel']) await x.provider.onSettingsMessage({type,action:'connect',toolkit:'gmail',url:'https://connect.composio.dev/link/old'});
+ assert.deepEqual(x.commands,[]);assert.deepEqual(x.opened,[]);assert.match(x.messages.at(-1).message,/Manage apps in Composio/);
+ const chat=[];x.provider.post=m=>chat.push(m);
+ x.provider.onEvent({type:'composio_connection',toolkit:'gmail',status:'pending',url:'https://connect.composio.dev/link/old'});
+ assert.deepEqual(chat,[]);
+});
+test('cancelled or failed dashboard opening offers a retry without an auth request',async()=>{
+ const x=composioHarness();globalThis.__DGC_TEST_VSCODE.env.openExternal=async()=>false;
+ await x.provider.onSettingsMessage({type:'composioCatalog'});assert.match(x.messages.at(-1).message,/try again/);
+ globalThis.__DGC_TEST_VSCODE.env.openExternal=async()=>{throw Error('native failure')};
+ await x.provider.onSettingsMessage({type:'composioCatalog'});assert.match(x.messages.at(-1).message,/Could not open/);assert.deepEqual(x.commands,[]);
+});
+
+function connectorHarness(...args){
+ const h=mcpTransactionHarness(...args);h.provider.ensureBackend=()=>h.provider.backend;
+ h.provider.backend.send=()=>true;h.provider.post=()=>{};h.provider.settingsCatalog=[];
+ h.posted=[];h.provider.settingsEditor={webview:{postMessage:m=>h.posted.push(m)}};
+ return h;
+}
+test('connector requires native terms consent and stores only runtime tokens in SecretStorage',async()=>{
+ const h=connectorHarness();await h.provider.saveConnector({name:'zapier',token:'fixture-token',auth:'token'});assert.equal(h.commands.length,0);
+ notices.warningResponses.push('Accept and connect');await h.provider.saveConnector({name:'zapier',token:'fixture-token',auth:'token'});
+ const cmd=h.commands[0];assert.equal(cmd.connector,'zapier');assert.equal(cmd.accept_license,'Zapier service terms');assert.equal(cmd.runtime.env.DGC_MCP_BEARER_TOKEN,'fixture-token');assert.doesNotMatch(JSON.stringify(cmd.persisted),/fixture-token/);assert.equal(cmd.persisted.defer_until_setup,true);
+ assert.equal(h.catalog()[0].connector,'zapier');assert.doesNotMatch(JSON.stringify(h.catalog()),/fixture-token/);assert.match(h.rawSecrets.get('dgc.mcp.zapier'),/fixture-token/);
+ h.provider.settingsCatalog=[{name:'zapier',installed:true}];h.clearEvidence();await h.provider.saveConnector({name:'zapier',token:'',auth:'token'});assert.equal(h.commands[0].runtime.env.DGC_MCP_BEARER_TOKEN,'fixture-token');
+});
+test('generic MCP save cannot forge connector license acceptance',async()=>{
+ const h=connectorHarness();await h.provider.saveMcpServer({name:'zapier',transport:'remote',target:'https://mcp.zapier.com/api/v1/connect',token:'fixture-token',connector:'zapier',connectorLicense:'Zapier service terms'});
+ assert.equal(h.commands[0].connector,undefined);assert.equal(h.catalog()[0].connector,undefined);
+});
+test('connector SecretStorage failure compensates backend and ownership and leaves no local record',async()=>{
+ const h=connectorHarness();h.failSecret('store','dgc.mcp.zapier');notices.warningResponses.push('Accept and connect');
+ await h.provider.saveConnector({name:'zapier',token:'fixture-token',auth:'token'});
+ assert.deepEqual(h.commands.map(c=>c.type),['upsert_mcp_server','remove_mcp_server']);assert.deepEqual(h.catalog(),[]);assert.equal(h.rawSecrets.size,0);assert.equal(h.posted.some(m=>m.type==='mcpSaved'),false);
+});
+test('connector rejects missing tokens, wrong endpoints and a release backend without connector support',async()=>{
+ const h=connectorHarness();for(const msg of [{name:'zapier',auth:'token'},{name:'make',auth:'token',token:'fixture'},{name:'arcade',url:'https://evil.example/mcp/id',auth:'oauth'}])await h.provider.saveConnector(msg);
+ assert.equal(h.commands.length,0);assert.equal(h.posted.filter(m=>m.type==='connectorError').length,3);
+ h.provider.lastReadyEvent={capabilities:{}};await h.provider.saveConnector({name:'make',auth:'oauth'});assert.match(h.posted.findLast(m=>m.type==='connectorError').message,/local connector build/);assert.equal(h.commands.length,0);
+});
+
+test('released or not-yet-ready CLI never receives private plugin commands',()=>{
+ const h=connectorHarness();const sent=[];h.provider.backend.send=c=>{sent.push(c);return true;};
+ for(const ready of [undefined,{capabilities:{}}]){
+  h.provider.lastReadyEvent=ready;for(const type of ['list_plugins','list_plugin_marketplaces','install_plugin','inspect_plugin','uninstall_plugin','create_plugin'])assert.equal(h.provider.sendPluginCommand({type}),false);
+ }
+ assert.deepEqual(sent,[]);assert.match(h.posted.at(-1).message,/local connector build/);
+ h.provider.lastReadyEvent={capabilities:{plugin_management:true}};assert.equal(h.provider.sendPluginCommand({type:'list_plugins'}),true);assert.equal(sent[0].type,'list_plugins');
+});
+
+test('saved connector tokens are not replayed to a release CLI during startup',async()=>{
+ const h=connectorHarness();const item={name:'zapier',connector:'zapier',connectorLicense:'Zapier service terms',transport:'remote',target:'https://mcp.zapier.com/api/v1/connect',args:[],envNames:[],logLevel:'warning'};
+ await h.provider.storeMcpSecrets(item,{token:'private-token'});h.clearEvidence();h.provider.lastReadyEvent={capabilities:{}};
+ assert.equal(await h.provider.sendManagedMcp(h.provider.backend,item,true),true);
+ assert.deepEqual(h.commands,[]);assert.equal(h.timeline.some(s=>s.startsWith('secret:get:')),false);
+ await assert.rejects(h.provider.sendManagedMcp(h.provider.backend,item,false),/local connector build/);
+ assert.match(h.rawSecrets.get('dgc.mcp.zapier'),/private-token/);
 });

@@ -463,6 +463,19 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
 
 
+def _suppress_bridge_browser(env: dict) -> dict:
+    """Stop mcp-remote from opening a browser before the user agrees.
+
+    Its bundled opener treats BROWSER=/bin/true as success and then skips the desktop
+    fallbacks. The editor or CLI opens the URL only after that consent.
+    """
+    if os.name != "posix" or not os.path.isfile("/bin/true"):
+        return env
+    quiet = dict(env)
+    quiet["BROWSER"] = "/bin/true"
+    return quiet
+
+
 def _runtime_server_args(spec: dict) -> list[str]:
     """Materialize safe remote auth indirection without persisting a header value."""
     args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
@@ -488,6 +501,9 @@ def _runtime_server_args(spec: dict) -> list[str]:
         args[1] = MCP_REMOTE_PACKAGE
         if "--auth-timeout" not in args:
             args.extend(["--auth-timeout", "120"])
+        if "--static-oauth-client-metadata" not in args:
+            args.extend(["--static-oauth-client-metadata", json.dumps({
+                "client_name": "DGC", "client_uri": "https://vibedgc.com"})])
         if urlsplit(url).hostname == "::1" and "--allow-http" not in args:
             args.append("--allow-http")
     return args
@@ -551,10 +567,12 @@ class MCPServer:
         self._auth_handler = auth_handler
         self._connection_done = threading.Event()
         self._connection_cancel = None
+        self._browser_auth_generation: int | None = None
 
     # lifecycle ----------------------------------------------------------------
     def start(self, timeout: float = 10.0, cancel: threading.Event | None = None) -> bool:
         self._connection_done.clear()
+        self._browser_auth_generation = None
         self._connection_cancel = _AnyCancel(cancel, self._connection_done)
         try:
             return self._start(timeout, self._connection_cancel)
@@ -623,8 +641,18 @@ class MCPServer:
                 "clientInfo": _CLIENT_INFO,
             }, timeout, cancel, modern=False)
             if init is None:
-                self.error = f"initialize failed: {err or self._diagnostic_tail() or 'no response'}"
                 self.stop()
+                # Join the readers before inspecting stderr, so an exit does not discard
+                # the bridge's actual error. Never expose OAuth URLs or credential values.
+                from .redaction import redact_text
+                from .model_errors import scrub_urls
+                diagnostic = scrub_urls(redact_text(self._diagnostic_tail(), self.env.values()))
+                lines = [line for line in diagnostic.splitlines()
+                         if re.search(r"\b(error|failed|forbidden|unauthorized)\b", line, re.I)
+                         and not line.lstrip().startswith("at ")]
+                detail = " ".join(dict.fromkeys(lines[-3:]))[:1000]
+                reason = str(err or 'no response')
+                self.error = f"initialize failed: {reason}" + (f". {detail}" if detail else "")
                 return False
             selected = str(init.get("protocolVersion") or MCP_LEGACY_PROTOCOL_VERSION)
             if selected == MCP_PROTOCOL_VERSION:
@@ -664,11 +692,12 @@ class MCPServer:
         return True
 
     def _launch(self) -> bool:
+        env = _suppress_bridge_browser(self.env) if self.remote_bridge else self.env
         try:
             proc = subprocess.Popen(
                 [self.command, *self.args],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                env=self.env, cwd=str(self.root), text=True, bufsize=1, start_new_session=True,
+                env=env, cwd=str(self.root), text=True, bufsize=1, start_new_session=True,
             )
         except Exception as e:
             self.error = f"could not launch: {e}"
@@ -971,13 +1000,18 @@ class MCPServer:
                             # Generic server input sanitization strips this private marker. Only
                             # the local pinned bridge may ask the editor to forward its callback.
                             params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
-                            if auth_count <= 2 and callable(self._auth_handler):
+                            if auth_count <= 2 and callable(self._auth_handler) and self.proc is proc:
+                                # Once a real authorize URL exists, the human owns the wait.
+                                # Preserve this bridge/callback until initialize completes or
+                                # the user/connection cancels, not the startup request deadline.
+                                self._browser_auth_generation = self._generation
                                 response = self._auth_handler(self.name, "elicitation/create", params,
                                                               self._connection_cancel)
                                 if response.get("action") != "accept":
                                     self._connection_done.set()
-                        except Exception:
-                            self._append_diagnostic("Remote MCP sign-in could not be completed")
+                        except Exception as exc:
+                            self._append_diagnostic(
+                                f"Remote MCP sign-in could not be completed ({type(exc).__name__})")
                             self._connection_done.set()
                         continue
                 self._append_diagnostic(
@@ -1330,11 +1364,15 @@ class MCPServer:
                 self._append_diagnostic(send_error)
                 self._stop_process(proc, generation)
             return None, send_error
-        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+        def awaiting_browser():
+            return (method == "initialize" and self.remote_bridge
+                    and self._browser_auth_generation == generation)
+
+        while not ev.wait(0.1 if awaiting_browser() else min(0.1, max(0.0, deadline - time.monotonic()))):
             reason = None
             if cancel is not None and cancel.is_set():
                 reason = "cancelled by user"
-            elif time.monotonic() >= deadline:
+            elif time.monotonic() >= deadline and not awaiting_browser():
                 reason = "request timed out"
             if reason:
                 with self._lock:

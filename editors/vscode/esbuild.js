@@ -61,6 +61,12 @@ async function main() {
     outfile: "dist/mermaid.js", minify: true, sourcemap: false,
     legalComments: "inline",
   });
+  await esbuild.build({
+    entryPoints: ["src/settingsClient.js"], bundle: true, format: "iife",
+    loader: { ".ico": "dataurl", ".png": "dataurl", ".svg": "dataurl" },
+    platform: "browser", target: "chrome108", outfile: "dist/settings.js",
+    minify: production, sourcemap: false,
+  });
   const ctx = await esbuild.context({
     entryPoints: ["src/extension.ts"],
     bundle: true,

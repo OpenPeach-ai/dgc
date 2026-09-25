@@ -113,12 +113,13 @@ _BUSY_MUTATIONS = {
     # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
-    "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
+    # set_skill_enabled is absent: a skill switch only changes what the next prompt may load.
+    "resolve_retained_task", "reload_skills", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
     # Continuing an interrupted turn is offered on an idle chat; while a turn runs there is
     # nothing interrupted to continue.
-    "resume_turn",
+    "resume_turn", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "prompt", "start_goal", "resume_turn",
@@ -132,6 +133,8 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory", "list_monitors", "stop_monitor", "list_agents",
+    "composio_connection", "list_plugins", "install_plugin", "inspect_plugin", "uninstall_plugin", "list_plugin_marketplaces",
+    "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 # Config fields added to protocol v14 after it first shipped. An editor validates every event it
@@ -1520,7 +1523,7 @@ class Backend:
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
-                          "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          "plugin_management": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
@@ -2545,9 +2548,13 @@ class Backend:
         return terminal
 
     def _upsert_mcp_server(self, request_id: str, name: str,
-                           runtime_value, persisted_value, *, interactive: bool = False):
+                           runtime_value, persisted_value, *, interactive: bool = False, connector: str = "", accept_license: str = ""):
+        from . import connectors, plugins
         def finish(error=None):
-            terminal = lambda: self._emit_mcp_servers(request_id, error)
+            def terminal():
+                self._emit_mcp_servers(request_id, error)
+                if connector:
+                    self.em.emit("plugin_catalog", request_id=request_id, items=self._editor_plugins())
             return terminal if interactive else terminal()
 
         if not _MCP_NAME_RE.fullmatch(name):
@@ -2580,12 +2587,17 @@ class Backend:
         servers = dict(self.config.get("mcp_servers", {}) or {})
         if name not in servers and len(servers) >= _MAX_MCP_SERVERS:
             return finish(f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
+        if connector:
+            try:
+                if name != connector: raise plugins.PluginError("Connector identity cannot be renamed")
+                connectors.save(self.config, connector, persisted, accept_license)
+            except (plugins.PluginError, OSError, ValueError) as exc:
+                return finish(str(exc))
+        else:
+            servers[name] = persisted
+            self.config.set("mcp_servers", servers)
         if hasattr(self.config, "drop_mcp_secrets"):
-            # An editor upsert may replace a SecretStorage value without changing the public
-            # server identity.  Never let an older CLI-migrated value win on the next launch.
             self.config.drop_mcp_secrets(name)
-        servers[name] = persisted
-        self.config.set("mcp_servers", servers)
         secret_candidates = list(runtime.get("env", {}).values())
         existing = list(getattr(self.config, "_session_secret_values", ()))
         self.config._session_secret_values = tuple((existing + secret_candidates)[-256:])
@@ -3232,6 +3244,115 @@ class Backend:
             if quiet:
                 self._suppress_wakes(False)
 
+    def _editor_plugins(self, opening: str = "", connected: set | None = None) -> list:
+        from .plugins import catalog_for_editor, ensure_first_party
+        ensure_first_party()
+        raw = self.config.get("disabled_skills", [])
+        disabled = {item for item in raw if isinstance(item, str)} if isinstance(raw, list) else set()
+        current = set(self.agent.mcp.servers) if connected is None else connected
+        rows = catalog_for_editor(opening=opening, connected=current, disabled=disabled)
+        for row in rows:
+            failure = next((self.agent.mcp.failures.get(n) for n in row.get("server_names", [row["name"]]) if self.agent.mcp.failures.get(n)), None)
+            if failure:
+                row["connection_error"] = str(failure)[:500]
+        return rows
+
+    def _install_plugin(self, cmd: dict) -> None:
+        from .plugins import PluginError, _installed, connect, install, record_servers
+        request_id = str(cmd.get("request_id") or "")
+        name = str(cmd.get("name") or "").strip()
+        try:
+            accept = str(cmd.get("accept_license") or "")
+            reviewed = getattr(self, "_prepared_plugins", {}).pop(name, None)
+            existing = next((row for row in _installed() if row["name"] == name), None)
+            if reviewed is not None:
+                record = install(reviewed, accept_license=accept, selected_servers=cmd.get("selected_servers"))
+                name = record["name"]
+            elif existing is not None:
+                # Connect uses exactly the installed selection, never a newly fetched package.
+                record = existing
+            else:
+                raise PluginError("Open the plugin install review again before installing. The previous review is no longer available.")
+            self.agent.reload_skills()
+            failure_message = ""
+            if record_servers(record) and not record.get("setup_required"):
+                self.em.emit("plugin_catalog", items=self._editor_plugins(opening=name), **_request_fields(request_id))
+            if record_servers(record):
+                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input, cancel=self.agent.cancelled)
+                failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record) if self.agent.mcp.failures.get(n)), None)
+                if failure:
+                    detail = str(failure)
+                    # A timeout/process exit is not evidence of a vendor approval rejection.
+                    # Keep the observed error; the install UI explains known prerequisites.
+                    if "exited" in detail or "timed out" in detail:
+                        detail = (f"{name} could not finish connecting. " + detail)
+                    self.agent.mcp.failures[name] = detail
+                    failure_message = detail
+            connected = set(self.agent.mcp.servers)
+            items = self._editor_plugins(connected=connected)
+            def terminal():
+                if failure_message:
+                    self.em.emit("command_rejected", command="install_plugin", reason="plugin", request_id=request_id, message=failure_message)
+                self.em.emit("plugin_catalog", items=items, **_request_fields(request_id))
+            return terminal
+        except (PluginError, OSError, StopIteration, ValueError) as exc:
+            message = str(exc)
+            return lambda: self.em.emit("command_rejected", command="install_plugin", reason="plugin", request_id=request_id, message=message)
+
+    def _plugin_operation(self, cmd: dict) -> None:
+        from . import plugins, plugin_registry
+        request = str(cmd.get("request_id", ""))
+        action = cmd["type"]
+        name = str(cmd.get("name", ""))
+        try:
+            if action == "inspect_plugin":
+                item = plugins.prepare_plugin(name)
+                if not hasattr(self, "_prepared_plugins"): self._prepared_plugins = {}
+                if len(self._prepared_plugins) >= 16: self._prepared_plugins.pop(next(iter(self._prepared_plugins)))
+                self._prepared_plugins[name] = item
+                return lambda: self.em.emit("plugin_preview", request_id=request, item=item)
+            if action == "list_plugin_marketplaces":
+                self.em.emit("plugin_marketplaces", request_id=request,
+                             items=plugin_registry.list_marketplaces(plugins.PLUGIN_HOME))
+                return
+            message, path = "", ""
+            removed_servers = []
+            if action == "uninstall_plugin":
+                result = plugins.uninstall(name, config=self.config, manager=self.agent.mcp)
+                removed_servers = result["removed_servers"]
+                self.agent.reload_skills()
+                self._emit_skill_catalog(request)
+                self._emit_mcp_servers(request)
+                message = "Plugin uninstalled."
+                if result["retained_servers"]:
+                    message += " Kept shared or edited MCP servers: " + ", ".join(result["retained_servers"])
+            elif action in ("add_plugin_marketplace", "refresh_plugin_marketplace"):
+                source = str(cmd.get("source", ""))
+                if action == "refresh_plugin_marketplace":
+                    row = next((r for r in plugin_registry.list_marketplaces(plugins.PLUGIN_HOME) if r["name"]==name), None)
+                    if row is None: raise plugins.PluginError("Marketplace not found")
+                    source = row["source"]
+                row = plugin_registry.add_marketplace(plugins.PLUGIN_HOME, source, refresh=action.startswith("refresh"))
+                message = "Marketplace ready. Installed packages keep their reviewed versions."
+            elif action == "remove_plugin_marketplace":
+                plugin_registry.remove_marketplace(plugins.PLUGIN_HOME, name)
+                message = "Marketplace removed. Installed plugins are unchanged."
+            elif action == "create_plugin":
+                path = str(plugin_registry.create_plugin(plugins.PLUGIN_HOME, name,
+                           cmd.get("display_name", ""), cmd.get("description", "")))
+                message = "Plugin created. Edit its skill, then install it from Personal in the directory."
+            items = self._editor_plugins()
+            markets = plugin_registry.list_marketplaces(plugins.PLUGIN_HOME)
+            def terminal():
+                self.em.emit("plugin_operation", request_id=request, action=action, name=name, path=path,
+                             message=message, removed_servers=removed_servers)
+                self.em.emit("plugin_catalog", request_id=request, items=items)
+                self.em.emit("plugin_marketplaces", request_id=request, items=markets)
+            return terminal
+        except (plugins.PluginError, OSError, ValueError) as exc:
+            message = str(exc)
+            return lambda: self.em.emit("command_rejected", request_id=request, command=action, reason="plugin", message=message)
+
     def _dispatch(self, cmd: dict) -> None:
         problem = command_error(cmd)
         if problem:
@@ -3255,6 +3376,12 @@ class Backend:
                          **_request_fields(request_id))
             return
 
+        if t == "composio_connection":
+            # Compatibility reply for an old webview. No fixed provider schema or
+            # setup RPC is supported; app authorization belongs in Composio.
+            self.em.emit("composio_connection", request_id=request_id, toolkit=cmd["toolkit"],
+                         status="error", message="Manage app connections in Composio For You → Connect Apps.")
+            return
         if t == "start_goal":
             # Validate and persist the whole prepared request while no other foreground work can
             # take the turn slot. A rejected selection must not replace the standing goal.
@@ -3574,6 +3701,7 @@ class Backend:
                 self.agent.skills.clear()
                 self.agent.skills.update(updated)
                 self._emit_skill_catalog(request_id)
+                self.em.emit("plugin_catalog", items=self._editor_plugins(), request_id=request_id)
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
                              message=str(exc))
@@ -3617,13 +3745,13 @@ class Backend:
             if cmd.get("interactive"):
                 if not self._start_foreground_worker(lambda: self._upsert_mcp_server(
                         cmd["request_id"], cmd["name"], cmd["runtime"], cmd["persisted"],
-                        interactive=True), label="mcp-connection"):
+                        interactive=True, connector=cmd.get("connector", ""), accept_license=cmd.get("accept_license", "")), label="mcp-connection"):
                     self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                                  request_id=cmd["request_id"], message="A turn or MCP operation is already running")
             else:
                 self._upsert_mcp_server(
                     str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
-                    cmd.get("runtime"), cmd.get("persisted"))
+                    cmd.get("runtime"), cmd.get("persisted"), connector=cmd.get("connector", ""), accept_license=cmd.get("accept_license", ""))
 
         elif t == "remove_mcp_server":
             request_id = str(cmd.get("request_id") or "")
@@ -3631,6 +3759,13 @@ class Backend:
             if not _MCP_NAME_RE.fullmatch(name):
                 self._emit_mcp_servers(
                     request_id, "server name must use 1-64 letters, digits, ., _, or -")
+                return
+            from . import connectors, plugins
+            try:
+                # Also undo connector ownership when the editor compensates a failed secret save.
+                connectors.forget(self.config, name)
+            except (plugins.PluginError, OSError, ValueError) as exc:
+                self._emit_mcp_servers(request_id, str(exc))
                 return
             servers = dict(self.config.get("mcp_servers", {}) or {})
             servers.pop(name, None)
@@ -4471,6 +4606,20 @@ class Backend:
                          context_size=self._context_window_size(),
                          busy=self._busy() or bool(getattr(self, "_queue", None)),
                          **_request_fields(request_id))
+        elif t in {"inspect_plugin", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin"}:
+            if not self._start_foreground_worker(lambda: self._plugin_operation(cmd), label="plugin-operation"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd.get("request_id"),
+                             message="Wait for the current turn or plugin operation before changing packages.")
+        elif t == "list_plugin_marketplaces":
+            terminal = self._plugin_operation(cmd)
+            if callable(terminal): terminal()
+        elif t == "list_plugins":
+            self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
+        elif t == "install_plugin":
+            if not self._start_foreground_worker(lambda: self._install_plugin(cmd), label="plugin-install"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             request_id=cmd.get("request_id"),
+                             message="A turn or plugin install is already running; cancel or wait")
         elif t == "shutdown":
             raise _Shutdown()
         else:

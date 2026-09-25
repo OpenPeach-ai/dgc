@@ -2332,6 +2332,162 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "plugin_catalog"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array"
+            },
+            "installed": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "composio_connection"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "toolkit": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "toolkit",
+            "status",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plugin_preview"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "item": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "item"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plugin_marketplaces"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plugin_operation"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "removed_servers": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "action",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "skill_detail"
             },
             "seq": {
@@ -4405,6 +4561,226 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "list_plugins"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "install_plugin"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "accept_license": {
+              "type": "string"
+            },
+            "selected_servers": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "composio_connection"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "connect",
+                "check"
+              ]
+            },
+            "toolkit": {
+              "type": "string",
+              "enum": [
+                "gmail",
+                "googlecalendar",
+                "googledrive",
+                "figma"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "action",
+            "toolkit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "inspect_plugin"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "uninstall_plugin"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list_plugin_marketplaces"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "add_plugin_marketplace"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "remove_plugin_marketplace"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "refresh_plugin_marketplace"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create_plugin"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "display_name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "display_name",
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "reload_skills"
             },
             "request_id": {
@@ -4757,6 +5133,12 @@
             },
             "interactive": {
               "type": "boolean"
+            },
+            "connector": {
+              "type": "string"
+            },
+            "accept_license": {
+              "type": "string"
             }
           },
           "required": [

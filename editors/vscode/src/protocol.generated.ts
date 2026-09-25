@@ -7,8 +7,8 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step";
-export type DgcCommandType = "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "get_usage" | "list_agents" | "get_image";
+export type DgcEventType = "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "plugin_catalog" | "composio_connection" | "plugin_preview" | "plugin_marketplaces" | "plugin_operation" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step";
+export type DgcCommandType = "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "list_plugins" | "install_plugin" | "composio_connection" | "inspect_plugin" | "uninstall_plugin" | "list_plugin_marketplaces" | "add_plugin_marketplace" | "remove_plugin_marketplace" | "refresh_plugin_marketplace" | "create_plugin" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "get_usage" | "list_agents" | "get_image";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
 
@@ -2067,6 +2067,124 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     }
   },
+  "plugin_catalog": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "items": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "installed": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "composio_connection": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "toolkit": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "status": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "message": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "plugin_preview": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "item": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    }
+  },
+  "plugin_marketplaces": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "items": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    }
+  },
+  "plugin_operation": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "action": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "path": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "message": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "removed_servers": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    }
+  },
   "skill_detail": {
     "request_id": {
       "types": [
@@ -3736,6 +3854,174 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     }
   },
+  "list_plugins": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "install_plugin": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "accept_license": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "selected_servers": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    }
+  },
+  "composio_connection": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "action": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "connect",
+        "check"
+      ]
+    },
+    "toolkit": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "gmail",
+        "googlecalendar",
+        "googledrive",
+        "figma"
+      ]
+    }
+  },
+  "inspect_plugin": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "uninstall_plugin": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "list_plugin_marketplaces": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "add_plugin_marketplace": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "source": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "remove_plugin_marketplace": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "refresh_plugin_marketplace": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "create_plugin": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "display_name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "description": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
   "reload_skills": {
     "request_id": {
       "types": [
@@ -4040,6 +4326,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "interactive": {
       "types": [
         "boolean"
+      ],
+      "required": false
+    },
+    "connector": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "accept_license": {
+      "types": [
+        "string"
       ],
       "required": false
     }
