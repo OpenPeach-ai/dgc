@@ -410,9 +410,27 @@ async function run() {
   // Activate a delegated route through the real config event, then cross the installed extension
   // boundary for every model/thinking surface. Vendor model discovery must stay local to the
   // engine metadata instead of touching the native endpoint.
-  const settingsPosts = posted().filter((item) => item.type === "settings_open").length;
+  // Settings are their own editor tab now, not a view inside the chat webview, so opening them no
+  // longer posts `settings_open` into the transcript's webview -- it creates a "dgc.settings"
+  // panel beside it. This assertion used to wait for that post and would hang forever, which is
+  // how the migration first showed up: both unit suites were green and only the real extension
+  // host could see that nothing opened.
+  const settingsTabs = () => vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => (tab.label || "").includes("DGC Settings")).length;
+  const settingsBefore = settingsTabs();
+  const configReadsBefore = backendCommands(backendLogPath)
+    .filter((command) => command.type === "get_config").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "openSettings" });
-  await waitFor(() => posted().filter((item) => item.type === "settings_open").length > settingsPosts);
+  await waitFor(() => settingsTabs() > settingsBefore);
+  // The tab existing is not the precondition this next assertion needs. What it needs is the
+  // route, and the route arrives on the `config` event that the settings surface requests. On a
+  // FIRST open that request waits for the settings webview's own ready message, so the tab can be
+  // there while routeState is still empty -- and listModels would then legitimately fall through
+  // to the native endpoint. The old in-panel settings issued get_config synchronously, which is
+  // why this wait was never needed before and is not a weakening now.
+  await waitFor(() => backendCommands(backendLogPath)
+    .filter((command) => command.type === "get_config").length > configReadsBefore);
   const nativeListCount = backendCommands(backendLogPath)
     .filter((command) => command.type === "list_models").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "listModels" });
