@@ -10943,6 +10943,32 @@ def test_extension_vsix_guard():
           and guard.VENDORED_MEMBERS == frozenset({"extension/dist/mermaid.js"})
           and guard.DEFAULT_MEMBER_SIZE_LIMIT == 4 * 1024 * 1024,
           (guard.MEMBER_SIZE_LIMITS, guard.VENDORED_MEMBERS))
+    # An inlined image is base64, and base64 of zero bytes is a run of "A" -- long enough to read
+    # as an AWS key. dist/settings.js inlines the connector logos as data: URIs and one .ico does
+    # exactly that, which failed the release build. The exemption must stay narrow: image payloads
+    # only, never data:text, never the rest of the file.
+    _icon_blob = (b'const logo = "data:image/x-icon;base64,BgAAAAAAAAqCwAAG6mAA'
+                  + b"A" * 40 + b'";')
+    _icon_ok = True
+    try:
+        guard._scan_credentials("extension/dist/settings.js", _icon_blob, [])
+    except guard.ValidationError:
+        _icon_ok = False
+    _real_key_caught = False
+    try:
+        guard._scan_credentials("extension/dist/settings.js", b'k = "AKIA1234567890ABCDEF"', [])
+    except guard.ValidationError:
+        _real_key_caught = True
+    _text_uri_caught = False
+    try:
+        guard._scan_credentials("extension/dist/settings.js",
+                                b'data:text/plain;base64,AKIA1234567890ABCDEF', [])
+    except guard.ValidationError:
+        _text_uri_caught = True
+    check("an inlined image cannot be mistaken for a credential, and nothing else is exempt",
+          _icon_ok and _real_key_caught and _text_uri_caught,
+          f"icon_ok={_icon_ok} real_caught={_real_key_caught} text_caught={_text_uri_caught}")
+
     _fake_secret = b'x = {token: "ghp_' + b"a" * 30 + b'"}'
     _scan_failed = False
     try:

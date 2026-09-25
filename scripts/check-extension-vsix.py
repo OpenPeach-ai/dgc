@@ -157,12 +157,30 @@ def _looks_like_placeholder(value: str) -> bool:
     )
 
 
+# An inlined image is base64, and base64 of zero bytes is a run of "A". A 16-character run inside
+# an icon therefore reads as an AWS key to the pattern above: `dist/settings.js` inlines the
+# connector logos as data: URIs, and one of the .ico files contains AKIAAAAAAAAAAAAAAAAA.
+#
+# The exemption is deliberately narrow -- ONLY the payload of a base64 IMAGE data URI. It is not
+# extended to data:text or data:application, where a literal credential could genuinely hide, and
+# not to the file as a whole: everything outside these payloads is still scanned, in this member
+# as in every other. A real key would have to be pasted inside an image's base64 to slip past, and
+# it would then not decode as the image it claims to be.
+_IMAGE_DATA_URI = re.compile(rb"data:image/[a-zA-Z.+-]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _without_image_payloads(raw: bytes) -> bytes:
+    """The bytes a credential scan should see: image data URIs blanked, everything else intact."""
+    return _IMAGE_DATA_URI.sub(lambda m: b"data:image/x;base64," + b"." * (len(m.group(0)) - 20), raw)
+
+
 def _scan_credentials(member: str, raw: bytes, environment_values: list[bytes]) -> None:
     for value in environment_values:
         if value in raw:
             raise ValidationError(f"{member}: contains a credential supplied by the release environment")
+    scannable = _without_image_payloads(raw)
     for label, pattern in KNOWN_SECRET_PATTERNS:
-        if pattern.search(raw):
+        if pattern.search(scannable):
             raise ValidationError(f"{member}: contains a probable {label}")
     if Path(member).suffix.lower() not in TEXT_SUFFIXES:
         return
