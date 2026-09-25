@@ -7927,7 +7927,14 @@
     row.dataset.state = "open";
     row.dataset.askId = id;
 
-    const folded = el("button", "open-ask-folded", `${icon("circle-help")}<span>Answer question</span>`);
+    // The folded line is all that survives after 30s, so it has to say enough to be worth
+    // reopening: a question with choices says how many, or the chip is indistinguishable from
+    // every other unanswered question in the transcript.
+    const optionCount = Array.isArray(ev.options) ? ev.options.length : 0;
+    const foldedLabel = optionCount
+      ? `Answer question \u00b7 ${optionCount} option${optionCount === 1 ? "" : "s"}`
+      : "Answer question";
+    const folded = el("button", "open-ask-folded", `${icon("circle-help")}<span>${esc(foldedLabel)}</span>`);
     folded.type = "button";
     folded.title = String(ev.question || "");
 
@@ -7950,6 +7957,31 @@
       chips.appendChild(chip);
     }
     if (chips.children.length) body.appendChild(chips);
+
+    // Options, when the model could name them. The rows reuse the blocking picker's markup so the
+    // two read alike, but NOT its placement: this card stays in the transcript and must never
+    // dock into the composer, because the docking is what makes the picker modal and the whole
+    // point here is that the turn did not stop. Picking a row answers the question the same way
+    // typing does -- one tagged prompt -- so nothing new crosses the wire.
+    const options = Array.isArray(ev.options) ? ev.options.slice(0, 6) : [];
+    if (options.length) {
+      const list = el("div", "open-ask-options");
+      list.setAttribute("role", "group");
+      list.setAttribute("aria-label", "Suggested answers");
+      options.forEach((option, index) => {
+        const label = String(option && option.label || "").trim();
+        if (!label) return;
+        const row2 = el("button", "ask-opt" + (option.recommended ? " recommended" : ""));
+        row2.type = "button";
+        row2.dataset.index = String(index);
+        row2.innerHTML = `<span class="ask-opt-label">${esc(label)}</span>`
+          + (option.description ? `<span class="ask-opt-desc">${esc(String(option.description))}</span>` : "")
+          + (option.recommended ? `<span class="ask-opt-mark">Recommended</span>` : "");
+        row2.onclick = () => { input.value = label; sendOpenAsk(ask); };
+        list.appendChild(row2);
+      });
+      if (list.children.length) body.appendChild(list);
+    }
     body.appendChild(input);
 
     const actions = el("div", "open-ask-actions");

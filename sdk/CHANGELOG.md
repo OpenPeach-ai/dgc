@@ -1,5 +1,13 @@
 # DGC SDK changelog
 
+## 0.6.9 — unreleased
+
+Pairs with CLI 0.45.0. The vendored copy of the editor protocol gains `ask_request.options` and
+`set_workspace_roots.ask_options`, both optional: an open question can now carry the picker's
+choices without stopping the turn. A client that does not declare `ask_options` receives the
+question exactly as before, because a field it has not declared would make it drop the whole
+event.
+
 ## 0.6.8 — 2026-09-23
 
 0.6.7 published to PyPI and failed on npm: `npm publish "artifacts/…tgz"` contains a slash and no

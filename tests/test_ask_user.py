@@ -44,11 +44,12 @@ class _UI:
     def tool_result(self, name, out, call_id):
         self.results.append((name, out, call_id))
 
-    def ask_open_question(self, ask_id, question, context, suggestions, call_id=None):
+    def ask_open_question(self, ask_id, question, context, suggestions, call_id=None, options=None):
         if not self.can_show:
             return False
         self.shown.append({"ask_id": ask_id, "question": question, "context": context,
-                           "suggestions": list(suggestions), "call_id": call_id})
+                           "suggestions": list(suggestions), "call_id": call_id,
+                           "options": list(options or [])})
         return True
 
     def ask_resolved(self, ask_id, outcome, question, answer="", call_id=None):
@@ -237,13 +238,24 @@ class WiringTest(unittest.TestCase):
         from dgc.tools import TOOL_SCHEMAS
         spec = next(t for t in TOOL_SCHEMAS if t["function"]["name"] == "ask_user")
         params = spec["function"]["parameters"]
-        self.assertEqual(params["required"], ["question"])
-        self.assertEqual(set(params["properties"]), {"question", "context", "suggestions"})
+        self.assertEqual(params["required"], ["question"],
+                         "everything but the question stays optional")
+        self.assertEqual(set(params["properties"]),
+                         {"question", "context", "suggestions", "options"})
         self.assertEqual(params["properties"]["suggestions"]["maxItems"], 4)
+        # `options` is the picker's shape, so a model that CAN name the choices no longer has to
+        # stop the turn to offer them. suggestions only prefill the box; options are real choices.
+        self.assertEqual(params["properties"]["options"]["maxItems"], 6)
+        self.assertEqual(params["properties"]["options"]["items"]["required"], ["label"])
         described = spec["function"]["description"]
         self.assertIn("does not stop the turn", described)
         self.assertIn("propose_options", described,
                       "the description must draw the line to the tool it is not")
+        # That line MOVED: enumerable options used to be propose_options' alone, and the text said
+        # so. Now they belong here too, and propose_options is only for a decision the turn
+        # genuinely cannot proceed without.
+        self.assertNotIn("if you can enumerate the real options, use propose_options instead",
+                         described, "the old rule is now backwards")
 
 
 if __name__ == "__main__":

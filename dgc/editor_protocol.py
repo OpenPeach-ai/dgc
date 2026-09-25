@@ -224,8 +224,13 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # An open question the model asked mid-turn. This is NOT a request/response pair: the turn did
     # not stop for it, `ask_id` is the answer's identity, and the answer arrives later as an
     # ordinary steering prompt tagged with `answers`.
+    # ``options`` turns the open question into a picker WITHOUT making the turn wait for it: the
+    # card still sits in the transcript, still folds to a line you can answer later, and the answer
+    # still arrives as an ordinary tagged prompt. Only sent to a client that declared
+    # capabilities.ask_options, because a field an older peer has not declared makes it drop the
+    # whole event -- it would show no card at all rather than a card without options.
     "ask_request": {"call_id": _NS(False), "ask_id": _S(), "question": _S(),
-                    "context": _S(False), "suggestions": _A(False)},
+                    "context": _S(False), "suggestions": _A(False), "options": _A(False)},
     # How an open question ended -- for every client drawing its card, and for replay.
     "ask_resolved": {"call_id": _NS(False), "ask_id": _S(),
                      "outcome": _f("string", enum=("answered", "skipped", "expired", "unavailable")),
@@ -488,8 +493,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # ``open_asks`` is how a client says it can show a question the turn did not stop for. The
     # backend never emits ask_request/ask_resolved to a client that did not ask for them, and the
     # model is not offered the tool when no frontend can show one.
+    # ``ask_options`` is the same promise one step further: this client can draw the OPTIONS on an
+    # open question, not just its text box. A client that says open_asks but not ask_options still
+    # gets the question, without them.
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False),
-                            "open_asks": _B(False)},
+                            "open_asks": _B(False), "ask_options": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False), "reason": _S(False),

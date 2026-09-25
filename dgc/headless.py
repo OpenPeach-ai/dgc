@@ -1370,17 +1370,24 @@ class HeadlessUI:
         return decision if decision in _PLAN_MODES else None
 
     def ask_open_question(self, ask_id: str, question: str, context: str,
-                          suggestions: list, call_id=None) -> bool:
+                          suggestions: list, call_id=None, options=None) -> bool:
         """Show a question the turn did not stop for. Returns False when nobody could show it.
 
         Unlike ask_questions this registers no pending request and does not block: the answer
         comes back later as an ordinary steering prompt tagged with the ask_id.
+
+        ``options`` is sent only to a client that declared it can draw them. A client with
+        open_asks but not ask_options still gets the question -- as a text box, which is what it
+        could already show. Sending the field regardless would make it drop the whole event and
+        show nothing at all, which is the failure mode the capability gate exists to prevent.
         """
         if not getattr(self, "_open_asks_enabled", False):
             return False
+        send_options = options and getattr(self, "_ask_options_enabled", False)
         self.em.emit("ask_request", ask_id=ask_id, question=question,
                      **({"context": context} if context else {}),
                      **({"suggestions": list(suggestions)} if suggestions else {}),
+                     **({"options": list(options)} if send_options else {}),
                      **({"call_id": call_id} if isinstance(call_id, str) else {}))
         return True
 
@@ -1524,6 +1531,10 @@ class Backend:
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
+                          # The client answers with set_workspace_roots.ask_options when it can
+                          # draw the options too; ready.capabilities is a free-form object, so
+                          # advertising one costs an older client nothing.
+                          "ask_options": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           "editor_liveness": True, "produced_files": True, "agent_steps": True,
@@ -3724,6 +3735,7 @@ class Backend:
             # flag somewhere nobody looks, so every question was refused with "nobody can answer
             # questions here" while `ready` advertised the capability as present.
             self.ui._open_asks_enabled = bool(cmd.get("open_asks"))
+            self.ui._ask_options_enabled = bool(cmd.get("ask_options"))
             # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
             # structured request per question batch.
             roots, visible = [], []

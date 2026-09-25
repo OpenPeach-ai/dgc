@@ -1397,9 +1397,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // no past sessions in the project. The authoritative sync runs from the `ready` handler, where
     // capabilities are known.
     const supportsOpenAsks = this.lastReadyEvent?.capabilities?.open_asks === true;
+    // ask_options is the same promise one step further: this panel can draw the OPTIONS on that
+    // question, not only its text box. Gated identically, and for the identical reason -- a CLI
+    // that has not declared the field rejects the whole handshake command, which is not a
+    // degraded question but no session at all.
+    const supportsAskOptions = this.lastReadyEvent?.capabilities?.ask_options === true;
     const command = this.stateCommand(
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
-                           ...(supportsOpenAsks ? { open_asks: true } : {}) });
+                           ...(supportsOpenAsks ? { open_asks: true } : {}),
+                           ...(supportsAskOptions ? { ask_options: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);

@@ -321,9 +321,9 @@ TOOL_SCHEMAS = [
                            "required": ["question", "options"]}}},
         ["questions"]),
     _fn("ask_user", "Ask ONE open question you cannot answer yourself, and keep working. Unlike "
-        "propose_options this does not stop the turn and invents no options: use it when you do not "
-        "know the answers, only that you need one — a name, a value, an address, which of their "
-        "systems they meant. Their reply arrives mid-turn as an ordinary message. Ask only when a "
+        "propose_options this does not stop the turn: use it whenever the work can go on without "
+        "the answer, whether or not you can list the choices — pass `options` when you can. Their "
+        "reply arrives mid-turn as an ordinary message. Ask only when a "
         "different answer changes what you build; if a sensible default exists, take it, say which "
         "you took, and carry on. Never for permission, for whether a plan is ready, or for anything "
         "the code or the request already answers. Meanwhile do every part of the task that does not "
@@ -332,10 +332,20 @@ TOOL_SCHEMAS = [
          "context": {"type": "string",
                      "description": "Optional: why you need it, one short sentence"},
          "suggestions": {"type": "array", "maxItems": 4,
-                         "description": "Optional example answers to save typing. Plain strings, "
-                                        "not choices — if you can enumerate the real options, use "
-                                        "propose_options instead",
-                         "items": {"type": "string"}}},
+                         "description": "Optional example answers to save typing. Plain strings "
+                                        "that only prefill the box; the user may ignore them",
+                         "items": {"type": "string"}},
+         "options": {"type": "array", "maxItems": 6,
+                     "description": "Optional: the real choices, when you can enumerate them. "
+                                    "Put the one you recommend first and end its label with "
+                                    "(Recommended). The user may still type something else. Use "
+                                    "propose_options instead only when you genuinely cannot "
+                                    "continue without the answer",
+                     "items": {"type": "object", "additionalProperties": False,
+                               "properties": {
+                                   "label": {"type": "string"},
+                                   "description": {"type": "string"}},
+                               "required": ["label"]}}},
         ["question"]),
     _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
         "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
@@ -360,9 +370,10 @@ TOOL_SCHEMAS = [
          "agent": {"type": "string", "description": "explorer (read-only search and map), "
                    "researcher (writes one findings file), critic (reviews named files or a "
                    "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
-         "background": {"type": "boolean", "description": "If true, the child keeps working after "
-                        "this turn ends. Where the frontend can deliver it, you are woken when the "
-                        "child finishes; the tool result says which you get. Default false."}},
+         "background": {"type": "boolean", "description": "True only when you will not use the "
+                        "result this turn -- a parallel track. False when your next step needs the "
+                        "answer. A background child outlives the turn; the result says whether you "
+                        "are woken. Default false."}},
         ["description", "prompt"]),
 ]
 

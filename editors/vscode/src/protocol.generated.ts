@@ -1225,6 +1225,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": false
+    },
+    "options": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "ask_resolved": {
@@ -3474,6 +3480,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     },
     "open_asks": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "ask_options": {
       "types": [
         "boolean"
       ],

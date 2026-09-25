@@ -6637,7 +6637,7 @@ class Agent(GoalLifecycle):
 
     def _ask_user(self, call_id, args, secrets) -> str:
         """The ask_user executor: hand the question to the frontend and return at once."""
-        from .questions import UNAVAILABLE_RESULT, cut_cells, one_line
+        from .questions import UNAVAILABLE_RESULT, _option, cut_cells, one_line
         self.ui.tool_call("ask_user", redact_value(args, secrets), call_id)
 
         def finish(out: str) -> str:
@@ -6652,6 +6652,20 @@ class Agent(GoalLifecycle):
         raw = safe.get("suggestions")
         cleaned = [one_line(cut_cells(str(item), 120)) for item in raw] if isinstance(raw, list) else []
         suggestions = [item for item in cleaned if item][:4]   # drop blanks, THEN take four
+        # Options go through the picker's own normaliser rather than a second parser: same label
+        # and description caps, the same three ways a model writes "(Recommended)", and the same
+        # rule that a model-added "Other" row is dropped because the client adds its own.
+        options: list[dict] = []
+        raw_options = safe.get("options")
+        if isinstance(raw_options, list):
+            for item in raw_options[:6]:
+                try:
+                    option = _option(item)
+                except ValueError:
+                    continue                    # a malformed option is skipped, not fatal: the
+                                                # question is still worth asking as free text
+                if option:
+                    options.append(option)
 
         show = getattr(self.ui, "ask_open_question", None)
         if self.depth > 0 or not callable(show):
@@ -6662,13 +6676,25 @@ class Agent(GoalLifecycle):
             return finish(self.ASK_TOO_MANY.format(n=len(open_now)))
 
         ask_id = f"ask{uuid.uuid4().hex[:12]}"
+        # `options` is newer than this method, and a frontend is free to implement the older
+        # signature -- so ask for it only when there is something to show, and fall back rather
+        # than losing the question. The two excepts are deliberately different: a frontend that
+        # predates the argument is fine and keeps the question, while a frontend that RAISES
+        # cannot show it at all. Catching both as one is what made a simple arity mismatch
+        # indistinguishable from "nobody can display this", with the question silently dropped.
         try:
-            delivered = show(ask_id, question, context, suggestions, call_id)
+            delivered = (show(ask_id, question, context, suggestions, call_id, options)
+                         if options else show(ask_id, question, context, suggestions, call_id))
+        except TypeError:
+            try:
+                delivered = show(ask_id, question, context, suggestions, call_id)
+            except Exception:
+                delivered = False
         except Exception:
             delivered = False
         if not delivered:
             return finish(UNAVAILABLE_RESULT)
-        open_now[ask_id] = {"question": question, "call_id": call_id}
+        open_now[ask_id] = {"question": question, "call_id": call_id, "options": options}
         return finish(self.ASK_DELIVERED)
 
     def resolve_open_ask(self, ask_id: str, outcome: str, answer: str = "") -> bool:

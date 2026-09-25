@@ -1442,6 +1442,9 @@
             },
             "suggestions": {
               "type": "array"
+            },
+            "options": {
+              "type": "array"
             }
           },
           "required": [
@@ -4077,6 +4080,9 @@
               "type": "boolean"
             },
             "open_asks": {
+              "type": "boolean"
+            },
+            "ask_options": {
               "type": "boolean"
             }
           },

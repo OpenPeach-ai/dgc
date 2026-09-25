@@ -1756,6 +1756,17 @@ body.ask-docked #tasks-panel { display: none; }
 .open-ask-q { margin: 0; color: var(--text-strong, var(--text)); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
 .open-ask-context { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .open-ask-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+
+/* The open question's option rows. Same shape as the blocking picker's so the two read alike;
+   the difference is where the card lives, not what it looks like. */
+.open-ask-options { display: flex; flex-direction: column; gap: 4px; margin: var(--sp-2) 0; }
+.ask-opt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; width: 100%; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
+.ask-opt:hover { background: var(--surface2); border-color: var(--border-strong); }
+.ask-opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ask-opt-label { font-weight: var(--w-med); color: var(--text-strong); }
+.ask-opt-desc { flex: 1; min-width: 0; color: var(--muted); }
+.ask-opt-mark { flex: none; color: var(--link); font: var(--w-med) var(--t-xs)/1 var(--mono); }
+.ask-opt.recommended { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); }
 .open-ask-chip { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   background: transparent; color: var(--text); font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; }
 .open-ask-chip:hover { border-color: var(--accent); }
