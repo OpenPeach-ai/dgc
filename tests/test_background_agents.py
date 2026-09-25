@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from unittest.mock import patch
 
 from dgc.config import Config
@@ -177,13 +178,12 @@ class BackgroundTaskTests(HarnessCase):
 
     def test_stop_detached_cancels_the_child(self):
         h = self.make(git=True, mode="auto")
+        finalized = threading.Event()
+        h.agent.on_detached_ended = lambda notice: finalized.set()
 
         def stubborn(messages, results, cancel):
-            deadline = time.monotonic() + 4
-            while time.monotonic() < deadline:
-                if cancel is not None and cancel.is_set():
-                    break
-                time.sleep(0.05)
+            self.assertIsNotNone(cancel)
+            cancel.wait(4)
             return ChatResult(content="still going")
 
         routes = [
@@ -199,19 +199,18 @@ class BackgroundTaskTests(HarnessCase):
         ]
         with patch.object(LLMClient, "chat", Script(routes)), \
                 patch.object(Config, "clone_for_root", clone_fixture):
-            self._go(h, "parent: background map", routes)
-            agent_id = h.of("agent_started")[-1]["id"]
-            self.assertEqual(h.agent.stop_detached(agent_id), 1)
-            deadline = time.monotonic() + 6
-            while time.monotonic() < deadline:
+            try:
+                self._go(h, "parent: background map", routes)
+                agent_id = h.of("agent_started")[-1]["id"]
+                self.assertEqual(h.agent.stop_detached(agent_id), 1)
+                self.assertTrue(finalized.wait(6), "detached child did not finish cleanup")
                 ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
-                # "stopped" is announced before the child's checkout is cleaned up; the job leaves
-                # the list only after that, and the fixture's folder must not vanish under it.
-                if ended and agent_id not in (getattr(h.agent, "_detached_jobs", None) or {}):
-                    self.assertEqual(ended[-1]["state"], "stopped")
-                    return
-                time.sleep(0.05)
-            self.fail("detached child did not stop")
+                self.assertEqual(ended[-1]["state"], "stopped")
+            finally:
+                # agent_ended precedes worktree finalization. Do not remove the temporary
+                # repository or unpatch the model while that finalizer can still write .git.
+                h.agent.stop_detached()
+                self.assertTrue(finalized.wait(6), "detached finalizer is still running")
 
 
 class TerminalWakeTests(HarnessCase):

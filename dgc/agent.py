@@ -2635,6 +2635,42 @@ class Agent(GoalLifecycle):
         return {"type": parameters.get("type", "object"), "required": required,
                 "properties": properties}
 
+    def _installed_plugin_note(self, query: str) -> str:
+        """Tell the model which installed plugins match, including ones whose MCP server is down."""
+        try:
+            from .plugins import _installed, record_servers
+            rows = _installed()
+        except Exception:
+            return ""
+        needle = str(query or "").strip().lower()
+        connected = set(getattr(self.mcp, "servers", {}) or {})
+        failures = dict(getattr(self.mcp, "failures", {}) or {})
+        lines = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "")
+            label = str(row.get("display_name") or name)
+            folders = [str(item) for item in (row.get("skills") or []) if isinstance(item, str)]
+            skills = [folder.split("--", 1)[1] if folder.startswith(name + "--") else folder for folder in folders]
+            blob = " ".join([name, label, *skills]).lower()
+            if needle and needle not in blob and not any(needle in part for part in blob.split()):
+                continue
+            server_names = set(record_servers(row))
+            if server_names and server_names <= connected:
+                state = "MCP connected"
+            elif row.get("setup_required"):
+                state = "MCP setup required; no account connection is available yet"
+            elif server_names & failures.keys():
+                state = "MCP not connected (" + str(failures[next(iter(server_names & failures.keys()))])[:160] + ")"
+            elif server_names:
+                state = "MCP configured but not connected in this session"
+            else:
+                state = "skills only, no MCP server"
+            skill_text = ", ".join(skills[:12]) or "none"
+            lines.append(f"- {label} (`{name}`): {state}. Skills: {skill_text}.")
+        return "\n".join(lines[:24])
+
     def _search_mcp_tools(self, query: str, limit) -> str:
         try:
             count = max(1, min(20, int(limit or 8)))
@@ -2651,7 +2687,9 @@ class Agent(GoalLifecycle):
                  for schema in matches]
         names = [name for name in names if name.startswith("mcp__")]
         if not names:
-            return f"No configured MCP tool matched {query!r}. Refine the capability or server name."
+            note = self._installed_plugin_note(query)
+            return (f"No connected MCP tool matched {query!r}. "
+                    + (note or "Refine the capability or server name."))
         self._active_mcp_tools.update(names)
         self._refresh_system()  # text-tool fallback embeds the newly prioritized direct schemas.
         lines = [
@@ -3338,6 +3376,12 @@ class Agent(GoalLifecycle):
             parts += ["", "# Skills",
                       "Reusable instruction packages. Invoke with the skill tool when one matches the task:"]
             parts += [f"- {s.name}: {s.description}" for s in skill_catalog]
+        plugins = self._installed_plugin_note("")
+        if plugins:
+            parts += ["", "# Installed plugins",
+                      "A plugin can be installed while its MCP server is still disconnected. "
+                      "Its skills are in the list above. Its tools appear in mcp_search only after the server connects.",
+                      plugins]
 
         explicit = format_skill_instructions(getattr(self, "_explicit_skill_instructions", {}))
         if explicit:

@@ -2302,6 +2302,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "protocol": "dgc protocol describe|validate     inspect or validate the editor/headless contract",
     "bug": "dgc bug                            where to report a bug or request a feature",
     "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
+    "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|installed",
     "mcp": "dgc mcp ...                        manage MCP servers, resources, prompts and connections",
 }
 
@@ -2367,6 +2368,20 @@ def main(argv: list[str] | None = None) -> int | None:
             except (OSError, ValueError) as exc:
                 print(terminal_safe_text(redact_text(str(exc), secret_values(cfg))), file=sys.stderr)
                 return 1
+        if raw_argv[0] == "plugin":
+            from .mcp import MCPManager
+            from .plugins import PluginError, handle as handle_plugin
+            cfg = Config()
+            ui = UI()
+            manager = MCPManager(cfg.project_root, disabled_names=cfg.get("disabled_mcp_servers", []),
+                                 client_capabilities=Agent._mcp_client_capabilities(ui))
+            try:
+                return handle_plugin(cfg, raw_argv[1:], ui=ui, manager=manager)
+            except PluginError as exc:
+                print(terminal_safe_text(str(exc)), file=sys.stderr)
+                return 1
+            finally:
+                manager.stop_all()
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "export-training":
@@ -2421,7 +2436,7 @@ def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
-        epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · mcp · "
+        epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · plugin · mcp · "
                "serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")

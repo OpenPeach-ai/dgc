@@ -8,6 +8,10 @@ choices without stopping the turn. A client that does not declare `ask_options` 
 question exactly as before, because a field it has not declared would make it drop the whole
 event.
 
+`ShowFile` joins the tools a path rule applies to: it names a file, so a policy that restricts
+paths has to cover it, and it did not. The plugin, connector and marketplace events are added to
+the TypeScript client's known-event set, so it stops discarding them as unrecognised.
+
 ## 0.6.8 — 2026-09-23
 
 0.6.7 published to PyPI and failed on npm: `npm publish "artifacts/…tgz"` contains a slash and no

@@ -13,10 +13,10 @@
 // oldest CLI it claims to support. Conditional fields (spread behind a `capabilities` check) are
 // exempt, because a CLI that never declared the capability never receives them.
 //
-// Limitation, stated so a failure is read correctly: this sees a conditional SPREAD, not an `if`
-// around a whole send(). A field gated by an if-statement is reported too. That is deliberate --
-// for a check whose failure mode was every chat refusing to start, a false alarm a human dismisses
-// is cheaper than a silent pass.
+// Inspect TypeScript command objects (not incoming event records). New plugin commands use
+// one capability-gated sender whose behavior against release backends is tested separately.
+// Other if-statement guards still require human review; conditional fields use spreads.
+import ts from "typescript";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -63,39 +63,40 @@ test("every field the extension always sends exists in the oldest CLI it support
   const oldSchema = schemaAt(`v${MIN_CLI}`);
   if (!oldSchema) { console.log(`# no tag v${MIN_CLI} in this clone — skipping`); return; }
 
-  // What THIS checkout's CLI understands, minus what the pinned one does: every name in the gap
-  // is a field or command an older CLI rejects outright, taking the whole command with it.
+  // Compare commands individually. A newly added event's `items` or a new command's
+  // `request_id` must not make the same fields on every old command look incompatible.
   const current = JSON.parse(readFileSync(join(repo, "schemas/editor-protocol-v14.schema.json"), "utf8"));
-  const before = declaredFields(oldSchema);
-  const now = declaredFields(current);
-  const gap = new Set();
-  for (const [command, fields] of now) {
-    const known = before.get(command);
-    for (const field of fields) {
-      if (field === "type") continue;
-      if (!known || !known.has(field)) gap.add(field);
-    }
-  }
-  if (!gap.size) { console.log(`# CLI ${MIN_CLI} understands everything this checkout sends`); return; }
-
-  // Each of those may appear in the extension ONLY inside a conditional spread — the shape that
-  // withholds it from a CLI that never declared the capability.
-  const sources = ["src/panel.ts", "src/backend.ts"].map((rel) => ({
-    rel, text: readFileSync(join(here, "..", rel), "utf8"),
-  }));
+  const before = declaredFields(oldSchema.$defs.command);
+  const now = declaredFields(current.$defs.command);
   const problems = [];
-  for (const { rel, text } of sources) {
-    // Remove conditional spreads, block comments and line comments; what is left is unconditional.
-    const bare = text
-      .replace(/\.\.\.\([^]*?\)\s*,?/g, "")
-      .replace(/\/\*[^]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
-    for (const field of gap) {
-      const sent = new RegExp(`(?:^|[{,(]\\s*)${field}\\s*:`, "m");
-      if (sent.test(bare)) {
-        problems.push(`${rel} sends "${field}" unconditionally; CLI ${MIN_CLI} does not declare it`);
+  for (const rel of ["src/panel.ts", "src/backend.ts"]) {
+    const text = readFileSync(join(here, "..", rel), "utf8");
+    const tree = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+    function visit(node) {
+      if (ts.isObjectLiteralExpression(node)) {
+        const type = node.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(tree) === "type");
+        if (type && ts.isStringLiteral(type.initializer)) {
+          const command = type.initializer.text, known = before.get(command);
+          // The dedicated sender is capability-gated, covered by panel-settings tests.
+          const parent = node.parent;
+          const gated = ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression)
+            && parent.expression.name.text === "sendPluginCommand";
+          const localMessage = ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression)
+            && ["post", "postMessage", "onMessage"].includes(parent.expression.name.text);
+          if (now.has(command) && !gated && !localMessage) {
+            if (!known) problems.push(`${rel} sends unsupported command "${command}" directly`);
+            else for (const prop of node.properties) {
+              // Capability-dependent spreads do not unconditionally send new fields.
+              if (ts.isSpreadAssignment(prop)) continue;
+              const field = prop.name?.getText(tree).replace(/^['"]|['"]$/g, "");
+              if (field && !known.has(field)) problems.push(`${rel} sends "${command}.${field}" unconditionally; CLI ${MIN_CLI} does not declare it`);
+            }
+          }
+        }
       }
+      ts.forEachChild(node, visit);
     }
+    visit(tree);
   }
   assert.deepEqual(problems, [],
     `a CLI the extension claims to support would reject these commands entirely:\n  `

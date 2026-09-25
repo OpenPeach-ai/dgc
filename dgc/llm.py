@@ -1294,12 +1294,10 @@ def resolve_think_budget(value) -> int | None:
             return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    if number != number:                                   # NaN
+    if not math.isfinite(number):
         return None
-    if number == float("inf"):
-        return 0
     return max(0, int(number))
 
 

@@ -38,6 +38,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "thinking_end", "todos", "tool_call", "tool_denied", "tool_images", "tool_progress",
   "tool_result", "turn_activity", "turn_end", "turn_eta", "turn_start", "usage_report",
   "workspace_change", "workspace_changes", "workspace_roots",
+  "composio_connection", "plugin_catalog", "plugin_marketplaces", "plugin_operation", "plugin_preview",
 ]);
 const DECISION_EVENTS = new Set(["permission_request", "plan_proposal", "options_request", "mcp_input_request"]);
 const TURN_EVENTS = new Set(["turn_start", "turn_end", "request_expired", "prompt_accepted"]);

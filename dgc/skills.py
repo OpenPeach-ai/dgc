@@ -26,7 +26,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import USER_SKILLS, BUILTIN_SKILLS, PORTABLE_USER_SKILLS
+from .config import USER_HOME, USER_SKILLS, BUILTIN_SKILLS, PORTABLE_USER_SKILLS
 from .workspace import WorkspaceBoundaryError, is_within, read_regular_bytes, scan_directory_entries
 
 
@@ -273,7 +273,8 @@ def discover_skills(project_root: Path, *, disabled_names=()) -> dict[str, Skill
     disabled = {name for name in disabled_names if isinstance(name, str)} if isinstance(disabled_names, (list, tuple, set)) else set()
     roots = ((project_root / ".dgc" / "skills", "project"),
              (project_root / ".agents" / "skills", "project"),
-             (USER_SKILLS, "user"), (PORTABLE_USER_SKILLS, "user"), (BUILTIN_SKILLS, "builtin"))
+             (USER_SKILLS, "user"), (PORTABLE_USER_SKILLS, "user"),
+             (USER_HOME / "plugins" / "skills", "plugin"), (BUILTIN_SKILLS, "builtin"))
     for base, source in roots:
         for skill_md in _skill_paths(base):
             skill = _parse_skill(skill_md)

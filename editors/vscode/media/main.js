@@ -444,6 +444,11 @@
     propose_options: ["Asking", "Asked"],
     task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
   };
+  function pluginLogoHtml(name) {
+    const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
+    const src = match && pluginLogos[match[1]];
+    return src ? `<img class="plugin-logo" alt="" src="${esc(src)}">` : "";
+  }
   function toolCopy(name) {
     const known = TOOL_COPY[canonicalTool(name)];
     if (known) return { present: known[0], past: known[1], target: "" };
@@ -2279,7 +2284,8 @@
     const copy = toolCopy(ev.name);
     const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
-    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
+    const pluginMark = pluginLogoHtml(ev.name);
+    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${pluginMark || icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
     const head = c.querySelector(".head");
     const toggle = c.querySelector(".tool-toggle");
     toggle.onclick = () => {
@@ -2799,11 +2805,12 @@
 
   // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
   const SURFACE_META = {
-    skills: ["Skills", "library"], mcp: ["MCP servers", "plug"],
+    skills: ["Skills", "library"], plugins: ["Plugins", "extensions"], mcp: ["MCP servers", "plug"],
     docs: ["Documentation", "book"], permissions: ["Permission rules", "shield"],
     memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
+  let pluginRows = [], pluginLogos = {}, pluginPane = "search";
   const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
   let surfaceReturnSection = "";   // the settings tab a surface was opened from, if any
 
@@ -2873,6 +2880,79 @@
     const waiting = [...pendingImages].filter(owner => owner.session === draftSession).length;
     if (attachments.length + waiting >= 64) { sysLine("Select at most 64 attachments per message."); return false; }
     return true;
+  }
+  function pluginBlurb(row) {
+    const text = String(row.summary || "").split(". ")[0];
+    return text.length > 72 ? text.slice(0, 69) + "…" : text;
+  }
+  function renderPlugins(items) {
+    const query = surfaceKind === "plugins" ? surfaceSearch.value : "";
+    pluginRows = Array.isArray(items) ? items : [];
+    pluginLogos = {};
+    for (const row of pluginRows) if (row.logo) pluginLogos[row.name] = row.logo;
+    // A settings refresh also delivers this catalog. Only draw it when the user already
+    // opened Plugins in the chat; otherwise the gear would cover the conversation.
+    if (surfaceKind !== "plugins") return;
+    surfaceSearch.value = query;
+    surfaceSearch.placeholder = pluginPane === "installed" ? "Filter installed plugins" : "Filter plugins";
+    const available = pluginRows.filter(row => row.install !== "block" && row.license !== "Proprietary");
+    const visible = pluginPane === "installed" ? available.filter((row) => row.installed) : available;
+    const tabs = `<div class="plugin-tabs" role="tablist">
+      <button type="button" class="set-tab${pluginPane === "search" ? " active" : ""}" data-plugin-pane="search" role="tab" aria-selected="${pluginPane === "search"}">Search</button>
+      <button type="button" class="set-tab${pluginPane === "installed" ? " active" : ""}" data-plugin-pane="installed" role="tab" aria-selected="${pluginPane === "installed"}">Installed</button>
+    </div>`;
+    const adder = pluginPane === "search"
+      ? `<form class="plugin-add" id="plugin-add"><input id="plugin-add-url" type="url" inputmode="url" maxlength="500" placeholder="Paste a GitHub, Claude, or Codex plugin link" aria-label="Plugin link"><button type="submit" class="act">Add</button></form>`
+      : "";
+    const rows = visible.map((row) => {
+      let label = "Install";
+      let kind = "install";
+      if (row.install === "block") { label = ""; kind = ""; }
+      else if (row.opening) { label = "Signing in…"; kind = ""; }
+      else if (row.connected) { label = "Connected"; kind = ""; }
+      else if (row.installed && row.auth === "browser") { label = "Sign in"; kind = "sign"; }
+      else if (row.installed) { label = "Installed"; kind = ""; }
+      const button = label && kind
+        ? `<button type="button" class="act" data-plugin-${kind}="${esc(row.name)}" data-license="${esc(row.install === "accept" ? row.license : "")}">${esc(label)}</button>`
+        : (label ? `<span class="plugin-state">${esc(label)}</span>` : "");
+      const icon = row.logo
+        ? `<img class="plugin-row-logo" alt="" src="${esc(row.logo)}">`
+        : `<span class="plugin-row-logo plugin-row-empty" aria-hidden="true"></span>`;
+      return `<article class="plugin-row" data-filter="${esc(`${row.name} ${row.display_name} ${row.summary}`.toLowerCase())}">${icon}<div class="plugin-copy"><strong>${esc(row.display_name)}</strong><span>${esc(row.block_reason || pluginBlurb(row))}</span></div>${button}</article>`;
+    }).join("") || `<div class="surface-empty">${pluginPane === "installed" ? "No plugins installed yet." : "No curated plugins."}</div>`;
+    const retired = pluginRows.some(row => row.installed && (row.install === "block" || row.license === "Proprietary"));
+    surfaceBody.innerHTML = tabs + adder + rows + (retired && pluginPane === "installed"
+      ? '<button type="button" class="act" id="plugin-removals">Manage unavailable installations in Settings</button>' : '');
+    const removals = surfaceBody.querySelector("#plugin-removals");
+    if (removals) removals.onclick = () => vscode.postMessage({ type: "openSettings", section: "plugins" });
+    const sendInstall = (button) => {
+      button.disabled = true;
+      button.textContent = "Installing…";
+      vscode.postMessage({ type: "installPlugin", name: button.dataset.pluginInstall || button.dataset.pluginSign, acceptLicense: button.dataset.license || "" });
+    };
+    surfaceBody.querySelectorAll("[data-plugin-install], [data-plugin-sign]").forEach((button) => {
+      button.onclick = () => sendInstall(button);
+    });
+    surfaceBody.querySelectorAll("[data-plugin-open]").forEach((button) => {
+      button.onclick = () => vscode.postMessage({ type: "openPluginBrowser" });
+    });
+    surfaceBody.querySelectorAll("[data-plugin-pane]").forEach((button) => {
+      button.onclick = () => {
+        pluginPane = button.dataset.pluginPane === "installed" ? "installed" : "search";
+        renderPlugins(pluginRows);
+      };
+    });
+    const addForm = $("plugin-add");
+    if (addForm) addForm.onsubmit = (event) => {
+      event.preventDefault();
+      const field = $("plugin-add-url");
+      const url = String(field.value || "").trim();
+      if (!url) return;
+      const submit = addForm.querySelector("button");
+      if (submit) { submit.disabled = true; submit.textContent = "Adding…"; }
+      vscode.postMessage({ type: "installPlugin", name: url, acceptLicense: "" });
+    };
+    filterSurface();
   }
   function renderSkills(items) {
     const query = surfaceKind === "skills" ? surfaceSearch.value : "";
@@ -3692,6 +3772,7 @@
         if (ev.exists) decisionCard(`<div class="q">${icon("clipboard-list")} Saved plan</div><pre>${esc(ev.plan)}</pre>`);
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
+      case "plugin_catalog": renderPlugins(ev.items); break;
       case "skill_catalog": {
         skillRows = Array.isArray(ev.items) ? ev.items : [];
         if (surfaceKind === "skills") renderSkills(ev.items);
@@ -5107,6 +5188,13 @@
     updateSubscriptionFields();
   };
   document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
+  const openPlugins = $("open-plugins");
+  if (openPlugins) openPlugins.onclick = () => {
+    surfaceReturnSection = "extensions";
+    closeSettings();
+    vscode.postMessage({ type: "requestPlugins" });
+    openSurface("plugins");
+  };
   document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
     // Settings has to close for the surface to take the panel, so remember where we came from
     // and put it back on the way out. Without this the Extensions tab was a one-way door.
