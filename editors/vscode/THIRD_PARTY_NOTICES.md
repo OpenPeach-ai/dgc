@@ -72,3 +72,10 @@ katex, dompurify, roughjs and the rest. It is a separate file from `dist/extensi
 fetched by the panel only when an answer actually contains a diagram. Exact dependency versions
 are locked in `package-lock.json`. Every package's copyright notice and license is reproduced in
 `licenses/MERMAID-LICENSES.txt`.
+
+## Service marks in the settings and connector directory
+
+`media/plugin-logos/` bundles the logos of third-party services so the settings webview can
+identify a connector without making a request to that service. They are used unmodified, as
+identifiers, and imply no partnership, endorsement or completed authorization. Each file's origin
+and download date is recorded in `media/plugin-logos/SOURCES.md`, which ships with them.

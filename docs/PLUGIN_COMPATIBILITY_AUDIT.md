@@ -136,8 +136,34 @@ needs neither a DGC-owned Composio project nor a bundled project API key.
 | Service | Published route | Actual DGC probe | Assessment |
 | --- | --- | --- | --- |
 | Composio Connect | `https://connect.composio.dev/mcp` | DGC received an authorization URL at `connect.composio.dev/oauth/authorize`, then cancelled | Offered as an optional connector. User reports Figma connected in Composio; authenticated DGC tool execution remains unverified. |
-| Pipedream consumer MCP | `https://mcp.pipedream.net/v2` | Bridge exited before an authorization URL | Not offered; failure cause unresolved. |
+| Pipedream consumer MCP | `https://mcp.pipedream.net/v2` | Bridge exited before an authorization URL | **Not offered. Closed 25 September 2026** — see below. |
 | Pipedream developer platform | Hosted MCP plus a project and credentials | Documentation only | Not implemented. |
+
+### Pipedream — closed 25 September 2026
+
+Reproduced directly rather than left as "cause unresolved". Running the same
+bridge DGC would use:
+
+```
+npx -y mcp-remote https://mcp.pipedream.net/v2
+  Discovered authorization server: https://mcp.pipedream.com
+  Received error: Dynamic Client Registration rejected (HTTP 404): Not Found
+```
+
+The bridge discovers the authorization server correctly and then asks it to
+register a client. Pipedream answers 404: it does not offer Dynamic Client
+Registration on that endpoint, so no client exists, no authorization URL is
+issued, and the bridge exits before a browser ever opens.
+
+**This is not a DGC defect and not a transient failure.** Nothing in DGC can fix
+it, because the fix is a pre-registered client — which means a DGC-owned
+Pipedream project and credentials shipped to users. That is precisely the model
+rejected earlier in this document in favour of the user's own account, so
+declining it here is the same decision, not a new one.
+
+Pipedream stays out of the catalog. Revisit only if Pipedream supports Dynamic
+Client Registration on the consumer endpoint, at which point it becomes an
+ordinary OAuth connector like Make or Arcade.
 
 ## Implemented Composio experience
 
@@ -161,21 +187,34 @@ See [implementation and verification](COMPOSIO_CONNECTOR.md) for exact contracts
 permission behavior, recovery paths and evidence limits. No account registration,
 app consent or paid plan acceptance was performed during development.
 
-### Commercial terms question — unresolved
+### Commercial terms question — CLOSED 25 September 2026
+
+**Decision (owner, 25 September 2026): ship it as a plain connector. No question
+will be sent, and none is required.**
+
+The reasoning, recorded so this is not reopened from the analysis below: DGC
+holds no Composio project, embeds no project API key, and proxies nothing. The
+user signs in to Composio themselves, accepts Composio's terms inside Composio's
+own flow, and enables or disables individual apps in Composio's dashboard. DGC
+offers the endpoint and routes MCP tool calls the user's own account exposes.
+That is a user connecting a service they already have, which is what every other
+connector here does.
+
+The analysis that raised the question is kept below as the record of what was
+checked, not as an outstanding action.
 
 Checked 23 September 2026. The developer documentation supports embedding, but
 section 3 of the [public terms](https://composio.dev/terms) grants commercial
-use and then contains broad commercial-use/resale exclusions. Obtain written
-clarification of how these apply to DGC and review the applicable agreement
-with counsel before commercial launch. This is an unresolved contractual
-question, not a finding that integration is prohibited.
+use and then contains broad commercial-use/resale exclusions. This was raised as
+a question for counsel; the owner's decision above closes it.
 
 The published [DPA](https://composio.dev/legal/dpa) becomes binding only through
 dashboard acceptance and lists Pro/Enterprise Developer eligibility. Confirm
 the applicable data-processing agreement and privacy disclosures for DGC's
 user-data flow; the public page alone is not an executed agreement.
 
-Draft question for Composio (not sent):
+Draft question, written 23 September and NOT sent. Retained only to show what
+was considered; the decision above is not to send it:
 
 > DGC is a coding application distributed to end users. We intend to embed
 > your app catalog, managed account connection flows and tool execution in

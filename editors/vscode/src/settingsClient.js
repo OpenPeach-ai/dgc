@@ -408,8 +408,18 @@ function bindPlugins(main) {
 }
 function link(url, text) { if (!url)
     return 'Not provided'; return /^https?:\/\//.test(url || '') ? `<a href="${esc(url)}" data-external>${esc(text || url)}</a>` : esc(text || url || 'Not provided'); }
+function cloudNotice(row) {
+    // DGC's whole pitch is that the model can be yours and local, so "this one still sends your
+    // request to somebody else's machine" cannot be one clause inside a Requirements paragraph.
+    // It is a banner, and it is driven by a catalog flag rather than by whoever wrote the prose.
+    if (!row.cloud_execution) { return ''; }
+    return `<div class="banner"><p><strong>Runs in ${esc(row.display_name || row.name)}'s cloud.</strong> `
+        + `Your requests and their data are sent to this service and processed there, including when `
+        + `the model you are using runs on this computer. It holds the app credentials you authorize.</p></div>`;
+}
 function compatibilityDetails(row) {
-    return (row.requirements ? `<p class="note"><strong>Requirements.</strong> ${esc(row.requirements)}</p>` : '')
+    return cloudNotice(row)
+        + (row.requirements ? `<p class="note"><strong>Requirements.</strong> ${esc(row.requirements)}</p>` : '')
         + (row.verification ? `<p class="note"><strong>Checked${row.audited_on ? ' ' + esc(row.audited_on) : ''}.</strong> ${esc(row.verification)}</p>` : '')
         + (row.compatibility_url ? `<p>${link(row.compatibility_url, 'Connection requirements')}</p>` : '')
         + (row.name === 'figma' ? '<button class="secondary" data-desktop-setup>Set up Figma desktop</button>' : '');

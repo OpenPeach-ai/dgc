@@ -1,67 +1,71 @@
 {
-  "zapier": {
-    "name": "Zapier",
-    "kind": "App connector",
-    "url": "https://mcp.zapier.com/api/v1/connect",
-    "auth": [
-      "token"
-    ],
-    "manage": "https://mcp.zapier.com/",
-    "docs": "https://docs.zapier.com/mcp/get-started/connect/other",
-    "terms": "https://zapier.com/legal/terms-of-service",
-    "privacy": "https://zapier.com/privacy",
-    "summary": "Use the apps and actions connected to your own Zapier account.",
-    "setup": "In Zapier MCP, add a server for Other, open Connect, and generate a connection token. Copy the token itself into DGC. Manage your apps and tools in Zapier.",
-    "placeholder": "",
-    "license": "Zapier service terms"
-  },
-  "make": {
-    "name": "Make",
-    "kind": "Workflow connector",
-    "url": "https://mcp.make.com/",
-    "auth": [
-      "oauth"
-    ],
-    "manage": "https://www.make.com/en/login",
-    "docs": "https://developers.make.com/mcp-server/connect-using-oauth",
-    "terms": "https://www.make.com/en/terms-and-conditions",
-    "privacy": "https://www.make.com/en/privacy-notice",
-    "summary": "Run the scenarios you configure in your Make account.",
-    "setup": "Connect your Make account in the browser and choose the organization and scopes. The Run your scenarios scope covers its active and on-demand scenarios. Manage scenarios and app credentials in Make.",
-    "placeholder": "",
-    "license": "Make service terms"
-  },
-  "n8n": {
-    "name": "n8n",
-    "kind": "Workflow connector",
-    "url": "",
-    "auth": [
-      "oauth",
-      "token"
-    ],
-    "manage": "",
-    "docs": "https://docs.n8n.io/connect/connect-to-n8n-mcp-server",
-    "terms": "https://n8n.io/legal/",
-    "privacy": "https://n8n.io/legal/privacy",
-    "summary": "Use selected workflows on n8n Cloud or your own n8n instance.",
-    "setup": "In your n8n instance, enable Settings \u2192 Instance-level MCP, expose the workflows you want to use, and copy the server URL. Choose browser sign-in or a personal access token. With Remote SSH, local addresses refer to the machine running DGC.",
-    "placeholder": "https://your-instance.app.n8n.cloud/mcp-server/http",
-    "license": "n8n service terms"
-  },
-  "arcade": {
-    "name": "Arcade",
-    "kind": "App connector",
-    "url": "",
-    "auth": [
-      "oauth"
-    ],
-    "manage": "https://app.arcade.dev/",
-    "docs": "https://docs.arcade.dev/en/get-started/quickstarts/call-tool-client",
-    "terms": "https://www.arcade.dev/terms-of-service/",
-    "privacy": "https://www.arcade.dev/privacy-policy/",
-    "summary": "Connect a gateway containing the tools you select in Arcade.",
-    "setup": "Create an MCP Gateway in Arcade, select Arcade Auth and the tools to expose, then copy its gateway URL. Sign in with your own Arcade account. Manage tools and provider authorization in Arcade. This setup supports Arcade Cloud gateways.",
-    "placeholder": "https://api.arcade.dev/mcp/your-gateway",
-    "license": "Arcade service terms"
-  }
+ "zapier": {
+  "name": "Zapier",
+  "kind": "App connector",
+  "url": "https://mcp.zapier.com/api/v1/connect",
+  "auth": [
+   "token"
+  ],
+  "manage": "https://mcp.zapier.com/",
+  "docs": "https://docs.zapier.com/mcp/get-started/connect/other",
+  "terms": "https://zapier.com/legal/terms-of-service",
+  "privacy": "https://zapier.com/privacy",
+  "summary": "Use the apps and actions connected to your own Zapier account.",
+  "setup": "In Zapier MCP, add a server for Other, open Connect, and generate a connection token. Copy the token itself into DGC. Manage your apps and tools in Zapier.",
+  "placeholder": "",
+  "license": "Zapier service terms",
+  "cloud_execution": true
+ },
+ "make": {
+  "name": "Make",
+  "kind": "Workflow connector",
+  "url": "https://mcp.make.com/",
+  "auth": [
+   "oauth"
+  ],
+  "manage": "https://www.make.com/en/login",
+  "docs": "https://developers.make.com/mcp-server/connect-using-oauth",
+  "terms": "https://www.make.com/en/terms-and-conditions",
+  "privacy": "https://www.make.com/en/privacy-notice",
+  "summary": "Run the scenarios you configure in your Make account.",
+  "setup": "Connect your Make account in the browser and choose the organization and scopes. The Run your scenarios scope covers its active and on-demand scenarios. Manage scenarios and app credentials in Make.",
+  "placeholder": "",
+  "license": "Make service terms",
+  "cloud_execution": true
+ },
+ "n8n": {
+  "name": "n8n",
+  "kind": "Workflow connector",
+  "url": "",
+  "auth": [
+   "oauth",
+   "token"
+  ],
+  "manage": "",
+  "docs": "https://docs.n8n.io/connect/connect-to-n8n-mcp-server",
+  "terms": "https://n8n.io/legal/",
+  "privacy": "https://n8n.io/legal/privacy",
+  "summary": "Use selected workflows on n8n Cloud or your own n8n instance.",
+  "setup": "In your n8n instance, enable Settings → Instance-level MCP, expose the workflows you want to use, and copy the server URL. Choose browser sign-in or a personal access token. With Remote SSH, local addresses refer to the machine running DGC.",
+  "placeholder": "https://your-instance.app.n8n.cloud/mcp-server/http",
+  "license": "n8n service terms",
+  "cloud_execution": false
+ },
+ "arcade": {
+  "name": "Arcade",
+  "kind": "App connector",
+  "url": "",
+  "auth": [
+   "oauth"
+  ],
+  "manage": "https://app.arcade.dev/",
+  "docs": "https://docs.arcade.dev/en/get-started/quickstarts/call-tool-client",
+  "terms": "https://www.arcade.dev/terms-of-service/",
+  "privacy": "https://www.arcade.dev/privacy-policy/",
+  "summary": "Connect a gateway containing the tools you select in Arcade.",
+  "setup": "Create an MCP Gateway in Arcade, select Arcade Auth and the tools to expose, then copy its gateway URL. Sign in with your own Arcade account. Manage tools and provider authorization in Arcade. This setup supports Arcade Cloud gateways.",
+  "placeholder": "https://api.arcade.dev/mcp/your-gateway",
+  "license": "Arcade service terms",
+  "cloud_execution": true
+ }
 }

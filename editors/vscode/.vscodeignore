@@ -12,3 +12,4 @@ esbuild.js
 **/.DS_Store
 cap-*.mjs
 media/seti-codepoints.json
+SETTINGS_HANDOFF.md
