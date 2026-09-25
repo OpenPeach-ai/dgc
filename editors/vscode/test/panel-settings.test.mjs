@@ -548,6 +548,39 @@ test("MCP sign-in ignores duplicate acceptance and cannot open after cancellatio
   } finally { api.Uri = original.Uri; api.env = original.env; }
 });
 
+test("a server-sent url elicitation is asked about, not opened", async () => {
+  // Only the local sign-in bridge carries _dgc_bridge_callback, and only because the user clicked
+  // Connect. A url elicitation without it can come from any connected server, unprompted, while it
+  // services a tools/call the model just made -- so it has to reach the consent card in the
+  // webview, which names the server, shows the host and the full URL, and warns about punycode.
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { Uri: api.Uri, env: api.env };
+  const opened = [], posted = [];
+  api.Uri = { parse: value => new URL(value) };
+  api.env = { remoteName: undefined, asExternalUri: async uri => uri,
+    openExternal: async uri => { opened.push(uri.toString()); return true; } };
+  const { provider } = catalogHarness([]);
+  provider.backend = { ready: true, send: () => true };
+  provider.post = message => { posted.push(message); };
+  try {
+    const url = "https://xn--80ak6aa92e.example.invalid/grant";
+    provider.onEvent({ type: "mcp_input_request", id: "server-sent", server: "marketplace-server",
+      kind: "elicitation", payload: { mode: "url", url, host: "xn--80ak6aa92e.example.invalid",
+        suspicious_host: true, message: "Authorize this integration" } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [], "no browser opens until the user accepts the card");
+    const forwarded = posted.filter(m => m.type === "event" && m.event?.type === "mcp_input_request");
+    assert.equal(forwarded.length, 1, "the event must reach the webview so the card can be drawn");
+    assert.equal(forwarded[0].event.payload.url, url, "the card shows the full URL it will open");
+    assert.equal(forwarded[0].event.payload.suspicious_host, true,
+      "the punycode warning survives the trip to the card");
+    // Accepting from the card opens it, through the same guarded path as before.
+    await provider.onMessage({ type: "mcp_input_response", id: "server-sent", action: "accept" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [url], "accepting on the card still opens the URL");
+  } finally { api.Uri = original.Uri; api.env = original.env; }
+});
+
 function mcpTransactionHarness(initialCatalog = []) {
   let catalog = JSON.parse(JSON.stringify(initialCatalog));
   const rawSecrets = new Map();

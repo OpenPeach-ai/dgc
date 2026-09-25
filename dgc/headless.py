@@ -3352,13 +3352,29 @@ class Backend:
                 path = str(plugin_registry.create_plugin(plugins.PLUGIN_HOME, name,
                            cmd.get("display_name", ""), cmd.get("description", "")))
                 message = "Plugin created. Edit its skill, then install it from Personal in the directory."
-            items = self._editor_plugins()
-            markets = plugin_registry.list_marketplaces(plugins.PLUGIN_HOME)
+            # Everything above has already committed to disk. Reading the catalog back is a
+            # separate act that fails on its own -- one unreadable marketplace cache is enough --
+            # and letting it fall into the handler below reported a completed uninstall as
+            # command_rejected. The editor gates clearUninstalledPluginServers on plugin_operation,
+            # so it kept the connector's ownership row and its bearer in SecretStorage and put the
+            # server back on the next backend generation, while the retry answered "Plugin is not
+            # installed". Report what actually happened, and name the catalog as the part that
+            # could not be re-read.
+            catalog_error, items, markets = "", None, None
+            try:
+                items = self._editor_plugins()
+                markets = plugin_registry.list_marketplaces(plugins.PLUGIN_HOME)
+            except (plugins.PluginError, OSError, ValueError) as exc:
+                catalog_error = str(exc)
             def terminal():
                 self.em.emit("plugin_operation", request_id=request, action=action, name=name, path=path,
-                             message=message, removed_servers=removed_servers)
-                self.em.emit("plugin_catalog", request_id=request, items=items)
-                self.em.emit("plugin_marketplaces", request_id=request, items=markets)
+                             message=(f"{message} The plugin list could not be re-read: {catalog_error}"
+                                      ).strip() if catalog_error else message,
+                             removed_servers=removed_servers)
+                if items is not None:
+                    self.em.emit("plugin_catalog", request_id=request, items=items)
+                if markets is not None:
+                    self.em.emit("plugin_marketplaces", request_id=request, items=markets)
             return terminal
         except (plugins.PluginError, OSError, ValueError) as exc:
             message = str(exc)

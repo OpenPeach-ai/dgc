@@ -5,13 +5,20 @@ const { existsSync, readFileSync, readdirSync, statSync, writeFileSync } = requi
 const { basename, join, resolve } = require("node:path");
 const vscode = require("vscode");
 
-async function waitFor(predicate, timeoutMs = 10_000) {
+async function waitFor(predicate, timeoutMs = 10_000, what = "") {
   const deadline = Date.now() + timeoutMs;
+  let lastError;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    try { if (predicate()) return; }
+    catch (err) { lastError = err; }   // a file caught mid-write, say: keep waiting, report it if we give up
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("timed out waiting for the DGC webview/backend handshake");
+  // Every wait in this file used to report the handshake, whichever condition had actually timed
+  // out, so a failure named the wrong step and sent the reader to the wrong part of the run. Print
+  // the condition itself: it is the one description that cannot drift from what is waited on.
+  const condition = what || String(predicate).replace(/\s+/g, " ").trim().slice(0, 240);
+  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${condition}`
+    + (lastError ? ` (last error from the condition: ${lastError.message})` : ""));
 }
 
 function backendCommands(path) {

@@ -929,9 +929,14 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-strong);
   font: var(--w-med) var(--t-xs)/1.45 var(--sans); white-space: nowrap; user-select: none; vertical-align: baseline; }
+/* The sigil has to be the key that opens the picker for that kind, and the sigil attachInvocation
+   puts on the chip underneath: $ for a skill, / for a template, @ for a file. There was no
+   .pill-skill rule at all, so a skill fell through to the default and rendered the TEMPLATE's
+   sigil -- type $fix, get a pill reading /fixture above a chip reading $fixture. */
 .composer-pill::before { content: "/"; color: var(--link); font-family: var(--mono); }
+.composer-pill.pill-skill::before { content: "$"; }
+.composer-pill.pill-template::before { content: "/"; }
 .composer-pill.pill-file::before { content: "@"; }
-.composer-pill.pill-template::before { content: "$"; }
 /* A link pill shows its own favicon instead of a sigil, and the host rather than the whole URL. */
 .composer-pill.pill-link::before { content: none; }
 .composer-pill.pill-link .link-favicon { width: 13px; height: 13px; border-radius: 2px; align-self: center; }

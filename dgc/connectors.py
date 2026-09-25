@@ -58,6 +58,16 @@ def save(config, name, spec, accept_license=''):
     with plugins._registry_lock():
         rows = plugins._installed()
         previous = next((r for r in rows if r['name'] == name), None)
+        # A plugin and a connector share one flat namespace, and a package's own plugin.json can
+        # name itself anything -- so an installed plugin can already hold exactly the row this save
+        # writes. The conflict check below only inspects rows with a DIFFERENT name, so that row
+        # was invisible to it and the _save at the end of this function dropped it. Its skill
+        # folders stayed in the live discovery root with no row owning them: still offered to the
+        # model, not removed by an uninstall, and impossible to reinstall, because installing a
+        # tree refuses a skill folder no row owns. Only a manual delete recovered it.
+        if previous is not None and previous.get('connector') != name:
+            raise plugins.PluginError(
+                f'A plugin named {name} is already installed. Uninstall it before connecting this service.')
         plugins._license_ok(entry, accept_license or (previous or {}).get('accepted_license', ''))
         before = dict(config.get('mcp_servers', {}) or {})
         if name in before and (not previous or previous.get('connector') != name):

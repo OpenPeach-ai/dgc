@@ -2334,12 +2334,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
+          const callbackUrl = typeof ev.payload._dgc_bridge_callback === "string"
+            ? ev.payload._dgc_bridge_callback : "";
           this.backendNote(`[mcp sign-in prompt for ${String(ev.server || "plugin")}]`);
           this.mcpUrls.set(String(ev.id), { url: String(ev.payload.url || ""),
-            ...(typeof ev.payload._dgc_bridge_callback === "string"
-              ? { callbackUrl: ev.payload._dgc_bridge_callback } : {}) });
-          void this.confirmMcpBrowser(String(ev.id), String(ev.server || "this plugin"));
-          return;
+            ...(callbackUrl ? { callbackUrl } : {}) });
+          // Open straight away ONLY for the pinned local sign-in bridge. That callback is set by
+          // the CLI (mcp.py, at the point it starts the bridge) and never by a server, so its
+          // presence means the user clicked Connect a moment ago and is waiting for the browser.
+          //
+          // Any connected server can send this same elicitation while servicing a tools/call the
+          // model just made -- the CLI requires only that one client request be in flight, and
+          // tools/call qualifies. Those go to the webview, which names the requesting server,
+          // shows the host and the full URL, and draws the punycode warning that the CLI and the
+          // TUI both still draw. 0.44.1 asked; returning here for every mode:"url" took the ask
+          // away from the editor alone, and the same batch ships a marketplace that installs
+          // third-party MCP servers.
+          if (callbackUrl) {
+            void this.confirmMcpBrowser(String(ev.id), String(ev.server || "this plugin"));
+            return;
+          }
+          break;
         }
         this.backendNote(`[mcp input ignored kind=${String(ev.kind || "")}]`);
         break;

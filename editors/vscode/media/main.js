@@ -37,20 +37,50 @@
     // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree.
     let text = "";
     let found = stopNode == null ? 0 : -1;
+    let endedByBr = false;   // a real <br> ended the last line, as opposed to a block boundary
     const visit = (node) => {
-      if (stopNode === node && found < 0 && node.nodeType !== 3) found = text.length;
       if (node.nodeType === 3) {
         if (stopNode === node && found < 0) found = text.length + Math.min(stopOffset, node.data.length);
         text += node.data;
+        if (node.data) endedByBr = false;
         return;
       }
-      if (node.nodeType !== 1) return;
-      if (node.tagName === "BR") { text += "\n"; return; }
-      // A pill is atomic: it contributes its placeholder and nothing from inside it.
-      if (node.hasAttribute && node.hasAttribute("data-pill")) { text += node.dataset.pill; return; }
+      if (node.nodeType !== 1) {
+        if (stopNode === node && found < 0) found = text.length;
+        return;
+      }
+      // A <br> and a pill are atomic: an offset into one only says which side of it the caret is
+      // on. Everything else takes its offset from the child index, below. This used to be one
+      // blanket "found = text.length" on entry, which pinned every element-anchored caret to the
+      // position BEFORE that element's contents and left the child-index checks unreachable --
+      // and an element anchor with a non-zero offset is exactly what Chromium hands back after an
+      // uneditable pill, so the caret read as sitting in front of the pill it was placed after.
+      const atomic = node.tagName === "BR" || (node.hasAttribute && node.hasAttribute("data-pill"));
+      if (atomic) {
+        const before = text.length;
+        // Chromium ends every block with a <br> so the block's last line can hold a caret. That
+        // line is already represented by the boundary the block opened with, so charging for both
+        // made one Shift+Enter serialize as "\n\n" and a visually empty box serialize as "\n" --
+        // which kept the placeholder off and made the three draft guards call an empty composer
+        // non-empty, so "Restore message to draft" answered "Send or clear the current draft
+        // first." against a box that was empty on screen.
+        const filler = node.tagName === "BR" && node === node.parentNode.lastChild;
+        if (!filler) {
+          text += node.tagName === "BR" ? "\n" : node.dataset.pill;
+          endedByBr = node.tagName === "BR";
+        }
+        if (stopNode === node && found < 0) found = stopOffset > 0 ? text.length : before;
+        return;
+      }
       const block = BLOCK.has(node.tagName) && node !== root;
-      // A block starts a new line unless nothing has been written yet.
-      if (block && text && !text.endsWith("\n")) text += "\n";
+      // A block starts a new line unless nothing has been written yet, or unless a <br> just ended
+      // one: in the flat text<br>text shape setComposerValue builds, the <br> IS the break and a
+      // following block must not add a second. Between two BLOCKS it must, because the empty line
+      // Shift+Enter leaves behind is the boundary itself -- its filler <br> contributed nothing
+      // just above. Asking only whether the text already ended in a newline could not tell those
+      // two apart, and collapsed every blank line in the draft.
+      if (block && text && !endedByBr) text += "\n";
+      endedByBr = false;
       const kids = [...node.childNodes];
       kids.forEach((kid, i) => {
         if (stopNode === node && i === stopOffset && found < 0) found = text.length;
@@ -60,10 +90,8 @@
     };
     visit(root);
     if (found < 0) found = text.length;
-    // Chromium's filler <br> is not a line the user typed.
-    if (text.endsWith("\n") && root.lastChild && root.lastChild.nodeName === "BR") {
-      text = text.slice(0, -1);
-    }
+    // (The filler <br> is dropped where it is visited, above. Trimming a trailing newline here as
+    // well would eat the block boundary a real last line stands on.)
     return [text, Math.min(found, text.length)];
   }
 
@@ -92,6 +120,12 @@
     // they showed are still live in `attachments`, so the row has to be redrawn or they become
     // invisible AND unremovable -- no pill to backspace, no chip to close. Losing the pill is
     // acceptable; losing the user's ability to see what they selected is not.
+    //
+    // And no pill governs them any more: this rebuild removed every one of them, and the user did
+    // not. reconcilePills() withdraws a selection whose pill has gone, which is right when the
+    // user deleted it and wrong here -- a draft restored after a rejected prompt came back with
+    // its skills silently dropped. Hand those selections back to the row.
+    for (const a of attachments) delete a.fromPill;
     if (typeof renderAtts === "function") renderAtts();
   }
 
@@ -114,18 +148,26 @@
 
   function rangeAt(target) {
     // The inverse of walk(): the DOM position whose serialized offset is `target`.
-    let seen = 0, hit = null;
+    // This and walk() must count identically. walk() opened a block's line only when the text did
+    // not already end in a newline; this charged for every block while seen < target -- two
+    // different rules. Blink turns Shift+Enter and any multi-line paste into paragraph separators,
+    // so one blank line anywhere in the draft put the two out of step, and insertComposerPill --
+    // which, unlike editComposer, has no verification step and no fallback -- spliced the pill a
+    // character early into the text that was actually sent.
+    let seen = 0, hit = null, endedByBr = false;
     const visit = (node) => {
       if (hit) return;
       if (node.nodeType === 3) {
         if (seen + node.data.length >= target) { hit = [node, target - seen]; return; }
         seen += node.data.length;
+        if (node.data) endedByBr = false;
         return;
       }
       if (node.nodeType !== 1) return;
       if (node.tagName === "BR") {
+        if (node === node.parentNode.lastChild) return;   // the block's filler, as in walk()
         if (seen >= target) { hit = [node.parentNode, [...node.parentNode.childNodes].indexOf(node)]; return; }
-        seen += 1;
+        seen += 1; endedByBr = true;
         return;
       }
       if (node.hasAttribute && node.hasAttribute("data-pill")) {
@@ -136,9 +178,22 @@
           return;
         }
         seen += len;
+        if (len) endedByBr = false;
         return;
       }
-      if (BLOCK.has(node.tagName) && node !== input && seen && seen < target) seen += 1;
+      if (BLOCK.has(node.tagName) && node !== input && seen && !endedByBr) {
+        // The newline this block contributes sits AT offset `seen`, so a target of exactly `seen`
+        // is the position in front of it -- the end of the line above, which is the position just
+        // before this block in its parent. Answering [node, 0] put it after the newline instead,
+        // one offset further on than walk() reads that same position back as.
+        if (seen >= target) {
+          const parent = node.parentNode;
+          hit = [parent, [...parent.childNodes].indexOf(node)];
+          return;
+        }
+        seen += 1;
+      }
+      endedByBr = false;
       [...node.childNodes].forEach(visit);
     };
     visit(input);
@@ -212,22 +267,62 @@
     // where a direct DOM mutation drops out of the stack and Ctrl+Z then jumps over the pill.
     input.focus({ preventScroll: true });
     setComposerRange(start, end);
-    const html = pillElement(kind, label, wire).outerHTML;
+    const built = pillElement(kind, label, wire);
+    // Tag it so the caret repair below can find exactly the node just inserted, rather than
+    // guessing at "the last pill" -- there may already be others, in any order.
+    const stamp = `p${Math.random().toString(36).slice(2, 10)}`;
+    built.dataset.fresh = stamp;
     composerEditing = true;
     try {
       const ok = typeof document.execCommand === "function"
-        && document.execCommand("insertHTML", false, html);
+        && document.execCommand("insertHTML", false, built.outerHTML);
       if (!ok) {
         const range = window.getSelection()?.getRangeAt(0);
         if (range) {
           range.deleteContents();
-          range.insertNode(pillElement(kind, label, wire));
+          range.insertNode(built);
           range.collapse(false);
         }
       }
     } catch { /* leave the draft as it was rather than half-edit it */ }
     finally { composerEditing = false; }
+    // THE CARET REPAIR, and why it is not optional. An inline contenteditable=false span has no
+    // editable position after it, so Blink collapses the caret to the END OF THE PRECEDING TEXT
+    // NODE -- before the pill, not after. Everything typed next goes in front of it: measured in
+    // Chromium, "Review $fix" + Tab + " the diff" produced "Review  the diff[fixture]", the pill
+    // having migrated to the end of the message. Two pills came out reversed, Backspace looked on
+    // the wrong side and could never remove one, and a link pill's URL -- whose wire text is the
+    // URL itself -- landed in the wrong place in what the model was sent.
+    //
+    // jsdom never showed any of this: it has no execCommand, so every test took the fallback
+    // above, whose range.collapse(false) puts the caret after the pill. The tests exercised the
+    // branch that does not ship.
+    const fresh = input.querySelector(`[data-fresh="${stamp}"]`);
+    if (fresh) {
+      delete fresh.dataset.fresh;
+      // Give the caret somewhere to be. Without a following text node there is no editable
+      // position after an inline uneditable element at the end of the host.
+      let after = fresh.nextSibling;
+      if (!after || after.nodeType !== 3) {
+        after = document.createTextNode("");
+        fresh.parentNode.insertBefore(after, fresh.nextSibling);
+      }
+      const sel = window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.setStart(after, 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
     markComposerEmpty();
+    // Remember that this selection arrived as a pill. A selection added from the + menu or the
+    // Skills surface has no pill and must not be governed by one; reconcilePills() below only
+    // withdraws the ones that came in this way.
+    const owner = attachments.find((a) => (kind === "file" ? a.label === label && a.resource
+      : a[kind] === label));
+    if (owner) owner.fromPill = true;
     // The row was drawn before this pill existed -- attachInvocation renders it, then the pill is
     // inserted -- so redraw now that there is something inline to defer to.
     renderAtts();
@@ -263,11 +358,37 @@
 
   // Removing a pill gives back whatever it was standing for, so the selection it represents does
   // not linger after the thing the reader can see has gone.
+  // Pills and the attachment row are two views of one selection, and only the Backspace handler
+  // kept them in step: releasePill has a single caller, and it bails on a non-collapsed selection.
+  // So mouse-selecting a pill and deleting it, Ctrl+A then Delete, or undoing the insertion left
+  // the selection attached with nothing on screen standing for it -- and persistDraft saves a
+  // draft that has attachments even with no text, so every skill and @-file of an abandoned draft
+  // rode along with the next, unrelated prompt, after a reload too.
+  function reconcilePills() {
+    const shown = new Set([...input.querySelectorAll(".composer-pill")]
+      .map((pill) => `${pill.dataset.kind}\u0000${pill.textContent}`));
+    let dropped = false;
+    for (let i = attachments.length - 1; i >= 0; i--) {
+      const a = attachments[i];
+      if (!a.fromPill) continue;
+      const kind = a.skill ? "skill" : a.template ? "template" : (a.resource ? "file" : "");
+      const name = kind === "file" ? a.label : a[kind];
+      if (kind && !shown.has(`${kind}\u0000${name}`)) { attachments.splice(i, 1); dropped = true; }
+    }
+    if (dropped) { renderAtts(); scheduleDraftSave(); }
+  }
   function releasePill(pill) {
     // Match on the SELECTION's own identity, not on the pill's text: an invocation is stored as
     // {label: "$fixture", skill: "fixture"} while the pill shows the bare name, so comparing
     // labels silently matched nothing and the selection outlived the pill that showed it.
     const kind = pill.dataset.kind, name = pill.textContent;
+    // One selection can stand behind more than one pill: attachInvocation dedupes, so picking the
+    // same skill twice makes two pills and a single attachment. Handing the selection back on the
+    // first removal dropped it while a pill for it was still on screen, and the message went out
+    // with no skills at all. Only the last pill standing for a selection gives it back. Files are
+    // exempt: the @file branch pushes unconditionally, so those are already one-to-one.
+    if (kind !== "file" && [...input.querySelectorAll(".composer-pill")].some((other) =>
+      other !== pill && other.dataset.kind === kind && other.textContent === name)) return;
     const index = attachments.findIndex((a) => (
       kind === "file" ? a.label === name && a.resource : a[kind] === name));
     if (index >= 0) { attachments.splice(index, 1); renderAtts(); }
@@ -291,7 +412,15 @@
   }
 
   // The placeholder cannot key off :empty, because of the filler <br>. It keys off the serializer.
-  function markComposerEmpty() { input.classList.toggle("is-empty", composerText() === ""); }
+  function markComposerEmpty() {
+    // A pill carries no wire text -- a skill's is "" by design -- so a composer holding one
+    // serializes to "" and used to be called empty. The ::before placeholder is the first inline
+    // box in the editing host, so it laid out AHEAD of the pill: "Ask DGC to build, fix or
+    // explain…/fixture" on one line. hasComposerInput() already counts attachments; this is the
+    // same notion of not-empty, read from what is on screen.
+    input.classList.toggle("is-empty",
+      composerText() === "" && !input.querySelector("[data-pill]"));
+  }
 
   // THE TRAP THIS GUARDS. Almost every composer test drives the panel with `input.value = "..."`.
   // Assigning `.value` to a div does not fail -- it creates an expando, the read returns what was
@@ -4457,6 +4586,9 @@
       label.textContent = a.pasted ? `Pasted text · ${a.chars.toLocaleString()} chars` : a.label;
       label.title = label.textContent; remove.type = "button"; remove.title = "Remove this attachment";
       remove.setAttribute("aria-label", `Remove attachment ${label.textContent}`);
+      // (No pill to take with it: pillShowing() suppresses a chip for as long as a pill stands for
+      // the same selection, so a chip and its pill are never both on screen. Measured in Chromium
+      // -- two skills picked, #attachments is empty.)
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label);
       if (a.pasted) {
@@ -4625,7 +4757,9 @@
         setComposerRange(start, end);
         const done = text ? document.execCommand("insertText", false, text)
           : document.execCommand("delete", false);
-        if (done && composerText() === expected) return;
+        // onInput is suppressed while composerEditing is set, so nothing else re-reads the empty
+        // state on this path: after a send the box sat empty with no placeholder on it.
+        if (done && composerText() === expected) { markComposerEmpty(); return; }
       } catch { /* fall through to a plain assignment */ }
       finally { composerEditing = false; }
     }
@@ -4634,7 +4768,34 @@
     setComposerRange(start + text.length);
   }
   function setComposerText(text) { editComposer(0, composerText().length, String(text ?? "")); }
-  function clearComposer() { setComposerText(""); autosizeComposer(); }
+  function clearComposer() {
+    // A composer holding nothing but pills serializes to the empty string -- a skill pill's wire
+    // text IS "" -- so the text-range edit below is a 0-to-0 no-op and the pills survive the send,
+    // still sitting in the box under the message they were part of. Delete by DOM range instead of
+    // by text offsets, and keep it an execCommand so the undo history that brings a sent prompt
+    // back (composer-undo.test.mjs) survives.
+    const cleared = () => composerText() === "" && !input.querySelector("[data-pill]");
+    if (input.firstChild && typeof document.execCommand === "function") {
+      composerEditing = true;
+      try {
+        input.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(input);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          if (document.execCommand("delete", false) && cleared()) {
+            markComposerEmpty(); autosizeComposer(); return;
+          }
+        }
+      } catch { /* fall through to the text edit */ }
+      finally { composerEditing = false; }
+    }
+    setComposerText("");
+    if (!cleared()) setComposerValue("");
+    autosizeComposer();
+  }
 
   // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
   // either side of that edit, put the chip back or take it away again to match.
@@ -4657,6 +4818,7 @@
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     markComposerEmpty();
+    reconcilePills();
     // An IME composition builds a word by repeatedly rewriting text nodes. A textarea absorbed
     // that internally; an editing host does not, and ANY programmatic edit or selection move
     // during a composition cancels the session and drops what was being typed. So the picker,
@@ -4729,10 +4891,18 @@
       }
     });
     zone.addEventListener("drop", (e) => {
+      // Take every drop. An editing host is a native drop target, so returning early handed the
+      // browser its own default: the dragged content inserted verbatim, styled markup and remote
+      // <img> and all, straight past the paste handling below. Dropped text still arrives, as
+      // text, through the same edit path as everything else typed here.
+      e.preventDefault();
       const list = e.dataTransfer ? e.dataTransfer.getData("text/uri-list") : "";
       const uris = list.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).slice(0, 16);
-      if (!uris.length) return;
-      e.preventDefault();
+      if (!uris.length) {
+        const text = e.dataTransfer ? e.dataTransfer.getData("text/plain") : "";
+        if (text && zone === input) { const at = composerSelection()[0]; editComposer(at, at, text); }
+        return;
+      }
       vscode.postMessage({ type: "drop_uris", uris });
     });
   }
@@ -5860,8 +6030,14 @@
     else if (msg.type === "composer_skill") {
       if (!attachInvocation("skill", String(msg.name || ""))) return;
       if (msg.text) {
-        composerText() += (composerText() && !/\s$/.test(composerText()) ? " " : "") + String(msg.text);
-        setComposerRange(composerText().length);
+        // `composerText() += x` is an assignment to a CALL, which parses fine and throws
+        // ReferenceError at runtime -- node --check passes it, V8 does not. It arrived mechanically
+        // when stage 2 renamed `input.value` to the reader everywhere, including on the left of an
+        // assignment. Appending has to go through the writer, and through the editing path so it
+        // is one entry in the undo history and cannot destroy a pill already in the box.
+        const at = composerText().length;
+        const gap = composerText() && !/\s$/.test(composerText()) ? " " : "";
+        editComposer(at, at, gap + String(msg.text));
       }
       input.focus(); onInput();
     }

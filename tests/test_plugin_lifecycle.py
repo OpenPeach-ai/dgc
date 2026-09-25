@@ -56,6 +56,41 @@ class PluginLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(plugins.PluginError,'already owns'): self.install()
         self.assertEqual([r['name'] for r in plugins._installed()],['fixture'])
 
+    def test_connecting_an_app_refuses_to_replace_a_plugin_of_the_same_name(self):
+        # Plugins and connectors share one flat namespace, and a package names itself. Saving the
+        # connector used to drop the plugin's ownership row while leaving its skill folder in the
+        # live discovery root -- still offered to the model, and impossible to reinstall, because
+        # no row owned it any more.
+        from dgc import connectors
+        self.entry['name'] = 'zapier'; self.install()
+        entry = {**self.entry, 'connector': 'zapier', 'license': 'Zapier service terms'}
+        with patch.object(plugins, 'load_catalog', return_value={'plugins': [entry]}):
+            url = connectors.CATALOG['zapier']['url']
+            with self.assertRaisesRegex(plugins.PluginError, 'plugin named zapier'):
+                connectors.save(self.config, 'zapier',
+                                {'transport': 'remote', 'command': 'npx',
+                                 'args': ['-y', 'mcp-remote', url], 'url': url,
+                                 'env_names': ['DGC_MCP_BEARER_TOKEN'], 'defer_until_setup': True,
+                                 'auth_env': 'DGC_MCP_BEARER_TOKEN'},
+                                accept_license='Zapier service terms')
+        rows = plugins._installed()
+        self.assertEqual([(r['name'], r.get('connector')) for r in rows], [('zapier', None)])
+        self.assertEqual(rows[0]['skills'], ['zapier--example'])
+        self.assertTrue((plugins.SKILL_ROOT / 'zapier--example').exists())
+        self.assertNotIn('zapier', self.values.get('mcp_servers', {}))
+
+    def test_installing_a_plugin_refuses_to_replace_a_connected_app(self):
+        # The same collision from the other side: the install used to replace the connector's row
+        # while its mcp_servers entry stayed live, so the panel showed the app disconnected while
+        # the editor kept re-supplying its bearer token.
+        plugins._save([{**self.entry, 'name': 'zapier', 'connector': 'zapier', 'skills': [],
+                        'servers': {}, 'server_names': ['zapier']}])
+        self.entry['name'] = 'zapier'
+        with self.assertRaisesRegex(plugins.PluginError, 'connected app'):
+            self.install()
+        rows = plugins._installed()
+        self.assertEqual([(r['name'], r.get('connector')) for r in rows], [('zapier', 'zapier')])
+
     def test_multiple_servers_are_selected_and_registered_independently(self):
         self.write('.mcp.json',{'mcpServers':{'one':{'url':'https://one.example/mcp'},'two':{'url':'https://two.example/mcp'}}})
         preview=plugins._preview(self.entry,self.package)

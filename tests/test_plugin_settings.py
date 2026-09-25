@@ -87,6 +87,38 @@ class PluginSettingsTests(unittest.TestCase):
         self.assertEqual(rows[1]['display_name'], 'Linked plugin')
         self.assertTrue(rows[1]['installed'])
 
+    def test_a_committed_uninstall_is_reported_even_when_the_catalog_cannot_be_reread(self):
+        # plugins.uninstall() commits before the catalog is read back, and one unreadable
+        # marketplace cache is enough to make that read raise. Reporting it as command_rejected
+        # told the editor the uninstall had not happened: it gates clearUninstalledPluginServers on
+        # plugin_operation, so it kept the connector's ownership row and its bearer in
+        # SecretStorage and put the server back on the next backend generation, while the retry
+        # answered "Plugin is not installed".
+        from types import SimpleNamespace
+        from dgc.headless import Backend
+        values, events = {}, []
+        backend = object.__new__(Backend)
+        backend.config = SimpleNamespace(project_root=self.package, get=lambda k, d=None: values.get(k, d),
+                                         set=lambda k, v: values.__setitem__(k, v))
+        backend.agent = SimpleNamespace(mcp=None, reload_skills=lambda: None)
+        backend.em = SimpleNamespace(emit=lambda kind, **kw: events.append({"type": kind, **kw}))
+        backend._emit_skill_catalog = lambda request: None
+        backend._emit_mcp_servers = lambda request: None
+        backend._editor_plugins = lambda: (_ for _ in ()).throw(plugins.PluginError('marketplace cache is unreadable'))
+        with patch.object(plugins, 'uninstall',
+                          return_value={'removed_servers': ['zapier'], 'retained_servers': []}) as uninstall:
+            terminal = backend._plugin_operation(
+                {"type": "uninstall_plugin", "name": "zapier", "request_id": "rm"})
+            terminal()
+        uninstall.assert_called_once()
+        kinds = [e['type'] for e in events]
+        self.assertIn('plugin_operation', kinds)
+        self.assertNotIn('command_rejected', kinds)
+        operation = next(e for e in events if e['type'] == 'plugin_operation')
+        self.assertEqual(operation['removed_servers'], ['zapier'])
+        self.assertIn('could not be re-read', operation['message'])
+        self.assertNotIn('plugin_catalog', kinds)
+
     def test_skill_toggle_during_a_turn_keeps_the_loaded_skill(self):
         from types import SimpleNamespace
         from dgc.headless import Backend

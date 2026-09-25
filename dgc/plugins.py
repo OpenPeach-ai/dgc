@@ -253,6 +253,12 @@ def _install_tree(entry: dict, source: Path | None, *, accept_license: str, sele
             raise PluginError('Selected MCP servers do not belong to this plugin')
         if not preview['skills'] and not selected: raise PluginError('Select at least one supported component')
         old_rows = _installed()
+        # The same flat namespace, from the other side: a package whose plugin.json names itself
+        # after a connected app installs over that connector's ownership row, while the connector's
+        # entry in config.mcp_servers stays live with its bearer. The panel then reports the app
+        # disconnected while the editor goes on re-supplying its token on every backend generation.
+        if any(r['name'] == name and r.get('connector') == name for r in old_rows):
+            raise PluginError('A connected app already uses this name. Disconnect it before installing this plugin.')
         # Skills keep their declared names. Refuse ambiguity across packages instead of replacing one.
         declared = {skill['name'] for skill in preview['skills']}
         for row in old_rows:
