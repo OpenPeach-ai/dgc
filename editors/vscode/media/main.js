@@ -47,7 +47,7 @@
       if (node.nodeType !== 1) return;
       if (node.tagName === "BR") { text += "\n"; return; }
       // A pill is atomic: it contributes its placeholder and nothing from inside it.
-      if (node.dataset && node.dataset.pill) { text += node.dataset.pill; return; }
+      if (node.hasAttribute && node.hasAttribute("data-pill")) { text += node.dataset.pill; return; }
       const block = BLOCK.has(node.tagName) && node !== root;
       // A block starts a new line unless nothing has been written yet.
       if (block && text && !text.endsWith("\n")) text += "\n";
@@ -61,8 +61,9 @@
     visit(root);
     if (found < 0) found = text.length;
     // Chromium's filler <br> is not a line the user typed.
-    if (text.endsWith("\n") && !root.lastChild?.dataset?.pill
-        && root.lastChild && root.lastChild.nodeName === "BR") text = text.slice(0, -1);
+    if (text.endsWith("\n") && root.lastChild && root.lastChild.nodeName === "BR") {
+      text = text.slice(0, -1);
+    }
     return [text, Math.min(found, text.length)];
   }
 
@@ -122,7 +123,7 @@
         seen += 1;
         return;
       }
-      if (node.dataset && node.dataset.pill) {
+      if (node.hasAttribute && node.hasAttribute("data-pill")) {
         const len = node.dataset.pill.length;
         if (seen + len >= target) {
           const parent = node.parentNode;
@@ -162,6 +163,89 @@
   let composing = false;
   input.addEventListener("compositionstart", () => { composing = true; });
   input.addEventListener("compositionend", () => { composing = false; onInput(); });
+
+  // ---- inline pills -------------------------------------------------------------------------
+  // A picked skill, template or @file used to vanish from the box and reappear as a chip in a row
+  // underneath, because a <textarea> cannot contain an element. It can now sit where it was typed.
+  //
+  // `data-pill` is the pill's WIRE text, and for these kinds it is deliberately the empty string:
+  // the payload travels in `skills`, `templates` or `context`, never in prompt.text, and the tests
+  // that pin "Review  after" are asserting exactly that. The attribute's PRESENCE marks a pill;
+  // its value is what the model reads. contenteditable=false makes it one object to the caret, so
+  // the browser steps over it and selects it whole.
+  function pillElement(kind, label, wire = "") {
+    const pill = document.createElement("span");
+    pill.className = `composer-pill pill-${kind}`;
+    pill.setAttribute("contenteditable", "false");
+    pill.setAttribute("data-pill", wire);
+    pill.dataset.kind = kind;
+    pill.textContent = label;
+    return pill;
+  }
+
+  function insertComposerPill(start, end, kind, label, wire = "") {
+    // Through execCommand so the insertion is ONE entry in the browser's own undo history --
+    // measured, not assumed: a spike confirmed insertHTML inserts an element as a single step,
+    // where a direct DOM mutation drops out of the stack and Ctrl+Z then jumps over the pill.
+    input.focus({ preventScroll: true });
+    setComposerRange(start, end);
+    const html = pillElement(kind, label, wire).outerHTML;
+    composerEditing = true;
+    try {
+      const ok = typeof document.execCommand === "function"
+        && document.execCommand("insertHTML", false, html);
+      if (!ok) {
+        const range = window.getSelection()?.getRangeAt(0);
+        if (range) {
+          range.deleteContents();
+          range.insertNode(pillElement(kind, label, wire));
+          range.collapse(false);
+        }
+      }
+    } catch { /* leave the draft as it was rather than half-edit it */ }
+    finally { composerEditing = false; }
+    markComposerEmpty();
+    scheduleDraftSave();
+  }
+
+  // Backspace against a pill removes the whole thing. Without this the browser walks into it and
+  // deletes one character of a label that is not text the user typed.
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Backspace" && event.key !== "Delete") return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!input.contains(range.startContainer)) return;
+    const back = event.key === "Backspace";
+    let victim = null;
+    if (range.startContainer.nodeType === 1) {
+      const kids = range.startContainer.childNodes;
+      const at = back ? range.startOffset - 1 : range.startOffset;
+      const node = kids[at];
+      if (node && node.nodeType === 1 && node.hasAttribute("data-pill")) victim = node;
+    } else if (back && range.startOffset === 0) {
+      const prev = range.startContainer.previousSibling;
+      if (prev && prev.nodeType === 1 && prev.hasAttribute("data-pill")) victim = prev;
+    }
+    if (!victim) return;
+    event.preventDefault();
+    releasePill(victim);
+    victim.remove();
+    markComposerEmpty();
+    onInput();
+  }, true);
+
+  // Removing a pill gives back whatever it was standing for, so the selection it represents does
+  // not linger after the thing the reader can see has gone.
+  function releasePill(pill) {
+    // Match on the SELECTION's own identity, not on the pill's text: an invocation is stored as
+    // {label: "$fixture", skill: "fixture"} while the pill shows the bare name, so comparing
+    // labels silently matched nothing and the selection outlived the pill that showed it.
+    const kind = pill.dataset.kind, name = pill.textContent;
+    const index = attachments.findIndex((a) => (
+      kind === "file" ? a.label === name && a.resource : a[kind] === name));
+    if (index >= 0) { attachments.splice(index, 1); renderAtts(); }
+  }
 
   function insertComposerText(text) {
     input.focus();
@@ -4388,8 +4472,12 @@
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
     if (it.skill || it.template) {
-      if (!attachInvocation(it.skill ? "skill" : "template", it.skill || it.template)) return;
-      replacePopToken();
+      const kind = it.skill ? "skill" : "template";
+      if (!attachInvocation(kind, it.skill || it.template)) return;
+      // The token becomes a pill in place rather than disappearing. It serialises to "" -- the
+      // skill travels in `skills`, exactly as before -- so what reaches the model is unchanged
+      // and the reader can finally see which skill they picked, where they picked it.
+      insertComposerPill(popStart, popEnd, kind, it.skill || it.template);
       hidePop(); input.focus(); return;
     }
     if (popMode === "@") {
@@ -4399,7 +4487,7 @@
         relative_path: it.relative_path, workspace: it.workspace,
       } });
       renderAtts();
-      replacePopToken();
+      insertComposerPill(popStart, popEnd, "file", it.label);
     } else if (popMode === "/") {
       if (it.action?.startsWith("workflow:")) {
         // One edit, so one Ctrl+Z returns to what was typed: removing the token and adding the

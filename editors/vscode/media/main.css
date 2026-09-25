@@ -923,6 +923,16 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
    filler <br> behind after an edit, so the class is set from the same serializer the rest of the
    panel reads, and never from the DOM looking empty. */
 #input.is-empty::before { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
+/* An inline pill. line-height matches the composer's so a line holding one is no taller than a
+   line of plain text -- a pill that changes the box height as you type reads as a jolt. */
+.composer-pill { display: inline-flex; align-items: baseline; gap: 4px; margin: 0 1px; padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-strong);
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); white-space: nowrap; user-select: none; vertical-align: baseline; }
+.composer-pill::before { content: "/"; color: var(--link); font-family: var(--mono); }
+.composer-pill.pill-file::before { content: "@"; }
+.composer-pill.pill-template::before { content: "$"; }
+@media (forced-colors: active) { .composer-pill { border-color: CanvasText; } }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 /* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,
    which model will do it on the right, and Send pinned to the model group so it travels with it.
