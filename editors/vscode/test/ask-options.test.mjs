@@ -26,17 +26,17 @@ const OPTIONS = [
 
 test("the options are drawn as rows on the card", () => {
   const h = askedWith(OPTIONS);
-  const rows = [...h.doc.querySelectorAll(".open-ask .ask-opt")];
+  const rows = [...h.doc.querySelectorAll(".open-ask .oask-opt")];
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].querySelector(".ask-opt-label").textContent, "Local");
-  assert.equal(rows[1].querySelector(".ask-opt-desc").textContent, "on a rented box");
+  assert.equal(rows[0].querySelector(".oask-label").textContent, "Local");
+  assert.equal(rows[1].querySelector(".oask-desc").textContent, "on a rented box");
 });
 
 test("the recommended one is marked", () => {
   const h = askedWith(OPTIONS);
-  const rows = [...h.doc.querySelectorAll(".open-ask .ask-opt")];
+  const rows = [...h.doc.querySelectorAll(".open-ask .oask-opt")];
   assert.ok(rows[0].classList.contains("recommended"));
-  assert.ok(rows[0].querySelector(".ask-opt-mark"), "and says so in words, not colour alone");
+  assert.ok(rows[0].querySelector(".oask-mark"), "and says so in words, not colour alone");
   assert.equal(rows[1].classList.contains("recommended"), false);
 });
 
@@ -51,7 +51,7 @@ test("the card stays in the transcript and never docks into the composer", () =>
 
 test("picking an option answers the question the same way typing does", () => {
   const h = askedWith(OPTIONS);
-  h.doc.querySelector(".open-ask .ask-opt").click();
+  h.doc.querySelector(".open-ask .oask-opt").click();
   const sent = h.posted.at(-1);
   assert.equal(sent.type, "prompt");
   assert.equal(sent.text, "Local");
@@ -63,7 +63,7 @@ test("picking an option answers the question the same way typing does", () => {
 
 test("a question with no options is unchanged", () => {
   const h = askedWith(null);
-  assert.equal(h.doc.querySelector(".open-ask .ask-opt"), null);
+  assert.equal(h.doc.querySelector(".open-ask .oask-opt"), null);
   assert.ok(h.doc.querySelector(".open-ask-input"), "still a text box");
 });
 
@@ -78,7 +78,7 @@ test("the folded line says how many options are waiting", () => {
 
 test("a malformed option is skipped, not fatal", () => {
   const h = askedWith([{ label: "Local" }, { description: "no label" }, { label: "" }]);
-  const rows = [...h.doc.querySelectorAll(".open-ask .ask-opt")];
+  const rows = [...h.doc.querySelectorAll(".open-ask .oask-opt")];
   assert.equal(rows.length, 1, "the good row survives");
   assert.deepEqual(h.errors, []);
 });

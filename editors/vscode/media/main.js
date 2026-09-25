@@ -2,6 +2,30 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+
+  // ---- the composer's five primitives ----------------------------------------------------
+  // Everything that touches the draft goes through these, and nothing else reads `input.value`
+  // or its selection directly. Today they are a thin skin over a <textarea>, so this changes no
+  // behaviour whatsoever -- that is the point of landing it on its own.
+  //
+  // They exist because the element is going to become a contenteditable that can hold inline
+  // pills, and a textarea's two guarantees do not survive that: `.value` stops being the text,
+  // and the selection stops being a pair of integer offsets into it. Thirty-eight value sites and
+  // twenty selection sites cannot each be re-reasoned at that moment. They are re-pointed once,
+  // here, when the answers are still obvious.
+  //
+  // The trap this also guards: assigning `.value` to a div does not fail, it creates an expando.
+  // A test that drives the panel with `input.value = "..."` would keep passing against a composer
+  // that renders nothing at all. When the element changes, these five are reimplemented over the
+  // DOM and the accessors are defined in terms of THEM, so a test that goes through `.value`
+  // still moves the real composer.
+  const composerText = () => input.value;
+  const setComposerValue = (text) => { input.value = text; };
+  const composerSelection = () => [input.selectionStart, input.selectionEnd];
+  const setComposerRange = (start, end = start) => input.setSelectionRange(start, end);
+  // What the backend is sent. Identity while the composer is plain text; once a pill can sit in
+  // the draft this is where its placeholder is turned back into the words the model should read.
+  const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
   const monitorsBar = $("monitorsbar");
   const announcer = $("announcer");
@@ -508,8 +532,8 @@
     } catch { return null; }
   }
   function captureDraft() {
-    return { text: input.value, attachments: [...attachments], start: input.selectionStart,
-      end: input.selectionEnd, updated: Date.now() };
+    return { text: composerText(), attachments: [...attachments], start: composerSelection()[0],
+      end: composerSelection()[1], updated: Date.now() };
   }
   function persistDraft() {
     if (restoringDraft) return;
@@ -579,8 +603,8 @@
       if (focused) input.focus({ preventScroll: true });
       shownPastes.length = 0;
     }
-    input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
-    input.selectionStart = draft.start; input.selectionEnd = draft.end;
+    setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
+    setComposerRange(draft.start, draft.end);
     renderAtts(); autosizeComposer();
     hidePop(); restoringDraft = false; persistDraft();
   }
@@ -609,8 +633,8 @@
       const draft = draftEntries.get(draftSession);
       if (draft) {
         restoringDraft = true;
-        input.value = draft.text; attachments.push(...draft.attachments);
-        input.selectionStart = draft.start; input.selectionEnd = draft.end;
+        setComposerValue(draft.text); attachments.push(...draft.attachments);
+        setComposerRange(draft.start, draft.end);
         renderAtts(); autosizeComposer();
         restoringDraft = false;
       }
@@ -625,8 +649,8 @@
         : "Delivery of a message from the previous connection was not confirmed. Check the chat before retrying.";
       const button = el("button", "act", "Restore message to draft"); button.type = "button";
       button.onclick = () => {
-        if (input.value || attachments.length) { sysLine("Send or clear the current draft first."); return; }
-        input.value = row.draft.text; attachments.push(...row.draft.attachments);
+        if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
+        setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
         unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
         node.remove(); renderAtts(); onInput(); persistDraft();
       };
@@ -653,16 +677,16 @@
       if (pending.session && pending.session !== draftSession) {
         sysLine("Reopen this message's original chat to restore its draft."); return;
       }
-      if (input.value || attachments.length) {
+      if (composerText() || attachments.length) {
         sysLine("Send or clear the current draft before restoring this message."); return;
       }
-      input.value = pending.text; attachments.push(...pending.attachments);
+      setComposerValue(pending.text); attachments.push(...pending.attachments);
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
     const retry = el("button", "act", confirmed ? "Restore unsent message" : "Review delivery before restoring"); retry.type = "button";
     retry.onclick = restore; pending.node.appendChild(retry);
-    if (confirmed && (!pending.session || pending.session === draftSession) && !input.value && !attachments.length) restore();
+    if (confirmed && (!pending.session || pending.session === draftSession) && !composerText() && !attachments.length) restore();
     else {
       unconfirmedDrafts.push({ id, session: pending.session || draftSession, rejected: confirmed,
         draft: { text: pending.text, attachments: pending.attachments, start: 0,
@@ -1811,7 +1835,7 @@
       if (act === "branch") { vscode.postMessage({ type: "branchChat", prompt: String(prompt || "") }); return; }
       if (act === "retry") { resend(prompt); return; }
       if (act === "edit") {
-        setComposerText(String(prompt || "")); input.selectionStart = input.selectionEnd = input.value.length;
+        setComposerText(String(prompt || "")); setComposerRange(composerText().length);
         input.focus(); onInput(); scroll();
       }
     };
@@ -1846,9 +1870,9 @@
   function resend(prompt) {
     const text = String(prompt || "").trim();
     if (!text) return;
-    const draft = input.value;
+    const draft = composerText();
     setComposerText(text); submit();
-    if (input.value === "" && draft) { setComposerText(draft); onInput(); }
+    if (composerText() === "" && draft) { setComposerText(draft); onInput(); }
   }
   function discardTurn() {
     liveTurnHint = null;
@@ -2827,7 +2851,7 @@
     const skill = skillRows.find((row) => row.name === name);
     if (skill?.enabled === false) return;
     if (!attachInvocation("skill", name)) return;
-    if (!input.value.trim() && skill?.default_prompt) {
+    if (!composerText().trim() && skill?.default_prompt) {
       setComposerText(String(skill.default_prompt).slice(0, 4096));
       autosizeComposer();
     }
@@ -3809,7 +3833,7 @@
   }
 
   // ---- composer ----
-  function hasComposerInput() { return Boolean(input.value.trim() || attachments.length); }
+  function hasComposerInput() { return Boolean(composerText().trim() || attachments.length); }
   function renderComposerControls() {
     // A question docked in the composer replaces the text box, so nothing typed is a draft: Send is
     // Stop, and Queue and the follow-up hint have nothing to act on. The footer itself stays.
@@ -3913,7 +3937,7 @@
     log.appendChild(m); setSending(true);
     return m;
   }
-  function submitGoal(objective, restoreText = input.value) {
+  function submitGoal(objective, restoreText = composerText()) {
     if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
       sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
     }
@@ -3934,7 +3958,7 @@
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
     // model receives exactly what was pasted.
     const pastes = attachments.filter((a) => a.pasted);
-    const typed = input.value.trim();
+    const typed = composerText().trim();
     const text = pastes.length
       ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
       : typed;
@@ -4048,13 +4072,13 @@
         show.type = "button";
         show.title = "Put this text back into the composer";
         show.onclick = () => {
-          const at = input.selectionStart ?? input.value.length;
-          const before = input.value;
+          const at = composerSelection()[0] ?? composerText().length;
+          const before = composerText();
           editComposer(at, at, a.pasted);
-          input.selectionStart = input.selectionEnd = at + a.pasted.length;
+          setComposerRange(at + a.pasted.length);
           // The insert is in the textarea's undo history; the chip leaving is not. Remember both
           // sides so Ctrl+Z folds the text back into its chip instead of deleting the paste.
-          shownPastes.push({ before, after: input.value, item: a, index: i });
+          shownPastes.push({ before, after: composerText(), item: a, index: i });
           if (shownPastes.length > 8) shownPastes.shift();
           attachments.splice(i, 1);
           renderAtts();
@@ -4088,7 +4112,7 @@
   }
   function replacePopToken(value = "") {
     editComposer(popStart, popEnd, value);
-    input.selectionStart = input.selectionEnd = popStart + value.length;
+    setComposerRange(popStart + value.length);
     autosizeComposer();
     scheduleDraftSave();
   }
@@ -4114,10 +4138,10 @@
         prepareWorkflowDraft(it.action.slice("workflow:".length), popStart, popEnd);
         hidePop(); input.focus(); return;
       }
-      if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
+      if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
         replacePopToken(); hidePop(); input.focus();
-        if (it.action === "goal" && input.value.trim()) {
-          const objective = input.value.trim();
+        if (it.action === "goal" && composerText().trim()) {
+          const objective = composerText().trim();
           submitGoal(objective, `${objective} /goal`);
         } else {
           // Management actions operate independently of the draft. Opening a model, skills,
@@ -4139,12 +4163,12 @@
   function prepareWorkflowDraft(name, tokenStart = 0, tokenEnd = tokenStart) {
     if (!["plan", "review", "init"].includes(name)) return;
     const prefix = `/${name} `;
-    const value = input.value;
+    const value = composerText();
     const token = tokenEnd > tokenStart;
     const without = token ? value.slice(0, tokenStart) + value.slice(tokenEnd) : value;
     const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(without);
     const removed = current ? current[0].length : 0;
-    const caret = Math.max(0, (token ? tokenStart : input.selectionStart) - removed) + prefix.length;
+    const caret = Math.max(0, (token ? tokenStart : composerSelection()[0]) - removed) + prefix.length;
     const next = prefix + without.slice(removed);
     // The smallest single replacement that turns the box into `next`.
     let head = 0;
@@ -4153,7 +4177,7 @@
     while (tail < value.length - head && tail < next.length - head
       && value[value.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
     editComposer(head, value.length - tail, next.slice(head, next.length - tail));
-    input.selectionStart = input.selectionEnd = caret;
+    setComposerRange(caret);
     autosizeComposer();
     persistDraft(); input.focus();
   }
@@ -4194,26 +4218,26 @@
   // DOM), the edit still happens, just without history.
   let composerEditing = false;
   function editComposer(start, end, text) {
-    start = Math.max(0, Math.min(start, input.value.length));
-    end = Math.max(start, Math.min(end, input.value.length));
+    start = Math.max(0, Math.min(start, composerText().length));
+    end = Math.max(start, Math.min(end, composerText().length));
     if (start === end && !text) return;
-    const expected = input.value.slice(0, start) + text + input.value.slice(end);
+    const expected = composerText().slice(0, start) + text + composerText().slice(end);
     if (typeof document.execCommand === "function") {
       composerEditing = true;
       try {
         input.focus({ preventScroll: true });
-        input.setSelectionRange(start, end);
+        setComposerRange(start, end);
         const done = text ? document.execCommand("insertText", false, text)
           : document.execCommand("delete", false);
-        if (done && input.value === expected) return;
+        if (done && composerText() === expected) return;
       } catch { /* fall through to a plain assignment */ }
       finally { composerEditing = false; }
     }
     // No editing command, or it did not produce exactly this edit: set the result directly.
-    input.value = expected;
-    input.selectionStart = input.selectionEnd = start + text.length;
+    setComposerValue(expected);
+    setComposerRange(start + text.length);
   }
-  function setComposerText(text) { editComposer(0, input.value.length, String(text ?? "")); }
+  function setComposerText(text) { editComposer(0, composerText().length, String(text ?? "")); }
   function clearComposer() { setComposerText(""); autosizeComposer(); }
 
   // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
@@ -4223,11 +4247,11 @@
     if (!shownPastes.length || (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")) return;
     for (const entry of [...shownPastes].reverse()) {
       const attached = attachments.includes(entry.item);
-      if (event.inputType === "historyUndo" && !attached && input.value === entry.before) {
+      if (event.inputType === "historyUndo" && !attached && composerText() === entry.before) {
         attachments.splice(Math.min(entry.index, attachments.length), 0, entry.item);
         renderAtts(); return;
       }
-      if (event.inputType === "historyRedo" && attached && input.value === entry.after) {
+      if (event.inputType === "historyRedo" && attached && composerText() === entry.after) {
         attachments.splice(attachments.indexOf(entry.item), 1);
         renderAtts(); return;
       }
@@ -4239,10 +4263,10 @@
     scheduleDraftSave();
     renderComposerControls();
     autosizeComposer();
-    const v = input.value, caret = input.selectionStart;
+    const v = composerText(), caret = composerSelection()[0];
     const upto = v.slice(0, caret);
     const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
-    if (!token || input.selectionStart !== input.selectionEnd || input.matches(":disabled")) return hidePop();
+    if (!token || composerSelection()[0] !== composerSelection()[1] || input.matches(":disabled")) return hidePop();
     popStart = caret - token[2].length;
     popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
     popMode = token[2][0];
@@ -4404,11 +4428,11 @@
   // two that were previously reachable only from a settings page.
   function insertTrigger(ch) {
     input.focus();
-    const at = input.selectionStart ?? input.value.length;
-    const before = input.value.slice(0, at);
+    const at = composerSelection()[0] ?? composerText().length;
+    const before = composerText().slice(0, at);
     const prefix = before && !/\s$/.test(before) ? " " : "";
     editComposer(at, at, prefix + ch);
-    input.selectionStart = input.selectionEnd = at + prefix.length + 1;
+    setComposerRange(at + prefix.length + 1);
     onInput();
   }
   function hideAddMenu() {
@@ -4459,10 +4483,10 @@
   }
   $("btn-add").onclick = toggleAddMenu;
   function openCommandMenu() {
-    const caret = input.selectionEnd;
-    const prefix = caret && !/\s/.test(input.value[caret - 1]) ? " /" : "/";
+    const caret = composerSelection()[1];
+    const prefix = caret && !/\s/.test(composerText()[caret - 1]) ? " /" : "/";
     editComposer(caret, caret, prefix);
-    input.selectionStart = input.selectionEnd = caret + prefix.length; input.focus(); onInput();
+    setComposerRange(caret + prefix.length); input.focus(); onInput();
   }
   $("btn-cmd").onclick = openCommandMenu;
   $("btn-model").onclick = (e) => {
@@ -5386,14 +5410,14 @@
       openCommandMenu();
     }
     else if (msg.type === "composer_text") {
-      setComposerText(String(msg.text || "")); input.selectionStart = input.selectionEnd = input.value.length;
+      setComposerText(String(msg.text || "")); setComposerRange(composerText().length);
       input.focus(); onInput();
     }
     else if (msg.type === "composer_skill") {
       if (!attachInvocation("skill", String(msg.name || ""))) return;
       if (msg.text) {
-        input.value += (input.value && !/\s$/.test(input.value) ? " " : "") + String(msg.text);
-        input.selectionStart = input.selectionEnd = input.value.length;
+        composerText() += (composerText() && !/\s$/.test(composerText()) ? " " : "") + String(msg.text);
+        setComposerRange(composerText().length);
       }
       input.focus(); onInput();
     }
@@ -7401,7 +7425,7 @@
     if (ask) retireAsk("replaced");
     const questions = ev.questions;
     const hadFocus = document.activeElement === input;
-    const busyComposer = hadFocus && !!input.value.trim();
+    const busyComposer = hadFocus && !!composerText().trim();
     const n = ++askSerial;
     const flagged = questions.map((q) => (q.multi_select ? -1 : q.options.findIndex(askFlagged)));
     const el = document.createElement("section");
@@ -7971,12 +7995,12 @@
       options.forEach((option, index) => {
         const label = String(option && option.label || "").trim();
         if (!label) return;
-        const row2 = el("button", "ask-opt" + (option.recommended ? " recommended" : ""));
+        const row2 = el("button", "oask-opt" + (option.recommended ? " recommended" : ""));
         row2.type = "button";
         row2.dataset.index = String(index);
-        row2.innerHTML = `<span class="ask-opt-label">${esc(label)}</span>`
-          + (option.description ? `<span class="ask-opt-desc">${esc(String(option.description))}</span>` : "")
-          + (option.recommended ? `<span class="ask-opt-mark">Recommended</span>` : "");
+        row2.innerHTML = `<span class="oask-label">${esc(label)}</span>`
+          + (option.description ? `<span class="oask-desc">${esc(String(option.description))}</span>` : "")
+          + (option.recommended ? `<span class="oask-mark">Recommended</span>` : "");
         row2.onclick = () => { input.value = label; sendOpenAsk(ask); };
         list.appendChild(row2);
       });
