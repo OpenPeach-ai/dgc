@@ -295,7 +295,7 @@ def _validate_content_types(raw: bytes) -> None:
         ".css": "text/css", ".js": "application/javascript", ".json": "application/json",
         ".md": "text/markdown", ".png": "image/png", ".svg": "image/svg+xml",
         ".ttf": "font/ttf", ".txt": "text/plain", ".vsixmanifest": "text/xml",
-        ".ico": "image/vnd.microsoft.icon",
+        ".ico": "image/x-icon",
         ".woff": "font/woff",
     }
     if (actual != expected or len(actual) != len(default_nodes)
