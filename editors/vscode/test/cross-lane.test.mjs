@@ -86,7 +86,14 @@ test("300px: a reconnect line and an inline summary each end a tool group; Escap
     assert.deepEqual(order, ["retry", "group:view_image", "note", "group:propose_options"]);
 
     // Open the image step, then its chip: the viewer covers the panel over the docked question.
-    await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());
+    await page.evaluate(() => {
+      // A finished tool group folds to its summary line now, so its cards are hidden inside a
+      // closed <details>. A reader opens the group first; these tests click the card directly,
+      // which a person could not do while it is out of sight.
+      const card = document.querySelector('.tool[data-tool-name="view_image"]');
+      card.closest(".tool-group")?.setAttribute("open", "");
+      card.querySelector(".tool-toggle").click();
+    });
     await page.waitForSelector(".image-chip[data-state=ready]");
     await page.click(".image-chip");
     await page.waitForSelector("#image-viewer");
@@ -119,7 +126,14 @@ test("300px: the viewer's Show focuses the docked question's highlighted row", a
   if (skipOrFail(t)) return;
   const { page, send, errors } = await openCrossLane(browser, { width: 300, height: 760, scenario: "transcript" });
   try {
-    await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());
+    await page.evaluate(() => {
+      // A finished tool group folds to its summary line now, so its cards are hidden inside a
+      // closed <details>. A reader opens the group first; these tests click the card directly,
+      // which a person could not do while it is out of sight.
+      const card = document.querySelector('.tool[data-tool-name="view_image"]');
+      card.closest(".tool-group")?.setAttribute("open", "");
+      card.querySelector(".tool-toggle").click();
+    });
     await page.waitForSelector(".image-chip[data-state=ready]");
     await page.click(".image-chip");
     await page.waitForSelector("#image-viewer");
@@ -142,7 +156,14 @@ test("300px: a recovering backend exit undocks the question, keeps the viewer qu
   if (skipOrFail(t)) return;
   const { page, post, errors } = await openCrossLane(browser, { width: 300, height: 760, scenario: "transcript" });
   try {
-    await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());
+    await page.evaluate(() => {
+      // A finished tool group folds to its summary line now, so its cards are hidden inside a
+      // closed <details>. A reader opens the group first; these tests click the card directly,
+      // which a person could not do while it is out of sight.
+      const card = document.querySelector('.tool[data-tool-name="view_image"]');
+      card.closest(".tool-group")?.setAttribute("open", "");
+      card.querySelector(".tool-toggle").click();
+    });
     await page.waitForSelector(".image-chip[data-state=ready]");
     await page.click(".image-chip");
     await page.waitForSelector("#image-viewer");
@@ -200,7 +221,14 @@ for (const theme of ["dark-modern", "light-modern"]) {
     if (skipOrFail(t)) return;
     const { page, send, errors } = await openCrossLane(browser, { width: 300, height: 760, theme, scenario: "transcript" });
     try {
-      await page.evaluate(() => document.querySelector('.tool[data-tool-name="view_image"] .tool-toggle').click());
+      await page.evaluate(() => {
+      // A finished tool group folds to its summary line now, so its cards are hidden inside a
+      // closed <details>. A reader opens the group first; these tests click the card directly,
+      // which a person could not do while it is out of sight.
+      const card = document.querySelector('.tool[data-tool-name="view_image"]');
+      card.closest(".tool-group")?.setAttribute("open", "");
+      card.querySelector(".tool-toggle").click();
+    });
       await page.waitForSelector(".image-chip[data-state=ready]");
       await page.click(".image-chip");
       await page.waitForSelector("#image-viewer");

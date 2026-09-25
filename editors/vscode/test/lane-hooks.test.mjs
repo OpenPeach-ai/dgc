@@ -31,9 +31,14 @@ function instrumented() {
   const docked = "function askCardDocked() {";
   assert.equal(script.split(docked).length, 2);
   script = script.replace(docked, `${docked} if (window.__docked !== undefined) return window.__docked === true;`);
-  const shared = "function endToolGroup() { if (turn) turn.toolGroup = null; }";
-  assert.equal(script.split(shared).length, 2);
-  return script.replace(shared, `${shared}\n  window.__endToolGroup = endToolGroup;`);
+  // Match the DECLARATION, not one exact body. Pinning the whole line meant that editing what
+  // endToolGroup does silently stopped this instrumentation applying -- and since every test here
+  // builds its DOM through it, seven of them failed at once for a reason none of them named.
+  const shared = /function endToolGroup\(\)[^\n]*\n/;
+  const matched = script.match(shared);
+  assert.ok(matched, "endToolGroup is no longer declared on one line; update this hook");
+  assert.equal(script.split(matched[0]).length, 2, "endToolGroup must be declared once");
+  return script.replace(shared, `${matched[0]}  window.__endToolGroup = endToolGroup;\n`);
 }
 
 function dom() {

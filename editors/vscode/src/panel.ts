@@ -3102,6 +3102,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "openFile":
         await this.openFile(msg.path, msg.line);
         break;
+      case "saveImage":
+        await this.saveImage(String(msg.name || "image.png"), String(msg.data || ""));
+        break;
       case "getImage": {
         const requestId = String(msg.requestId || "");
         const ref = typeof msg.ref === "string" ? msg.ref : "";
@@ -3310,6 +3313,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target), { preview: true });
   }
   // ---- end 0.40 images ---------------------------------------------------------------------------
+
+  // A webview cannot write to disk, so saving an image the panel is showing has to come back
+  // here. The reader picks the destination: nothing is written anywhere without a dialog, and the
+  // bytes never leave the machine. Only the inline image types the panel renders are accepted, so
+  // a crafted `data:` URI cannot smuggle a script or an executable through the save dialog.
+  private async saveImage(name: string, data: string): Promise<void> {
+    const match = /^data:image\/(png|jpeg|gif|webp|bmp);base64,([A-Za-z0-9+/=]+)$/.exec(data);
+    if (!match) {
+      void vscode.window.showWarningMessage("DGC can only save an image it is displaying.");
+      return;
+    }
+    const ext = match[1] === "jpeg" ? "jpg" : match[1];
+    const safe = (name.split(/[\\/]/).pop() || "image").replace(/[^\w.-]+/g, "-").slice(0, 80);
+    const stem = safe.replace(/\.[^.]*$/, "") || "image";
+    const target = await vscode.window.showSaveDialog({
+      title: "Save image",
+      filters: { Images: [ext] },
+      defaultUri: vscode.Uri.joinPath(
+        vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(homedir()),
+        `${stem}.${ext}`),
+    });
+    if (!target) return;                       // cancelled: say nothing, write nothing
+    try {
+      await vscode.workspace.fs.writeFile(target, Buffer.from(match[2], "base64"));
+    } catch (err) {
+      void vscode.window.showErrorMessage(`DGC could not save the image: ${String(err)}`);
+    }
+  }
 
   private async openFile(path: string, line?: number): Promise<void> {
     const target = await workspaceFile(path, this.workspaceRoots());

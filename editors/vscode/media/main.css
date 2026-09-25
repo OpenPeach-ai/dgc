@@ -1614,7 +1614,10 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.45 var(--sans); }
 #iv-meta { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
-#image-viewer .iv-controls { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+/* The bar wraps, but its control cluster used to refuse to: `flex: none` kept it one rigid row,
+   so adding the zoom stepper and Save pushed Open file past the edge of a 300px panel. It
+   wraps now and keeps every control reachable at any width. */
+#image-viewer .iv-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px; margin-left: auto; min-width: 0; }
 #image-viewer .iv-pos { padding: 0 var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1 var(--sans);
   white-space: nowrap; font-variant-numeric: tabular-nums; }
 #image-viewer .iv-btn { width: var(--control); height: var(--control); display: inline-grid; place-items: center; padding: 0;
@@ -1636,6 +1639,15 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
     linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%);
   background-size: 16px 16px; background-position: 0 0, 8px 8px; }
 #image-viewer.actual .iv-stage img { max-width: none; max-height: none; cursor: zoom-out; }
+/* The fit/actual toggle answers two questions; a percentage answers the one in between. The
+   steps are coarse on purpose -- a slider in a preview is fiddly to hit. */
+#image-viewer .iv-zoomer { display: inline-flex; align-items: center; gap: 2px; margin-right: var(--sp-1); }
+#image-viewer .iv-level { min-width: 4.2ch; text-align: center; color: var(--muted); font: var(--w-med) var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; }
+#image-viewer .iv-btn[disabled] { opacity: .4; cursor: default; }
+#image-viewer.scaled .iv-stage img { max-width: none; max-height: none;
+  width: calc(var(--iv-natural-w, auto) * var(--iv-scale, 1)); cursor: grab; }
+#image-viewer.scaled .iv-stage { overflow: auto; }
+
 #image-viewer .iv-message { margin: auto; max-width: 28rem; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
   background: var(--vscode-editorWidget-background, var(--surface)); color: var(--text-strong);
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans); text-align: center; }

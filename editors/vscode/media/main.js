@@ -1513,6 +1513,10 @@
     });
     clearInterval(turn.timer);
     clearTimeout(turn.recoverTimer);
+    // A turn whose last act was a tool call has no prose after it to retire the group, so fold it
+    // here. Every OTHER group in the turn was already folded when the model moved on; without
+    // this the final one stays open and the turn reads inconsistently with the ones above it.
+    releaseToolGroup();
     const nodes = [...turn.block.querySelectorAll(".text")];
     let answer = finalId != null ? nodes.find((n) => n.dataset.messageId === String(finalId)) : null;
     // Absent and null are different answers to the same question. A backend that never states the
@@ -3247,7 +3251,7 @@
         }
         break;
       }
-      case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
+      case "text_delta": ensureTurn(); finishReasoning(); releaseToolGroup(); turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
         if (!turn && (ev.agent || agentIdFromCall(ev.call_id))) break;
         ensureTurn(); turn.chars += String(ev.text || "").length;
@@ -5173,7 +5177,7 @@
   function placeSteering(node) {
     flushText(); finishReasoning();
     if (turn.textEl) { turn.textEl.classList.add("commentary"); commentaryCopy(turn.textEl); }
-    turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
+    turn.textEl = null; turn._buf = ""; releaseToolGroup();
     appendTurnContent(node);
   }
   function legacyItem(it) {
@@ -5540,7 +5544,33 @@
   // Anything drawn at turn level between tool rounds (text, a model-retry line, an inline thought
   // note, a withheld-thinking row, a collapsed reasoning group, an image row with no step) ends the
   // open tool group, so the next tool card starts a new group below it rather than joining one above.
-  function endToolGroup() { if (turn) turn.toolGroup = null; }
+  // A tool group stops being the LIVE one when the model moves on -- to prose, to a decision
+  // card, to the end of the turn. Codex folds each finished run to one muted line, so its
+  // transcript reads as a sequence of steps instead of a wall of cards, and the founder asked for
+  // the same (2026-09-24).
+  //
+  // The group stays OPEN while it works. That is the part the previous decision was protecting:
+  // it used to collapse the moment it was created, so a run of twenty commands showed one grey
+  // line and the reader could not see what was being done to their project. Folding only once
+  // there is nothing left to watch keeps both -- you see the work happen, and you are not left
+  // scrolling past it afterwards. The summary sentence the header already prints is what remains.
+  //
+  // A group that failed, was denied, or was stopped stays open. An error is the one thing you
+  // must never have to expand to find.
+  function retireToolGroup(group) {
+    if (!group || !group.isConnected) return;
+    const cards = [...group.querySelectorAll(":scope > .tool")];
+    if (!cards.length) return;
+    const unsettled = cards.some((card) => card.dataset.status === "running");
+    const trouble = cards.some((card) => ["failed", "denied", "stopped"].includes(card.dataset.status));
+    if (!unsettled && !trouble) group.open = false;
+  }
+  function releaseToolGroup() {
+    if (!turn) return;
+    retireToolGroup(turn.toolGroup);
+    turn.toolGroup = null;
+  }
+  function endToolGroup() { releaseToolGroup(); }
   // ---- end 0.40 shared ----------------------------------------------------------------------------
 
 
@@ -6734,19 +6764,28 @@
     const viewer = el("div");
     viewer.id = "image-viewer";
     viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-labelledby", "iv-title");
-    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
+    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}<span class="iv-zoomer"><button type="button" class="iv-btn iv-out" aria-label="Zoom out" title="Zoom out (-)"><span class="codicon codicon-zoom-out" aria-hidden="true"></span></button><output class="iv-level" aria-live="off">100%</output><button type="button" class="iv-btn iv-in" aria-label="Zoom in" title="Zoom in (+)"><span class="codicon codicon-zoom-in" aria-hidden="true"></span></button></span>${viewerButton("screen-full", "Fit to panel", "Fit to panel (Z)", "iv-zoom")}${viewerButton("desktop-download", "Save image", "Save image", "iv-save")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
     const inert = [...document.body.children]
       .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
       .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
     for (const saved of inert) { saved.node.setAttribute("inert", ""); try { saved.node.inert = true; } catch {} }
     const records = imageSequenceFor(record);
     imageViewer = { el: viewer, records, index: Math.max(0, records.indexOf(record)), opener, inert,
-                    actual: false, observer: null };
+                    actual: false, scale: 1, observer: null };
     const q = (selector) => viewer.querySelector(selector);
     q(".iv-zoom").setAttribute("aria-pressed", "false");
     q(".iv-prev").onclick = () => moveViewer(-1);
     q(".iv-next").onclick = () => moveViewer(1);
     q(".iv-zoom").onclick = () => toggleViewerZoom();
+    q(".iv-in").onclick = () => stepViewerZoom(1);
+    q(".iv-out").onclick = () => stepViewerZoom(-1);
+    // A webview cannot write a file: the bytes go to the extension host, which owns the save
+    // dialog and the workspace. Nothing is written without the reader choosing where.
+    q(".iv-save").onclick = () => {
+      const record = imageViewer?.records[imageViewer.index];
+      if (!record || record.state !== "ready" || !record.src) return;
+      vscode.postMessage({ type: "saveImage", name: record.name || "image.png", data: record.src });
+    };
     q(".iv-close").onclick = () => closeImageViewer(true);
     // The viewer covers the composer, and with it Stop: while a turn runs, Stop is in the viewer too.
     q(".iv-stop").onclick = () => doStop();
@@ -6798,6 +6837,14 @@
     else if ((key === "z" || key === "Z") && !event.metaKey && !event.ctrlKey && !event.altKey) {
       event.preventDefault(); toggleViewerZoom();
     }
+    // The buttons advertise these keys in their titles, so they have to exist. "=" is the
+    // unshifted key that carries "+" on most layouts, and the numpad sends "Add"/"Subtract".
+    else if ((key === "+" || key === "=" || key === "Add") && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault(); stepViewerZoom(1);
+    }
+    else if ((key === "-" || key === "_" || key === "Subtract") && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault(); stepViewerZoom(-1);
+    }
   }
   // A history snapshot re-rendered under the viewer: the image stays, the sequence it came from does not.
   function viewerLive() {
@@ -6809,7 +6856,41 @@
     const next = Math.max(0, Math.min(last, step === Infinity ? last : step === -Infinity ? 0 : imageViewer.index + step));
     if (next === imageViewer.index) return;
     imageViewer.index = next;
+    imageViewer.scale = 1;          // a new picture starts at its own size, not the last one's
+    applyViewerZoom();
     renderViewerImage(true);
+  }
+  // Codex shows a percentage with - and + beside it, so a reader can meet an image halfway
+  // instead of choosing between "fits the panel" and "every pixel". The steps are coarse on
+  // purpose: a slider in a preview is fiddly, and these are the sizes anyone actually wants.
+  const ZOOM_STEPS = [0.25, 0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.5, 2, 3, 4];
+  function viewerZoomIndex() {
+    const wanted = imageViewer?.scale ?? 1;
+    let best = 0;
+    ZOOM_STEPS.forEach((step, i) => {
+      if (Math.abs(step - wanted) < Math.abs(ZOOM_STEPS[best] - wanted)) best = i;
+    });
+    return best;
+  }
+  function applyViewerZoom() {
+    if (!imageViewer) return;
+    const el2 = imageViewer.el;
+    const scale = imageViewer.scale ?? 1;
+    // Any explicit zoom means the reader chose a size, so the fit/actual toggle steps aside.
+    el2.classList.toggle("scaled", scale !== 1);
+    el2.style.setProperty("--iv-scale", String(scale));
+    const level = el2.querySelector(".iv-level");
+    if (level) level.value = `${Math.round(scale * 100)}%`;
+    const out = el2.querySelector(".iv-out"), inn = el2.querySelector(".iv-in");
+    if (out) out.disabled = scale <= ZOOM_STEPS[0];
+    if (inn) inn.disabled = scale >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  }
+  function stepViewerZoom(direction) {
+    if (!imageViewer) return;
+    const next = Math.max(0, Math.min(ZOOM_STEPS.length - 1, viewerZoomIndex() + direction));
+    imageViewer.scale = ZOOM_STEPS[next];
+    if (imageViewer.actual) toggleViewerZoom();   // an explicit size replaces "actual size"
+    applyViewerZoom();
   }
   function toggleViewerZoom() {
     if (!imageViewer) return;
