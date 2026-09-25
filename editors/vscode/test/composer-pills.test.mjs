@@ -144,3 +144,36 @@ test("a pasted link is still one paste to undo", () => {
   const { event } = pasteInto(h, "https://example.test/x");
   assert.equal(event.defaultPrevented, true, "the browser never inserts it itself");
 });
+
+// ---- the attachment row, and what happens when a pill cannot survive ---------------------------
+
+test("a pill is not repeated as a chip underneath", () => {
+  const h = panelWithSkill();
+  pickSkill(h);
+  assert.equal(h.doc.querySelectorAll("#input .composer-pill").length, 1);
+  assert.equal(h.doc.querySelectorAll("#attachments .invocation-chip").length, 0,
+    "the row carries what is NOT already visible inline");
+});
+
+test("a selection with no pill still gets its chip", () => {
+  // The condition for hiding a chip is the pill's existence, never the kind. A skill restored from
+  // a draft, or added from the + menu, has no pill -- hiding its chip would leave the user with a
+  // selection they can neither see nor remove, which is worse than showing it twice.
+  const h = panelWithSkill();
+  pickSkill(h);
+  const input = h.doc.getElementById("input");
+  // Assigning the value rebuilds the composer from serialized text, and a pill serialises to "",
+  // so the pill goes. The SELECTION survives in attachments, and the row must show it again.
+  input.value = "still drafting";
+  assert.equal(h.doc.querySelectorAll("#input .composer-pill").length, 0, "the pill is gone");
+  assert.equal(h.doc.querySelectorAll("#attachments .invocation-chip").length, 1,
+    "so the row takes it back rather than losing it silently");
+});
+
+test("what the model receives is unchanged either way", () => {
+  const h = panelWithSkill();
+  const input = pickSkill(h);
+  const before = input.value;
+  input.value = before;                       // round-trip through the serializer
+  assert.equal(input.value, "Review  after", "the prose is stable across a rebuild");
+});

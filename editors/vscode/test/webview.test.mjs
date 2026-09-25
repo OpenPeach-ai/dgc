@@ -12,6 +12,22 @@ import {
   contrastRatio, mainCss, mainJs, makeDom, panelSrc, rootHex,
 } from "./support/webview-dom.mjs";
 
+
+// Appending to the composer without rebuilding it: `input.value += x` round-trips through the
+// serializer and drops any pill, which is a real behaviour but not what a test appending text
+// means to exercise.
+function insertAtCaret(dom, input, text) {
+  const sel = dom.window.getSelection();
+  const range = sel.rangeCount ? sel.getRangeAt(0) : dom.window.document.createRange();
+  if (!sel.rangeCount) { range.selectNodeContents(input); range.collapse(false); }
+  range.insertNode(dom.window.document.createTextNode(text));
+  // jsdom does not keep the selection's range live across insertNode, so collapsing the Range
+  // object leaves the caret at 0 -- and the picker then reads an empty prefix and splices from
+  // the start. Place the caret through the composer's own accessor instead.
+  input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+}
+
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const extensionSrc = readFileSync(dir + "../src/extension.ts", "utf8");
 const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
@@ -761,12 +777,21 @@ test("skill and template chips preserve text, travel as selections, and restore 
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
   assert.equal(input.value, "Review  after");
-  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 1);
-  assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
-  input.value += " /check"; input.selectionStart = input.selectionEnd = input.value.length;
-  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  // A picked skill is shown as a PILL where it was typed now, so the row underneath no longer
+  // repeats it: the row carries what is not already visible inline. The selection itself is
+  // unchanged -- what travels in `skills` is asserted below and is the thing that matters.
+  assert.equal(doc.querySelectorAll("#input .composer-pill.pill-skill").length, 1,
+    "the skill is visible where it was picked");
+  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 0,
+    "and is not repeated in the row beneath");
+  // NB: assigning `input.value` wholesale rebuilds the composer from serialized text, and a pill
+  // serializes to "" -- so this drops the pill above. That degradation is deliberate and covered
+  // in composer-pills.test.mjs; here the point is the SELECTIONS, so type at the end instead.
+  input.selectionStart = input.selectionEnd = input.value.length;
+  insertAtCaret(dom, input, " /check");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(doc.querySelectorAll("#attachments .invocation-chip").length, 2);
+  assert.equal(doc.querySelectorAll("#input .composer-pill").length, 2,
+    "the template is a pill too");
   assert.equal(posted.some((m) => m.type === "prompt"), false);
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const prompt = posted.at(-1);

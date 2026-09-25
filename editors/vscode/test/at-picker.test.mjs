@@ -73,7 +73,12 @@ test("choosing a file stages it as a file_mention and clears the token", () => {
   p.send({ type: "files", files: FILES });
   p.doc.querySelector("#pop .pi").dispatchEvent(new p.dom.window.MouseEvent("click", { bubbles: true }));
   const input = p.doc.getElementById("input");
-  assert.doesNotMatch(input.value, /@supplier/, "the typed token is replaced by the chip");
-  assert.match(p.doc.getElementById("attachments").textContent, /supplier-review\.docx/,
-               "and the file shows as an attachment chip");
+  assert.doesNotMatch(input.value, /@supplier/, "the typed token is replaced by the pill");
+  // The file is shown as a pill where it was typed now, so the row beneath does not repeat it.
+  // What matters is unchanged and is asserted below: it travels as a file_mention resource.
+  const pill = p.doc.querySelector("#input .composer-pill.pill-file");
+  assert.ok(pill, "the file is visible where it was picked");
+  assert.match(pill.textContent, /supplier-review\.docx/);
+  assert.doesNotMatch(p.doc.getElementById("attachments").textContent, /supplier-review\.docx/,
+                      "and is not repeated underneath");
 });

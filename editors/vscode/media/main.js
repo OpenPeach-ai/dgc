@@ -88,6 +88,11 @@
     // would yank the selection out of whatever else the user was typing in.
     if (wasOurs) setComposerRange(composerText().length);
     markComposerEmpty();
+    // Rebuilding from text destroys any pills, because a pill serialises to "". The SELECTIONS
+    // they showed are still live in `attachments`, so the row has to be redrawn or they become
+    // invisible AND unremovable -- no pill to backspace, no chip to close. Losing the pill is
+    // acceptable; losing the user's ability to see what they selected is not.
+    if (typeof renderAtts === "function") renderAtts();
   }
 
   function offsetOf(node, offset) {
@@ -223,6 +228,9 @@
     } catch { /* leave the draft as it was rather than half-edit it */ }
     finally { composerEditing = false; }
     markComposerEmpty();
+    // The row was drawn before this pill existed -- attachInvocation renders it, then the pill is
+    // inserted -- so redraw now that there is something inline to defer to.
+    renderAtts();
     scheduleDraftSave();
   }
 
@@ -4419,9 +4427,23 @@
     chip.append(tile, caption, remove);
     return chip;
   }
+  // A selection that is ALREADY visible as a pill in the composer does not need a second chip
+  // underneath. The condition is the pill's existence, not the kind: a skill restored from a draft,
+  // or added from the + menu, has no pill, and hiding its chip would leave the user with a
+  // selection they can neither see nor remove -- worse than showing it twice.
+  function pillShowing(a) {
+    for (const pill of input.querySelectorAll(".composer-pill")) {
+      const kind = pill.dataset.kind, name = pill.textContent;
+      if (kind === "skill" && a.skill === name) return true;
+      if (kind === "template" && a.template === name) return true;
+      if (kind === "file" && a.resource && a.label === name) return true;
+    }
+    return false;
+  }
   function renderAtts() {
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
+      if (pillShowing(a)) return;
       if (a.img) {
         const drop = el("button", "x", "\u00d7");
         drop.type = "button"; drop.title = "Remove this image";
