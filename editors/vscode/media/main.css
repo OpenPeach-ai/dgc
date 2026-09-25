@@ -915,8 +915,14 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .cinput { min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
 .cinput .pmark { display: none; }
 #cbox[data-mode="auto"] .cinput .pmark { color: #8B7CFF; }
-#input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-chat)/1.45 var(--sans); padding: 0; max-height: 200px; min-width: 0; }
-#input::placeholder { color: var(--faint); }
+/* The composer is an editing host, not a form control, so three things it used to get free now
+   have to be asked for: wrapping that keeps a typed newline (pre-wrap), a placeholder (a textarea
+   has one; a div does not), and a height that follows its content instead of `rows`. */
+#input { flex: 1; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-chat)/1.45 var(--sans); padding: 0; max-height: 160px; min-width: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Shown only when the composer is genuinely empty. `:empty` is not enough: Chromium leaves a
+   filler <br> behind after an edit, so the class is set from the same serializer the rest of the
+   panel reads, and never from the DOM looking empty. */
+#input.is-empty::before { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 /* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,
    which model will do it on the right, and Send pinned to the model group so it travels with it.

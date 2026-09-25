@@ -1711,9 +1711,22 @@ test("a large paste becomes an attachment that can be put back", () => {
   };
 
   const small = paste("x".repeat(4999));
-  assert.equal(doc.querySelector(".pasted-chip"), null, "a normal paste is left alone");
-  assert.equal(small.defaultPrevented, false, "and still reaches the text field");
+  assert.equal(doc.querySelector(".pasted-chip"), null, "a normal paste makes no chip");
+  // This assertion used to read `defaultPrevented === false`, "and still reaches the text field".
+  // That was a SAFETY property while the composer was a <textarea>: the element physically cannot
+  // hold markup, so letting the browser's own paste run was the safe choice and nothing here ever
+  // looked at text/html. On an editing host the identical line becomes the hazard -- the default
+  // action inserts the clipboard's HTML, and the panel's CSP stops <script> but not an <img> that
+  // beacons the moment you paste. Every paste is now cancelled and the PLAIN TEXT put in by hand,
+  // so what this must assert is that the text still arrives, not that the browser was left to it.
+  assert.equal(small.defaultPrevented, true, "a paste is never left to the browser's default");
+  assert.equal(input.value, "x".repeat(4999), "and the plain text still reaches the composer");
 
+  // The small paste above genuinely lands in the composer now -- the panel inserts it rather than
+  // leaving it to the browser -- so clear it before measuring what the LARGE paste contributes.
+  // This assertion used to pass because jsdom performs no default paste at all, which made
+  // "nothing was inserted" indistinguishable from "we never tried".
+  input.value = "";
   const big = "y".repeat(5000);
   assert.equal(paste(big).defaultPrevented, true, "a large paste is intercepted");
   const chip = doc.querySelector(".pasted-chip");

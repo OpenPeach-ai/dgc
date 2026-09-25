@@ -5978,7 +5978,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="cbox" data-mode="default">
     <div id="attachments" aria-label="Attached context"></div>
-    <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>
+    <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div></div>
     <div id="cfooter">
       <div class="cf-left">
       <div class="picker add-picker">

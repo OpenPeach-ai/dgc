@@ -8,6 +8,12 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { answer, launch, modelServer, panelSession, sleep, toolCalls, transcript, until } from "./support/panel-live.mjs";
 
+// Playwright's inputValue() is only defined for form controls and throws on anything else,
+// whatever accessors the page defines -- it checks the element, not the property. The composer is
+// an editing host now, so read what the panel itself would send instead. This is the same string
+// inputValue() used to return; it is not a looser check.
+const composerText = (page) => page.evaluate(() => document.getElementById("input").value);
+
 let env, model;
 before(async () => {
   env = await launch();
@@ -57,12 +63,12 @@ test("DGC: Restart Backend during a turn gives the queued messages back as not s
     const lines = await settled(s);
     assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
       "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
-    assert.equal(await s.page.locator("#input").inputValue(), "second message", "the first is back in the empty composer");
+    assert.equal(await composerText(s.page), "second message", "the first is back in the empty composer");
     assert.equal(await s.page.locator("#queued").textContent(), "");
     // The second one restores once the composer is free.
     await s.page.locator("#input").fill("");
     await s.page.locator(".msg.user", { hasText: "third message" }).locator("button", { hasText: "Restore unsent message" }).click();
-    assert.equal(await s.page.locator("#input").inputValue(), "third message");
+    assert.equal(await composerText(s.page), "third message");
     await sleep(500);
     assert.equal(notSent(await transcript(s.page)).length, 2, "the reconnect's history leaves them in place");
     assert.deepEqual(s.errors, []);
@@ -79,7 +85,7 @@ test("Developer: Reload Window during a turn gives the queued messages back as n
     const lines = await settled(s);
     assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
       "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
-    assert.equal(await s.page.locator("#input").inputValue(), "second message");
+    assert.equal(await composerText(s.page), "second message");
     // They are handed back once: another reload of the window does not bring them back again.
     await s.page.locator("#input").fill("");
     await sleep(300);
@@ -109,7 +115,7 @@ test("a backend that dies on its own gives the queued messages back once, under 
       "you · not sent: third message [Restore unsent message]"], final.join("\n"));
     assert.ok(final.indexOf(notSent(final)[0]) > final.findIndex((line) => line.startsWith("DGC:")), "below the replayed turn");
     assert.equal(lines.filter((line) => /second message/.test(line)).length, 1);
-    assert.equal(await s.page.locator("#input").inputValue(), "second message");
+    assert.equal(await composerText(s.page), "second message");
     assert.deepEqual(s.errors, []);
   } finally {
     await s.close();
@@ -134,7 +140,7 @@ test("a webview reloaded with messages queued still shows them, and Stop gives t
     }, "Stop to hand the queued messages back", 15_000).catch(async () => transcript(s.page));
     assert.deepEqual(notSent(lines), ["you · not sent: second message [Restore unsent message]",
       "you · not sent: third message [Restore unsent message]"], lines.join("\n"));
-    assert.equal(await s.page.locator("#input").inputValue(), "second message");
+    assert.equal(await composerText(s.page), "second message");
     assert.deepEqual(s.errors, []);
   } finally {
     await s.close();
@@ -196,7 +202,7 @@ test("DGC: Restart Backend before a steering message is applied gives it back as
     assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
     assert.equal(final.filter((line) => /not confirmed|steer this please/.test(line)).length, 1, final.join("\n"));
     assert.equal(lines.filter((line) => /not confirmed/.test(line)).length, 0);
-    assert.equal(await s.page.locator("#input").inputValue(), "steer this please");
+    assert.equal(await composerText(s.page), "steer this please");
     assert.deepEqual(s.errors, []);
   } finally {
     await s.close();
@@ -212,7 +218,7 @@ test("Developer: Reload Window before a steering message is applied gives it bac
     await sleep(800);
     const final = await transcript(s.page);
     assert.deepEqual(notSent(final), ["you · not sent: steer this please [Restore unsent message]"], final.join("\n"));
-    assert.equal(await s.page.locator("#input").inputValue(), "steer this please");
+    assert.equal(await composerText(s.page), "steer this please");
     assert.deepEqual(s.errors, []);
   } finally {
     await s.close();

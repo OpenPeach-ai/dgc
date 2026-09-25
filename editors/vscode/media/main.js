@@ -19,10 +19,198 @@
   // that renders nothing at all. When the element changes, these five are reimplemented over the
   // DOM and the accessors are defined in terms of THEM, so a test that goes through `.value`
   // still moves the real composer.
-  const composerText = () => input.value;
-  const setComposerValue = (text) => { input.value = text; };
-  const composerSelection = () => [input.selectionStart, input.selectionEnd];
-  const setComposerRange = (start, end = start) => input.setSelectionRange(start, end);
+  // The composer is a contenteditable, so "the text" and "the caret" have to be computed rather
+  // than read off the element. Two measured facts drive every line of this:
+  //
+  //   * Chromium does NOT insert "\n" for a newline. It wraps the following content in a block:
+  //     typing a, Enter, b gives `a<div>b</div>`, whose textContent is "ab". Reading textContent
+  //     would silently JOIN every line the user typed.
+  //   * After an edit it leaves a trailing filler <br> in an otherwise empty host, so the DOM
+  //     looking non-empty says nothing about whether there is a draft.
+  //
+  // walk() is the single definition of the text, and offsetOf/rangeAt are its exact inverse.
+  // Everything -- the wire, drafts, the pickers' arithmetic, the empty check -- comes from here,
+  // so they cannot disagree with each other.
+  const BLOCK = new Set(["DIV", "P", "LI", "TR", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE"]);
+
+  function walk(root, stopNode, stopOffset) {
+    // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree.
+    let text = "";
+    let found = stopNode == null ? 0 : -1;
+    const visit = (node) => {
+      if (stopNode === node && found < 0 && node.nodeType !== 3) found = text.length;
+      if (node.nodeType === 3) {
+        if (stopNode === node && found < 0) found = text.length + Math.min(stopOffset, node.data.length);
+        text += node.data;
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === "BR") { text += "\n"; return; }
+      // A pill is atomic: it contributes its placeholder and nothing from inside it.
+      if (node.dataset && node.dataset.pill) { text += node.dataset.pill; return; }
+      const block = BLOCK.has(node.tagName) && node !== root;
+      // A block starts a new line unless nothing has been written yet.
+      if (block && text && !text.endsWith("\n")) text += "\n";
+      const kids = [...node.childNodes];
+      kids.forEach((kid, i) => {
+        if (stopNode === node && i === stopOffset && found < 0) found = text.length;
+        visit(kid);
+      });
+      if (stopNode === node && stopOffset >= kids.length && found < 0) found = text.length;
+    };
+    visit(root);
+    if (found < 0) found = text.length;
+    // Chromium's filler <br> is not a line the user typed.
+    if (text.endsWith("\n") && !root.lastChild?.dataset?.pill
+        && root.lastChild && root.lastChild.nodeName === "BR") text = text.slice(0, -1);
+    return [text, Math.min(found, text.length)];
+  }
+
+  const composerText = () => walk(input, null, 0)[0];
+
+  function setComposerValue(text) {
+    // One text node per line, separated by <br>. Never innerHTML: the string may be a draft that
+    // came back from storage, or a pasted payload, and neither may bring markup into the host.
+    const frag = document.createDocumentFragment();
+    String(text ?? "").split("\n").forEach((line, i) => {
+      if (i) frag.appendChild(document.createElement("br"));
+      if (line) frag.appendChild(document.createTextNode(line));
+    });
+    // Whether the caret was ours to move must be decided BEFORE the nodes it points at are gone.
+    const sel = window.getSelection();
+    const wasOurs = !sel || sel.rangeCount === 0 || input.contains(sel.getRangeAt(0).startContainer);
+    input.replaceChildren(frag);
+    // Assigning a textarea's value leaves the caret at the end of the new text, and every caller
+    // here was written against that. replaceChildren instead leaves the old range pointing at
+    // nodes that no longer exist, so the pickers read a stale offset into text that has changed.
+    // Only reclaim the caret if it was already inside the composer: doing it unconditionally
+    // would yank the selection out of whatever else the user was typing in.
+    if (wasOurs) setComposerRange(composerText().length);
+    markComposerEmpty();
+  }
+
+  function offsetOf(node, offset) {
+    return walk(input, node, offset)[1];
+  }
+
+  function composerSelection() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return [composerText().length, composerText().length];
+    const range = sel.getRangeAt(0);
+    if (!input.contains(range.startContainer)) {
+      const end = composerText().length;
+      return [end, end];
+    }
+    const a = offsetOf(range.startContainer, range.startOffset);
+    const b = offsetOf(range.endContainer, range.endOffset);
+    return a <= b ? [a, b] : [b, a];
+  }
+
+  function rangeAt(target) {
+    // The inverse of walk(): the DOM position whose serialized offset is `target`.
+    let seen = 0, hit = null;
+    const visit = (node) => {
+      if (hit) return;
+      if (node.nodeType === 3) {
+        if (seen + node.data.length >= target) { hit = [node, target - seen]; return; }
+        seen += node.data.length;
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === "BR") {
+        if (seen >= target) { hit = [node.parentNode, [...node.parentNode.childNodes].indexOf(node)]; return; }
+        seen += 1;
+        return;
+      }
+      if (node.dataset && node.dataset.pill) {
+        const len = node.dataset.pill.length;
+        if (seen + len >= target) {
+          const parent = node.parentNode;
+          hit = [parent, [...parent.childNodes].indexOf(node) + (target > seen ? 1 : 0)];
+          return;
+        }
+        seen += len;
+        return;
+      }
+      if (BLOCK.has(node.tagName) && node !== input && seen && seen < target) seen += 1;
+      [...node.childNodes].forEach(visit);
+    };
+    visit(input);
+    if (hit) return hit;
+    return [input, input.childNodes.length];
+  }
+
+  function setComposerRange(start, end = start) {
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    const [sn, so] = rangeAt(Math.max(0, start));
+    const [en, eo] = rangeAt(Math.max(0, end));
+    try {
+      range.setStart(sn, so);
+      range.setEnd(en, eo);
+    } catch { range.selectNodeContents(input); range.collapse(false); }
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // One way to put text in at the caret, so every caller lands in the browser's undo history as
+  // an ordinary edit. execCommand is deprecated and is still the ONLY API that does that: a
+  // direct DOM mutation drops out of the stack, and Ctrl+Z then jumps over it to the edit before.
+  // Set for as long as an IME session is open. There were no composition listeners at all before:
+  // harmless for a textarea, which handles it internally, and not harmless here.
+  let composing = false;
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => { composing = false; onInput(); });
+
+  function insertComposerText(text) {
+    input.focus();
+    // Guarded exactly as editComposer guards it: where execCommand does not exist, CALLING it
+    // throws rather than returning falsy, and the text would be silently dropped instead of
+    // falling through to the assignment below.
+    const inserted = typeof document.execCommand === "function"
+      && document.execCommand("insertText", false, text);
+    if (!inserted) {
+      // A browser that refuses it still has to end up with the same text.
+      const [start, end] = composerSelection();
+      const whole = composerText();
+      setComposerValue(whole.slice(0, start) + text + whole.slice(end));
+      setComposerRange(start + text.length);
+    }
+    markComposerEmpty();
+  }
+
+  // The placeholder cannot key off :empty, because of the filler <br>. It keys off the serializer.
+  function markComposerEmpty() { input.classList.toggle("is-empty", composerText() === ""); }
+
+  // THE TRAP THIS GUARDS. Almost every composer test drives the panel with `input.value = "..."`.
+  // Assigning `.value` to a div does not fail -- it creates an expando, the read returns what was
+  // written, and the whole suite stays green against a composer that renders nothing. Defining the
+  // accessors in terms of the primitives above means a test going through `.value` moves the real
+  // composer, and a test asserting on it sees what the model would actually be sent.
+  Object.defineProperty(input, "value", {
+    get: () => composerText(),
+    set: (text) => { setComposerValue(text); },
+    configurable: true,
+  });
+  // Writable, because a textarea's are: `input.selectionStart = 8; input.selectionEnd = 11` is the
+  // idiom throughout the panel and its tests, and a getter-only property turns that into a thrown
+  // TypeError. The clamping mirrors the platform -- moving the start past the end drags the end
+  // with it, and vice versa -- so the two assignments compose in either order.
+  Object.defineProperty(input, "selectionStart", {
+    get: () => composerSelection()[0],
+    set: (at) => { const end = composerSelection()[1]; setComposerRange(at, Math.max(at, end)); },
+    configurable: true,
+  });
+  Object.defineProperty(input, "selectionEnd", {
+    get: () => composerSelection()[1],
+    set: (at) => { const start = composerSelection()[0]; setComposerRange(Math.min(start, at), at); },
+    configurable: true,
+  });
+  input.setSelectionRange = (start, end) => setComposerRange(start, end);
+  // Another method a <textarea> supplied. Callers use it to select the whole draft before
+  // replacing or deleting it, and on a div it simply does not exist.
+  input.select = () => setComposerRange(0, composerText().length);
   // What the backend is sent. Identity while the composer is plain text; once a pill can sit in
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
@@ -4274,13 +4462,12 @@
     const width = input.clientWidth;
     if (!input.isConnected || width < 40 || document.hidden) { composerSizedWidth = -1; return; }
     composerSizedWidth = width;
-    input.style.height = "auto";
-    // scrollHeight is a whole number of pixels, and a 14px/1.45 line is 20.3px: a box sized to it
-    // was a fraction short, which on a HiDPI screen drew a scrollbar beside a single line. Leave a
-    // pixel over, and scroll only once the text really is taller than the cap.
-    const content = input.scrollHeight, capped = content >= 160;
-    input.style.overflowY = capped ? "auto" : "hidden";
-    input.style.height = (capped ? 160 : content + 1) + "px";
+    // An editing host already sizes to its content, so the measure-and-set dance a <textarea>
+    // needed is gone: `max-height: 160px` with `overflow-y: auto` in main.css is the whole
+    // behaviour. What is kept is the width bookkeeping the ResizeObserver reads, and clearing any
+    // inline height a previous build may have left on the element.
+    if (input.style.height) input.style.height = "";
+    if (input.style.overflowY) input.style.overflowY = "";
   }
   if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => { if (input.clientWidth !== composerSizedWidth) autosizeComposer(); })
@@ -4341,6 +4528,12 @@
   input.addEventListener("input", syncShownPaste);
   function onInput() {
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
+    markComposerEmpty();
+    // An IME composition builds a word by repeatedly rewriting text nodes. A textarea absorbed
+    // that internally; an editing host does not, and ANY programmatic edit or selection move
+    // during a composition cancels the session and drops what was being typed. So the picker,
+    // autosize and draft save all wait for compositionend.
+    if (composing) return;
     scheduleDraftSave();
     renderComposerControls();
     autosizeComposer();
@@ -4394,6 +4587,10 @@
     }
     if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); cycleMode(); return; }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.altKey ? "queue" : undefined); }
+    // Shift+Enter used to be the textarea's own business. An editing host answers it by wrapping
+    // the rest of the line in a <div>, which the serializer would have to unpick -- so insert the
+    // break explicitly and keep the host a flat run of text and <br>.
+    else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); insertComposerText("\n"); }
     else if (e.key === "Escape" && streaming) doStop();
   });
   // Files dragged from the explorer (or a tab) attach as @-mentions, like the popup does.
@@ -4474,7 +4671,21 @@
       attachments.push({ label: "Pasted text", pasted, chars: pasted.length });
       renderAtts();
       sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
+      return;
     }
+    // EVERY other paste is prevented too, and the plain text re-inserted by hand.
+    //
+    // This inverts a guarantee rather than adding one. A <textarea> physically cannot hold markup,
+    // so letting the default action run WAS the safe choice and nothing here ever looked at
+    // `text/html`. An editing host takes the clipboard's HTML instead, and the panel's CSP stops
+    // <script> and on* handlers but not `<img src="https://tracker/...">` -- a beacon that fires
+    // the instant you paste -- nor `style="position:fixed"` laid over the Send button.
+    //
+    // The refusal paths above still work because they `return` before reaching here only when
+    // they handled the paste themselves; where they fall through, this inserts the text, so a
+    // clipboard is never silently dropped.
+    e.preventDefault();
+    if (pasted) insertComposerText(pasted);
   });
   send.onclick = () => { if (streaming && (!hasComposerInput() || askCardDocked())) doStop(); else submit(); };
   $("stop-run").onclick = doStop;
@@ -4567,7 +4778,11 @@
     const caret = composerSelection()[1];
     const prefix = caret && !/\s/.test(composerText()[caret - 1]) ? " /" : "/";
     editComposer(caret, caret, prefix);
-    setComposerRange(caret + prefix.length); input.focus(); onInput();
+    // Focus FIRST, then place the caret. Focusing an editing host moves the selection to its
+    // start, so the old order -- harmless when the element was a textarea, whose focus does not
+    // touch selectionStart -- silently threw the caret away and the picker then read an empty
+    // prefix and never opened.
+    input.focus(); setComposerRange(caret + prefix.length); onInput();
   }
   $("btn-cmd").onclick = openCommandMenu;
   $("btn-model").onclick = (e) => {
