@@ -581,6 +581,64 @@ test("a server-sent url elicitation is asked about, not opened", async () => {
   } finally { api.Uri = original.Uri; api.env = original.env; }
 });
 
+test("a settings-side MCP save does not swallow a /mcp typed in chat", async () => {
+  // The counter alone could not say which webview started the command, and it is held across a
+  // request that may run for three minutes -- so a /mcp typed in chat during that window was
+  // redirected to the settings tab and vanished entirely: no bubble, no Stop, no output, and no
+  // error either, because a timeout is reported as this same event and main.js discards a result
+  // whose request id it never recorded. The request id says who asked.
+  const chat = [], settings = [];
+  const { provider } = catalogHarness([]);
+  provider.view = { webview: { postMessage: m => chat.push(m) } };
+  provider.settingsEditor = { webview: { postMessage: m => settings.push(m) } };
+  provider.settingsMcpOperation = 1;
+  provider.post({ type: "mcp_command_started", requestId: "mcp-command-7", view: "context" });
+  assert.deepEqual(settings, [], "a /mcp typed in chat is not the settings tab's business");
+  assert.equal(chat.at(-1).requestId, "mcp-command-7", "it belongs to the chat that asked");
+  chat.length = 0;
+  provider.post({ type: "mcp_command_started", requestId: "mcp-config-3", view: "servers" });
+  assert.equal(chat.some(m => m.type === "mcp_command_started"), false,
+    "and the settings tab's own write does not flip the chat to the MCP surface");
+  assert.equal(settings.at(-1).requestId, "mcp-config-3");
+});
+
+test("a new backend refreshes the settings tab without navigating it", async () => {
+  // settingsSelection is written only when the USER opens settings, so re-posting it on a
+  // handshake -- Restart Backend, crash recovery, or opening a second chat, none of which the user
+  // aimed at this tab -- sent the page back to wherever settings was opened and took a half-typed
+  // MCP server with it: navTo clears mcpEditing, and none of the mcp-* fields are in the snapshot
+  // the other sections are restored from. The refresh a new backend genuinely owes must survive.
+  const settings = [], commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage: m => settings.push(m) } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("mcp");
+  settings.length = 0; commands.length = 0;
+  h.provider.sessionRestoreSaved = false;
+  h.provider.maybeCompleteHandshake(h.backend);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settings.some(m => m.type === "show"), false, "a handshake is not a navigation");
+  assert.ok(commands.some(c => c.type === "get_config"), "but the new backend still refreshes it");
+  assert.ok(commands.some(c => c.type === "list_mcp_servers"));
+});
+
+test("a rejection from the chat is not painted over the settings page", async () => {
+  // The client's chain ends in a bare `section === 'mcp'`, so any forwarded rejection became a red
+  // MCP-server banner -- over a page that was working, and it outlived leaving the section. Plugin
+  // failures also arrived twice, once raw and once as pluginOperationError.
+  const messages = [];
+  const { provider } = catalogHarness([]);
+  provider.settingsEditor = { webview: { postMessage: m => messages.push(m) } };
+  provider.onEvent({ type: "command_rejected", command: "prompt", reason: "prompt_too_large",
+                     message: "prompt exceeds the 1000000-character limit" });
+  assert.deepEqual(messages, [], "a refused prompt is the chat's business");
+  provider.onEvent({ type: "command_rejected", command: "upsert_mcp_server", message: "no" });
+  assert.equal(messages.filter(m => m.type === "event").length, 1,
+    "its own MCP write still reaches it");
+  assert.equal(messages.at(-1).event.command, "upsert_mcp_server");
+});
+
 function mcpTransactionHarness(initialCatalog = []) {
   let catalog = JSON.parse(JSON.stringify(initialCatalog));
   const rawSecrets = new Map();
@@ -1860,23 +1918,27 @@ test("Clear and a typed /todo clear reach the backend as one correlated clear_to
 });
 
 test("the Token Usage tab's request reaches get_usage, and an older CLI is told to update", async () => {
+  // Re-pointed from the chat webview's getUsage, which went with the in-panel settings dialog, to
+  // the standalone Settings tab's own branch -- the one that ships. Same four invariants: the
+  // request id travels, an unknown range falls back rather than reaching the backend, a CLI with no
+  // usage ledger is never sent a command it would reject, and a send that fails says so.
   const h = harness(), posted = [], sent = [];
-  h.provider.post = message => posted.push(message);
+  h.provider.settingsEditor = { webview: { postMessage: m => posted.push(m) } };
   h.provider.backend.send = command => { sent.push(command); return true; };
   h.provider.lastReadyEvent = { capabilities: { usage_ledger: true } };
-  await h.provider.onMessage({ type: "getUsage", range: "30d", requestId: "usage-abc-1" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "30d", requestId: "usage-abc-1" });
   assert.deepEqual(sent, [{ type: "get_usage", request_id: "usage-abc-1", range: "30d" }]);
-  await h.provider.onMessage({ type: "getUsage", range: "year; drop", requestId: "usage-abc-2" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "year; drop", requestId: "usage-abc-2" });
   assert.deepEqual(sent.at(-1), { type: "get_usage", request_id: "usage-abc-2", range: "7d" },
     "an unknown range falls back to the default instead of reaching the backend");
   h.provider.lastReadyEvent = { capabilities: {} };
-  await h.provider.onMessage({ type: "getUsage", range: "today", requestId: "usage-old" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "today", requestId: "usage-old" });
   assert.equal(sent.length, 2, "an older CLI is never sent a command it would reject");
   assert.deepEqual(posted.at(-1), { type: "usage_unavailable", requestId: "usage-old",
     message: "Update the DGC CLI to see token usage in the editor." });
   h.provider.lastReadyEvent = { capabilities: { usage_ledger: true } };
   h.provider.backend.send = () => false;
-  await h.provider.onMessage({ type: "getUsage", range: "all", requestId: "usage-full" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "all", requestId: "usage-full" });
   assert.equal(posted.at(-1).type, "usage_unavailable");
   assert.equal(posted.at(-1).requestId, "usage-full");
 });

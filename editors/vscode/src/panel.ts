@@ -13,7 +13,6 @@ import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
 } from "./cliupdate";
 import { checkForExtensionUpdates } from "./extensionupdate";
-import { listEndpointModels } from "./endpointmodels";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 import { settingsDocument } from "./settingsView";
@@ -274,6 +273,15 @@ function maxLiveChats(): number {
  *  left can be read as if it described the chat you are looking at. Captured and restored as a
  *  unit by name: a field added here is automatically saved, and one that is only ever captured or
  *  only ever restored cannot exist. */
+/** The rejections the settings tab can explain: its own skill toggle, its own usage read, and the
+ *  five MCP commands it issues. Anything else that fails reaches it as a typed message, so
+ *  forwarding the raw rejection too both duplicated it and let a failure from the CHAT paint a red
+ *  banner over a settings page that was working. */
+const SETTINGS_REJECTIONS = [
+  "set_skill_enabled", "get_usage",
+  "upsert_mcp_server", "remove_mcp_server", "set_mcp_enabled", "reconnect_mcp_server", "list_mcp_servers",
+];
+
 const PER_CHAT_FIELDS = [
   "backend", "initializingBackend", "lastReadyEvent",
   "sessionReady", "sessionRestoreCandidate", "sessionRestoreSaved", "sessionRestoreStarted",
@@ -949,7 +957,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       be.send({ type: "list_agents", request_id: this.nextRequestId("agents-restore") });
     }
     this.scheduleWorkspaceChanges(0);
-    if (this.settingsEditor) this.showEditorSettings();
+    if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     void this.resumeInterruptedWork(be);
   }
 
@@ -2487,7 +2495,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "event", event: answer });
       return;
     }
-    if (this.settingsEditor && ["config", "usage_report", "mcp_servers", "command_rejected"].includes(ev.type)) {
+    // The rejections the settings page can actually explain: its own skill toggle, its own usage
+    // read, its own MCP write. Every other failure it shows reaches it as a typed message
+    // (`pluginOperationError`, `pluginResult`), so forwarding the raw rejection as well did two
+    // things: it delivered every plugin failure twice, and -- because the client's chain ends in a
+    // bare `section === 'mcp'` -- it painted a rejection from the CHAT (a refused prompt, a
+    // duplicate skill name, a full follow-up queue) as a red MCP-server banner over a page that
+    // was working, where it then outlived leaving the section.
+    const settingsRejection = ev.type === "command_rejected" && SETTINGS_REJECTIONS.includes(String(ev.command || ""));
+    if (this.settingsEditor && (settingsRejection || ["config", "usage_report", "mcp_servers"].includes(ev.type))) {
       this.settingsEditor.webview.postMessage({ type: "event", event: ev });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -2567,16 +2583,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.post({ type: "event", event: ev });
-  }
-
-  /** The CLI ('dgc') is missing — offer to install it (the extension drives the CLI). */
-  private async openLatestPluginBrowser(): Promise<void> {
-    const entry = [...this.mcpUrls.entries()].at(-1);
-    if (!entry) {
-      void vscode.window.showInformationMessage("The sign-in page is not ready yet.");
-      return;
-    }
-    await this.confirmMcpBrowser(entry[0], "this plugin");
   }
 
   private async confirmMcpBrowser(id: string, server: string): Promise<void> {
@@ -2769,7 +2775,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private post(msg: any): void {
-    if (this.settingsMcpOperation && msg?.type === "mcp_command_started") {
+    // A settings-side MCP write reports its progress to the settings tab, not into the chat. The
+    // counter alone could not say WHICH webview started the command, and it is held across a
+    // request that may take three minutes -- so a /mcp the user typed in chat during that window
+    // was redirected too, and vanished: no bubble, no "Working with MCP...", no Stop, no output,
+    // and no error either, because a timeout is reported as this same event and main.js discards a
+    // result whose request id it never recorded. The id says who asked. sendManagedMcp mints
+    // "mcp-config-" for an editor-managed write; the chat's own /mcp mints "mcp-command-".
+    if (this.settingsMcpOperation && msg?.type === "mcp_command_started"
+        && String(msg.requestId || "").startsWith("mcp-config-")) {
       this.settingsEditor?.webview.postMessage(msg);
       return;
     }
@@ -2876,8 +2890,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media"),
-        vscode.Uri.joinPath(this.context.extensionUri, "dist"),
-        vscode.Uri.file(join(homedir(), ".dgc", "plugins", "logos"))],
+        vscode.Uri.joinPath(this.context.extensionUri, "dist")],
     };
     view.webview.html = this.html(view.webview);
     // VS Code keeps both copies alive (retainContextWhenHidden), and it does not resolve a view a
@@ -3192,9 +3205,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pickModel":
         this.selectModel();
         break;
-      case "settingsModels":
-        void this.settingsModels(msg);
-        break;
       case "listModels":
         this.listModels();
         break;
@@ -3229,28 +3239,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await this.setContextSize(Number(msg.size));
         break;
       case "openSettings":
-        // A surface opened from a settings tab asks to be put back on that tab when it closes.
+        // The header gear. It opens the standalone Settings tab beside the chat.
         this.openSettings(typeof msg.section === "string" ? msg.section : "general");
         break;
-      case "saveSettings":
-        await this.saveSettings(msg.values || {});
-        break;
-      case "getUsage": {
-        // The Token Usage tab reads the CLI's local ledger. Only the range and a correlation id
-        // travel; the backend answers with a usage_report carrying the same request_id.
-        const requestId = String(msg.requestId || this.nextRequestId("usage")).slice(0, 128);
-        const range = ["today", "7d", "30d", "month", "all"].includes(msg.range) ? msg.range : "7d";
-        if (this.lastReadyEvent && !this.lastReadyEvent.capabilities?.usage_ledger) {
-          this.post({ type: "usage_unavailable", requestId,
-            message: "Update the DGC CLI to see token usage in the editor." });
-          break;
-        }
-        if (!be.send({ type: "get_usage", request_id: requestId, range })) {
-          this.post({ type: "usage_unavailable", requestId,
-            message: "DGC could not ask its backend for token usage. Try Refresh." });
-        }
-        break;
-      }
       case "pickMode":
         this.setMode();
         break;
@@ -3301,15 +3292,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "requestSkills":
         be.send({ type: "list_skills", request_id: this.nextRequestId("composer-skills") });
-        break;
-      case "requestPlugins":
-        this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
-        break;
-      case "installPlugin":
-        this.openEditorSettings("plugins");
-        break;
-      case "openPluginBrowser":
-        void this.openLatestPluginBrowser();
         break;
       case "skillsReload":
         be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
@@ -4669,32 +4651,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       : [];
   }
 
-  // Settings → Models and Agents: the models the host in the form offers, before it is saved, so
-  // picking the Ollama preset (or typing a host) fills the model dropdown. A saved key goes only to
-  // the host it was saved for; a key typed into the form goes to the host typed beside it.
-  private async settingsModels(msg: any): Promise<void> {
-    const target = msg?.target === "subagent" ? "subagent" : "main";
-    const typed = typeof msg?.base_url === "string" ? msg.base_url.trim() : "";
-    const base = typed
-      || (target === "subagent" ? this.routeState.subagentBaseUrl || "" : "")
-      || this.state.baseUrl || PROVIDERS.ollama.url;
-    const typedKey = typeof msg?.api_key === "string" ? msg.api_key.trim() : "";
-    let key = typedKey;
-    // Either saved key may serve (a sub-agent on the main host uses the main key), but only for the
-    // very host it is bound to.
-    for (const id of target === "subagent" ? ["subagentApiKey", "apiKey"] : ["apiKey"]) {
-      if (key) { break; }
-      const [saved, bound] = await Promise.all([
-        this.context.secrets.get(`dgc.${id}`), this.context.secrets.get(`dgc.${id}.endpoint`)]);
-      key = saved && bound && bound === endpointId(base) ? saved : "";
-    }
-    try {
-      this.post({ type: "settings_models", target, base_url: base, ids: await listEndpointModels(base, key) });
-    } catch (err: any) {
-      this.post({ type: "settings_models", target, base_url: base, ids: [],
-                  error: String(err?.message || err).slice(0, 200) });
-    }
-  }
 
   // in-composer model menu (rendered inside the webview)
   async listModels(): Promise<void> {
@@ -4803,10 +4759,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.ensureBackend().send(command);
   }
 
+  /** Open the tab AT a section. Only a user action reaches this: the gear, a palette entry, or a
+   *  webview that has just loaded and has nowhere else to start. */
   private showEditorSettings(): void {
+    this.settingsEditor?.webview.postMessage({ type: "show", ...this.settingsSelection });
+    this.refreshEditorSettings();
+  }
+
+  /** What a NEW backend owes the tab, and nothing else. Deliberately without the `show` post:
+   *  `settingsSelection` is written only when the user opens settings, so re-posting it on a
+   *  handshake -- Restart Backend, crash recovery, or opening a second chat, none of which the
+   *  user aimed at this tab -- sends the page back to wherever settings was opened and takes a
+   *  half-typed MCP server (name, command, args, env lines, token) with it, because `navTo`
+   *  clears `mcpEditing` and the `mcp-*` fields are not in the `defaults` snapshot. A chosen
+   *  usage range reverts to 7 days the same way. Every other push below is already guarded by
+   *  `!mcpEditing` on the client; `show` was the one that routed around that guard. */
+  private refreshEditorSettings(): void {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
-    this.settingsEditor?.webview.postMessage({ type: "show", ...this.settingsSelection });
     const be = this.ensureBackend();
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read") });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
@@ -5016,6 +4986,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } else if (msg?.type === "skillToggle" && typeof msg.enabled === "boolean") {
       be.send({ type: "set_skill_enabled", request_id: this.nextRequestId("skill-toggle"),
                 name: String(msg.name || ""), enabled: msg.enabled });
+      // These switches render from plugin_catalog, and nothing else delivers it. The backend used
+      // to answer set_skill_enabled with one, which is the single case of a 0.45.0 event answering
+      // a command a 0.44.1 panel also sends -- so it announced itself broken over an ordinary
+      // toggle. Ask for it here instead, from the surface that owns the switch: commands share one
+      // ordered pipe, so this is dispatched after the toggle has been applied.
+      this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     } else if (msg?.type === "listMcp") {
       be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
     } else if (msg?.type === "mcpToggle" || msg?.type === "mcpReconnect") {
@@ -5033,25 +5009,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
       }
     }
-  }
-
-  private async loadSettings(section: string, usageRange?: string): Promise<void> {
-    const be = this.ensureBackend();
-    const configReady = this.requestState(
-      // Ask for the config fields v14 grew later; a CLI only sends them to a client that asks.
-      be, "config-read", { type: "get_config", fields: ["subagent_context_size"] }, "config", 5000);
-    const providers = Object.entries(PROVIDERS).map(([id, p]) =>
-      ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
-    let models: string[] = [];
-    const modelReady = this.fetchModels().then((ids) => { models = ids; })
-      .catch(() => undefined); // endpoint may be down; settings must still open
-    try { await configReady; }
-    catch (err: any) {
-      void vscode.window.showErrorMessage(
-        err?.message || "DGC could not read its current settings.");
-    }
-    await modelReady;
-    this.post({ type: "settings_open", providers, models, section, ...(usageRange ? { range: usageRange } : {}) });
   }
 
   async saveSettings(v: any): Promise<void> {
@@ -5759,198 +5716,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <button type="button" id="goal-review-close" class="fbtn goal-dialog-close" aria-label="Close goal review" title="Close"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     <h2 id="goal-review-title">Review goal</h2>
     <div id="goal-review-body" class="surface-markdown" tabindex="0"></div>
-  </div>
-</div>
-<div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
-  <div class="set-head">
-    <span id="settings-title" class="set-title"><span class="codicon codicon-settings-gear" aria-hidden="true"></span> DGC Settings</span>
-    <button type="button" id="set-close" class="fbtn" title="Close" aria-label="Close settings"><span class="codicon codicon-close" aria-hidden="true"></span></button>
-  </div>
-  <div class="settings-nav" role="tablist" aria-label="Settings categories">
-    <button type="button" class="set-tab active" role="tab" aria-selected="true" data-section="general" title="Permission mode, thinking, context size and tool profile">General</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="models" title="Where DGC sends a turn: a local host, a provider, or your own subscription CLI">Models</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="agents" title="The model and host that sub-agents and the fallback route use">Agents</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="usage" title="Tokens and requests counted on this machine, by model and by day">Token Usage</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="security" title="Sandbox confinement, plan-mode limits and artifact previews">Security</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="extensions" title="Skills, MCP servers, hooks and permission rules">Extensions</button>
-  </div>
-  <div class="set-body">
-    <section class="set-section" data-section="models" hidden>
-    <div class="set-group">Connection</div>
-    <label>Provider preset
-      <select id="s-provider"></select></label>
-    <label>Host URL
-      <input id="s-base_url" type="text" spellcheck="false" placeholder="http://localhost:11434/v1"></label>
-    <label>API key
-      <input id="s-api_key" type="password" spellcheck="false" placeholder="(dummy for local)"></label>
-    <label>Model
-      <span class="set-row"><input id="s-model" type="text" spellcheck="false" placeholder="model id" list="s-models"><datalist id="s-models"></datalist></span></label>
-
-    <div class="set-group">Subscription <span class="set-hint">run each turn through your own Claude/Codex/Qwen/Kimi/Copilot plan via its official CLI</span></div>
-    <label>Engine
-      <select id="s-subscription_engine"><option value="">off — use the model above</option><option value="claude">Claude Code (your subscription)</option><option value="codex">Codex / ChatGPT (your subscription)</option><option value="qwen">Qwen Code (your subscription)</option><option value="kimi">Kimi for Coding (your subscription)</option><option value="copilot">GitHub Copilot (your subscription)</option></select></label>
-    <div id="s-subscription_status" class="set-hint"></div>
-    <label>Subscription model <span class="set-hint">optional — overrides the CLI's own default</span>
-      <input id="s-subscription_model" type="text" spellcheck="false" placeholder="(the CLI's default)"></label>
-    <label>Reasoning effort <span class="set-hint">Claude, Codex &amp; Copilot · model support varies</span>
-      <select id="s-subscription_effort"><option value="">default</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
-
-    <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
-    <label>API transport
-      <select id="s-api_mode"><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-    <label>Responses state
-      <select id="s-provider_state"><option value="stateless">stateless (private default)</option><option value="server">server stored</option></select></label>
-    <label>Prompt cache routing
-      <select id="s-prompt_cache"><option value="true">enabled</option><option value="false">disabled</option></select></label>
-    <label>Capability retry TTL (seconds)
-      <input id="s-capability_cache_ttl_s" type="number" min="1" step="1" placeholder="300"></label>
-    </section>
-
-    <section class="set-section" data-section="agents" hidden>
-    <div class="set-group">Sub-agents <span class="set-hint">run <code>task</code> sub-agents on a different model / host — blank = inherit main</span></div>
-    <label>Provider preset <span class="set-hint">fills the host below; leave the fields blank to inherit the main model</span>
-      <select id="s-subagent_provider"><option value="">choose a preset\u2026</option></select></label>
-      <label>Sub-agent model
-      <span class="set-row"><input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main" list="s-subagent-models"><datalist id="s-subagent-models"></datalist></span></label>
-    <label>Sub-agent host URL
-      <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
-    <label>Sub-agent API transport
-      <select id="s-subagent_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-    <label>Sub-agent API key
-      <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit only on the same endpoint"></label>
-    <label>Sub-agent context size (tokens) <span class="set-hint">Each sub-agent\u2019s window, as Context size is the main model\u2019s. A named agent\u2019s own <code>context_size</code> wins.</span>
-      <div class="set-row">
-        <select id="s-subagent_context_size_preset" aria-label="Sub-agent context size preset">
-          <option value="0">Same as the main model</option>
-          <option value="8192">8K &middot; 8,192</option>
-          <option value="16384">16K &middot; 16,384</option>
-          <option value="32768">32K &middot; 32,768</option>
-          <option value="65536">64K &middot; 65,536</option>
-          <option value="131072">128K &middot; 131,072</option>
-          <option value="262144">256K &middot; 262,144</option>
-          <option value="custom">Custom\u2026</option>
-        </select>
-        <input id="s-subagent_context_size" type="number" min="0" step="1024" placeholder="0"
-               aria-label="Custom sub-agent context size in tokens" hidden>
-      </div></label>
-
-    <div class="set-group">Fallback <span class="set-hint">retried if the primary model errors</span></div>
-    <label>Fallback model
-      <input id="s-fallback_model" type="text" spellcheck="false" placeholder="none"></label>
-    <label>Fallback host URL
-      <input id="s-fallback_base_url" type="text" spellcheck="false" placeholder="same as main"></label>
-    <label>Fallback API transport
-      <select id="s-fallback_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
-    <label>Fallback API key
-      <input id="s-fallback_api_key" type="password" spellcheck="false" placeholder="same endpoint only / DGC_FALLBACK_API_KEY"></label>
-    </section>
-
-    <section class="set-section usage-section" data-section="usage" hidden>
-    <div class="set-group">Token usage <span class="set-hint">what each provider reported for requests DGC finished</span></div>
-    <label>Range <span id="usage-timezone" class="set-hint">Days follow this computer&rsquo;s local time.</span>
-      <select id="usage-range"><option value="today">Today</option><option value="7d" selected>7 days</option><option value="30d">30 days</option><option value="month">This month</option><option value="all">All time</option></select></label>
-    <div class="usage-toolbar">
-      <span id="usage-status" class="usage-status" role="status" aria-live="polite"></span>
-      <button type="button" id="usage-refresh" class="fbtn usage-refresh" title="Count again from this machine&rsquo;s usage ledger" aria-label="Refresh token usage"><span class="codicon codicon-refresh" aria-hidden="true"></span><span>Refresh</span></button>
-    </div>
-    <div id="usage-empty" class="usage-empty" hidden>
-      <p class="usage-empty-title">No model requests counted in this range yet</p>
-      <p>Each request DGC finishes (chats, goals, sub-agents, fallbacks, compaction) will appear here with the input, output and cached tokens its provider reported, totalled by model and by day.</p>
-      <p id="usage-empty-all" class="usage-empty-all" hidden>Earlier requests may be in a longer range. <button type="button" id="usage-show-all" class="link" title="Count every request the ledger keeps (up to 400 days)">Show all time</button></p>
-    </div>
-    <p class="set-note">Local provider reports only; missing usage is marked unmetered. Subscription CLI turns are counted by that CLI. Up to 400 days are retained; this is not your provider account quota or bill.</p>
-    <div id="usage-content" hidden>
-      <div id="usage-figures" class="usage-figures"></div>
-      <p id="usage-unmetered" class="usage-unmetered" hidden></p>
-      <div class="set-group">By model <span class="set-hint">top 100, sorted by total tokens</span></div>
-      <div class="usage-table-wrap" role="region" aria-label="Token usage by model" tabindex="0">
-        <table class="usage-table">
-          <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Cached</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
-          <tbody id="usage-models"></tbody>
-        </table>
-      </div>
-      <div class="set-group">By day</div>
-      <div id="usage-days" class="usage-days" role="group" tabindex="0" aria-roledescription="bar strips" aria-label="Input and output tokens per day. Use the arrow keys to read each day." aria-describedby="usage-day-readout">
-        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-in"></span>Input</span><span id="usage-peak-in" class="usage-peak"></span></div>
-        <div id="usage-strip-in" class="usage-strip usage-strip-in"></div>
-        <div class="usage-strip-label" aria-hidden="true"><span class="usage-key"><span class="usage-swatch usage-out"></span>Output</span><span id="usage-peak-out" class="usage-peak"></span></div>
-        <div id="usage-strip-out" class="usage-strip usage-strip-out"></div>
-        <div class="usage-axis" aria-hidden="true"><span id="usage-days-first"></span><span id="usage-days-last"></span></div>
-      </div>
-      <p id="usage-day-readout" class="usage-readout" aria-live="polite"></p>
-    </div>
-    <p class="set-note usage-privacy">Counted on this machine from what each provider reports. Nothing here is sent anywhere.</p>
-    </section>
-
-    <section class="set-section" data-section="general">
-    <div class="set-group">Behavior</div>
-    <label>Permission mode
-      <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
-    <label>Thinking <span class="set-hint">Same control as the composer. Applies to the next model round; the round already on the wire keeps its budget.</span>
-      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
-    <p id="s-reasoning-note" class="set-hint"></p>
-    <label>DGC Ultra <span class="set-hint">extended reasoning guidance + proactive bounded sub-agents; never changes permissions</span>
-      <select id="s-ultra_mode"><option value="false">off</option><option value="true">on</option></select></label>
-    <label>Context size (tokens) <span class="set-hint">DGC uses the smaller of this and the model\u2019s own maximum, and compacts near 85% of it. Ollama cloud models ignore the request server-side, so this governs when DGC compacts rather than what the server accepts.</span>
-      <div class="set-row">
-        <select id="s-context_size_preset" aria-label="Context size preset">
-          <option value="8192">8K &middot; 8,192</option>
-          <option value="16384">16K &middot; 16,384</option>
-          <option value="32768">32K &middot; 32,768</option>
-          <option value="65536">64K &middot; 65,536</option>
-          <option value="131072">128K &middot; 131,072</option>
-          <option value="262144">256K &middot; 262,144</option>
-          <option value="524288">512K &middot; 524,288</option>
-          <option value="1048576">1M &middot; 1,048,576</option>
-          <option value="custom">Custom\u2026</option>
-        </select>
-        <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"
-               aria-label="Custom context size in tokens" hidden>
-      </div></label>
-    <label>Show model thinking <span class="set-hint">Short provider summaries show inline; raw thinking stays collapsed. Labels say where thinking came from: raw from the model, or summarized by the provider.</span>
-      <select id="s-show_reasoning"><option value="inline">inline</option><option value="collapsed">collapsed</option><option value="hidden">hidden</option></select></label>
-    <label>Prompt suggestions
-      <select id="s-suggest"><option value="true">enabled</option><option value="false">disabled</option></select></label>
-    <label>Wake on monitor events <span class="set-hint">When a background monitor prints while the chat is idle, DGC starts a short turn to read it. Off: events wait for your next message.</span>
-      <select id="s-monitor_wake"><option value="true">enabled</option><option value="false">disabled</option></select></label>
-    <label>Tool profile
-      <select id="s-tool_profile"><option value="standard">standard — every tool, every turn</option><option value="adaptive">adaptive — only tools the prompt asks for</option><option value="full">full catalog every turn</option></select></label>
-    <label>Parallel sub-agent tasks
-      <input id="s-max_parallel_tasks" type="number" min="1" max="8" step="1" placeholder="4"></label>
-    </section>
-
-    <section class="set-section" data-section="security" hidden>
-    <div class="set-group">Sandbox and plan safety</div>
-    <label>OS sandbox
-      <select id="s-sandbox"><option value="false">off</option><option value="true">on</option></select></label>
-    <label>Sandbox network
-      <select id="s-sandbox_network"><option value="false">blocked</option><option value="true">allowed</option></select></label>
-    <label>Automatic plan preview
-      <select id="s-plan_artifact"><option value="true">enabled (loopback only)</option><option value="false">disabled</option></select></label>
-    <label>Restore artifact previews on launch
-      <select id="s-artifact_autostart"><option value="true">enabled</option><option value="false">disabled</option></select></label>
-    <label>Arbitrary artifact tool in plan mode
-      <select id="s-artifact_in_plan"><option value="false">disabled</option><option value="true">enabled</option></select></label>
-    <p class="set-note">Sandbox confinement and permission policy are independent. Plan mode stays read-only; enabling arbitrary artifacts in plan mode broadens that surface.</p>
-    </section>
-
-    <section class="set-section" data-section="extensions" hidden>
-    <div class="set-group">Agent extensions</div>
-    <p class="set-note">Manage the same local DGC capabilities used by the CLI. Credentials entered for editor-managed MCP servers stay in VS Code SecretStorage.</p>
-    <div class="settings-links">
-      <button type="button" class="act" id="open-plugins" title="Browse and manage supported plugins">Plugins</button>
-      <button type="button" class="act" data-open-surface="mcp" title="Connect and manage Model Context Protocol servers">MCP servers</button>
-      <button type="button" class="act" data-open-surface="skills" title="Reusable instructions DGC can apply to a request">Skills</button>
-      <button type="button" class="act" data-open-surface="permissions" title="What DGC may run and edit without asking">Permission rules</button>
-      <button type="button" class="act" data-open-surface="memory" title="Facts DGC keeps about this project and about you">Memory</button>
-      <button type="button" class="act" data-open-surface="hooks" title="Commands that run at points in a turn, such as before an edit">Lifecycle hooks</button>
-      <button type="button" class="act" data-open-surface="docs" title="How-to guides, read inside the panel">Documentation</button>
-    </div>
-    </section>
-  </div>
-  <div class="set-foot">
-    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for every workspace on this computer">Save</button>
-    <button type="button" id="set-cancel" class="fbtn" title="Close without saving">Close</button>
   </div>
 </div>
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>

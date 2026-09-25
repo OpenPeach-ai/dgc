@@ -118,17 +118,19 @@ test("a pasted link becomes a pill carrying the host", () => {
     "and the model receives exactly what was pasted, not a shortened form");
 });
 
-test("the favicon is requested for the ORIGIN only", () => {
-  // A URL can carry a token in its path or query. The icon service learns the host and nothing
-  // else -- the same trade the transcript's link favicons already make.
+test("a pasted link fetches nothing: the disclosure waits for the send", () => {
+  // The transcript's trade is that the icon service learns the hosts you SENT. A draft is not a
+  // send. Building the pill used to set img.src on a DETACHED element -- before the insertion was
+  // even attempted, so it fired on the path where the insertion throws and no pill renders -- which
+  // moved the boundary to "when you paste": paste an internal wiki or Jira URL, think better of it,
+  // delete the pill, never send, and the host has already left the machine.
   const h = panelWithSkill();
   pasteInto(h, "https://example.test/secret-path?token=abc123");
-  const img = h.doc.querySelector("#input .composer-pill.pill-link img.link-favicon");
-  if (img) {
-    assert.equal(img.src.includes("secret-path"), false, "the path must not leave the machine");
-    assert.equal(img.src.includes("abc123"), false, "nor the query");
-    assert.equal(img.referrerPolicy, "no-referrer");
-  }
+  assert.ok(h.doc.querySelector("#input .composer-pill.pill-link"), "the pill is still drawn");
+  assert.equal(h.doc.querySelector("#input img.link-favicon"), null,
+    "and it costs no request for a URL the user may yet delete");
+  assert.equal(h.doc.querySelectorAll("img.link-favicon").length, 0,
+    "nowhere else either -- the element is built detached, so a stray one would not be in #input");
 });
 
 test("pasting prose that contains a link stays prose", () => {
@@ -165,6 +167,9 @@ test("a selection with no pill still gets its chip", () => {
   // Assigning the value rebuilds the composer from serialized text, and a pill serialises to "",
   // so the pill goes. The SELECTION survives in attachments, and the row must show it again.
   input.value = "still drafting";
+  // Route through onInput, which is where reconcilePills runs. Without it this test passes even
+  // when setComposerValue forgets to retire the fromPill flag, because nothing re-reads the pair.
+  input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
   assert.equal(h.doc.querySelectorAll("#input .composer-pill").length, 0, "the pill is gone");
   assert.equal(h.doc.querySelectorAll("#attachments .invocation-chip").length, 1,
     "so the row takes it back rather than losing it silently");

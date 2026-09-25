@@ -12,15 +12,84 @@ const module={exports:{}};new Function('module','exports',view.outputFiles[0].te
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 function setup(){const dom=new JSDOM(module.exports.settingsDocument(),{runScripts:'outside-only'});const {window:w}=dom;windows.push(w);const sent=[];w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m)});w.eval(code);const message=m=>w.dispatchEvent(new w.MessageEvent('message',{data:m}));const config={type:'config',base_url:'https://model.example/v1',model:'original',mode:'default',think:'high',subscription_engine:'',subagent_base_url:'https://agent.example/v1',subagent_model:'agent',fallback_model:'backup',sandbox:true,sandbox_network:false,prompt_cache:false,capability_cache_ttl_s:300,context_size:65536};message({type:'event',event:config});return{w,d:w.document,sent,message,config,click:s=>w.document.querySelector(s).click(),input:(s,value)=>{const e=w.document.querySelector(s);e.value=value;e.dispatchEvent(new w.Event('input',{bubbles:true}));}};}
 const plugin={name:'fixture',display_name:'Fixture',summary:'Package description',installed:true,apps:[{id:'service',name:'Declared service'}],mcps:[{name:'fixture',url:'https://mcp.example/mcp'}],skills:[{name:'first',description:'First frontmatter',enabled:true},{name:'second',description:'Second frontmatter',enabled:false}]};
+test('Save says it applies to every workspace, which is where it writes',()=>{
+  // Carried over from the in-panel settings dialog, which is being deleted. Saving writes the user
+  // config (~/.dgc/config.json, through set_config) that every workspace on the machine reads, and
+  // the tab said nothing about that at all -- the statement existed only on the surface nobody
+  // could open. Checked on every page that offers Save, because each renders its own button.
+  const x=setup();
+  for(const nav of ['general','models','agents','security']){
+    x.click(`[data-nav=${nav}]`);
+    const save=x.d.querySelector('#save');
+    assert.ok(save,`${nav} offers Save`);
+    assert.doesNotMatch(save.title,/this workspace/,`${nav}: not just this workspace`);
+    assert.match(save.title,/every workspace/,`${nav}: says where it writes`);
+  }
+});
+
+test('the Show model thinking select carries show_reasoning and thinking_inline together',()=>{
+  // Carried over from the in-panel settings dialog. One control stands for two config keys, and
+  // the mapping has to survive in both directions: a config paints the select, and a choice saves
+  // the pair. Each Save is acknowledged, or `saving` leaves the button disabled and the later
+  // iterations dispatch nothing at all -- the loop would then re-read the FIRST message and pass
+  // while proving nothing.
+  const x=setup();
+  x.click('[data-nav=general]');
+  for(const [values,expected] of [[{show_reasoning:true,thinking_inline:true},'inline'],
+                                  [{show_reasoning:true,thinking_inline:false},'collapsed'],
+                                  [{show_reasoning:false,thinking_inline:false},'hidden']]){
+    x.message({type:'event',event:{...x.config,...values}});
+    assert.equal(x.d.querySelector('#show_reasoning').value,expected,JSON.stringify(values));
+  }
+  for(const [choice,show,inline] of [['inline',true,true],['collapsed',true,false],['hidden',false,false]]){
+    x.input('#show_reasoning',choice);
+    x.click('#save');
+    const saved=x.sent.filter(m=>m.type==='saveSettings').pop();
+    assert.equal(saved.values.show_reasoning,show,choice);
+    assert.equal(saved.values.thinking_inline,inline,choice);
+    x.message({type:'settingsSaved',ok:true});
+  }
+});
+
+test('a backend config never populates a secret field in the webview',()=>{
+  // Carried over from the in-panel settings dialog, which is being deleted: it was the only test
+  // in the tree asserting this, and the same invariant lives here at settingsClient.js's
+  // applyConfig -- `key.endsWith('api_key') ? '' : ...`. Dropping that ternary would paint a
+  // stored key into a live webview, and nothing else would go red. Both key fields are checked
+  // because only one of them had a test before.
+  const x=setup();
+  x.message({type:'event',event:{...x.config,api_key:'sk-live-secret',fallback_api_key:'sk-live-fallback'}});
+  x.click('[data-nav=models]');
+  assert.equal(x.d.querySelector('#api_key').value,'','the backend may hold a key; the webview may not');
+  x.click('[data-nav=agents]');
+  const fallback=x.d.querySelector('#fallback_api_key');
+  if(fallback)assert.equal(fallback.value,'','nor the fallback route\'s key');
+  assert.equal(JSON.stringify(x.sent).includes('sk-live-'),false,'and none of it is echoed back');
+});
 test('Save from General retains routes and false/zero values from other pages',()=>{const x=setup();x.message({type:'event',event:{...x.config,capability_cache_ttl_s:0}});x.click('#ultra_mode');x.click('#save');const values=x.sent.at(-1).values;assert.equal(values.subagent_model,'agent');assert.equal(values.subagent_base_url,'https://agent.example/v1');assert.equal(values.fallback_model,'backup');assert.equal(values.prompt_cache,false);assert.equal(values.capability_cache_ttl_s,0);assert.equal(values.sandbox,true);assert.equal(values.ultra_mode,true);assert.equal(values.base_url,x.config.base_url);});
 test('unsaved edits survive navigation and background config responses',()=>{const x=setup();x.click('[data-nav=models]');x.input('#model','edited');x.input('#api_key','not-persisted-by-ui');x.click('[data-nav=security]');x.click('#sandbox_network');x.message({type:'event',event:x.config});x.click('[data-nav=models]');assert.equal(x.d.querySelector('#model').value,'edited');assert.equal(x.d.querySelector('#api_key').value,'not-persisted-by-ui');x.click('#save');assert.equal(x.sent.at(-1).values.sandbox_network,true);x.message({type:'settingsSaved',ok:true});assert.equal(x.d.querySelector('#api_key').value,'');});
 test('installed switch enables mixed skills consistently without opening details',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-plugin=fixture]');const messages=x.sent.filter(m=>m.type==='skillToggle');assert.deepEqual(messages.map(m=>[m.name,m.enabled]),[['second',true]]);assert.ok(!x.d.querySelector('#back'));x.click('[data-open=fixture]');assert.ok(x.d.querySelector('#back'));assert.match(x.d.body.textContent,/First frontmatter/);});
 test('Apps and MCPs show their declared entries, not duplicate package titles',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.equal(x.d.querySelector('#plugin-list strong').textContent,'Declared service');assert.match(x.d.querySelector('#plugin-list').textContent,/Uses MCP/);x.click('[data-lane=mcp]');assert.equal(x.d.querySelector('h1').textContent,'MCP servers');assert.equal(x.sent.at(-1).type,'listMcp');});
 test('install reviews the package before sending an install; then keeps the connection banner',()=>{const x=setup();x.message({type:'plugins',items:[{...plugin,installed:false}]});x.click('[data-nav=plugins]');assert.equal(x.d.querySelector('[data-install=fixture]'),null);x.click('#browse-directory');x.click('[data-install=fixture]');assert.equal(x.sent.at(-1).type,'inspectPlugin');assert.ok(x.d.querySelector('dialog'));assert.equal(x.sent.filter(m=>m.type==='installPlugin').length,0);x.message({type:'pluginPreview',requested:'fixture',item:{...plugin,supported:true,server_specs:{fixture:{url:'https://mcp.example/mcp'}}}});x.click('#confirm-plugin');assert.equal(x.sent.at(-1).type,'installPlugin');assert.deepEqual(Array.from(x.sent.at(-1).selectedServers),['fixture']);assert.ok(x.d.querySelector('#back'));x.message({type:'signin',server:'fixture',title:'Fixture'});assert.match(x.d.body.textContent,/Finish connecting Fixture in your browser/);x.click('[data-browser]');assert.equal(x.sent.at(-1).type,'openSignIn');x.message({type:'plugins',items:[{...plugin,connected:true}]});assert.doesNotMatch(x.d.body.textContent,/Finish connecting/);x.message({type:'pluginResult',name:'fixture',error:'No sign-in page was offered.'});assert.match(x.d.querySelector('[role=alert]').textContent,/No sign-in page/);});
-test('rich usage ignores stale replies, shows figures/share bars and keyboard day readouts',()=>{const x=setup();x.click('[data-nav=usage]');const request=x.sent.at(-1);assert.equal(request.type,'getUsage');const report={type:'usage_report',request_id:request.requestId,range:'7d',timezone:'Asia/Kolkata',totals:{input_tokens:100000,output_tokens:1000,cached_input_tokens:10,requests:2},by_model:[{model:'local-model:Q4_K_M',provider:'local',host:'localhost:11434',input_tokens:100000,output_tokens:1000,requests:2}],by_day:[{date:'2026-09-21',input_tokens:60000,output_tokens:800,requests:1},{date:'2026-09-22',input_tokens:40000,output_tokens:200,requests:1}]};x.message({type:'event',event:{...report,request_id:'old'}});assert.equal(x.d.querySelector('#usage-content').hidden,true);x.message({type:'event',event:report});assert.equal(x.d.querySelectorAll('.usage-figure').length,4);assert.equal(x.d.querySelectorAll('.usage-share-fill').length,1);assert.equal(x.d.querySelectorAll('.usage-day').length,4);x.d.querySelector('#usage-days').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'End'}));assert.match(x.d.querySelector('#usage-day-readout').textContent,/40,000 input/);x.click('#usage-refresh');assert.notEqual(x.sent.at(-1).requestId,request.requestId);});
+test('rich usage ignores stale replies, shows figures/share bars and keyboard day readouts',()=>{const x=setup();x.click('[data-nav=usage]');const request=x.sent.at(-1);assert.equal(request.type,'getUsage');const report={type:'usage_report',request_id:request.requestId,range:'7d',timezone:'Asia/Kolkata',totals:{input_tokens:100000,output_tokens:1000,cached_input_tokens:10,requests:2},by_model:[{model:'local-model:Q4_K_M',provider:'local',host:'localhost:11434',input_tokens:100000,output_tokens:1000,requests:2}],by_day:[{date:'2026-09-21',input_tokens:60000,output_tokens:800,requests:1},{date:'2026-09-22',input_tokens:40000,output_tokens:200,requests:1}]};x.message({type:'event',event:{...report,request_id:'old'}});assert.equal(x.d.querySelector('#usage-content').hidden,true);x.message({type:'event',event:report});assert.equal(x.d.querySelectorAll('.usage-figure').length,4);assert.equal(x.d.querySelectorAll('.usage-share-fill').length,1);assert.equal(x.d.querySelectorAll('.usage-day').length,4);x.d.querySelector('#usage-days').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'End'}));assert.match(x.d.querySelector('#usage-day-readout').textContent,/40,000 input/);x.click('#usage-refresh');assert.notEqual(x.sent.at(-1).requestId,request.requestId);// This page has no icon font: its CSP is default-src 'none' with no font-src, and it draws
+// every icon as an inline SVG. The Refresh markup was hand-copied from the chat panel, which
+// links codicon.css -- so the copied span rendered as nothing at all, and aria-busy could not
+// spin a non-replaced inline element either.
+const refresh=x.d.querySelector('#usage-refresh');assert.ok(refresh.querySelector('svg'),'the settings page draws its own icons');assert.equal(refresh.querySelector('.codicon'),null,'there is no codicon font here to render one');});
 test('usage empty state offers all time and reports unavailable without a stale ledger',()=>{const x=setup();x.click('[data-nav=usage]');x.message({type:'event',event:{type:'usage_report',request_id:x.sent.at(-1).requestId,range:'7d',totals:{requests:0}}});assert.equal(x.d.querySelector('#usage-empty').hidden,false);x.click('#usage-show-all');assert.equal(x.sent.at(-1).range,'all');x.message({type:'usage_unavailable',requestId:x.sent.at(-1).requestId,message:'Backend disconnected'});assert.match(x.d.querySelector('#usage-status').textContent,/Backend disconnected/);});
 test('MCP controls send existing commands and split user/plugin servers',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.message({type:'event',event:{type:'mcp_servers',items:[{name:'fixture',enabled:true,state:'connected'},{name:'local',enabled:true,state:'configured',command:'node'}]}});x.click('[data-nav=mcp]');x.click('[data-mcp-toggle=local]');assert.deepEqual({...x.sent.at(-1)},{type:'mcpToggle',name:'local',enabled:false});x.click('[data-mcp-edit=local]');assert.equal(x.d.querySelector('#mcp-target').value,'node');x.click('#mcp-cancel');assert.doesNotMatch(x.d.body.textContent,/From plugins/);assert.equal(x.d.querySelector('[data-mcp-toggle=fixture]'),null);});
-test('background catalogs never open the in-chat Plugins surface',()=>{const source=readFileSync(src+'../media/main.js','utf8');const fn=source.slice(source.indexOf('  function renderPlugins(items)'),source.indexOf('  function renderPlugins(items)')+800);assert.match(fn,/if \(surfaceKind !== "plugins"\) return;/);assert.doesNotMatch(fn,/openSurface\("plugins"\)/);});
+test('the chat has no Plugins surface of its own',()=>{
+  // Was: a guard that a background catalog must not OPEN the in-chat browser. That browser shipped
+  // unreachable -- the only door was a settings dialog that could not be opened -- and has been
+  // removed, so the guard is now structural. This is the stronger statement, and it is what stops
+  // a weaker second install path reappearing beside the one on this tab.
+  const source=readFileSync(src+'../media/main.js','utf8');
+  assert.doesNotMatch(source,/function renderPlugins\(/,'the in-chat browser stays gone');
+  assert.doesNotMatch(source,/openSurface\("plugins"\)/);
+  assert.doesNotMatch(source,/plugins: \["Plugins"/,'and "plugins" is not a surface kind');
+  assert.match(source,/function cachePluginLogos\(/,
+    'the catalog still arrives, for the tool-card marks that are its one live consumer');
+});
 
 test('skill acknowledgements preserve keyboard focus on the switch',async()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.d.querySelector('[data-plugin=fixture]').focus();x.click('[data-plugin=fixture]');x.message({type:'plugins',items:[{...plugin,skills:plugin.skills.map(s=>({...s,enabled:true}))}]});await Promise.resolve();assert.equal(x.d.activeElement.dataset.plugin,'fixture');});
 

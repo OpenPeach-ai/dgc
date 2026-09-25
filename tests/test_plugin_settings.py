@@ -87,6 +87,63 @@ class PluginSettingsTests(unittest.TestCase):
         self.assertEqual(rows[1]['display_name'], 'Linked plugin')
         self.assertTrue(rows[1]['installed'])
 
+    def test_a_skill_toggle_survives_an_unreadable_plugin_store(self):
+        # The catalog read used to sit inside set_skill_enabled's own try, and PluginError is a
+        # ValueError -- so a truncated installed.json or one dead marketplace root reported a toggle
+        # that had already committed to disk and to the live agent as reason="invalid_skill",
+        # naming a file the skill has nothing to do with.
+        from types import SimpleNamespace
+        from dgc.headless import Backend
+        from dgc.skills import Skill
+        loaded = Skill("fixture", "Description", "Current", self.package / "SKILL.md")
+        values, events = {}, []
+        backend = object.__new__(Backend)
+        backend.config = SimpleNamespace(project_root=self.package, get=lambda k, d=None: values.get(k, d),
+                                         set=lambda k, v: values.__setitem__(k, v))
+        backend.agent = SimpleNamespace(skills={"fixture": loaded}, ctx=None)
+        backend.em = SimpleNamespace(emit=lambda kind, **kw: events.append({"type": kind, **kw}))
+        backend._busy = lambda: True
+        backend._emit_skill_catalog = lambda request: events.append({"type": "skill_catalog"})
+        backend._editor_plugins = lambda: (_ for _ in ()).throw(plugins.PluginError('installed.json is not valid JSON'))
+        with patch('dgc.skills.discover_skills',
+                   return_value={"fixture": Skill("fixture", "Description", "Next", self.package / "SKILL.md")}):
+            backend._dispatch({"type": "set_skill_enabled", "name": "fixture", "enabled": False, "request_id": "t"})
+        self.assertEqual(values['disabled_skills'], ['fixture'])
+        self.assertNotIn('command_rejected', [e['type'] for e in events])
+        self.assertIn('skill_catalog', [e['type'] for e in events])
+
+    def test_a_skill_toggle_rebinds_rather_than_emptying_the_live_catalog(self):
+        # _dispatch runs on the stdin reader thread while a turn reads agent.skills on the worker.
+        # clear() then update() emptied the dict under a reader mid-iteration -- a real
+        # "dictionary changed size during iteration" shown to a user who clicked a switch.
+        from types import SimpleNamespace
+        from dgc.headless import Backend
+        from dgc.skills import Skill
+        names = ('fixture', 'alpha', 'beta', 'gamma')
+        live = {n: Skill(n, "Description", "Current turn", self.package / "SKILL.md") for n in names}
+        reader = live                      # what a turn already holds
+        ctx = SimpleNamespace(skills=live)
+        values, events = {}, []
+        backend = object.__new__(Backend)
+        backend.config = SimpleNamespace(project_root=self.package, get=lambda k, d=None: values.get(k, d),
+                                         set=lambda k, v: values.__setitem__(k, v))
+        backend.agent = SimpleNamespace(skills=live, ctx=ctx)
+        backend.em = SimpleNamespace(emit=lambda kind, **kw: events.append({"type": kind, **kw}))
+        backend._busy = lambda: True
+        backend._emit_skill_catalog = lambda request: None
+        # Freshly constructed Skill objects, and one MORE of them: a reader iterating the old dict
+        # must neither see it change size nor have its own objects mutated underneath it.
+        nxt = {n: Skill(n, "Description", "Next turn", self.package / "SKILL.md")
+               for n in names + ('delta',)}
+        with patch('dgc.skills.discover_skills', return_value=nxt):
+            backend._dispatch({"type": "set_skill_enabled", "name": "fixture", "enabled": False, "request_id": "t"})
+        self.assertEqual(len(reader), 4, "the dict a turn is iterating never changes size")
+        self.assertTrue(reader['fixture'].enabled, "nor is the turn's own Skill object flipped")
+        self.assertEqual(len(backend.agent.skills), 5, "the next request takes the new dict whole")
+        self.assertFalse(backend.agent.skills['fixture'].enabled)
+        self.assertIs(backend.agent.ctx.skills, backend.agent.skills,
+                      "the skill tool reads ctx.skills, so it has to move with it")
+
     def test_a_committed_uninstall_is_reported_even_when_the_catalog_cannot_be_reread(self):
         # plugins.uninstall() commits before the catalog is read back, and one unreadable
         # marketplace cache is enough to make that read raise. Reporting it as command_rejected
@@ -140,7 +197,11 @@ class PluginSettingsTests(unittest.TestCase):
         self.assertFalse(backend.agent.skills['fixture'].enabled)
         self.assertTrue(loaded.enabled)
         self.assertEqual(loaded.body, "Current turn instructions")
-        self.assertEqual(events[-1]['type'], 'plugin_catalog')
+        # A skill toggle answers with skill_catalog and nothing else. plugin_catalog does not
+        # exist before 0.45.0 while set_skill_enabled does, so answering this command with one made
+        # a 0.44.1 panel print "skipped a backend event it does not handle yet" -- a red alert, read
+        # aloud, next to a switch that had worked. The settings tab asks for the catalog itself.
+        self.assertNotIn('plugin_catalog', [e['type'] for e in events])
 
 
 if __name__ == '__main__':

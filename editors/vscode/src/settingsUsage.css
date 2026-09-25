@@ -1,11 +1,12 @@
 .usage-section > .set-group:first-child { margin-top: 0; }
 .usage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 40px; padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
 .usage-status { min-width: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
-.usage-refresh { flex: none; height: 28px; color: var(--muted); border: 1px solid var(--border-strong); }
+.usage-refresh { display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; height: 28px; color: var(--muted); border: 1px solid var(--border-strong); }
 .usage-refresh:hover { color: var(--text); background: var(--surface2); }
-.usage-section[aria-busy="true"] .usage-refresh .codicon { animation: usage-spin 1s linear infinite; }
+/* The icon is this page's own inline SVG, not a codicon: there is no icon font here to spin. */
+.usage-section[aria-busy="true"] .usage-refresh svg { animation: usage-spin 1s linear infinite; transform-origin: 50% 50%; }
 @keyframes usage-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .usage-section[aria-busy="true"] .usage-refresh .codicon { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .usage-section[aria-busy="true"] .usage-refresh svg { animation: none; } }
 .usage-section[aria-busy="true"] #usage-content { opacity: .6; }
 .usage-empty { margin: var(--sp-4) 0 var(--sp-2); padding: var(--sp-4); border: 1px dashed var(--border-strong); border-radius: var(--r-md); color: var(--muted); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); }
 .usage-empty p { margin: 0 0 var(--sp-2); }

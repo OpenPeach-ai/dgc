@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Secondary text in Settings, read in a real browser under VS Code's light theme tokens. The panel
-// painted hints, notes, inactive tabs and the Close button with --faint, which resolves to VS Code's
-// disabledForeground: rgba(97,97,97,.5) in the light themes, 2.13:1 on the sidebar. Text a reader
-// needs (a time zone, a privacy note, which tabs exist) has to clear 4.5:1.
+// Secondary text in the panel, read in a real browser under VS Code's light theme tokens. --faint
+// resolves to VS Code's disabledForeground -- rgba(97,97,97,.5) in the light themes, 2.13:1 on the
+// sidebar -- so any text a reader actually needs has to be painted with --muted instead.
+//
+// This began as a settings-dialog test. That dialog has been removed; the same token is still worn
+// by live panel text, which is what is measured now.
 const here = dirname(fileURLToPath(import.meta.url));
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -34,7 +36,7 @@ before(async () => {
 after(async () => { await browser?.close(); });
 
 for (const [theme, tokens] of Object.entries(LIGHT_THEMES)) {
-  test(`Settings secondary text clears ${MINIMUM[theme]}:1 in ${theme}`, async (t) => {
+  test(`panel secondary text clears ${MINIMUM[theme]}:1 in ${theme}`, async (t) => {
     if (skipReason()) return t.skip(skipReason());
     const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
     const css = readFileSync(here + "/../media/main.css", "utf8");
@@ -51,7 +53,12 @@ for (const [theme, tokens] of Object.entries(LIGHT_THEMES)) {
         window.DgcMarkdown = { render: (s) => String(s), linkTarget: () => null };
         eval(mjs);
         window.postMessage({ type: "session_ready", sessionId: "s1" }, "*");
-        window.postMessage({ type: "settings_open", providers: [], models: [], section: "usage" }, "*");
+        // Draw the live surfaces that carry secondary text: the follow-up hint under the composer,
+        // and a feature browser's own empty state.
+        window.postMessage({ type: "event", event: { type: "ready", capabilities: {} } }, "*");
+        window.postMessage({ type: "event", event: { type: "docs_catalog", request_id: "d", total: 0, items: [] } }, "*");
+        const hint = document.getElementById("followup-hint");
+        if (hint) { hint.hidden = false; hint.textContent = "Enter to send, Shift+Enter for a new line"; }
       }, mainJs);
       await page.waitForTimeout(200);
       const readings = await page.evaluate(() => {
@@ -70,11 +77,7 @@ for (const [theme, tokens] of Object.entries(LIGHT_THEMES)) {
           const a = lum(mixed), b = lum(bg);
           return Math.round((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) * 100) / 100;
         };
-        const pick = {
-          "time zone line": "#usage-timezone", "privacy note": ".usage-privacy",
-          "section hint": '.set-section[data-section="usage"] .set-hint', "inactive tab": ".set-tab:not(.active)",
-          "Close button": "#set-cancel", "close icon": "#set-close", "group heading": '.set-section[data-section="usage"] .set-group',
-        };
+        const pick = { "follow-up hint": "#followup-hint" };
         return Object.fromEntries(Object.entries(pick).map(([name, selector]) => {
           const node = document.querySelector(selector);
           return [name, node ? ratio(node) : null];

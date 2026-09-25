@@ -3725,10 +3725,38 @@ class Backend:
             request_id = str(cmd.get("request_id") or "")
             try:
                 updated = set_skill_enabled(self.config, str(cmd.get("name") or ""), cmd.get("enabled"))
-                self.agent.skills.clear()
-                self.agent.skills.update(updated)
+                # Rebind; never clear() then update(). _dispatch runs on the stdin reader thread
+                # while a turn reads this same dict on the worker: _skill_catalog() builds every
+                # model request from it and _drain_steer re-matches skills mid-turn, both as
+                # Python-level comprehensions preemptible at every entry. Emptying the dict under
+                # one of them surfaced as "Turn failed - dictionary changed size during iteration",
+                # and the quiet half dropped the skill tool and the whole Skills section from that
+                # request. A reader already iterating finishes on the old dict; the next one takes
+                # the new dict whole.
+                #
+                # The command stays out of _BUSY_MUTATIONS deliberately -- a switch only changes
+                # what the NEXT prompt may load, and the settings tab has no busy guard to stop the
+                # click -- so this has to be SAFE rather than refused. reload_skills can use
+                # clear()+update() precisely because it is refused while a turn runs.
+                # ctx.skills is the same object the skill tool reads, so it moves with it.
+                self.agent.skills = updated
+                if getattr(self.agent, "ctx", None) is not None:
+                    self.agent.ctx.skills = self.agent.skills
                 self._emit_skill_catalog(request_id)
-                self.em.emit("plugin_catalog", items=self._editor_plugins(), request_id=request_id)
+                # No plugin_catalog here. set_skill_enabled is the one command older than that
+                # event, so this was the only place a 0.45.0 answer could reach a 0.44.1 panel --
+                # which keeps the connection and prints "skipped a backend event it does not handle
+                # yet", a red alert read aloud over TTS, beside a switch that actually worked. Every
+                # other plugin_catalog answers a command only a plugin-aware client sends.
+                #
+                # Reading the catalog back also fails on its own: PluginError is a ValueError, so
+                # one unreadable marketplace root or a truncated installed.json landed in the
+                # handler below and reported a toggle that had already committed to disk and to the
+                # live agent as reason="invalid_skill", naming a file the skill has nothing to do
+                # with -- while the settings switch, which renders from plugin_catalog alone,
+                # reverted to its stale value. The settings tab asks for its own refresh after the
+                # toggle (panel.ts, skillToggle); commands share one ordered pipe, so it arrives
+                # after this one has been applied.
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
                              message=str(exc))

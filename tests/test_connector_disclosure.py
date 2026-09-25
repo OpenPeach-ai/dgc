@@ -94,6 +94,40 @@ class CloudExecution(unittest.TestCase):
         self.assertIn("runs on this computer", notice,
                       "it must name the case a local-model user would otherwise assume")
 
+    def test_the_flag_reaches_the_editor_rows(self) -> None:
+        # A string-slice of the UI source cannot see whether a render path ever reaches the banner,
+        # and this is the half that was broken: catalog_for_editor projects rows through an explicit
+        # key allow-list, and cloud_execution was not in it, so row.cloud_execution was undefined for
+        # every plugin and every connector in the list the panel renders from. The flag is also
+        # top-level rather than inside metadata, so the metadata spread could not carry it either.
+        from unittest.mock import patch
+        from dgc import plugins
+        entries = json.loads((ROOT / "dgc" / "plugin_catalog.json").read_text(encoding="utf-8"))["plugins"]
+        with patch.object(plugins, "load_catalog", return_value={"plugins": entries}), \
+             patch.object(plugins, "_installed", return_value=[]), \
+             patch.object(plugins, "_source", side_effect=plugins.PluginError("not cached")):
+            rows = {row["name"]: row for row in plugins.catalog_for_editor()}
+        for name, entry in CONNECTORS.items():
+            with self.subTest(connector=name):
+                self.assertIn(name, rows, "every connector is offered in the editor catalog")
+                self.assertEqual(rows[name].get("cloud_execution"), bool(entry.get("cloud_execution")),
+                                 f"{name}'s row must carry the catalog's own decision, "
+                                 f"not silently lose it on the way to the panel")
+
+    def test_the_connect_dialog_discloses_where_the_work_runs(self) -> None:
+        # reviewPlugin short-circuits to openConnector for exactly the connectors that need this,
+        # so the detail page that renders the banner is the one page they never reach. The dialog
+        # they DO reach has to carry it, and it has to read the flag rather than the row -- the
+        # banner must stand whether or not a plugin list has arrived.
+        dialog = SETTINGS_UI[SETTINGS_UI.index("function openConnector"):]
+        dialog = dialog[:dialog.index("\nfunction ")]
+        self.assertIn("cloudNotice(", dialog,
+                      "the consent moment for zapier/make/arcade is this dialog, not the detail page")
+        self.assertLess(dialog.index("cloudNotice("), dialog.index("esc(def.setup)"),
+                        "the disclosure comes before the setup instructions, not after them")
+        self.assertIn("def.cloud_execution", dialog,
+                      "driven by the bundled catalog, so it does not depend on a list arriving")
+
     def test_the_notice_precedes_the_requirements_paragraph(self) -> None:
         details = SETTINGS_UI[SETTINGS_UI.index("function compatibilityDetails"):]
         details = details[:details.index("\n}")]

@@ -15,7 +15,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Wake on monitors", "Start a short turn when a background monitor prints.", bool("monitor_wake", c.monitor_wake !== false))
                 + field("Tool profile", "Standard offers every product tool on each turn.", sel("tool_profile", [["standard", "Standard"], ["adaptive", "Adaptive"], ["full", "Full catalog"]], c.tool_profile || "standard"))
                 + field("Parallel tasks", "How many sub-agents may run at once.", inp("max_parallel_tasks", c.max_parallel_tasks || 4, "number")))
-            + '<button type="button" class="save" id="save">Save</button>';
+            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
     }
     function renderModels(main) {
         const c = config;
@@ -32,7 +32,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Responses state", "", sel("provider_state", [["stateless", "Stateless"], ["server", "Server stored"]], c.provider_state || "stateless"))
                 + field("Prompt cache", "", bool("prompt_cache", c.prompt_cache !== false))
                 + field("Capability retry TTL", "Seconds.", inp("capability_cache_ttl_s", c.capability_cache_ttl_s ?? "", "number")))
-            + '<button type="button" class="save" id="save">Save</button>';
+            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
         const preset = document.getElementById("provider");
         if (preset)
             preset.onchange = () => {
@@ -53,7 +53,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Host URL", "", inp("fallback_base_url", c.fallback_base_url || ""))
                 + field("Transport", "", sel("fallback_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.fallback_api_mode || ""))
                 + field("API key", "", inp("fallback_api_key", c.fallback_api_key || "", "password")))
-            + '<button type="button" class="save" id="save">Save</button>';
+            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
     }
     function renderSecurity(main) {
         const c = config;
@@ -63,7 +63,7 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Plan preview", "Loopback only.", bool("plan_artifact", c.plan_artifact !== false))
                 + field("Restore previews", "", bool("artifact_autostart", c.artifact_autostart !== false))
                 + field("Artifacts in plan mode", "Broadens the read-only plan surface.", bool("artifact_in_plan", c.artifact_in_plan === true)))
-            + '<button type="button" class="save" id="save">Save</button>';
+            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
     }
     ({ general: renderGeneral, models: renderModels, agents: renderAgents, security: renderSecurity })[section](main);
 }

@@ -209,6 +209,9 @@ test("each pill wears the sigil that picks it, and the one on its own chip", asy
   assert.equal(await sigil("skill"), "$");
   assert.equal(await sigil("template"), "/");
   assert.equal(await sigil("file"), "@");
+  assert.equal(await sigil("link"), "\ueb01",
+    "a link pill wears the bundled globe codicon -- a fetched favicon would disclose the host of a "
+    + "URL the user may still delete");
 });
 
 test("a pill-only draft does not render the placeholder over itself", async (t) => {
@@ -254,6 +257,8 @@ test("every offset survives the round trip through both halves of the serializer
     "plain text",
     "a<br>b",
     "a<br><br>b",
+    "a<br><br>",
+    "a<br><br><br>",
     "a<br>",
     "intro<div><br></div><div>run  now</div>",
     "hello<div><br></div>",
@@ -299,6 +304,25 @@ test("every offset survives the round trip through both halves of the serializer
   assert.deepEqual(bad, [], "each of these is an offset the two halves place differently");
 });
 
+test("a draft survives the round trip through the writer as well as the reader", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // walk() drops a <br> that is its parent's lastChild, because Chromium leaves one there as a
+  // filler so the final line can hold a caret. That makes a SINGLE trailing <br> ambiguous by
+  // construction, so the writer has to emit the pair Chromium emits. Writing one meant a draft
+  // finished with Shift+Enter lost a newline on every save and restore, cumulatively across chat
+  // switches, in silence.
+  const bad = await page.evaluate(() => {
+    const host = document.getElementById("input");
+    const texts = ["", "a", "a\n", "a\n\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n", "a \n"];
+    const failures = [];
+    for (const t of texts) { host.value = t; if (host.value !== t) failures.push([t, host.value]); }
+    host.replaceChildren();
+    return failures;
+  });
+  assert.deepEqual(bad, [],
+    "setComposerValue(t) then composerText() must be t for every t, trailing newlines included");
+});
+
 test("clearing the box by hand does not leave its selections attached", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   await freshComposer(["fixture"]);
@@ -317,4 +341,44 @@ test("clearing the box by hand does not leave its selections attached", async (t
   assert.equal(last.text, "something else entirely");
   assert.deepEqual(last.skills || [], [],
     "the abandoned draft's skill used to ride along with the next, unrelated prompt");
+});
+
+test("a reconnect to the same chat does not flatten the pills being typed", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // session_ready goes out on every webview repaint AND every backend handshake, both carrying the
+  // CURRENT session id -- so a crashed backend coming back, or a dgc serve restart, used to run the
+  // whole draft restore against the chat the user was already in. That rebuilds the composer from
+  // serialized text, and a pill serializes to "", so pills vanished mid-sentence with no user
+  // action and nothing on screen saying why.
+  await freshComposer(["fixture"]);
+  await page.keyboard.type("Review ");
+  await pickSkill("fixture");
+  await page.keyboard.type(" before merging");
+  await page.evaluate(() => window.postMessage({ type: "session_ready", sessionId: "s1" }, "*"));
+  await page.evaluate(() => window.postMessage({ type: "session_ready", sessionId: "s1" }, "*"));
+  assert.deepEqual(await pills(), ["fixture"], "the pill is still where it was picked");
+  assert.equal(await value(), "Review  before merging");
+});
+
+test("a rejected prompt comes back carrying its skills", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // submit() used to hand pendingPrompts the live attachment objects. Restoring pushed them back
+  // still flagged as pill-borne, with no pill standing for them, so reconcilePills withdrew every
+  // one of them from the message being given back. jsdom took the fallback branch and cleared the
+  // flag by accident, so the suite was green over a message that came back stripped.
+  await freshComposer(["fixture"]);
+  await page.keyboard.type("Review ");
+  await pickSkill("fixture");
+  await page.keyboard.press("Enter");
+  const req = await page.evaluate(() => (window.__posted || [])
+    .filter((m) => m.type === "prompt").pop().requestId);
+  await page.evaluate((id) => window.postMessage({ type: "prompt_rejected", requestId: id }, "*"), req);
+  await page.waitForFunction(() => document.getElementById("input").value === "Review");
+  const chips = await page.evaluate(() => [...document.querySelectorAll("#attachments .chip")]
+    .map((c) => c.textContent.replace("\u00d7", "").trim()));
+  assert.deepEqual(chips, ["$fixture"], "the selection is visible again, and removable");
+  await page.keyboard.press("Enter");
+  const skills = await page.evaluate(() => (window.__posted || [])
+    .filter((m) => m.type === "prompt").pop().skills);
+  assert.deepEqual(skills, ["fixture"], "and the re-sent message still carries it");
 });

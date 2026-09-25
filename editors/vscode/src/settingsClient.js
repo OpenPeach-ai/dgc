@@ -80,7 +80,9 @@ function snapshot() {
         }
     });
 }
-function navTo(next, nextRange) { snapshot(); directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; if (nextRange)
+// A failure belongs to the visit it happened in: leaving the section drops the banner, and the
+// `mcp_servers` reply that every arrival at this page asks for repaints a live one.
+function navTo(next, nextRange) { snapshot(); directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpError = ''; if (nextRange)
     range = nextRange; render(); $('main').scrollTop = 0; }
 // Catalog acknowledgements replace rows. Keep keyboard focus on the same control.
 let rememberedFocus = null;
@@ -374,7 +376,11 @@ function openConnector(id) {
     const row=items.find(r=>r.name===id) || {name:id,display_name:def.name};
     const server=servers.find(s=>s.name===id);
     const url=server?.url || row.mcps?.[0]?.url || def.url;
-    dialog('connector', 'Connect '+def.name, `${connectionArt(row)}<h2 class="connection-title" id="connector-title">Connect ${esc(def.name)}</h2><p>${esc(def.setup)}</p><p>${link(def.docs,'Setup instructions')} · ${link(def.terms,'Terms')} · ${link(def.privacy,'Privacy')}</p><form id="connector-form">${def.url ? `<p class="note">Server: ${esc(def.url)}</p>` : `<label>${id==='arcade'?'Gateway URL':'Instance MCP URL'}<input id="connector-url" type="url" required autocomplete="off" placeholder="${esc(def.placeholder)}" value="${esc(url)}"></label>`}<label>Authentication<select id="connector-auth">${def.auth.map(a=>`<option value="${a}"${a==='token' && server?.auth_env ? ' selected' : ''}>${a==='oauth'?'Browser sign-in':'Connection token'}</option>`).join('')}</select></label><label id="connector-token-field">Connection token<input id="connector-token" type="password" autocomplete="off" spellcheck="false" placeholder="${row.installed?'Leave blank to keep the saved token':'Paste the token from '+esc(def.name)}"></label><p class="note">Pasted tokens are kept in the editor’s secret storage. Browser sign-in tokens are managed by the local MCP bridge. App credentials and permissions are managed by ${esc(def.name)}. Disconnecting DGC does not revoke provider grants.</p><button class="save" id="connector-submit">${row.installed?'Save and connect':'Connect '+esc(def.name)}</button></form>`);
+    // This dialog is the consent moment for the three connectors reviewPlugin() sends straight
+    // here, so the disclosure belongs on it and not only on the detail page they skip. It reads
+    // the bundled connector catalog rather than the row: the banner has to stand whether or not a
+    // plugin list arrived, and n8n's false is a decision -- its URL can be the user's own machine.
+    dialog('connector', 'Connect '+def.name, `${connectionArt(row)}<h2 class="connection-title" id="connector-title">Connect ${esc(def.name)}</h2>${cloudNotice({name:id, display_name:def.name, cloud_execution:def.cloud_execution})}<p>${esc(def.setup)}</p><p>${link(def.docs,'Setup instructions')} · ${link(def.terms,'Terms')} · ${link(def.privacy,'Privacy')}</p><form id="connector-form">${def.url ? `<p class="note">Server: ${esc(def.url)}</p>` : `<label>${id==='arcade'?'Gateway URL':'Instance MCP URL'}<input id="connector-url" type="url" required autocomplete="off" placeholder="${esc(def.placeholder)}" value="${esc(url)}"></label>`}<label>Authentication<select id="connector-auth">${def.auth.map(a=>`<option value="${a}"${a==='token' && server?.auth_env ? ' selected' : ''}>${a==='oauth'?'Browser sign-in':'Connection token'}</option>`).join('')}</select></label><label id="connector-token-field">Connection token<input id="connector-token" type="password" autocomplete="off" spellcheck="false" placeholder="${row.installed?'Leave blank to keep the saved token':'Paste the token from '+esc(def.name)}"></label><p class="note">Pasted tokens are kept in the editor’s secret storage. Browser sign-in tokens are managed by the local MCP bridge. App credentials and permissions are managed by ${esc(def.name)}. Disconnecting DGC does not revoke provider grants.</p><button class="save" id="connector-submit">${row.installed?'Save and connect':'Connect '+esc(def.name)}</button></form>`);
     modal.classList.add('connection-dialog');
     modal.dataset.connector = id;
     modal.setAttribute('aria-labelledby','connector-title');
@@ -602,8 +608,11 @@ window.addEventListener('message', event => {
                 render();
         }
         else if (ev.type === 'command_rejected') {
-            skillPending.clear();
             if (ev.command === 'set_skill_enabled') {
+                // Only a refused TOGGLE settles a pending switch. Clearing on any rejection
+                // un-greyed a switch still waiting on its own round trip, so the pre-toggle value
+                // came back looking like the answer.
+                skillPending.clear();
                 if (detail)
                     errors.set(detail, ev.message);
                 if (section === 'plugins')

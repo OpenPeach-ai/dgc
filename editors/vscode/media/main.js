@@ -101,10 +101,19 @@
     // One text node per line, separated by <br>. Never innerHTML: the string may be a draft that
     // came back from storage, or a pasted payload, and neither may bring markup into the host.
     const frag = document.createDocumentFragment();
-    String(text ?? "").split("\n").forEach((line, i) => {
+    const lines = String(text ?? "").split("\n");
+    lines.forEach((line, i) => {
       if (i) frag.appendChild(document.createElement("br"));
       if (line) frag.appendChild(document.createTextNode(line));
     });
+    // A TRAILING newline takes TWO <br>, which is what Chromium itself emits: the second is the
+    // filler that lets the new empty line hold a caret, and walk() drops a <br> that is its
+    // parent's lastChild for exactly that reason. Writing one made the separator and the filler the
+    // same node, so the reader could not tell "ends in a newline" from "ends in a line" -- a draft
+    // finished with Shift+Enter lost one newline on every save and restore, silently, accumulating
+    // across chat switches. This is the writer's half of walk()'s contract: setComposerValue(t)
+    // followed by composerText() is t, for every t.
+    if (lines.length > 1 && lines[lines.length - 1] === "") frag.appendChild(document.createElement("br"));
     // Whether the caret was ours to move must be decided BEFORE the nodes it points at are gone.
     const sel = window.getSelection();
     const wasOurs = !sel || sel.rangeCount === 0 || input.contains(sel.getRangeAt(0).startContainer);
@@ -240,16 +249,16 @@
     pill.setAttribute("data-pill", wire);
     pill.dataset.kind = kind;
     if (kind === "link") {
-      // Origin-only, exactly as a link in the transcript: the path, query and fragment of what was
-      // pasted never leave the machine, and dgc.linkFavicons off means no request at all.
-      const src = faviconsEnabled() ? window.DgcMarkdown?.faviconUrl?.(wire) : null;
-      if (src) {
-        const img = el("img", "link-favicon");
-        img.alt = ""; img.setAttribute("aria-hidden", "true");
-        img.referrerPolicy = "no-referrer";
-        img.src = src;
-        pill.appendChild(img);
-      }
+      // NO FAVICON HERE, and that is the whole point. Setting img.src fetches from Google's icon
+      // service the instant the element is built -- on a DETACHED node, before insertComposerPill
+      // has even tried to splice it in, so it fired on the path where the insertion throws and no
+      // pill ever renders. That moved the disclosure boundary from "when you send" to "when you
+      // paste": paste an internal wiki or Jira URL, think better of it, delete the pill, never
+      // send, and the host has already left the machine. The transcript's trade is that Google
+      // learns the hosts you SENT; this would have covered hosts you merely considered, which is
+      // not the same trade. Nothing is lost after send: promptFavicon draws the site's own icon on
+      // the prompt bubble, which is where it was drawn before pills existed, and dgc.linkFavicons
+      // still governs that. The pill carries the host as text, which is what a reader needs.
       let shown = label;
       try { const u = new URL(label); shown = u.host + (u.pathname === "/" ? "" : u.pathname); }
       catch { /* keep the raw text if it will not parse */ }
@@ -512,7 +521,7 @@
   }
   let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
   let curWorkers = 4;
-  let lastConfig = null, settingsProviders = [];
+  let lastConfig = null;
   let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
   let lastCompaction = null, compacting = false;
@@ -1012,6 +1021,14 @@
   }
   function selectDraftSession(session, adoptFrom = "") {
     if (typeof session !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(session)) return;
+    // The same chat announced again is not a switch. `session_ready` goes out on every webview
+    // repaint (panel.ts:769) and on every backend handshake (:941), both carrying the CURRENT
+    // session id -- so a crashed backend coming back, or a `dgc serve` restart, used to run the
+    // whole restore below against the chat the user was already in. setComposerValue rebuilds the
+    // draft from serialized text, and a pill serializes to "", so every pill in a draft being
+    // typed vanished with no user action and nothing on screen saying why. There is nothing to
+    // restore here: persistDraft has been keeping this chat's entry and the box in step.
+    if (session === draftSession && !adoptFrom) return;
     persistDraft();
     const prior = draftSession;
     draftSession = session;
@@ -3232,14 +3249,13 @@
 
   // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
   const SURFACE_META = {
-    skills: ["Skills", "library"], plugins: ["Plugins", "extensions"], mcp: ["MCP servers", "plug"],
+    skills: ["Skills", "library"], mcp: ["MCP servers", "plug"],
     docs: ["Documentation", "book"], permissions: ["Permission rules", "shield"],
     memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
-  let pluginRows = [], pluginLogos = {}, pluginPane = "search";
+  let pluginLogos = {};
   const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
-  let surfaceReturnSection = "";   // the settings tab a surface was opened from, if any
 
   function openSurface(kind) {
     if (!SURFACE_META[kind]) return;
@@ -3254,13 +3270,6 @@
   }
   function closeSurface() {
     $("surface").hidden = true; surfaceKind = "";
-    if (surfaceReturnSection) {
-      const section = surfaceReturnSection;
-      surfaceReturnSection = "";
-      surfaceReturnFocus = null;
-      vscode.postMessage({ type: "openSettings", section });
-      return;
-    }
     const target = surfaceReturnFocus && typeof surfaceReturnFocus.focus === "function"
       ? surfaceReturnFocus : input;
     surfaceReturnFocus = null; target.focus();
@@ -3308,78 +3317,18 @@
     if (attachments.length + waiting >= 64) { sysLine("Select at most 64 attachments per message."); return false; }
     return true;
   }
-  function pluginBlurb(row) {
-    const text = String(row.summary || "").split(". ")[0];
-    return text.length > 72 ? text.slice(0, 69) + "…" : text;
-  }
-  function renderPlugins(items) {
-    const query = surfaceKind === "plugins" ? surfaceSearch.value : "";
-    pluginRows = Array.isArray(items) ? items : [];
+  // The chat has no Plugins browser: the standalone Settings tab owns that surface, and it is
+  // strictly richer -- directory browse, an install review with per-server checkboxes, marketplaces,
+  // uninstall. The in-chat one shipped behind a dialog that could not be opened, and its single
+  // button posted `installPlugin`, which the host answers by opening that same Settings tab.
+  //
+  // The catalog still arrives here, for one live consumer: a tool card belonging to a plugin's MCP
+  // server draws that package's own mark (pluginLogoHtml, above). This is where that cache fills.
+  function cachePluginLogos(items) {
     pluginLogos = {};
-    for (const row of pluginRows) if (row.logo) pluginLogos[row.name] = row.logo;
-    // A settings refresh also delivers this catalog. Only draw it when the user already
-    // opened Plugins in the chat; otherwise the gear would cover the conversation.
-    if (surfaceKind !== "plugins") return;
-    surfaceSearch.value = query;
-    surfaceSearch.placeholder = pluginPane === "installed" ? "Filter installed plugins" : "Filter plugins";
-    const available = pluginRows.filter(row => row.install !== "block" && row.license !== "Proprietary");
-    const visible = pluginPane === "installed" ? available.filter((row) => row.installed) : available;
-    const tabs = `<div class="plugin-tabs" role="tablist">
-      <button type="button" class="set-tab${pluginPane === "search" ? " active" : ""}" data-plugin-pane="search" role="tab" aria-selected="${pluginPane === "search"}">Search</button>
-      <button type="button" class="set-tab${pluginPane === "installed" ? " active" : ""}" data-plugin-pane="installed" role="tab" aria-selected="${pluginPane === "installed"}">Installed</button>
-    </div>`;
-    const adder = pluginPane === "search"
-      ? `<form class="plugin-add" id="plugin-add"><input id="plugin-add-url" type="url" inputmode="url" maxlength="500" placeholder="Paste a GitHub, Claude, or Codex plugin link" aria-label="Plugin link"><button type="submit" class="act">Add</button></form>`
-      : "";
-    const rows = visible.map((row) => {
-      let label = "Install";
-      let kind = "install";
-      if (row.install === "block") { label = ""; kind = ""; }
-      else if (row.opening) { label = "Signing in…"; kind = ""; }
-      else if (row.connected) { label = "Connected"; kind = ""; }
-      else if (row.installed && row.auth === "browser") { label = "Sign in"; kind = "sign"; }
-      else if (row.installed) { label = "Installed"; kind = ""; }
-      const button = label && kind
-        ? `<button type="button" class="act" data-plugin-${kind}="${esc(row.name)}" data-license="${esc(row.install === "accept" ? row.license : "")}">${esc(label)}</button>`
-        : (label ? `<span class="plugin-state">${esc(label)}</span>` : "");
-      const icon = row.logo
-        ? `<img class="plugin-row-logo" alt="" src="${esc(row.logo)}">`
-        : `<span class="plugin-row-logo plugin-row-empty" aria-hidden="true"></span>`;
-      return `<article class="plugin-row" data-filter="${esc(`${row.name} ${row.display_name} ${row.summary}`.toLowerCase())}">${icon}<div class="plugin-copy"><strong>${esc(row.display_name)}</strong><span>${esc(row.block_reason || pluginBlurb(row))}</span></div>${button}</article>`;
-    }).join("") || `<div class="surface-empty">${pluginPane === "installed" ? "No plugins installed yet." : "No curated plugins."}</div>`;
-    const retired = pluginRows.some(row => row.installed && (row.install === "block" || row.license === "Proprietary"));
-    surfaceBody.innerHTML = tabs + adder + rows + (retired && pluginPane === "installed"
-      ? '<button type="button" class="act" id="plugin-removals">Manage unavailable installations in Settings</button>' : '');
-    const removals = surfaceBody.querySelector("#plugin-removals");
-    if (removals) removals.onclick = () => vscode.postMessage({ type: "openSettings", section: "plugins" });
-    const sendInstall = (button) => {
-      button.disabled = true;
-      button.textContent = "Installing…";
-      vscode.postMessage({ type: "installPlugin", name: button.dataset.pluginInstall || button.dataset.pluginSign, acceptLicense: button.dataset.license || "" });
-    };
-    surfaceBody.querySelectorAll("[data-plugin-install], [data-plugin-sign]").forEach((button) => {
-      button.onclick = () => sendInstall(button);
-    });
-    surfaceBody.querySelectorAll("[data-plugin-open]").forEach((button) => {
-      button.onclick = () => vscode.postMessage({ type: "openPluginBrowser" });
-    });
-    surfaceBody.querySelectorAll("[data-plugin-pane]").forEach((button) => {
-      button.onclick = () => {
-        pluginPane = button.dataset.pluginPane === "installed" ? "installed" : "search";
-        renderPlugins(pluginRows);
-      };
-    });
-    const addForm = $("plugin-add");
-    if (addForm) addForm.onsubmit = (event) => {
-      event.preventDefault();
-      const field = $("plugin-add-url");
-      const url = String(field.value || "").trim();
-      if (!url) return;
-      const submit = addForm.querySelector("button");
-      if (submit) { submit.disabled = true; submit.textContent = "Adding…"; }
-      vscode.postMessage({ type: "installPlugin", name: url, acceptLicense: "" });
-    };
-    filterSurface();
+    for (const row of Array.isArray(items) ? items : []) {
+      if (row.logo) pluginLogos[row.name] = row.logo;
+    }
   }
   function renderSkills(items) {
     const query = surfaceKind === "skills" ? surfaceSearch.value : "";
@@ -3688,7 +3637,6 @@
         curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
         updateModelControl();
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
-        if (!$("settings").hidden) fillSettings(ev);
         break;
       case "think_changed": {
         const level = String(ev.think || "off");
@@ -3699,7 +3647,6 @@
             lastConfig.think = level;
           }
         }
-        if (!$("settings").hidden && lastConfig) fillSettings(lastConfig);
         break;
       }
       case "turn_start":
@@ -4199,7 +4146,7 @@
         if (ev.exists) decisionCard(`<div class="q">${icon("clipboard-list")} Saved plan</div><pre>${esc(ev.plan)}</pre>`);
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
-      case "plugin_catalog": renderPlugins(ev.items); break;
+      case "plugin_catalog": cachePluginLogos(ev.items); break;
       case "skill_catalog": {
         skillRows = Array.isArray(ev.items) ? ev.items : [];
         if (surfaceKind === "skills") renderSkills(ev.items);
@@ -4208,7 +4155,6 @@
       }
       case "skill_detail": if (surfaceKind === "skills") renderSkillDetail(ev); break;
       case "docs_catalog": if (surfaceKind === "docs") renderDocs(ev.items); break;
-      case "usage_report": renderUsage(ev); break;
       case "doc": if (surfaceKind === "docs") renderDoc(ev); break;
       case "mcp_servers":
         mcpRows = Array.isArray(ev.items) ? ev.items : [];
@@ -4449,7 +4395,12 @@
     if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
       sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
     }
-    const selected = [...attachments];
+    // A snapshot, not the live objects: `fromPill` means "a pill in the CURRENT composer governs
+    // this selection", and the composer is about to be emptied. submit() used to hand pendingPrompts
+    // the same objects, so restoring a rejected prompt pushed them back still flagged with no pill
+    // standing for them, and reconcilePills withdrew every skill, template and @file from the very
+    // message being given back.
+    const selected = attachments.map(({ fromPill, ...rest }) => rest);
     const node = appendGoalPrompt(objective, selected);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
@@ -4517,7 +4468,8 @@
     const requestId = `${promptPrefix}-${++promptSequence}`;
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
-    pendingPrompts.set(requestId, { text: pastes.length ? typed : text, attachments: [...attachments], node: m, session: draftSession });
+    pendingPrompts.set(requestId, { text: pastes.length ? typed : text,
+      attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession });
     // The restore draft rides along for the extension, which keeps it while the message is queued (a
     // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
     const restore = { text: pastes.length ? typed : text,
@@ -5205,528 +5157,7 @@
     hideAgentsMenu(e);
   });
 
-  // ---- settings page ----
-  const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
-    "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
-    "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
-    "capability_cache_ttl_s", "mode", "think", "context_size", "subagent_context_size", "sandbox",
-    "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
-    "artifact_in_plan", "tool_profile", "max_parallel_tasks", "monitor_wake",
-    "subscription_engine", "subscription_model", "subscription_effort"];
-  // `show_reasoning` is a three-way select (inline | collapsed | hidden) that carries two settings.
-  const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
-    "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
-    "monitor_wake"]);
-  let settingsReturnFocus = null;
-  function fillSettings(cfg) {
-    reasoningControl = cfg.provider_capabilities?.reasoning_control || reasoningControl;
-    $("s-reasoning-note").textContent = reasoningNote();
-    const map = {
-      base_url: cfg.base_url, model: cfg.model, mode: cfg.mode,
-      think: cfg.subscription_engine ? (cfg.subscription_effort || "off") : (cfg.think || curThink),
-      subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
-      subagent_api_mode: cfg.subagent_api_mode,
-      subagent_api_key: "", fallback_model: cfg.fallback_model,
-      fallback_base_url: cfg.fallback_base_url, context_size: cfg.context_size,
-      subagent_context_size: Number(cfg.subagent_context_size) > 0 ? cfg.subagent_context_size : 0,
-      fallback_api_mode: cfg.fallback_api_mode, fallback_api_key: "",
-      api_mode: cfg.api_mode, provider_state: cfg.provider_state,
-      prompt_cache: String(cfg.prompt_cache !== false),
-      capability_cache_ttl_s: cfg.capability_cache_ttl_s,
-      sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
-      show_reasoning: cfg.show_reasoning === false ? "hidden" : cfg.thinking_inline === false ? "collapsed" : "inline",
-      suggest: String(cfg.suggest !== false),
-      monitor_wake: String(cfg.monitor_wake !== false),
-      ultra_mode: String(cfg.ultra_mode === true),
-      plan_artifact: String(cfg.plan_artifact !== false),
-      artifact_autostart: String(cfg.artifact_autostart !== false),
-      artifact_in_plan: String(cfg.artifact_in_plan === true),
-      tool_profile: cfg.tool_profile || "standard",
-      max_parallel_tasks: cfg.max_parallel_tasks || 4,
-      subscription_engine: cfg.subscription_engine || "",
-      subscription_model: cfg.subscription_model || "",
-      subscription_effort: cfg.subscription_effort || "",
-    };
-    for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
-    const thinkMax = $("s-think") && [...$("s-think").options].find((o) => o.value === "max");
-    if (thinkMax) thinkMax.hidden = !map.subscription_engine;
-    const subscriptionSelect = $("s-subscription_engine");
-    if (subscriptionSelect) subscriptionSelect.dataset.loadedValue = map.subscription_engine;
-    updateSubscriptionFields();
-    renderSubscriptionStatus(cfg);
-    syncContextPreset(cfg.context_size);
-    syncContextPreset(map.subagent_context_size, "s-subagent_context_size_preset", "s-subagent_context_size");
-  }
-  function updateSubscriptionFields() {
-    const engine = $("s-subscription_engine")?.value || "";
-    const effort = $("s-subscription_effort");
-    if (effort) {
-      effort.disabled = engine === "qwen" || engine === "kimi" || !engine;
-      if (effort.disabled) effort.value = "";
-    }
-  }
-  function renderSubscriptionStatus(cfg) {
-    const box = $("s-subscription_status");
-    if (!box) return;
-    const active = cfg.subscription_engine || "";
-    const list = Array.isArray(cfg.subscription_engines) ? cfg.subscription_engines : [];
-    if (!active) { box.textContent = "off — DGC drives the model above directly."; return; }
-    const s = list.find((e) => e && e.key === active);
-    if (!s) { box.textContent = ""; return; }
-    if (!s.installed) box.textContent = s.label + ": CLI not installed.";
-    else if (s.auth_state === "check_on_launch") {
-      box.textContent = s.label + ": authentication is checked securely by its CLI on launch.";
-    }
-    else if (!s.logged_in) box.textContent = s.label + ": not signed in — run  " + s.login_cmd;
-    else box.textContent = s.label + ": signed in ✓ — turns run through your subscription.";
-  }
-  function showSettingsSection(section) {
-    const wanted = ["general", "models", "agents", "usage", "security", "extensions"].includes(section)
-      ? section : "general";
-    document.querySelectorAll(".set-section").forEach((node) => { node.hidden = node.dataset.section !== wanted; });
-    document.querySelectorAll(".set-tab").forEach((button) => {
-      const active = button.dataset.section === wanted;
-      button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
-    });
-    const first = $(`settings`).querySelector(`.set-section[data-section="${wanted}"] input, .set-section[data-section="${wanted}"] select, .set-section[data-section="${wanted}"] button`);
-    if (first) first.focus();
-    // A tab strip wider than the panel scrolls: keep the chosen tab in view and fade the edge
-    // that hides more tabs, so the ones past it are discoverable.
-    const activeTab = document.querySelector(`.set-tab[data-section="${wanted}"]`);
-    if (activeTab && typeof activeTab.scrollIntoView === "function") activeTab.scrollIntoView({ block: "nearest", inline: "nearest" });
-    usageEdges(document.querySelector(".settings-nav"));
-    if (wanted === "usage") requestUsage();     // opening the tab always counts again
-  }
-
-  // ---- Token Usage tab ----
-  // The CLI keeps a local ledger of every request DGC finished. The tab asks for one range
-  // (getUsage -> get_usage) and draws the usage_report it gets back. Every number is what a
-  // provider reported; nothing here is estimated, and only the newest request is ever drawn.
-  const USAGE_RANGES = ["today", "7d", "30d", "month", "all"];
-  const USAGE_TIMEOUT_MS = 15000;
-  let usageRequestId = "", usageSequence = 0, usageTimer = 0, usageHasData = false;
-  let usageBuckets = [], usageDay = -1;
-  const usageSection = () => $("settings").querySelector('.set-section[data-section="usage"]');
-  const usageCount = (value) => {
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
-  };
-  const usageExact = (value) => usageCount(value).toLocaleString();
-  function usageCompact(value) {
-    const n = usageCount(value);
-    const scaled = (unit, suffix) => {
-      const v = n / unit;
-      return (v >= 100 ? Math.round(v).toString() : v.toFixed(1).replace(/\.0$/, "")) + suffix;
-    };
-    if (n >= 1e9) return scaled(1e9, "B");
-    if (n >= 1e6) return scaled(1e6, "M");
-    if (n >= 1e4) return scaled(1e3, "K");
-    return n.toLocaleString();
-  }
-  function usageNode(tag, cls, text) {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  }
-  function usageDate(iso, withYear) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
-    if (!match) return String(iso || "");
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    return date.toLocaleDateString(undefined, withYear
-      ? { year: "numeric", month: "short", day: "numeric" } : { month: "short", day: "numeric" });
-  }
-  function setUsageStatus(text, busy) {
-    $("usage-status").textContent = text;
-    const section = usageSection();
-    if (busy) section.setAttribute("aria-busy", "true"); else section.removeAttribute("aria-busy");
-  }
-  function requestUsage() {
-    const select = $("usage-range");
-    const range = USAGE_RANGES.includes(select.value) ? select.value : "7d";
-    usageRequestId = `usage-${Date.now().toString(36)}-${++usageSequence}`;
-    const requestId = usageRequestId;
-    setUsageStatus(usageHasData ? "Refreshing\u2026" : "Counting\u2026", true);
-    clearTimeout(usageTimer);
-    usageTimer = setTimeout(() => {
-      if (requestId !== usageRequestId) return;
-      setUsageStatus("No answer from the DGC backend yet. Try Refresh.", false);
-    }, USAGE_TIMEOUT_MS);
-    vscode.postMessage({ type: "getUsage", range, requestId });
-  }
-  function usageUnavailable(msg) {
-    if (msg.requestId && msg.requestId !== usageRequestId) return;
-    clearTimeout(usageTimer);
-    usageHasData = false;
-    $("usage-content").hidden = true;
-    $("usage-empty").hidden = true;
-    setUsageStatus(String(msg.message || "Token usage is unavailable."), false);
-  }
-  // A long id keeps the part that tells variants apart: the ":tag"/quantisation or "-suffix" of
-  // a model, the ":port" of a host. The head truncates with an ellipsis; the tail always shows.
-  function usageSplit(text, kind) {
-    const value = String(text || "");
-    let cut = -1;
-    if (kind === "host") {
-      const port = /:\d{1,5}$/.exec(value);
-      if (port) cut = port.index;
-    } else if (kind === "model" && value.length > 14) {
-      const colon = value.lastIndexOf(":");
-      const dash = value.lastIndexOf("-");
-      if (colon > 0 && value.length - colon <= 14) cut = colon;
-      else if (dash > 0 && value.length - dash <= 10) cut = dash;
-      else cut = value.length - 8;
-    }
-    const line = usageNode("span", kind === "model" ? "usage-clip usage-name" : "usage-clip usage-where");
-    if (cut <= 0) {
-      line.appendChild(usageNode("span", "usage-head", value));
-    } else {
-      line.appendChild(usageNode("span", "usage-head", value.slice(0, cut)));
-      line.appendChild(usageNode("span", "usage-tail", value.slice(cut)));
-    }
-    return line;
-  }
-  // A box that scrolls sideways says so: its hidden edge fades while there is more to see.
-  function usageEdges(node) {
-    if (!node) return;
-    const more = node.scrollWidth - node.clientWidth;
-    node.classList.toggle("more-right", more > 1 && node.scrollLeft < more - 1);
-    node.classList.toggle("more-left", more > 1 && node.scrollLeft > 1);
-  }
-  function renderUsage(ev) {
-    if (!ev || ev.request_id !== usageRequestId) return;   // a late answer to an older request
-    clearTimeout(usageTimer);
-    const totals = ev.totals && typeof ev.totals === "object" ? ev.totals : {};
-    const models = (Array.isArray(ev.by_model) ? ev.by_model : [])
-      .filter((row) => row && typeof row === "object").slice(0, 100);
-    const days = (Array.isArray(ev.by_day) ? ev.by_day : [])
-      .filter((row) => row && typeof row === "object" && /^\d{4}-\d{2}-\d{2}$/.test(String(row.date)))
-      .slice(-401);
-    const zone = String(ev.timezone || "").slice(0, 64);
-    $("usage-timezone").textContent = `Days follow this computer’s local time${zone ? ` (${zone})` : ""}.`;
-    const stamp = new Date(String(ev.generated_at || ""));
-    const updated = Number.isNaN(stamp.getTime()) ? "Updated just now"
-      : `Updated ${stamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-    if (ev.error) {
-      usageHasData = false;
-      $("usage-content").hidden = true;
-      $("usage-empty").hidden = true;
-      setUsageStatus(`The usage ledger could not be read: ${String(ev.error).slice(0, 300)}`, false);
-      return;
-    }
-    const requests = usageCount(totals.requests);
-    usageHasData = requests > 0;
-    $("usage-empty").hidden = usageHasData;
-    $("usage-empty-all").hidden = usageHasData || $("usage-range").value === "all";
-    $("usage-content").hidden = !usageHasData;
-    setUsageStatus(updated, false);
-    if (!usageHasData) {
-      usageBuckets = [];
-      $("usage-strip-in").replaceChildren(); $("usage-strip-out").replaceChildren();
-      return;
-    }
-
-    const figures = $("usage-figures");
-    figures.replaceChildren();
-    for (const [label, key, unit] of [["Input", "input_tokens", "tokens"],
-      ["Output", "output_tokens", "tokens"], ["Cached input", "cached_input_tokens", "tokens"],
-      ["Requests", "requests", "requests"]]) {
-      const figure = usageNode("div", "usage-figure");
-      const exact = usageExact(totals[key]);
-      const compact = usageCompact(totals[key]);
-      figure.setAttribute("role", "group");
-      figure.setAttribute("aria-label", `${label}: ${exact} ${unit}`);
-      figure.appendChild(usageNode("span", "usage-figure-label", label));
-      figure.appendChild(usageNode("span", "usage-figure-value", compact));
-      // The exact count earns its line only when the big figure is abbreviated.
-      if (compact !== exact) figure.appendChild(usageNode("span", "usage-figure-exact", `${exact} ${unit}`));
-      figures.appendChild(figure);
-    }
-    const unmetered = usageCount(totals.unmetered_requests);
-    const unmeteredNote = $("usage-unmetered");
-    unmeteredNote.hidden = unmetered === 0;
-    unmeteredNote.textContent = unmetered === 0 ? ""
-      : unmetered === 1
-        ? "1 unmetered request ended without a usage report (cancelled, interrupted, or the "
-          + "provider sent none), so its tokens are not in these totals."
-        : `${unmetered.toLocaleString()} unmetered requests ended without a usage report `
-          + "(cancelled, interrupted, or the provider sent none), so their tokens are not in these totals.";
-
-    const body = $("usage-models");
-    body.replaceChildren();
-    const tokensOf = (row) => usageCount(row.input_tokens) + usageCount(row.output_tokens);
-    const tokenSum = models.reduce((sum, row) => sum + tokensOf(row), 0);
-    const requestSum = models.reduce((sum, row) => sum + usageCount(row.requests), 0);
-    for (const row of models) {
-      const tr = document.createElement("tr");
-      const model = String(row.model || "unknown").slice(0, 256);
-      const provider = String(row.provider || "").slice(0, 64);
-      const host = String(row.host || "").slice(0, 255);
-      const where = [provider, host].filter(Boolean).join(" · ");
-      const modelCell = usageNode("th", "usage-model");
-      modelCell.setAttribute("scope", "row");
-      modelCell.title = where ? `${model}\n${where}` : model;
-      modelCell.appendChild(usageSplit(model, "model"));
-      modelCell.appendChild(usageSplit(where || "—", host ? "host" : "where"));
-      tr.appendChild(modelCell);
-      for (const key of ["input_tokens", "output_tokens", "cached_input_tokens", "requests"]) {
-        tr.appendChild(usageNode("td", "num", usageExact(row[key])));
-      }
-      const share = tokenSum > 0 ? tokensOf(row) / tokenSum
-        : (requestSum > 0 ? usageCount(row.requests) / requestSum : 0);
-      const percent = share * 100;
-      const shareText = percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
-      const shareCell = usageNode("td", "usage-share-cell");
-      const wrap = usageNode("span", "usage-share");
-      wrap.setAttribute("role", "img");
-      wrap.setAttribute("aria-label", `${shareText} of ${tokenSum > 0 ? "tokens" : "requests"}`);
-      const track = usageNode("span", "usage-share-track");
-      const fill = usageNode("span", "usage-share-fill" + (percent > 0 ? " nonzero" : ""));
-      fill.style.width = `${Math.min(100, percent)}%`;
-      track.appendChild(fill);
-      wrap.appendChild(track);
-      wrap.appendChild(usageNode("span", "usage-share-text", shareText));
-      shareCell.appendChild(wrap);
-      tr.appendChild(shareCell);
-      body.appendChild(tr);
-    }
-    usageEdges(document.querySelector(".usage-table-wrap"));
-
-    // One column per local day (weeks past 62 days), drawn as two strips on their own scales:
-    // a coding agent reads far more than it writes, so output on the input scale would be a
-    // sliver whatever its size. Each strip names its own peak.
-    const weekly = days.length > 62;
-    usageBuckets = [];
-    for (let i = 0; i < days.length; i += weekly ? 7 : 1) {
-      const slice = days.slice(i, i + (weekly ? 7 : 1));
-      usageBuckets.push({
-        first: slice[0].date, last: slice[slice.length - 1].date,
-        input: slice.reduce((sum, day) => sum + usageCount(day.input_tokens), 0),
-        output: slice.reduce((sum, day) => sum + usageCount(day.output_tokens), 0),
-        requests: slice.reduce((sum, day) => sum + usageCount(day.requests), 0),
-      });
-    }
-    const crossesYear = days.length > 0 && days[0].date.slice(0, 4) !== days[days.length - 1].date.slice(0, 4);
-    const label = (bucket) => weekly
-      ? `Week of ${usageDate(bucket.first, crossesYear)}` : usageDate(bucket.first, crossesYear);
-    usageBuckets.forEach((bucket) => { bucket.label = label(bucket); });
-    // A single day has nothing to compare: the figures above already are that day.
-    const single = usageBuckets.length <= 1;
-    $("usage-days").hidden = single;
-    const strips = [["usage-strip-in", "input", "usage-in", "usage-peak-in"],
-      ["usage-strip-out", "output", "usage-out", "usage-peak-out"]];
-    for (const [id, key, cls, peakId] of strips) {
-      const strip = $(id);
-      strip.replaceChildren();
-      strip.classList.toggle("dense", usageBuckets.length > 40);
-      const peak = Math.max(0, ...usageBuckets.map((bucket) => bucket[key]));
-      $(peakId).textContent = peak > 0 ? `peak ${usageCompact(peak)}` : "none";
-      usageBuckets.forEach((bucket, index) => {
-        const column = usageNode("div", "usage-day");
-        column.dataset.index = String(index);
-        if (bucket[key] > 0) {
-          const bar = usageNode("span", `usage-bar ${cls}`);
-          bar.style.height = `${(bucket[key] / peak) * 100}%`;
-          column.appendChild(bar);
-        } else if (key === "input" && bucket.requests) {
-          column.appendChild(usageNode("span", "usage-bar usage-unmetered-day"));
-        }
-        column.addEventListener("mouseenter", () => selectUsageDay(index));
-        strip.appendChild(column);
-      });
-    }
-    $("usage-days-first").textContent = usageBuckets.length ? label(usageBuckets[0]) : "";
-    $("usage-days-last").textContent = usageBuckets.length > 1 ? label(usageBuckets[usageBuckets.length - 1]) : "";
-    $("usage-days").setAttribute("aria-label", `Input and output tokens per ${weekly ? "week" : "day"}, `
-      + `${usageBuckets.length} ${weekly ? "weeks" : "days"}. Use the arrow keys to read each one.`);
-    let busiest = usageBuckets.length - 1;
-    usageBuckets.forEach((bucket, index) => {
-      if (bucket.input + bucket.output > usageBuckets[busiest].input + usageBuckets[busiest].output) busiest = index;
-    });
-    selectUsageDay(busiest, true);
-  }
-  function selectUsageDay(index, initial) {
-    if (!usageBuckets.length) return;
-    usageDay = Math.max(0, Math.min(usageBuckets.length - 1, index));
-    const bucket = usageBuckets[usageDay];
-    $("usage-days").querySelectorAll(".usage-day").forEach((column) => {
-      column.classList.toggle("sel", Number(column.dataset.index) === usageDay);
-    });
-    const text = `${bucket.label}: ${bucket.input.toLocaleString()} input · `
-      + `${bucket.output.toLocaleString()} output tokens · ${bucket.requests.toLocaleString()} `
-      + `request${bucket.requests === 1 ? "" : "s"}`;
-    $("usage-day-readout").textContent = (initial && usageBuckets.length > 1 ? "Busiest — " : "") + text;
-  }
-  $("usage-days").addEventListener("keydown", (e) => {
-    if (!usageBuckets.length) return;
-    const moves = { ArrowLeft: usageDay - 1, ArrowRight: usageDay + 1, Home: 0, End: usageBuckets.length - 1 };
-    if (!(e.key in moves)) return;
-    e.preventDefault();
-    selectUsageDay(moves[e.key]);
-  });
-  $("usage-range").onchange = requestUsage;
-  $("usage-refresh").onclick = requestUsage;
-  $("usage-show-all").onclick = () => { $("usage-range").value = "all"; requestUsage(); };
-  document.querySelector(".usage-table-wrap").addEventListener("scroll", (e) => usageEdges(e.currentTarget), { passive: true });
-  const settingsNav = document.querySelector(".settings-nav");
-  if (settingsNav) settingsNav.addEventListener("scroll", () => usageEdges(settingsNav), { passive: true });
-  window.addEventListener("resize", () => {
-    usageEdges(settingsNav);
-    usageEdges(document.querySelector(".usage-table-wrap"));
-  });
-  function openSettings(providers, models, section, range) {
-    settingsProviders = providers || [];
-    $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
-      settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
-    const subPreset = $("s-subagent_provider");
-    if (subPreset) {
-      subPreset.innerHTML = '<option value="">choose a preset\u2026</option>'
-        + settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
-    }
-    $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
-    if (lastConfig) fillSettings(lastConfig);
-    askModels("subagent");
-    // `/usage 30d` opens the tab on the range it named; anything else keeps the last choice.
-    if (USAGE_RANGES.includes(range)) $("usage-range").value = range;
-    settingsReturnFocus = document.activeElement;
-    $("settings").hidden = false;
-    showSettingsSection(section || "general");
-  }
-  function closeSettings() {
-    $("settings").hidden = true;
-    const target = settingsReturnFocus && typeof settingsReturnFocus.focus === "function"
-      ? settingsReturnFocus : $("btn-settings");
-    settingsReturnFocus = null; target.focus();
-  }
-  // Context size: a menu of the sizes people actually use, with Custom for anything else. The
-  // number input stays the single source of truth, so collectSettings() is unchanged.
-  function syncContextPreset(value, presetId, customId) {
-    const preset = presetId ? $(presetId) : ($("s-context_preset") || $("s-context_size_preset"));
-    const custom = $(customId || "s-context_size");
-    if (!preset || !custom) return;
-    const known = [...preset.options].some((o) => o.value === String(value ?? ""));
-    // "0" is a real choice on the sub-agent menu (the main window), not a missing value.
-    if ((value || String(value) === "0") && known) {
-      preset.value = String(value);
-      custom.hidden = true;
-    } else {
-      preset.value = "custom";
-      custom.hidden = false;
-    }
-  }
-
-  function collectSettings() {
-    const v = {};
-    SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
-    SET_BOOLEAN_FIELDS.forEach((key) => { v[key] = v[key] !== "false"; });
-    // One select, two keys: hidden keeps whatever inline choice was already saved.
-    const shown = String(v.show_reasoning || "inline");
-    v.thinking_inline = shown === "hidden" ? lastConfig?.thinking_inline !== false
-      : shown === "inline" || shown === "true";
-    v.show_reasoning = shown !== "hidden" && shown !== "false";
-    return v;
-  }
-  for (const [presetId, customId] of [["s-context_size_preset", "s-context_size"],
-                                      ["s-subagent_context_size_preset", "s-subagent_context_size"]]) {
-    const preset = $(presetId);
-    if (preset) {
-      preset.onchange = () => {
-        const custom = $(customId);
-        if (preset.value === "custom") { custom.hidden = false; custom.focus(); return; }
-        custom.value = preset.value;
-        custom.hidden = true;
-      };
-    }
-  }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
-  $("set-close").onclick = closeSettings;
-  $("set-cancel").onclick = closeSettings;
-  $("set-save").onclick = () => { vscode.postMessage({ type: "saveSettings", values: collectSettings() }); closeSettings(); };
-  $("settings").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); closeSettings(); return; }
-    if (e.key !== "Tab") return;
-    const focusable = [...$("settings").querySelectorAll("button, input, select, textarea")]
-      .filter((node) => !node.disabled && node.getAttribute("aria-hidden") !== "true");
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  });
-  // The model dropdowns list what the host in the form offers: picking the Ollama preset, or typing
-  // a host, fetches that host's models (the extension asks the host; nothing is saved).
-  const modelLists = { main: "s-models", subagent: "s-subagent-models" };
-  const modelAsked = { main: "", subagent: "" };
-  function askModels(target) {
-    const base = $(target === "subagent" ? "s-subagent_base_url" : "s-base_url")?.value.trim() || "";
-    const key = $(target === "subagent" ? "s-subagent_api_key" : "s-api_key")?.value.trim() || "";
-    // A sub-agent with no host of its own runs on the main one, and lists the main host's models.
-    const host = base || (target === "subagent" ? $("s-base_url")?.value.trim() || "" : "");
-    modelAsked[target] = host;
-    vscode.postMessage({ type: "settingsModels", target, base_url: host,
-                         api_key: base || target === "main" ? key : $("s-api_key")?.value.trim() || "" });
-  }
-  function fillModelList(msg) {
-    const target = msg.target === "subagent" ? "subagent" : "main";
-    // A reply for a host the form has since moved away from is stale.
-    if (modelAsked[target] && msg.base_url && modelAsked[target].replace(/\/$/, "") !== String(msg.base_url).replace(/\/$/, "")) return;
-    const list = $(modelLists[target]);
-    if (list) list.innerHTML = (msg.ids || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
-    const input = $(target === "subagent" ? "s-subagent_model" : "s-model");
-    if (input) {
-      input.placeholder = msg.error ? "type a model id (couldn't list this host's models)"
-        : (msg.ids || []).length ? `${msg.ids.length} model${msg.ids.length === 1 ? "" : "s"} on this host`
-          : (target === "subagent" ? "inherit main" : "model id");
-    }
-  }
-  for (const [field, target] of [["s-base_url", "main"], ["s-subagent_base_url", "subagent"]]) {
-    const input = $(field);
-    if (input) input.addEventListener("change", () => askModels(target));
-  }
-  // The Agents tab needs the same shortcut the Models tab has: pick a provider, get its host.
-  // It fills only the sub-agent fields, and never touches the main connection.
-  $("s-subagent_provider").onchange = () => {
-    const preset = settingsProviders.find((x) => x.id === $("s-subagent_provider").value);
-    if (!preset) return;
-    $("s-subagent_base_url").value = preset.url;
-    $("s-subagent_api_mode").value = "auto";
-    if (!preset.needsKey && !$("s-subagent_api_key").value) $("s-subagent_api_key").value = "ollama";
-    askModels("subagent");
-  };
-  $("s-provider").onchange = () => {
-    const p = settingsProviders.find((x) => x.id === $("s-provider").value);
-    if (p) {
-      $("s-base_url").value = p.url; $("s-api_mode").value = "auto";
-      const se = $("s-subscription_engine"); if (se) se.value = "";   // a direct provider turns delegation off
-      const sm = $("s-subscription_model"); if (sm) sm.value = "";
-      const sf = $("s-subscription_effort"); if (sf) sf.value = "";
-      updateSubscriptionFields();
-      if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
-      askModels("main");
-    }
-  };
-  const subscriptionEngine = $("s-subscription_engine");
-  if (subscriptionEngine) subscriptionEngine.onchange = () => {
-    if (subscriptionEngine.value !== subscriptionEngine.dataset.loadedValue) {
-      const model = $("s-subscription_model"); if (model) model.value = "";
-      const effort = $("s-subscription_effort"); if (effort) effort.value = "";
-      subscriptionEngine.dataset.loadedValue = subscriptionEngine.value;
-    }
-    updateSubscriptionFields();
-  };
-  document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
-  const openPlugins = $("open-plugins");
-  if (openPlugins) openPlugins.onclick = () => {
-    surfaceReturnSection = "extensions";
-    closeSettings();
-    vscode.postMessage({ type: "requestPlugins" });
-    openSurface("plugins");
-  };
-  document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
-    // Settings has to close for the surface to take the panel, so remember where we came from
-    // and put it back on the way out. Without this the Extensions tab was a one-way door.
-    surfaceReturnSection = button.closest(".set-section")?.dataset.section || "extensions";
-    closeSettings(); vscode.postMessage({ type: "slash", action: button.dataset.openSurface });
-  });
 
   // ---- replay ----
   // Everything a saved turn is made of. Anything else in a history payload is not dispatched:
@@ -5995,9 +5426,6 @@
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
-    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section, msg.range); }
-    else if (msg.type === "settings_models") { fillModelList(msg); }
-    else if (msg.type === "usage_unavailable") { usageUnavailable(msg); }
     else if (msg.type === "mcp_command_started") {
       mcpContextPending = msg.requestId;
       openSurface("mcp");

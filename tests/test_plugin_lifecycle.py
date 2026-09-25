@@ -56,6 +56,31 @@ class PluginLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(plugins.PluginError,'already owns'): self.install()
         self.assertEqual([r['name'] for r in plugins._installed()],['fixture'])
 
+    def test_one_dead_marketplace_does_not_take_the_catalog_with_it(self):
+        # These roots live under marketplace-sources/ and are never re-fetched, so a dotfile sync
+        # that skips cache dirs, or a ~/.dgc copied to a machine with a different home, makes the
+        # loss permanent. It used to raise out of load_catalog with no isolation at all -- losing
+        # all 28 curated entries, and surfacing when someone clicked Connect on Zapier as a message
+        # about a marketplace manifest they never chose.
+        from dgc import plugin_registry
+        self.home.mkdir(parents=True, exist_ok=True)
+        plugin_registry.write_json(self.home / 'marketplaces.json', {'marketplaces': [
+            {'name': 'gone', 'root': str(self.root / 'no-such-snapshot'), 'source': 'https://example.invalid/m',
+             'pin': '', 'plugins': []},
+        ]})
+        # And a locally authored package the user can no longer read: same outage, own leg.
+        authored = self.home / 'authored' / 'broken'
+        authored.mkdir(parents=True, exist_ok=True)
+        (authored / '.codex-plugin').mkdir(parents=True, exist_ok=True)
+        (authored / '.codex-plugin' / 'plugin.json').write_text('{}')
+        authored.chmod(0o000)
+        self.addCleanup(lambda: authored.chmod(0o755))
+        rows = plugins.load_catalog()['plugins']
+        self.assertTrue(rows, 'the curated catalog survives a dead source')
+        self.assertNotIn('gone', [r.get('marketplace') for r in rows])
+        names = {r['name'] for r in rows}
+        self.assertIn('dgc-templates', names, 'the first-party entries are still offered')
+
     def test_connecting_an_app_refuses_to_replace_a_plugin_of_the_same_name(self):
         # Plugins and connectors share one flat namespace, and a package names itself. Saving the
         # connector used to drop the plugin's ownership row while leaving its skill folder in the

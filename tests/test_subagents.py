@@ -198,6 +198,20 @@ class Harness:
 
     def close(self):
         self._done.set()
+        # A detached child outlives the turn by design, and finishing means tearing down its git
+        # worktree -- which writes into the repository this harness is about to delete. Nothing can
+        # join the thread: it is a daemon and no handle is kept. But `work()` pops its entry from
+        # `_detached_jobs` in a `finally`, after the last of that work, so an empty map is the
+        # signal. Without this wait the temp directory was removed underneath a live child and the
+        # cleanup raised "Directory not empty: '.git'" -- long after the test itself had passed,
+        # under full-suite load only, failing the whole release gate on a race in the harness.
+        try:
+            self.agent.stop_detached()
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and getattr(self.agent, "_detached_jobs", None):
+                time.sleep(0.02)
+        except Exception:
+            pass
         try:
             self.agent.mcp.stop_all()
         except Exception:

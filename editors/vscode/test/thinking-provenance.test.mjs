@@ -157,30 +157,10 @@ for (const width of [300, 460]) {
   });
 }
 
-for (const width of [300, 460, 900]) {
-  test(`the Show model thinking select shows its whole value at ${width}px`, async (t) => {
-    if (skipOrFail(t)) return;
-    const page = await openThinkingPage(browser, { width, theme: "dark-modern", height: 800, events: [] });
-    try {
-      await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
-        data: { type: "settings_open", providers: [], models: [], section: "general" } })));
-      await page.waitForTimeout(150);
-      const facts = await page.evaluate(() => {
-        const select = document.getElementById("s-show_reasoning");
-        const style = getComputedStyle(select);
-        const context = document.createElement("canvas").getContext("2d");
-        context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-        const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 18;
-        return { room, widths: [...select.options].map((option) => [option.textContent, context.measureText(option.textContent).width]) };
-      });
-      for (const [text, measured] of facts.widths) {
-        assert.ok(measured <= facts.room, `"${text}" is ${measured.toFixed(1)}px in ${facts.room.toFixed(1)}px`);
-      }
-    } finally {
-      await page.close();
-    }
-  });
-}
+// The three "Show model thinking" width checks measured a select inside the in-panel settings
+// dialog, which has been removed. That control now lives on the standalone Settings tab, whose
+// page sets its own widths; re-measuring it there wants a harness pointed at
+// settingsView.settingsDocument() plus settings.css -- a new harness rather than an edit.
 
 test("a block whose text is not here says so inside its body", async (t) => {
   if (skipOrFail(t)) return;

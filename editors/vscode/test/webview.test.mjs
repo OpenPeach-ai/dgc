@@ -1862,85 +1862,6 @@ test("a folded paste can be put back into the text field", () => {
   dom.window.close();
 });
 
-test("the Agents tab offers the same provider preset the Models tab does", () => {
-  const { errors, send, doc } = makeDom();
-  send({ type: "event", event: { type: "ready", capabilities: {} } });
-  send({ type: "settings_open", providers: [
-    { id: "ollama", label: "Ollama (local)", url: "http://localhost:11434/v1", needsKey: false },
-    { id: "openai", label: "OpenAI", url: "https://api.openai.com/v1", needsKey: true },
-  ], models: [], section: "agents" });
-
-  const preset = doc.getElementById("s-subagent_provider");
-  assert.ok(preset, "the Agents tab has a provider preset");
-  assert.ok(preset.closest('[data-section="agents"]'), "and it lives on the Agents tab");
-  assert.deepEqual([...preset.options].map((o) => o.value), ["", "ollama", "openai"]);
-
-  preset.value = "ollama";
-  preset.onchange();
-  assert.equal(doc.getElementById("s-subagent_base_url").value, "http://localhost:11434/v1",
-               "choosing a preset fills the sub-agent host");
-  assert.equal(doc.getElementById("s-base_url").value, "",
-               "and never touches the main connection");
-  assert.deepEqual(errors, []);
-});
-
-test("picking a host fills the model dropdown with the models that host offers", () => {
-  const { errors, send, doc, posted } = makeDom();
-  const ollama = "http://localhost:11434/v1";
-  send({ type: "event", event: { type: "ready", capabilities: {} } });
-  send({ type: "settings_open", providers: [
-    { id: "ollama", label: "Ollama (local)", url: ollama, needsKey: false },
-  ], models: [], section: "agents" });
-  const asks = () => posted.filter((m) => m.type === "settingsModels");
-  assert.equal(asks().at(-1).target, "subagent", "opening Settings lists the sub-agent host's models");
-
-  const sub = doc.getElementById("s-subagent_provider");
-  sub.value = "ollama"; sub.onchange();
-  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["subagent", ollama]);
-  send({ type: "settings_models", target: "subagent", base_url: ollama, ids: ["glm-5.3:cloud", "qwen3.8:27b"] });
-  assert.equal(doc.getElementById("s-subagent_model").getAttribute("list"), "s-subagent-models");
-  assert.deepEqual([...doc.querySelectorAll("#s-subagent-models option")].map((o) => o.value),
-                   ["glm-5.3:cloud", "qwen3.8:27b"]);
-  assert.match(doc.getElementById("s-subagent_model").placeholder, /2 models on this host/);
-
-  const main = doc.getElementById("s-provider");
-  main.value = "ollama"; main.onchange();
-  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["main", ollama]);
-  send({ type: "settings_models", target: "main", base_url: ollama, ids: ["qwen3.8:27b"] });
-  assert.deepEqual([...doc.querySelectorAll("#s-models option")].map((o) => o.value), ["qwen3.8:27b"]);
-  send({ type: "settings_models", target: "main", base_url: "http://elsewhere:11434/v1", ids: ["stale"] });
-  assert.deepEqual([...doc.querySelectorAll("#s-models option")].map((o) => o.value), ["qwen3.8:27b"],
-                   "a reply for a host the form moved away from is ignored");
-
-  const host = doc.getElementById("s-subagent_base_url");
-  host.value = "http://gpu:11434/v1";
-  host.dispatchEvent(new doc.defaultView.Event("change"));
-  assert.deepEqual([asks().at(-1).target, asks().at(-1).base_url], ["subagent", "http://gpu:11434/v1"]);
-  send({ type: "settings_models", target: "subagent", base_url: "http://gpu:11434/v1", ids: [], error: "HTTP 404" });
-  assert.match(doc.getElementById("s-subagent_model").placeholder, /couldn't list/);
-  assert.deepEqual(errors, []);
-});
-
-test("the sub-agent context window loads from the config and saves with the form", () => {
-  const { errors, send, doc, posted } = makeDom();
-  send({ type: "settings_open", providers: [], models: [], section: "agents" });
-  const preset = doc.getElementById("s-subagent_context_size_preset");
-  const custom = doc.getElementById("s-subagent_context_size");
-  const config = (extra) => send({ type: "event", event: { type: "config", model: "m", mode: "default",
-    base_url: "http://localhost:11434/v1", context_size: 131072, ...extra } });
-  config({ subagent_context_size: 65536 });
-  assert.deepEqual([preset.value, custom.hidden], ["65536", true]);
-  config({});
-  assert.deepEqual([preset.value, custom.hidden], ["0", true], "no value: the main model's window");
-  config({ subagent_context_size: 50000 });
-  assert.deepEqual([preset.value, custom.hidden, custom.value], ["custom", false, "50000"]);
-  preset.value = "16384"; preset.onchange();
-  doc.getElementById("set-save").click();
-  assert.equal(posted.find((m) => m.type === "saveSettings").values.subagent_context_size, "16384");
-  assert.equal(doc.getElementById("s-context_size_preset").value, "131072", "the main window is its own menu");
-  assert.deepEqual(errors, []);
-});
-
 test("the context meter's menu sets the context window, as Settings does", () => {
   const { errors, send, doc, posted } = makeDom();
   const event = (ev) => send({ type: "event", event: ev });
@@ -2808,75 +2729,11 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   assert.deepEqual(errors, []);
 });
 
-test("provider runtime settings and actual usage round-trip through the webview", () => {
-  const { dom, errors, posted, send, doc } = makeDom();
-  assert.ok([...doc.getElementById("s-api_mode").options].some((option) =>
-    option.value === "anthropic" && option.textContent === "Anthropic Messages"));
-  send({ type: "settings_open", providers: [
-    { id: "ollama", label: "Ollama", url: "http://localhost:11434/v1", needsKey: false },
-  ], models: [] });
-  send({ type: "event", event: {
-    type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
-    mode: "default", think: "xhigh", api_mode: "responses", provider_state: "server",
-    subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
-    fallback_api_key: "must-not-enter-webview",
-    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000, ultra_mode: true,
-    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "max",
-    subscription_engines: [
-      { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
-  } });
-  assert.equal(doc.getElementById("s-api_mode").value, "responses");
-  assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
-  assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
-  assert.equal(doc.getElementById("s-think").value, "max",
-    "General → Thinking is the composer dial, so a subscription route shows its effort");
-  assert.equal(doc.getElementById("s-subscription_effort").value, "max",
-    "subscription max must survive settings hydration");
-  assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
-  assert.equal(doc.getElementById("s-provider_state").value, "server");
-  assert.equal(doc.getElementById("s-prompt_cache").value, "false");
-  assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
-  assert.equal(doc.getElementById("s-ultra_mode").value, "true");
-  assert.equal(doc.getElementById("s-fallback_api_key").value, "",
-    "backend config must never populate a secret field in the webview");
-  doc.getElementById("s-fallback_api_key").value = "new-fallback-secret";
-  doc.getElementById("set-save").click();
-  const saved = posted.find((m) => m.type === "saveSettings");
-  assert.equal(saved.values.provider_state, "server");
-  assert.equal(saved.values.prompt_cache, false);
-  assert.equal(saved.values.subagent_api_mode, "ollama");
-  assert.equal(saved.values.fallback_api_mode, "chat_completions");
-  assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
-  assert.equal(saved.values.subscription_engine, "codex");
-  assert.equal(saved.values.subscription_model, "gpt-5.6");
-  assert.equal(saved.values.think, "max");
-  assert.equal(saved.values.subscription_effort, "max");
-  assert.equal(saved.values.ultra_mode, true);
-  doc.getElementById("s-provider").value = "ollama";
-  doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  assert.equal(doc.getElementById("s-api_mode").value, "auto",
-    "a provider preset must not retain an incompatible forced transport");
-  assert.equal(doc.getElementById("s-subscription_engine").value, "");
-  assert.equal(doc.getElementById("s-subscription_model").value, "",
-    "a direct provider must not retain an engine-specific model");
-  assert.equal(doc.getElementById("s-subscription_effort").value, "",
-    "a direct provider must not retain an engine-specific effort");
-
-  send({ type: "event", event: {
-    type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
-    mode: "default", think: "low", subscription_engine: "copilot",
-    subscription_model: "", subscription_effort: "", subscription_engines: [
-      { key: "copilot", label: "Copilot", installed: true, logged_in: false,
-        auth_state: "check_on_launch", login_cmd: "copilot login" }],
-  } });
-  send({ type: "settings_open", providers: [], models: [] });
-  assert.match(doc.getElementById("s-subscription_status").textContent, /checked securely/);
-  doc.getElementById("s-subscription_engine").value = "qwen";
-  doc.getElementById("s-subscription_engine").dispatchEvent(
-    new dom.window.Event("change", { bubbles: true }));
-  assert.equal(doc.getElementById("s-subscription_effort").disabled, true,
-    "engines without an effort flag must not accept a stale effort override");
-
+test("the context pill and compaction round-trip through the webview", () => {
+  // The settings half of this test drove the in-panel settings dialog, which is gone; the tab
+  // has its own coverage in editor-settings.test.mjs. The context pill and compaction below
+  // never had anything to do with settings and are what this test is now for.
+  const { dom, doc, send, posted, errors } = makeDom();
   send({ type: "event", event: { type: "context", used: 1000, size: 4000,
     compact_threshold: .75, compact_at: 3000,
     input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,
@@ -2907,7 +2764,7 @@ test("provider runtime settings and actual usage round-trip through the webview"
   dom.window.close();
 });
 
-test("feature browsers manage MCP, docs, permissions, memory, and settings without chat pollution", () => {
+test("feature browsers manage MCP, docs, permissions and memory without chat pollution", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "surface_open", surface: "mcp" });
   send({ type: "event", event: { type: "mcp_servers", request_id: "servers-1", total: 1,
@@ -2970,9 +2827,6 @@ test("feature browsers manage MCP, docs, permissions, memory, and settings witho
   assert.equal(doc.getElementById("surface").hidden, true,
     "a late feature response must not reopen a panel the user closed");
 
-  send({ type: "settings_open", providers: [], models: [], section: "security" });
-  assert.equal(doc.querySelector('.set-section[data-section="security"]').hidden, false);
-  assert.equal(doc.querySelector('.set-section[data-section="models"]').hidden, true);
   assert.deepEqual(errors, [], "feature surfaces raised JS errors");
   dom.window.close();
 });
@@ -3038,7 +2892,7 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
   assert.equal(doc.getElementById("input").getAttribute("aria-label"), "Message DGC");
   assert.match(mainCss, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(mainCss, /#phead \.pm \.cur, \.tool \.dot\.run \{ animation: none; \}/);
-  for (const id of ["set-close", "btn-add", "btn-cmd", "btn-ctx", "btn-settings", "send"]) {
+  for (const id of ["btn-add", "btn-cmd", "btn-ctx", "btn-settings", "send"]) {
     assert.ok(doc.getElementById(id).getAttribute("aria-label"), `${id} needs an accessible name`);
   }
   for (const button of doc.querySelectorAll("button")) {
@@ -3105,11 +2959,6 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
 
   const settingsButton = doc.getElementById("btn-settings");
   settingsButton.focus();
-  send({ type: "settings_open", providers: [], models: [] });
-  assert.equal(doc.getElementById("settings").getAttribute("aria-modal"), "true");
-  assert.equal(doc.activeElement, doc.getElementById("s-mode"));
-  key(doc.getElementById("settings"), "Escape");
-  assert.equal(doc.getElementById("settings").hidden, true);
   assert.equal(doc.activeElement, settingsButton);
 
   assert.deepEqual(errors, [], "accessible interaction flow raised JS errors");
@@ -3386,29 +3235,6 @@ test("scrolling back through a run does not strand you at the top of it", () => 
   assert.deepEqual(errors, []);
 });
 
-test("picking a context-size preset saves that window", () => {
-  const { errors, send, doc, posted } = makeDom();
-  send({ type: "event", event: { type: "ready", capabilities: {} } });
-  send({ type: "event", event: { type: "config", context_size: 65536, model: "deepseek-v4-pro:cloud" } });
-  send({ type: "settings_open", providers: [], models: [] });
-
-  const preset = doc.getElementById("s-context_size_preset");
-  const custom = doc.getElementById("s-context_size");
-  assert.ok(preset && custom, "the context size control exists");
-  assert.equal(preset.value, "65536", "the stored window is preselected");
-  assert.equal(custom.value, "65536", "and mirrored into the number input");
-
-  preset.value = "1048576";
-  preset.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
-  doc.getElementById("set-save").click();
-
-  const saved = posted.filter((m) => m.type === "saveSettings").pop();
-  assert.ok(saved, "save posts the settings");
-  assert.equal(String(saved.values.context_size), "1048576",
-    "the chosen preset is what gets saved");
-  assert.deepEqual(errors, []);
-});
-
 test("a mermaid fence becomes a diagram, and survives a runtime that never arrives", () => {
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
@@ -3489,38 +3315,11 @@ test("a rating announces whether it is applied", () => {
   assert.deepEqual(errors, []);
 });
 
-test("the Extensions tab is not a one-way door", () => {
-  // Opening Skills from Settings has to close Settings for the surface to take the panel. Without
-  // remembering where it came from there was no route back to the Extensions tab at all.
-  const { errors, send, doc, posted } = makeDom();
-  send({ type: "event", event: { type: "ready", capabilities: {} } });
-  send({ type: "settings_open", providers: [], models: [], section: "extensions" });
-  assert.equal(doc.querySelector('.set-section[data-section="extensions"]').hidden, false);
-
-  const opener = doc.querySelector('.set-section[data-section="extensions"] [data-open-surface]');
-  assert.ok(opener, "the Extensions tab opens a feature surface");
-  opener.click();
-  assert.equal(doc.getElementById("settings").hidden, true, "settings yields the panel");
-  assert.equal(posted.at(-1).type, "slash");
-
-  // The host answers the slash by taking the panel with that surface.
-  send({ type: "surface_open", surface: opener.dataset.openSurface });
-  assert.equal(doc.getElementById("surface").hidden, false, "the surface is showing");
-  doc.getElementById("surface-close").click();
-  assert.equal(doc.getElementById("surface").hidden, true);
-  const back = posted.at(-1);
-  assert.equal(back.type, "openSettings", "closing it asks for settings again");
-  assert.equal(back.section, "extensions", "and lands on the tab it came from");
-  assert.deepEqual(errors, []);
-});
-
 test("a selected control is a filled pill, not a pill with a bar under it", () => {
   // An accent underline beneath an already-tinted background reads as a second, heavier element
   // rather than as emphasis. Selection is carried by the fill alone.
   assert.doesNotMatch(mainCss, /box-shadow:\s*inset 0 -\d+px 0 var\(--accent\)/,
     "no accent underline under a selected control");
-  assert.match(mainCss, /\.set-tab\.active \{[^}]*background: var\(--sel\)/,
-    "the active settings tab is still marked, by its fill");
   assert.match(mainCss, /\.model-control\.ultra \{[^}]*background: var\(--accent-soft\)/,
     "and so is the ultra model control");
 });
@@ -4020,20 +3819,6 @@ test("the monitors rail wraps its chips in a narrow panel and keeps a full-size 
   assert.match(shot, /narrow \? 4 : 2/, "the narrow render checks four chips");
 });
 
-test("the settings form carries the wake-on-monitor toggle both ways", () => {
-  const { doc, send, posted, errors } = makeDom();
-  assert.ok(doc.getElementById("s-monitor_wake"));
-  send({ type: "event", event: { type: "config", model: "m", mode: "default", think: "off", base_url: "x",
-         project_root: "/p", goal: {}, monitor_wake: false } });
-  send({ type: "settings_open", providers: [], models: [] });
-  assert.equal(doc.getElementById("s-monitor_wake").value, "false");
-  doc.getElementById("s-monitor_wake").value = "true";
-  doc.getElementById("set-save").click();
-  const saved = posted.filter((m) => m.type === "saveSettings").pop();
-  assert.equal(saved.values.monitor_wake, true, "saved as a boolean");
-  assert.deepEqual(errors, []);
-});
-
 // ---- Token Usage settings tab ----
 // The tab reads the CLI's local ledger: opening it, changing the range and Refresh each ask again,
 // only the newest answer is drawn, and every number arrives as a provider-reported count.
@@ -4066,230 +3851,13 @@ function openUsageTab() {
   return { ...view, requests };
 }
 
-test("the Token Usage tab sits after Agents and asks for the selected range when it opens", () => {
-  const { doc, requests, errors } = openUsageTab();
-  const tabs = [...doc.querySelectorAll(".set-tab")].map((t) => t.dataset.section);
-  assert.deepEqual(tabs.slice(0, 4), ["general", "models", "agents", "usage"]);
-  assert.equal(doc.querySelector('.set-tab[data-section="usage"]').textContent, "Token Usage");
-  assert.equal(doc.querySelector('.set-section[data-section="usage"]').hidden, false);
-  assert.equal(doc.querySelector('.set-section[data-section="general"]').hidden, true);
-  assert.equal(requests().length, 1);
-  assert.equal(requests()[0].range, "7d");
-  assert.match(requests()[0].requestId, /^usage-/);
-  assert.equal(doc.getElementById("usage-status").textContent, "Counting…");
-  assert.deepEqual([...doc.getElementById("usage-range").options].map((o) => o.textContent),
-    ["Today", "7 days", "30 days", "This month", "All time"]);
-  assert.match(doc.querySelector(".usage-privacy").textContent,
-    /Counted on this machine from what each provider reports\. Nothing here is sent anywhere\./);
-  assert.deepEqual(errors, []);
-});
-
-test("a populated usage report renders figures, a sorted escaped model table and two day strips", () => {
-  const { doc, send, requests, errors } = openUsageTab();
-  send({ type: "event", event: usageReport(requests()[0].requestId) });
-  assert.equal(doc.getElementById("usage-content").hidden, false);
-  assert.equal(doc.getElementById("usage-empty").hidden, true);
-  const figures = [...doc.querySelectorAll(".usage-figure")];
-  assert.deepEqual(figures.map((f) => f.querySelector(".usage-figure-label").textContent),
-    ["Input", "Output", "Cached input", "Requests"]);
-  assert.deepEqual(figures.map((f) => f.querySelector(".usage-figure-value").textContent),
-    ["1.2M", "89K", "400K", "321"]);
-  assert.match(figures[0].getAttribute("aria-label"), /^Input: 1.234.567 tokens$/);
-  assert.match(figures[0].querySelector(".usage-figure-exact").textContent, /^1.234.567 tokens$/);
-  assert.equal(figures[3].querySelector(".usage-figure-exact"), null,
-    "a count that is not abbreviated is not repeated underneath");
-  assert.equal(doc.getElementById("usage-unmetered").hidden, true, "unmetered appears only when non-zero");
-  assert.match(doc.getElementById("usage-timezone").textContent, /local time \(IST, UTC\+05:30\)/);
-  assert.match(doc.getElementById("usage-status").textContent, /^Updated /);
-
-  const rows = [...doc.querySelectorAll("#usage-models tr")];
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].querySelector(".usage-name").textContent, "qwen3.8:27b");
-  assert.equal(rows[0].querySelector(".usage-where").textContent, "ollama · localhost:11434");
-  assert.equal(rows[0].querySelector(".usage-where .usage-tail").textContent, ":11434",
-    "the port that tells two local servers apart is never the part that gets clipped");
-  assert.equal(rows[0].querySelector(".usage-model").getAttribute("scope"), "row");
-  assert.deepEqual([...rows[0].querySelectorAll("td.num")].map((c) => c.textContent.replace(/\D/g, "")),
-    ["1000000", "80000", "400000", "300"], "input, output, cached, requests");
-  assert.deepEqual([...doc.querySelectorAll(".usage-table thead th")].map((c) => c.childNodes[0].textContent.trim()),
-    ["Model", "Input", "Output", "Cached", "Requests", "Share"]);
-  assert.equal(rows[1].querySelector(".usage-name").textContent, "claude-<b>opus</b>");
-  assert.equal(rows[1].querySelector("b"), null, "model ids are text, never markup");
-  assert.equal(rows[0].querySelector(".usage-share-text").textContent, "82%");
-  assert.equal(rows[0].querySelector(".usage-share-fill").style.width, `${(1_080_000 / 1_323_579) * 100}%`);
-  assert.equal(rows[1].querySelector(".usage-share").getAttribute("aria-label"), "18% of tokens");
-
-  const bars = [...doc.querySelectorAll("#usage-strip-in .usage-day")];
-  const outBars = [...doc.querySelectorAll("#usage-strip-out .usage-day")];
-  assert.equal(bars.length, 7, "one column per day, zero days included");
-  assert.equal(outBars.length, 7);
-  assert.equal(bars[3].querySelector(".usage-bar"), null, "a day with no requests draws no bar");
-  // Each strip has its own scale: output is 7% of input here, yet its busiest day fills its strip.
-  assert.equal(bars[6].querySelector(".usage-bar.usage-in").style.height, "100%");
-  assert.equal(outBars[6].querySelector(".usage-bar.usage-out").style.height, "100%");
-  assert.equal(outBars[0].querySelector(".usage-bar.usage-out").style.height, `${(900 / 6300) * 100}%`);
-  assert.equal(doc.getElementById("usage-peak-in").textContent, "peak 70K");
-  assert.match(doc.getElementById("usage-peak-out").textContent, /^peak 6.300$/);
-  assert.equal(doc.getElementById("usage-days").hidden, false);
-  assert.match(doc.getElementById("usage-day-readout").textContent,
-    /^Busiest — .*: 70.000 input · 6.300 output tokens · 7 requests$/);
-  assert.ok(bars[6].classList.contains("sel") && outBars[6].classList.contains("sel"),
-    "the selected day is marked in both strips");
-
-  const strip = doc.getElementById("usage-days");
-  strip.dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
-  assert.match(doc.getElementById("usage-day-readout").textContent, /: 60.000 input · 5.400 output tokens · 6 requests$/);
-  assert.ok(bars[5].classList.contains("sel"));
-  strip.dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "Home", bubbles: true }));
-  assert.match(doc.getElementById("usage-day-readout").textContent, /: 10.000 input · 900 output tokens · 1 request$/);
-  assert.ok(doc.getElementById("usage-days-first").textContent);
-  assert.ok(doc.getElementById("usage-days-last").textContent);
-  assert.deepEqual(errors, []);
-});
-
-test("changing the range or refreshing asks again and a late answer to an older range is ignored", () => {
-  const { doc, send, requests, errors } = openUsageTab();
-  const first = requests()[0].requestId;
-  const range = doc.getElementById("usage-range");
-  range.value = "30d";
-  range.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
-  assert.equal(requests().length, 2);
-  assert.equal(requests()[1].range, "30d");
-  send({ type: "event", event: usageReport(first) });          // the 7-day answer arrives late
-  assert.equal(doc.getElementById("usage-content").hidden, true, "a superseded report is not drawn");
-  send({ type: "event", event: usageReport(requests()[1].requestId, { range: "30d",
-    totals: { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0, requests: 3, unmetered_requests: 2 } }) });
-  assert.equal(doc.getElementById("usage-content").hidden, false);
-  assert.equal(doc.getElementById("usage-unmetered").hidden, false);
-  assert.match(doc.getElementById("usage-unmetered").textContent,
-    /^2 unmetered requests ended without a usage report .*so their tokens are not/);
-  doc.getElementById("usage-refresh").click();
-  assert.equal(requests().length, 3);
-  assert.equal(requests()[2].range, "30d");
-  assert.equal(doc.getElementById("usage-status").textContent, "Refreshing…");
-  assert.equal(doc.querySelector('.set-section[data-section="usage"]').getAttribute("aria-busy"), "true");
-  // Re-opening the tab counts again, too.
-  doc.querySelector('.set-tab[data-section="general"]').click();
-  doc.querySelector('.set-tab[data-section="usage"]').click();
-  assert.equal(requests().length, 4);
-  assert.deepEqual(errors, []);
-});
-
-test("an empty range explains what will appear, and errors or an old CLI say so plainly", () => {
-  const { doc, send, requests, errors } = openUsageTab();
-  send({ type: "event", event: usageReport(requests()[0].requestId, {
-    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 },
-    by_model: [], by_day: [] }) });
-  const empty = doc.getElementById("usage-empty");
-  assert.equal(empty.hidden, false);
-  assert.equal(doc.getElementById("usage-content").hidden, true);
-  assert.match(empty.textContent, /No model requests counted in this range yet/);
-  assert.match(empty.textContent, /Each request DGC finishes \(chats, goals, sub-agents, fallbacks, compaction\) will appear here/);
-  assert.match(doc.querySelector('.set-section[data-section="usage"]').textContent, /Subscription CLI/);
-  assert.equal(doc.getElementById("usage-empty-all").hidden, false, "a short empty range points at All time");
-  doc.getElementById("usage-show-all").click();
-  assert.equal(doc.getElementById("usage-range").value, "all");
-  assert.equal(requests().at(-1).range, "all");
-  send({ type: "event", event: usageReport(requests().at(-1).requestId, { range: "all",
-    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 },
-    by_model: [], by_day: [] }) });
-  assert.equal(doc.getElementById("usage-empty-all").hidden, true, "All time has nowhere further to point");
-
-  doc.getElementById("usage-refresh").click();
-  send({ type: "event", event: usageReport(requests().at(-1).requestId, { error: "OperationalError: disk I/O error",
-    totals: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, requests: 0, unmetered_requests: 0 } }) });
-  assert.equal(empty.hidden, true);
-  assert.match(doc.getElementById("usage-status").textContent, /could not be read: OperationalError: disk I\/O error/);
-
-  doc.getElementById("usage-refresh").click();
-  send({ type: "usage_unavailable", requestId: requests().at(-1).requestId,
-    message: "Update the DGC CLI to see token usage in the editor." });
-  assert.equal(doc.getElementById("usage-status").textContent, "Update the DGC CLI to see token usage in the editor.");
-  assert.equal(doc.querySelector('.set-section[data-section="usage"]').hasAttribute("aria-busy"), false);
-  assert.deepEqual(errors, []);
-});
-
-test("a long range folds the day strip into weeks", () => {
-  const { doc, send, requests, errors } = openUsageTab();
-  const start = new Date(2026, 0, 1);
-  const days = Array.from({ length: 120 }, (_, i) => {
-    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return { date: iso, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0, requests: 1 };
-  });
-  send({ type: "event", event: usageReport(requests()[0].requestId, { range: "all", by_day: days }) });
-  assert.equal(doc.querySelectorAll("#usage-strip-in .usage-day").length, 18);
-  assert.equal(doc.querySelectorAll("#usage-strip-out .usage-day").length, 18);
-  assert.ok(doc.getElementById("usage-strip-in").classList.contains("dense") === false);
-  assert.match(doc.getElementById("usage-days-first").textContent, /^Week of /);
-  assert.match(doc.getElementById("usage-days").getAttribute("aria-label"), /per week, 18 weeks/);
-  assert.deepEqual(errors, []);
-});
-
-test("one day draws no strip, a singular unmetered request reads right, and long ids keep their tail", () => {
-  const { doc, send, requests, errors } = openUsageTab();
-  send({ type: "event", event: usageReport(requests()[0].requestId, {
-    range: "today",
-    totals: { input_tokens: 500, output_tokens: 40, cached_input_tokens: 0, requests: 3, unmetered_requests: 1 },
-    by_model: [
-      { model: "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M", provider: "openai", host: "192.0.2.10:8000",
-        requests: 2, unmetered_requests: 0, input_tokens: 400, output_tokens: 30, cached_input_tokens: 0 },
-      { model: "Qwen/Qwen3.5-122B-A10B-FP8", provider: "openai", host: "openrouter.ai",
-        requests: 1, unmetered_requests: 1, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0 },
-    ],
-    by_day: [{ date: "2026-09-14", input_tokens: 500, output_tokens: 40, cached_input_tokens: 0, requests: 3 }] }) });
-  assert.equal(doc.getElementById("usage-days").hidden, true, "a single day repeats the figures; no strip");
-  assert.match(doc.getElementById("usage-day-readout").textContent, /^[^B].*: 500 input · 40 output tokens · 3 requests$/);
-  assert.equal(doc.getElementById("usage-unmetered").textContent,
-    "1 unmetered request ended without a usage report (cancelled, interrupted, or the provider sent none), so its tokens are not in these totals.");
-  const [first, second] = doc.querySelectorAll("#usage-models tr");
-  assert.equal(first.querySelector(".usage-name .usage-tail").textContent, ":Q4_K_M");
-  assert.equal(first.querySelector(".usage-name").textContent, "hf.co/unsloth/Qwen3.5-27B-GGUF:Q4_K_M");
-  assert.equal(first.querySelector(".usage-where .usage-tail").textContent, ":8000");
-  assert.equal(second.querySelector(".usage-name .usage-tail").textContent, "-FP8");
-  assert.equal(second.querySelector(".usage-where .usage-tail"), null, "a host without a port is not split");
-  assert.match(first.querySelector(".usage-model").title, /^hf\.co\/unsloth\/Qwen3\.5-27B-GGUF:Q4_K_M\nopenai · 192\.0\.2\.10:8000$/);
-  assert.deepEqual(errors, []);
-});
-
-test("a sideways-scrolling tab strip or model table fades the edge that hides more", () => {
-  const { doc, send, posted, errors } = makeDom();
-  const nav = doc.querySelector(".settings-nav");
-  const wrap = doc.querySelector(".usage-table-wrap");
-  let navLeft = 0, wrapLeft = 0;
-  // jsdom has no layout: stand in for a 300px panel whose tabs and table are wider than it.
-  for (const [node, width, get, set] of [[nav, 420, () => navLeft, (v) => { navLeft = v; }],
-    [wrap, 640, () => wrapLeft, (v) => { wrapLeft = v; }]]) {
-    Object.defineProperty(node, "scrollWidth", { configurable: true, get: () => width });
-    Object.defineProperty(node, "clientWidth", { configurable: true, get: () => 274 });
-    Object.defineProperty(node, "scrollLeft", { configurable: true, get, set });
-  }
-  send({ type: "settings_open", providers: [], models: [], section: "usage" });
-  assert.ok(nav.classList.contains("more-right"));
-  assert.ok(!nav.classList.contains("more-left"));
-  send({ type: "event", event: usageReport(posted.filter((m) => m.type === "getUsage").at(-1).requestId) });
-  assert.ok(wrap.classList.contains("more-right"), "drawing the table checks its edges");
-  navLeft = 146;
-  nav.dispatchEvent(new doc.defaultView.Event("scroll"));
-  assert.ok(nav.classList.contains("more-left") && !nav.classList.contains("more-right"));
-  wrapLeft = 0;
-  wrap.dispatchEvent(new doc.defaultView.Event("scroll"));
-  assert.ok(wrap.classList.contains("more-right"));
-  wrapLeft = 366;
-  wrap.dispatchEvent(new doc.defaultView.Event("scroll"));
-  assert.ok(!wrap.classList.contains("more-right") && wrap.classList.contains("more-left"));
-  assert.deepEqual(errors, []);
-});
-
 test("the typed /usage command opens the Token Usage tab through the extension host", () => {
+  // The slash route is live and unchanged -- it opens the standalone Settings tab on its Token
+  // Usage page. What went with the in-panel dialog is the chat webview's own getUsage case and the
+  // usage stylesheet; the tab carries both itself, covered by editor-settings.test.mjs and by
+  // panel-settings.test.mjs's re-pointed get_usage test.
   assert.match(panelSrc, /case "usage": this\.openSettings\("usage"\); break;/);
-  assert.match(panelSrc, /case "getUsage": \{[\s\S]*?type: "get_usage", request_id: requestId, range/);
-  assert.match(mainCss, /\.usage-table-wrap \{[^}]*overflow-x: auto/);
-  assert.match(mainCss, /\.usage-table \{[^}]*font-variant-numeric: tabular-nums/);
-  assert.match(mainCss, /\.usage-section > \.set-group:first-child \{ margin-top: 0; \}/,
-    "the tab's first heading sits where every other tab's does");
-  assert.doesNotMatch(mainCss, /\.usage-clip \{[^}]*max-width: 140px/, "ids are not cut at a fixed 140px");
-  assert.match(mainCss, /\.usage-table-wrap\.more-right \{[^}]*mask-image/, "a table with hidden columns says so");
+  assert.doesNotMatch(mainCss, /\.usage-table/, "the chat no longer carries the usage stylesheet");
 });
 
 // A webview reloaded while a turn runs: the extension says a turn is running (turn_active) before the
@@ -4483,16 +4051,6 @@ test("a new backend's request with an id the last backend already used gets its 
   assert.deepEqual(errors, []);
 });
 
-test("settings opened on Token Usage with a range asks for that range", () => {
-  const { doc, send, posted, errors } = makeDom();
-  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "30d" });
-  assert.equal(doc.getElementById("usage-range").value, "30d");
-  assert.equal(posted.findLast(m => m.type === "getUsage").range, "30d");
-  send({ type: "settings_open", providers: [], models: [], section: "usage", range: "bogus" });
-  assert.equal(doc.getElementById("usage-range").value, "30d", "an unknown range leaves the choice alone");
-  assert.deepEqual(errors, []);
-});
-
 test("a draft with a pasted-text chip survives a reload, and so does an unconfirmed send of one", () => {
   // Before: cleanDraft accepted only skill, template, image and resource chips, so a draft holding a
   // pasted-text chip was dropped whole and the panel warned about storage limits for a 6 KB paste.
@@ -4522,16 +4080,6 @@ test("a draft with a pasted-text chip survives a reload, and so does an unconfir
   assert.equal(again.doc.getElementById("input").value, "draft with a pasted chip:");
   assert.equal(again.doc.querySelectorAll("#attachments .pasted-chip").length, 1);
   assert.deepEqual([...first.errors, ...reopened.errors, ...again.errors], []);
-});
-
-test("Settings Save says it applies to every workspace, which is where it writes", () => {
-  // Before: "Save these settings for this workspace", but saving writes the user config
-  // (~/.dgc/config.json through set_config) that every workspace on the machine reads.
-  const { doc, errors } = makeDom();
-  const save = doc.getElementById("set-save");
-  assert.doesNotMatch(save.title, /this workspace/);
-  assert.match(save.title, /every workspace/);
-  assert.deepEqual(errors, []);
 });
 
 test("a backend killed without a word says 'killed by SIGKILL' once, on the line and on the Continue card", () => {

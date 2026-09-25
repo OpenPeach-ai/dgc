@@ -155,15 +155,32 @@ def _entries(data, root, source, pin):
 
 def entries(home: Path) -> list[dict]:
     rows = []
+    # One unreadable source must not take the catalog with it. load_catalog() has no isolation of
+    # its own, so a marketplace whose snapshot is gone raised 'No marketplace found. Expected
+    # .agents/plugins/marketplace.json...' out of the plugin directory, out of ensure_first_party(),
+    # and out of connectors.save() when someone clicked Connect on Zapier -- naming a manifest that
+    # user never chose, and losing all 28 curated entries with it. These roots sit under
+    # marketplace-sources/ and are never re-fetched, so a dotfile sync that skips cache dirs, a
+    # ~/.dgc copied to a machine with a different home, or reclaimed disk space made it permanent
+    # rather than transient. Refresh and Remove both still work, because neither reads this root.
     for market in list_marketplaces(home):
         root = Path(market['root'])
-        rows += _entries(_manifest(root), root, market['source'], market['pin'])
+        try:
+            rows += _entries(_manifest(root), root, market['source'], market['pin'])
+        except (SourceError, OSError):
+            continue
     authored = home / 'authored'
     if authored.is_dir():
         for root in sorted(authored.iterdir())[:100]:
             if root.is_dir() and NAME.fullmatch(root.name):
-                rows += _entries({'name': 'personal', 'plugins': [{'name': root.name, 'source': './' + root.name}]},
-                                 authored, 'Created locally', '')
+                # Same isolation for a locally authored package: _entries reads its metadata, so a
+                # truncated or oversize plugin.json, or two folders that collide after namespacing,
+                # is one broken folder of the user's own -- not a reason to lose the catalog.
+                try:
+                    rows += _entries({'name': 'personal', 'plugins': [{'name': root.name, 'source': './' + root.name}]},
+                                     authored, 'Created locally', '')
+                except (SourceError, OSError):
+                    continue
     return rows
 
 

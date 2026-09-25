@@ -520,6 +520,10 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
             "verification": entry.get("verification") or "",
             "requirements": entry.get("requirements") or "",
             "audited_on": entry.get("audited_on") or "",
+            # The cloud banner is a disclosure, so the flag has to travel the list path too, not
+            # only the install review's raw entry. It sits below the metadata spread with the rest
+            # of DGC's compatibility decisions: a package must not be able to un-declare it.
+            "cloud_execution": bool(entry.get("cloud_execution")),
             "logo_file": (have or {}).get("logo_file") or "",
             "apps": metadata.get("apps", []),
             "mcps": [{"name":name, "url":spec.get("url", ""), "command":spec.get("command", ""), "transport":spec.get("transport", "stdio")} for name,spec in record_servers(have).items()] if have else metadata.get("mcps", []),

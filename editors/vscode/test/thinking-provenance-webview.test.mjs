@@ -352,27 +352,3 @@ test("20,000 one-token deltas into one block stay linear", () => {
   assert.ok(took < 1000, `took ${Math.round(took)}ms`);
 });
 
-test("the Show model thinking select carries show_reasoning and thinking_inline together", () => {
-  const { send, doc, posted } = makeDom();
-  const select = doc.getElementById("s-show_reasoning");
-  assert.deepEqual([...select.options].map((option) => [option.value, option.textContent]), [
-    ["inline", "inline"], ["collapsed", "collapsed"], ["hidden", "hidden"]]);
-  assert.match(select.closest("label").textContent,
-    /Short provider summaries show inline; raw thinking stays collapsed\. Labels say where thinking came from: raw from the model, or summarized by the provider\./);
-  send({ type: "settings_open", providers: [], models: [] });
-  const config = { type: "config", base_url: "http://h", model: "m", mode: "default", think: "off" };
-  for (const [values, expected] of [[{ show_reasoning: true }, "inline"],
-    [{ show_reasoning: true, thinking_inline: false }, "collapsed"],
-    [{ show_reasoning: false, thinking_inline: false }, "hidden"]]) {
-    send(ev({ ...config, ...values }));
-    assert.equal(select.value, expected, JSON.stringify(values));
-  }
-  for (const [choice, show, inline] of [["inline", true, true], ["collapsed", true, false], ["hidden", false, false]]) {
-    select.value = choice;
-    doc.getElementById("set-save").click();
-    const saved = posted.filter((m) => m.type === "saveSettings").pop();
-    assert.equal(saved.values.show_reasoning, show, choice);
-    assert.equal(saved.values.thinking_inline, inline, choice);
-    send({ type: "settings_open", providers: [], models: [] });
-  }
-});

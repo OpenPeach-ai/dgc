@@ -1,7 +1,7 @@
 /** Provider-owned setup. Public descriptions are shared with the Python package. */
 export type AppConnector = { name: string; kind: string; url: string; auth: string[];
   manage: string; docs: string; terms: string; privacy: string; summary: string;
-  setup: string; placeholder: string; license: string };
+  setup: string; placeholder: string; license: string; cloud_execution: boolean };
 export const APP_CONNECTORS: Record<string, AppConnector> = require('../../../dgc/connector_catalog.json');
 export function connectorUrl(id: string, input: unknown): string {
   const def = APP_CONNECTORS[id];
