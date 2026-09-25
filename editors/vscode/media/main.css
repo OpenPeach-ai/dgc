@@ -932,6 +932,9 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .composer-pill::before { content: "/"; color: var(--link); font-family: var(--mono); }
 .composer-pill.pill-file::before { content: "@"; }
 .composer-pill.pill-template::before { content: "$"; }
+/* A link pill shows its own favicon instead of a sigil, and the host rather than the whole URL. */
+.composer-pill.pill-link::before { content: none; }
+.composer-pill.pill-link .link-favicon { width: 13px; height: 13px; border-radius: 2px; align-self: center; }
 @media (forced-colors: active) { .composer-pill { border-color: CanvasText; } }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 /* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,

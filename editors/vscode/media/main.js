@@ -179,6 +179,24 @@
     pill.setAttribute("contenteditable", "false");
     pill.setAttribute("data-pill", wire);
     pill.dataset.kind = kind;
+    if (kind === "link") {
+      // Origin-only, exactly as a link in the transcript: the path, query and fragment of what was
+      // pasted never leave the machine, and dgc.linkFavicons off means no request at all.
+      const src = faviconsEnabled() ? window.DgcMarkdown?.faviconUrl?.(wire) : null;
+      if (src) {
+        const img = el("img", "link-favicon");
+        img.alt = ""; img.setAttribute("aria-hidden", "true");
+        img.referrerPolicy = "no-referrer";
+        img.src = src;
+        pill.appendChild(img);
+      }
+      let shown = label;
+      try { const u = new URL(label); shown = u.host + (u.pathname === "/" ? "" : u.pathname); }
+      catch { /* keep the raw text if it will not parse */ }
+      pill.appendChild(document.createTextNode(shown.length > 48 ? shown.slice(0, 47) + "\u2026" : shown));
+      pill.title = label;
+      return pill;
+    }
     pill.textContent = label;
     return pill;
   }
@@ -4759,6 +4777,19 @@
       attachments.push({ label: "Pasted text", pasted, chars: pasted.length });
       renderAtts();
       sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
+      return;
+    }
+    // A pasted link becomes a pill carrying its favicon, which is what Codex does and what was
+    // asked for. Only when the clipboard is EXACTLY one URL: pasting a paragraph that happens to
+    // contain a link is pasting prose, and rewriting the middle of it would be presumptuous.
+    //
+    // Unlike a skill pill, this one's wire text is the URL ITSELF, so the model receives precisely
+    // the characters that were pasted. The pill is a way of SHOWING the link, not of replacing it.
+    const single = pasted.trim();
+    if (single && !/\s/.test(single) && /^https?:\/\/\S+$/i.test(single) && single === pasted.trim()) {
+      e.preventDefault();
+      const [selStart, selEnd] = composerSelection();
+      insertComposerPill(selStart, selEnd, "link", single, single);
       return;
     }
     // EVERY other paste is prevented too, and the plain text re-inserted by hand.

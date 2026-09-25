@@ -93,3 +93,54 @@ test("a pill does not make its line taller than a line of text", () => {
 test("high contrast gets a visible pill border", () => {
   assert.match(mainCss, /forced-colors: active\) \{ \.composer-pill \{ border-color: CanvasText/);
 });
+
+// ---- link pills ------------------------------------------------------------------------------
+// Pasting a link shows it with its favicon, which is what Codex does. The difference from a skill
+// pill is the whole point: this one's wire text IS the URL, so the model receives exactly the
+// characters that were pasted. The pill SHOWS the link; it does not stand in for it.
+
+function pasteInto(h, text) {
+  const input = h.doc.getElementById("input");
+  const event = new h.dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { items: [], getData: () => text } });
+  input.dispatchEvent(event);
+  return { input, event };
+}
+
+test("a pasted link becomes a pill carrying the host", () => {
+  const h = panelWithSkill();
+  const { input } = pasteInto(h, "https://example.test/docs/page?token=secret");
+  const pill = h.doc.querySelector("#input .composer-pill.pill-link");
+  assert.ok(pill, "the link is shown as a pill");
+  assert.match(pill.textContent, /example\.test/, "the host is what a reader needs");
+  assert.equal(pill.title, "https://example.test/docs/page?token=secret", "the whole URL on hover");
+  assert.equal(input.value, "https://example.test/docs/page?token=secret",
+    "and the model receives exactly what was pasted, not a shortened form");
+});
+
+test("the favicon is requested for the ORIGIN only", () => {
+  // A URL can carry a token in its path or query. The icon service learns the host and nothing
+  // else -- the same trade the transcript's link favicons already make.
+  const h = panelWithSkill();
+  pasteInto(h, "https://example.test/secret-path?token=abc123");
+  const img = h.doc.querySelector("#input .composer-pill.pill-link img.link-favicon");
+  if (img) {
+    assert.equal(img.src.includes("secret-path"), false, "the path must not leave the machine");
+    assert.equal(img.src.includes("abc123"), false, "nor the query");
+    assert.equal(img.referrerPolicy, "no-referrer");
+  }
+});
+
+test("pasting prose that contains a link stays prose", () => {
+  const h = panelWithSkill();
+  const { input } = pasteInto(h, "see https://example.test for more");
+  assert.equal(h.doc.querySelector("#input .composer-pill.pill-link"), null,
+    "rewriting the middle of a pasted paragraph would be presumptuous");
+  assert.equal(input.value, "see https://example.test for more");
+});
+
+test("a pasted link is still one paste to undo", () => {
+  const h = panelWithSkill();
+  const { event } = pasteInto(h, "https://example.test/x");
+  assert.equal(event.defaultPrevented, true, "the browser never inserts it itself");
+});
