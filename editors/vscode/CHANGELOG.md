@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.30.0 — unreleased
+
+In progress. What is already in:
+
+- **A finished run of tools folds to the one line that describes it.** The group stays open while
+  it works -- you can watch what is being done -- and folds once the model moves on, so a long
+  transcript reads as a sequence of steps instead of a wall of cards. A group whose tools failed,
+  were denied or were stopped stays open: an error is the one thing you should never have to
+  expand to find.
+
+- **"Edited N files" rebuilt.** The directory is dimmed and the filename is not, the totals sit
+  under the title, Undo and Review moved into the header, counts line up on the right, and a list
+  longer than three files collapses behind "Show N more files".
+
+- **A file with no line count says so.** A brand-new file, a binary write, or a change too large
+  to diff used to arrive as "+0 −0", which reads as "nothing changed" when it means "there was
+  never a diff to count".
+
+- **Auto mode is announced quietly.** The accent ring and focus glow around the composer are gone;
+  the control that names the mode carries the colour instead.
+
+- **The image viewer can keep a picture and scale it.** Save writes wherever you choose, and zoom
+  steps with a live percentage, by button or with + and -.
+
 ## 0.29.1 — 2026-09-24
 
 - **A file chip opens when you click it.** Clicking a produced PNG did nothing: the open path

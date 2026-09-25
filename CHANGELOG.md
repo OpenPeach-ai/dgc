@@ -4,6 +4,22 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.45.0 — unreleased
+
+In progress. What is already in:
+
+- **`propose_options` no longer parks a turn forever.** The picker blocked with no deadline and
+  nothing to reap it, because the abandonment watchdog reads a parked turn as a running one, so a
+  window that vanished mid-question left the backend waiting and holding the session. The bound is
+  positive evidence of abandonment -- two missed editor liveness pings -- not a clock, so a present
+  user may take as long as they like. Only the editor frontend is affected; the terminal, classic
+  CLI and ACP waits are unchanged.
+
+- **A `dgc serve` shutdown test no longer depends on the machine being quiet.** It waited on the
+  child without draining its stdout and stderr, so under load the child could block inside a flush
+  and the wait expired. With the pipes drained, shutdown measures at 0.12s under load, and the
+  test now allows about a second rather than a minute -- strictly stricter than what it replaces.
+
 ## 0.44.1 — 2026-09-24
 
 Nine fixes. Most were found by USING 0.44.0 rather than by testing it; the last was found by the
