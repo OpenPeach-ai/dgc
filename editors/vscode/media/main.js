@@ -1578,6 +1578,9 @@
     if (following) scroll();
   }
   // ---- what the turn changed, and what you can do about it ----
+  // Codex shows three files then "Show N more files". A turn that touched twenty files should not
+  // push its own Undo/Review controls off the screen.
+  const TS_VISIBLE_ROWS = 3;
   function turnSummaryCard(edits, prompt) {
     const files = [...(edits || new Map()).entries()];
     if (!files.length) return null;
@@ -1586,23 +1589,57 @@
     const card = el("div", "turn-summary");
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", "Files changed in this turn");
-    card.innerHTML = `<div class="ts-head">${icon("file-diff")}`
-      + `<span class="ts-title">${files.length} ${files.length === 1 ? "file" : "files"} changed</span>`
-      + `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span></div>`
-      + `<div class="ts-list">${files.map(([path, v], i) =>
-          `<button type="button" class="ts-row" data-file="${i}" title="Review ${esc(path)}">`
-          + `<span class="change-path">${esc(path)}</span>`
-          + (v.additions || v.deletions
-              ? `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`
-              : `<span class="ts-new">New</span>`)
-          + `<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")}</div>`
-      + `<div class="ts-actions">`
-      + `<button type="button" class="act ts-undo" title="Put these files back as they were before this turn">Undo</button>`
-      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">Review</button></div>`;
+    // The directory is context and the filename is the thing, so they are drawn at different
+    // weights -- one span at one colour makes the reader parse the path themselves.
+    const splitPath = (path) => {
+      const cut = String(path).lastIndexOf("/");
+      return cut < 0 ? ["", String(path)] : [String(path).slice(0, cut + 1), String(path).slice(cut + 1)];
+    };
+    const row = ([path, v], i) => {
+      const [dir, name] = splitPath(path);
+      return `<button type="button" class="ts-row" data-file="${i}" title="Review ${esc(path)}">`
+        + `<span class="change-path">${dir ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
+        + `<span class="path-name">${esc(name)}</span></span>`
+        // "not diffable" is not "no change": a binary write or an oversized diff has no numbers
+        // to show, and printing +0 −0 for it claims the file was untouched.
+        + (v.counted === false
+            ? `<span class="ts-uncounted" title="No line count: a new, binary or oversized file">New</span>`
+            : `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`)
+        + `</button>`;
+    };
+    const counted = files.filter(([, v]) => v.counted !== false);
+    const totals = counted.length
+      ? `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span>`
+      : `<span class="ts-uncounted">no line count</span>`;
+    const head = files.length === 1 ? "Edited 1 file" : `Edited ${files.length} files`;
+    const shown = files.slice(0, TS_VISIBLE_ROWS);
+    const rest = files.slice(TS_VISIBLE_ROWS);
+    card.innerHTML = `<div class="ts-head"><span class="ts-mark">${icon("file-diff")}</span>`
+      + `<span class="ts-heading"><span class="ts-title">${head}</span>`
+      + `<span class="ts-totals">${totals}</span></span>`
+      + `<span class="ts-actions">`
+      + `<button type="button" class="ts-undo" title="Put these files back as they were before this turn">Undo <span class="codicon codicon-discard" aria-hidden="true"></span></button>`
+      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">Review</button>`
+      + `</span></div>`
+      + `<div class="ts-list">${shown.map(row).join("")}`
+      + (rest.length
+          ? `<div class="ts-more" hidden>${rest.map((entry, i) => row(entry, i + TS_VISIBLE_ROWS)).join("")}</div>`
+            + `<button type="button" class="ts-expand" aria-expanded="false">Show ${rest.length} more `
+            + `${rest.length === 1 ? "file" : "files"} <span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>`
+          : "")
+      + `</div>`;
     card.querySelectorAll("[data-file]").forEach((row) => row.onclick = () => {
       const entry = files[Number(row.dataset.file)];
       if (entry) vscode.postMessage({ type: "reviewChange", path: entry[0], scope: "chat" });
     });
+    const expand = card.querySelector(".ts-expand");
+    if (expand) expand.onclick = () => {
+      const more = card.querySelector(".ts-more");
+      const open = more.hidden;
+      more.hidden = !open;
+      expand.setAttribute("aria-expanded", String(open));
+      expand.hidden = open;          // once opened it stays open; there is nothing to re-collapse to
+    };
     card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
     // Undo restores the workspace to the recovery point this turn opened. The extension
     // identifies it by the prompt, refuses when it can no longer find it, and confirms first.
@@ -2288,12 +2325,18 @@
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/;
 
   const EDIT_TOOLS = new Set(["edit_file", "write_file", "multi_edit", "apply_patch", "create_file"]);
-  function recordEdit(path, additions = 0, deletions = 0) {
+  // `counted` separates "we diffed it and the totals are these" from "we never had a diff to
+  // count" -- a brand-new file, a binary write, or a change over MAX_DIFF_BYTES. Without it both
+  // arrive as 0/0, and the summary printed "+0 −0", which reads as "nothing changed" when it
+  // means "not diffable". The review panel already draws that distinction; this is the same data
+  // reaching the other renderer.
+  function recordEdit(path, additions = 0, deletions = 0, counted = true) {
     const name = String(path || "").replace(/^[ab]\//, "").replace(/^\/+/, "").trim();
     if (!turn || !name || name === "changed file") return;
-    const prior = turn.edits.get(name) || { additions: 0, deletions: 0 };
+    const prior = turn.edits.get(name) || { additions: 0, deletions: 0, counted: false };
     turn.edits.set(name, { additions: prior.additions + (Number(additions) || 0),
-                           deletions: prior.deletions + (Number(deletions) || 0) });
+                           deletions: prior.deletions + (Number(deletions) || 0),
+                           counted: prior.counted || !!counted });
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; appendConversationContent(c); breakText(); return c; }
   function requestArtifactStop(id, container, button) {
@@ -3297,7 +3340,7 @@
         }
         ensureTurn();
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
-          recordEdit(turn._paths?.[ev.call_id || ev.name]);
+          recordEdit(turn._paths?.[ev.call_id || ev.name], 0, 0, false);
         }
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
@@ -3325,7 +3368,8 @@
             rendered.dataset.agentId = c.dataset.agentId;
             rendered.classList.add("agent-owned");
           }
-          if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del);
+          if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del,
+                                       rendered.dataset.add !== undefined || rendered.dataset.del !== undefined);
         }
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));

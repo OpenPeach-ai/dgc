@@ -3121,7 +3121,8 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
 
   const card = doc.querySelector(".turn-summary");
   assert.ok(card, "a turn that changed files must say so");
-  assert.equal(card.querySelector(".ts-title").textContent, "2 files changed");
+  // Codex's wording, adopted 2026-09-24: the card leads with the action, not the noun.
+  assert.equal(card.querySelector(".ts-title").textContent, "Edited 2 files");
   assert.equal(card.querySelector(".ts-head .change-add").textContent, "+1");
   assert.equal(card.querySelector(".ts-head .change-del").textContent, "−1");
   const rows = [...card.querySelectorAll(".ts-row .change-path")].map((n) => n.textContent);
@@ -3487,10 +3488,16 @@ test("a selected control is a filled pill, not a pill with a bar under it", () =
 });
 
 test("auto mode colours the model pill too, not just the box around it", () => {
-  // Auto mode is a lavender outline on the ordinary composer surface, not the olive error colour.
-  assert.match(mainCss,
-    /#cbox\[data-mode="auto"\] \{[^}]*background: var\(--surface2\)/,
+  // Auto mode used to ring the whole composer: an accent border plus a 3px glow on focus. The
+  // founder asked for that to go (2026-09-24) -- a bright halo round the box you look at all day
+  // is an accent spent as decoration, the same complaint that moved links off --accent. What it
+  // must NOT do is take the box's own fill; it is announced by the controls, on the ordinary
+  // surface.
+  assert.doesNotMatch(mainCss,
+    /#cbox\[data-mode="auto"\] \{[^}]*background:\s*(?!var\(--surface2\))/,
     "the box fill stays the ordinary surface");
+  assert.doesNotMatch(mainCss, /#cbox\[data-mode="auto"\]:focus-within \{/,
+    "and auto mode no longer rings the composer");
   assert.match(mainCss,
     /#cbox\[data-mode="auto"\] \.model-control\.ultra \{[^}]*background: var\(--accent-soft\)/,
     "the model pill takes the auto colour");

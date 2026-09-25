@@ -74,6 +74,23 @@ test("forced-colors hands links back to the system", () => {
 });
 
 
+// Auto mode is announced by colouring the composer's own mode control instead of ringing the whole
+// box. That label is TEXT on the composer surface, so it owes 4.5:1 -- and the obvious colour to
+// reach for, --accent, is the very token links had to abandon for failing it.
+test("the auto-mode label uses the AA-passing accent, not the brand one", () => {
+  const rule = mainCss.match(/#cbox\[data-mode="auto"\] #modelabel,\s*#cbox\[data-mode="auto"\] #modeicon \{([^}]*)\}/);
+  assert.ok(rule, "the auto-mode label rule is missing");
+  assert.match(rule[1], /color:\s*var\(--link\)/,
+    "the auto-mode label must take --link; --accent fails AA as text");
+  assert.doesNotMatch(rule[1], /color:\s*var\(--accent\)/);
+});
+
+// The halo this replaced must stay gone: a 3px accent glow around the box you stare at all day.
+test("auto mode no longer rings the whole composer", () => {
+  const block = mainCss.match(/#cbox\[data-mode="auto"\]:focus-within \{([^}]*)\}/);
+  assert.equal(block, null, "the auto-mode composer halo is back");
+});
+
 // A file-kind mark is non-text content: WCAG 1.4.11 asks 3:1, not 4.5:1.
 const AA_NONTEXT = 3.0;
 const HUES = ["blue", "yellow", "orange", "green", "violet", "pink", "red", "neutral"];
