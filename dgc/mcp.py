@@ -1552,7 +1552,22 @@ class MCPServer:
         out = "\n".join(p for p in parts if p) or "(MCP tool returned no content)"
         if len(out) > _MAX_CONTENT:
             out = out[:_MAX_CONTENT] + f"\n… MCP content truncated ({len(out) - _MAX_CONTENT} chars)"
-        return ("ERROR: " + out) if res.get("isError") else out
+        if not res.get("isError"):
+            return out
+        # An upstream rate limit is transient, but it reaches the model as the same opaque payload
+        # as a missing credential -- so it reads as "no access" and the model surrenders to the
+        # user instead of pausing. Name it. No retry here: a sleep inside a tool call stalls the
+        # turn and the goal cycle around it.
+        #
+        # Phrases only, never a bare "429": this runs over the whole payload, which can be 120_000
+        # characters of someone else's JSON, and three digits appear in request ids and byte counts.
+        lowered = out.lower()
+        if "rate limit" in lowered or "too many requests" in lowered:
+            out += ("\n[dgc] This looks like an upstream rate limit, not a missing credential and "
+                    "not a permanent failure: the same call usually succeeds after a pause. Wait "
+                    "and retry with growing backoff before reporting it blocked, and do not ask "
+                    "the user to supply by hand what this tool can read.")
+        return "ERROR: " + out
 
 
 class MCPManager:

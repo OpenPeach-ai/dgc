@@ -2668,7 +2668,23 @@ class Agent(GoalLifecycle):
             else:
                 state = "skills only, no MCP server"
             skill_text = ", ".join(skills[:12]) or "none"
-            lines.append(f"- {label} (`{name}`): {state}. Skills: {skill_text}.")
+            # A connected broker -- Composio, Zapier, Arcade, n8n, Make -- fronts the third-party
+            # accounts the user authorized inside THAT service. Reporting only per-plugin
+            # connectivity let a model read "Figma: MCP not connected (OAuth error)" as "Figma is
+            # unreachable" while Composio sat connected one line below with the user's Figma
+            # account behind it. It did not merely fail to try: it wrote the premise into its own
+            # sub-agent's brief -- "The Figma MCP server is NOT connected in this environment, so
+            # you cannot query Figma files via MCP. Do not try." -- and asked for screenshots of
+            # data the broker could read. `state` gates it, so a broker that is down says nothing.
+            # The category is read from both places the catalog puts it: the installed row is
+            # written once at install and is not refreshed when a server merely connects.
+            category = str(row.get("category") or (row.get("metadata") or {}).get("category") or "")
+            broker = ""
+            if state == "MCP connected" and category.lower().endswith("connector"):
+                broker = (" It brokers accounts you authorized in its own service, so its tools may"
+                          " reach a service with no connected plugin here: search it with mcp_search"
+                          " before concluding one is unreachable.")
+            lines.append(f"- {label} (`{name}`): {state}. Skills: {skill_text}.{broker}")
         return "\n".join(lines[:24])
 
     def _search_mcp_tools(self, query: str, limit) -> str:
@@ -3380,7 +3396,10 @@ class Agent(GoalLifecycle):
         if plugins:
             parts += ["", "# Installed plugins",
                       "A plugin can be installed while its MCP server is still disconnected. "
-                      "Its skills are in the list above. Its tools appear in mcp_search only after the server connects.",
+                      "Its skills are in the list above. Its tools appear in mcp_search only after the server connects. "
+                      "A service whose own plugin is not connected may still be reachable through a connected "
+                      "connector plugin listed above: check that before telling the user a service needs "
+                      "credentials or a screenshot you cannot obtain.",
                       plugins]
 
         explicit = format_skill_instructions(getattr(self, "_explicit_skill_instructions", {}))
