@@ -3330,6 +3330,11 @@ class TUI:
         from . import docs as docs_mod
         entry = docs_mod.find(title)
         if not entry:
+            # `find` is an exact title match, so a near miss -- "plugins" for "Plugins, apps and
+            # MCP" -- used to return in silence and read as "there is no such page". Open the index
+            # instead, which is what the person was looking for, and say why.
+            self._flash(f"no page titled {title!r} — pick one from the list")
+            self._open_docs()
             return
         self._open_reader(entry[2], footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
 
