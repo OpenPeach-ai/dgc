@@ -3159,8 +3159,17 @@
     goalBar.hidden = !text || status === "completed";
     syncComposerRail();
     if (!text) { closeGoalEditor(false); closeGoalReview(false); return; }
-    $("goal-text").textContent = text;
     const paused = status === "paused", blocked = status === "blocked", completed = status === "completed";
+    // A blocked goal put "Blocked goal" beside the objective and nothing about WHY, so the one
+    // thing the reader needs -- what stopped it -- was behind the Review button. It was already in
+    // hand: goal_snapshot sends `reason` and setGoalState spreads it into goalState; only the
+    // review dialog ever read it. Once a goal is blocked or paused you know what you asked for,
+    // so the reason takes the line and the objective stays on the tooltip, the way a blocked task
+    // shows what blocked it rather than repeating its own title.
+    const reason = String(goalState.reason || "").trim();
+    const why = (blocked || paused) && reason ? reason : "";
+    $("goal-text").textContent = why || text;
+    $("goal-text").classList.toggle("goal-why", !!why);
     $("goal-status").textContent = paused ? "Paused goal" : blocked ? "Blocked goal" : completed ? "Completed goal" : "Pursuing goal";
     goalBar.dataset.status = status;
     const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
@@ -3169,8 +3178,10 @@
     icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
     toggle.title = resume ? "Resume goal" : "Pause goal";
     toggle.setAttribute("aria-label", resume ? "Resume goal" : "Pause goal");
-    $("goal-main").title = text;
-    $("goal-main").setAttribute("aria-label", `Expand and edit goal: ${text.slice(0, 180)}`);
+    $("goal-main").title = why ? `${text}\n\n${why}` : text;
+    $("goal-main").setAttribute("aria-label",
+      why ? `Expand and edit goal: ${text.slice(0, 180)}. ${status}: ${why.slice(0, 220)}`
+          : `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
     fitGoalText();
     if (!$("goal-review").hidden) renderGoalReview();
@@ -8114,6 +8125,22 @@
       }
       pendingPrompts.delete(`ask-${ask.id}`);
       return;
+    }
+    // A half-typed answer is the user's work, and the card is about to be replaced by a one-line
+    // "Not answered" -- so whatever is in its box would go with it, along with the question it was
+    // answering. Hand it back to the composer instead, on its own line under whatever is already
+    // there, ready to send. This is what Codex does (take_question_drafts, recovered on a turn
+    // that completes, is interrupted OR fails), and the reason is the same: the question was ours
+    // to ask, the typing was theirs.
+    //
+    // Not on "skipped": that is the user deciding not to answer, and putting their abandoned words
+    // back in the box would undo the dismissal they just made.
+    const orphaned = ev.outcome === "skipped" ? "" : String(ask.input?.value || "").trim();
+    if (orphaned) {
+      const at = composerText();
+      editComposer(at.length, at.length, (at && !at.endsWith("\n") ? "\n" : "") + orphaned);
+      autosizeComposer();
+      persistDraft();
     }
     ask.row.dataset.state = "settled";
     ask.row.dataset.outcome = String(ev.outcome || "");

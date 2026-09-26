@@ -6688,7 +6688,9 @@ class Agent(GoalLifecycle):
     ASK_DELIVERED = ("Your question is on the user's screen. This did NOT pause the turn and there "
                      "is no answer yet: carry on with every part of the task that does not depend "
                      "on it, do not guess the answer, and do not ask it again. If they reply it "
-                     "arrives as an ordinary message quoting your question.")
+                     "arrives as an ordinary message quoting your question. If the turn ends before "
+                     "they answer, say which default you took and repeat the question at the end of "
+                     "your reply, so they can answer it next turn.")
     ASK_TOO_MANY = ("error: you already have {n} questions open and unanswered. Wait for those, or "
                     "proceed on your own assumption and say so.")
 

@@ -883,6 +883,10 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #goalbar[data-status="blocked"] .goal-icon { color: var(--err-text); }
 #goal-status { flex: none; color: var(--muted); }
 #goal-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+/* The objective is a reminder of something you wrote, so --faint is enough for it. Why a goal
+   STOPPED is not -- that is the sentence the reader came for, and --faint is VS Code's
+   disabledForeground, 2.13:1 in the light themes. */
+#goal-text.goal-why { color: var(--muted); }
 #goal-time { flex: none; color: var(--faint); font: var(--w-reg) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
 .goal-actions { display: flex; flex: none; align-items: center; gap: 0; }
 .rail-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;

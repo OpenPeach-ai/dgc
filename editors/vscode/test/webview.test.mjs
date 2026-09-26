@@ -2581,11 +2581,21 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   doc.getElementById("goal-toggle").click();
   assert.equal(posted.filter((m) => m.type === "pauseGoal").length, 1);
   send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
-    elapsed_seconds: 67 } });
+    elapsed_seconds: 67, details: { reason: "no container registry on this machine" } } });
   assert.equal(doc.getElementById("goal-status").textContent, "Blocked goal");
+  // A blocked goal said "Blocked goal" beside the objective and nothing about why -- the reason
+  // was already on the wire and only the Review dialog ever read it. Once it is blocked, why it
+  // stopped is the sentence the reader came for; the objective stays on the tooltip.
+  assert.equal(doc.getElementById("goal-text").textContent, "no container registry on this machine");
+  assert.match(doc.getElementById("goal-main").title, /ship the release/,
+    "the objective is still one hover away");
+  assert.match(doc.getElementById("goal-main").getAttribute("aria-label"), /no container registry/,
+    "and a screen reader is told why, not just that");
   send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "paused",
     elapsed_seconds: 67 } });
   assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
+  assert.equal(doc.getElementById("goal-text").textContent, "ship the release",
+    "with no reason to show, the objective keeps the line");
   assert.equal(doc.getElementById("goal-time").textContent, "1:07");
   assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume goal");
   doc.getElementById("goal-toggle").click();

@@ -2043,8 +2043,9 @@ the question above it, as an ordinary message, so a reopened session shows it th
 
 Leave it and it folds to a single line reading **Answer question**; click that whenever you like
 and it opens again. Nothing is lost by ignoring it: a question still unanswered when the turn ends
-is recorded as unanswered, and the model is told so it decides for itself and says what it
-assumed. Skip does the same immediately.
+is recorded as unanswered, the model is told before it finishes so it decides for itself and says
+what it assumed, and it repeats the question at the end of its reply so you can answer it in your
+next message. Skip does the same immediately, minus the repeat.
 
 The model may have at most two open at once, it is never offered in a sub-agent or in a
 non-interactive `dgc -p` run, and asking a question never raises a permission prompt — nothing is

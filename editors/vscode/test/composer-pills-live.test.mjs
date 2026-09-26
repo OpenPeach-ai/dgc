@@ -446,3 +446,27 @@ test("pills on wrapped lines do not collide, and a pill does not grow the line",
   assert.ok(measured.pillHeight < measured.oneLine,
     `a pill is ${measured.pillHeight.toFixed(1)}px inside a ${measured.oneLine.toFixed(1)}px line, so it cannot push the line taller`);
 });
+
+test("an answer typed into a question that expires is handed back, not thrown away", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // The card is replaced by a one-line "Not answered", so a half-typed answer went with it -- and
+  // so did the question it was answering. Codex hands those drafts back to the composer at turn
+  // end; so does this now. A deliberate skip is left alone.
+  const recover = async (outcome, typed) => {
+    await freshComposer([]);
+    await page.evaluate(() => { window.postMessage({ type: "event",
+      event: { type: "turn_start", turn_id: "t1", prompt: "go", kind: "prompt" } }, "*"); });
+    await page.evaluate((q) => window.postMessage({ type: "event", event: {
+      type: "ask_request", ask_id: "a1", question: q } }, "*"), "Which host?");
+    await page.waitForFunction(() => !!document.querySelector(".open-ask-input"));
+    await page.evaluate((t) => { const i = document.querySelector(".open-ask-input");
+      i.value = t; i.dispatchEvent(new Event("input", { bubbles: true })); }, typed);
+    await page.evaluate((o) => window.postMessage({ type: "event", event: {
+      type: "ask_resolved", ask_id: "a1", outcome: o } }, "*"), outcome);
+    return value();
+  };
+  assert.equal(await recover("expired", "staging-2.internal"), "staging-2.internal",
+    "the turn ending is not a decision the user made; their words come back");
+  assert.equal(await recover("skipped", "staging-2.internal"), "",
+    "but skipping IS a decision -- putting the words back would undo it");
+});
