@@ -533,7 +533,15 @@ test("the pill's probe answers only the host bridge's nonce, and panel.ts keeps 
   assert.doesNotMatch(onMessage.slice(0, onMessage.indexOf("\n  }\n")), /agentsProbe/);
   const reply = panelSrc.slice(panelSrc.indexOf("private testOnlyWebviewReply("));
   assert.match(reply.slice(0, reply.indexOf("\n  }\n")), /if \(!process\.env\.DGC_EXTENSION_TEST_TOKEN \|\| msg\?\.type !== "agentsProbeResult"\) return false;/);
-  assert.match(panelSrc, /onDidReceiveMessage\(\(msg\) => \{\s*if \(this\.testOnlyWebviewReply\(msg\)\) return;/);
+  // The ordering is the invariant, not the exact adjacency: the probe reply must be intercepted
+  // before anything dispatches into the switch. Asserting positions rather than "these two lines
+  // touch" lets an unrelated early return (the liveness heartbeat) be added without loosening it.
+  const listener = panelSrc.slice(panelSrc.indexOf("onDidReceiveMessage((msg) => {"));
+  const body = listener.slice(0, listener.indexOf("\n      });"));
+  assert.ok(body.includes("if (this.testOnlyWebviewReply(msg)) return;"),
+    "the listener must intercept the probe reply itself");
+  assert.ok(body.indexOf("this.testOnlyWebviewReply(msg)") < body.indexOf("this.onMessage("),
+    "and it must do so before the message reaches the switch");
   assert.deepEqual(errors, []);
 });
 

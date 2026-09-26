@@ -52,7 +52,7 @@ const REQUEST_RESPONSES = new Map<string, string>([
   ["mcp_input_request", "mcp_input_response"],
 ]);
 const RESPONSE_COMMANDS = new Set(REQUEST_RESPONSES.values());
-const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt", "ping"]);
+const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt", "ping", "editor_state"]);
 
 // How often we tell the backend this window still exists. Comfortably inside the backend's own
 // patience (15 minutes), so a missed tick or a slow machine never reads as a closed window.
@@ -386,6 +386,11 @@ export class DgcBackend extends EventEmitter {
         if ((ev as any).capabilities?.editor_liveness) {
           this.startLivenessPings(this.proc);
         }
+        // Renderer-sourced liveness, and deliberately NOT a replacement for the timer above. That
+        // timer says "this extension host is alive", which is exactly what an orphaned host also
+        // says -- true, useless for a takeover, and still the right signal for the backend's
+        // 15-minute self-heal. What the backend cannot get from us, it gets from the webview.
+        this.editorStateSupported = !!(ev as any).capabilities?.editor_state;
         // Notify the panel first. Its synchronous ready handler sends workspace roots and
         // begins loading SecretStorage-backed settings. User commands remain held until the
         // panel explicitly releases the handshake.
@@ -599,6 +604,26 @@ export class DgcBackend extends EventEmitter {
     }, LIVENESS_PING_MS);
     // Never hold the extension host open on our account.
     (this.livenessTimer as any)?.unref?.();
+  }
+
+  private editorStateSupported = false;
+
+  /** Tell the backend what is actually on screen. A no-op against a CLI that does not declare it,
+   *  and never against a child that is not running: `send` would start one for a non-control
+   *  command and surface a stale-decision rejection for a control one, and a heartbeat must do
+   *  neither. */
+  editorState(source: "renderer" | "host", view: "open" | "closed"): void {
+    if (!this.editorStateSupported || !this.ready || !this.proc) { return; }
+    // A liveness statement is only true at the instant it is sent, so it must never be QUEUED.
+    // `send` enqueues whenever the transport is not clear, and `flushPending` would then write it
+    // minutes later -- moving the backend's renderer clock forward on behalf of a window that had
+    // already gone, and delaying the handover by however long the queue was backed up. That is the
+    // one thing this signal exists to prevent. Dropping it is safe in the direction that matters:
+    // the next renderer statement is 20s away and will be true when it goes, and a dropped
+    // host/closed claim only costs a closed view its bounded extra minute.
+    if (!this.released || this.draining
+        || this.setupPending.length || this.controlPending.length || this.pending.length) { return; }
+    this.send({ type: "editor_state", source, view });
   }
 
   private stopLivenessPings(): void {

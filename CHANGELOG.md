@@ -4,9 +4,87 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.45.0 — unreleased
+## 0.46.0 — unreleased
 
-In progress. What is already in:
+0.45.0 was built and tested on one machine and never published. Auditing that build found 27
+defects, and a first real session with it found twelve more; those fixes and this release's new
+work are all here, under one version number.
+
+### Sub-agents you can watch, and a fan-out that happens where you put it
+
+- **The model can now ask what its background children are doing.** A foreground `task` blocks
+  until the child finishes and a `background: true` one returns at once, but between the two the
+  model was blind: it had started something detached and had no way to ask about it. `list_tasks`
+  reports every sub-agent of the chat -- id, state, how long it has run, its tool count, a finished
+  one's summary, and which results nobody has read -- and `wait_tasks` blocks for a background
+  child's full result, the same text a foreground call would have returned. Both are read-only, and
+  neither is offered unless there is something to act on, so a pointless wait is not expressible.
+  A wait ends early when you say something, so the model reads you before it reads the child.
+
+  Neither name appears in `ready.tools`, and that is deliberate rather than an oversight: an already
+  installed `dgc-sdk` whose `RuntimePolicy` sets `allow_tools` raises on any runtime tool its own
+  table does not know, so publishing a new name there would end every such embedder's session on
+  the day the CLI updated. A session whose host set that allowlist is not offered the pair at all.
+
+- **One small edit beside four sub-agents no longer runs them one at a time.** The fan-out refused
+  any batch that was not entirely `task` and `todo`, so a single `bash` call or a one-line edit next
+  to four children cost the whole batch its parallelism -- about 26 minutes of one measured session.
+  The children now fan out where the model put them: a run of `task` calls that ENDS the response
+  goes out together, once everything before it has actually run, so the checkout they snapshot is
+  the one the model described. A call placed after them keeps the batch serial, because hoisting it
+  past children that are already working would be the same bug from the other side. The tool
+  description and the Ultra prompt both say so, so the model can use the rule rather than discover
+  it.
+
+- **Ultra now actually runs wider.** Ultra is not a token-saving mode, and its prose already
+  promised the whole range; the executor still ran four at a time. Both clamps now come from one
+  function, so the width the prompt promises is the width the pool runs. A width you chose yourself
+  is honoured exactly, including 1 -- the rate-limit advice tells you to lower that number, and an
+  unconditional override would have made that advice a lie. The ceiling is unchanged at 8.
+
+### A held session, decided on whether a window exists
+
+- **A reloaded window gets its session back in about two minutes, not fifteen.** This is the bug
+  the founder hit twice. Reloading an editor window leaves its extension host running, and nothing
+  in the editor API tells that host it was orphaned -- so it goes on saying "I am alive", truthfully
+  and uselessly, on a timer. Every one of those was read as "the window is fine", which is how a
+  session stayed stranded for 25 hours. The chat panel's own webview now says it is on screen every
+  twenty seconds, and that is the clock a takeover is decided on: a reloaded window takes its panel
+  with it and cannot fake one. An extension that knows nothing about this is judged exactly as it
+  shipped, so upgrading the CLI alone changes nothing for it.
+
+- **A refusal now says the true thing.** Asking for a session held by a window that is genuinely on
+  screen used to print a countdown and promise "send this again and it will be handed over" -- for
+  two minutes at a stretch, about a window you were looking at. A live panel is now refused with
+  "its editor window is on screen" and no deadline. A holder that AGREED to hand over and is still
+  saving used to be described with the fifteen-minute self-heal figure, which was about a backend
+  ending itself; it now says it agreed and to send again in a few seconds.
+
+- **A granted handover actually completes inside the asking window's budget.** Standing down ended
+  the command read by closing the stream, which cannot work: closing a stream another thread is
+  blocked reading takes the lock that reader holds, so the closer blocked too and the reader woke
+  only when the next byte happened to arrive -- around 30 seconds on average against the 25 the
+  asker waits. So a granted takeover usually reported a refusal anyway. The read is now interrupted
+  by a signal the process sends itself, and a handover's shutdown grace is bounded by the asker's
+  budget rather than exceeding it. `~/.dgc/logs/serve.log` names a handover as a handover; in
+  13,417 lines of history it had never once contained that line.
+
+- **A liveness ping is no longer treated as something you did.** Every ping told the monitor policy
+  a user command had just landed, which restarts the background-wake delay. Any
+  `monitor_wake_delay_s` at or above the ping interval therefore held monitor wakes off forever.
+
+### A paste can carry instructions the person pasting it cannot see
+
+- **Invisible characters in a draft are counted and named.** Bidirectional overrides reorder how
+  text displays without changing its bytes; tag characters encode a whole line of ASCII in
+  something that renders as nothing; zero-width characters pad text invisibly. DGC hands your draft
+  to a model and then acts on it, so this is a way in. The editor raises a bar over the composer --
+  **Remove 3 invisible characters**, and "can carry a hidden instruction" only for the two classes
+  that actually can -- with **Keep** beside it. Nothing is altered unless you click Remove.
+  Arabic, Persian and Hebrew directional marks, every multi-person emoji, and the three subdivision
+  flags do not raise it: a notice that fires on ordinary text teaches you to dismiss it.
+
+### Everything from the 0.45.0 build
 
 - **`propose_options` no longer parks a turn forever.** The picker blocked with no deadline and
   nothing to reap it, because the abandonment watchdog reads a parked turn as a running one, so a

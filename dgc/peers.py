@@ -293,6 +293,12 @@ def user_line(peers: list[dict]) -> str:
 RELEASE_ANSWER_WAIT_S = 6.0          # how long an asker waits for a holder to answer
 RELEASE_REQUEST_FRESH_S = 30.0       # a request older than this is ignored, not answered
 
+# The two refusals whose WORDING the asking side changes its message for. They live here because
+# `dgc serve` writes them and the asking Agent reads them, and matching prose across two modules is
+# how the asker ended up telling someone their live window would "be handed over".
+REFUSED_ON_SCREEN = "its editor window is on screen"
+REFUSED_STILL_CONNECTED = "its editor window is still connected"
+
 
 def _same_session(record: dict, session: str) -> bool:
     if not session or not record.get("session"):

@@ -2902,7 +2902,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       view.onDidChangeVisibility(() => {
         if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
       });
+      view.onDidDispose(() => {
+        // The user unchecked the view: the renderer is gone, the WINDOW is not, and closing the
+        // view has never stopped the backend. Say which of the two it is, once. The backend gives
+        // that claim a bounded extra wait before it hands the session to a window that is asking,
+        // and nothing more -- a host cannot prove its window is still there.
+        if (this.view === view) { this.webviewReady = false; }
+        for (const be of this.liveBackends()) { be.editorState("host", "closed"); }
+      });
       view.webview.onDidReceiveMessage((msg) => {
+        if (msg?.type === "editorAlive") { this.rendererAlive(); return; }
         if (this.testOnlyWebviewReply(msg)) return;
         void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
           err?.message || "DGC could not process that editor request."));
@@ -2917,6 +2926,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.state.model) {
       this.postState();
     }
+  }
+
+  /** The chat webview says it is on screen. Every live backend hears it -- one panel serves all
+   *  the chats, and a parked chat's child is judged by the same clock -- and none is STARTED by
+   *  it. */
+  private rendererAlive(): void {
+    for (const be of this.liveBackends()) { be.editorState("renderer", "open"); }
+  }
+
+  /** Every `dgc serve` this panel currently owns: the active chat's and each parked chat's. */
+  private liveBackends(): DgcBackend[] {
+    const all: DgcBackend[] = this.backend ? [this.backend] : [];
+    for (const slot of this.slots) {
+      const parked = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+      if (parked && !all.includes(parked)) { all.push(parked); }
+    }
+    return all;
   }
 
   focus(): void {

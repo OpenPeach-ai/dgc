@@ -169,6 +169,8 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 - **/memory add TEXT** — save project memory · **/memory add user TEXT** — save personal memory
 - **Ctrl+R** — recall a past prompt · **Tab / →** — accept the ghost suggestion
 - **Ctrl+Y** — copy the last reply to your clipboard (works mid-turn) · **/copy code** — its code block
+- **Paste** — a tall paste folds to a chip, a lone URL becomes a pill, and characters you cannot
+  see are counted. See **Pasted text**.
 
 ## This turn
 - **Esc** — stop the turn · **Ctrl+C** — cancel · clear draft · quit
@@ -218,10 +220,6 @@ while a turn is still running. The text goes to your system clipboard through th
 If you would rather drag-select with the mouse: DGC captures the mouse so the wheel scrolls its
 own transcript and rows stay clickable, and that capture is what stops your terminal's own
 selection. **/select** hands the mouse back for this session (PageUp/PageDn still scroll), and
-A paste of five lines or more (or a very long one) collapses in the composer to a chip such as
-`[Pasted text #1 +40 lines]`, so a tall paste no longer fills the screen; it expands back to the
-full text the moment you send. Short pastes insert as typed.
-
 **/mouse off** remembers that choice. **Shift+drag** (**Option+drag** on some terminals) selects
 without leaving scroll mode at all, where the terminal passes the modifier through.
 
@@ -331,6 +329,9 @@ API-key environment reference is process-only:
 - `dgc mcp ...` — the same MCP catalog as `/mcp`, outside a chat. See **MCP servers**.
 - `dgc skills ...` — list, create, install, enable, disable, or show a skill package.
   See **Skills**.
+- `dgc plugin list|search TEXT|install NAME|sign-in NAME|uninstall NAME|installed` — the plugin
+  directory without the editor; `dgc plugin marketplace list|add SOURCE|remove NAME|refresh NAME`
+  manages catalogs. See **Plugins, apps and MCP**.
 - `dgc notes [QUERY]` — search this project's context notes. See **Context notes**.
 - `dgc trust` — list workspace-trust grants; `dgc trust revoke N|PATH|here` forgets one.
 - `dgc export [ID] [FILE]` — save a session as Markdown (default: most recent, to
@@ -563,6 +564,124 @@ the frontend looks polished by default. They stay on this machine unless you
 explicitly confirm LAN sharing; plan previews always stay private.
 """.strip()),
 
+    ("Plugins, apps and MCP",
+     "install a plugin, connect an app, and what a connector brokers",
+     """
+# Plugins, apps and MCP
+
+A **plugin** is a package you install into DGC: skills, an MCP server, or both. An **app** is a
+third-party service one of those servers reaches — GitHub, Notion, Linear, Sentry, Supabase, Stripe.
+**MCP** is the wire underneath: every tool a plugin adds arrives as `mcp__<server>__<tool>`, and
+**MCP servers** covers the protocol, the remote bridge and the execution boundaries.
+
+Nothing is installed until you install it, and nothing reaches a service until you sign in to it.
+Two first-party packages — default templates and plugin management — ship inside DGC, so installing
+those fetches nothing.
+
+## Where they live
+
+The editor owns the browsing surface. **Settings ▸ Plugins** has three lanes:
+
+- **Plugins** — what is installed, with its state: *Installed*, *Setup required*, or *Connected*.
+- **Apps** — the individual services those packages reach, each naming the plugin behind it.
+- **MCPs** — the servers themselves, the same catalog as `/mcp`.
+
+**Browse directory** opens the curated catalog. Every entry names its licence and, separately, what
+DGC actually *verified* — which is often less than "it works": a package whose structure was checked
+but whose authenticated tools were never exercised says exactly that. **Manage marketplaces** adds
+another catalog, and the filter separates DGC curated from Personal and from anything you added.
+
+The terminal does the same work without a browser:
+
+```text
+dgc plugin list
+dgc plugin search notion
+dgc plugin install notion
+dgc plugin sign-in notion
+dgc plugin installed
+dgc plugin uninstall notion
+dgc plugin marketplace list
+dgc plugin marketplace add SOURCE
+```
+
+## Installing one
+
+A plugin's files are copied into `~/.dgc/plugins` at install. Its skills land in DGC's discovery
+root and show up in `/skills` after a reload. They are not part of the DGC source tree and stay
+under their own upstream licence, which is why an entry whose terms need your agreement asks for it
+before anything is copied — `--accept-license ID` in the terminal.
+
+Nothing in a package runs on install, and a file arrives without its executable bit. A package's
+hooks, agents, commands, language servers and output styles are not imported at all, and the install
+review names each one it is ignoring. A script that survives runs later only through the normal
+approval you give any command. The package is bounded: at most 40 skills, 64 KiB per `SKILL.md`, and
+8 MiB per file with 64 MiB and 4,000 files across the whole package.
+
+DGC reads the `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` layouts, so a package
+written for Claude Code or Codex installs here — but only the skills and the MCP servers inside it
+come across.
+
+Some catalog entries are **withdrawn rather than offered**, and you will not see them in the
+directory at all. Figma's remote server requires a client it has approved and DGC is not one of
+them; Google Workspace needs a project you register yourself. An offer DGC cannot honour is worse
+than no offer, so it is taken out rather than left to fail at the sign-in. One you already installed,
+or one that arrives from a marketplace you added yourself, does show — with the reason on its card.
+
+**Installing is not connecting.** **Connect** starts whatever sign-in the plugin declares — a
+browser handoff, or a token you name, such as `GITHUB_PAT_TOKEN` for GitHub. A plugin can sit
+installed for as long as you like with its server disconnected, and the model is told exactly that
+rather than left to infer it: *installed, MCP configured but not connected in this session*.
+
+## App connectors
+
+Five entries are **connectors** rather than single services: **Composio**, **Zapier**, **Arcade**
+and **Make**, plus **n8n** for workflows on your own instance. You authorize your accounts inside
+that service, and its one MCP server then reaches all of them. Composio's card says where: connect
+and manage your apps in **Composio For You → Connect Apps**, then come back and ask DGC to use them.
+App permissions, account selection and revocation stay there. Uninstalling the connector here
+revokes nothing upstream.
+
+A pasted connector token is kept in the editor's secret storage under DGC's own MCP bearer variable
+and bound to the exact URL it was given for, never written to the config file. A URL carrying
+credentials, a query or a fragment is refused outright.
+
+Two consequences, and DGC now states both rather than leaving you to discover them:
+
+- **The work happens in their cloud.** A connector holds the app's credentials and runs the app
+  request on its own servers — including when your model is running locally on this machine. Their
+  terms govern that part, not DGC's.
+- **A connected connector may reach a service that has no plugin of its own here.** The roster the
+  model reads used to report per-plugin connectivity and nothing else. It read
+  `Figma: MCP not connected` as *Figma is unreachable* — with a connected Composio one line below
+  holding the very Figma account it needed — wrote that premise into its own sub-agent's brief, and
+  offered to work from screenshots sent by hand. A connected connector now says that it brokers the
+  accounts you authorized in its own service, and the model is told to search it with `mcp_search`
+  before telling you a service needs credentials, or a screenshot it cannot obtain. A connector
+  whose server is down advertises none of this.
+
+A rate-limited call from one of these servers now says it was rate-limited. It used to arrive as the
+same opaque payload as a missing credential, which is the other half of why a busy service read as a
+locked one.
+
+## Uninstalling
+
+**Uninstall** removes the package, its skills, and the servers DGC created for it. A server you
+edited by hand, or one another plugin also uses, is kept and named in the result — DGC created
+neither and will not delete either. Plugins and connectors share one flat namespace, so a name
+belongs to exactly one of them; two things can no longer both claim it and leave skill folders
+behind that nothing owns and nothing can remove.
+
+## What a plugin cannot do
+
+A plugin's skills are instructions. They grant nothing: no permission, no account, no tool. Its
+tools are ordinary MCP tools, and every call passes through permission requests, lifecycle hooks,
+cancellation, redaction and output bounds like any other; plan mode does not execute them. Reference
+text a server returns cannot activate a skill or hand itself a tool.
+
+What does deserve care is the server process. Treat a configured server command as a trusted
+executable: it starts unsandboxed in your workspace, and DGC cannot mediate that process's own
+filesystem or network activity through tool permissions. See **MCP servers**.
+"""),
     ("MCP servers", "connect external tools over MCP", """
 # MCP servers
 
@@ -643,7 +762,10 @@ bounded multi-round-trip requests; legacy elicitation/sampling callbacks are acc
 only while exactly one originating tool request is active. Every frontend makes the requesting server
 visible. Forms reject credential/payment fields and are type-checked again before
 sharing. URL requests show the exact host and URL, never prefetch, require consent,
-and allow remote HTTPS or loopback HTTP only. Sampling has no tools, MCP context, or
+and allow remote HTTPS or loopback HTTP only. Every frontend asks, the editor included, and
+the card carries the requesting server, the host, the whole URL, and a warning when the host
+contains Punycode. The one URL that still opens without a card is the sign-in you started
+yourself by clicking **Connect**. Sampling has no tools, MCP context, or
 project transcript and requires approval before generation and again before its
 response is disclosed. Unsupported modes are not advertised and fail closed.
 
@@ -799,6 +921,9 @@ Optional `agents/openai.yaml` metadata can set `interface.display_name`,
 and fails closed to explicit invocation. Supporting files resolve relative to the skill
 directory and retain normal filesystem permissions.
 
+A **plugin** is now the most common way a skill arrives: installing one copies its skills into the
+same discovery root, where they behave like any other. See **Plugins, apps and MCP**.
+
 ## Manage packages
 
 ```
@@ -917,6 +1042,47 @@ Trusting an already-open terminal or editor loads them without a restart. Isolat
 fleet workspaces use the approved source project's definitions rather than loading new
 definitions from their scratch checkout. An optional `tools:` frontmatter line is an
 allow-list of built-in tool names.
+
+## Watching, and waiting on purpose
+
+A foreground `task` blocks until the child is done. A `background: true` one does not, and DGC wakes
+a turn when it lands. Between those two the model was blind: it had started something detached and
+had no way to ask about it.
+
+Two read-only tools close that. Neither is offered unless there is something to act on — a
+background child still running, or one whose result nobody has read yet — so a pointless wait is not
+possible. Neither is offered in a session whose host application set its own tool allowlist either:
+that allowlist could not have named them, and a policy that could not have named a tool never
+silently receives it.
+
+- **`list_tasks`** — every sub-agent of this chat, from the same snapshot the agents pill and
+  `/agents` read: its id, its state (queued, running, waiting on the user, finished, failed,
+  stopped), how long it has run, its tool count, and a finished one's one-line summary. A child
+  started by another child is indented under it. Instant, and it marks which results are still
+  unread.
+- **`wait_tasks`** — block until a background child reaches a final state, then hand back its whole
+  result: the same text a foreground `task` would have returned, including which paths were
+  integrated. `ids` takes the ids `list_tasks` gave; leave it out to mean every background child of
+  this chat. Either way it returns as soon as the first of those has a result nobody has read.
+  `timeout_s` is 30 seconds by default and is clamped to 5–600 rather than refused. Four results
+  come back at once; the rest are announced and wait for the next call.
+
+A wait ends early if you say something while it is running, and says so, so the model reads you
+before it reads the child. A timeout reports what is still running and tells the model to get on
+with something else meanwhile. Waiting on an id that ran in the foreground is an error that explains
+itself — that `task` already returned its result — rather than a silent wait on nothing.
+
+A result the model read inside its turn is not announced again afterwards. The wake-up that would
+have repeated it is dropped, so one child is reported once instead of twice.
+
+Neither tool reaches a sub-agent: a child's `background: true` runs inline, so a child has nothing
+detached to supervise. Neither can be named in a permission rule, because neither changes anything —
+`deny: Task` is the off switch, and with no children the pair never appears at all. Repeating the
+same `wait_tasks` call is how waiting works, so it is exempt from the loop guard that stops a model
+reissuing an identical call.
+
+Both show their work as they run: **Checking sub-agents**, and **Waiting for a sub-agent** with a
+line every five seconds — *waiting on 2 background sub-tasks · 15s of 30s*.
 
 ## Eyes for a model without vision
 
@@ -1140,9 +1306,13 @@ choosing.
 
 - `task` — a sub-agent: `agent` picks explorer / researcher / critic / worker (or a named
   definition); `background: true` outlives the turn (see **Sub-agents**).
+- `list_tasks` · `wait_tasks` — what this chat's sub-agents are doing, and block for a background
+  one's result. Read-only, and offered only while there is a background child or a result nobody
+  has read (see **Sub-agents**).
 - `todo` · `skill` · `add_skill` · `save_memory` · `update_goal` · `notes`
 - `present_plan` — plan mode only, for approval.
-- `propose_options` — ask you to decide (see **Questions**).
+- `propose_options` — ask you to decide, and wait (see **Questions**).
+- `ask_user` — ask you something and keep working (see **Questions**).
 - `monitor` · `monitor_stop` — watch a long-running command (see **Background monitors**).
 
 MCP tools join this catalog as `mcp__<server>__<tool>` when a server is connected.
@@ -1392,6 +1562,15 @@ for as long as the editor *process* lives, and an editor can leave that process 
 reloads. Nothing is dropped to make this happen — a backend with a turn running, a background
 monitor armed, a detached sub-agent still working, or an open goal stays up regardless, however
 long it has been quiet.
+
+Handing the session to a window that is *asking* for it is a faster, stricter question, and it is
+answered by the chat panel rather than by the editor process. The panel itself says it is on screen
+every twenty seconds. A window that reloaded takes its panel with it, so those statements stop at
+once -- even in the case that started all of this, an editor host that outlives its own window and
+goes on insisting, on a timer, that everything is fine. After about two minutes with no word from
+any panel, the window that asked gets the session. Closing the chat view without closing the window
+is the one case where a live window has no panel to speak for it: the editor says so, that buys a
+bounded extra minute, and then the session goes to whoever is waiting.
 
 If you would rather not wait, start a new session, or close the other window.
 """.strip()),
@@ -1871,7 +2050,16 @@ CLI; the extension updates through your editor.
 ## The composer
 
 - **@** attaches a file, **/** opens the command palette, **$** applies a skill.
-- Paste an image to attach it for a vision model. Drag files in from the explorer.
+- A picked skill, template or file becomes a **pill** where you typed it, not a rewritten line: it
+  carries its own sigil, you can remove it with Backspace or the mouse, and the model receives the
+  text it stands for. Two pills of the same skill are two selections. Anything the pill does not
+  already show sits in the attachment row underneath, and a pill you delete takes its attachment
+  with it.
+- Paste an image to attach it for a vision model. Drag files in from the explorer. See
+  **Pasted text** for a tall paste, a pasted link, and characters you cannot see.
+- Tool calls collect into one folded group with a summary in its header. It opens by itself the
+  first time something in it fails, and once you fold it by hand it stays folded — a later failure
+  does not throw it open under you.
 - The send button fills with DGC purple as soon as there is something to send, and becomes a stop
   button while a turn is running.
 - The row underneath holds the model, the reasoning effort and the permission mode. Every control
@@ -1963,11 +2151,14 @@ numbered list instead.
 
 ## Settings
 
-The gear opens five pages: **General** (permission mode, thinking, context size, tool profile),
+The gear opens seven pages: **General** (permission mode, thinking, context size, tool profile),
 **Models** (a local host, a provider, or your own subscription CLI), **Agents** (the model and
-host that sub-agents and the fallback route use), **Security** (sandbox confinement and plan-mode
-limits) and **Extensions** (skills, MCP servers, hooks, permission rules, memory and these docs).
-Everything is a row: what it is on the left, the control on the right, the explanation beneath.
+host that sub-agents and the fallback route use), **Token usage** (what this machine counted),
+**Security** (sandbox confinement and plan-mode limits), **Plugins** (installed packages, the apps
+they reach, and the directory) and **MCP servers**. Everything is a row: what it is on the left,
+the control on the right, the explanation beneath. Skills, lifecycle hooks, permission rules,
+project memory and these docs each open as their own panel from the command menu.
+See **Plugins, apps and MCP**.
 
 ## What the editor adds
 
@@ -1979,6 +2170,69 @@ Everything is a row: what it is on the left, the control on the right, the expla
   the prompt.
 """.strip()),
 
+    ("Pasted text",
+     "a tall paste, a pasted link, and characters you cannot see",
+     """
+# Pasted text
+
+A paste is not typing. It can be forty lines of log, a bare URL, a whole file, or text carrying
+characters that have no glyph at all. DGC handles each of those differently, and changes what you
+pasted only when you ask it to.
+
+## A tall paste folds
+
+In the **terminal**, a paste of five lines or more — or over 600 characters — collapses to a chip in
+the composer, `[Pasted text #1 +40 lines]`, so a forty-line paste no longer takes half the screen.
+It expands back to the full text the moment you send. A shorter paste inserts as typed, and a field
+prompt that wants one exact value (a URL, a session name) always takes the raw text.
+
+In the **editor**, a paste of 5,000 characters or more becomes an attachment chip reading
+**Pasted text · 12,480 chars** instead of filling the composer. Click it to read what it holds.
+Whatever you had already typed stays where it was.
+
+## A pasted link becomes a pill
+
+In the editor, a clipboard holding exactly one URL and nothing else inserts a pill showing the host
+and path — `github.com/OpenPeach-ai/dgc` — with the whole URL on its tooltip. What the model
+receives is the URL itself, character for character: the pill shows the link, it does not replace
+it. Nothing is fetched to draw it, not even a favicon, so pasting a link discloses it to nobody. A
+paragraph that happens to contain a URL is prose, and is pasted as prose.
+
+## Characters you cannot see are counted, never removed for you
+
+Three kinds of invisible character can hide an instruction inside text that looks ordinary:
+
+- **Bidirectional overrides** reorder how text *displays* without changing its bytes, so what you
+  read and what the model reads can differ.
+- **Tag characters** encode a whole line of ASCII inside something that renders as nothing at all.
+- **Zero-width characters** pad text invisibly.
+
+DGC hands your draft to a model and then acts on it, so this is a way in rather than untidiness. In
+the editor a bar appears over the composer: **Remove 3 invisible characters — 2 can carry a hidden
+instruction**, with **Keep** beside it. Click **Remove** and exactly those characters go, and
+nothing else. Click **Keep** to say the text is deliberate, and the row goes until the draft changes
+again. Ignore it and nothing changes either way: the count is a report, not an edit, because quietly
+altering what you pasted would be its own bug. The bar watches the whole draft rather than only a
+paste, so text you typed or dictated raises it the same way.
+
+The bar is deliberately quiet about the harmless cases. Arabic, Persian and Hebrew carry directional
+marks as a matter of course, every multi-person emoji is held together by zero-width joiners, and
+the three subdivision flags are built from tag characters. None of them raise it, because a notice
+that fires on ordinary text teaches you to dismiss it — which is worse than no notice. And "can
+carry a hidden instruction" is said only for the two classes that actually can, so a stray
+byte-order mark from a web page is not dressed up as an attack.
+
+Two limits, stated rather than hidden. This is the editor's composer: the terminal does not show the
+bar. And a paste large enough to fold into an attachment changes no composer text, so nothing counts
+it yet — the text inside that chip still reaches the model.
+
+## The editor never pastes markup
+
+The composer is an editing host, which means the browser would otherwise insert your clipboard's
+HTML into it rather than its text. DGC takes the plain text instead, on every path — so a copied web
+page cannot bring an image that calls home the instant you paste, or an element laid over the Send
+button.
+"""),
     ("Questions", "when the model needs you to pick, not guess", """
 # Questions
 
@@ -2046,6 +2300,11 @@ and it opens again. Nothing is lost by ignoring it: a question still unanswered 
 is recorded as unanswered, the model is told before it finishes so it decides for itself and says
 what it assumed, and it repeats the question at the end of its reply so you can answer it in your
 next message. Skip does the same immediately, minus the repeat.
+
+Words you had started typing are yours, and retiring the card used to take them with it. In the
+editor they come back: whatever was in the answer box is appended to the composer on its own line,
+ready to send. Not on an explicit **Skip** — that is you deciding not to answer, and putting the
+abandoned text back would undo the dismissal you just made.
 
 The model may have at most two open at once, it is never offered in a sub-agent or in a
 non-interactive `dgc -p` run, and asking a question never raises a permission prompt — nothing is
@@ -2571,7 +2830,8 @@ exceeds the model's reported output limit or half the context window, so a 32K w
 `xhigh` (or leaves it if you already set that), tells delegated CLIs their strongest supported
 effort, and makes the main agent a lead: it locates each part of the request, gives every part
 that changes different files its own worker (or an explorer for an area to map) in one parallel
-batch — up to `max_parallel_tasks` (default 4, at most 8; concurrent in auto mode) — then
+batch — up to 8 at once under Ultra, or the `max_parallel_tasks` width if you set one (default 4
+outside Ultra, at most 8; concurrent in auto mode) — then
 integrates and runs the tests. A sub-agent starts cold, so it only saves time beside others: a
 single part, parts that share files or one investigation, and edits the lead already knows stay
 with the lead. Critic reviews a change when you ask for a review or when no test can check it.
@@ -2911,7 +3171,10 @@ Useful keys:
 - `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 8; set 1 to disable). In a
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
   from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive
-  permission modes, mixed tool batches, and non-Git projects keep the normal serial path.
+  permission modes and non-Git projects keep the normal serial path. A batch may mix tools: the
+  task calls fan out when they are the LAST calls in the response, so a `todo`, an edit or a bash
+  command beside them runs first, in order, and nothing is reordered past a running child. A task
+  call that is not part of that trailing run keeps the whole batch serial.
 - `max_subagent_depth` — how deep `task` may nest (default 1, maximum 8). 1 keeps the tree flat:
   the agent you are talking to delegates, and its children do their work themselves. Raise it to 2
   when a lead should be able to delegate research that itself fans out; 0 turns delegation off

@@ -4418,6 +4418,34 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "editor_state"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "renderer",
+                "host"
+              ]
+            },
+            "view": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "source",
+            "view"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "set_mode"
             },
             "mode": {

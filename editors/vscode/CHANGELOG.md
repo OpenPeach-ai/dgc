@@ -1,8 +1,41 @@
 # Changelog
 
-## 0.30.0 — unreleased
+## 0.31.0 — unreleased
 
-In progress. What is already in:
+0.30.0 was built and installed on one machine and never published. Auditing that build found 27
+defects and a first real session found twelve more; those fixes and this release's new work are all
+here, under one version number.
+
+- **The chat panel now proves its window exists.** The panel says it is on screen every twenty
+  seconds, and the backend decides a session handover on that rather than on whether some process
+  is alive. A window reload takes the panel with it, which is the one thing an extension host left
+  behind by that reload cannot fake -- so reloading a window and typing "continue" gets the session
+  back in about two minutes instead of being refused for fifteen. Unchecking the chat view says
+  which of the two went away, once, and still does not stop the backend. The statement is never
+  queued: one that arrived late would move the backend's clock forward on behalf of a window that
+  had already gone.
+
+- **A paste can carry instructions you cannot see, and now says so.** A bar over the composer reads
+  **Remove 3 invisible characters -- 2 can carry a hidden instruction**, with **Keep** beside it.
+  Nothing is altered unless you ask. Arabic, Persian and Hebrew directional marks, multi-person
+  emoji and the three subdivision flags never raise it.
+
+- **The edited-files list folds again.** It could be expanded and then not collapsed. Paths in it
+  are shortened the way a reader wants them: project-relative where it can be,
+  `../packages/ui/x.ts` for a sibling in the same repository, `~/` under your home directory, and
+  absolute only where the full path is the useful information.
+
+- **A tool group you folded by hand stays folded.** It still opens itself the first time something
+  inside it fails, but a later failure no longer throws it open under you.
+
+- **A question you had started answering gives your words back.** Retiring the card used to take
+  the half-typed answer with it; it is now appended to the composer, ready to send. Not on an
+  explicit Skip, which is you deciding not to answer.
+
+- **A blocked or paused goal says what blocked it.** The goal bar showed the objective, which you
+  already knew, instead of the reason.
+
+What was already in 0.30.0:
 
 - **A finished run of tools folds to the one line that describes it.** The group stays open while
   it works -- you can watch what is being done -- and folds once the model moves on, so a long

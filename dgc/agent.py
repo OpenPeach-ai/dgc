@@ -73,6 +73,8 @@ _RESUME_COMPACT_RATIO = 0.5  # a restored transcript filling this much of the wi
                              # before the next prompt is appended, so there is room to answer
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
+_CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
+_FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
                      "add_skill", "save_memory"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
@@ -93,7 +95,8 @@ _ALWAYS_HANDLED_TOOLS = frozenset({
 _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_user", "update_goal"})
 # Names `_handle_call` acts on but `EXECUTORS` does not contain: delegation, the artifact server,
 # and every MCP route (which are discovered at runtime, so they are matched by shape).
-_DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search"})
+_DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search",
+                                           "list_tasks", "wait_tasks"})
 
 
 def _dispatchable(name: str) -> bool:
@@ -113,7 +116,22 @@ _IMAGE_BATCH_TEXT = {
 _IMAGE_INDEX_LOCK = threading.Lock()     # parallel sub-agents record into one root index
 _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel", "git_diff"}
 _WAITS_ON_USER_CALLS = {"propose_options", "present_plan"}   # saved before they wait (see run loop)
-_LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
+# Polling a real background job can legitimately repeat -- and supervising a background sub-task is
+# the same shape: identical `wait_tasks` arguments ARE how a model waits again for a child that has
+# not finished yet. Without the exemption the 4th identical poll comes back as a loop-guard refusal
+# and the 7th aborts the whole turn with "It is looping, not working", which is a fan-out the model
+# can never finish. `list_tasks` is exempt for the same reason.
+_LOOP_EXEMPT_CALLS = {"bash_output", "list_tasks", "wait_tasks"}
+# `wait_tasks` bounds. Codex's own defaults are 30s / 10s min / 1h max (core/src/config/mod.rs);
+# DGC keeps the 30s default, drops the floor to 5s because a local child is often quick, and caps
+# at 600s rather than an hour because a running turn refuses every mutation command the editor
+# sends (headless.py, _BUSY_MUTATIONS) -- an hour-long wait makes the panel look wedged. Out-of
+# range values are clamped, never refused, exactly as Codex clamps them.
+_WAIT_TASKS_DEFAULT_S, _WAIT_TASKS_MIN_S, _WAIT_TASKS_MAX_S = 30, 5, 600
+_WAIT_TASKS_MAX_RESULTS = 4      # finished children handed back in one call (each one's text is
+                                 # large; the rest wait for the next call and are announced)
+_MAX_DETACHED_RESULTS = 64       # completions the ledger keeps per conversation, oldest dropped
+_DETACHED_LEDGER_INIT_LOCK = threading.Lock()   # the ledger is created from whichever thread asks
 # Sub-agents are not offered propose_options; this tells a child what to do with a user's decision.
 _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: finish the work that does "
                            "not depend on it, then end your result with the question and the option "
@@ -843,6 +861,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
+                    SUPERVISION_TOOL_SCHEMAS,
                     bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images,
                     take_pending_files)
@@ -1058,9 +1077,15 @@ _HELD_SESSION_REMEDY = (
 
 
 # How long to keep retrying after a holder agrees to stand down. It has to finish the step it is
-# on and save the session first, so the lease does not free the instant it says yes; the backend's
-# own shutdown grace is 20s, and this is that plus room for the write.
+# on and save the session first, so the lease does not free the instant it says yes; a holder
+# standing down gives its turn `headless.STAND_DOWN_GRACE_S` to reach a boundary and then spends a
+# couple of seconds joining threads, and this is that with room for the write.
 _RECLAIM_WAIT_S = 25.0
+# What a holder that AGREED said, as opposed to one that refused. A constant, not a sentence to
+# match: the granted branch used to return "", and an empty reason fell through to the message
+# about a backend that releases its session "within about 15 minutes" -- said about a holder that
+# had agreed two seconds earlier.
+_STOOD_DOWN_REASON = "it agreed to hand the session over and is still saving its work"
 
 
 @dataclass
@@ -1101,6 +1126,19 @@ def _todo_lock(ctx):
 class _TaskOutcome:
     output: str
     integrated: bool = False
+    paths: tuple[str, ...] = ()        # repo paths this task actually landed, when it integrated
+
+
+def _wants_background(arguments) -> bool:
+    """Did this `task` call ask to be detached? The ONE reading of the flag.
+
+    `_handle_call` and the parallel-batch admission check must agree exactly. If the batch leaves a
+    call out because it looks like background work and the detach gate then disagrees, the call runs
+    alone in the foreground instead of beside its siblings -- slower than either intent. `bool()` is
+    deliberately the whole parse: a text-tool model writing the string "false" gets a detached child
+    today, and changing that is a separate decision, not one to make twice in two places.
+    """
+    return bool(arguments.get("background")) if isinstance(arguments, dict) else False
 
 
 class _SubUI:
@@ -2249,7 +2287,8 @@ class Agent(GoalLifecycle):
                     reserve_chars=_MCP_BROKER_SCHEMA_CHARS)
             else:  # compatibility for injected/third-party manager shims
                 mcp_schemas = self.mcp.tool_schemas()
-        schemas = TOOL_SCHEMAS + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas
+        schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
+                   + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         if not bool(getattr(self.client, "vision_supported", False)):
             # images: a model that cannot read an image is never offered a tool that shows it one.
             # When a vision model can look for it (dgc/vision.py), view_image asks that model and
@@ -2336,6 +2375,12 @@ class Agent(GoalLifecycle):
         if not self._task_exposed():
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "task"]
+        # Supervision follows delegation: decided once, for every profile, on state and never on
+        # the request's wording. A tool with nothing to act on is not offered, exactly as
+        # bash_output/bash_kill are gated on a live handle above.
+        if not self._supervision_exposed():
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") not in ("list_tasks", "wait_tasks")]
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
@@ -2517,6 +2562,36 @@ class Agent(GoalLifecycle):
                 or bool(self.config.get("ultra_mode", False))
                 or "repo_navigation" in active)
 
+    def _supervision_exposed(self) -> bool:
+        """Are `list_tasks` / `wait_tasks` offered on this request?
+
+        Three gates, none of them the request's wording:
+
+        DEPTH. The lead agent only. `_run_subagent`'s detach gate is `self.depth == 0`, so a child's
+        `background: true` runs inline and a child can never have a background sub-task to
+        supervise; at depth > 0 the pair would be two schemas of pure cost. That is also why
+        neither name needs an execution-time depth refusal the way `task` does: at depth > 0 the
+        tools are inert, and a refusal would be dead code.
+
+        SOMETHING TO ACT ON. A live detached job, or a completion nobody has read yet. Exactly the
+        `bash_output` / `bash_kill` gate: a tool whose subject must exist. It also makes a
+        pointless wait impossible -- `wait_tasks` is never offered with nothing to wait for.
+
+        NO LAUNCHING APPLICATION'S POLICY. `ready.tools` cannot carry these names without killing
+        an installed dgc-sdk that sets allow_tools (see SUPERVISION_TOOL_SCHEMAS), so such a
+        session cannot refuse them by name and is not given them. Fail closed: a policy that could
+        not have named a tool never silently receives it.
+
+        Deliberately does NOT read the registry: this runs on the TUI's render thread on every
+        status-line repaint, and `SubagentRegistry.snapshot()` takes the publish lock.
+        """
+        if self.depth != 0:
+            return False
+        from .permissions import session_policy
+        if session_policy() is not None:
+            return False
+        return bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
+
     def _delegation_guidance(self, mode: str) -> list[str]:
         """The lead agent's roster and delegation policy, sent only while `task` is offered."""
         if self.depth != 0 or not self._task_exposed():
@@ -2547,8 +2622,9 @@ class Agent(GoalLifecycle):
                 "Delegate when it clearly helps: a broad search across many files or areas "
                 "(explorer), independent chunks that can run in parallel (one task each, all in ONE "
                 "response), or an independent review (critic). Do small or tightly coupled work "
-                "yourself. After a researcher writes a design or plan file, spawn critic on that "
-                "path before implementing, unless the user asked you to skip review.",
+                "yourself. A part whose result you will not use this turn takes `background: true`. "
+                "After a researcher writes a design or plan file, spawn critic on that path before "
+                "implementing, unless the user asked you to skip review.",
             ]
         from .ultra import worker_limit
         # Calibrated on real runs (deepseek-v4.1-flash; Ollama Cloud serves concurrent requests in
@@ -2569,9 +2645,12 @@ class Agent(GoalLifecycle):
             "result (separate bugs or features, backend vs UI, a long test or deploy battery), "
             "give each part its own `task` — worker to change code, explorer to "
             f"map an area — all in ONE response (up to {worker_limit(self.config)} parallel "
-            "workers), naming its files and symbols. `task` blocks until the batch ends, so every "
-            "part goes in that batch or none does. Parts that share a file or one investigation "
-            "count as one part.",
+            "workers), naming its files and symbols. Put those calls LAST in the response: anything "
+            "you want done first goes before them and runs first, while a call placed after them "
+            "runs the whole batch one child at a time. The batch ends when its foreground parts do, "
+            "so every part goes in that batch or none does. `background: true` returns at once, runs "
+            "on after the turn, and starts after the foreground ones. Parts that share a file or one "
+            "investigation count as one part.",
             "3. Do it yourself when the turn has one part, when running code answers the question, "
             "or when you already know every exact edit: briefing a child costs more than the edit.",
             "4. Integrate: reconcile every child result, then run the tests yourself. Read a file "
@@ -3054,6 +3133,9 @@ class Agent(GoalLifecycle):
         registry = getattr(self, "subagents", None)
         if registry is not None:
             registry.reset()                     # the agents list belongs to the chat being left
+        finished = getattr(self, "_finished_jobs", None)
+        if finished is not None:
+            finished.clear()                     # and so do the previous chat's task outcomes
         self._last_turn_tool_intents = set()
         self._last_turn_mcp_tools = set()
         self._last_turn_mcp_query = ""
@@ -3578,7 +3660,7 @@ class Agent(GoalLifecycle):
         if answer.get("granted"):
             # It is standing down, but standing down means finishing the step it is on and saving
             # the session first, so the lease does not free the instant it agrees.
-            return _RECLAIM_WAIT_S, ""
+            return _RECLAIM_WAIT_S, _STOOD_DOWN_REASON
         return None, str(answer.get("reason") or "")
 
     @staticmethod
@@ -3610,6 +3692,17 @@ class Agent(GoalLifecycle):
         if str(note.get("kind") or "") == "tui":
             return (f"This session is open in {who}.{said} Finish or close that terminal, or "
                     f"start a new session here. {tail}")
+        # It said yes and is still saving. Neither the "kept it" phrasing above nor the 15-minute
+        # figure is true of it, and both were being printed.
+        if reason == _STOOD_DOWN_REASON:
+            return (f"This session is held by {who}, which agreed to hand it over and is saving its "
+                    f"work. Send this again in a few seconds. {tail}")
+        # Its panel is on screen, so nobody is going to hand anything over and the 15-minute
+        # self-heal below -- which is about a backend whose editor HAS gone -- would be a promise
+        # this session never keeps. Say the true thing: someone is using it.
+        if reason == peers.REFUSED_ON_SCREEN:
+            return (f"This session is open in {who}, and its DGC panel is on screen. Carry on there, "
+                    f"or start a new session here. {tail}")
         # A reload is the common case, and then the holder is counting down to handing over. Say
         # that, rather than the 15-minute figure, which is about a backend ending itself.
         if "ask again in about" in reason:
@@ -4500,6 +4593,9 @@ class Agent(GoalLifecycle):
                 self.ui.info(self._safe_text(
                     f"↳ stopped {stopped} background sub-task{'s' if stopped != 1 else ''} "
                     "that belonged to the previous chat"))
+            finished = getattr(self, "_finished_jobs", None)
+            if finished is not None:
+                finished.clear()       # the previous chat's task outcomes leave with it
             # Monitors belong to the conversation being left; they never come back with a reopened
             # one either. Nothing is sent to the model about it; the frontend shows one line.
             self.monitors.new_epoch("shutdown")
@@ -6205,8 +6301,15 @@ class Agent(GoalLifecycle):
             # Save before the first call too: a process can die inside it, including while a
             # question or approval waits. Recovery must know which actions have no confirmed result.
             self._save_turn_progress(None if native else unfinished_text_batch(0))
-            parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
-            parallel_outputs = ({} if parallel_tasks else
+            # The fan-out happens where the model put it. When the task run starts the batch this
+            # is exactly today's whole-batch call; otherwise the helper is called from inside the
+            # loop, once the siblings before the run have actually run.
+            task_run = self._parallel_task_plan(result.tool_calls)
+            parallel_tasks: dict[int, _TaskOutcome] = {}
+            if task_run and task_run[0] == 0:
+                task_run = []
+                parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
+            parallel_outputs = ({} if (parallel_tasks or task_run) else
                                 self._parallel_read_outputs(result.tool_calls, sig_count))
             for call_index, call in enumerate(result.tool_calls):
                 # A parallel helper has already completed and rendered the whole batch. Preserve a
@@ -6230,6 +6333,13 @@ class Agent(GoalLifecycle):
                     else:
                         text_results.append(f"<result tool=\"{call.name}\">\n{NOT_RUN_AFTER_DISMISSAL}\n</result>")
                     continue
+                if task_run and call_index == task_run[0]:
+                    # Every sibling before this point has run: its effects are in the checkout the
+                    # children are about to snapshot, and there is nothing left to hoist past them.
+                    run, task_run = task_run, []
+                    inner = self._parallel_task_outputs(
+                        [result.tool_calls[i] for i in run], sig_count)
+                    parallel_tasks = {run[j]: outcome for j, outcome in inner.items()}
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
                 if call.name not in _LOOP_EXEMPT_CALLS:
@@ -7202,7 +7312,11 @@ class Agent(GoalLifecycle):
                             out = self._run_subagent(
                                 str(args.get("description", "")), str(args.get("prompt", "")),
                                 str(args.get("agent", "")), call_id,
-                                background=bool(args.get("background")))
+                                background=_wants_background(args))
+                    elif name == "list_tasks":
+                        out = self._list_tasks_result()
+                    elif name == "wait_tasks":
+                        out = self._wait_tasks_result(args, call_id)
                     elif name == "mcp_search":
                         out = self._search_mcp_tools(
                             str(args.get("query", "")), args.get("limit", 8))
@@ -7862,7 +7976,8 @@ class Agent(GoalLifecycle):
     def _execute_prepared_subagent(self, description: str, prompt: str, agent_name: str,
                                    workspace, sub_ui: _SubUI,
                                    call_id: str | None = None, *,
-                                   cancel: threading.Event | None = None) -> tuple[str, str, str]:
+                                   cancel: threading.Event | None = None,
+                                   handle: dict | None = None) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
 
         Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
@@ -7949,6 +8064,10 @@ class Agent(GoalLifecycle):
                     registry.running(agent_id, model=str(getattr(sub.client, "model", "") or ""))
                 if adef and adef.effort:
                     sub._effort_override = adef.effort
+                if handle is not None:
+                    # Publish only a FULLY wired child: whatever reads this later expects the cancel
+                    # token, registry, checkpoints, client and effort above to be in place.
+                    handle["agent"] = sub
                 if own_cancel.is_set() or self.stopping:
                     thrown = "cancelled before the isolated run started"
                 else:
@@ -8004,10 +8123,58 @@ class Agent(GoalLifecycle):
                         note = (note + "\nFILES: " + ", ".join(files)).strip()
                 registry.end(agent_id, state, self._safe_text(note), tool_calls=tool_calls, tokens=tokens)
 
-    @staticmethod
-    def _preserve_task_workspace(workspace, reason: str) -> str:
+    def _remove_task_workspace(self, workspace, *, cancel: threading.Event | None = None,
+                               may_remove: bool = True) -> tuple[bool, str]:
+        """Remove a finished checkout with the workspace write lease held: (removed, warning).
+
+        `cleanup()` is `git worktree remove --force` plus `git branch -D` in the USER's repository
+        (dgc/worktree.py:1072). Every caller that reaches it through here does so with the lease NOT
+        held: a detached child finalizes on its own thread, long after the parent turn released it.
+        Unleased, those two commands race the parent's own git, a peer session and the user's shell;
+        git refuses a contended ref rather than corrupting it, so the cost is a leaked worktree and a
+        warning nobody can act on -- but the lease is what the rest of this file uses to make a
+        parent-repo write exclusive, and this is a parent-repo write.
+
+        A BOUNDED acquire, not `acquire_cancellable`: that one waits forever for a lease a peer
+        holds, and this runs inside the finalizer `wait_finalizers()` joins at shutdown.
+
+        NEVER call this while holding the lease: it is a plain, non-reentrant lock
+        (dgc/scheduler.py:120). `integrate()` removes its own checkout (dgc/worktree.py:712, :772)
+        under the lease its caller already holds (agent.py:8062-8065) and stays untouched -- moving
+        an acquire in there hangs every successful integration.
+        """
+        if not may_remove:
+            return False, ""
+        token = cancel if cancel is not None else self.cancelled
+        if token is not None and token.is_set():
+            return False, ""
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not lease.acquire(timeout=_CLEANUP_LEASE_WAIT_S):
+            return False, lease.last_error or ""
+        try:
+            return True, (workspace.cleanup() or "")
+        finally:
+            lease.release()
+
+    def _preserve_task_workspace(self, workspace, reason: str, *,
+                                 cancel: threading.Event | None = None,
+                                 may_remove: bool = True, never_ran: bool = False) -> str:
+        """Retain a stopped child's checkout, or remove it under the lease when it holds nothing.
+
+        ``never_ran`` is for a checkout that was prepared and then abandoned before any child
+        touched it. It is empty by construction, so there is no delta to inspect -- and inspecting
+        it anyway is not harmless: a `changed_paths()` that failed would take the branch below and
+        RETAIN it, leaving both a worktree and a retained-task record for a sub-task that never
+        started.
+        """
         if workspace is None:
             return ""
+        if never_ran:
+            # Whether or not the removal got the lease, there is nothing here to tell the user
+            # about beyond a problem removing it.
+            _removed, cleanup_error = self._remove_task_workspace(
+                workspace, cancel=cancel, may_remove=may_remove)
+            return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
         try:
             changed = workspace.changed_paths()
         except Exception as exc:
@@ -8020,8 +8187,20 @@ class Agent(GoalLifecycle):
             warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
             return (f" Its unintegrated changes were preserved at {workspace.path} on branch "
                     f"{workspace.branch}.{warning}")
-        cleanup_error = workspace.cleanup()
-        return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
+        removed, cleanup_error = self._remove_task_workspace(
+            workspace, cancel=cancel, may_remove=may_remove)
+        if removed:
+            return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
+        # Nothing to integrate and no lease to remove it with. An unrecorded checkout is what
+        # `retain` exists to prevent, so record it and let `/tasks` drop it.
+        busy = f"; {cleanup_error}" if cleanup_error else ""
+        metadata_error = workspace.retain(
+            f"{reason}; nothing changed, and the workspace write lease was not free to remove "
+            f"the checkout{busy}", [])
+        warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
+        return (f" It changed nothing; its empty checkout is still at {workspace.path} on branch "
+                f"{workspace.branch} because the workspace write lease was busy. `/tasks` can drop "
+                f"it.{warning}")
 
     def _finalize_subagent(self, description: str, workspace, failure: str, result: str,
                            start_error: str = "", *,
@@ -8038,14 +8217,16 @@ class Agent(GoalLifecycle):
         """
         isolated = workspace is not None
         if start_error:
-            cleanup_error = workspace.cleanup() if workspace is not None else None
-            cleanup = (f" Cleanup warning for {workspace.path} on {workspace.branch}: "
-                       f"{cleanup_error}." if workspace is not None and cleanup_error else "")
+            # The child never ran, so the checkout is empty and removing it is right -- but that
+            # removal writes the user's .git, so it goes through the one helper that takes the write
+            # lease first. If the lease is busy the empty checkout is retained instead.
+            cleanup = self._preserve_task_workspace(
+                workspace, f"not started: {start_error}", cancel=cancel)
             return _TaskOutcome(
                 f"error: Sub-task '{description}' was not started because its isolated configuration "
                 f"could not be created: {start_error}.{cleanup}")
         if failure:
-            kept = self._preserve_task_workspace(workspace, failure)
+            kept = self._preserve_task_workspace(workspace, failure, cancel=cancel)
             shared = " Partial changes may remain in the shared checkout." if not isolated else ""
             return _TaskOutcome(f"error: Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
         if workspace is None:
@@ -8056,7 +8237,8 @@ class Agent(GoalLifecycle):
         lease = workspace_mutation_lock(self.config.project_root)
         if not acquire_cancellable(lease, cancel if cancel is not None else self.cancelled):
             detail = lease.last_error or "cancelled while waiting to integrate"
-            kept = self._preserve_task_workspace(workspace, detail)
+            kept = self._preserve_task_workspace(workspace, detail, cancel=cancel,
+                                                 may_remove=False)
             return _TaskOutcome(
                 f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}")
         try:
@@ -8070,7 +8252,7 @@ class Agent(GoalLifecycle):
             extra = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
             return _TaskOutcome(
                 f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
-                f"{paths}{extra}.{warning}\nSummary:\n{result}", True)
+                f"{paths}{extra}.{warning}\nSummary:\n{result}", True, tuple(integration.paths))
         if integration.status == "clean":
             return _TaskOutcome(
                 f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}")
@@ -8125,10 +8307,16 @@ class Agent(GoalLifecycle):
         jobs = getattr(self, "_detached_jobs", None)
         if jobs is None:
             self._detached_jobs = jobs = {}
-        try:
-            cap = max(1, min(8, int(self.config.get("max_parallel_tasks", 4))))
-        except (TypeError, ValueError):
-            cap = 4
+            # Created here, on the parent thread, so no worker ever has to and no lazy-init races.
+            # `_finalizing` is the detached children writing the user's files RIGHT NOW: integration
+            # runs AFTER a child's record ended, on its thread, and `wait_finalizers` is the only
+            # thing that waits for it. `_finished_jobs` keeps the last few outcomes addressable by id
+            # after the job entry is popped.
+            self._finalizing = {}
+            self._finalizing_lock = threading.Lock()
+            self._finished_jobs = {}
+        from .ultra import worker_limit
+        cap = worker_limit(self.config)
         detach = bool(background) and self.depth == 0 and len(jobs) < cap and not self.stopping
         own_cancel = threading.Event() if detach else self.cancelled
         sub_ui = _SubUI(self.ui, description, cancel=own_cancel)
@@ -8155,7 +8343,6 @@ class Agent(GoalLifecycle):
         """Run the child on its own thread and cancel token; the parent turn may end."""
         jobs = self._detached_jobs
         agent_id = sub_ui.agent_id
-        jobs[agent_id] = {"cancel": own_cancel, "description": description}
         # The frontend's own callback wins; without one, the hub's pending queue is what wakes the
         # terminal. Pin the conversation now: a child can outlive the chat that asked for it, and
         # its result must not land in whatever chat replaced it.
@@ -8164,19 +8351,46 @@ class Agent(GoalLifecycle):
         # The chat this work belongs to, as it is NOW. `self.checkpoints` is replaced by a new
         # chat, and this child may outlive that; its integration belongs to the chat that asked.
         keeper = self.checkpoints
+        # THE HANDLE. Everything that addresses this child by id reads it from here instead of
+        # re-deriving it: `cancel` for stop_detached, `agent` for anything that wants to talk to the
+        # running child (nothing in this stage does -- it is published so the next one needs no
+        # change inside _execute_prepared_subagent), and the worktree triple so a supervisor can
+        # describe or resolve the work without shelling out to git. Keys only, no dataclass:
+        # `job["cancel"]` is read by stop_detached and by tests, and a plain dict keeps those
+        # working. The entry is popped when the child finalizes, which is what drops the Agent
+        # reference -- do not copy it into _finished_jobs.
+        jobs[agent_id] = {"cancel": own_cancel, "description": description, "agent": None,
+                         "parent_id": getattr(self, "_subagent_id", None),
+                         "worktree": getattr(workspace, "path", None),
+                         "branch": getattr(workspace, "branch", ""),
+                         "base_commit": getattr(workspace, "base_commit", ""),
+                         "keeper": keeper, "started_at": time.time()}
+        handle = jobs[agent_id]
 
         def work():
             outcome = _TaskOutcome(f"error: Sub-task '{description}' did not complete.")
             try:
                 execution = self._execute_prepared_subagent(
                     description, prompt, agent_name, workspace, sub_ui, call_id,
-                    cancel=own_cancel)
-                outcome = self._finalize_subagent(
-                    description, workspace, *execution, cancel=own_cancel, keeper=keeper)
+                    cancel=own_cancel, handle=handle)
+                # From here to the pop, this thread can write the user's files and their .git, with
+                # the child's record already ended and the parent turn already returned. This is the
+                # window `wait_finalizers` exists to keep a process exit out of.
+                with self._finalizing_lock:
+                    self._finalizing[agent_id] = description
+                try:
+                    outcome = self._finalize_subagent(
+                        description, workspace, *execution, cancel=own_cancel, keeper=keeper)
+                finally:
+                    with self._finalizing_lock:
+                        self._finalizing.pop(agent_id, None)
             except Exception as exc:
                 outcome = _TaskOutcome(
                     f"error: Sub-task '{description}' did not complete: {type(exc).__name__}: {exc}.")
             finally:
+                # BEFORE the pop, so the id is never in neither map: a supervisor that looked in
+                # between would otherwise be told the task does not exist.
+                self._remember_finished(agent_id, description, outcome)
                 jobs.pop(agent_id, None)
                 notify = getattr(self, "on_detached_ended", None)
                 # A child can outlive the chat that asked for it: `/new` and `/clear` signal it and
@@ -8188,19 +8402,29 @@ class Agent(GoalLifecycle):
                             and hub.epoch != notify_epoch)
                 if self.stopping or replaced:
                     pass
-                elif callable(notify):
-                    try:
-                        notify({"id": agent_id, "description": description,
-                                "message": outcome.output,
-                                "integrated": bool(outcome.integrated)})
-                    except Exception:
-                        pass
-                elif hub is not None and notify_epoch is not None:
-                    try:
-                        hub.queue_subtask_ended(agent_id, description, outcome.output,
-                                                bool(outcome.integrated), notify_epoch)
-                    except Exception:
-                        pass
+                else:
+                    # Keep the outcome where a TOOL can read it, BEFORE anything is delivered.
+                    # `wait_tasks` runs inside this Agent on the parent's turn thread; the two
+                    # queues below belong to the frontend (the Backend's `_agent_wakes`, reached
+                    # only through the one-way callback, and the monitor hub's pending deque), and
+                    # `SubagentRegistry` holds only a 500-char first line recorded before
+                    # `_finalize_subagent` integrated anything. This ledger is the only place the
+                    # full outcome survives, and writing it first means a wake can never beat a
+                    # wait to the same completion.
+                    self._record_detached_result(agent_id, description, outcome, notify_epoch)
+                    if callable(notify):
+                        try:
+                            notify({"id": agent_id, "description": description,
+                                    "message": outcome.output,
+                                    "integrated": bool(outcome.integrated)})
+                        except Exception:
+                            pass
+                    elif hub is not None and notify_epoch is not None:
+                        try:
+                            hub.queue_subtask_ended(agent_id, description, outcome.output,
+                                                    bool(outcome.integrated), notify_epoch)
+                        except Exception:
+                            pass
 
         threading.Thread(target=work, daemon=True, name=f"dgc-bg-{agent_id[-8:]}").start()
         # Promise only the delivery that will actually happen. Three cases: the editor backend's
@@ -8243,6 +8467,303 @@ class Agent(GoalLifecycle):
             n += 1
         return n
 
+    def _remember_finished(self, agent_id: str, description: str, outcome: _TaskOutcome) -> None:
+        """Keep a detached child's result addressable by id after its job entry is gone.
+
+        The parent's own account of work it has not collected yet -- not a transcript, and not the
+        registry's first-line summary. Bounded, clamped, and it holds no Agent and no message list.
+        """
+        finished = getattr(self, "_finished_jobs", None)
+        if finished is None:
+            return
+        finished[agent_id] = {
+            "id": agent_id, "description": description,
+            "output": _clamp(self._safe_text(outcome.output)),
+            "integrated": bool(outcome.integrated), "paths": list(outcome.paths[:20]),
+            "ended_at": time.time()}
+        while len(finished) > _FINISHED_JOBS_KEPT:
+            finished.pop(next(iter(finished)), None)      # insertion order: oldest first
+
+    def wait_finalizers(self, timeout: float = 2.0) -> str:
+        """Wait, bounded, for detached children that are writing the user's files right now.
+
+        A detached child integrates on its own thread AFTER its record ended and after the parent
+        turn returned. `integrate()` applies a multi-file delta one atomic file at a time
+        (dgc/worktree.py:756); the except-rollback cannot run if the process is gone. So a graceful
+        exit waits here. It NEVER cancels: a cancelled integration is the outcome this exists to
+        avoid, and `reset()` / session load deliberately signal without waiting (agent.py:3042,
+        :4497) because a new chat must not block on an old child.
+
+        Returns '' when nothing was in flight or everything landed, else one line naming what was
+        still running, for the exit log. It cannot make the delta atomic -- a SIGKILL still tears it,
+        which is what the in-flight breadcrumb in `integrate()` is for.
+        """
+        lock = getattr(self, "_finalizing_lock", None)
+        if lock is None:
+            return ""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            with lock:
+                pending = sorted(self._finalizing.values())
+            if not pending:
+                return ""
+            if time.monotonic() >= deadline:
+                more = f" (+{len(pending) - 4} more)" if len(pending) > 4 else ""
+                return (f"{len(pending)} background sub-task integration(s) still writing after "
+                        f"{max(0.0, float(timeout)):.1f}s: " + ", ".join(pending[:4]) + more)
+            time.sleep(0.05)
+
+    # ---- supervising background children: the completion ledger ---------------------------------
+    # `_detached_jobs` holds a RUNNING child (its cancel token and description) and is popped the
+    # instant that child ends. Nothing in the Agent kept what the child PRODUCED: the outcome went
+    # straight to the frontend, and the registry keeps only a clipped first line written before
+    # integration ran. A tool could therefore see that a child had finished and never see its
+    # result. This is that missing half -- Agent-local, bounded, epoch-tagged, and written before
+    # the frontend is told.
+
+    def _detached_ledger(self):
+        """(lock, dict) for the completion ledger, built once however many threads ask at once."""
+        if getattr(self, "_detached_done", None) is None:
+            with _DETACHED_LEDGER_INIT_LOCK:
+                if getattr(self, "_detached_done", None) is None:
+                    self._detached_done_lock = threading.Lock()
+                    self._detached_done = {}
+        return self._detached_done_lock, self._detached_done
+
+    def _detached_epoch(self):
+        return getattr(getattr(self, "monitors", None), "epoch", None)
+
+    def _record_detached_result(self, agent_id: str, description: str, outcome, epoch) -> None:
+        """A detached child reached a terminal outcome. Runs on that child's own thread."""
+        lock, ledger = self._detached_ledger()
+        with lock:
+            ledger.pop(agent_id, None)               # re-insert so insertion order is completion order
+            ledger[agent_id] = {"id": agent_id, "description": description,
+                                "output": outcome.output, "integrated": bool(outcome.integrated),
+                                "ended_at": time.time(), "epoch": epoch, "consumed": False}
+            while len(ledger) > _MAX_DETACHED_RESULTS:
+                ledger.pop(next(iter(ledger)))
+
+    def _detached_result_waiting(self) -> bool:
+        """Is a completion still unread? Cheap: no registry, no sort -- a render thread calls this."""
+        lock, ledger = self._detached_ledger()
+        now_epoch = self._detached_epoch()
+        with lock:
+            return any(not entry["consumed"]
+                       and (entry["epoch"] is None or now_epoch is None
+                            or entry["epoch"] == now_epoch)
+                       for entry in ledger.values())
+
+    def _detached_results(self, ids=None, *, unconsumed_only: bool = False) -> list[dict]:
+        """Ledger entries for THIS conversation, oldest completion first.
+
+        An entry recorded in a conversation the hub has since replaced (`/new`, `/clear`, a session
+        load -- each calls `monitors.new_epoch`) is invisible and is dropped as it is found, so a
+        reopened chat can never be handed the previous chat's child. That reuses the epoch the
+        spawn already pinned instead of adding a second place someone must remember to clear.
+        """
+        lock, ledger = self._detached_ledger()
+        now_epoch = self._detached_epoch()
+        wanted = {str(item) for item in ids} if ids is not None else None
+        with lock:
+            for key in [key for key, entry in ledger.items()
+                        if entry["epoch"] is not None and now_epoch is not None
+                        and entry["epoch"] != now_epoch]:
+                ledger.pop(key, None)
+            rows = [dict(entry) for entry in ledger.values()
+                    if (wanted is None or entry["id"] in wanted)
+                    and not (unconsumed_only and entry["consumed"])]
+        rows.sort(key=lambda entry: entry["ended_at"])
+        return rows
+
+    def _detached_consumed_ids(self) -> frozenset:
+        """Ids whose result a tool already gave the model. Read by the backend's wake queue."""
+        lock, ledger = self._detached_ledger()
+        with lock:
+            return frozenset(key for key, entry in ledger.items() if entry["consumed"])
+
+    def _consume_detached_results(self, ids) -> None:
+        """Mark results the model has now been handed, on BOTH delivery paths.
+
+        One is not enough. The editor's path parks the notice in `Backend._agent_wakes` until this
+        turn ends and then spends a whole billed wake turn re-announcing a result the model already
+        summarised. The terminal's path is worse: `_drain_monitors` folds the hub's pending batch
+        into THIS turn at the next tool-round boundary, so the same completion arrives twice within
+        seconds. The flag below is what the backend filters on; the hub gets an explicit drop.
+        """
+        lock, ledger = self._detached_ledger()
+        with lock:
+            for agent_id in ids:
+                entry = ledger.get(str(agent_id))
+                if entry is not None:
+                    entry["consumed"] = True
+        drop = getattr(getattr(self, "monitors", None), "drop_pending_subtask", None)
+        if callable(drop):
+            for agent_id in ids:
+                try:
+                    drop(str(agent_id))
+                except Exception:
+                    pass
+
+    def _live_detached_ids(self) -> set:
+        """Detached children belonging to THIS conversation.
+
+        `/new` signals a child and moves on without waiting, so for a moment the previous chat's
+        child is still in `_detached_jobs`. The registry is reset with the chat, so an id it does
+        not know is not this conversation's business and is not named back to the model.
+        """
+        jobs = set(getattr(self, "_detached_jobs", None) or {})
+        registry = getattr(self, "subagents", None)
+        if not jobs or registry is None:
+            return jobs
+        try:
+            known = {str(item.get("id") or "")
+                     for item in (registry.snapshot().get("items") or [])}
+        except Exception:
+            return jobs
+        return {agent_id for agent_id in jobs if agent_id in known}
+
+    def _list_tasks_result(self) -> str:
+        """`list_tasks`: this chat's sub-agents, rendered from the same snapshot the pill reads."""
+        from .subagents import model_view
+        registry = getattr(self, "subagents", None)
+        snap = (registry.snapshot() if registry is not None
+                else {"items": [], "total": 0, "active": 0})
+        return model_view(snap, running_ids=self._live_detached_ids(),
+                          result_ids={row["id"] for row in
+                                      self._detached_results(unconsumed_only=True)})
+
+    def _wait_tasks_result(self, args: dict, call_id: str | None) -> str:
+        """`wait_tasks`: block until a background child is final, then return its whole outcome.
+
+        Codex ships two different `wait_agent` tools under one name. DGC takes V1's contract --
+        ids in, the finisher's final text out -- for two reasons read off the source: V1's
+        `{"completed": "<final assistant message>"}` is the ONLY return in either version that
+        carries the child's work, and V2's "Does not return the content" is coherent only beside
+        the mailbox and `send_message` channel DGC does not have yet. Returning every target that
+        is already final is V1's behaviour too, not an embellishment: it breaks on the first final
+        status and then drains the others already ready. V2's one better property is kept -- the
+        wait ends early when the user steers into the running turn.
+        """
+        raw = args.get("ids")
+        if raw is None or raw == "":
+            ids = None
+        elif isinstance(raw, str):
+            ids = [raw.strip()] if raw.strip() else None
+        elif isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+            ids = [item.strip() for item in raw if item.strip()] or None
+        else:
+            return "error: ids must be an array of background sub-task id strings."
+        try:
+            asked = int(args.get("timeout_s", _WAIT_TASKS_DEFAULT_S) or _WAIT_TASKS_DEFAULT_S)
+        except (TypeError, ValueError):
+            asked = _WAIT_TASKS_DEFAULT_S
+        budget = max(_WAIT_TASKS_MIN_S, min(_WAIT_TASKS_MAX_S, asked))
+        note = "" if budget == asked else f" (timeout_s {asked} was clamped to {budget}.)"
+
+        if ids is not None:
+            known = set(getattr(self, "_detached_jobs", None) or {})
+            known |= {row["id"] for row in self._detached_results()}
+            missing = [item for item in ids if item not in known]
+            if len(missing) == len(ids):
+                registry = getattr(self, "subagents", None)
+                snap = registry.snapshot() if registry is not None else {"items": []}
+                seen = {str(item.get("id") or "") for item in (snap.get("items") or [])}
+                if all(item in seen for item in missing):
+                    return ("error: " + ", ".join(missing) + " did not run in the background, so "
+                            "there is nothing to wait for -- the `task` call that started it "
+                            "returned its result to you directly. Call list_tasks for what is "
+                            "running.")
+                return ("error: this conversation has no background sub-task with the id "
+                        + ", ".join(missing) + ". Call list_tasks for the ids that exist.")
+            ids = [item for item in ids if item in known]
+
+        deadline = time.monotonic() + budget
+        progress = getattr(self.ui, "tool_progress", None)
+        announced = 0.0
+        while True:
+            ready = self._detached_results(ids, unconsumed_only=True)
+            if ready:
+                break
+            if self.cancelled.is_set() or self.stopping:
+                return "The turn was stopped while waiting for background sub-tasks."
+            with self._steer_lock:
+                interrupted = bool(self.steer_queue)
+            if interrupted:
+                # V2's property, and the reason the slice below is short: the steering is left in
+                # the queue for `_drain_steer` to fold in at this tool boundary, seconds from now
+                # instead of up to ten minutes.
+                return ("Wait interrupted: the user sent a message while you were waiting. Read it "
+                        "and deal with that first -- the sub-task keeps running and you can wait "
+                        "again." + note)
+            live = self._live_detached_ids()
+            pending = sorted(live if ids is None else live.intersection(ids))
+            if not pending:
+                return ("Nothing to wait for: no background sub-task of this conversation "
+                        + ("with that id " if ids is not None else "")
+                        + "is still running, and no result is unread. Call list_tasks to see what "
+                        "has run." + note)
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return (f"Wait timed out after {budget}s. Still running: " + ", ".join(pending)
+                        + ". Carry on with something else and wait again when you need the "
+                        "result." + note)
+            if callable(progress) and time.monotonic() - announced >= 5.0:
+                announced = time.monotonic()
+                progress("wait_tasks",
+                         f"waiting on {len(pending)} background sub-task"
+                         + ("" if len(pending) == 1 else "s")
+                         + f" · {int(budget - max(0.0, left))}s of {budget}s", call_id=call_id)
+            # Not time.sleep: a Stop sets this event, so the turn ends in a quarter second rather
+            # than after the whole budget.
+            self.cancelled.wait(min(0.25, left))
+
+        rows = ready[:_WAIT_TASKS_MAX_RESULTS]
+        self._consume_detached_results([row["id"] for row in rows])
+        # One child gets the same room a foreground `task` result gets; several share it, so a
+        # batch cannot push the central 30 KB ceiling into cutting the last child's text in half.
+        share = max(2000, _MAX_TOOL_OUT // max(1, len(rows)))
+        blocks = [f"[{row['id']}] " + _clamp(str(row["output"]).strip(), share) for row in rows]
+        live = self._live_detached_ids()
+        still = sorted(live if ids is None else live.intersection(ids))
+        if len(ready) > len(rows):
+            blocks.append(f"{len(ready) - len(rows)} other finished sub-task(s) have results you "
+                          "have not read -- call wait_tasks again for them.")
+        if still:
+            blocks.append("Still running: " + ", ".join(still) + ".")
+        return "\n\n".join(blocks) + note
+
+    def _parallel_task_plan(self, calls: list[ToolCall]) -> list[int]:
+        """The indices this batch may fan out: a task run that ENDS the batch, or [] for serial.
+
+        The fan-out prepares one shared baseline and does not return until every child has stopped,
+        so anything the model emitted BEFORE the tasks has to have run first -- otherwise a sibling
+        edit or bash call is hoisted past children that are already working, and the checkout they
+        snapshotted is not the one the model asked them to work from. A call AFTER the run has the
+        mirror problem. Hence: the run must be last, and the caller must run it from inside the
+        call loop rather than before it.
+
+        What the old rule cost: `_parallel_task_outputs` refused the whole batch when any sibling
+        was not task/todo, so one small edit or one bash call beside four tasks ran the four
+        children one after another -- about 26 minutes of one measured 4.5-hour session. `todo`
+        stays tolerated anywhere, for the reason `_parallel_task_outputs` already gives.
+
+        A `task` OUTSIDE the run keeps the whole batch serial. Fanning out the tail while a leading
+        task integrates would give the siblings two different baselines, which is exactly what the
+        `same_baseline` check downstream exists to refuse.
+        """
+        if len(calls) < 2:
+            return []
+        start = len(calls)
+        while start and calls[start - 1].name in ("task", "todo"):
+            start -= 1
+        run = list(range(start, len(calls)))
+        if len([i for i in run if calls[i].name == "task"]) < 2:
+            return []                       # nothing to run side by side
+        if any(call.name == "task" for call in calls[:start]):
+            return []                       # a task outside the run would need a second baseline
+        return run
+
     def _parallel_task_outputs(self, calls: list[ToolCall],
                                prior_counts: dict | None = None) -> dict[int, _TaskOutcome]:
         """Run a task batch in private worktrees and preserve model-call result order.
@@ -8256,20 +8777,49 @@ class Agent(GoalLifecycle):
         """
         from .worktree import TaskWorkspace, repo_root
 
-        slots = [i for i, call in enumerate(calls) if call.name == "task"]
+        # `background: true` means "do not wait for me", and this path waits for everything: a
+        # background call inside a batch was silently run in the foreground, whatever the model asked
+        # for. Take those calls OUT of the batch and let the ordinary per-call path have them. That
+        # path is where the detach gate lives (agent.py:8132) AND where the mode, hooks, permission,
+        # allow-list, offered-set, depth and loop-guard checks this batch makes are applied one call
+        # at a time -- so this reroute re-applies every gate by bypassing none of them: it only
+        # removes calls from the batch, and a batch that then refuses still sends everything down the
+        # serial path exactly as before. The two ways a SMALLER batch could pass a gate the full one
+        # failed are closed below: the batch ceiling is measured against every task call, not the
+        # reduced set, and a malformed call is never deferred, so it cannot buy the rest their
+        # admission. The loop guard needs nothing: `background` is part of a call's signature, so a
+        # deferred call can never share one with a kept call, and `task` is not loop-exempt, so the
+        # turn's own counter still sees every deferred call.
+        from .ultra import worker_limit
+        tasks = [i for i, call in enumerate(calls) if call.name == "task"]
+        deferred: set[int] = set()
+        if self.depth == 0 and not self.stopping and len(tasks) <= _MAX_PARALLEL_TASK_BATCH:
+            wants = [i for i in tasks if _wants_background(calls[i].arguments)
+                     and "_unparsed" not in calls[i].arguments]
+            # Only as many as the detach gate will really take: it re-checks `len(jobs) < cap` per
+            # call and only this thread adds a job, so this budget is exact rather than hopeful. A
+            # background call over the cap stays in the batch and blocks exactly as it does today;
+            # sending it to the serial path instead would run it alone, after all the others.
+            free = max(0, worker_limit(self.config)
+                       - len(getattr(self, "_detached_jobs", None) or {}))
+            deferred = set(wants[:free])
+        slots = [i for i in tasks if i not in deferred]
         if len(slots) != len(calls):
             # A `todo` update is bookkeeping, not work, and models routinely send one beside the
             # task calls it tracks; it used to turn the whole fan-out serial. It still runs, in call
-            # order, on the normal path after this batch. Any other sibling keeps the batch serial.
+            # order, on the normal path after this batch -- and so does every deferred background
+            # call. Any other sibling keeps the batch serial.
             if any(call.name not in ("task", "todo") for call in calls):
                 return {}
+            if len(slots) < 2:
+                return {}          # nothing left to batch: every call takes the ordinary path
             inner = self._parallel_task_outputs([calls[i] for i in slots], prior_counts)
             return {slots[j]: outcome for j, outcome in inner.items()}
 
-        try:
-            limit = max(1, min(8, int(self.config.get("max_parallel_tasks", 4))))
-        except (TypeError, ValueError):
-            limit = 1
+        from .ultra import worker_limit
+        # The same width the prompt promised and the background gate allows. Left inline, Ultra
+        # printed "up to 8 parallel workers" and then ran a 4-wide pool.
+        limit = worker_limit(self.config, on_error=1)   # unreadable: `limit < 2` keeps it serial
         # The same cap as everywhere else. This was a second hard-coded 3, written independently
         # of the executor's: it is the only depth check on this path when `_offered_tool_names`
         # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
@@ -8351,8 +8901,12 @@ class Agent(GoalLifecycle):
             if not same_baseline:
                 detail = "the parent checkout changed while preparing the shared parallel baseline"
                 for i, workspace in prepared.items():
-                    cleanup = workspace.cleanup()
-                    warning = f" Cleanup warning: {cleanup}." if cleanup else ""
+                    # The prepare lease was released above, so this removal takes it again
+                    # through the one funnel instead of calling cleanup() unleased. These checkouts
+                    # were prepared and never handed to a child, so `never_ran` says so rather than
+                    # letting a failed delta inspection retain an empty worktree and file a
+                    # retained-task record for a sub-task that never started.
+                    warning = self._preserve_task_workspace(workspace, detail, never_ran=True)
                     outcomes[i] = _TaskOutcome(
                         f"Sub-task '{self._safe_text(str(calls[i].arguments.get('description', '')))}' "
                         "was not started: "
@@ -8421,7 +8975,8 @@ class Agent(GoalLifecycle):
             outcomes[i] = self._finalize_subagent(description, prepared[i], *execution)
         for i, call in enumerate(calls):
             outcome = outcomes.get(i, _TaskOutcome("Sub-task failed without a result."))
-            outcome = _TaskOutcome(_clamp(self._safe_text(outcome.output)), outcome.integrated)
+            outcome = _TaskOutcome(_clamp(self._safe_text(outcome.output)), outcome.integrated,
+                                   outcome.paths)
             outcomes[i] = outcome
             self.ui.tool_result(call.name, outcome.output, call.id)
         return outcomes

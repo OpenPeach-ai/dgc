@@ -529,6 +529,14 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # so a newer editor talking to an older backend just collects one command_rejected and
     # carries on -- no protocol version bump, and no fixture/capture churn.
     "ping": {},
+    # What is actually ON SCREEN, and who saw it. Additive and capability-gated ("editor_state"),
+    # like `ping` above: an older backend answers one command_rejected, no version bump, no
+    # fixture churn. ``source`` is the field that carries the weight. Only "renderer" is evidence
+    # that a window exists, because an extension host left behind by a window reload keeps running
+    # its own timers and no API tells it that it was orphaned -- so a host may report that its view
+    # was disposed, but it can never prove that its window is still there.
+    "editor_state": {"source": _f("string", enum=("renderer", "host")),
+                     "view": _f("string", enum=("open", "closed"))},
     "set_mode": {
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
         "live": _B(False),

@@ -362,8 +362,10 @@ TOOL_SCHEMAS = [
         "project it works in a private checkout, then integrates only its conflict-free delta; "
         "conflicting or incomplete work is preserved without overwriting the caller. It starts "
         "cold, so it saves time only beside other tasks: emit independent task calls in ONE "
-        "response (they run concurrently in auto mode); never batch tasks that depend on or edit "
-        "the same files. The user does not see its result: summarize it.",
+        "response (they run concurrently in auto mode) and put them LAST in that response -- "
+        "anything you want done first goes before them, and a call after them runs the whole batch "
+        "one child at a time; never batch tasks that depend on or edit the same files. The user "
+        "does not see its result: summarize it.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
          "prompt": {"type": "string", "description": "Self-contained brief: goal, project-relative "
                     "paths, constraints, what is known, what to return"},
@@ -375,6 +377,39 @@ TOOL_SCHEMAS = [
                         "answer. A background child outlives the turn; the result says whether you "
                         "are woken. Default false."}},
         ["description", "prompt"]),
+]
+
+# Supervising the background children `task` already starts. Deliberately NOT part of
+# TOOL_SCHEMAS: `dgc serve` publishes every TOOL_SCHEMAS name in the `ready` event's `tools`
+# array, and an ALREADY INSTALLED dgc-sdk whose RuntimePolicy sets `allow_tools` raises
+# DGCUnsupportedError for any runtime tool name its own table does not know
+# (sdk/python/dgc_sdk/policy.py, _confirm_tools) -- so listing these two there would kill every
+# such embedder's session on the day the CLI updates. They reach the model through
+# Agent._tool_schemas instead, and a session launched with DGC_SESSION_POLICY is not offered them
+# at all until an SDK exists that can name them. Moving them into TOOL_SCHEMAS is the mutation
+# tests/test_task_supervision.py exists to fail.
+SUPERVISION_TOOL_SCHEMAS = [
+    _fn("list_tasks", "List the sub-agents of THIS conversation and what each is doing: id, state "
+        "(queued, running, waiting on the user, finished, failed, stopped), how long it has run, "
+        "its tool count, and a finished one's one-line summary. Read-only and instant. Use it to "
+        "decide what to wait for: the ids it returns are the ids `wait_tasks` takes, and it marks "
+        "which results are still unread.",
+        {}, []),
+    _fn("wait_tasks", "Block until a background sub-task reaches a final state, then return its "
+        "full result -- the same text a foreground `task` call would have returned, including "
+        "which paths were integrated. An id that is already final returns immediately. Use it "
+        "sparingly: only when you need a child's result for your very next step and cannot make "
+        "progress without it. Do not wait by reflex, and prefer one long wait to repeated short "
+        "ones. It also returns early if the user says something mid-turn, so you read them first.",
+        {"ids": {"type": "array", "items": {"type": "string"},
+                 "description": "Background sub-task ids (from `task` or `list_tasks`). Pass "
+                                "several to return as soon as ANY of them finishes. Omit to wait "
+                                "on every background sub-task of this conversation."},
+         "timeout_s": {"type": "integer",
+                       "description": "Seconds to wait before giving up and reporting what is "
+                                      "still running. Default 30, minimum 5, maximum 600; a value "
+                                      "outside that range is clamped, not refused."}},
+        []),
 ]
 
 SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}

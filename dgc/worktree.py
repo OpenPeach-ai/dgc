@@ -741,6 +741,12 @@ class TaskWorkspace:
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("conflict", display, shown, detail)
 
+        # A multi-file delta is not atomic. Each file lands atomically (_replace_state, :432) but the
+        # loop below is not, the except-rollback cannot run if the process is gone, and until now
+        # nothing on disk said an integration was in flight. Leave a breadcrumb first, so a torn
+        # apply is visible to `/tasks` instead of silent. Evidence, not a resume: re-applying it is
+        # refused, because the files already written no longer match the recorded baseline.
+        self.retain("integration in progress; DGC stopped while applying this delta", changed)
         applied: list[str] = []
         try:
             for repo_path in changed:
@@ -769,6 +775,13 @@ class TaskWorkspace:
             if metadata_error:
                 detail += f"; {metadata_error}"
             return TaskIntegration("error", display, error=detail)
+        # The delta landed: drop the in-flight breadcrumb BEFORE cleanup, so a worktree that cannot
+        # be removed does not leave a retained row for work that is already applied (_cleanup_task
+        # keeps the metadata on partial failure, by design).
+        try:
+            self.metadata_path.unlink()
+        except OSError:
+            pass
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, cleanup_error=cleanup_error)
 

@@ -106,6 +106,7 @@ _ACTIVITY_VERBS = {
     "propose_options": "Asking a question",
     "memory": "Updating memory", "artifact": "Building an artifact",
     "monitor": "Starting a monitor", "monitor_stop": "Stopping a monitor",
+    "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
 }
 
 
@@ -119,7 +120,49 @@ def activity_verb(name: str) -> str:
     return "Running " + (key or "a tool")
 
 
-def arg_summary(name: str, args: dict) -> str:
+def display_path(path, root=None) -> str:
+    """A path as a reader wants to see it: short, and still unambiguous.
+
+    The same rule Codex uses (codex-rs/tui/src/diff_render.rs display_path_for), because it is the
+    right one and there is no value in differing: a path already relative is left alone; one inside
+    the project loses that prefix, which is the common case and turns
+    /home/you/project/src/app/page.tsx into src/app/page.tsx; one elsewhere in the same repository
+    is shown relative, so a sibling reads ../packages/ui/x.ts rather than an absolute line; one
+    under your home directory is shown with ~; anything else stays absolute, because at that point
+    the full path IS the useful information.
+
+    Falls back to the original string on any error -- a display helper must never be the reason a
+    tool card fails to render.
+    """
+    text = str(path or "")
+    if not text:
+        return ""
+    try:
+        import os
+        from pathlib import Path
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            return text
+        base = Path(root).resolve() if root else None
+        if base is not None:
+            try:
+                return str(candidate.resolve().relative_to(base))
+            except ValueError:
+                pass
+            # Same tree, different branch of it: a relative path beats an absolute one.
+            shared = os.path.commonpath([str(candidate.resolve()), str(base)])
+            if shared not in ("/", ""):
+                return os.path.relpath(str(candidate.resolve()), str(base))
+        home = Path.home()
+        try:
+            return "~/" + str(candidate.resolve().relative_to(home))
+        except ValueError:
+            return text
+    except Exception:
+        return text
+
+
+def arg_summary(name: str, args: dict, root=None) -> str:
     """A one-line human summary of a tool call's primary argument."""
     if name == "propose_options" and isinstance(args, dict):
         from .questions import args_summary
@@ -131,7 +174,9 @@ def arg_summary(name: str, args: dict) -> str:
         return value[:120] + ("…" if len(value) > 120 else "")
     for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
         if key in args:
-            value = str(args[key]).replace("\n", " ")
+            # A path is shortened; everything else is the model's own words and stays verbatim.
+            raw = display_path(args[key], root) if key == "path" else str(args[key])
+            value = raw.replace("\n", " ")
             return value[:120] + ("…" if len(value) > 120 else "")
     return ""
 

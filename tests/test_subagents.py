@@ -615,6 +615,157 @@ class SerialAndParallelTests(HarnessCase):
         self.assertFalse(any(f["parallel"] for f in started))
 
 
+class TheWidthIsOneNumberTests(unittest.TestCase):
+    """The prose, the batch pool and the background gate must not be able to disagree.
+
+    Ultra printed "up to 8 parallel workers" into the prompt while the executor kept a 4-wide pool,
+    because the width was clamped inline in three places. Every surface now reads `worker_limit`.
+    """
+
+    class Cfg:
+        def __init__(self, **data):
+            self.data = data
+
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+
+    def test_ultra_uses_the_whole_range_when_you_never_chose_one(self):
+        from dgc.ultra import ULTRA_WORKERS, worker_limit
+        self.assertEqual(worker_limit(self.Cfg()), 4, "outside Ultra the default is unchanged")
+        self.assertEqual(worker_limit(self.Cfg(ultra_mode=True)), ULTRA_WORKERS)
+        self.assertEqual(ULTRA_WORKERS, 8, "the ceiling is hard-coded in seven places; this is it")
+
+    def test_a_width_you_chose_is_honoured_even_under_ultra(self):
+        from dgc.ultra import worker_limit
+        for chosen in (1, 2, 3, 6):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(
+                    worker_limit(self.Cfg(ultra_mode=True, max_parallel_tasks=chosen)), chosen,
+                    "model_errors tells a rate-limited user to LOWER this number; an "
+                    "unconditional Ultra override would make that advice a lie")
+
+    def test_setting_it_to_the_shipped_default_is_the_one_wart_and_the_profile_line_says_so(self):
+        # Ultra cannot distinguish "I chose 4" from "I left it alone", so it widens. The profile
+        # line the user sees when they turn Ultra on says how to narrow it.
+        from dgc.ultra import summary, worker_limit
+        self.assertEqual(worker_limit(self.Cfg(ultra_mode=True, max_parallel_tasks=4)), 8)
+        line = summary(self.Cfg(ultra_mode=True, max_subagent_depth=1))
+        self.assertIn("up to 8 parallel agents", line)
+        self.assertIn("max_parallel_tasks", line)
+        pinned = summary(self.Cfg(ultra_mode=True, max_subagent_depth=1, max_parallel_tasks=2))
+        self.assertIn("up to 2 parallel agents", pinned)
+        self.assertNotIn("max_parallel_tasks", pinned, "nothing to explain when you pinned it")
+
+    def test_an_unreadable_width_means_what_each_caller_needs_it_to_mean(self):
+        # The two executor sites disagree and always have: the background gate falls back to 4, the
+        # batch pool to 1 so its own `limit < 2` check keeps the batch serial. One shared internal
+        # fallback would have turned an unreadable config into a 4-wide fan-out.
+        from dgc.ultra import worker_limit
+        broken = self.Cfg(max_parallel_tasks="lots")
+        self.assertEqual(worker_limit(broken), 4)
+        self.assertEqual(worker_limit(broken, on_error=1), 1)
+
+    def test_the_prompt_promises_the_width_the_pool_will_run(self):
+        from dgc.ultra import worker_limit
+        import re
+        source = (ROOT / "dgc" / "agent.py").read_text(encoding="utf-8")
+        # Both executor clamps read the shared function. An inline `min(8, int(...))` on
+        # max_parallel_tasks is the drift this test exists to refuse.
+        inline = re.findall(r'min\(8,\s*int\([^)]*max_parallel_tasks', source)
+        self.assertEqual(inline, [], "every fan-out width must come from ultra.worker_limit")
+        self.assertEqual(source.count("worker_limit(self.config, on_error=1)"), 1,
+                         "the batch pool is the one caller that needs the serial fallback")
+
+
+class TheFanOutRunsWhereTheModelPutItTests(HarnessCase):
+    """One small sibling call beside four tasks used to run the four children one after another.
+
+    `_parallel_task_outputs` refused any batch that was not all task/todo, so a `todo`, an edit or a
+    bash call next to a fan-out cost the whole batch its parallelism -- about 26 minutes of one
+    measured 4.5-hour session. The fan-out now happens where the model put it: a task run that ENDS
+    the response fans out once everything before it has actually run.
+    """
+
+    def plan(self, *names) -> list[int]:
+        h = self.make()
+        calls = [ToolCall(f"c{n}", name, {}) for n, name in enumerate(names)]
+        return h.agent._parallel_task_plan(calls)
+
+    def test_a_trailing_task_run_fans_out_behind_its_siblings(self):
+        self.assertEqual(self.plan("ls", "task", "task"), [1, 2])
+        self.assertEqual(self.plan("write_file", "bash", "task", "task", "task"), [2, 3, 4])
+
+    def test_a_whole_batch_of_tasks_is_still_the_whole_batch(self):
+        self.assertEqual(self.plan("task", "task"), [0, 1])
+        self.assertEqual(self.plan("task", "task", "todo"), [0, 1, 2])
+
+    def test_a_call_after_the_run_keeps_the_batch_serial(self):
+        # The mirror problem: a call placed after the children would be hoisted past work that has
+        # already started, against a checkout the model never described.
+        self.assertEqual(self.plan("task", "task", "ls"), [])
+        self.assertEqual(self.plan("ls", "task", "task", "bash"), [])
+
+    def test_a_task_outside_the_run_keeps_the_batch_serial(self):
+        # Two baselines: the leading child integrates while the trailing ones snapshot. That is
+        # exactly what the downstream same-baseline check exists to refuse.
+        self.assertEqual(self.plan("task", "ls", "task", "task"), [])
+
+    def test_one_task_is_not_a_fan_out(self):
+        self.assertEqual(self.plan("ls", "task"), [])
+        self.assertEqual(self.plan("task"), [])
+
+    def test_the_sibling_before_a_fan_out_really_runs_first(self):
+        """The property, end to end: parallel children AND the sibling ordered before them.
+
+        Under the old rule `parallel` was False for every one of these children.
+        """
+        h = self.make(git=True, max_parallel_tasks=2)
+        calls = [ToolCall("look", "ls", {"path": "."}),
+                 ToolCall("p0", "task", {"description": "part 0", "prompt": "CHILD0 work"}),
+                 ToolCall("p1", "task", {"description": "part 1", "prompt": "CHILD1 work"})]
+        h.run("split", [("CHILD0", child()), ("CHILD1", child()), ("split", calls_then(calls))])
+        self.assertFramesValid(h)
+        started = h.of("agent_started")
+        self.assertEqual([f["call_id"] for f in started], ["p0", "p1"])
+        self.assertTrue(all(f["parallel"] for f in started),
+                        "a sibling call must no longer cost the batch its parallelism")
+        i_sibling = h.index(lambda f: f["type"] == "tool_result" and f["call_id"] == "look")
+        i_first_child = h.index(lambda f: f["type"] == "agent_started")
+        self.assertLess(i_sibling, i_first_child,
+                        "the sibling's effects must be in the checkout the children snapshot")
+
+    def test_under_ultra_the_pool_really_is_wider_than_the_default(self):
+        """Measured concurrency, not a promise. The old inline clamp capped this at 4."""
+        h = self.make(git=True, ultra_mode=True)          # no max_parallel_tasks: Ultra's to choose
+        calls = [ToolCall(f"u{n}", "task", {"description": f"u{n}", "prompt": f"CHILD{n} work"})
+                 for n in range(6)]
+        responses = [(f"CHILD{n}", child(sleep=0.35)) for n in range(6)]
+        h.run("wide", [*responses, ("wide", calls_then(calls))])
+        self.assertFramesValid(h)
+        running, peak = set(), 0
+        for frame in h.stream.frames():
+            if frame["type"] == "agent_updated" and frame["state"] in ("running", "waiting"):
+                running.add(frame["id"])
+            elif frame["type"] == "agent_ended":
+                running.discard(frame["id"])
+            peak = max(peak, len(running))
+        self.assertGreater(peak, 4, f"Ultra ran {peak} at once; the default clamp of 4 is the bug")
+        self.assertEqual({f["state"] for f in h.of("agent_ended")}, {"finished"})
+
+    def test_a_trailing_sibling_still_gets_the_serial_path_and_every_child_runs(self):
+        h = self.make(git=True, max_parallel_tasks=2)
+        calls = [ToolCall("p0", "task", {"description": "part 0", "prompt": "CHILD0 work"}),
+                 ToolCall("p1", "task", {"description": "part 1", "prompt": "CHILD1 work"}),
+                 ToolCall("look", "ls", {"path": "."})]
+        h.run("split", [("CHILD0", child()), ("CHILD1", child()), ("split", calls_then(calls))])
+        self.assertFramesValid(h)
+        started = h.of("agent_started")
+        self.assertEqual([f["call_id"] for f in started], ["p0", "p1"])
+        self.assertFalse(any(f["parallel"] for f in started),
+                         "serial, because a later call must not be hoisted past running children")
+        self.assertEqual({f["state"] for f in h.of("agent_ended")}, {"finished"})
+
+
 class TerminalStateTests(HarnessCase):
     def test_nested_agents_and_metrics_survive_save_and_resume(self):
         h = self.make(max_subagent_depth=2)  # about a grandchild: buy the level explicitly

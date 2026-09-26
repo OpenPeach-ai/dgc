@@ -993,8 +993,14 @@ test("a history payload only ever drives the replayable events", () => {
   assert.equal(doc.querySelectorAll(".msg.dgc").length, 1, "and nothing else invents a turn");
   assert.match(doc.querySelector(".compaction").textContent, /summarised/);
   assert.equal(doc.querySelector(".compaction-body").textContent, "earlier summary");
-  assert.deepEqual(posted.filter((m) => m.type !== "webviewReady" && m.type !== "getRecall"), [],
-    "replay posts nothing to the extension host but the pager's own request for the archive");
+  // Three posts are not driven by the payload: the ready handshake, the pager's own request for the
+  // archive, and the liveness heartbeat, which the renderer starts on a timer to prove to the
+  // backend that a window exists. Counting the heartbeat rather than ignoring it keeps the
+  // invariant honest -- replay driving one would push the count above the single statement at load.
+  assert.equal(posted.filter((m) => m.type === "editorAlive").length, 1,
+    "the heartbeat says it once at load; replay must not produce another");
+  assert.deepEqual(posted.filter((m) => !["webviewReady", "getRecall", "editorAlive"].includes(m.type)),
+    [], "replay posts nothing to the extension host but the pager's own request for the archive");
   assert.deepEqual(errors, []);
 });
 

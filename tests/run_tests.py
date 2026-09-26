@@ -11519,12 +11519,20 @@ def test_benchmark_integrity():
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
                            "present_plan", "propose_options", "ask_user", "python", "update_goal"}
-        # Measured at 6,376 on this release (6,222 before `show_file`; the Environment line's
-        # timezone is 7 of them). The ceiling is a bloat gate, not a target -- it earned its keep
-        # on 0.44.0, where `show_file`'s first description cost 206 tokens and pushed the total to
-        # 6,428. The fix was a shorter description, not a higher ceiling. Headroom is thin now:
-        # the next tool should arrive with a one-line description or a deliberate raise.
-        _PROBE_TOKEN_CEILING = 6400
+        # Measured at 6,402 on 0.46.0 (6,383 before it; 6,376 on 0.45.0; 6,222 before `show_file`,
+        # whose Environment line's timezone is 7 of them). The ceiling is a bloat gate, not a
+        # target -- it earned its keep on 0.44.0, where `show_file`'s first description cost 206
+        # tokens and pushed the total to 6,428, and the fix was a shorter description rather than a
+        # higher ceiling.
+        #
+        # 0.46.0 is the deliberate raise that comment left room for. `task` gained `background`,
+        # and the model has to be told what it does: without it the guidance still says the batch
+        # always blocks, which became false the moment a background child could run inside one --
+        # a model acting on a false instruction is worse than 19 tokens. It was written twice
+        # first, in the sub-agent section and again in the batch rule, and trimming that to once
+        # gave back 42 of the 61 it originally cost. 6,450 restores roughly the headroom 0.45.0
+        # had; the next tool still arrives with a one-line description or its own raise.
+        _PROBE_TOKEN_CEILING = 6450
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"

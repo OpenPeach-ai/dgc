@@ -195,11 +195,21 @@ class TheHolderDecides(_Home):
         from dgc import headless
 
         class _Watch:
+            """Shaped like the real one: `_consider_release` asks `editor_gone_for_takeover` first
+            and only falls back to `editor_gone` for a build that predates it. A double with the
+            fallback alone tested a branch production never takes."""
+
             def __init__(self) -> None:
                 self.stood_down = False
 
             def editor_gone(self):
                 return gone
+
+            def editor_gone_for_takeover(self):
+                return gone, 0.0
+
+            def renderer_on_screen(self):
+                return False            # no chat panel has spoken; the traffic clock decides
 
             def stand_down(self):
                 self.stood_down = True
@@ -279,17 +289,31 @@ class AReloadedWindowGetsItBack(_Home):
         from dgc.headless import ABANDONED_AFTER_S, TAKEOVER_SILENCE_S
         self.assertLess(TAKEOVER_SILENCE_S, ABANDONED_AFTER_S,
                         "handing over to a waiting window must be faster than ending yourself")
-        self.assertGreater(TAKEOVER_SILENCE_S, 60.0,
-                           "the editor pings every 60s; a shorter window would rob a live editor")
+        from dgc.headless import EDITOR_HEARTBEAT_S
+        self.assertGreater(TAKEOVER_SILENCE_S, 4 * EDITOR_HEARTBEAT_S,
+                           "the chat panel says it is on screen every EDITOR_HEARTBEAT_S; a "
+                           "backgrounded window's timers can be throttled to once a minute, so a "
+                           "shorter window would rob a live editor")
 
     def test_a_window_reloaded_a_moment_ago_does_not_get_it_yet(self):
         gone, remaining = self.watch(5.0).editor_gone_for_takeover()
         self.assertFalse(gone, "five seconds of quiet is not evidence an editor has gone")
         self.assertGreater(remaining, 0, "and the asker is told how long is left")
 
-    def test_after_two_missed_pings_the_session_is_handed_over(self):
+    def test_a_never_rendered_editor_is_still_judged_by_its_traffic(self):
+        """`self.watch` rewinds the TRAFFIC clock, which is an older extension's only evidence.
+
+        The old name said "after two missed pings the session is handed over", which is a true
+        statement about `_EditorLiveness` and a false one about the product: a reload leaves the
+        extension host pinging, so its traffic clock never goes quiet at all. That case is
+        TheTakeoverClockTest in tests/test_editor_liveness.py. This is the other one, and it has to
+        keep working -- an extension that knows nothing about `editor_state` must be judged exactly
+        as it shipped rather than losing every session two minutes after a CLI upgrade.
+        """
         from dgc.headless import TAKEOVER_SILENCE_S
-        gone, remaining = self.watch(TAKEOVER_SILENCE_S + 1).editor_gone_for_takeover()
+        watch = self.watch(TAKEOVER_SILENCE_S + 1)
+        self.assertIsNone(watch._last_renderer, "no chat panel has ever spoken to this one")
+        gone, remaining = watch.editor_gone_for_takeover()
         self.assertTrue(gone, "a live editor is never silent this long; someone is waiting")
         self.assertEqual(remaining, 0.0)
 
@@ -436,6 +460,21 @@ class TheAskerRetries(_Home):
             wait, _ = self.agent()._reclaim_session_lease()
         self.assertEqual(wait, _RECLAIM_WAIT_S)
 
+    def test_a_grant_says_it_was_a_grant(self):
+        """The retry running out must not look like a refusal that said nothing.
+
+        It returned "" for a grant, and an empty reason fell all the way through to the message about
+        a backend that releases its session "within about 15 minutes" -- printed about a holder that
+        had agreed two seconds earlier and was mid-save.
+        """
+        from dgc.agent import _RECLAIM_WAIT_S, _STOOD_DOWN_REASON
+        self.write(self.note())
+        with patch.object(peers, "liveness", return_value="live"), \
+             self.replies(granted=True):
+            wait, why = self.agent()._reclaim_session_lease()
+        self.assertEqual(wait, _RECLAIM_WAIT_S)
+        self.assertEqual(why, _STOOD_DOWN_REASON)
+
     def test_the_wait_covers_the_backends_own_shutdown_grace(self):
         """It agrees at once but then finishes its step and saves, so the lease frees later."""
         from dgc.agent import _RECLAIM_WAIT_S
@@ -468,6 +507,28 @@ class TheRefusalSaysWhoHasIt(_Home):
         self.assertIn("321", text)
         self.assertIn("still connected", text)
         self.assertIn("Nothing was started.", text)
+
+    def test_a_holder_that_agreed_is_not_described_as_a_holder_that_refused(self):
+        from dgc.agent import _STOOD_DOWN_REASON
+        text = self.message(self.note(pid=321, status="working", liveness="live"),
+                            _STOOD_DOWN_REASON)
+        self.assertIn("agreed", text)
+        self.assertIn("Send this again", text)
+        self.assertNotIn("15 minutes", text,
+                         "it is saving right now, not waiting out the self-heal")
+        self.assertNotIn("kept it", text, "it did not keep it; it said yes")
+
+    def test_a_window_on_screen_is_not_promised_a_handover(self):
+        """The refusal a live window earns must not read like one that is about to let go.
+
+        Every non-immediate refusal used to count down and say "send this again and it will be handed
+        over" -- for two minutes at a stretch, about a window the person could see in front of them.
+        """
+        text = self.message(self.note(pid=321, status="working", liveness="live"),
+                            peers.REFUSED_ON_SCREEN)
+        self.assertIn("on screen", text)
+        self.assertNotIn("handed over", text)
+        self.assertNotIn("15 minutes", text, "nothing is self-healing: someone is using it")
 
     def test_a_terminal_holder_gets_the_remedy_that_works_on_a_terminal(self):
         text = self.message(self.note(kind="tui", liveness="live"))

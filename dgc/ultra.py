@@ -11,11 +11,45 @@ def enabled(config) -> bool:
     return bool(config.get("ultra_mode", False))
 
 
-def worker_limit(config) -> int:
+# Ultra's fan-out width when the user has not chosen one. Ultra means "run more of the turn at once
+# and pay for it in tokens", so it uses the whole range the rest of DGC already allows instead of the
+# conservative default. The CEILING is deliberately NOT raised: 8 is hard-coded in seven independent
+# places (headless.py _CONFIG_INTEGER_RANGES, agent.py, tui.py's settings label, the VS Code panel,
+# protocol.generated.ts, docs.py), and the panel rewrites a stored value above its own clamp on the
+# next settings Save -- a silent downgrade. Raising it is a separate coordinated change.
+ULTRA_WORKERS = 8
+
+
+def worker_limit(config, *, on_error: int = 4) -> int:
+    """How many children may run at once: one answer for the prose, the batch pool and the
+    background gate, so the prompt can never promise a width the executor does not run.
+
+    Under Ultra a width the user never chose is widened to ``ULTRA_WORKERS``; a width the user DID
+    choose is honoured exactly, including 1, which config.py documents as "disables". That matters
+    beyond politeness: model_errors.py tells a rate-limited user to lower ``max_parallel_tasks``, and
+    an unconditional Ultra override would make that advice a lie.
+
+    ``Config.is_explicit`` cannot be the discriminator. The VS Code settings pane posts
+    ``max_parallel_tasks`` on EVERY Save and set_config runs every posted key through ``Config.set``,
+    which marks it explicit -- so one Save would pin every editor user at 4 and Ultra would silently
+    stop widening. Test fixtures write ``data`` directly with no explicit keys, so tests would
+    disagree with production too. "Still the value DEFAULTS ships" survives both.
+
+    ``on_error`` is what an unreadable width means to THIS caller, because the two executor sites
+    disagree and always have: the background gate falls back to 4, while the batch pool falls back
+    to 1 so that its own ``limit < 2`` check keeps the batch serial. Swallowing both into one
+    internal fallback would quietly turn an unreadable config into a 4-wide fan-out.
+    """
+    from .config import DEFAULTS
+    shipped = DEFAULTS.get("max_parallel_tasks", 4)
+    raw = config.get("max_parallel_tasks", shipped)
     try:
-        return max(1, min(8, int(config.get("max_parallel_tasks", 4))))
+        width, pinned = max(1, min(8, int(raw))), int(raw) != int(shipped)
     except (TypeError, ValueError):
-        return 4
+        return on_error         # a value we could not read is not a width you chose
+    if enabled(config) and not pinned:
+        return max(width, min(8, ULTRA_WORKERS))
+    return width
 
 
 def native_effort(config, current: str) -> str:
@@ -86,6 +120,14 @@ def summary(config) -> str:
         depth = max(0, min(8, int(config.get("max_subagent_depth", 1))))
     except (TypeError, ValueError):
         depth = 1
-    agents = (f"up to {worker_limit(config)} parallel agents" if depth
+    width = worker_limit(config)
+    try:
+        # Derived, not restated: worker_limit differing from the plain clamp IS "Ultra widened it".
+        widened = bool(depth) and width != max(1, min(8, int(config.get("max_parallel_tasks", 4))))
+    except (TypeError, ValueError):
+        widened = bool(depth)
+    agents = (f"up to {width} parallel agents" if depth
               else "no sub-agents (max_subagent_depth is 0)")
+    if widened:
+        agents += " (max_parallel_tasks pins a narrower width)"
     return f"Ultra · xhigh reasoning · {agents}"

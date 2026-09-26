@@ -160,6 +160,16 @@ class DeclarationTests(unittest.TestCase):
 
 
 class HeadlessSharedTests(unittest.TestCase):
+    def test_a_liveness_ping_is_not_a_user_action(self):
+        # Outside the neutral set, every ping ran the suppression pair around itself: the True
+        # cancels any pending monitor wake timer, the False tells the policy a user command just
+        # landed and restarts the delay. The editor pings once a minute, so a
+        # monitor_wake_delay_s at or above that -- the setting allows up to 300 -- could never
+        # elapse, and background monitors stopped waking for that user entirely.
+        self.assertIn("ping", headless._WAKE_NEUTRAL_COMMANDS)
+        self.assertNotIn("ping", headless._BUSY_MUTATIONS,
+                         "and a ping must never be refused because a turn is running")
+
     def test_allowlists(self):
         self.assertTrue({"list_agents", "get_image"} <= headless._WAKE_NEUTRAL_COMMANDS)
         self.assertIn("list_agents", headless._OPTIONALLY_CORRELATED_COMMANDS)

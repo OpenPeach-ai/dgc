@@ -1003,6 +1003,26 @@ class MonitorHub:
         with self._lock:
             return sum(1 for batch in self._pending if batch.kind == "output")
 
+    def drop_pending_subtask(self, agent_id: str) -> int:
+        """Forget a queued `subtask_ended` notice: a tool has already given the model that result.
+
+        `Agent._drain_monitors` folds pending batches into the RUNNING turn at the next tool-round
+        boundary, so without this a `wait_tasks` result is followed seconds later by an inline
+        notice carrying the same completion, and the model reports the child twice. Returns how
+        many batches were dropped.
+        """
+        wanted = str(agent_id or "")
+        if not wanted:
+            return 0
+        with self._lock:
+            keep = [batch for batch in self._pending
+                    if not (batch.kind == "subtask_ended" and batch.monitor_id == wanted)]
+            dropped = len(self._pending) - len(keep)
+            if dropped:
+                self._pending.clear()
+                self._pending.extend(keep)
+        return dropped
+
     def take_pending(self, max_chars: int = MAX_NOTIFICATION_CHARS) -> Notification | None:
         """Atomically take the next deliverable events, oldest first, within one message budget."""
         with self._lock:

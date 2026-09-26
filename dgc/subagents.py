@@ -848,3 +848,39 @@ def meta_text(item: dict, *, main_model: str = "", fmt_tokens: Callable[[int], s
     if item.get("tokens"):
         parts.append(f"{fmt_tokens(_int(item['tokens']))} tokens")
     return " · ".join(parts)
+
+
+def model_view(snapshot: dict, *, running_ids=(), result_ids=()) -> str:
+    """This chat's sub-agents as plain text for the MODEL (the `list_tasks` tool).
+
+    Built from ``SubagentRegistry.snapshot()``, so the model reads exactly what the editor pill and
+    ``/agents`` read. ``running_ids`` are the ids whose detached thread is still alive and
+    ``result_ids`` the ids whose full result ``wait_tasks`` can still hand over; both come from the
+    Agent, not from ``state``, because ``end()`` marks a record finished BEFORE
+    ``_finalize_subagent`` integrates its worktree -- so "finished" here does not yet mean "its
+    result is readable", and deriving either mark from ``state`` would tell the model a child's
+    work was available while its delta was still being merged.
+    """
+    items = [item for item in (snapshot.get("items") or []) if isinstance(item, dict)]
+    if not items:
+        return "No sub-agents have run in this conversation."
+    running_ids, result_ids = set(running_ids or ()), set(result_ids or ())
+    rows = []
+    for level, item in tree_items(items):
+        agent_id = str(item.get("id") or "")
+        marks = []
+        if item.get("background"):
+            marks.append("background")
+        if agent_id in running_ids:
+            marks.append("still running")
+        if agent_id in result_ids:
+            marks.append("result unread — wait_tasks")
+        meta = meta_text(item)
+        rows.append("  " * min(level, 3) + f"- {agent_id} · "
+                    + (str(item.get("description") or "") or "(no description)")
+                    + (f" · {meta}" if meta else "")
+                    + ((" · " + " · ".join(marks)) if marks else ""))
+    head = (f"{len(items)} sub-agent" + ("" if len(items) == 1 else "s") + " listed · "
+            f"{_int(snapshot.get('active'))} active · "
+            f"{_int(snapshot.get('total'))} in this conversation")
+    return head + "\n" + "\n".join(rows)

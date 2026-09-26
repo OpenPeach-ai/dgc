@@ -1298,6 +1298,7 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
     provider.ensureBackend = () => ({ ready: true, request: async () => ({}) });
     const makeView = (viewType) => {
       const onVisible = [];
+      const onDispose = [];
       return {
         viewType, visible: true, show() {},
         webview: {
@@ -1306,6 +1307,10 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
           onDidReceiveMessage() {},
         },
         onDidChangeVisibility(fn) { onVisible.push(fn); },
+        // Real: WebviewView.onDidDispose fires when the user UNCHECKS the view. Provided here
+        // rather than called optionally in the panel, so a genuinely missing API still throws.
+        onDidDispose(fn) { onDispose.push(fn); },
+        dispose() { onDispose.forEach((fn) => fn()); },
         becomeVisible() { this.visible = true; onVisible.forEach((fn) => fn()); },
       };
     };
@@ -1325,6 +1330,61 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
       "coming back to it makes it the chat again");
     assert.match(secondary.webview.html, /stays out of the way/,
       "and the one now left behind carries the notice");
+  } finally {
+    vs.Uri = savedUri;
+  }
+});
+
+test("unchecking the chat view tells every backend the panel is gone, and stops none of them", () => {
+  // The backend decides a takeover from what the CHAT PANEL says is on screen, because an extension
+  // host left behind by a window reload keeps insisting all is well and nothing in the VS Code API
+  // tells it otherwise. Unchecking the view is the one case where a live window legitimately has no
+  // panel, so it is also the one honest statement the host can make -- and it must not be mistaken
+  // for the window closing: closing the view has never stopped the backend and still must not.
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const savedUri = vs.Uri;
+  try {
+    vs.Uri = { joinPath: (...parts) => ({ fsPath: parts.map(String).join("/") }),
+      file: value => ({ fsPath: value }) };
+    const provider = new DgcViewProvider({
+      extension: { packageJSON: { version: "0.25.1", dgcCliVersion: "0.40.1" } },
+      extensionUri: { fsPath: "/ext" }, subscriptions: [],
+      globalState: { get() {}, async update() {} },
+      workspaceState: { get() {}, async update() {} },
+    });
+    const recorder = (name) => ({
+      name, states: [], stopped: 0,
+      editorState(source, view) { this.states.push(`${source}/${view}`); },
+      stop() { this.stopped += 1; },
+      dispose() { this.stopped += 1; },
+    });
+    const active = recorder("active");
+    const parked = recorder("parked");
+    provider.backend = active;
+    provider.slots = [{ id: "parked", backend: parked }];
+    provider.ensureBackend = () => active;
+
+    const onDispose = [];
+    const view = {
+      viewType: "dgc.chat", visible: true, show() {},
+      webview: {
+        options: {}, html: "", cspSource: "vscode-webview:",
+        asWebviewUri: (uri) => ({ toString: () => String(uri.fsPath) }),
+        onDidReceiveMessage() {},
+      },
+      onDidChangeVisibility() {},
+      onDidDispose(fn) { onDispose.push(fn); },
+    };
+    provider.resolveWebviewView(view);
+    assert.equal(onDispose.length, 1, "the panel must listen for the view being unchecked");
+
+    onDispose.forEach((fn) => fn());
+    assert.deepEqual(active.states, ["host/closed"],
+      "exactly one statement, and it says which of the two went away");
+    assert.deepEqual(parked.states, ["host/closed"],
+      "one webview serves every chat, so a parked chat's backend hears it too");
+    assert.equal(active.stopped + parked.stopped, 0,
+      "closing the view has never stopped the backend and must not start now");
   } finally {
     vs.Uri = savedUri;
   }

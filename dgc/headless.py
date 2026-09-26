@@ -96,6 +96,14 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image",
+    # A liveness ping is the editor breathing, not the user acting. Left out of this set, every
+    # ping ran the suppression pair around itself: _suppress_wakes(True) cancels any pending wake
+    # timer, and the matching False tells the monitor policy a user command just landed. With a
+    # ping a minute that restarts the delay a minute, so any monitor_wake_delay_s at or above the
+    # ping interval -- the setting allows up to 300 -- can never elapse, and background monitors
+    # stop waking entirely for that user. It also costs a pointless cancel/rearm every minute at
+    # the default of 2. `editor_state` is the same thing at 20s, where the threshold is lower still.
+    "ping", "editor_state",
 })
 _WAKE_YIELD_TIMEOUT = 10.0
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
@@ -293,6 +301,17 @@ TURN_CONTINUE_PROMPT = (
 
 class _Shutdown(Exception):
     pass
+
+
+class _ReadEnded(BaseException):
+    """We ended our own command read: a handover was granted, or the window was given up on.
+
+    A blocked ``readline`` cannot be ended by closing the stream from another thread -- CPython's
+    ``BufferedReader.close()`` takes the same lock the blocked reader holds, so the CLOSER blocks
+    too and the reader comes out only when the next byte happens to arrive. A signal we send
+    ourselves does interrupt it, and this is what its handler raises. BaseException for the same
+    reason ``_Terminated`` is one.
+    """
 
 
 class _Terminated(BaseException):
@@ -519,6 +538,17 @@ ABANDON_CHECK_EVERY_S = 30.0
 # The editor pings every 60s (backend.ts LIVENESS_PING_MS), so a live one is never silent for two
 # whole intervals. Missing two is strong evidence it is gone, and someone is waiting.
 TAKEOVER_SILENCE_S = 125.0
+# How often the CHAT PANEL says it is on screen (editors/vscode/media/main.js
+# EDITOR_ALIVE_EVERY_MS). Six of these fit inside TAKEOVER_SILENCE_S, which is the tolerance that
+# matters: a backgrounded window's timers can be throttled to once a minute, and losing a live
+# session to a throttled renderer would be the same bug in the opposite direction.
+EDITOR_HEARTBEAT_S = 20.0
+# Extra patience for the one state where a live window legitimately has no renderer: the user
+# unchecked the DGC view, so VS Code disposed it and the extension host said so. Bounded, and
+# deliberately so. The host cannot prove its window is still there -- no API tells an orphaned
+# extension host that it was orphaned -- so this is a claim, not evidence. If a window reload ever
+# delivers the same view disposal on its way out, an orphan gets one extra minute, not forever.
+CLOSED_VIEW_GRACE_S = 60.0
 
 
 class _EditorLiveness:
@@ -536,7 +566,7 @@ class _EditorLiveness:
     """
 
     def __init__(self, backend, stream, *, after: float = ABANDONED_AFTER_S,
-                 every: float = ABANDON_CHECK_EVERY_S) -> None:
+                 every: float = ABANDON_CHECK_EVERY_S, wake=None) -> None:
         self.backend = backend
         self.stream = stream
         self.after = after
@@ -545,6 +575,17 @@ class _EditorLiveness:
         self.abandoned = False
         self.idle_for = 0.0
         self._last = time.monotonic()
+        # A SECOND clock, and the only one a takeover is decided on once it exists. `_last` is any
+        # traffic, which an extension host left behind by a window reload keeps producing on a
+        # timer of its own -- that is the 25-hour stranded session, and no statement that host can
+        # make distinguishes it from a live one, because nothing tells it that it was orphaned. A
+        # statement from the chat panel's own webview does distinguish them: the renderer of a
+        # reloaded window is gone and cannot send one. None until one arrives.
+        self._last_renderer: float | None = None
+        self._view_closed_at: float | None = None    # the host says the view was disposed
+        self.stood_down = False                      # we handed over, rather than gave up
+        self.wake = wake                             # how to get the read loop out of a blocked read
+        self._closer: threading.Thread | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
 
@@ -557,6 +598,22 @@ class _EditorLiveness:
         """Any command at all counts as the editor being alive, not only a ping."""
         with self._lock:
             self._last = time.monotonic()
+
+    def editor_state(self, *, source: str, view: str) -> None:
+        """Record what the editor says is on screen, and WHO saw it.
+
+        ``source == "renderer"`` is the only evidence that a window exists, so it is the only thing
+        that moves the takeover clock. A host saying its view was disposed is a claim about a
+        window it cannot see; it counts as traffic, and it buys ``CLOSED_VIEW_GRACE_S`` and no more.
+        """
+        with self._lock:
+            self.armed = True
+            self._last = time.monotonic()
+            if source == "renderer":
+                self._last_renderer = self._last
+                self._view_closed_at = None
+            elif view == "closed":
+                self._view_closed_at = self._last
 
     def working(self) -> str:
         """Name the work that should keep this backend alive, or '' when there is none."""
@@ -595,10 +652,7 @@ class _EditorLiveness:
         if self.working():
             return False
         self.abandoned = True
-        try:
-            self.stream.close()          # the read loop treats this as end of input
-        except Exception:
-            pass
+        self._end_stream()
         return True
 
     def run(self) -> None:
@@ -639,8 +693,62 @@ class _EditorLiveness:
         with self._lock:
             if not self.armed:
                 return False, 0.0       # never pinged: an older editor, judged as before
-        quiet = self.silent_for()
-        return quiet > TAKEOVER_SILENCE_S, max(0.0, TAKEOVER_SILENCE_S - quiet)
+            renderer_last = self._last_renderer
+            closed_at = self._view_closed_at
+        if renderer_last is None:
+            # No renderer has ever spoken to us: an older extension, which pings from its host and
+            # knows nothing about `editor_state`. Judge it exactly as it shipped.
+            quiet = self.silent_for()
+            return quiet > TAKEOVER_SILENCE_S, max(0.0, TAKEOVER_SILENCE_S - quiet)
+        self.silent_for()               # keep `idle_for` current for describe() and the end line
+        quiet = time.monotonic() - renderer_last
+        budget = TAKEOVER_SILENCE_S
+        if closed_at is not None and closed_at >= renderer_last:
+            budget += CLOSED_VIEW_GRACE_S
+        return quiet > budget, max(0.0, budget - quiet)
+
+    def renderer_on_screen(self) -> bool:
+        """A chat panel said it was on screen recently enough to still believe it.
+
+        The refusal a peer gets depends on this. Without it every refusal counted down and promised
+        "send this again and it will be handed over" -- said, for two minutes at a stretch, about a
+        window the person is looking at. Two heartbeats of tolerance, so one dropped tick does not
+        turn a live window into a countdown. A view the host reported disposed does not count: there
+        is no panel on screen then, only a window that may or may not still be there.
+        """
+        with self._lock:
+            last = self._last_renderer
+            closed_at = self._view_closed_at
+        if last is None or (closed_at is not None and closed_at >= last):
+            return False
+        return (time.monotonic() - last) < 2 * EDITOR_HEARTBEAT_S
+
+    def _close_stream(self) -> None:
+        try:
+            self.stream.close()          # the read loop treats this as end of input
+        except Exception:
+            pass
+
+    def _end_stream(self) -> None:
+        """Get the read loop out of its blocking read, by the fastest route available.
+
+        Closing the stream is NOT that route. CPython's ``BufferedReader.close()`` takes the same
+        lock a blocked ``readline`` holds, so the closer blocks too and the reader wakes only when
+        the next byte happens to arrive: with a 60s editor ping that is ~30s on average and 60s at
+        worst, against the 25s the asking backend waits (``agent._RECLAIM_WAIT_S``) -- so a granted
+        takeover usually missed its own window. A signal we send ourselves does interrupt the read.
+        The close stays as the fallback for a platform with no signal to send, and it runs on its
+        own thread so that whoever stood us down is never the thread that blocks.
+        """
+        if self.wake is not None:
+            try:
+                self.wake()
+                return
+            except Exception:
+                pass                     # fall through to the close
+        self._closer = threading.Thread(target=self._close_stream, name="dgc-stream-close",
+                                        daemon=True)
+        self._closer.start()
 
     def stand_down(self) -> bool:
         """End the backend because another window asked for this session.
@@ -648,12 +756,12 @@ class _EditorLiveness:
         The same ending as abandonment, without the in-flight veto that ``check`` applies. It is
         only ever reached once the editor has already gone, so the work that veto protects has no
         audience left -- and the alternative is that the window someone IS watching waits forever.
+
+        Someone is at a keyboard waiting on this, so it must not block: see ``_end_stream``.
         """
         self.abandoned = True
-        try:
-            self.stream.close()          # the read loop treats this as end of input
-        except Exception:
-            pass
+        self.stood_down = True
+        self._end_stream()
         return True
 
     def stop(self) -> None:
@@ -1096,7 +1204,7 @@ class HeadlessUI:
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._close_reasoning_fallback()
-        summary = arg_summary(name, args)
+        summary = arg_summary(name, args, getattr(self, "preview_root", None))
         self.turn_activity("tool", activity_verb(name), summary)
         self._note_shown_call(call_id)
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
@@ -1337,7 +1445,7 @@ class HeadlessUI:
             self._announce_request(rid, "permission_request", dict(
                 call_id=call_id, name=name, args=args,
                 command=(args.get("command") if name in ("bash", "monitor") else None),
-                summary=arg_summary(name, args), diff=preview or None,
+                summary=arg_summary(name, args, getattr(self, "preview_root", None)), diff=preview or None,
                 suggested_rule=str(rule_for(name, args)),
                 choices=["once", "always", "deny"]))
             payload = self._await(rid, ev, recheck=recheck, human=True) or {}
@@ -1541,6 +1649,10 @@ class Backend:
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           "editor_liveness": True, "produced_files": True, "agent_steps": True,
+                          # The chat panel can say what is on screen, so a takeover stops being
+                          # decided by whether a process is alive. Gated: an older CLI would answer
+                          # a heartbeat with command_rejected every 20s.
+                          "editor_state": True,
                           # Both the flag and where to write, inside capabilities: a new TOP-LEVEL
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
@@ -1783,12 +1895,19 @@ class Backend:
                            if hasattr(watch, "editor_gone_for_takeover")
                            else (watch.editor_gone(), 0.0))
         if not gone:
-            # Say how long, so the asker can tell the person something better than "no". A window
-            # that reloaded is silent from that moment, so this counts down to a real handover.
-            reason = ("its editor window is still connected"
-                      if remaining <= 0 else
-                      f"its editor has been quiet for a moment but not long enough to be sure; "
-                      f"ask again in about {int(remaining) + 1}s")
+            # Say how long, so the asker can tell the person something better than "no" -- but only
+            # promise a handover when one is actually coming. A panel that spoke within the last two
+            # heartbeats is a window ON SCREEN: it will never hand over, and the countdown told the
+            # person for two minutes at a time that it was about to.
+            ask_on_screen = getattr(watch, "renderer_on_screen", None)
+            on_screen = bool(ask_on_screen()) if callable(ask_on_screen) else False
+            if on_screen:
+                reason = _peers.REFUSED_ON_SCREEN
+            elif remaining <= 0:
+                reason = _peers.REFUSED_STILL_CONNECTED
+            else:
+                reason = (f"its editor has been quiet for a moment but not long enough to be sure; "
+                          f"ask again in about {int(remaining) + 1}s")
             _peers.answer_release(granted=False, reason=reason)
             return False
         _peers.answer_release(granted=True)
@@ -2198,10 +2317,25 @@ class Backend:
         self._maybe_wake()
 
     def _take_agent_wake_locked(self) -> dict | None:
+        """The next completion that still needs a wake turn, discarding ones already delivered.
+
+        `wait_tasks` hands a child's result to the model INSIDE the turn that waited, and a running
+        turn holds the backend busy -- so the notice this method would deliver is still sitting
+        here when that turn ends. Waking a fresh turn to re-announce a result the model has already
+        summarised costs a billed turn per child and tells the user the same thing twice.
+        Consumed notices are POPPED, not skipped: leaving one in the list makes `_maybe_wake` queue
+        a wake item, find nothing deliverable, retire the worker and re-arm itself forever.
+        """
         wakes = getattr(self, "_agent_wakes", None)
         if not wakes:
             return None
-        return wakes.pop(0)
+        consumed = getattr(getattr(self, "agent", None), "_detached_consumed_ids", None)
+        consumed = consumed() if callable(consumed) else frozenset()
+        while wakes:
+            notice = wakes.pop(0)
+            if str(notice.get("id") or "") not in consumed:
+                return notice
+        return None
 
     def _suppress_wakes(self, on: bool) -> None:
         agent = getattr(self, "agent", None)
@@ -2738,6 +2872,13 @@ class Backend:
         for worker in workers:
             if isinstance(worker, threading.Thread) and worker is not threading.current_thread():
                 worker.join(timeout=2)
+        # A detached child's worktree integration runs on its own thread, after its record ended and
+        # after the turn returned, and it writes the user's files one atomic file at a time. Exiting
+        # mid-apply leaves a half-applied delta. Bounded like the joins around it, and it never
+        # cancels: `stop_detached()` above already signalled, so a child that has not yet taken the
+        # integrate lease retains itself; this waits only for one that is past that point.
+        waiter = getattr(self.agent, "wait_finalizers", None)
+        self._finalizer_wait = waiter(2.0) if callable(waiter) else ""
         hub = getattr(self.agent, "monitors", None)
         if hub is not None:
             with self._turn_state_lock():
@@ -3152,7 +3293,7 @@ class Backend:
                     call_id = str(tc.get("id") or "") or None
                     # The summary is read from the whole arguments, as live: a bound must not change it.
                     items.append({"type": "tool_call", "call_id": call_id, "name": name,
-                                  "args": args, "summary": arg_summary(name, saved)})
+                                  "args": args, "summary": arg_summary(name, saved, self._display_root())})
                     if call_id:
                         calls[call_id] = name
                         if name == "propose_options":
@@ -3254,6 +3395,11 @@ class Backend:
         finally:
             if quiet:
                 self._suppress_wakes(False)
+
+    def _display_root(self):
+        """The directory tool paths are shown relative to: this chat's project."""
+        config = getattr(self, "config", None)
+        return getattr(config, "project_root", None)
 
     def _editor_plugins(self, opening: str = "", connected: set | None = None) -> list:
         from .plugins import catalog_for_editor, ensure_first_party
@@ -3954,6 +4100,14 @@ class Backend:
             watch = getattr(self, "_editor_liveness", None)
             if watch is not None:
                 watch.pinged()
+
+        elif t == "editor_state":
+            # What is actually ON SCREEN, and who saw it. No reply, same as `ping`. Only a renderer
+            # statement is evidence a window exists; the watchdog decides what each one is worth.
+            watch = getattr(self, "_editor_liveness", None)
+            if watch is not None:
+                watch.editor_state(source=str(cmd.get("source") or ""),
+                                   view=str(cmd.get("view") or ""))
 
         elif t == "ask_skip":
             ask_id = str(cmd.get("ask_id") or "")
@@ -5428,6 +5582,29 @@ def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
 # Long enough for a normal tool call to finish and the session to be written; short enough that
 # the replacement backend, which the editor starts within a second or two, never waits on us.
 SHUTDOWN_GRACE_S = 20.0
+# The same idea, but for a handover, where somebody IS waiting on us and their budget is fixed:
+# `agent._RECLAIM_WAIT_S` is 25s from the moment we answer "granted". Out of that, close() can
+# spend 2s joining the turn worker and 2s shutting monitors down, and the session write is under a
+# second -- so the in-flight turn gets 8s to reach a boundary and the whole handover lands with
+# room to spare. 20s did not: grace alone plus the joins overran the asker, which then reported a
+# refusal for a holder that had agreed.
+STAND_DOWN_GRACE_S = 8.0
+
+
+def _liveness_end_cause(liveness) -> str:
+    """Why the watchdog ended the read loop, for the log.
+
+    A handover and a give-up are different events and used to print the same line -- with the
+    15-minute figure in it, though a takeover is decided on 125s. ``stood_down`` is checked first
+    because standing down sets ``abandoned`` as well.
+    """
+    if liveness is None:
+        return "our own read ended with no watchdog to explain it"
+    if getattr(liveness, "stood_down", False):
+        return "handed this session to another DGC window that asked for it"
+    if liveness.abandoned:
+        return f"the editor stopped talking to us: {liveness.describe()}"
+    return "our own read was interrupted"
 
 
 
@@ -5503,11 +5680,28 @@ def serve(config: Config) -> None:
     stop_handlers.update(termbg.install_stop_handler(_on_stop))
     if crash_log is not None:
         _register_signal_dumps(crash_log)
+    # How the watchdog gets us out of a blocking read. Closing the command stream from another
+    # thread cannot do it (see _EditorLiveness._end_stream); a signal we send ourselves can,
+    # because the handler runs on THIS thread and the exception it raises leaves the read exactly
+    # the way _on_stop's already does. SIGUSR1 is untouched elsewhere in DGC, and faulthandler
+    # claims only SIGTERM/SIGHUP, so nothing has to be unregistered around it.
+    wake_reader = None
+    _wake_signal = getattr(signal, "SIGUSR1", None)
+    if _wake_signal is not None and hasattr(signal, "pthread_kill"):
+        def _on_wake(signum, frame) -> None:       # noqa: ARG001 -- the frame is the signal API's
+            if reading["stdin"]:
+                raise _ReadEnded()
+        _reader_ident = threading.main_thread().ident
+        try:
+            signal.signal(_wake_signal, _on_wake)
+            wake_reader = lambda: signal.pthread_kill(_reader_ident, _wake_signal)   # noqa: E731
+        except (ValueError, OSError, RuntimeError):
+            wake_reader = None                     # restricted context: the close is the fallback
     try:
         # Inside the try on purpose: start() is where the first model metadata and context
         # estimates happen, and a parent that gives up during it must still reach the finally.
         backend.start()
-        liveness = _EditorLiveness(backend, command_stream)
+        liveness = _EditorLiveness(backend, command_stream, wake=wake_reader)
         backend._editor_liveness = liveness
         liveness.start()
         for line, frame_problem in _command_lines(command_stream, pipe_watch):
@@ -5540,6 +5734,15 @@ def serve(config: Config) -> None:
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
                 _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
         reading["stdin"] = False               # past this point a signal has nothing to interrupt
+    except _ReadEnded:
+        # We ended our own read: the watchdog handed this session to a window that asked for it, or
+        # gave up on a window that had stopped talking to us. From here on this is the same shutdown
+        # a closed pipe gets -- the finally persists and releases -- so name the cause the same way.
+        reading["stdin"] = False
+        end_cause = _liveness_end_cause(liveness)
+        _end_line(crash_log, f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
+                             f"{commands} commands, last {last_command or 'none'!r}, turn running: "
+                             + ("yes" if _safe_busy(backend) else "no") + f", pipe: {pipe_watch.describe()}")
     except (KeyboardInterrupt, BrokenPipeError) as interrupt:
         end_cause = type(interrupt).__name__
         _end_line(crash_log, f"serve loop ended: {end_cause}; pipe: {pipe_watch.describe()}")
@@ -5560,7 +5763,7 @@ def serve(config: Config) -> None:
             cause = "the editor asked us to shut down"
         elif liveness is not None and liveness.abandoned:
             # Say what actually happened. "stdin closed" would be true and useless: we closed it.
-            cause = f"the editor stopped talking to us: {liveness.describe()}"
+            cause = _liveness_end_cause(liveness)
         elif pipe_watch.gave_up:
             cause = (f"the command pipe kept turning non-blocking ({pipe_watch.restores} restores); "
                      "stopped reading")
@@ -5587,20 +5790,25 @@ def serve(config: Config) -> None:
         # not, and neither is a signal. Only those get the grace period.
         if liveness is not None:
             liveness.stop()
-        grace = 0.0 if shutdown_requested else SHUTDOWN_GRACE_S
+        # A handover is on somebody else's clock: they stop retrying after `_RECLAIM_WAIT_S`, so a
+        # 20s grace plus the joins inside close() overran the very window it was meant to fit.
+        stood_down = bool(getattr(liveness, "stood_down", False))
+        grace = 0.0 if shutdown_requested else STAND_DOWN_GRACE_S if stood_down else SHUTDOWN_GRACE_S
         if grace > 0 and _safe_busy(backend):
             # If the editor is still there it should hear this from us, not infer it from silence.
             try:
                 backend.em.emit("info", message=(
                     f"DGC's backend is stopping ({end_cause}); it is finishing the current step "
-                    f"(up to {SHUTDOWN_GRACE_S:.0f}s) and saving the session."))
+                    f"(up to {grace:.0f}s) and saving the session."))
             except Exception:
                 pass
         outcome = backend.close(grace_s=grace)
         # Only now: for the whole grace window the process must keep the handler that makes a
         # second SIGTERM land cleanly instead of killing the turn we are busy saving.
         termbg.restore_stop_handlers(stop_handlers)
-        _log_crash(crash_log, f"backend closed cleanly (work in flight: {outcome})")
+        finalizers = getattr(backend, "_finalizer_wait", "")
+        _log_crash(crash_log, f"backend closed cleanly (work in flight: {outcome}"
+                              + (f"; {finalizers}" if finalizers else "") + ")")
         if crash_log is not None:
             try: crash_log.close()
             except Exception: pass

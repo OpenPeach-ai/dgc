@@ -58,6 +58,41 @@ function declaredFields(schema) {
   return out;
 }
 
+// Methods that send a command only when the CLI declared the capability, and the flag each one
+// must still check. A command sent from inside one of these is exempt from the oldest-CLI rule --
+// and the test below asserts the guard is really there, so the exemption cannot be claimed falsely.
+const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" }].map(g => g.method);
+const GATED_SENDER_GUARDS = { editorState: "editorStateSupported" };
+
+/** Is this node inside a method with the given name? */
+function insideMethod(node, name) {
+  for (let up = node.parent; up; up = up.parent) {
+    if ((ts.isMethodDeclaration(up) || ts.isFunctionDeclaration(up))
+        && up.name?.getText?.() === name) { return true; }
+  }
+  return false;
+}
+
+test("a capability-gated sender still refuses to send when the CLI did not declare it", () => {
+  // The exemption above is only honest while this holds. A sender that lost its guard would send a
+  // command every 20 seconds to a CLI that answers command_rejected every time.
+  const text = readFileSync(join(here, "..", "src/backend.ts"), "utf8");
+  const tree = ts.createSourceFile("src/backend.ts", text, ts.ScriptTarget.Latest, true);
+  const found = [];
+  function visit(node) {
+    if (ts.isMethodDeclaration(node) && node.name?.getText?.() in GATED_SENDER_GUARDS) {
+      const name = node.name.getText();
+      found.push(name);
+      assert.match(node.getText(tree), new RegExp(`!this\\.${GATED_SENDER_GUARDS[name]}\\b`),
+        `${name}() must return early unless the CLI declared ${GATED_SENDER_GUARDS[name]}`);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  assert.deepEqual(found.sort(), Object.keys(GATED_SENDER_GUARDS).sort(),
+    "every named gated sender must exist; a renamed one would silently lose its exemption");
+});
+
 test("every field the extension always sends exists in the oldest CLI it supports", () => {
   assert.match(MIN_CLI, /^\d+\.\d+\.\d+$/, "package.json must pin a minimum CLI version");
   const oldSchema = schemaAt(`v${MIN_CLI}`);
@@ -77,13 +112,16 @@ test("every field the extension always sends exists in the oldest CLI it support
         const type = node.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(tree) === "type");
         if (type && ts.isStringLiteral(type.initializer)) {
           const command = type.initializer.text, known = before.get(command);
-          // The dedicated sender is capability-gated, covered by panel-settings tests.
+          // Dedicated senders are capability-gated: they refuse to send unless the CLI declared
+          // support in `ready.capabilities`. Naming them here is only safe because the assertion
+          // below proves each one still carries its guard -- delete the guard and this test fails.
           const parent = node.parent;
           const gated = ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression)
             && parent.expression.name.text === "sendPluginCommand";
+          const gatedSelf = GATED_SENDERS.some((sender) => insideMethod(node, sender));
           const localMessage = ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression)
             && ["post", "postMessage", "onMessage"].includes(parent.expression.name.text);
-          if (now.has(command) && !gated && !localMessage) {
+          if (now.has(command) && !gated && !gatedSelf && !localMessage) {
             if (!known) problems.push(`${rel} sends unsupported command "${command}" directly`);
             else for (const prop of node.properties) {
               // Capability-dependent spreads do not unconditionally send new fields.

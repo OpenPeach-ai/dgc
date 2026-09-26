@@ -61,13 +61,24 @@ def backend(*, busy=False, monitors=None, detached=None, goal="") -> SimpleNames
     return SimpleNamespace(agent=agent, _busy=lambda: busy)
 
 
-def watcher(target, stream=None, *, after=900.0):
-    return _EditorLiveness(target, stream if stream is not None else _Stream(), after=after)
+def watcher(target, stream=None, *, after=900.0, wake=None):
+    return _EditorLiveness(target, stream if stream is not None else _Stream(), after=after,
+                           wake=wake)
 
 
 def age(watch: _EditorLiveness, seconds: float) -> None:
     """Move the last-seen time into the past rather than waiting for the clock."""
     watch._last = time.monotonic() - seconds
+
+
+def age_renderer(watch: _EditorLiveness, seconds: float) -> None:
+    """Move the chat panel's last statement into the past. The takeover clock, once it exists."""
+    watch._last_renderer = time.monotonic() - seconds
+
+
+def age_closed(watch: _EditorLiveness, seconds: float) -> None:
+    """Move the host's "the view was disposed" claim into the past."""
+    watch._view_closed_at = time.monotonic() - seconds
 
 
 class ArmingTest(unittest.TestCase):
@@ -153,15 +164,36 @@ class WorkInFlightTest(unittest.TestCase):
 
 
 class EndingTest(unittest.TestCase):
-    def test_it_ends_by_closing_the_stream_not_by_signalling(self):
+    def test_it_ends_the_read_loop_by_the_fastest_route_it_has(self):
+        # The invariant is "the loop reaches its normal end of input, so the transcript is persisted
+        # and the lease released" -- NOT "the stream was closed". The old name asserted the closing
+        # of the stream as a proxy for that and so defended the bug: closing a stream another thread
+        # is blocked reading takes the lock that reader holds, so the CLOSER blocks and the reader
+        # comes out only when a byte happens to arrive. Where a signal can be sent, that is the
+        # route; the close is the fallback for a platform with none.
+        stream = _Stream()
+        woke = []
+        watch = watcher(backend(), stream, wake=lambda: woke.append(True))
+        watch.pinged()
+        age(watch, 10_000)
+        self.assertTrue(watch.check())
+        self.assertEqual(woke, [True], "the waker is the route where there is one")
+        self.assertFalse(stream.closed_by_watchdog,
+                         "and then the stream is NOT closed from this thread, which would block it")
+        self.assertTrue(watch.abandoned)
+
+    def test_with_no_waker_it_still_ends_the_loop_without_blocking_the_caller(self):
         stream = _Stream()
         watch = watcher(backend(), stream)
         watch.pinged()
         age(watch, 10_000)
         self.assertTrue(watch.check())
-        self.assertTrue(stream.closed_by_watchdog,
-                        "the read loop must end through its normal end-of-input path, so the "
-                        "transcript is persisted and the session lease released")
+        # Off the calling thread by design: whoever stood us down must never be the thread that
+        # blocks on the reader's lock.
+        self.assertIsNotNone(watch._closer)
+        watch._closer.join(2)
+        self.assertTrue(stream.closed_by_watchdog)
+        self.assertTrue(watch.abandoned)
 
     def test_it_only_fires_once(self):
         watch = watcher(backend())
@@ -191,9 +223,159 @@ class EndingTest(unittest.TestCase):
         self.assertIn("900", described)
 
 
+class TheTakeoverClockTest(unittest.TestCase):
+    """A takeover is decided on whether a WINDOW exists, not on whether a process is alive.
+
+    This is the 25-hour bug's actual shape. A window reload leaves the extension host running --
+    nothing in the VS Code API tells a host that it was orphaned -- so it goes on pinging, truthfully
+    and uselessly, and every ping used to be read as "the window is fine". The chat panel's own
+    webview is the one thing that cannot survive its window, so that is what the clock now counts.
+    """
+
+    def test_a_host_that_keeps_pinging_does_not_keep_the_session(self):
+        watch = watcher(backend())
+        watch.editor_state(source="renderer", view="open")
+        age_renderer(watch, 200)
+        watch.pinged()                  # the orphaned extension host, still on its 60s timer
+        gone, _ = watch.editor_gone_for_takeover()
+        self.assertTrue(gone, "a ping from a host whose window is gone must not hold the session")
+
+    def test_without_renderer_evidence_the_traffic_clock_still_rules(self):
+        # An older extension pings and knows nothing about `editor_state`. It must be judged exactly
+        # as it shipped -- the alternative is that upgrading the CLI alone loses every session after
+        # two minutes.
+        watch = watcher(backend())
+        watch.pinged()
+        age(watch, 200)
+        self.assertTrue(watch.editor_gone_for_takeover()[0])
+        fresh = watcher(backend())
+        fresh.pinged()
+        age(fresh, 5)
+        self.assertFalse(fresh.editor_gone_for_takeover()[0])
+
+    def test_a_closed_view_buys_a_bounded_extra_wait_and_no_more(self):
+        from dgc.headless import CLOSED_VIEW_GRACE_S, TAKEOVER_SILENCE_S
+        watch = watcher(backend())
+        watch.editor_state(source="renderer", view="open")
+        age_renderer(watch, TAKEOVER_SILENCE_S + 5)
+        watch.editor_state(source="host", view="closed")
+        age_closed(watch, 5)
+        self.assertFalse(watch.editor_gone_for_takeover()[0],
+                         "the user unchecked the view: a live window with no panel to speak for it")
+        age_renderer(watch, TAKEOVER_SILENCE_S + CLOSED_VIEW_GRACE_S + 5)
+        self.assertTrue(watch.editor_gone_for_takeover()[0],
+                        "bounded on purpose -- a host cannot prove its window is still there")
+
+    def test_a_renderer_statement_clears_a_stale_closed_view_claim(self):
+        from dgc.headless import TAKEOVER_SILENCE_S
+        watch = watcher(backend())
+        watch.editor_state(source="host", view="closed")
+        watch.editor_state(source="renderer", view="open")
+        age_renderer(watch, TAKEOVER_SILENCE_S + 1)
+        self.assertTrue(watch.editor_gone_for_takeover()[0],
+                        "the view came back, so one old closed claim must not buy 60s forever")
+
+    def test_a_live_panel_is_on_screen_and_a_quiet_one_is_not(self):
+        from dgc.headless import EDITOR_HEARTBEAT_S
+        watch = watcher(backend())
+        self.assertFalse(watch.renderer_on_screen(), "nothing has spoken yet")
+        watch.editor_state(source="renderer", view="open")
+        self.assertTrue(watch.renderer_on_screen())
+        age_renderer(watch, 2 * EDITOR_HEARTBEAT_S + 1)
+        self.assertFalse(watch.renderer_on_screen(),
+                         "past two heartbeats it is a countdown, not a window on screen")
+
+    def test_a_disposed_view_is_not_a_panel_on_screen(self):
+        watch = watcher(backend())
+        watch.editor_state(source="renderer", view="open")
+        watch.editor_state(source="host", view="closed")
+        self.assertFalse(watch.renderer_on_screen(),
+                         "there is no panel then -- only a window that may or may not be there")
+
+    def test_the_two_clocks_are_a_number_apart_that_cannot_drift(self):
+        from dgc.headless import EDITOR_HEARTBEAT_S, TAKEOVER_SILENCE_S
+        self.assertGreater(TAKEOVER_SILENCE_S, 4 * EDITOR_HEARTBEAT_S,
+                           "a backgrounded window's timers can be throttled to once a minute; "
+                           "losing a live session to a throttled renderer is the same bug in "
+                           "the other direction")
+
+    def test_the_heartbeat_the_backend_expects_is_the_one_the_panel_sends(self):
+        # A drift gate between two files that must agree on one number. Not evidence of behaviour.
+        import re
+        from dgc.headless import EDITOR_HEARTBEAT_S
+        panel = (PROJECT / "editors/vscode/media/main.js").read_text(encoding="utf-8")
+        found = re.search(r"EDITOR_ALIVE_EVERY_MS\s*=\s*([0-9_]+)", panel)
+        self.assertIsNotNone(found, "the panel must declare its heartbeat interval")
+        self.assertEqual(int(found.group(1).replace("_", "")), int(EDITOR_HEARTBEAT_S * 1000))
+
+
+class TheLogSaysWhichEndingItWasTest(unittest.TestCase):
+    """A handover and a give-up are different events that used to print the same line."""
+
+    def test_the_log_says_a_handover_was_a_handover(self):
+        from dgc.headless import _liveness_end_cause
+        handed = watcher(backend())
+        handed.pinged()
+        handed.stand_down()
+        self.assertIn("handed this session", _liveness_end_cause(handed))
+        self.assertNotIn("stopped talking", _liveness_end_cause(handed))
+        gave_up = watcher(backend())
+        gave_up.pinged()
+        age(gave_up, 10_000)
+        gave_up.check()
+        self.assertIn("stopped talking", _liveness_end_cause(gave_up))
+
+    def test_a_handover_gets_a_grace_that_fits_the_asker_s_budget(self):
+        # Arithmetic, and labelled as such: a drift gate so nobody raises one constant alone. The
+        # evidence that a handover completes is the live run, not this.
+        from dgc.agent import _RECLAIM_WAIT_S
+        from dgc.headless import SHUTDOWN_GRACE_S, STAND_DOWN_GRACE_S
+        self.assertLessEqual(STAND_DOWN_GRACE_S + 2 + 2 + 1, _RECLAIM_WAIT_S,
+                             "grace + worker join + monitor shutdown + session write must fit "
+                             "inside the window the asking window actually waits")
+        self.assertLess(STAND_DOWN_GRACE_S, SHUTDOWN_GRACE_S,
+                        "somebody is at a keyboard waiting on a handover; nobody is waiting on a "
+                        "backend that simply gave up")
+
+
+class LivenessIsNotAUserActionTest(unittest.TestCase):
+    """A heartbeat that looked like a user command starved every background monitor wake."""
+
+    def _suppressions(self, command: dict) -> list:
+        from dgc.headless import Backend
+        seen: list = []
+        fake = SimpleNamespace(_suppress_wakes=lambda on: seen.append(on),
+                               _dispatch=lambda cmd: None)
+        Backend.dispatch.__get__(fake)(command)
+        return seen
+
+    def test_a_heartbeat_is_not_treated_as_a_user_action(self):
+        self.assertEqual(self._suppressions({"type": "ping"}), [])
+        self.assertEqual(self._suppressions({"type": "editor_state", "source": "renderer",
+                                             "view": "open"}), [])
+
+    def test_a_real_command_still_is(self):
+        self.assertEqual(self._suppressions({"type": "prompt", "text": "hi"}), [True, False])
+
+
 class ProtocolTest(unittest.TestCase):
     def test_ping_is_a_valid_command(self):
         self.assertIsNone(ep.command_error({"type": "ping"}))
+
+    def test_editor_state_is_a_valid_command(self):
+        self.assertIsNone(ep.command_error({"type": "editor_state", "source": "renderer",
+                                            "view": "open"}))
+        self.assertIsNone(ep.command_error({"type": "editor_state", "source": "host",
+                                            "view": "closed"}))
+
+    def test_editor_state_fails_closed_on_anything_else(self):
+        # Undeclared fields fail closed on this protocol -- which is exactly why nothing was added
+        # to `ping` or to any existing event, and a whole new command was added instead.
+        self.assertIsNotNone(ep.command_error({"type": "editor_state", "source": "renderer"}))
+        self.assertIsNotNone(ep.command_error({"type": "editor_state", "source": "guess",
+                                               "view": "open"}))
+        self.assertIsNotNone(ep.command_error({"type": "editor_state", "source": "renderer",
+                                               "view": "open", "window": 1}))
 
     def test_an_older_backend_rejects_it_without_dying(self):
         # The schema is how the backend decides; an unknown command becomes command_rejected in
@@ -254,3 +436,63 @@ class DocumentedTest(unittest.TestCase):
         self.assertEqual(ABANDONED_AFTER_S, 15 * 60.0)
         self.assertIn("fifteen minutes", body,
                       "the documented wait must track ABANDONED_AFTER_S, not drift from it")
+
+
+class WakingABlockedReaderTest(unittest.TestCase):
+    """The defect that made a granted handover miss its own window, proved on a real pipe.
+
+    `stand_down()` used to end the read loop by closing the command stream. CPython's
+    ``BufferedReader.close()`` takes the same lock a blocked ``readline`` holds, so the closer blocks
+    too and the reader comes out only when the next byte happens to arrive -- with a 60s editor ping
+    that is ~30s on average against the 25s the asking window waits, so the window that had been
+    granted the session usually reported a refusal anyway.
+
+    Nothing is ever written to this pipe. That is the whole point: the read has to end with no byte.
+    """
+
+    @unittest.skipUnless(hasattr(signal := __import__("signal"), "SIGUSR1")
+                         and hasattr(signal, "pthread_kill"),
+                         "needs a signal we can send ourselves")
+    def test_a_blocked_read_ends_with_no_byte_ever_written(self):
+        import os
+        import signal
+        import threading as _threading
+
+        from dgc import headless
+        from dgc.headless import _ReadEnded
+
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, write_fd)
+        stream = os.fdopen(read_fd, "rb")
+        self.addCleanup(stream.close)
+
+        reader_ident = _threading.main_thread().ident
+        previous = signal.signal(signal.SIGUSR1, lambda *_: (_ for _ in ()).throw(_ReadEnded()))
+        self.addCleanup(signal.signal, signal.SIGUSR1, previous)
+
+        # A refuted mutation must FAIL, not hang the suite: if the close-based route comes back, no
+        # byte ever arrives and the read blocks forever.
+        alarm_previous = signal.signal(signal.SIGALRM,
+                                       lambda *_: (_ for _ in ()).throw(AssertionError(
+                                           "the read never ended: closing the stream from another "
+                                           "thread cannot interrupt a blocked readline")))
+        signal.setitimer(signal.ITIMER_REAL, 5.0)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0.0)
+        self.addCleanup(signal.signal, signal.SIGALRM, alarm_previous)
+
+        watch = _EditorLiveness(backend(), stream,
+                                wake=lambda: signal.pthread_kill(reader_ident, signal.SIGUSR1))
+        handover = _threading.Timer(0.2, watch.stand_down)
+        handover.start()
+        self.addCleanup(handover.cancel)
+
+        ended = False
+        try:
+            for _line, _problem in headless._command_lines(stream):
+                self.fail("nothing is ever written to this pipe")
+        except _ReadEnded:
+            ended = True
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        self.assertTrue(ended, "the read must end through the wake, not by waiting for a byte")
+        self.assertTrue(watch.stood_down, "and it must be recorded as a handover, not a give-up")
+        self.assertIsNone(watch._closer, "the blocking close must not have been used at all")

@@ -879,6 +879,8 @@
     present_document: ["Preparing document", "Prepared document"],
     propose_options: ["Asking", "Asked"],
     task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
+    list_tasks: ["Checking sub-agents", "Checked sub-agents"],
+    wait_tasks: ["Waiting for a sub-agent", "Waited for a sub-agent"],
   };
   function pluginLogoHtml(name) {
     const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
@@ -2640,7 +2642,14 @@
     // is still a command, and saying so is strictly more useful than a shrug.
     setIcon(group.querySelector(":scope > summary > .tg-icon"),
       headerIcon(running.length ? running : executed.length ? executed : cards));
-    if (failures.length) group.open = true;
+    // Open a group the FIRST time something in it fails, and never again: this runs on every tool
+    // update, so re-asserting it meant a reader who folded the group had it thrown open under them
+    // a moment later, for as long as one failed card remained. There was no way to put it away.
+    // A hand-fold is a decision and outlives the group's own opinion.
+    if (failures.length && !group.dataset.failureShown) {
+      group.dataset.failureShown = "1";
+      group.open = true;
+    }
   }
   function appendTool(card) {
     if (!turn) return;
@@ -2653,6 +2662,15 @@
       // reader had no idea what had just been done to their project. The summary sentence still
       // sits in the header when the group is folded by hand.
       turn.toolGroup.open = true;
+      // Capture the element. Reading it back through `turn` fires after a rewind or a turn change
+      // has already cleared turn.toolGroup, and the listener then throws on null -- which took out
+      // nineteen tests across agents, reloads, steering replay and the image viewer.
+      const group = turn.toolGroup;
+      group.addEventListener("toggle", () => {
+        // Folding by hand settles it. Without this the next failure in the same group -- or any
+        // later refresh -- would reopen it, which is how the section became impossible to close.
+        if (!group.open) group.dataset.failureShown = "1";
+      });
     }
     turn.toolGroup.appendChild(card);
     refreshToolGroup(turn.toolGroup);
@@ -8692,5 +8710,16 @@
   loadDraftState();
   window.addEventListener("pagehide", persistDraft);
   input.addEventListener("select", scheduleDraftSave);
+  // Liveness comes from HERE, not from the extension host. A window that goes away can leave its
+  // host running -- that is the 25-hour stranded session -- and the host cannot tell that it has.
+  // This renderer simply stops existing, which is evidence the backend can trust. Say so on a
+  // timer, and again the moment the window is looked at, because a backgrounded page's timers can
+  // be throttled to once a minute. Kept in step with dgc/headless.py EDITOR_HEARTBEAT_S.
+  const EDITOR_ALIVE_EVERY_MS = 20_000;
+  const sayAlive = () => vscode.postMessage({ type: "editorAlive" });
+  setInterval(sayAlive, EDITOR_ALIVE_EVERY_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) sayAlive(); });
+  window.addEventListener("focus", sayAlive);
+  sayAlive();
   vscode.postMessage({ type: "webviewReady" });
 })();

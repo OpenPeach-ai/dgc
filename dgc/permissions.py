@@ -61,8 +61,17 @@ RULE_ARG = {
     "external_directory": "path",
 }
 
+# `list_tasks` / `wait_tasks` are read-only and are deliberately NOT in DISPLAY, so no rule can
+# name them. DISPLAY is mirrored byte-for-byte by the SDK (tests/test_dgc_sdk_policy.py,
+# test_tool_table_matches_the_runtime), and an allow_tools policy compiled by a NEWER SDK emits a
+# deny rule for every DISPLAY name -- which an OLDER CLI's Rule.parse rejects, making
+# _parse_session_policy return `broken` and denying every tool in the session. Two entries here
+# cost nothing in either direction; two entries in DISPLAY break one direction or the other.
+# `deny: Task` is the off switch: with no children the pair is never offered at all (see
+# Agent._supervision_exposed).
 READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
-                   "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal"}
+                   "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal",
+                   "list_tasks", "wait_tasks"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.
