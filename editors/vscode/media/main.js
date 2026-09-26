@@ -2114,10 +2114,15 @@
     const expand = card.querySelector(".ts-expand");
     if (expand) expand.onclick = () => {
       const more = card.querySelector(".ts-more");
-      const open = more.hidden;
+      const open = more.hidden;      // about to open?
       more.hidden = !open;
       expand.setAttribute("aria-expanded", String(open));
-      expand.hidden = open;          // once opened it stays open; there is nothing to re-collapse to
+      // A one-way control is a trap: expanding a twenty-file list used to hide the only button on
+      // the card, leaving no way back to three rows. The button stays and says what it does next.
+      expand.innerHTML = open
+        ? 'Show fewer <span class="codicon codicon-chevron-up" aria-hidden="true"></span>'
+        : `Show ${rest.length} more ${rest.length === 1 ? "file" : "files"} `
+          + '<span class="codicon codicon-chevron-down" aria-hidden="true"></span>';
     };
     card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
     // Undo restores the workspace to the recovery point this turn opened. The extension

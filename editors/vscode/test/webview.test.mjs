@@ -3060,6 +3060,54 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
   assert.deepEqual(errors, []);
 });
 
+test("a long list of edited files expands AND collapses again", () => {
+  // The founder expanded a file list and found no way back: the control hid itself on open, with a
+  // comment saying "there is nothing to re-collapse to". Three rows is the collapsed shape, so
+  // there always was.
+  const { errors, send, doc } = makeDom();
+  const files = ["src/clamp.py", "tests/test_clamp.py", "src/app/routes/deeply/nested/handler.ts",
+                 "docs/notes.md", "editors/vscode/media/main.js"];
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Touch five files" } });
+  files.forEach((path, i) => {
+    const diff = `--- a/${path}\n+++ b/${path}\n@@ -1,1 +1,1 @@\n-old\n+new\n`;
+    send({ type: "event", event: { type: "tool_call", call_id: `c${i}`, name: "edit_file", args: { path } } });
+    send({ type: "event", event: { type: "tool_result", call_id: `c${i}`, name: "edit_file",
+                                   output: diff, is_diff: true, diff } });
+  });
+  send({ type: "event", event: { type: "text_delta", text: "Five files touched." } });
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 9 } });
+
+  const card = doc.querySelector(".turn-summary");
+  assert.ok(card, "a turn that changed five files must produce the card");
+  const button = card.querySelector(".ts-expand");
+  const more = card.querySelector(".ts-more");
+  assert.equal(card.querySelector(".ts-title").textContent, "Edited 5 files");
+  assert.equal(button.textContent.trim(), "Show 2 more files");
+  assert.equal(more.hidden, true, "three rows to start; Codex's shape");
+
+  button.click();
+  assert.equal(more.hidden, false, "the rest are shown");
+  assert.equal(button.hidden, false, "and the way back must still be on screen");
+  assert.equal(button.textContent.trim(), "Show fewer", "the label says what it does NEXT");
+  assert.equal(button.getAttribute("aria-expanded"), "true");
+
+  button.click();
+  assert.equal(more.hidden, true, "and it really collapses");
+  assert.equal(button.textContent.trim(), "Show 2 more files");
+  assert.equal(button.getAttribute("aria-expanded"), "false");
+  assert.deepEqual(errors, []);
+});
+
+test("a turn that changed nothing grows no summary card", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start", turn_id: "t2", prompt: "What does it do?" } });
+  send({ type: "event", event: { type: "text_delta", text: "It clamps a value." } });
+  send({ type: "event", event: { type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 4 } });
+  assert.equal(doc.querySelectorAll(".turn-summary").length, 0,
+    "the card is a report of file changes; with none there is nothing to report");
+  assert.deepEqual(errors, []);
+});
+
 test("every turn shows its prompt exactly once, wherever the turn was started", () => {
   const { errors, posted, send, doc } = makeDom();
   send({ type: "session_ready", sessionId: "chat-1" });
