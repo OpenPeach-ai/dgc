@@ -463,7 +463,7 @@
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
-  const monitorsBar = $("monitorsbar");
+  const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   // The inline ceilings: what fits in the 4 MiB protocol frame once base64 has inflated it.
@@ -3046,8 +3046,126 @@
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
+  // ---- invisible characters in a paste -------------------------------------------------------
+  // A mirror of dgc/textsafety.py, deliberately: the panel, the TUI and the backend must give the
+  // same answer, and tests/test_invisible_characters.py owns the definition. If you change a rule
+  // here, change it there in the same commit -- three slightly different answers is worse than
+  // none, because the notice starts disagreeing with what the strip removes.
+  //
+  // Most invisible characters are harmless residue from a web page. Three kinds are not: bidi
+  // overrides reorder how text DISPLAYS without changing its bytes, so what the reader sees and
+  // what the model reads can differ; tag characters encode a whole ASCII string inside something
+  // that renders as nothing at all; zero-width characters pad text invisibly. DGC hands a paste to
+  // a model and then acts on it, so text that hides instructions from the person who pasted it is
+  // a real problem. Counted and offered, never stripped on its own: silently altering what someone
+  // pasted is its own bug.
+  const INVIS_OVERRIDES = new Set([0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069]);
+  const INVIS_MARKS = new Set([0x200E, 0x200F, 0x061C]);
+  const INVIS_ZERO = new Set([0x200B, 0x2060, 0xFEFF, 0x00AD, 0x180E, 0x034F, 0x115F, 0x1160, 0x3164, 0xFFA0]);
+  const INVIS_JOINERS = new Set([0x200C, 0x200D]);
+  // The only tag sequences Unicode defines. Checking the SHAPE of a subdivision flag -- a leading
+  // U+1F3F4 and a trailing U+E007F -- accepts any hidden string wearing one character as a
+  // costume, which is a one-character bypass of the exact thing this exists to catch.
+  const INVIS_RGI = new Set(["gbeng", "gbsct", "gbwls"]);
+  // U+061C and U+FEFF sit inside the naive Arabic ranges, so a class written the obvious way lets
+  // each of them declare the text RTL and thereby excuse itself. Split around both.
+  const INVIS_RTL = /[\u0590-\u05FF\u0600-\u061B\u061D-\u06FF\u0700-\u074F\u0780-\u07BF\u0860-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFE]|[\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+  const INVIS_WORD = /[0-9A-Za-z]/;
+  const isTag = (n) => n >= 0xE0000 && n <= 0xE007F;
+  const isHiddenMark = (n) => n >= 0xE0100 && n <= 0xE01EF;
+  const isControl = (n) => (n < 0x20 || n === 0x7F || (n >= 0x80 && n <= 0x9F))
+    && n !== 0x09 && n !== 0x0A && n !== 0x0D;
+
+  function classifyInvisible(text) {
+    const cps = [...String(text ?? "")];
+    const rtl = INVIS_RTL.test(String(text ?? ""));
+    const counts = Object.create(null);
+    const keep = [];
+    const bump = (kind, n = 1) => { counts[kind] = (counts[kind] || 0) + n; };
+    const drops = (n) => INVIS_OVERRIDES.has(n) || INVIS_ZERO.has(n) || isControl(n)
+      || isHiddenMark(n) || (INVIS_MARKS.has(n) && !rtl);
+    // The next codepoint that will SURVIVE. Reading the original neighbours instead lets a dropped
+    // one change the verdict on a second pass, and then one click is not enough to clean the box.
+    const nextKept = (from) => {
+      for (let j = from; j < cps.length; j++) {
+        const n = cps[j].codePointAt(0);
+        if (INVIS_JOINERS.has(n) || drops(n)) continue;
+        return cps[j];
+      }
+      return "";
+    };
+    const tagLetters = (run) => {
+      let out = "";
+      for (const ch of run) {
+        const n = ch.codePointAt(0);
+        if (n < 0xE0020 || n > 0xE007E) return "";
+        out += String.fromCharCode(n - 0xE0000);
+      }
+      return out;
+    };
+    for (let i = 0; i < cps.length; ) {
+      const n = cps[i].codePointAt(0);
+      if (isTag(n)) {
+        let j = i;
+        while (j < cps.length && isTag(cps[j].codePointAt(0))) j++;
+        const run = cps.slice(i, j);
+        const closed = run.length > 1 && run[run.length - 1].codePointAt(0) === 0xE007F;
+        const spelled = closed ? tagLetters(run.slice(0, -1)) : "";
+        if (i > 0 && cps[i - 1].codePointAt(0) === 0x1F3F4 && INVIS_RGI.has(spelled)) {
+          keep.push(...run);                       // a flag people actually type
+        } else {
+          bump("hidden", run.length);
+        }
+        i = j; continue;
+      }
+      if (INVIS_OVERRIDES.has(n)) { bump("bidi"); i++; continue; }
+      if (INVIS_MARKS.has(n)) { rtl ? keep.push(cps[i]) : bump("bidi"); i++; continue; }
+      if (INVIS_JOINERS.has(n)) {
+        const before = keep.length ? keep[keep.length - 1] : "";
+        if (INVIS_WORD.test(before) && INVIS_WORD.test(nextKept(i + 1))) bump("zero-width");
+        else keep.push(cps[i]);                    // emoji, Indic and Persian shaping keep theirs
+        i++; continue;
+      }
+      if (INVIS_ZERO.has(n)) { bump("zero-width"); i++; continue; }
+      if (isHiddenMark(n)) { bump("hidden"); i++; continue; }
+      if (isControl(n)) { bump("control"); i++; continue; }
+      keep.push(cps[i]); i++;
+    }
+    return { counts, clean: keep.join("") };
+  }
+
+  function invisibleTotal(counts) {
+    return Object.values(counts).reduce((sum, n) => sum + n, 0);
+  }
+
+  function renderPasteNotice() {
+    const { counts } = classifyInvisible(composerText());
+    const n = invisibleTotal(counts);
+    pasteBar.hidden = n === 0;
+    if (!n) { syncComposerRail(); return; }
+    // Name the danger only when it is earned. Saying "hidden instruction" over a stray BOM from a
+    // web page is the crying-wolf failure wearing a different costume.
+    const risky = (counts["bidi"] || 0) + (counts["hidden"] || 0);
+    pasteBar.dataset.status = risky ? "hidden" : "noise";
+    $("paste-count").textContent = `Remove ${n} invisible character${n === 1 ? "" : "s"}`
+      + (risky ? ` — ${risky} can carry a hidden instruction` : "");
+    syncComposerRail();
+  }
+
+  // One click, never automatic. Strip removes exactly what the notice counted -- one walk produces
+  // both, so they cannot disagree -- and Keep says the text is deliberate and dismisses the row
+  // until the draft changes again.
+  $("paste-strip").onclick = () => {
+    const { clean } = classifyInvisible(composerText());
+    setComposerText(clean);
+    renderPasteNotice();
+    input.focus({ preventScroll: true });
+  };
+  $("paste-keep").onclick = () => { pasteBar.hidden = true; syncComposerRail(); input.focus({ preventScroll: true }); };
+
   function syncComposerRail() {
-    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden;
+    composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden
+      && pasteBar.hidden;
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
@@ -4793,6 +4911,7 @@
     if (composerEditing) return;   // our own edit: its caller already does the follow-up work
     markComposerEmpty();
     reconcilePills();
+    renderPasteNotice();
     // An IME composition builds a word by repeatedly rewriting text nodes. A textarea absorbed
     // that internally; an editing host does not, and ANY programmatic edit or selection move
     // during a composition cancels the session and drops what was being typed. So the picker,
@@ -4938,6 +5057,12 @@
     // characters it becomes an attachment instead, recoverable with one click. The threshold
     // matches Codex's.
     const pasted = e.clipboardData ? String(e.clipboardData.getData("text/plain") || "") : "";
+    // No hook here. Every branch that puts text INTO the composer fires an input event, and
+    // onInput already re-counts -- proved by removing this line and watching the tests stay green.
+    // The one branch it would have covered, a paste large enough to fold into an attachment,
+    // changes no composer text, so there is nothing for it to count. That path is a known gap:
+    // the folded text still travels to the model in `a.pasted`, and nothing inspects it. Fixing
+    // it means classifying the attachment, not the draft, and giving the chip its own notice.
     if (pasted.length >= PASTED_TEXT_LIMIT && canAttach()) {
       e.preventDefault();
       attachments.push({ label: "Pasted text", pasted, chars: pasted.length });

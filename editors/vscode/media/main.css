@@ -785,6 +785,8 @@ button.act:hover { border-color: var(--accent); }
   padding: var(--sp-2) var(--sp-1); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); color: var(--text); }
 #tasksbar[data-status="active"] .tasks-icon { color: var(--accent-text); }
 #tasksbar[data-status="blocked"] .tasks-icon { color: var(--err-text); }
+#pastebar[data-status="noise"] .paste-icon { color: var(--faint); }
+#pastebar[data-status="hidden"] .paste-icon { color: var(--err-text); }
 #tasksbar[data-status="pending"] .tasks-icon, #tasksbar[data-status="done"] .tasks-icon { color: var(--faint); }
 #tasks-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 #tasks-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
@@ -1799,7 +1801,12 @@ body.ask-docked #tasks-panel { display: none; }
 /* A short panel: the rail and "Workspace changes" step aside while a question is open, and below
    560px only the highlighted row keeps its description. */
 @media (max-height: 599px) {
-  body.ask-docked #composer-rail, body.ask-docked #workspace-changes { display: none; }
+  /* The paste notice is the one rail item that must not step aside: a hidden instruction in a
+     pasted answer is exactly what a docked question invites. Everything else still goes, and the
+     rail itself still goes when the notice is not up -- keeping the container laid out cost the
+     transcript its height at 480px and pushed the card into overflow. */
+  body.ask-docked #composer-rail:not(:has(#pastebar:not([hidden]))) { display: none; }
+  body.ask-docked #composer-rail > :not(#pastebar), body.ask-docked #workspace-changes { display: none; }
 }
 @media (max-height: 559px) {
   .ask-opt:not(.hot) .ask-desc { display: none; }

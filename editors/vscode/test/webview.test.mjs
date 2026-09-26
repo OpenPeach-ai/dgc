@@ -92,7 +92,10 @@ test("the session checklist is a composer-rail row above the goal and updates in
   const event = data => send({ type: "event", event: data });
   assert.equal(doc.getElementById("tasks"), null, "the old standalone slot is gone");
   assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "exactly one task surface");
-  assert.deepEqual([...rail.children].map(node => node.id), ["monitorsbar", "changesbar", "tasksbar", "goalbar"],
+  // pastebar sits LAST, directly against the composer, because it is about the text in the box
+  // rather than about the session -- and it is the one row that survives a docked question.
+  assert.deepEqual([...rail.children].map(node => node.id),
+    ["monitorsbar", "changesbar", "tasksbar", "goalbar", "pastebar"],
     "rail order: monitors, changes, tasks, goal — the whole rail sits on the prompt box");
   assert.equal(rail.nextElementSibling.id, "cbox");
   assert.equal(bar.classList.contains("rail-item"), true);

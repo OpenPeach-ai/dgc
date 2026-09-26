@@ -5755,6 +5755,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="goal-edit" class="rail-icon-button" title="Edit goal" aria-label="Edit goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
       </div>
     </section>
+    <section id="pastebar" class="rail-item" aria-label="Invisible characters in this draft" data-status="noise" hidden>
+      <button type="button" id="paste-strip" class="rail-main" aria-label="Remove the invisible characters" title="Remove them from the draft"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count">Remove 0 invisible characters</span></button>
+      <button type="button" id="paste-keep" class="rail-text-action" title="Send the text exactly as pasted">Keep</button>
+    </section>
   </div>
   <div id="cbox" data-mode="default">
     <div id="attachments" aria-label="Attached context"></div>
