@@ -1368,9 +1368,9 @@
   // spacing measurements quiet. It is a real element rather than a ::after so that it is exposed
   // to a screen reader and so the spacing check can measure the prompt's real foot.
   const STEER_NOTE = {
-    pending: "steering \u2026",
-    queued: "queued for the next turn",
-    applied: "steered \u2014 the model has read this",
+    pending: "\u21b3 steering \u2026",
+    queued: "\u21b3 queued for the next turn",
+    applied: "\u21b3 steered \u2014 the model has read this",
   };
   function setSteerState(node, state) {
     if (!node) return;
@@ -4619,16 +4619,27 @@
         prepareWorkflowDraft(it.action.slice("workflow:".length), popStart, popEnd);
         hidePop(); input.focus(); return;
       }
+      if (it.action === "goal") {
+        // `/goal` is a DRAFT command, not a management action: picking it fills the box and waits
+        // for Enter -- like Codex, and like the siblings /plan, /review and /init just above.
+        // It used to START the goal on selection. 1f19d92a added that when a mid-prompt menu could
+        // offer nothing BUT /goal, behind `if (sl > 0) all = all.filter(c => c.label === "/goal")`
+        // and the comment "inserting one cannot silently replace or discard an in-progress
+        // prompt"; 138c4ed1 deleted the filter and the comment and left the send. So one click on
+        // a menu row committed a standing objective with no Enter and no take-back -- and for a
+        // token picked mid-prose it started a goal from words that Enter routes as an ordinary
+        // prompt, which the suite asserts by name. submit() still reads `/goal TEXT` and the
+        // `TEXT /goal` suffix, so the only thing this costs is the keypress that makes it
+        // deliberate. Keyed on the action, not on acceptsArgs, so an older backend that omits
+        // accepts_args cannot put the send back.
+        replacePopToken(it.label + " ");
+        hidePop(); input.focus(); return;
+      }
       if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
+        // Management actions operate independently of the draft. Opening a model, skills,
+        // MCP, or settings picker must not submit or replace the user's unfinished request.
         replacePopToken(); hidePop(); input.focus();
-        if (it.action === "goal" && composerText().trim()) {
-          const objective = composerText().trim();
-          submitGoal(objective, `${objective} /goal`);
-        } else {
-          // Management actions operate independently of the draft. Opening a model, skills,
-          // MCP, or settings picker must not submit or replace the user's unfinished request.
-          vscode.postMessage({ type: "slash", action: it.action });
-        }
+        vscode.postMessage({ type: "slash", action: it.action });
         return;
       }
       if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {

@@ -87,6 +87,15 @@ test("a running agent's mark glows, and a finished one does not", () => {
   assert.match(mainCss, /\.agent-mark:has\(img\)\.is-live \{[^}]*drop-shadow/,
                "a live mark with artwork has no glow");
   assert.match(mainCss, /@keyframes agent-mark-breathe/, "and nothing animates it");
+  // The artwork MOVES, not just its glow -- the /vscode/ hero's own motion, ported value for
+  // value. A glow alone is easy to miss at 16px beside a wall of tool output.
+  const frames = /@keyframes agent-mark-breathe \{([\s\S]*?)\n\}/.exec(mainCss);
+  assert.ok(frames, "the keyframes are declared");
+  assert.match(frames[1], /transform: rotate\(-10deg\) scale\(\.96\)/, "it rocks back");
+  assert.match(frames[1], /transform: rotate\(12deg\) scale\(1\.08\)/, "and forward, swelling");
+  // One animation, so the glow and the movement cannot drift into two beating periods.
+  assert.equal((mainCss.match(/animation: agent-mark-breathe/g) || []).length, 1,
+               "the mark runs exactly one animation");
   assert.match(mainCss, /prefers-reduced-motion: reduce\)[^}]*\{\s*\.agent-mark:has\(img\)\.is-live \{ animation: none/,
                "the pulse must stop for reduced motion");
 });

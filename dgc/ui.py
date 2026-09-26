@@ -207,6 +207,9 @@ def split_diff(out: str) -> tuple[bool, str]:
     return False, ""
 
 
+_SIGPIPE_EXIT = 141          # 128 + SIGPIPE: a reader such as `head` closed the pipe early
+
+
 def tool_output_is_error(out: str) -> bool:
     """Classify the canonical tool result formats for front-end status rendering."""
     text = str(out or "").lstrip()
@@ -221,10 +224,32 @@ def tool_output_is_error(out: str) -> bool:
     if low.startswith("exit code:"):
         first = low.splitlines()[0].partition(":")[2].strip()
         try:
-            return int(first) != 0
+            code = int(first)
         except ValueError:
             return True
-    async_exit = re.match(r"\[[^]]+ · exited\s+(-?\d+)\]", low)
+        # 128+13 = SIGPIPE, which is what a pipeline ending in `head`, `head -n`, `q` in less or
+        # any other reader that stops early produces: the reader closes the pipe, the writer is
+        # signalled, and `-o pipefail` reports it. The command did what was asked, so painting it
+        # red and pinning its whole run open is wrong -- five of those in one session, on runs
+        # where nothing had failed.
+        #
+        # This is a judgement, not a proof. pipefail reports the RIGHTMOST non-zero status, so 141
+        # only tells us the last non-zero stage was signalled; an earlier stage that failed with
+        # its own status is not visible here. In the shape that actually produces this -- one
+        # writer piped into an early-exiting reader -- a writer that fails on its own reports its
+        # own status instead (measured: `{ printf 'a\nb\nc\n'; exit 3; } | head -2` gives 3), so
+        # the trade is sound for the common case and silent only for a multi-stage pipeline whose
+        # middle stage failed. It matters beyond the card: this same answer gates
+        # agent.py:_note_tool_result, so getting it wrong the other way writes a durable note
+        # telling the model a command failed when it did not.
+        return code != 0 and code != _SIGPIPE_EXIT
+    # The header carries more after the code -- `[bg21 · exited 1 · 52 retained lines]` -- so
+    # anchoring on the closing bracket meant this never matched a real one, and every background
+    # command in a session read as a success. Four of nineteen in one session had exited non-zero,
+    # including a typecheck that ended "1 check(s) failed." and a run ending in an HTTP 404
+    # traceback, both folded away green.
+    async_exit = re.match(r"\[[^]]+ · exited\s+(-?\d+)\b", low)
     if async_exit:
-        return int(async_exit.group(1)) != 0
+        code = int(async_exit.group(1))
+        return code != 0 and code != _SIGPIPE_EXIT
     return False

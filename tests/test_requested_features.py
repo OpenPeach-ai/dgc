@@ -142,6 +142,30 @@ class RequestedFeatures(unittest.TestCase):
         self.assertTrue(tool_output_is_error(result.output.removeprefix('error: ')))
         self.assertFalse(tool_output_is_error("Sub-task 'ok' completed in the shared checkout. Summary:\nfine"))
 
+    def test_a_pipeline_ending_in_head_is_not_a_failure(self):
+        from dgc.ui import tool_output_is_error
+        # DGC runs bash with -o pipefail, so `... | head -20` reports 141 -- the writer signalled
+        # when head closed the pipe. The command did what was asked. Painting it red force-opened
+        # the card and pinned the whole run open; five of those in one session, two on runs where
+        # nothing had failed at all. It matters past the card too: this same answer gates the
+        # durable note _note_tool_result writes, so the model was told those runs had failed.
+        self.assertFalse(tool_output_is_error("exit code: 141\nsrc/app/page.tsx\nsrc/app/api"))
+        self.assertTrue(tool_output_is_error("exit code: 1\nsomething broke"),
+                        "a real non-zero status is still a failure")
+        self.assertFalse(tool_output_is_error("exit code: 0\nfine"))
+
+    def test_a_background_command_reports_its_own_exit_status(self):
+        from dgc.ui import tool_output_is_error
+        # The header carries more after the code, so anchoring the pattern on the closing bracket
+        # meant it never matched one: every background command read as a success, including a
+        # typecheck that ended "1 check(s) failed." and a run ending in an HTTP 404 traceback.
+        self.assertTrue(tool_output_is_error("[bg21 · exited 1 · 52 retained lines] cd /app && npm run typecheck"))
+        self.assertFalse(tool_output_is_error("[bg4 · exited 0 · 75 retained lines] cd /app && docker compose build"))
+        self.assertFalse(tool_output_is_error("[bg3 · running · 35 retained lines] cd /app && docker compose up"),
+                         "a command still running has not failed")
+        self.assertFalse(tool_output_is_error("[bg9 · exited 141 · 3 retained lines] grep -r x . | head -3"),
+                         "SIGPIPE is not a failure in the background form either")
+
     def test_installer_finds_supported_python_after_an_old_system_python(self):
         root = Path(__file__).resolve().parent.parent
         # Execute the installer's actual interpreter selection, stopping before download/install.

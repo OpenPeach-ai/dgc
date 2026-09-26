@@ -233,11 +233,22 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
    16px, so the motion is this pulse rather than the artwork. */
 .agent-mark:has(img).is-live {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mark, #7D8CA3) 85%, transparent));
-  animation: agent-mark-breathe 1.9s ease-in-out infinite;
+  animation: agent-mark-breathe 2s ease-in-out infinite;
 }
+/* The artwork moves, not just its glow. This is the /vscode/ hero's own motion, value for value
+   (site-src/assets/extension-hero.css, dgc-hero-agent-breathe): the mark rocks from -10deg to
+   +12deg while it swells, and the glow rides the same keyframes so the two are one gesture rather
+   than two periods beating against each other. Nothing else is needed to port it -- the panel
+   already ships the identical SVGs, and the site uses no library and nothing about the artwork's
+   internals. `.agent-mark` is inline-block (:191), so the transform applies; on a non-replaced
+   inline element it silently would not, which is how the settings Refresh icon came to have a
+   spin that never spun. No stagger, exactly as on the site: marks that start together move
+   together. The reduced-motion block below stops it, and leaves no transform behind to reset. */
 @keyframes agent-mark-breathe {
-  0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 55%, transparent)); }
-  50%      { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--mark, #7D8CA3) 95%, transparent)); }
+  0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 55%, transparent));
+             transform: rotate(-10deg) scale(.96); opacity: .8; }
+  50%      { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--mark, #7D8CA3) 95%, transparent));
+             transform: rotate(12deg) scale(1.08); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-mark:has(img).is-live { animation: none; }
@@ -291,8 +302,16 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    readers only, and the agent stops printing its own line once a frontend claims to show this --
    so without these a sighted user had nothing telling them the model had taken the message. */
 .msg.user > .steer-note {
-  margin-top: var(--sp-1); color: var(--muted);
-  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right;
+  /* Flush LEFT, under the bubble, where the backend's own `↳ steering: …` line used to print as a
+     `.sys` row until 2026-09-11 -- the transcript's machine voice lives on that margin, and a
+     reader follows one column, not two. `.msg.user` is `align-items: flex-end`, so without
+     `align-self` this flex child is dragged under the bubble's right edge and reads as a caption
+     hanging off the message rather than a note about what became of it.
+     Kept in --muted and --sans: the original was --faint, which is VS Code's disabledForeground
+     at 2.13:1 in the light themes, and settings-contrast.test.mjs now forbids it for text a
+     reader needs. */
+  align-self: flex-start; margin-top: var(--sp-1); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: left;
 }
 .msg.user[data-steer="applied"] > .steer-note { color: var(--accent-text, var(--accent)); }
 /* A prompt opens a new exchange, so it stands a step further from the turn before it than from the
@@ -914,17 +933,25 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 /* The composer is an editing host, not a form control, so three things it used to get free now
    have to be asked for: wrapping that keeps a typed newline (pre-wrap), a placeholder (a textarea
    has one; a div does not), and a height that follows its content instead of `rows`. */
-#input { flex: 1; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-chat)/1.45 var(--sans); padding: 0; max-height: 160px; min-width: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+#input { flex: 1; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-chat)/1.6 var(--sans); padding: 0; max-height: 160px; min-width: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Shown only when the composer is genuinely empty. `:empty` is not enough: Chromium leaves a
    filler <br> behind after an edit, so the class is set from the same serializer the rest of the
    panel reads, and never from the DOM looking empty. */
 #input.is-empty::before { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
-/* An inline pill. line-height matches the composer's so a line holding one is no taller than a
-   line of plain text -- a pill that changes the box height as you type reads as a jolt. */
+/* An inline pill. It is an atomic inline box, so the line box has to be taller than the pill or
+   two pills on consecutive wrapped lines sit with their borders almost touching -- measured at 1px
+   apart, which reads as a collision when you paste several links in a row.
+   Matching the pill's line-height to the composer's did the opposite of what it intended: at 1.45
+   the pill came out 18.9px against an 18.85px line box, so a line holding one was TALLER than a
+   line of plain text (78.7px vs 75.4px over four lines) -- the jolt it was written to avoid.
+   The pill's own text box is 15px, so ~17px is the floor before glyphs meet the border; the room
+   has to come from the line box instead. 13px/1.6 = 20.8px against a 16.8px pill leaves 3.95px
+   between lines, and a line with a pill is now exactly as tall as one without.
+   Measured in composer-pills-live.test.mjs, which fails if that gap closes again. */
 .composer-pill { display: inline-flex; align-items: baseline; gap: 4px; margin: 0 1px; padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-strong);
-  font: var(--w-med) var(--t-xs)/1.45 var(--sans); white-space: nowrap; user-select: none; vertical-align: baseline; }
+  font: var(--w-med) var(--t-xs)/1.35 var(--sans); white-space: nowrap; user-select: none; vertical-align: baseline; }
 /* The sigil has to be the key that opens the picker for that kind, and the sigil attachInvocation
    puts on the chip underneath: $ for a skill, / for a template, @ for a file. There was no
    .pill-skill rule at all, so a skill fell through to the default and rendered the TEMPLATE's

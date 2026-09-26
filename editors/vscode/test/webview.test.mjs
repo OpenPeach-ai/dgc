@@ -655,7 +655,14 @@ test("goal actions carry selected skills, templates, images and MCP snapshots wi
     } });
     send({ type: "session_ready", sessionId: "alpha" });
     const input = doc.getElementById("input");
-    if (inline) input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    if (inline) {
+      // The restored draft ends in `/goal`, so the token picker opens and would take this Enter.
+      // Picking `/goal` from the menu now FILLS the box rather than starting the goal, so dismiss
+      // the menu and let Enter reach submit() -- this test is about the attachments riding along
+      // with a goal, not about the picker.
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    }
     input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const command = posted.findLast(message => message.type === "startGoal");
     assert.equal(command.text, "Verify the release");
@@ -2519,8 +2526,11 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("pop").textContent, /\/goal/,
     "the goal action must remain discoverable after an in-progress prompt");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(input.value, "",
-    "choosing the suffix action must activate the preserved prompt without a second Enter");
+  assert.equal(input.value, "ship the release safely /goal ",
+    "choosing /goal fills the draft -- a menu must never send an unfinished request");
+  assert.equal(posted.some((m) => m.type === "startGoal" && m.text === "ship the release safely"), false,
+    "selection alone must not commit a standing objective");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const suffixedGoal = posted.filter((m) => m.type === "startGoal").at(-1);
   assert.equal(suffixedGoal.text, "ship the release safely");
   assert.equal(posted.some((m) => m.type === "prompt" && /\/goal$/.test(m.text)), false,

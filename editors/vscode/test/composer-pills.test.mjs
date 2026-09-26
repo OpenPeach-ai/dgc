@@ -82,10 +82,19 @@ test("removing a pill gives back what it stood for", () => {
     "a selection must not outlive the pill that showed it");
 });
 
-test("a pill does not make its line taller than a line of text", () => {
-  // A box that jumps when a pill appears reads as a jolt while typing.
-  assert.match(mainCss, /\.composer-pill \{[^}]*\/1\.45/,
-    "the pill shares the composer's line-height");
+test("a pill is shorter than the line it sits on, and never wraps mid-label", () => {
+  // A box that jumps when a pill appears reads as a jolt while typing -- and two pills on
+  // consecutive wrapped lines must not touch. Both need the same thing: the pill has to be SHORTER
+  // than the line box. This used to assert that the pill shares the composer's line-height, which
+  // is the opposite: matching it made the pill 18.9px against an 18.85px line box, so a line
+  // holding one was taller than a line of plain text AND pills on adjacent lines sat 1px apart.
+  // jsdom has no layout, so the real check is the measured one in composer-pills-live.test.mjs;
+  // this pins the relationship in the source so the two values cannot drift back together.
+  const pillLine = /\.composer-pill \{[^}]*\/([\d.]+) var\(--sans\)/.exec(mainCss);
+  const inputLine = /#input \{[^}]*\/([\d.]+) var\(--sans\)/.exec(mainCss);
+  assert.ok(pillLine && inputLine, "both line-heights are declared");
+  assert.ok(Number(pillLine[1]) < Number(inputLine[1]),
+    `pill line-height ${pillLine[1]} must be below the composer's ${inputLine?.[1]}`);
   assert.match(mainCss, /\.composer-pill \{[^}]*white-space: nowrap/,
     "and never wraps mid-label");
 });

@@ -228,6 +228,24 @@ test("a pill-only draft does not render the placeholder over itself", async (t) 
     "is-empty laid the placeholder out as the first inline box, ahead of the pill");
 });
 
+test("picking /goal fills the box and waits for Enter, the way Codex does", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer([]);
+  const goalsBefore = await page.evaluate(() =>
+    window.__posted.filter((m) => m.type === "startGoal").length);
+  await page.keyboard.type("finish the build /goa");
+  await page.keyboard.press("Tab");
+  assert.equal(await value(), "finish the build /goal ",
+    "the pick fills the draft; it used to strip the token and start the goal on the click");
+  assert.equal(await page.evaluate(() =>
+    window.__posted.filter((m) => m.type === "startGoal").length), goalsBefore,
+    "one click on a menu row must never commit a standing objective");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() =>
+    window.__posted.filter((m) => m.type === "startGoal").at(-1).text), "finish the build",
+    "and the inserted token still routes: submit() reads the `TEXT /goal` suffix");
+});
+
 test("a line break serializes as one newline, and an empty box as nothing", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   await freshComposer([]);
@@ -381,4 +399,50 @@ test("a rejected prompt comes back carrying its skills", async (t) => {
   const skills = await page.evaluate(() => (window.__posted || [])
     .filter((m) => m.type === "prompt").pop().skills);
   assert.deepEqual(skills, ["fixture"], "and the re-sent message still carries it");
+});
+
+test("pills on wrapped lines do not collide, and a pill does not grow the line", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // Paste several links and they wrap. A pill is an atomic inline box, so the separation between
+  // one line's pill and the next is (line box - pill height) and nothing else -- margin cannot buy
+  // it, because margin moves the pill WITHIN its line box. Matching the pill's line-height to the
+  // composer's made the pill 18.9px against an 18.85px line box: 1px apart, which reads as two
+  // bordered boxes touching, and a line holding a pill came out taller than a line of plain text.
+  await freshComposer([]);
+  const measured = await page.evaluate(() => {
+    const host = document.getElementById("input");
+    const pill = (label) => {
+      const s = document.createElement("span");
+      s.className = "composer-pill pill-link";
+      s.dataset.kind = "link"; s.dataset.pill = label;
+      s.contentEditable = "false"; s.textContent = label;
+      return s;
+    };
+    host.replaceChildren();
+    host.append(document.createTextNode("see this dashboard look, "));
+    host.append(pill("www.figma.com/design/BOY6VzJKDuSYgvXh8RjkA2/Sno\u2026"));
+    host.append(document.createTextNode(", and we use the orange accents like "));
+    host.append(pill("www.figma.com/site/FpcmsvEfDPNzDzO9LUBcm6/Strai\u2026"));
+    host.append(document.createTextNode(" this orange, and make the side bar translucent like "));
+    host.append(pill("www.figma.com/design/oj70QwI3aSHwo5zfURmLcz/Sid\u2026"));
+    const boxes = [...host.querySelectorAll(".composer-pill")].map((p) => p.getBoundingClientRect());
+    let gap = Infinity;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (Math.abs(boxes[i].top - boxes[j].top) > 2) {
+          gap = Math.min(gap, Math.max(boxes[i].top, boxes[j].top) - Math.min(boxes[i].bottom, boxes[j].bottom));
+        }
+      }
+    }
+    const withPills = host.getBoundingClientRect().height;
+    const lines = host.querySelectorAll(".composer-pill").length && boxes.length;
+    host.replaceChildren(document.createTextNode("x"));
+    const oneLine = host.getBoundingClientRect().height;
+    host.replaceChildren();
+    return { gap, pillHeight: boxes[0].height, oneLine, withPills, lines };
+  });
+  assert.ok(measured.gap >= 3,
+    `pills on consecutive lines are ${measured.gap.toFixed(2)}px apart; two bordered boxes need real space`);
+  assert.ok(measured.pillHeight < measured.oneLine,
+    `a pill is ${measured.pillHeight.toFixed(1)}px inside a ${measured.oneLine.toFixed(1)}px line, so it cannot push the line taller`);
 });
