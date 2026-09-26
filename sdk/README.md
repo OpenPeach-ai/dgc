@@ -1,7 +1,7 @@
 # DGC SDK
 
 Embed the DGC coding agent in an application or a CI job. **0.6.9**, editor protocol **v14**,
-pairs with CLI **0.45.0**. Proven on Linux; macOS and WSL are unproven; native Windows is
+pairs with CLI **0.46.0**. Proven on Linux; macOS and WSL are unproven; native Windows is
 experimental. Release tag **`sdk-v0.6.9`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |

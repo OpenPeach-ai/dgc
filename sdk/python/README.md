@@ -1,7 +1,7 @@
 # dgc-sdk
 
 Run the DGC coding agent inside your own Python application or CI job. Version **0.6.9**, editor
-protocol v14, pairs with DGC CLI **0.45.0**. Python 3.10+, proven on Linux.
+protocol v14, pairs with DGC CLI **0.46.0**. Python 3.10+, proven on Linux.
 
 ```bash
 python3 -m pip install dgc-sdk==0.6.9

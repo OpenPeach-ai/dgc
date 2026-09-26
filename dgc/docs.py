@@ -1941,7 +1941,7 @@ model-token spend your provider bills you.
 
 Current release: **dgc-sdk 0.6.9** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
 package `@vibedgc/sdk` 0.6.9, both tagged [`sdk-v0.6.9`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.6.9)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.45.0** over editor protocol
+(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.46.0** over editor protocol
 v14 and are proven on Linux. The full guide and API reference is
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.6.9/docs/SDK.md).
 

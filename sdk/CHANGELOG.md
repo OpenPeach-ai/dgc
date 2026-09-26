@@ -2,7 +2,9 @@
 
 ## 0.6.9 — unreleased
 
-Pairs with CLI 0.45.0. The vendored copy of the editor protocol gains `ask_request.options` and
+Pairs with CLI 0.46.0. The vendored copy of the editor protocol gains the `editor_state` command --
+so a backend can be told what is actually on screen, which is how a takeover stops being decided on
+whether a process is alive -- and `ask_request.options` and
 `set_workspace_roots.ask_options`, both optional: an open question can now carry the picker's
 choices without stopping the turn. A client that does not declare `ask_options` receives the
 question exactly as before, because a field it has not declared would make it drop the whole
