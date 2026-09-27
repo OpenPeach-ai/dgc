@@ -8310,8 +8310,10 @@ class Agent(GoalLifecycle):
             if integration.merged:
                 names = ", ".join(integration.merged[:10])
                 more = f" (+{len(integration.merged) - 10} more)" if len(integration.merged) > 10 else ""
-                reconciled = (f" You changed {names}{more} while it worked, so its edits were merged"
-                              f" with yours rather than written over them — worth a look.")
+                reconciled = (f" {names}{more} changed in the working tree while the sub-agent ran"
+                              f" — someone outside this task edited them — so its edits were merged"
+                              f" with those changes rather than written over them. Say so in your"
+                              f" answer, and suggest the user review those files.")
             return _TaskOutcome(
                 f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
                 f"{paths}{extra}.{reconciled}{warning}\nSummary:\n{result}", True,
@@ -8326,8 +8328,9 @@ class Agent(GoalLifecycle):
             reconciled = ""
             if integration.merged:
                 names = ", ".join(integration.merged[:10])
-                reconciled = (f" You changed {names} while it worked, so its edits were merged with"
-                              f" yours rather than written over them.")
+                reconciled = (f" {names} changed in the working tree while the sub-agent ran"
+                              f" — someone outside this task edited them — so its edits were merged"
+                              f" with those changes rather than written over them.")
             return _TaskOutcome(
                 f"Sub-task '{description}' partly integrated. Applied {len(integration.paths)} "
                 f"path(s): {landed}{more}.{reconciled} Held back because you changed the same lines:"

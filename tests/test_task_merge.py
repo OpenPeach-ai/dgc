@@ -170,6 +170,28 @@ class AnOverlapHoldsBackOnlyTheFileItTouchesTest(unittest.TestCase):
         self.assertEqual(retained[0].display_paths, ["x.py"])
 
 
+class TheMergeNoticeAddressesItsActualReaderTest(unittest.TestCase):
+    """A sub-task result is read by the MODEL, so "you" in it means the model.
+
+    The first wording said "You changed calc.py while it worked". In a real run the model read that
+    as a claim about itself, knew it had not touched the file, and told the user the note "appears
+    to be a false positive from the tool's concurrency detection" -- turning a correct warning into
+    a reason to distrust the tool. Only a live model turn surfaced it; no assertion about the string
+    would have.
+    """
+
+    def test_the_notice_does_not_address_the_model_as_the_editor(self) -> None:
+        source = (PROJECT / "dgc" / "agent.py").read_text(encoding="utf-8")
+        start = source.index("integration.status == \"applied\"")
+        end = source.index("def _run_subagent")
+        block = source[start:end]
+        self.assertNotIn("You changed", block,
+                         "a tool result is addressed to the model; 'you' makes it read as a claim "
+                         "about the model's own edits, which it knows are not there")
+        self.assertIn("changed in the working tree", block,
+                      "name what happened without addressing the reader as the actor")
+
+
 class EverySurfaceKnowsThePartialStatusTest(unittest.TestCase):
     """A new status value is only safe if every reader has a branch for it.
 
