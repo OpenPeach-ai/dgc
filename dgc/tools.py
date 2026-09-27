@@ -449,6 +449,53 @@ VIEW_IMAGE_RELAY_SCHEMA = _fn(
 
 # ------------------------------------------------------------- executors ---
 
+def _remember_version(ctx, path, version) -> None:
+    """Record what the model has now SEEN of a file, so a later wholesale write can tell a foreign
+    save from DGC's own last write. Called on every read AND every successful write."""
+    store = getattr(ctx, "seen_versions", None)
+    if store is None:
+        return
+    lock = getattr(ctx, "seen_lock", None)
+    if lock is not None:
+        with lock:
+            store[str(path)] = version
+    else:
+        store[str(path)] = version
+
+
+def _refresh_version(ctx, path) -> None:
+    """After DGC writes, what is on disk IS what the model has seen. Without this its own
+    `edit_file` would make the next `write_file` look like a foreign save."""
+    try:
+        after = read_regular_bytes(path, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError):
+        return
+    _remember_version(ctx, path, after[1] if after else None)
+
+
+def _stale_since_read(ctx, path, version) -> bool:
+    """True when the file changed since the model last saw it.
+
+    Only a RECORDED read counts. A file the model never read is one it is creating or deliberately
+    replacing, and refusing that would break every legitimate first write.
+
+    `write_file` builds its own `expected` version by reading the file microseconds before it
+    writes, which closes a TOCTOU race inside the tool and nothing else -- a save made seconds
+    earlier is already in that read, and the wholesale write then discards it. Measured: a user's
+    line survived `edit_file`, which patches current content, and was LOST by `write_file`.
+    """
+    store = getattr(ctx, "seen_versions", None)
+    if not store:
+        return False
+    lock = getattr(ctx, "seen_lock", None)
+    if lock is not None:
+        with lock:
+            known = store.get(str(path))
+    else:
+        known = store.get(str(path))
+    return known is not None and version is not None and known != version
+
+
 def _resolve(path: str, root: Path, *, allow_external: bool = False) -> Path:
     return resolve_path(path, root, allow_external=allow_external)
 
@@ -521,6 +568,7 @@ def read_file(args: dict, ctx) -> str:
     if captured is None:
         return f"error: no such file: {p}"
     raw, _version = captured
+    _remember_version(ctx, p, _version)
     if image_views.sniff(raw) and image_views.parse_dimensions(raw):
         # images: an image is not text. The chat still gets a clickable chip. A model that can
         # see also receives the pixels; one that cannot is told so.
@@ -605,6 +653,14 @@ def write_file(args: dict, ctx) -> str:
     except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
     expected = captured[1] if captured is not None else None
+    if _stale_since_read(ctx, p, expected):
+        # Somebody else saved this file after the model read it. A wholesale write would throw
+        # their work away without a word, and this tool cannot merge -- so say so and let the model
+        # re-read. `edit_file` needs no such guard: it patches whatever is there now.
+        _remember_version(ctx, p, expected)
+        return (f"error: {p} changed after you read it, and write_file would replace the whole "
+                f"file and discard that change. Read it again, then re-apply your edit — or use "
+                f"edit_file, which patches the current content.")
     if captured is not None:
         try:
             old = captured[0].decode("utf-8")
@@ -614,6 +670,13 @@ def write_file(args: dict, ctx) -> str:
         _atomic_write_bytes(p, content.encode("utf-8"), expected=expected)
     except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
+    # DGC's own write is now what the model has seen, so its next write is not refused by this
+    # file's own history.
+    try:
+        after = read_regular_bytes(p, missing_ok=True)
+        _remember_version(ctx, p, after[1] if after else None)
+    except (OSError, WorkspaceBoundaryError):
+        pass
     diff = _diff(old, content, str(p), ctx)
     return f"wrote {len(content)} bytes to {p}\n{diff}"
 
@@ -741,6 +804,7 @@ def apply_patch_tool(args: dict, ctx) -> str:
         _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
     except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
+    _refresh_version(ctx, p)
     return (f"patched {p} atomically · sha256 {hashlib.sha256(out.encode('utf-8')).hexdigest()}\n"
             + _diff(content, updated, str(p), ctx))
 
@@ -1241,6 +1305,7 @@ def edit_file(args: dict, ctx) -> str:
         _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
     except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
+    _refresh_version(ctx, p)
     note = "" if how == "exact" else f"  [matched via {how}]"
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p), ctx)}"
 
@@ -1324,6 +1389,7 @@ def multi_edit(args: dict, ctx) -> str:
         _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
     except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
+    _refresh_version(ctx, p)
     msg = f"applied {applied}/{len(edits)} edits to {p}"
     if failures:
         msg += "\nFAILED (do NOT re-send the applied edits, only fix these):\n" + "\n".join(failures)
