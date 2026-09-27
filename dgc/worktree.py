@@ -415,6 +415,69 @@ def _fingerprint_matches(state: _FileState, value: object) -> bool:
             and value.get("sha256") == hashlib.sha256(state.data).hexdigest())
 
 
+def _merge_mode(base: int, ours: int, theirs: int) -> int | None:
+    """The executable bit, three ways. None when both sides moved it in different directions."""
+    if ours == theirs:
+        return ours
+    if ours == base:              # only the sub-agent changed it
+        return theirs
+    if theirs == base:            # only the parent changed it
+        return ours
+    return None
+
+
+def _merge_file(base: _FileState, ours: _FileState, theirs: _FileState,
+                cwd: Path) -> _FileState | None:
+    """Reconcile one file three ways, or None when the two sides genuinely collide.
+
+    `integrate` compares whole files: if the parent's copy differs at all from the bytes the
+    sub-agent started with, the delta is refused. Editing a DIFFERENT part of the same file -- the
+    parent fixing a line at the bottom while the child rewrote a function at the top -- reads
+    exactly like a collision, and the child's work on every other file is discarded with it.
+
+    `git merge-file` is the whole mechanism. It reconciles three versions of ONE file, it is handed
+    literal bytes in a scratch directory rather than paths in a repository, and with `-p` it writes
+    nothing. That last part carries more weight than it sounds:
+
+      * Nothing touches the index, so no lock is taken and the user's own `git status` is
+        undisturbed -- the reason this is not built on `git stash create`, which rewrites the real
+        index, omits untracked files entirely, and fails outright when a lock is held.
+      * Git never sees these as tracked paths, so no clean filter, no `core.autocrlf` and no LFS
+        smudge runs over the content. A CRLF file merges back byte for byte and a binary asset is
+        refused rather than quietly replaced by its pointer text.
+
+    Exit status is the entire contract, and every non-zero value means the same thing to us: 1 for
+    a real conflict, 255 for a file git will not merge at all, 125 when the merged text would cross
+    the task byte ceiling (`_run_git` converts a truncated capture into that failure, so an
+    oversized merge becomes a refusal instead of a half-written file), 124 on timeout. So the rule
+    is `returncode == 0, or refuse` -- and on any refusal the caller keeps the parent's bytes and
+    retains the delta for review.
+    """
+    # Only a real file has lines to reconcile. A symlink, a deletion on either side, or a file one
+    # side created from nothing has no common ancestor text, and "merging" it would mean inventing
+    # one. Those are genuine collisions and are reported as such.
+    if any(state.kind != "file" for state in (base, ours, theirs)):
+        return None
+    mode = _merge_mode(base.mode, ours.mode, theirs.mode)
+    if mode is None:
+        return None
+    # Git answers 255 for these anyway; deciding it here keeps the refusal explicit and cheap.
+    if any(b"\0" in state.data for state in (base, ours, theirs)):
+        return None
+    with tempfile.TemporaryDirectory(prefix="dgc-merge-") as holder:
+        names = {}
+        for name, state in (("base", base), ("ours", ours), ("theirs", theirs)):
+            target = Path(holder) / name
+            target.write_bytes(state.data)
+            names[name] = str(target)
+        # Argument order is ours, base, theirs -- not the three-way order the name suggests.
+        done = _git_bytes(["merge-file", "-p", "--", names["ours"], names["base"], names["theirs"]],
+                          cwd, max_stdout=_MAX_TASK_BYTES)
+    if done.returncode != 0:
+        return None
+    return _FileState("file", done.stdout, mode)
+
+
 def _read_state(path: Path, *, max_bytes: int = _MAX_TASK_BYTES) -> _FileState:
     try:
         info = path.lstat()
@@ -721,15 +784,33 @@ class TaskWorkspace:
 
         expected: dict[str, _FileState] = {}
         desired: dict[str, _FileState] = {}
+        child: dict[str, _FileState] = {}
         prior: dict[str, _FileState] = {}
+        merged: list[str] = []
         conflicts = []
         try:
             for repo_path in changed:
                 expected[repo_path] = self._expected(repo_path)
-                desired[repo_path] = _read_state(_checked_target(self.path, repo_path))
+                child[repo_path] = _read_state(_checked_target(self.path, repo_path))
+                desired[repo_path] = child[repo_path]
                 prior[repo_path] = _read_state(_checked_target(self.repo, repo_path))
-                if prior[repo_path] != expected[repo_path]:
+                if prior[repo_path] == expected[repo_path]:
+                    continue        # the parent has not touched it; the child's bytes stand
+                # The parent's copy moved while the task ran. That is a collision only if the two
+                # sides touched the same lines. Reconcile them, and keep the child's work on this
+                # file -- and on every other file in the delta -- when they did not.
+                #
+                # Nothing dirty before delegation reaches here: `protected` is checked above and
+                # returns first, so a file the user already had uncommitted work in is still
+                # refused outright rather than merged into. That ordering is the whole safety
+                # argument, and tests/test_task_merge.py holds it.
+                union = _merge_file(expected[repo_path], prior[repo_path], child[repo_path],
+                                    self.repo)
+                if union is None:
                     conflicts.append(repo_path)
+                else:
+                    desired[repo_path] = union
+                    merged.append(repo_path)
         except Exception as exc:
             metadata_error = self.retain(str(exc), changed)
             detail = str(exc) + (f"; {metadata_error}" if metadata_error else "")
@@ -757,7 +838,9 @@ class TaskWorkspace:
                     raise TaskWorkspaceError(f"could not capture rewind checkpoint: {repo_path}")
                 if _read_state(target) != prior[repo_path]:
                     raise TaskWorkspaceError(f"parent changed during checkpoint capture: {repo_path}")
-                if _read_state(_checked_target(self.path, repo_path)) != desired[repo_path]:
+                # Against the CHILD's own bytes: `desired` may be a merge of those bytes with the
+                # parent's, and comparing the checkout to the merged result would fail every time.
+                if _read_state(_checked_target(self.path, repo_path)) != child[repo_path]:
                     raise TaskWorkspaceError(f"isolated checkout changed during integration: {repo_path}")
                 _replace_state(target, desired[repo_path])
                 applied.append(repo_path)
@@ -1227,15 +1310,29 @@ class RetainedTask:
 
         expected: dict[str, _FileState] = {}
         desired: dict[str, _FileState] = {}
+        child: dict[str, _FileState] = {}
         prior: dict[str, _FileState] = {}
         conflicts = []
         try:
             for repo_path in changed:
                 expected[repo_path] = _head_state(self.repo, self.base_commit, repo_path)
-                desired[repo_path] = _read_state(_checked_target(self.path, repo_path))
+                child[repo_path] = _read_state(_checked_target(self.path, repo_path))
+                desired[repo_path] = child[repo_path]
                 prior[repo_path] = _read_state(_checked_target(self.repo, repo_path))
-                if prior[repo_path] != expected[repo_path]:
+                if prior[repo_path] == expected[repo_path]:
+                    continue
+                # Same reconciliation the live path does, and it matters more here: this IS the
+                # retry. A task is retained precisely because something collided, so by the time
+                # anyone resolves it the parent has usually moved on further still. Refusing again
+                # over an edit in a different part of the file is how retained work became
+                # unrecoverable. `protected` is checked above, so nothing dirty at delegation
+                # reaches this.
+                union = _merge_file(expected[repo_path], prior[repo_path], child[repo_path],
+                                    self.repo)
+                if union is None:
                     conflicts.append(repo_path)
+                else:
+                    desired[repo_path] = union
         except Exception as exc:
             return TaskIntegration("error", display, error=str(exc))
         if conflicts:
@@ -1256,7 +1353,8 @@ class RetainedTask:
                 if _read_state(target) != prior[repo_path]:
                     raise TaskWorkspaceError(
                         f"parent changed during retained checkpoint capture: {repo_path}")
-                if _read_state(_checked_target(self.path, repo_path)) != desired[repo_path]:
+                # Against the CHILD's bytes, not the merged result -- see TaskWorkspace.integrate.
+                if _read_state(_checked_target(self.path, repo_path)) != child[repo_path]:
                     raise TaskWorkspaceError(f"retained checkout changed during integration: {repo_path}")
                 _replace_state(target, desired[repo_path])
                 applied.append(repo_path)
