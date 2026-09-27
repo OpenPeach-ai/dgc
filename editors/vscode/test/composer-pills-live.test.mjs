@@ -241,51 +241,35 @@ test("a pill-only draft does not render the placeholder over itself", async (t) 
     "is-empty laid the placeholder out as the first inline box, ahead of the pill");
 });
 
-test("picking /goal opens the goal control, carrying what was already typed", async (t) => {
+test("picking /goal arms the prompt: what you typed becomes the objective", async (t) => {
   if (skipReason()) return t.skip(skipReason());
-  // A goal is THREAD state, not composer text -- Codex models it the same way (`thread/goal/set`
-  // returning a ThreadGoal with its own status, budget and tokens) and offers it as a control in
-  // the composer footer, not as characters in the box. So the pick opens that control. What it
-  // must NOT do is throw away the words typed around the token: they are the objective.
+  // The whole interaction. There is no dialog and there must not be one: a box asking for the
+  // objective is a second place to type the thing you were already typing. The pick leaves a PILL
+  // whose wire text is "/goal ", so `submit()` reads it exactly as the hand-typed form always has.
   await freshComposer([]);
-  const goalsBefore = await page.evaluate(() =>
-    window.__posted.filter((m) => m.type === "startGoal").length);
+  // `window.__posted` accumulates across every test on this shared page, so both counts are read
+  // as deltas from here rather than as absolutes.
+  const [goalsBefore, promptsBefore] = await page.evaluate(() => [
+    window.__posted.filter((m) => m.type === "startGoal").length,
+    window.__posted.filter((m) => m.type === "prompt").length]);
   await page.keyboard.type("finish the build /goa");
   await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.getElementById("goal-editor").hidden), false,
-    "the control opens");
-  assert.equal(await page.evaluate(() => document.getElementById("goal-editor-text").value),
-    "finish the build", "seeded with what was already in the box, not with nothing");
-  assert.equal((await value()).trim(), "finish the build",
-    "the token goes, the words stay -- cancelling must not cost the user their draft");
+
+  assert.equal(await page.evaluate(() => document.getElementById("goal-editor").hidden), true,
+    "no dialog -- the prompt IS the objective");
+  assert.deepEqual(await pills(), ["goal"], "a pill, not the characters /goal for you to half-delete");
+  assert.equal(await value(), "finish the build /goal ", "and the wire text is unchanged");
   assert.equal(await page.evaluate(() =>
     window.__posted.filter((m) => m.type === "startGoal").length), goalsBefore,
-    "one click on a menu row must never commit a standing objective");
+    "picking a menu row must never commit a standing objective on its own");
 
-  // Cancel: the draft is untouched.
-  await page.evaluate(() => document.getElementById("goal-editor-cancel").click());
-  assert.equal((await value()).trim(), "finish the build");
-
-  // Save: those words ARE the goal now, so they leave the box rather than being sent twice.
-  await page.evaluate(async () => {
-    const input = document.getElementById("input");
-    input.focus();
-    // focus() alone leaves the caret at the START, so the token would be typed in front of the
-    // draft and the words picked up as the objective would be the wrong ones.
-    const range = document.createRange();
-    range.selectNodeContents(input); range.collapse(false);
-    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-    document.execCommand("insertText", false, " /goal");
-    await new Promise((r) => setTimeout(r, 200));
-    document.querySelector("#pop .pi").click();
-    await new Promise((r) => setTimeout(r, 200));
-    document.getElementById("goal-editor-save").click();
-    await new Promise((r) => setTimeout(r, 200));
-  });
-  assert.equal(await value(), "");
+  await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(() =>
-    window.__posted.filter((m) => m.type === "updateGoal").at(-1).text), "finish the build");
-  await page.evaluate(() => { document.getElementById("goal-editor").hidden = true; });
+    window.__posted.filter((m) => m.type === "startGoal").at(-1).text), "finish the build",
+    "Enter turns the typed prompt into the goal");
+  assert.equal(await page.evaluate((before) =>
+    window.__posted.filter((m) => m.type === "prompt").length - before, promptsBefore), 0,
+    "and it is not ALSO sent as an ordinary prompt");
 });
 
 test("a line break serializes as one newline, and an empty box as nothing", async (t) => {
@@ -699,6 +683,37 @@ test("a picked command that takes arguments is a pill, and still parses as the c
   assert.deepEqual(await pills(), ["name"], "one pill, and its label carries no second slash");
   assert.equal(await value(), "/name the release chat",
     "the wire text is exactly what plain characters would have been");
+});
+
+test("the slash menu is not squashed by a tall transcript", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // `#pop` is a direct child of the column-flex `body`, so a fixed height ALONE is worthless: with
+  // the default `flex-shrink: 1`, a long transcript plus a composer rail squeezed 210px down to
+  // one clipped row. That is worse than the collapsing the fixed height replaced, and it only
+  // appears when the panel is full -- an empty one has room to spare and looks fine.
+  await freshComposer([]);
+  await page.evaluate(async () => {
+    for (let i = 0; i < 25; i++) {
+      window.postMessage({ type: "event", event: { type: "turn_start", turn_id: "t" + i, prompt: "an earlier prompt " + i } }, "*");
+      window.postMessage({ type: "event", event: { type: "text_delta", text: "an earlier reply " + i + " ".repeat(40) } }, "*");
+      window.postMessage({ type: "event", event: { type: "turn_end", turn_id: "t" + i, reason: "completed" } }, "*");
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const input = document.getElementById("input");
+    input.focus();
+    document.execCommand("insertText", false, "/");
+    await new Promise((r) => setTimeout(r, 250));
+  });
+  const measured = await page.evaluate(() => {
+    const pop = document.getElementById("pop");
+    return { height: Math.round(pop.getBoundingClientRect().height),
+             shrink: getComputedStyle(pop).flexShrink,
+             composerVisible: !!document.getElementById("cbox").offsetParent };
+  });
+  assert.equal(measured.shrink, "0", "the menu must refuse to be shrunk by its flex parent");
+  assert.ok(measured.height >= 200, `a full panel must not squash the menu (was ${measured.height}px)`);
+  assert.ok(measured.composerVisible, "and refusing to shrink must not push the composer away");
+  await freshComposer([]);
 });
 
 test("the slash menu keeps one height however few rows match", async (t) => {

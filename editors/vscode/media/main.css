@@ -1257,8 +1257,14 @@ button.act.danger { color: var(--err-text); }
    "/goal" collapsed a four-row list to a single line: the panel jumped under the cursor as you
    typed, and the one row that was left read as a stray banner rather than a list you were choosing
    from. Codex caps its popup at 8 rows (MAX_POPUP_ROWS) and lets it shrink; in a terminal that is
-   calm, in a panel it is not. Fixed, top-aligned, and it scrolls past four. */
-.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); height: 210px; max-height: 210px; overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
+   calm, in a panel it is not. Fixed, top-aligned, and it scrolls past four.
+
+   `flex: 0 0 auto` is load-bearing, and its absence is what a fixed height alone bought: this is a
+   direct child of the column-flex `body`, so with the default `flex-shrink: 1` a tall transcript
+   plus a composer rail simply squashed the 210px down to whatever was left -- one clipped row,
+   which is worse than the collapsing it replaced. `max-height: min(210px, 40vh)` is the other half:
+   refusing to shrink must not mean pushing the composer off a short panel. */
+.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); flex: 0 0 auto; height: 210px; max-height: min(210px, 40vh); overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
 .pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); color: var(--text); }
 .pop .pi-label { display: flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The icon carries the kind, so the row can drop the sigil and read as a name. Sized to the row's

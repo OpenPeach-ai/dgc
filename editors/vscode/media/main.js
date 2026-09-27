@@ -3412,24 +3412,15 @@
     }
   }
 
-  // The draft the goal editor was seeded FROM, if any. Saving moves those words into the goal and
-  // clears them from the composer -- they became the objective, and sending them as a prompt too
-  // would be saying the same thing twice. Cancelling leaves the draft exactly as it was, which is
-  // why this is settled on save rather than when the editor opens.
-  let goalSeededFrom = "";
-  function openGoalEditor(allowEmpty = false, seed = "") {
-    if (!goalState.text && !allowEmpty) return;
+  function openGoalEditor() {
+    if (!goalState.text) return;
     const editor = $("goal-editor-text");
-    // `seed` is what the composer already held. Picking `/goal` after typing "finish the build"
-    // must not throw those words away: they ARE the objective the user was writing.
-    goalSeededFrom = String(seed || "");
-    editor.value = seed || goalState.text || "";
+    editor.value = goalState.text;
     $("goal-editor-save").disabled = false;
     $("goal-editor").hidden = false;
     editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
   }
   function closeGoalEditor(restoreFocus = true) {
-    goalSeededFrom = "";        // cancelled: the draft stays exactly as it was
     $("goal-editor").hidden = true;
     if (restoreFocus && !goalBar.hidden) focusQuietly($("goal-main"));
   }
@@ -3441,12 +3432,6 @@
     // editing the words never silently clears a budget somebody set elsewhere.
     const budget = Number(goalState.token_budget || 0);
     $("goal-editor-save").disabled = true;
-    if (goalSeededFrom && composerText().trim() === goalSeededFrom.trim()) {
-      // Those words are the goal now. Leaving them in the box would send them as a prompt as well.
-      setComposerValue("");
-      markComposerEmpty(); autosizeComposer(); persistDraft();
-    }
-    goalSeededFrom = "";
     vscode.postMessage({ type: "updateGoal", text,
                          tokenBudget: Number.isSafeInteger(budget) && budget > 0 ? budget : 0 });
   }
@@ -4599,19 +4584,13 @@
   // Clicking the bar EXPANDS it; the pencil edits. It used to open the editor, which is what the
   // pencil beside it is for, so the one thing the bar could not do was tell you what had happened
   // to the goal -- the reason was on a tooltip, where it cannot be read at length or copied.
-  /** The footer's Goal control: what `/goal` opens, and the place a goal is visible at rest.
+  /** The footer's Goal control: where a live goal is visible, and a way back to what it says.
    *
-   *  Codex keeps a goal as THREAD state (`thread/goal/set` -> a ThreadGoal carrying its objective,
-   *  status, budget and tokens) and puts a control for it in the composer footer beside the
-   *  permission mode. This is that control. With no goal it starts one; with a goal it opens the
-   *  detail the bar expands to, so there is one place to read what has happened to it. */
-  function openGoalControl(seed = "") {
-    // Words typed around the token are a PROPOSED objective, so they win even when a goal already
-    // exists -- picking `/goal` after writing something is how you reword one. Saving is still an
-    // explicit click, so nothing is replaced silently. With nothing typed there is nothing to
-    // propose, so an existing goal simply opens for reading.
-    if (!seed && goalState.text) { goalBarAttention(); return; }
-    openGoalEditor(true, seed);
+   *  It only ever REPORTS. Setting a goal is done by arming a prompt with `/goal` and sending it;
+   *  a control that opened a dialog asking for the objective would be a second place to type the
+   *  thing you were already typing. */
+  function openGoalControl() {
+    goalBarAttention();
   }
 
   /** Bring the goal bar into view and open its detail, without stealing the composer's caret. */
@@ -4927,19 +4906,17 @@
         hidePop(); input.focus(); return;
       }
       if (it.action === "goal") {
-        // A goal is THREAD STATE, not something you type. Codex models it the same way --
-        // `thread/goal/set {threadId, objective}` returning a ThreadGoal with its own status,
-        // budget and token count -- and its composer shows it as a CONTROL in the footer beside
-        // the permission mode, not as characters in the box. So picking `/goal` opens that
-        // control; it does not leave a token behind for the user to edit into "/goa".
-        // Read the draft AFTER the token is removed rather than slicing around popStart/popEnd:
-        // the same answer, from the one source of truth, with no chance of using offsets that
-        // belong to an earlier open of the menu. Whatever is left is the objective the user was
-        // writing, and it must not be discarded with the token.
-        replacePopToken();
-        hidePop();
-        openGoalControl(composerText().trim());
-        return;
+        // Picking `/goal` ARMS THE PROMPT: whatever you type becomes the objective when you press
+        // Enter. That is the whole interaction, and it is what `/goal TEXT` typed by hand has
+        // always done -- `submit()` reads the prefix and the `TEXT /goal` suffix, so this pick only
+        // has to put the marker in the box and get out of the way.
+        //
+        // It is a PILL rather than the characters "/goal ", so it cannot be half-deleted into
+        // "/goa" and one Backspace removes it whole. The pill's wire text IS "/goal ", so nothing
+        // downstream learns the difference. Deliberately NOT a dialog: a box asking for the
+        // objective is a second place to type the thing you were already typing.
+        insertCommandPill(it.label, popStart, popEnd);
+        hidePop(); input.focus(); return;
       }
       if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
         // Management actions operate independently of the draft. Opening a model, skills,
