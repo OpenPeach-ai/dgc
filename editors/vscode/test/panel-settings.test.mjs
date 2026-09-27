@@ -2238,3 +2238,60 @@ test('saved connector tokens are not replayed to a release CLI during startup',a
  await assert.rejects(h.provider.sendManagedMcp(h.provider.backend,item,false),/local connector build/);
  assert.match(h.rawSecrets.get('dgc.mcp.zapier'),/private-token/);
 });
+
+// A `session` frame is where a chat's identity changes. The handler CLEARS the chat change set,
+// because the previous chat's files must not be attributed to this one, and `onEvent`'s refresh
+// list re-asks the backend what the NEW chat changed. Both halves are load-bearing and only the
+// first was covered: clearing without re-asking leaves the set empty while the transcript repaints
+// that session's finished-turn file lists from history, so clicking any of those rows reaches
+// `reviewWorkspaceChange`'s empty-set branch and answers "That file is no longer in the workspace
+// change set." for files the chat really did change.
+//
+// Written while hunting exactly that report (the cause turned out to be the diff header's path --
+// tests/test_diff_header_path.py). The behaviour here was already right; nothing pinned it. Drop
+// "session" from the refresh list in panel.ts and this test fails.
+//
+// The assertion is the request reaching the backend, not the timer that schedules it.
+function sessionSwitchHarness() {
+  const posted = [], asked = [];
+  const provider = new DgcViewProvider({ subscriptions: [], globalState: { get() {} },
+    workspaceState: { get() {}, async update() {} } });
+  provider.post = message => posted.push(message);
+  const backend = { ready: true, send() { return true; },
+    request(command) {
+      asked.push(command.type);
+      if (command.type === "get_chat_changes") {
+        return Promise.resolve({ type: "chat_changes", session_id: provider.currentSessionId, roots: [] });
+      }
+      return Promise.resolve({ type: "workspace_changes", roots: [] });
+    },
+  };
+  Object.assign(provider, { backend, initializingBackend: undefined, currentSessionId: "first-chat",
+    workspaceRootsDirty: false, workspaceRootsInFlight: undefined,
+    lastReadyEvent: { capabilities: { workspace_inspection: true, chat_inspection: true } } });
+  provider.chatChanges = [{ id: "stale", root: scratch, folder: "fixture", path: "old.ts",
+                           displayPath: "old.ts", additions: 1, deletions: 0 }];
+  return { provider, posted, asked };
+}
+
+test("a resumed chat asks what IT changed, instead of keeping the previous chat's empty set", async () => {
+  const h = sessionSwitchHarness();
+  h.provider.onEvent({ type: "session", kind: "resumed", session_id: "second-chat", name: "Saved",
+                       message_count: 4 });
+  assert.equal(h.provider.currentSessionId, "second-chat");
+  assert.deepEqual(h.provider.chatChanges, [],
+    "the previous chat's files must never be attributed to this one");
+  assert.ok(h.posted.some(message => message.type === "chat_changes"
+    && message.sessionId === "second-chat" && message.files.length === 0),
+    "the webview is told the set is empty for the new chat");
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.ok(h.asked.includes("get_chat_changes"),
+    "clearing without re-asking is the bug: the transcript's restored file rows then resolve "
+    + "against an empty set and report the file is no longer in the change set");
+  // A brand-new chat takes the same path, and its answer is legitimately empty -- the point is
+  // that the question is asked, so the set matches the chat the user is looking at.
+  const fresh = sessionSwitchHarness();
+  fresh.provider.onEvent({ type: "session", kind: "new", session_id: "third-chat" });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.ok(fresh.asked.includes("get_chat_changes"));
+});
