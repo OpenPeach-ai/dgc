@@ -1552,6 +1552,12 @@ class CLI:
             warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
             self.ui.info(f"applied retained task {task_id}: {len(result.paths)} path(s).{warning} "
                          "Use /rewind to undo.")
+        elif result.status == "partial":
+            # Some of it landed. Reporting this through the error branch below would call a partial
+            # success a failure and hide the files that did change.
+            held = f" Still held: {', '.join(result.conflicts[:12])}." if result.conflicts else ""
+            self.ui.info(f"partly applied retained task {task_id}: {len(result.paths)} path(s).{held}"
+                         " Use /rewind to undo what landed; the rest stays retained.")
         elif result.status == "clean":
             warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
             self.ui.info(f"retained task {task_id} had no remaining changes.{warning}")

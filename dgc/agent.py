@@ -1123,6 +1123,15 @@ class AgentContext:
     # written after the model was told about it (tools.todo skips the former).
     todo_clear_epoch: int = 0
     todo_request_epoch: int | None = None
+    # What the model last SAW of each file, so a wholesale `write_file` cannot silently discard a
+    # save someone made while the model was composing. `write_file` reads the file to build its
+    # own `expected` version microseconds before writing, which closes a TOCTOU race inside the
+    # tool and nothing else: a save made seconds earlier is already in that read. Measured -- a
+    # user's line survived `edit_file` (a targeted replacement lands on current content) and was
+    # LOST by `write_file`. Recorded on every read AND on every write DGC itself performs, so a
+    # mismatch means a FOREIGN writer, never DGC's own previous edit.
+    seen_versions: dict = field(default_factory=dict)
+    seen_lock: threading.RLock = field(default_factory=threading.RLock)
     # The agent's background monitors (dgc.monitors.MonitorHub); tools reach it through the context.
     monitors: object = None
 
@@ -8293,9 +8302,38 @@ class Agent(GoalLifecycle):
         if integration.status == "applied":
             paths = ", ".join(integration.paths[:20])
             extra = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
+            # Say when a file was RECONCILED rather than simply written. Those are files the user
+            # changed while the sub-agent ran, so their own edit is now interleaved with the
+            # child's; "integrated 1 path(s)" reads identically to writing over an untouched file
+            # and gives them no reason to look.
+            reconciled = ""
+            if integration.merged:
+                names = ", ".join(integration.merged[:10])
+                more = f" (+{len(integration.merged) - 10} more)" if len(integration.merged) > 10 else ""
+                reconciled = (f" You changed {names}{more} while it worked, so its edits were merged"
+                              f" with yours rather than written over them — worth a look.")
             return _TaskOutcome(
                 f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
-                f"{paths}{extra}.{warning}\nSummary:\n{result}", True, tuple(integration.paths))
+                f"{paths}{extra}.{reconciled}{warning}\nSummary:\n{result}", True,
+                tuple(integration.paths))
+        if integration.status == "partial":
+            # Some of the delta landed and some is held back. Say both halves plainly: a result
+            # that named only the conflict would read as "nothing happened" while files had in fact
+            # changed, and one that named only what landed would hide work still waiting.
+            landed = ", ".join(integration.paths[:20]) or "(none)"
+            held = ", ".join(integration.conflicts[:20]) or "(none)"
+            more = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
+            reconciled = ""
+            if integration.merged:
+                names = ", ".join(integration.merged[:10])
+                reconciled = (f" You changed {names} while it worked, so its edits were merged with"
+                              f" yours rather than written over them.")
+            return _TaskOutcome(
+                f"Sub-task '{description}' partly integrated. Applied {len(integration.paths)} "
+                f"path(s): {landed}{more}.{reconciled} Held back because you changed the same lines:"
+                f" {held}. That work is preserved at {workspace.path} on branch {workspace.branch};"
+                f" resolve it from /tasks.{warning}\nSummary:\n{result}",
+                True, tuple(integration.paths))
         if integration.status == "clean":
             return _TaskOutcome(
                 f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}")

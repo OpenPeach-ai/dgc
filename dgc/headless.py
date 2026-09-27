@@ -4636,6 +4636,14 @@ class Backend:
                 warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
                 self.em.emit("info", message=f"Applied retained task {task_id}: "
                              f"{len(result.paths)} path(s). Use rewind to undo.{warning}")
+            elif result.status == "partial":
+                # Same reason as the terminal path: a partial success is not an error, and the
+                # files that DID land must be named.
+                held = (f" Still held: {', '.join(result.conflicts[:12])}."
+                        if result.conflicts else "")
+                self.em.emit("info", message=f"Partly applied retained task {task_id}: "
+                             f"{len(result.paths)} path(s).{held} Use rewind to undo what landed; "
+                             f"the rest stays retained.")
             elif result.status == "clean":
                 warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
                 self.em.emit("info", message=f"Retained task {task_id} had no remaining changes.{warning}")

@@ -625,8 +625,31 @@ def _head_state(repo: Path, base_commit: str, repo_path: str) -> _FileState:
         raise TaskWorkspaceError(f"invalid git tree record for {repo_path}") from exc
     if kind != b"blob":
         raise TaskWorkspaceError(f"submodules are not supported in isolated task integration: {repo_path}")
-    blob = _git_bytes(["cat-file", "blob", oid.decode("ascii")], repo,
-                      max_stdout=_MAX_TASK_BYTES + 1)
+    # What a CHECKOUT of that blob holds, not the blob. These differ whenever the repository
+    # configures a conversion -- `core.autocrlf`, a `.gitattributes` `eol=` rule, or a clean/smudge
+    # filter (Git LFS's exact shape) -- and this value is compared against bytes read off disk. Ask
+    # for the blob itself and they never match, so EVERY delta touching such a file was refused and
+    # the refusal was blamed on the parent ("parent checkout changed while the isolated task was
+    # running"). Measured on Linux with no user config: an `eol=crlf` attribute and an LFS-shaped
+    # filter both refuse; a plain repository applies.
+    #
+    # `--filters` runs the repository's smudge filter, and that is not a new capability: DGC
+    # already runs it for every delegation, because `git worktree add` materialises the child's
+    # checkout through the same filters. Measured -- a child's copy holds the smudged bytes.
+    #
+    # Symlinks are exempt. Git does not convert them, and `--filters` on a symlink blob would ask a
+    # text filter to rewrite a link target.
+    if mode == b"120000":
+        blob = _git_bytes(["cat-file", "blob", oid.decode("ascii")], repo,
+                          max_stdout=_MAX_TASK_BYTES + 1)
+    else:
+        blob = _git_bytes(["cat-file", "--filters", "--path", repo_path, oid.decode("ascii")], repo,
+                          max_stdout=_MAX_TASK_BYTES + 1)
+        if blob.returncode != 0:
+            # An older git, or a filter that refuses: fall back to the raw blob rather than fail
+            # the integration outright. That restores the previous behaviour for this file only.
+            blob = _git_bytes(["cat-file", "blob", oid.decode("ascii")], repo,
+                              max_stdout=_MAX_TASK_BYTES + 1)
     if blob.returncode != 0:
         raise TaskWorkspaceError(f"could not read task baseline blob: {repo_path}")
     data = bytes(blob.stdout or b"")
@@ -644,6 +667,15 @@ class TaskIntegration:
     conflicts: list[str] = field(default_factory=list)
     error: str = ""
     cleanup_error: str = ""
+    # Paths where the sub-agent's bytes were reconciled with a change the parent made DURING the
+    # run, rather than written over an untouched file. The user is editing those files right now,
+    # so a silent "integrated" is the wrong thing to say about them.
+    #
+    # LAST, deliberately. Several call sites build this positionally --
+    # `TaskIntegration("conflict", display, conflicts, detail)` -- so a field inserted before
+    # `error` silently swallows the message that explains a refusal. That is what happened when it
+    # was added in the middle, and TheSafetyInvariantTest caught it.
+    merged: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -815,7 +847,22 @@ class TaskWorkspace:
             metadata_error = self.retain(str(exc), changed)
             detail = str(exc) + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("error", display, error=detail)
-        if conflicts:
+        # One collision used to discard the child's work on every OTHER file in the delta. That is
+        # safe and very expensive: a sub-agent that edited ten files and overlapped on one lost all
+        # ten, and the only way back was to resolve the retained task by hand. Apply the files that
+        # DO reconcile and hold back only the ones that do not -- the shape Grok Build's
+        # `apply_worktree` uses, where a conflict is reported per path.
+        #
+        # The cost of this, stated plainly: a change that spans two files can now half-land. It is
+        # accepted because the alternative discards correct work on every delegation that touches a
+        # file the user happened to edit, because the held-back files are named in the result and
+        # kept in the worktree for review, and because `/rewind` undoes the whole turn again (it
+        # could not, until the `note_written` fix in this same release).
+        #
+        # Nothing conflicting is applied, and a delta where EVERY path conflicts still refuses
+        # wholesale, exactly as before.
+        appliable = [path for path in changed if path not in conflicts]
+        if conflicts and not appliable:
             shown = [self._display_path(path) for path in conflicts]
             reason = "parent checkout changed while the isolated task was running"
             metadata_error = self.retain(reason, changed)
@@ -830,7 +877,7 @@ class TaskWorkspace:
         self.retain("integration in progress; DGC stopped while applying this delta", changed)
         applied: list[str] = []
         try:
-            for repo_path in changed:
+            for repo_path in appliable:
                 target = _checked_target(self.repo, repo_path)
                 if _read_state(target) != prior[repo_path]:
                     raise TaskWorkspaceError(f"parent changed during integration: {repo_path}")
@@ -843,6 +890,16 @@ class TaskWorkspace:
                 if _read_state(_checked_target(self.path, repo_path)) != child[repo_path]:
                     raise TaskWorkspaceError(f"isolated checkout changed during integration: {repo_path}")
                 _replace_state(target, desired[repo_path])
+                # Tell the manager what DGC just left here. `record_file` above captured the BEFORE
+                # bytes; without this second half `_left` still holds whatever DGC wrote in an
+                # earlier turn, so the next rewind finds a file it cannot account for, refuses the
+                # WHOLE turn, and tells the user "changed outside this chat" about a file DGC's own
+                # sub-agent wrote. `getattr` because the suites pass duck-typed checkpoint stubs
+                # that define only `record_file`; a bare call would turn those into an integration
+                # error. Same shape as the edit-tool path in agent.py.
+                note = getattr(checkpoints, "note_written", None)
+                if callable(note):
+                    note(str(target))
                 applied.append(repo_path)
         except Exception as exc:
             rollback_errors = []
@@ -858,6 +915,17 @@ class TaskWorkspace:
             if metadata_error:
                 detail += f"; {metadata_error}"
             return TaskIntegration("error", display, error=detail)
+        landed = [self._display_path(path) for path in applied]
+        reconciled = [self._display_path(path) for path in merged if path in applied]
+        if conflicts:
+            # Part of the delta is still in the worktree. Keep it, and record ONLY what is left to
+            # resolve so a retry does not try to re-apply what already landed.
+            held = [self._display_path(path) for path in conflicts]
+            reason = ("parent checkout changed while the isolated task was running; "
+                      f"{len(applied)} path(s) still applied")
+            metadata_error = self.retain(reason, conflicts)
+            detail = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("partial", landed, held, detail, merged=reconciled)
         # The delta landed: drop the in-flight breadcrumb BEFORE cleanup, so a worktree that cannot
         # be removed does not leave a retained row for work that is already applied (_cleanup_task
         # keeps the metadata on partial failure, by design).
@@ -866,7 +934,8 @@ class TaskWorkspace:
         except OSError:
             pass
         cleanup_error = self.cleanup() or ""
-        return TaskIntegration("applied", display, cleanup_error=cleanup_error)
+        return TaskIntegration("applied", display, merged=reconciled,
+                               cleanup_error=cleanup_error)
 
     def cleanup(self) -> str | None:
         return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
@@ -1312,6 +1381,8 @@ class RetainedTask:
         desired: dict[str, _FileState] = {}
         child: dict[str, _FileState] = {}
         prior: dict[str, _FileState] = {}
+        merged: list[str] = []
+        satisfied: list[str] = []
         conflicts = []
         try:
             for repo_path in changed:
@@ -1319,6 +1390,14 @@ class RetainedTask:
                 child[repo_path] = _read_state(_checked_target(self.path, repo_path))
                 desired[repo_path] = child[repo_path]
                 prior[repo_path] = _read_state(_checked_target(self.repo, repo_path))
+                if prior[repo_path] == child[repo_path]:
+                    # The parent already holds exactly these bytes. Since a partial integration
+                    # applies the files that reconcile and retains only the ones that do not, the
+                    # preserved worktree still contains the paths that already landed -- and
+                    # re-applying them would compare a now-current parent against a stale base and
+                    # report a collision on work that is already in place.
+                    satisfied.append(repo_path)
+                    continue
                 if prior[repo_path] == expected[repo_path]:
                     continue
                 # Same reconciliation the live path does, and it matters more here: this IS the
@@ -1333,18 +1412,23 @@ class RetainedTask:
                     conflicts.append(repo_path)
                 else:
                     desired[repo_path] = union
+                    merged.append(repo_path)
         except Exception as exc:
             return TaskIntegration("error", display, error=str(exc))
-        if conflicts:
+        if conflicts and not [p for p in changed if p not in conflicts and p not in satisfied]:
             shown = [self._display_path(path) for path in conflicts]
             reason = "parent checkout changed before retained task resolution"
             metadata_error = self.retain(reason, changed)
             error = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("conflict", display, shown, error)
 
+        # Same partial rule as the live path: apply what reconciles, hold back only what collides.
+        # `satisfied` paths are already in place, so they are neither applied nor held.
+        appliable = [path for path in changed
+                     if path not in conflicts and path not in satisfied]
         applied: list[str] = []
         try:
-            for repo_path in changed:
+            for repo_path in appliable:
                 target = _checked_target(self.repo, repo_path)
                 if _read_state(target) != prior[repo_path]:
                     raise TaskWorkspaceError(f"parent changed during retained integration: {repo_path}")
@@ -1357,6 +1441,16 @@ class RetainedTask:
                 if _read_state(_checked_target(self.path, repo_path)) != child[repo_path]:
                     raise TaskWorkspaceError(f"retained checkout changed during integration: {repo_path}")
                 _replace_state(target, desired[repo_path])
+                # Tell the manager what DGC just left here. `record_file` above captured the BEFORE
+                # bytes; without this second half `_left` still holds whatever DGC wrote in an
+                # earlier turn, so the next rewind finds a file it cannot account for, refuses the
+                # WHOLE turn, and tells the user "changed outside this chat" about a file DGC's own
+                # sub-agent wrote. `getattr` because the suites pass duck-typed checkpoint stubs
+                # that define only `record_file`; a bare call would turn those into an integration
+                # error. Same shape as the edit-tool path in agent.py.
+                note = getattr(checkpoints, "note_written", None)
+                if callable(note):
+                    note(str(target))
                 applied.append(repo_path)
         except Exception as exc:
             rollback_errors = []
@@ -1370,8 +1464,18 @@ class RetainedTask:
                 detail += "; rollback incomplete: " + ", ".join(rollback_errors[:8])
             self.retain(detail, changed)
             return TaskIntegration("error", display, error=detail)
+        landed = [self._display_path(path) for path in applied]
+        reconciled = [self._display_path(path) for path in merged if path in applied]
+        if conflicts:
+            held = [self._display_path(path) for path in conflicts]
+            reason = ("parent checkout changed before retained task resolution; "
+                      f"{len(applied)} path(s) still applied")
+            metadata_error = self.retain(reason, conflicts)
+            detail = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("partial", landed, held, detail, merged=reconciled)
         cleanup_error = self.cleanup() or ""
-        return TaskIntegration("applied", display, cleanup_error=cleanup_error)
+        return TaskIntegration("applied", display, merged=reconciled,
+                               cleanup_error=cleanup_error)
 
 
 def _retained_storage_root(storage_root: Path | None) -> Path:
