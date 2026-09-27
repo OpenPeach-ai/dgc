@@ -560,3 +560,116 @@ test("ordinary text never raises the paste notice", async (t) => {
       `${label} must not raise the notice`);
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// What a paste puts in the composer. The founder pasted a numbered list with blank lines between
+// the items and got it back as one run of lines. None of this reproduces in the Chromium this
+// harness runs, which is the point: the composer's contents must not depend on which Chromium is
+// embedding it.
+// ---------------------------------------------------------------------------------------------
+
+/** Fire a real paste with the flavours a real clipboard carries. */
+async function paste({ plain, html, breakInsert = false }) {
+  await freshComposer([]);
+  await page.evaluate(async (c) => {
+    const input = document.getElementById("input");
+    input.focus();
+    const saved = document.execCommand;
+    if (c.breakInsert) {
+      // The host we cannot reproduce, modelled: an insertText that collapses runs of newlines.
+      document.execCommand = function (cmd, ui, value) {
+        return cmd === "insertText"
+          ? saved.call(document, cmd, ui, String(value).replace(/\n{2,}/g, "\n"))
+          : saved.call(document, cmd, ui, value);
+      };
+    }
+    const dt = new DataTransfer();
+    if (c.plain !== undefined) { dt.setData("text/plain", c.plain); }
+    if (c.html !== undefined) { dt.setData("text/html", c.html); }
+    input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 120));
+    document.execCommand = saved;
+  }, { plain, html, breakInsert });
+}
+
+const LIST = ["Heading:", "", "1. first item", "", "2. second item"].join("\n");
+
+test("a pasted list keeps its blank lines even where the host's insertText does not", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await paste({ plain: LIST });
+  assert.equal(await value(), LIST, "the faithful host is left alone");
+
+  await paste({ plain: LIST, breakInsert: true });
+  assert.equal(await value(), LIST,
+    "and a host that eats blank lines is repaired, because the result is checked, not assumed");
+});
+
+test("a clipboard carrying only HTML still pastes, as text", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // This handler calls preventDefault() on every paste -- it must, or the editing host takes the
+  // markup -- so reading only text/plain meant an HTML-only clipboard vanished with no message.
+  await paste({ html: "Heading:<br><br>1. first item<br><br>2. second item" });
+  assert.equal(await value(), LIST, "<br> is a newline, and two of them is a blank line");
+
+  await paste({ html: "<p>Heading:</p><p>1. first item</p><p>2. second item</p>" });
+  assert.equal(await value(), "Heading:\n1. first item\n2. second item",
+    "a block boundary is a newline, so a list does not run into one line");
+});
+
+test("pasted markup never reaches the composer", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // The whole reason the default action is prevented: <img src="https://tracker/..."> fires the
+  // instant it is inserted, and style="position:fixed" lies over the Send button.
+  await paste({ html: '<p>Hi</p><img src="https://tracker.invalid/x.png">'
+                      + '<div style="position:fixed;inset:0">over the send button</div><p>There</p>' });
+  assert.equal(await page.evaluate(() => document.querySelectorAll("#input img, #input [style]").length), 0,
+    "no element from the clipboard, only its words");
+  assert.match(await value(), /^Hi\n/);
+  assert.match(await value(), /There$/);
+
+  await paste({ html: "<p>one</p><script>window.__pwned = 1;</script><p>two</p>" });
+  assert.equal(await page.evaluate(() => window.__pwned), undefined, "and nothing from it runs");
+  assert.equal(await value(), "one\ntwo");
+});
+
+test("a picked slash command is a pill, and still parses as the command", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // `/goal` sat in the box as the characters "/goal ", which reads as something you typed and
+  // half-deletes into "/goa". A pill is one object -- but its WIRE text is unchanged, so submit()'s
+  // `/goal TEXT` parse never learns the difference. That is the whole trick.
+  await freshComposer([]);
+  await page.evaluate(async () => {
+    const input = document.getElementById("input");
+    input.focus();
+    document.execCommand("insertText", false, "/goal");
+    await new Promise((r) => setTimeout(r, 150));
+    document.querySelector("#pop .pi")?.click();
+    await new Promise((r) => setTimeout(r, 150));
+    document.execCommand("insertText", false, "ship the sub-agent stages");
+    await new Promise((r) => setTimeout(r, 100));
+  });
+  assert.deepEqual(await pills(), ["goal"], "one pill, and its label carries no second slash");
+  assert.equal(await value(), "/goal ship the sub-agent stages");
+  assert.ok(/^\/goal\s+([\s\S]+)$/i.test(await value()), "submit() still reads it as a goal");
+});
+
+test("the slash menu keeps one height however few rows match", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  // Narrowing "/g" to "/goal" collapsed a four-row list to a single line: the panel jumped under
+  // the cursor as you typed, and the row that was left read as a stray banner.
+  await freshComposer([]);
+  const heightFor = (q) => page.evaluate(async (text) => {
+    const input = document.getElementById("input");
+    input.replaceChildren(); input.focus();
+    document.execCommand("insertText", false, text);
+    await new Promise((r) => setTimeout(r, 200));
+    const pop = document.getElementById("pop");
+    return { rows: pop.querySelectorAll(".pi").length,
+             height: Math.round(pop.getBoundingClientRect().height) };
+  }, q);
+  const wide = await heightFor("/g");
+  const narrow = await heightFor("/goal");
+  assert.ok(wide.rows > narrow.rows, `"/g" must match more than "/goal" (${wide.rows} vs ${narrow.rows})`);
+  assert.equal(wide.height, narrow.height, "and the menu must be the same height for both");
+  assert.ok(narrow.height > 100, `a single match still gets a readable list, not a line (${narrow.height}px)`);
+});

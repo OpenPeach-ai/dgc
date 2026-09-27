@@ -5733,7 +5733,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <h2 id="goal-editor-title">Edit goal</h2>
     <label class="sr-only" for="goal-editor-text">Goal</label>
     <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="4000"></textarea>
-    <label class="goal-budget">Token budget (optional)<input id="goal-editor-budget" type="number" min="0" max="1000000000000" step="1" placeholder="No limit"></label>
     <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act" title="Close without changing the objective">Cancel</button><button type="button" id="goal-editor-save" class="act primary" title="Save the objective and start pursuing it">Save</button></div>
   </div>
 </div>
@@ -5780,6 +5779,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="goal-toggle" class="rail-icon-button" title="Pause goal" aria-label="Pause goal"><span class="codicon codicon-debug-pause" aria-hidden="true"></span></button>
         <button type="button" id="goal-edit" class="rail-icon-button" title="Edit goal" aria-label="Edit goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
       </div>
+      <div id="goal-detail" class="goal-detail" role="region" aria-label="Goal detail" tabindex="0" hidden></div>
     </section>
     <section id="pastebar" class="rail-item" aria-label="Invisible characters in this draft" data-status="noise" hidden>
       <button type="button" id="paste-strip" class="rail-main" aria-label="Remove the invisible characters" title="Remove them from the draft"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count">Remove 0 invisible characters</span></button>

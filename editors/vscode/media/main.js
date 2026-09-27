@@ -405,19 +405,62 @@
 
   function insertComposerText(text) {
     input.focus();
+    // What the composer must hold afterwards, computed BEFORE the insert so it can be checked.
+    const [start, end] = composerSelection();
+    const whole = composerText();
+    const want = whole.slice(0, start) + text + whole.slice(end);
     // Guarded exactly as editComposer guards it: where execCommand does not exist, CALLING it
     // throws rather than returning falsy, and the text would be silently dropped instead of
     // falling through to the assignment below.
     const inserted = typeof document.execCommand === "function"
       && document.execCommand("insertText", false, text);
-    if (!inserted) {
-      // A browser that refuses it still has to end up with the same text.
-      const [start, end] = composerSelection();
-      const whole = composerText();
-      setComposerValue(whole.slice(0, start) + text + whole.slice(end));
+    // ...and then VERIFIED, because what `insertText` does with consecutive newlines is the host's
+    // business, not ours. A paste of a numbered list with blank lines between the items came back
+    // with the blank lines gone on one Chromium and intact on another, and a composer whose
+    // contents depend on which editor is embedding it is not a composer. Where the native path is
+    // faithful it is kept, because it is the one that gives native undo; where it is not, the
+    // exact text is put in by hand. `composerText()` is the same serializer the wire uses, so this
+    // compares what the model would receive.
+    if (!inserted || composerText() !== want) {
+      setComposerValue(want);
       setComposerRange(start + text.length);
     }
     markComposerEmpty();
+  }
+
+  /** The clipboard's text, from whichever flavour carries it.
+   *
+   *  Some applications put ONLY `text/html` on the clipboard. This handler prevents the default
+   *  action on every paste -- it has to, an editing host would otherwise take the markup -- so a
+   *  missing `text/plain` used to mean the paste vanished with no message at all. The HTML is never
+   *  inserted; it is parsed, and only its TEXT is taken, with a newline wherever the markup put a
+   *  block boundary or a <br>, so a list pasted from a rich-text app keeps the shape it was copied
+   *  with instead of running into one line. */
+  function clipboardText(data) {
+    const plain = data ? String(data.getData("text/plain") || "") : "";
+    if (plain || !data) return plain;
+    const html = String(data.getData("text/html") || "");
+    if (!html) return "";
+    let doc;
+    try { doc = new DOMParser().parseFromString(html, "text/html"); } catch { return ""; }
+    const BLOCK = new Set(["P", "DIV", "LI", "TR", "BR", "H1", "H2", "H3", "H4", "H5", "H6",
+                           "BLOCKQUOTE", "PRE", "SECTION", "ARTICLE", "UL", "OL", "TABLE", "HR"]);
+    let out = "";
+    const walk = (node) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) { out += child.nodeValue.replace(/\s+/g, " "); continue; }
+        if (child.nodeType !== 1) continue;
+        const tag = child.tagName;
+        if (tag === "SCRIPT" || tag === "STYLE") continue;
+        if (tag === "BR") { out += "\n"; continue; }
+        const block = BLOCK.has(tag);
+        if (block && out && !out.endsWith("\n")) out += "\n";
+        walk(child);
+        if (block && out && !out.endsWith("\n")) out += "\n";
+      }
+    };
+    walk(doc.body || doc);
+    return out.replace(/\n{3,}/g, "\n\n").trim();
   }
 
   // The placeholder cannot key off :empty, because of the filler <br>. It keys off the serializer.
@@ -3325,13 +3368,53 @@
           : `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
     fitGoalText();
+    renderGoalDetail();
     if (!$("goal-review").hidden) renderGoalReview();
   }
+  /** Open or close the three-line detail panel under the goal bar.
+   *
+   *  What it holds is the thing the bar has no room for: the objective in full, and then what has
+   *  actually happened to it -- the reason it is blocked or paused, or the evidence recorded when
+   *  it was met. Both already travel on `goal_snapshot`; until now only the review dialog read
+   *  them. Three lines with its own scroller, so a long reason is readable without the bar growing
+   *  to fill the panel. */
+  function toggleGoalDetail(force) {
+    const panel = $("goal-detail");
+    const open = typeof force === "boolean" ? force : panel.hidden;
+    panel.hidden = !open;
+    $("goal-main").setAttribute("aria-expanded", String(open));
+    if (open) renderGoalDetail();
+  }
+
+  function renderGoalDetail() {
+    const panel = $("goal-detail");
+    if (panel.hidden) return;
+    panel.replaceChildren();
+    panel.appendChild(el("p", "goal-detail-objective", goalState.text || ""));
+    const status = String(goalState.status || "");
+    const reason = String(goalState.reason || "").trim();
+    const evidence = Array.isArray(goalState.evidence)
+      ? goalState.evidence.map((item) => String(item || "").trim()).filter(Boolean) : [];
+    if (reason) {
+      const label = status === "blocked" ? "Blocked" : status === "paused" ? "Paused" : "Note";
+      panel.appendChild(el("p", "goal-detail-why", `${label}: ${reason}`));
+    }
+    if (evidence.length) {
+      panel.appendChild(el("p", "goal-detail-label", evidence.length === 1 ? "Evidence" : "Evidence"));
+      const list = el("ul", "goal-detail-evidence");
+      for (const item of evidence) list.appendChild(el("li", "", item));
+      panel.appendChild(list);
+    }
+    if (!reason && !evidence.length) {
+      panel.appendChild(el("p", "goal-detail-why goal-detail-quiet",
+        status === "active" ? "No blocker recorded. Nothing has stopped it." : "Nothing recorded yet."));
+    }
+  }
+
   function openGoalEditor() {
     if (!goalState.text) return;
     const editor = $("goal-editor-text");
     editor.value = goalState.text;
-    $("goal-editor-budget").value = goalState.token_budget || "";
     $("goal-editor-save").disabled = false;
     $("goal-editor").hidden = false;
     editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
@@ -3343,12 +3426,13 @@
   function saveGoalEditor() {
     const text = $("goal-editor-text").value.trim();
     if (!text) return;
-    const budget = Number($("goal-editor-budget").value || 0);
-    if (!Number.isSafeInteger(budget) || budget < 0 || budget > 1e12) {
-      $("goal-editor-budget").reportValidity(); return;
-    }
+    // The budget field is gone from this dialog -- it is not something you set while rewording an
+    // objective, and `/goal budget` still sets it. Send back whatever is already on the goal, so
+    // editing the words never silently clears a budget somebody set elsewhere.
+    const budget = Number(goalState.token_budget || 0);
     $("goal-editor-save").disabled = true;
-    vscode.postMessage({ type: "updateGoal", text, tokenBudget: budget });
+    vscode.postMessage({ type: "updateGoal", text,
+                         tokenBudget: Number.isSafeInteger(budget) && budget > 0 ? budget : 0 });
   }
   function renderGoalReview() {
     const body = $("goal-review-body");
@@ -4496,7 +4580,10 @@
   $("tasks-clear").onclick = requestTodoClear;
   $("tasks-main").onclick = toggleTasks;
   $("tasks-toggle").onclick = toggleTasks;
-  $("goal-main").onclick = openGoalEditor;
+  // Clicking the bar EXPANDS it; the pencil edits. It used to open the editor, which is what the
+  // pencil beside it is for, so the one thing the bar could not do was tell you what had happened
+  // to the goal -- the reason was on a tooltip, where it cannot be read at length or copied.
+  $("goal-main").onclick = toggleGoalDetail;
   $("goal-edit").onclick = openGoalEditor;
   $("goal-review-button").onclick = openGoalReview;
   $("goal-review-close").onclick = () => closeGoalReview();
@@ -4784,7 +4871,7 @@
         // `TEXT /goal` suffix, so the only thing this costs is the keypress that makes it
         // deliberate. Keyed on the action, not on acceptsArgs, so an older backend that omits
         // accepts_args cannot put the send back.
-        replacePopToken(it.label + " ");
+        insertCommandPill(it.label, popStart, popEnd);
         hidePop(); input.focus(); return;
       }
       if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
@@ -4795,7 +4882,7 @@
         return;
       }
       if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
-        replacePopToken(it.label + " ");
+        insertCommandPill(it.label, popStart, popEnd);
         hidePop(); input.focus(); return;
       }
       replacePopToken();
@@ -4803,6 +4890,39 @@
     }
     hidePop(); input.focus();
   }
+  /** Put a picked draft command in the composer as a PILL, the way a skill or a file goes in.
+   *
+   *  `/goal` used to sit in the box as the literal characters "/goal ", which reads as something
+   *  you typed and can half-delete into "/goa". A pill is one object: it carries its own sigil, a
+   *  single Backspace removes it whole, and what the model receives is unchanged -- the pill's wire
+   *  text IS "/goal ", so submit()'s `/goal TEXT` parse never learns the difference.
+   *
+   *  One command per prompt. Picking a second replaces the first rather than stacking, which is
+   *  what the prefix-rewriting in prepareWorkflowDraft did for /plan, /review and /init. */
+  function insertCommandPill(label, tokenStart, tokenEnd) {
+    const existing = [...input.querySelectorAll('[data-kind="command"]')];
+    if (existing.length) {
+      // Remove the old one first, and do it before measuring, so the offsets below are the ones
+      // that will actually apply.
+      for (const pill of existing) {
+        // `offsetOf` is the same walk the wire text and the caret use, so this is the pill's
+        // position in the string submit() will parse, not a guess at the DOM.
+        const before = composerText();
+        const at = offsetOf(pill.parentNode, [...pill.parentNode.childNodes].indexOf(pill));
+        const wire = String(pill.dataset.pill || "");
+        editComposer(at, at + wire.length, "");
+        const shrank = before.length - composerText().length;
+        if (tokenStart >= at) { tokenStart = Math.max(at, tokenStart - shrank); }
+        if (tokenEnd >= at) { tokenEnd = Math.max(tokenStart, tokenEnd - shrank); }
+      }
+    }
+    // The "/" is the pill's sigil, drawn by CSS like "$" on a skill and "@" on a file, so the
+    // label must not carry one too or the pill reads "//goal".
+    insertComposerPill(tokenStart, tokenEnd, "command", label.replace(/^\//, ""), label + " ");
+    autosizeComposer();
+    persistDraft();
+  }
+
   // `tokenStart`/`tokenEnd`: the slash-menu token this replaces, removed in the same edit.
   function prepareWorkflowDraft(name, tokenStart = 0, tokenEnd = tokenStart) {
     if (!["plan", "review", "init"].includes(name)) return;
@@ -5079,7 +5199,7 @@
     // A wall of pasted text buries the composer and hides the controls under it. Past this many
     // characters it becomes an attachment instead, recoverable with one click. The threshold
     // matches Codex's.
-    const pasted = e.clipboardData ? String(e.clipboardData.getData("text/plain") || "") : "";
+    const pasted = clipboardText(e.clipboardData);
     // No hook here. Every branch that puts text INTO the composer fires an input event, and
     // onInput already re-counts -- proved by removing this line and watching the tests stay green.
     // The one branch it would have covered, a paste large enough to fold into an attachment,

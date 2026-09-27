@@ -1045,14 +1045,56 @@ test("goal review exposes saved evidence, bounded editing, and keyboard focus", 
   doc.getElementById("goal-review").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(doc.activeElement.id, "goal-review-button");
   doc.getElementById("goal-edit").click();
-  assert.equal(doc.getElementById("goal-editor-budget").value, "2000");
+  // The budget field is gone from this dialog: it is not something you set while rewording an
+  // objective, and the pencil is now the only way in (clicking the bar expands it instead).
+  assert.equal(doc.getElementById("goal-editor-budget"), null);
   assert.equal(doc.getElementById("goal-editor-text").maxLength, 4000);
-  doc.getElementById("goal-editor-budget").value = "3000";
   doc.getElementById("goal-editor-save").focus();
   doc.getElementById("goal-editor-save").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
   assert.equal(doc.activeElement.id, "goal-editor-close");
   doc.getElementById("goal-editor-save").click();
-  assert.equal(posted.at(-1).tokenBudget, 3000);
+  assert.equal(posted.at(-1).tokenBudget, 2000,
+    "and the budget already on the goal is sent back unchanged, so editing the words never "
+    + "silently clears a budget set with /goal budget");
+  assert.deepEqual(errors, []);
+});
+
+test("clicking the goal bar expands it; the pencil edits", () => {
+  // The bar used to open the editor, which is what the pencil beside it is for -- so the one thing
+  // it could not do was say what had happened to the goal. The reason lived on a tooltip, where it
+  // can be neither read at length nor copied.
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "goal_changed", goal: "Ship 0.46.0", status: "blocked",
+    elapsed_seconds: 90, details: { reason: "site/version.json still reports 0.44.1" } } });
+  const panel = doc.getElementById("goal-detail");
+  assert.equal(panel.hidden, true, "collapsed to start");
+  assert.equal(doc.getElementById("goal-editor").hidden, true);
+
+  doc.getElementById("goal-main").click();
+  assert.equal(panel.hidden, false, "the bar expands");
+  assert.equal(doc.getElementById("goal-editor").hidden, true, "and does NOT open the editor");
+  assert.equal(doc.getElementById("goal-main").getAttribute("aria-expanded"), "true");
+  assert.match(panel.textContent, /Ship 0\.46\.0/, "the objective in full");
+  assert.match(panel.textContent, /Blocked: site\/version\.json still reports 0\.44\.1/,
+    "and what actually stopped it");
+
+  doc.getElementById("goal-main").click();
+  assert.equal(panel.hidden, true, "and collapses again");
+
+  doc.getElementById("goal-edit").click();
+  assert.equal(doc.getElementById("goal-editor").hidden, false, "the pencil is the way to edit");
+  assert.deepEqual(errors, []);
+});
+
+test("an expanded goal shows the evidence recorded when it was met", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "goal_changed", goal: "Ship 0.46.0", status: "active",
+    elapsed_seconds: 90, details: { evidence: ["1834/1834 checks pass", "VSIX installed"] } } });
+  doc.getElementById("goal-main").click();
+  const panel = doc.getElementById("goal-detail");
+  assert.match(panel.textContent, /1834\/1834 checks pass/);
+  assert.match(panel.textContent, /VSIX installed/);
+  assert.equal(panel.querySelectorAll(".goal-detail-evidence li").length, 2);
   assert.deepEqual(errors, []);
 });
 

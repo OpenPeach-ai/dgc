@@ -1,4 +1,18 @@
 // Existing settings fields, shared by the editor settings client.
+/** What "Parallel sub-agents" actually does, which is not the same number in both profiles.
+ *
+ *  Ultra runs the whole range when you have not chosen a width, so a box reading 4 beside an Ultra
+ *  toggle that is on was telling the user something untrue. Ultra widens only a width still equal
+ *  to the shipped default -- any number you set is honoured exactly, including 1, because the
+ *  rate-limit advice tells you to lower this. The hint says which of the two you are looking at. */
+function parallelHint(c) {
+    const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
+    if (c.ultra_mode !== true) { return "How many sub-agents may run at once. Ultra raises this to 8 unless you set a number here."; }
+    return pinned
+        ? "Ultra would run 8; this pins it narrower. Clear it back to 4 to let Ultra widen again."
+        : "Ultra is on, so this runs 8. Set any other number to pin it — 1 disables parallel sub-agents.";
+}
+
 export function renderFields(section, main, config, providers, ui) {
     const { field, sel, inp, bool, card } = ui;
     function renderGeneral(main) {
@@ -9,12 +23,12 @@ export function renderFields(section, main, config, providers, ui) {
             + card("Behavior", field("Permission mode", "What DGC may do without asking again.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"))
                 + field("Thinking", "Applies to the next model round.", sel("think", [["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], think))
                 + field("DGC Ultra", "Extra guidance and bounded sub-agents. Permissions stay as set.", bool("ultra_mode", c.ultra_mode === true))
+                + field("Parallel sub-agents", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
                 + field("Context size", "Tokens before DGC compacts. The model's own maximum still applies.", inp("context_size", c.context_size ?? "", "number"))
                 + field("Show thinking", "Inline, collapsed, or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
                 + field("Prompt suggestions", "", bool("suggest", c.suggest !== false))
                 + field("Wake on monitors", "Start a short turn when a background monitor prints.", bool("monitor_wake", c.monitor_wake !== false))
-                + field("Tool profile", "Standard offers every product tool on each turn.", sel("tool_profile", [["standard", "Standard"], ["adaptive", "Adaptive"], ["full", "Full catalog"]], c.tool_profile || "standard"))
-                + field("Parallel tasks", "How many sub-agents may run at once.", inp("max_parallel_tasks", c.max_parallel_tasks || 4, "number")))
+                + field("Tool profile", "Standard offers every product tool on each turn.", sel("tool_profile", [["standard", "Standard"], ["adaptive", "Adaptive"], ["full", "Full catalog"]], c.tool_profile || "standard")))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
     }
     function renderModels(main) {

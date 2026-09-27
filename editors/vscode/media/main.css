@@ -1229,7 +1229,12 @@ button.act.danger { color: var(--err-text); }
 .icon-action:hover { color: var(--err-text); }
 
 /* @file / slash popover */
-.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); max-height: 210px; overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); }
+/* ONE height, whatever the query matches. It used to size to its rows, so narrowing "/g" to
+   "/goal" collapsed a four-row list to a single line: the panel jumped under the cursor as you
+   typed, and the one row that was left read as a stray banner rather than a list you were choosing
+   from. Codex caps its popup at 8 rows (MAX_POPUP_ROWS) and lets it shrink; in a terminal that is
+   calm, in a panel it is not. Fixed, top-aligned, and it scrolls past four. */
+.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); height: 210px; max-height: 210px; overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
 .pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); color: var(--text); }
 .pop .pi-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop .pi-kind { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
@@ -1421,6 +1426,36 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
    @media (forced-colors: active) and @media (max-width: 360px) blocks; the shared blocks above
    stay untouched. Keep the blank lines between sections.
    ================================================================================================== */
+
+/* The By-model filter row. A free-text box rather than fixed provider buttons: the categories a
+   reader wants -- ollama, vLLM, llama.cpp, a particular host -- are just values in the provider
+   and host columns, and a hard-coded list of them goes stale the first time someone runs something
+   new. One box matches all three columns. */
+.usage-filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.usage-find { flex: 1 1 220px; min-width: 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); background: var(--surface); color: var(--text); font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.usage-hide { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); white-space: nowrap; cursor: pointer; }
+.usage-hidden-note { margin: 0 0 var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+
+/* The goal bar, expanded. Three lines and its own scroller: a blocked reason can be a paragraph,
+   and the bar itself must not grow to hold it -- the composer sits directly below. Clicking the
+   bar opens this; the pencil beside it still edits the objective. */
+/* `.rail-item` is a flex row, so the panel earns its own line by wrapping to full width rather
+   than by a grid column that does not exist here. Only the goal bar wraps: the paste bar beside it
+   must stay on one line. */
+#goalbar { flex-wrap: wrap; }
+.goal-detail { flex: 1 0 100%; max-height: calc(3 * 1.5em + var(--sp-2)); overflow-y: auto;
+  margin-top: var(--sp-1); padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--border);
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); overscroll-behavior: contain; }
+.goal-detail p { margin: 0 0 var(--sp-1); }
+.goal-detail p:last-child, .goal-detail ul:last-child { margin-bottom: 0; }
+.goal-detail-objective { color: var(--text); }
+.goal-detail-why { color: var(--text); }
+.goal-detail-quiet { color: var(--muted); }
+.goal-detail-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: var(--t-2xs, 10px); }
+.goal-detail-evidence { margin: 0; padding-left: 1.1em; }
+.goal-detail-evidence li { margin-bottom: 2px; }
 
 /* ---- 0.40 agents ------------------------------------------------------------------------------ */
 /* The "● 2 agents" pill and its list. Green, blue and a grey ring distinguish working,

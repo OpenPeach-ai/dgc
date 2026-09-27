@@ -110,9 +110,13 @@ export function createUsage(root, vscode) {
         node.classList.toggle("more-right", more > 1 && node.scrollLeft < more - 1);
         node.classList.toggle("more-left", more > 1 && node.scrollLeft > 1);
     }
+    let lastUsage = null;
     function renderUsage(ev) {
         if (!ev || ev.request_id !== usageRequestId)
             return; // a late answer to an older request
+        // Filtering and hiding are presentation, not a new count: keep the report so typing in the
+        // box redraws from what is already here instead of going back to the ledger per keystroke.
+        lastUsage = ev;
         clearTimeout(usageTimer);
         const totals = ev.totals && typeof ev.totals === "object" ? ev.totals : {};
         const models = (Array.isArray(ev.by_model) ? ev.by_model : [])
@@ -173,9 +177,32 @@ export function createUsage(root, vscode) {
         const body = $("usage-models");
         body.replaceChildren();
         const tokensOf = (row) => usageCount(row.input_tokens) + usageCount(row.output_tokens);
+        // Shares stay against EVERY row, hidden or not: a filtered table that also re-based its
+        // percentages would say a model was 100% of your usage because you had typed its name.
         const tokenSum = models.reduce((sum, row) => sum + tokensOf(row), 0);
         const requestSum = models.reduce((sum, row) => sum + usageCount(row.requests), 0);
-        for (const row of models) {
+        // A row here always ran at least one request -- the report is GROUP BY over the request
+        // ledger, so a model you never used cannot appear. "No counted tokens" therefore means
+        // UNMETERED: requests whose provider reported no usage, which local llama.cpp and vLLM
+        // builds often do not. That is real work, so it is hidden rather than dropped, and the
+        // line below says how much is behind the checkbox.
+        const find = String($("usage-find")?.value || "").trim().toLowerCase();
+        const hideZero = $("usage-hide-zero") ? $("usage-hide-zero").checked : false;
+        const matches = (row) => !find || [row.model, row.provider, row.host]
+            .some((field) => String(field || "").toLowerCase().includes(find));
+        const shown = models.filter((row) => matches(row) && !(hideZero && tokensOf(row) === 0));
+        const hiddenZero = models.filter((row) => matches(row) && tokensOf(row) === 0).length;
+        const note = $("usage-hidden-note");
+        if (note) {
+            const requests = models.filter((row) => matches(row) && tokensOf(row) === 0)
+                .reduce((sum, row) => sum + usageCount(row.requests), 0);
+            note.hidden = !(hideZero && hiddenZero > 0);
+            note.textContent = note.hidden ? ""
+                : `${hiddenZero} model${hiddenZero === 1 ? "" : "s"} ran `
+                  + `${requests.toLocaleString()} request${requests === 1 ? "" : "s"} that reported no `
+                  + "tokens, and are hidden. Uncheck to see them.";
+        }
+        for (const row of shown) {
             const tr = document.createElement("tr");
             const model = String(row.model || "unknown").slice(0, 256);
             const provider = String(row.provider || "").slice(0, 64);
@@ -288,6 +315,9 @@ export function createUsage(root, vscode) {
     });
     $("usage-range").onchange = requestUsage;
     $("usage-refresh").onclick = requestUsage;
+    const redrawUsage = () => { if (lastUsage) renderUsage(lastUsage); };
+    if ($("usage-find")) $("usage-find").oninput = redrawUsage;
+    if ($("usage-hide-zero")) $("usage-hide-zero").onchange = redrawUsage;
     $("usage-show-all").onclick = () => { $("usage-range").value = "all"; requestUsage(); };
     root.querySelector(".usage-table-wrap").addEventListener("scroll", (e) => usageEdges(e.currentTarget), { passive: true });
     const settingsNav = root.querySelector(".settings-nav");
