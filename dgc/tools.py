@@ -34,6 +34,7 @@ from .codeintel import run_code_intel, symbol_records
 from . import documents, image_views
 from .attachments import DOCUMENT_SUFFIXES
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
+from .ui import display_path
 from .workspace import (
     WorkspaceBoundaryError,
     atomic_write_bytes as _atomic_write_bytes,
@@ -1330,10 +1331,24 @@ def multi_edit(args: dict, ctx) -> str:
 
 
 def _diff(old: str, new: str, path: str, ctx=None) -> str:
+    """A unified diff of an applied edit, headed by the path as a reader spells it.
+
+    The header is not decoration: it is the only place the file's identity travels. `split_diff`
+    hands this text to the editor as a `tool_result`'s `diff`, the panel parses the `+++` line for
+    the name it puts on the diff card AND on the end-of-turn "Edited N files" row, and clicking
+    that row looks the name up in the chat's change set -- whose names are relative to the project
+    root. Every call site passed `str(p)`, an ABSOLUTE path, so the header read `+++ b//home/you/
+    project/src/a.py`; the panel strips `b/` and the leading slash and was left with
+    `home/you/project/src/a.py`, which matches nothing. Every such row answered a click with
+    "That file is no longer in the workspace change set." for a file the chat had just written.
+    So the header carries `display_path`'s spelling -- the same rule the approval card's
+    `edit_preview` already used, and the same one the terminal prints.
+    """
     if old == new:
         return "(no changes)"
+    label = display_path(path, getattr(ctx, "project_root", None)) or path
     lines = list(difflib.unified_diff(old.splitlines(), new.splitlines(),
-                                      f"a/{path}", f"b/{path}", lineterm="", n=2))
+                                      f"a/{label}", f"b/{label}", lineterm="", n=2))
     if ctx is not None:
         # Redact the complete diff before the line ceiling. Otherwise a long secret spanning the
         # 80-line boundary can be reduced to fragments that the central result boundary cannot see.
