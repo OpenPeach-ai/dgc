@@ -5825,6 +5825,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
         <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
+      <button type="button" id="btn-goal" class="fbtn goal-control" data-state="none" title="Standing goal" aria-label="Standing goal: none set"><span class="codicon codicon-target" aria-hidden="true"></span> <span id="goal-control-label">Goal</span></button>
       </div>
       <div class="cf-right">
       <div class="picker agents-picker" id="agents-picker" hidden>

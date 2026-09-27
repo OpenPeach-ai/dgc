@@ -3342,7 +3342,7 @@
     // a completed objective was resumed and started over. The transcript keeps the record.
     goalBar.hidden = !text || status === "completed";
     syncComposerRail();
-    if (!text) { closeGoalEditor(false); closeGoalReview(false); return; }
+    if (!text) { renderGoalControl(); closeGoalEditor(false); closeGoalReview(false); return; }
     const paused = status === "paused", blocked = status === "blocked", completed = status === "completed";
     // A blocked goal put "Blocked goal" beside the objective and nothing about WHY, so the one
     // thing the reader needs -- what stopped it -- was behind the Review button. It was already in
@@ -3369,6 +3369,7 @@
     paintGoalClock();
     fitGoalText();
     renderGoalDetail();
+    renderGoalControl();
     if (!$("goal-review").hidden) renderGoalReview();
   }
   /** Open or close the three-line detail panel under the goal bar.
@@ -3411,15 +3412,24 @@
     }
   }
 
-  function openGoalEditor() {
-    if (!goalState.text) return;
+  // The draft the goal editor was seeded FROM, if any. Saving moves those words into the goal and
+  // clears them from the composer -- they became the objective, and sending them as a prompt too
+  // would be saying the same thing twice. Cancelling leaves the draft exactly as it was, which is
+  // why this is settled on save rather than when the editor opens.
+  let goalSeededFrom = "";
+  function openGoalEditor(allowEmpty = false, seed = "") {
+    if (!goalState.text && !allowEmpty) return;
     const editor = $("goal-editor-text");
-    editor.value = goalState.text;
+    // `seed` is what the composer already held. Picking `/goal` after typing "finish the build"
+    // must not throw those words away: they ARE the objective the user was writing.
+    goalSeededFrom = String(seed || "");
+    editor.value = seed || goalState.text || "";
     $("goal-editor-save").disabled = false;
     $("goal-editor").hidden = false;
     editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
   }
   function closeGoalEditor(restoreFocus = true) {
+    goalSeededFrom = "";        // cancelled: the draft stays exactly as it was
     $("goal-editor").hidden = true;
     if (restoreFocus && !goalBar.hidden) focusQuietly($("goal-main"));
   }
@@ -3431,6 +3441,12 @@
     // editing the words never silently clears a budget somebody set elsewhere.
     const budget = Number(goalState.token_budget || 0);
     $("goal-editor-save").disabled = true;
+    if (goalSeededFrom && composerText().trim() === goalSeededFrom.trim()) {
+      // Those words are the goal now. Leaving them in the box would send them as a prompt as well.
+      setComposerValue("");
+      markComposerEmpty(); autosizeComposer(); persistDraft();
+    }
+    goalSeededFrom = "";
     vscode.postMessage({ type: "updateGoal", text,
                          tokenBudget: Number.isSafeInteger(budget) && budget > 0 ? budget : 0 });
   }
@@ -4583,6 +4599,41 @@
   // Clicking the bar EXPANDS it; the pencil edits. It used to open the editor, which is what the
   // pencil beside it is for, so the one thing the bar could not do was tell you what had happened
   // to the goal -- the reason was on a tooltip, where it cannot be read at length or copied.
+  /** The footer's Goal control: what `/goal` opens, and the place a goal is visible at rest.
+   *
+   *  Codex keeps a goal as THREAD state (`thread/goal/set` -> a ThreadGoal carrying its objective,
+   *  status, budget and tokens) and puts a control for it in the composer footer beside the
+   *  permission mode. This is that control. With no goal it starts one; with a goal it opens the
+   *  detail the bar expands to, so there is one place to read what has happened to it. */
+  function openGoalControl(seed = "") {
+    // Words typed around the token are a PROPOSED objective, so they win even when a goal already
+    // exists -- picking `/goal` after writing something is how you reword one. Saving is still an
+    // explicit click, so nothing is replaced silently. With nothing typed there is nothing to
+    // propose, so an existing goal simply opens for reading.
+    if (!seed && goalState.text) { goalBarAttention(); return; }
+    openGoalEditor(true, seed);
+  }
+
+  /** Bring the goal bar into view and open its detail, without stealing the composer's caret. */
+  function goalBarAttention() {
+    if (goalBar.hidden) return;
+    toggleGoalDetail(true);
+    focusQuietly($("goal-main"));
+  }
+
+  function renderGoalControl() {
+    const button = $("btn-goal"), label = $("goal-control-label");
+    if (!button) return;
+    const text = String(goalState.text || "");
+    const status = text ? String(goalState.status || "active") : "none";
+    button.dataset.state = status;
+    label.textContent = text ? "Goal" : "Goal";
+    button.title = text ? `${status === "active" ? "Pursuing" : status} goal: ${text}` : "Set a standing goal";
+    button.setAttribute("aria-label", text ? `Standing goal, ${status}: ${text.slice(0, 180)}`
+                                           : "Standing goal: none set");
+  }
+
+  $("btn-goal").onclick = openGoalControl;
   $("goal-main").onclick = toggleGoalDetail;
   $("goal-edit").onclick = openGoalEditor;
   $("goal-review-button").onclick = openGoalReview;
@@ -4815,7 +4866,13 @@
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${esc(it.label)}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    // Codex's rows: an icon for WHAT this is, then the bare name. The sigil is redundant once an
+    // icon says the same thing, and "/goal" beside "$code-review" made the list read as two
+    // alphabets. `label` keeps its sigil -- the matcher and the inserter both read it -- so this
+    // is a rendering change only.
+    const rowIcon = (it) => (it.skill ? "codicon-package"
+      : it.template ? "codicon-symbol-snippet" : "codicon-terminal");
+    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
@@ -4859,20 +4916,19 @@
         hidePop(); input.focus(); return;
       }
       if (it.action === "goal") {
-        // `/goal` is a DRAFT command, not a management action: picking it fills the box and waits
-        // for Enter -- like Codex, and like the siblings /plan, /review and /init just above.
-        // It used to START the goal on selection. 1f19d92a added that when a mid-prompt menu could
-        // offer nothing BUT /goal, behind `if (sl > 0) all = all.filter(c => c.label === "/goal")`
-        // and the comment "inserting one cannot silently replace or discard an in-progress
-        // prompt"; 138c4ed1 deleted the filter and the comment and left the send. So one click on
-        // a menu row committed a standing objective with no Enter and no take-back -- and for a
-        // token picked mid-prose it started a goal from words that Enter routes as an ordinary
-        // prompt, which the suite asserts by name. submit() still reads `/goal TEXT` and the
-        // `TEXT /goal` suffix, so the only thing this costs is the keypress that makes it
-        // deliberate. Keyed on the action, not on acceptsArgs, so an older backend that omits
-        // accepts_args cannot put the send back.
-        insertCommandPill(it.label, popStart, popEnd);
-        hidePop(); input.focus(); return;
+        // A goal is THREAD STATE, not something you type. Codex models it the same way --
+        // `thread/goal/set {threadId, objective}` returning a ThreadGoal with its own status,
+        // budget and token count -- and its composer shows it as a CONTROL in the footer beside
+        // the permission mode, not as characters in the box. So picking `/goal` opens that
+        // control; it does not leave a token behind for the user to edit into "/goa".
+        // Read the draft AFTER the token is removed rather than slicing around popStart/popEnd:
+        // the same answer, from the one source of truth, with no chance of using offsets that
+        // belong to an earlier open of the menu. Whatever is left is the objective the user was
+        // writing, and it must not be discarded with the token.
+        replacePopToken();
+        hidePop();
+        openGoalControl(composerText().trim());
+        return;
       }
       if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
         // Management actions operate independently of the draft. Opening a model, skills,

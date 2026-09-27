@@ -65,6 +65,17 @@ const pills = () => page.evaluate(() =>
 // mid-message is not something a real backend does.
 async function freshComposer(skills) {
   await page.evaluate((s) => {
+    // Every test in this file shares ONE page, so anything a test leaves on screen is the next
+    // test's problem. A modal is the worst of them: `#goal-editor` and `#goal-review` cover the
+    // composer, so `page.click("#input")` waits for an element that will never be clickable and
+    // every later test dies on a 30s timeout naming nothing. One test opening the goal editor
+    // cost seventeen others exactly that. Close them here rather than trusting each test to.
+    for (const id of ["goal-editor", "goal-review", "att-viewer", "image-viewer"]) {
+      const modal = document.getElementById(id);
+      if (modal) { modal.hidden = true; }
+    }
+    const pop = document.getElementById("pop");
+    if (pop) { pop.style.display = "none"; }
     document.getElementById("input").replaceChildren();
     window.postMessage({ type: "event", event: { type: "ready", skills: s, custom_commands: [] } }, "*");
   }, skills);
@@ -193,9 +204,11 @@ test("picking one skill twice keeps it attached until the last pill goes", async
 
 test("each pill wears the sigil that picks it, and the one on its own chip", async (t) => {
   if (skipReason()) return t.skip(skipReason());
-  // attachInvocation labels the chip "$name" for a skill and "/name" for a template, and the
-  // picker opens on $ for skills. A skill had no CSS rule at all, so it fell through to the
-  // default and rendered the template's sigil above a chip carrying its own.
+  // Each KIND gets its own mark, and it is the same mark the `/` menu row shows for that kind, so
+  // picking a row and seeing the pill are the same object twice. A skill and a template take their
+  // codicon (Codex's treatment); a file keeps "@", which is both the key you press and what every
+  // editor uses for a mention. A skill once had no rule at all and fell through to the default,
+  // rendering the TEMPLATE's sigil above a chip carrying its own.
   await freshComposer(["fixture"]);
   const sigil = (kind) => page.evaluate((k) => {
     const host = document.getElementById("input");
@@ -206,8 +219,8 @@ test("each pill wears the sigil that picks it, and the one on its own chip", asy
     host.appendChild(pill);
     return getComputedStyle(pill, "::before").content.replace(/"/g, "");
   }, kind);
-  assert.equal(await sigil("skill"), "$");
-  assert.equal(await sigil("template"), "/");
+  assert.equal(await sigil("skill"), "\ueb29", "codicon-package, as the menu row shows");
+  assert.equal(await sigil("template"), "\ueb66", "codicon-symbol-snippet, as the menu row shows");
   assert.equal(await sigil("file"), "@");
   assert.equal(await sigil("link"), "\ueb01",
     "a link pill wears the bundled globe codicon -- a fetched favicon would disclose the host of a "
@@ -228,22 +241,51 @@ test("a pill-only draft does not render the placeholder over itself", async (t) 
     "is-empty laid the placeholder out as the first inline box, ahead of the pill");
 });
 
-test("picking /goal fills the box and waits for Enter, the way Codex does", async (t) => {
+test("picking /goal opens the goal control, carrying what was already typed", async (t) => {
   if (skipReason()) return t.skip(skipReason());
+  // A goal is THREAD state, not composer text -- Codex models it the same way (`thread/goal/set`
+  // returning a ThreadGoal with its own status, budget and tokens) and offers it as a control in
+  // the composer footer, not as characters in the box. So the pick opens that control. What it
+  // must NOT do is throw away the words typed around the token: they are the objective.
   await freshComposer([]);
   const goalsBefore = await page.evaluate(() =>
     window.__posted.filter((m) => m.type === "startGoal").length);
   await page.keyboard.type("finish the build /goa");
   await page.keyboard.press("Tab");
-  assert.equal(await value(), "finish the build /goal ",
-    "the pick fills the draft; it used to strip the token and start the goal on the click");
+  assert.equal(await page.evaluate(() => document.getElementById("goal-editor").hidden), false,
+    "the control opens");
+  assert.equal(await page.evaluate(() => document.getElementById("goal-editor-text").value),
+    "finish the build", "seeded with what was already in the box, not with nothing");
+  assert.equal((await value()).trim(), "finish the build",
+    "the token goes, the words stay -- cancelling must not cost the user their draft");
   assert.equal(await page.evaluate(() =>
     window.__posted.filter((m) => m.type === "startGoal").length), goalsBefore,
     "one click on a menu row must never commit a standing objective");
-  await page.keyboard.press("Enter");
+
+  // Cancel: the draft is untouched.
+  await page.evaluate(() => document.getElementById("goal-editor-cancel").click());
+  assert.equal((await value()).trim(), "finish the build");
+
+  // Save: those words ARE the goal now, so they leave the box rather than being sent twice.
+  await page.evaluate(async () => {
+    const input = document.getElementById("input");
+    input.focus();
+    // focus() alone leaves the caret at the START, so the token would be typed in front of the
+    // draft and the words picked up as the objective would be the wrong ones.
+    const range = document.createRange();
+    range.selectNodeContents(input); range.collapse(false);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    document.execCommand("insertText", false, " /goal");
+    await new Promise((r) => setTimeout(r, 200));
+    document.querySelector("#pop .pi").click();
+    await new Promise((r) => setTimeout(r, 200));
+    document.getElementById("goal-editor-save").click();
+    await new Promise((r) => setTimeout(r, 200));
+  });
+  assert.equal(await value(), "");
   assert.equal(await page.evaluate(() =>
-    window.__posted.filter((m) => m.type === "startGoal").at(-1).text), "finish the build",
-    "and the inserted token still routes: submit() reads the `TEXT /goal` suffix");
+    window.__posted.filter((m) => m.type === "updateGoal").at(-1).text), "finish the build");
+  await page.evaluate(() => { document.getElementById("goal-editor").hidden = true; });
 });
 
 test("a line break serializes as one newline, and an empty box as nothing", async (t) => {
@@ -632,25 +674,31 @@ test("pasted markup never reaches the composer", async (t) => {
   assert.equal(await value(), "one\ntwo");
 });
 
-test("a picked slash command is a pill, and still parses as the command", async (t) => {
+test("a picked command that takes arguments is a pill, and still parses as the command", async (t) => {
   if (skipReason()) return t.skip(skipReason());
-  // `/goal` sat in the box as the characters "/goal ", which reads as something you typed and
-  // half-deletes into "/goa". A pill is one object -- but its WIRE text is unchanged, so submit()'s
-  // `/goal TEXT` parse never learns the difference. That is the whole trick.
+  // A command that takes arguments used to sit in the box as the characters "/review ", which
+  // reads as something you typed and half-deletes into "/revie". A pill is one object -- and its
+  // WIRE text is unchanged, so the backend's parse never learns the difference. (`/goal` is not
+  // one of these: a goal is thread state, and picking it opens the footer control instead.)
   await freshComposer([]);
   await page.evaluate(async () => {
     const input = document.getElementById("input");
     input.focus();
-    document.execCommand("insertText", false, "/goal");
-    await new Promise((r) => setTimeout(r, 150));
+    // A real backend sends the command table on `ready`; the webview's built-in fallback list
+    // carries no accepts_args, so without this there is no arg-accepting command to pick.
+    window.postMessage({ type: "event", event: { type: "ready", skills: [], custom_commands: [],
+      commands: [{ name: "name", description: "rename this chat", action: "name", accepts_args: true }] } }, "*");
+    await new Promise((r) => setTimeout(r, 120));
+    document.execCommand("insertText", false, "/name");
+    await new Promise((r) => setTimeout(r, 200));
     document.querySelector("#pop .pi")?.click();
-    await new Promise((r) => setTimeout(r, 150));
-    document.execCommand("insertText", false, "ship the sub-agent stages");
+    await new Promise((r) => setTimeout(r, 200));
+    document.execCommand("insertText", false, "the release chat");
     await new Promise((r) => setTimeout(r, 100));
   });
-  assert.deepEqual(await pills(), ["goal"], "one pill, and its label carries no second slash");
-  assert.equal(await value(), "/goal ship the sub-agent stages");
-  assert.ok(/^\/goal\s+([\s\S]+)$/i.test(await value()), "submit() still reads it as a goal");
+  assert.deepEqual(await pills(), ["name"], "one pill, and its label carries no second slash");
+  assert.equal(await value(), "/name the release chat",
+    "the wire text is exactly what plain characters would have been");
 });
 
 test("the slash menu keeps one height however few rows match", async (t) => {
@@ -658,6 +706,18 @@ test("the slash menu keeps one height however few rows match", async (t) => {
   // Narrowing "/g" to "/goal" collapsed a four-row list to a single line: the panel jumped under
   // the cursor as you typed, and the row that was left read as a stray banner.
   await freshComposer([]);
+  // Its own command table: a sibling test replaces the shared one, and this test is about how many
+  // rows MATCH, so it cannot borrow whatever the page happens to be holding.
+  await page.evaluate(async () => {
+    window.postMessage({ type: "event", event: { type: "ready", skills: [], custom_commands: [], commands: [
+      { name: "goal", description: "standing objective", action: "goal" },
+      { name: "git", description: "workspace changes", action: "git" },
+      { name: "go", description: "resume", action: "go" },
+      { name: "grep", description: "search", action: "grep" },
+      { name: "model", description: "pick the model", action: "model" },
+    ] } }, "*");
+    await new Promise((r) => setTimeout(r, 120));
+  });
   const heightFor = (q) => page.evaluate(async (text) => {
     const input = document.getElementById("input");
     input.replaceChildren(); input.focus();

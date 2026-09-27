@@ -733,8 +733,9 @@ test("inline slash picker exposes management and skills without consuming the dr
   assert.equal(posted.some((m) => m.type === "prompt"), false);
   input.value = "Keep this /"; input.selectionStart = input.selectionEnd = input.value.length;
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  for (const expected of ["/skills", "/mcp", "/model", "$fixture", "/check-api"])
-    assert.ok(doc.getElementById("pop").textContent.includes(expected));
+  // The rows show the bare name beside a per-kind icon; the sigil would repeat what the icon says.
+  for (const expected of ["skills", "mcp", "model", "fixture", "check-api"])
+    assert.ok(doc.getElementById("pop").textContent.includes(expected), expected);
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   send({ type: "event", event: { type: "skill_catalog", items: [{ name: "fixture", description: "Fresh metadata" }] } });
   assert.equal(doc.getElementById("pop").style.display, "none", "a late catalog cannot reopen a dismissed picker");
@@ -2574,20 +2575,29 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   input.value = "ship the release safely /g";
   input.selectionStart = input.selectionEnd = input.value.length;
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  assert.match(doc.getElementById("pop").textContent, /\/goal/,
+  assert.match(doc.getElementById("pop").textContent, /goal/,
     "the goal action must remain discoverable after an in-progress prompt");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(input.value, "ship the release safely /goal ",
-    "choosing /goal fills the draft -- a menu must never send an unfinished request");
+  // A goal is THREAD state, so picking it opens the goal control seeded with the words already
+  // typed, rather than leaving "/goal " in the box for the user to edit into "/goa". Codex models
+  // it the same way: `thread/goal/set` carrying an objective, offered from a composer control.
+  assert.equal(doc.getElementById("goal-editor").hidden, false,
+    "choosing goal opens the control -- a menu must never send an unfinished request");
+  assert.equal(doc.getElementById("goal-editor-text").value, "ship the release safely",
+    "seeded with the draft, so the words are not thrown away with the token");
   assert.equal(posted.some((m) => m.type === "startGoal" && m.text === "ship the release safely"), false,
     "selection alone must not commit a standing objective");
-  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  const suffixedGoal = posted.filter((m) => m.type === "startGoal").at(-1);
+  doc.getElementById("goal-editor-save").click();
+  const suffixedGoal = posted.filter((m) => m.type === "updateGoal").at(-1);
   assert.equal(suffixedGoal.text, "ship the release safely");
   assert.equal(posted.some((m) => m.type === "prompt" && /\/goal$/.test(m.text)), false,
     "a trailing goal tag must not leak into ordinary model prompt text");
+  // No prompt bubble for this one, and that is the point: setting a goal from the control is not a
+  // turn. The typed `/goal TEXT` route above still draws one, because there the user pressed Enter
+  // on a message. The goal bar is where a goal set from the control becomes visible.
   assert.equal([...doc.querySelectorAll(".goal-prompt .bubble")].at(-1).textContent,
-    "ship the release safely");
+    "ship the release", "the control does not add a second bubble for the same objective");
+  assert.equal(input.value, "", "and the words left the box, because they became the goal");
 
   input.value = "Pause /goal";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

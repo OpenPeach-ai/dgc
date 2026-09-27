@@ -126,11 +126,14 @@ test("a workflow command picked from the slash menu is one undo step", async (t)
   // Before: the typed token was deleted by one editing command and the /plan prefix inserted by
   // a second, so the first Ctrl+Z showed a blank box and only the second reached "/pla".
   if (skipReason()) return t.skip(skipReason());
-  for (const [typed, command, inserted] of [["/pla", "/plan", "/plan "], ["write tests /revi", "/review", "/review write tests "]]) {
+  // The row shows the bare name beside an icon -- the sigil would be a second copy of what the
+  // icon already says -- so match on the name, not on "/plan".
+  for (const [typed, command, inserted] of [["/pla", "plan", "/plan "], ["write tests /revi", "review", "/review write tests "]]) {
     await clearBox();
     await page.click("#input");
     await page.keyboard.type(typed);
-    await page.waitForFunction((label) => [...document.querySelectorAll("#pop .pi-label")].some(n => n.textContent === label), command);
+    await page.waitForFunction((label) => [...document.querySelectorAll("#pop .pi-label")]
+      .some((n) => n.textContent.trim() === label), command);
     await page.waitForTimeout(200);
     await page.keyboard.press("Enter");
     assert.equal(await value(), inserted);

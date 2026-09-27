@@ -100,7 +100,9 @@ test("a pill is shorter than the line it sits on, and never wraps mid-label", ()
 });
 
 test("high contrast gets a visible pill border", () => {
-  assert.match(mainCss, /forced-colors: active\) \{ \.composer-pill \{ border-color: CanvasText/);
+  // A pill carries no border of its own any more (Codex's treatment: a mark and the name in the
+  // accent colour), so forced colours must supply the WHOLE border, not recolour one.
+  assert.match(mainCss, /forced-colors: active\) \{ \.composer-pill \{ border: 1px solid CanvasText/);
 });
 
 // ---- link pills ------------------------------------------------------------------------------
