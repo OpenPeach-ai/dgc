@@ -35,6 +35,30 @@ here, under one version number.
 - **A blocked or paused goal says what blocked it.** The goal bar showed the objective, which you
   already knew, instead of the reason.
 
+- **A goal is a control, not text you type.** Picking `/goal` opens a control in the composer
+  footer beside the permission mode, carrying whatever you had already typed -- those words are the
+  objective. Cancelling leaves your draft alone; saving moves the words into the goal. Codex models
+  a goal the same way, as thread state rather than composer text, and puts its control in the same
+  place. Typing `/goal TEXT` and pressing Enter is unchanged.
+
+- **Pills lost their box, and the slash menu lost its sigils.** A skill or template is now a mark
+  and its name in the accent colour, wearing the same icon its menu row shows; a bordered chip
+  beside another bordered chip was two rectangles competing with the words between them. The menu
+  rows show that icon and the bare name, because "/goal" beside "$code-review" read as two
+  alphabets.
+
+- **A paste keeps its shape, and a paste can no longer vanish.** Multi-line text was handed to the
+  browser's own insert and trusted; what that does with consecutive blank lines is the host's
+  business, so a numbered list came back flattened on some builds. The result is now checked and
+  repaired. Separately, a clipboard carrying only rich text pasted NOTHING at all -- only the plain
+  flavour was read, while the default action was prevented on every paste. Rich text is now taken
+  for its words, with a newline at each block boundary; no markup ever enters the composer.
+
+- **Token usage gets a filter, and hides what reported nothing.** A row there always ran at least
+  one request, so "no counted tokens" means unmetered -- a provider that reported none, which local
+  llama.cpp and vLLM builds often do. Those are hidden by default but not dropped, with a line
+  saying how many are behind the checkbox. One search box covers model, provider and host.
+
 What was already in 0.30.0:
 
 - **A finished run of tools folds to the one line that describes it.** The group stays open while

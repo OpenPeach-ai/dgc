@@ -42,6 +42,18 @@ work are all here, under one version number.
   is honoured exactly, including 1 -- the rate-limit advice tells you to lower that number, and an
   unconditional override would have made that advice a lie. The ceiling is unchanged at 8.
 
+- **The parent can talk to a running child, and stop one.** `message_task(id, text)` puts the
+  parent's words into a background child's next round; `close_task(id)` stops one and says what
+  became of its work -- retained as a `/tasks` row when the child had an isolated checkout, or
+  still in your files when it did not, which is the truth for a child that ran in the parent tree.
+  Both read the handle Stage 1 already published, so a message that arrives before the child is
+  constructed answers `delivered: false` rather than raising.
+
+  `interrupt_task` is deliberately absent. Codex's `interrupt_agent` promises the agent "remains
+  available for messages and follow-up tasks", which needs a child that survives its turn with a
+  mailbox. A DGC child is one turn; when it ends its worktree is integrated or retained and the
+  agent is dropped. Ours would be a synonym for `close_task` or a promise that fails.
+
 ### A held session, decided on whether a window exists
 
 - **A reloaded window gets its session back in about two minutes, not fifteen.** This is the bug
