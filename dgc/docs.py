@@ -1049,7 +1049,7 @@ A foreground `task` blocks until the child is done. A `background: true` one doe
 a turn when it lands. Between those two the model was blind: it had started something detached and
 had no way to ask about it.
 
-Two read-only tools close that. Neither is offered unless there is something to act on — a
+Four tools close that. None is offered unless there is something to act on — a
 background child still running, or one whose result nobody has read yet — so a pointless wait is not
 possible. Neither is offered in a session whose host application set its own tool allowlist either:
 that allowlist could not have named them, and a policy that could not have named a tool never
@@ -1066,6 +1066,20 @@ silently receives it.
   this chat. Either way it returns as soon as the first of those has a result nobody has read.
   `timeout_s` is 30 seconds by default and is clamped to 5–600 rather than refused. Four results
   come back at once; the rest are announced and wait for the next call.
+- **`message_task`** — one message into a child that is still working: a correction, a constraint
+  that was left out, a narrowing of the brief. It is folded into the task the child is already
+  doing, at its next tool boundary. It starts no new task, restarts nothing and waits for nothing,
+  and a child that has already finished cannot read it — the answer says so and points at
+  `wait_tasks`. The two control tools need a child that is still RUNNING, not merely a result
+  nobody has read.
+- **`close_task`** — stop a child whose work is no longer wanted. Its changes are **not**
+  integrated: whatever it had written to its own checkout is preserved as retained work, so
+  `/tasks` can apply or drop it, and nothing is silently thrown away. Stopping a child stops
+  anything it started. It returns as soon as the child is signalled; the child's own account
+  arrives the usual way.
+
+The same two actions are available to the USER over the wire, as `agent_control` — so a background
+child that is going wrong can be stopped on its own instead of ending the whole turn.
 
 A wait ends early if you say something while it is running, and says so, so the model reads you
 before it reads the child. A timeout reports what is still running and tells the model to get on

@@ -410,6 +410,26 @@ SUPERVISION_TOOL_SCHEMAS = [
                                       "still running. Default 30, minimum 5, maximum 600; a value "
                                       "outside that range is clamped, not refused."}},
         []),
+    _fn("message_task", "Send ONE message to a background sub-task that is still running: a "
+        "correction, a constraint you left out, or a narrowing of its brief. It is folded into the "
+        "work the child is already doing, at its next tool boundary -- it starts no new task, "
+        "restarts nothing, and does not wait for a reply. Use it when the brief turned out to be "
+        "wrong, not to converse: a child's instructions belong in the `task` prompt, and a child "
+        "that has already finished cannot read anything.",
+        {"id": {"type": "string", "description": "The background sub-task's id (from `task` or "
+                                                 "`list_tasks`)"},
+         "text": {"type": "string", "description": "What the child should know or do differently, "
+                  "self-contained: it cannot see this conversation"}},
+        ["id", "text"]),
+    _fn("close_task", "Stop a background sub-task that is still running, when its work is no "
+        "longer wanted: the request changed, you did it yourself, or it is going the wrong way. "
+        "Its changes are NOT integrated -- whatever it had already written is preserved as "
+        "retained work for the user to apply or drop -- and stopping it stops anything it started. "
+        "It returns at once; call `wait_tasks` for the child's final account. Use it rather than "
+        "leaving unwanted work running.",
+        {"id": {"type": "string", "description": "The background sub-task's id (from `task` or "
+                                                 "`list_tasks`)"}},
+        ["id"]),
 ]
 
 SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}

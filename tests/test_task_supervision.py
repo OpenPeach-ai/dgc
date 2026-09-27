@@ -33,8 +33,12 @@ SUPERVISION = {fn["function"]["name"] for fn in tools.SUPERVISION_TOOL_SCHEMAS}
 
 
 class WhereTheSchemasLiveTest(unittest.TestCase):
-    def test_the_pair_exists_and_is_the_pair_the_docs_name(self):
-        self.assertEqual(SUPERVISION, {"list_tasks", "wait_tasks"})
+    def test_the_set_is_the_set_the_docs_name(self):
+        # Two read-only (list_tasks, wait_tasks) and two control (message_task, close_task). Every
+        # one of them is kept out of `ready.tools` for the same reason, which the next test proves
+        # against the real SDK refusal rather than restating here.
+        self.assertEqual(SUPERVISION,
+                         {"list_tasks", "wait_tasks", "message_task", "close_task"})
 
     def test_neither_name_is_published_in_ready_tools(self):
         """The invariant, against the real SDK's real refusal rather than a restatement of it."""
@@ -97,3 +101,42 @@ class WhoIsOfferedThePairTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def control_gate(self, *, depth=0, jobs=None, waiting=False) -> bool:
+        agent = SimpleNamespace(depth=depth, _detached_jobs=jobs or {},
+                                _detached_result_waiting=lambda: waiting)
+        # Bind the REAL supervision gate, so the conjunction is tested rather than restated.
+        agent._supervision_exposed = Agent._supervision_exposed.__get__(agent)
+        return Agent._control_exposed.__get__(agent)()
+
+    def test_control_needs_a_child_that_is_still_running(self):
+        # An unread result is enough to REPORT on, and not enough to steer or stop: a child that
+        # has ended can do neither, and offering the tools then is the "nothing to act on" case.
+        self.assertTrue(self.gate(waiting=True))
+        self.assertFalse(self.control_gate(waiting=True))
+        self.assertTrue(self.control_gate(jobs={"sub-1": object()}))
+        self.assertFalse(self.control_gate(depth=1, jobs={"sub-1": object()}))
+        self.assertFalse(self.control_gate())
+
+    def test_the_control_tools_sit_in_the_tables_that_need_no_approval_and_in_no_mirrored_one(self):
+        from dgc import agent as agent_mod, permissions
+        from dgc.permissions import ALLOW, PermissionEngine
+        empty = {"allow": [], "ask": [], "deny": []}
+        for mode in ("default", "acceptEdits", "auto"):
+            for name in ("message_task", "close_task"):
+                with self.subTest(mode=mode, tool=name):
+                    self.assertEqual(
+                        PermissionEngine(mode, empty).decide(name, {"id": "sub-1"})[0], ALLOW,
+                        "a card asking the user to approve words sent to a child buys nothing: "
+                        "every action the child then takes is decided by this same engine")
+        # A stop is allowed in plan mode and is offered there, exactly like monitor_stop.
+        self.assertEqual(
+            PermissionEngine("plan", empty).decide("close_task", {"id": "sub-1"})[0], ALLOW)
+        self.assertIn("close_task", agent_mod._PLAN_TOOLS)
+        self.assertNotIn("message_task", agent_mod._PLAN_TOOLS,
+                         "steering a child to do work is not read-only in intent")
+        # DISPLAY is mirrored byte-for-byte by the SDK, and an allow_tools policy compiled by a
+        # NEWER SDK emits a deny rule for every DISPLAY name that an OLDER CLI's Rule.parse
+        # rejects -- which makes _parse_session_policy `broken` and denies every tool in the
+        # session. The consequence, accepted knowingly: no rule can name either tool.
+        self.assertEqual({"message_task", "close_task"} & set(permissions.DISPLAY), set())

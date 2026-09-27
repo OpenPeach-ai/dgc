@@ -71,11 +71,20 @@ RULE_ARG = {
 # Agent._supervision_exposed).
 READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
                    "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal",
-                   "list_tasks", "wait_tasks"}
+                   "list_tasks", "wait_tasks",
+                   # `message_task` is not a read, and neither are propose_options, ask_user,
+                   # present_document or update_goal above: this set is really "needs no
+                   # approval". A message changes nothing outside the process, and every action
+                   # the child then takes is decided by this same engine under the same rules, so
+                   # a card asking the user to approve words sent to a child would buy nothing.
+                   # `close_task` is in STOP_TOOLS below instead -- monitor_stop's exact case.
+                   # NEITHER may join DISPLAY, for the reason above: no rule can name them, and
+                   # `deny: Task` stays the off switch (with no children, neither is offered).
+                   "message_task"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.
-STOP_TOOLS = {"monitor_stop"}
+STOP_TOOLS = {"monitor_stop", "close_task"}
 # A tool whose policy is another tool's: a `monitor` runs a shell command, so every Bash rule, the
 # compound-command matching, plan-mode denial and auto-mode allowance apply to it unchanged. Rules
 # naming the tool itself (`Monitor`, `Monitor(tail *)`) apply too; see PermissionEngine.decide.

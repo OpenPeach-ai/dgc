@@ -375,3 +375,58 @@ fixture.doCleanups()
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_a_user_message_to_a_child_is_answered_mid_turn_and_does_not_stall_the_command_loop(self):
+        taken, refuse = [], {"value": False}
+        child = types.SimpleNamespace(cancelled=threading.Event(), _accepting_steer=True)
+        child.steer = lambda text, **kw: (not refuse["value"]) and (taken.append(text) or True)
+        self.agent._detached_jobs = {"sub-0123456789ab": {
+            "cancel": threading.Event(), "description": "map auth", "agent": child}}
+        entered = threading.Event()
+
+        def chat(messages, **kwargs):
+            entered.set()
+            self.assertTrue(self.release.wait(5))
+            return ChatResult(content="Completed")
+
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.backend.dispatch({"type": "prompt", "text": "Work", "request_id": "first"})
+            self.assertTrue(entered.wait(5))
+            started = time.monotonic()
+            self.backend.dispatch({"type": "agent_control", "action": "message",
+                                   "id": "sub-0123456789ab", "text": "only pkg/auth.py",
+                                   "request_id": "m1"})
+            frame = self.wait("agent_message", request_id="m1")
+            self.assertLess(
+                time.monotonic() - started, 1.0,
+                "dgc serve reads stdin and dispatches on one thread, so a handler that waits "
+                "stalls every later command, cancel included")
+            self.assertTrue(frame["delivered"])
+            self.assertNotIn("reason", frame)
+            self.assertEqual(taken, ["only pkg/auth.py"])
+            self.assertFalse([e for e in self.events if e["type"] == "command_rejected"
+                              and e.get("request_id") == "m1"])
+            # A child that will not take the message is REPORTED, not rejected: the panel has to
+            # tell "the child did not take it" from "the command was malformed".
+            refuse["value"] = True
+            self.backend.dispatch({"type": "agent_control", "action": "message",
+                                   "id": "sub-0123456789ab", "text": "and pkg/db.py",
+                                   "request_id": "m2"})
+            second = self.wait("agent_message", request_id="m2")
+            self.assertFalse(second["delivered"])
+            self.assertEqual(second["reason"], "queue_full")
+            self.assertEqual(taken, ["only pkg/auth.py"])
+            # The loop is still alive and still serving what comes after.
+            self.backend.dispatch({"type": "list_agents", "request_id": "after"})
+            self.wait("agents", request_id="after")
+
+    def test_a_reason_the_agent_adds_later_cannot_take_the_command_loop_down(self):
+        from dgc import editor_protocol as ep
+        self.agent._detached_jobs = {"sub-0123456789ab": {
+            "cancel": threading.Event(), "description": "map auth", "agent": object()}}
+        self.agent.message_detached = lambda agent_id, text: (False, "a reason added in 0.48")
+        self.backend.dispatch({"type": "agent_control", "action": "message",
+                               "id": "sub-0123456789ab", "text": "hi", "request_id": "m3"})
+        frame = self.wait("agent_message", request_id="m3")
+        self.assertFalse(frame["delivered"])
+        self.assertIn(frame["reason"], ep.AGENT_MESSAGE_REASONS)

@@ -137,7 +137,18 @@ _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: fin
                            "not depend on it, then end your result with the question and the option "
                            "you recommend.")
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "present_document", "propose_options", "update_goal",
-                                 "monitor_stop"}
+                                 # Ending work this agent itself started, `monitor_stop`'s exact
+                                 # case: a background child spawned before the user switched to
+                                 # plan mode keeps running, and stopping it must not require
+                                 # leaving plan mode. `message_task` is deliberately NOT here --
+                                 # steering a child to do work is not read-only in intent.
+                                 # ...and the two READ-ONLY supervision tools with it, because
+                                 # `close_task`'s own answers tell the model to "call list_tasks for
+                                 # the ids that exist" and "call wait_tasks for its result". Offering
+                                 # a tool whose every reply names two tools this mode filtered out is
+                                 # an instruction the model cannot follow. Both are already ALLOW in
+                                 # plan mode at the engine (READ_ONLY_TOOLS), so nothing else moves.
+                                 "monitor_stop", "close_task", "list_tasks", "wait_tasks"}
 # Monitor notices are command output delivered in the user role. They are bounded per turn and per
 # session so a chatty monitor cannot fill the window between compactions: past the session budget
 # the oldest notices are cut to a one-line stub in place.
@@ -2380,7 +2391,13 @@ class Agent(GoalLifecycle):
         # bash_output/bash_kill are gated on a live handle above.
         if not self._supervision_exposed():
             schemas = [tool for tool in schemas
-                       if tool.get("function", {}).get("name") not in ("list_tasks", "wait_tasks")]
+                       if tool.get("function", {}).get("name")
+                       not in ("list_tasks", "wait_tasks", "message_task", "close_task")]
+        elif not self._control_exposed():
+            # Reporting needs something to report; CONTROL needs a child that is still running.
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name")
+                       not in ("message_task", "close_task")]
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
@@ -2591,6 +2608,28 @@ class Agent(GoalLifecycle):
         if session_policy() is not None:
             return False
         return bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
+
+    def _control_exposed(self) -> bool:
+        """Are `message_task` / `close_task` offered on this request?
+
+        `_supervision_exposed` plus ONE narrowing: a child that is still RUNNING. That gate is also
+        true when the only thing left is a result nobody has read, and a child that has ended can
+        be neither messaged nor stopped -- so offering either then is the "a tool with nothing to
+        act on" case the gate above exists to prevent, and the model would spend a whole call
+        finding out.
+
+        Registry-free for the same reason `_supervision_exposed` is, and NOT `_live_detached_ids()`
+        for that reason either: this is reached from the TUI's status line on every repaint, and
+        `SubagentRegistry.snapshot()` takes the publish lock.
+
+        What that costs, stated rather than waved away: a child from a chat that has since been
+        replaced is still in `_detached_jobs` until its finalizer pops it, so the pair can be
+        offered for a child whose result will be dropped. Calling one then is not an error -- the
+        id resolves, the message is delivered or the stop is signalled -- it is simply work on a
+        conversation nobody is reading. The window is the length of one finalize, and the
+        alternative is taking a publish lock on the render thread.
+        """
+        return self._supervision_exposed() and bool(getattr(self, "_detached_jobs", None))
 
     def _delegation_guidance(self, mode: str) -> list[str]:
         """The lead agent's roster and delegation policy, sent only while `task` is offered."""
@@ -7317,6 +7356,10 @@ class Agent(GoalLifecycle):
                         out = self._list_tasks_result()
                     elif name == "wait_tasks":
                         out = self._wait_tasks_result(args, call_id)
+                    elif name == "message_task":
+                        out = self._message_task_result(args)
+                    elif name == "close_task":
+                        out = self._close_task_result(args)
                     elif name == "mcp_search":
                         out = self._search_mcp_tools(
                             str(args.get("query", "")), args.get("limit", 8))
@@ -8451,6 +8494,153 @@ class Agent(GoalLifecycle):
                     "the user's next message. Do not wait for it.")
         return (running + "Nothing will wake this conversation when it lands here, so do not wait "
                 "for it: carry on, and check on it later.")
+
+    # ---- supervising background children: parent -> child CONTROL -------------------------------
+    # One implementation per action, called by BOTH the model's tool and the editor's
+    # `agent_control` command, so the two surfaces cannot drift. Neither takes the workspace
+    # mutation lease, neither opens a checkpoint point, and neither waits on anything but a child's
+    # own `_steer_lock` -- which is what makes them safe to run from `dgc serve`'s command loop,
+    # where dispatch is synchronous with the stdin read and a blocked handler stalls `cancel`.
+
+    def _detached_handle(self, agent_id: str):
+        """The published handle for one live detached child, or None. Read ONCE, never twice.
+
+        `_detached_jobs` is written on the parent thread at spawn and popped on the child's own
+        thread when it finalizes, so two lookups can give two different answers; everything below
+        works off the local this returns.
+        """
+        jobs = getattr(self, "_detached_jobs", None) or {}
+        return jobs.get(str(agent_id))
+
+    def _knows_finished(self, agent_id: str) -> bool:
+        """Did THIS conversation run a background child with this id that has already ended?
+
+        `_finished_jobs` comes first because of an ordering nothing else covers: `work()`'s finally
+        writes it (agent.py:8393), THEN pops `_detached_jobs` (8394), THEN records the completion
+        ledger. A lookup landing between the pop and the ledger write sees neither the job nor the
+        ledger row -- the same blind spot `wait_tasks` has -- so without this term a message or a
+        close a millisecond after a child ends is answered "no such id", and `list_tasks` agrees.
+        """
+        key = str(agent_id)
+        if key in (getattr(self, "_finished_jobs", None) or {}):
+            return True
+        return any(row["id"] == key for row in self._detached_results())
+
+    def message_detached(self, agent_id: str, text: str) -> tuple[bool, str]:
+        """Queue one message for a running detached child. Returns (delivered, reason).
+
+        The callee is `Agent.steer` on the CHILD object, which `_execute_prepared_subagent`
+        publishes into the handle as `job["agent"]` once the child is fully wired (agent.py:8070).
+        Between the spawn on the parent thread (8362, seeding `agent: None`) and that publish on
+        the child's thread there is a real window -- an isolated child connects every MCP server
+        before the Agent is constructed -- and a message that lands in it is NOT an error and must
+        NOT raise: it answers delivered=False with `starting`, because there is no queue yet.
+
+        `steer` is the ONLY authority on whether a message was taken, and the reason is derived
+        AFTER it has answered. Inspecting the child's flags first would be a racy read that could
+        report a delivery that did not happen; inspecting afterwards can only mislabel a refusal
+        that is already certain.
+
+        `request_id` is deliberately not forwarded: `_drain_steer` calls
+        `ui.steering_applied(request_id)` and a `_SubUI` forwards that to the PARENT's UI, where
+        the id is looked up in the composer's own steering ledger. The command's request_id
+        correlates the reply event instead.
+        """
+        clean = str(text or "")
+        if not clean.strip():
+            return False, "empty"
+        handle = self._detached_handle(agent_id)
+        if handle is None:
+            return False, ("finished" if self._knows_finished(agent_id) else "unknown")
+        child = handle.get("agent")
+        if child is None:
+            return False, "starting"
+        steer = getattr(child, "steer", None)
+        if not callable(steer):
+            return False, "unavailable"
+        if steer(clean):
+            return True, ""
+        cancel = getattr(child, "cancelled", None)
+        if cancel is not None and cancel.is_set():
+            return False, "stopping"
+        if not getattr(child, "_accepting_steer", False):
+            return False, "finished"
+        return False, "queue_full"
+
+    def close_detached(self, agent_id: str) -> tuple[bool, str]:
+        """Signal ONE running detached child to stop. Returns (signalled, reason).
+
+        The effect is `stop_detached(agent_id)`'s and nothing more, on purpose. Setting the cancel
+        Event is what turns the child's exit into `_finalize_subagent`'s failure path, and that
+        path PRESERVES what it had written -- `_preserve_task_workspace` retains the delta as a
+        `/tasks` row instead of integrating it. Cancellation is transitive through the shared Event
+        (`_execute_prepared_subagent` assigns it to the child and its ctx, and a serial grandchild
+        inherits it), so there is no subtree to walk: the detach gate is `self.depth == 0`, so
+        `_detached_jobs` can only hold children the top-level agent spawned.
+
+        It does NOT try to stop a child that is already integrating, and must not: `integrate()`
+        applies a multi-file delta one atomic file at a time and its rollback cannot run if the
+        thread dies, which is what `wait_finalizers` exists to protect.
+        """
+        # Whether there is anything to preserve is the handle's to answer: `worktree` is seeded from
+        # the prepared workspace at spawn, and a child that runs in the parent checkout (no git, or
+        # isolation refused) has None there. Read it BEFORE the signal, because the finalizer pops
+        # the whole entry.
+        handle = self._detached_handle(agent_id)
+        isolated = bool(handle and handle.get("worktree"))
+        if self.stop_detached(agent_id) == 1:
+            return True, ("isolated" if isolated else "shared")
+        return False, ("finished" if self._knows_finished(agent_id) else "unknown")
+
+    def _message_task_result(self, args: dict) -> str:
+        """`message_task`: the parent's words into a running child's next round, as a tool result."""
+        agent_id = str(args.get("id", "") or "").strip()
+        if not agent_id:
+            return "error: id is required. Call list_tasks for the ids that exist."
+        delivered, reason = self.message_detached(agent_id, str(args.get("text", "") or ""))
+        if delivered:
+            return (f"Delivered to {agent_id}. It reads your message at its next tool boundary, "
+                    "inside the task it is already doing: this starts no new task, restarts "
+                    "nothing, and waits for nothing. Its result still arrives the usual way.")
+        return "error: " + {
+            "empty": "the message was empty.",
+            "unknown": (f"this conversation has no background sub-task with the id {agent_id}. "
+                        "Call list_tasks for the ids that exist."),
+            "starting": (f"{agent_id} is still starting and has no message queue yet. Try again in "
+                         "a moment -- and next time put it in the `task` prompt, which is where a "
+                         "sub-task's instructions belong."),
+            "finished": (f"{agent_id} has already finished, so nothing read the message. Call "
+                         f"wait_tasks with id {agent_id} for its result."),
+            "stopping": f"{agent_id} is stopping and no longer accepts messages.",
+            "queue_full": (f"{agent_id} is already holding as many messages as it will take, or "
+                           "this one is too long. It is working: wait for it instead of repeating."),
+        }.get(reason, f"{agent_id} could not be messaged ({reason}).")
+
+    def _close_task_result(self, args: dict) -> str:
+        """`close_task`: stop a running child; its partial work is preserved, not lost."""
+        agent_id = str(args.get("id", "") or "").strip()
+        if not agent_id:
+            return "error: id is required. Call list_tasks for the ids that exist."
+        signalled, reason = self.close_detached(agent_id)
+        if signalled:
+            # Only an ISOLATED child has a checkout of its own to retain. One that ran in the
+            # parent's tree -- not a git repository, or isolation refused at prepare -- has already
+            # written into the workspace, and telling the model its work was safely set aside would
+            # be the opposite of true: those edits are in the files right now.
+            where = ("whatever it had already written to its own checkout is preserved as retained "
+                     "work instead, for the user to apply or drop"
+                     if reason == "isolated" else
+                     "it had no isolated checkout, so anything it already wrote is IN the workspace "
+                     "now and stays there -- read the files before you act on them")
+            return (f"Signalled {agent_id} to stop. Its changes will NOT be integrated: {where}. "
+                    "Anything it started stops with it. "
+                    f"This returned at once -- call wait_tasks with id {agent_id} if you need its "
+                    "final account before you act.")
+        if reason == "finished":
+            return (f"error: {agent_id} has already finished, so there was nothing to stop. Call "
+                    f"wait_tasks with id {agent_id} for its result.")
+        return (f"error: this conversation has no background sub-task with the id {agent_id}. "
+                "Call list_tasks for the ids that exist.")
 
     def stop_detached(self, agent_id: str | None = None) -> int:
         """Cancel one detached child, or every detached child. Returns how many were signalled."""

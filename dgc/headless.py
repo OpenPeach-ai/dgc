@@ -48,6 +48,20 @@ _PLAN_MODES = ("auto", "acceptEdits", "default")
 _MAX_QUEUED_TURNS = 32
 _MAX_QUEUED_TURN_BYTES = 16 * 1024 * 1024
 _MAX_PROMPT_CHARS = 1_000_000
+# A message the user sends to one background sub-agent. Agent.steer is the authority and refuses
+# past _MAX_STEER_CHARS (agent.py:164) anyway; this is the same number, checked here so a 4 MiB
+# frame never reaches a redaction pass on the thread that reads stdin. The two must stay equal or
+# the wire accepts a message the child silently drops -- tests/test_protocol_v14.py asserts it.
+_MAX_AGENT_MESSAGE_CHARS = 64_000
+# The wire enum is closed (editor_protocol.AGENT_MESSAGE_REASONS); Agent.message_detached's reason
+# vocabulary is not. This map is total by way of .get(..., "unknown") at the call site, because
+# Emitter.emit RAISES on an undeclared enum value (dgc/protocol.py:41) from inside the command
+# loop -- so a reason added later would not spoil one event, it would throw where cancel lives.
+# "unavailable" (a handle with no steerable child) is reported as "unknown": from the user's side
+# it is indistinguishable from there being no such sub-agent.
+_AGENT_MESSAGE_WIRE_REASON = {
+    "unknown": "unknown", "unavailable": "unknown", "starting": "starting",
+    "finished": "finished", "stopping": "stopping", "queue_full": "queue_full"}
 _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 
 
@@ -1648,6 +1662,15 @@ class Backend:
                           "ask_options": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
+                          # This CLI accepts `agent_control`: the user may steer or stop ONE
+                          # background sub-agent instead of ending the whole turn. Gated because
+                          # an older CLI answers the command with command_rejected/invalid_command
+                          # (command_error runs before every arm) and a client has no other way to
+                          # find out. ready.capabilities is a free-form object, so advertising one
+                          # costs an older client nothing. NO set_workspace_roots echo-back is
+                          # needed: `agent_message` is only ever a reply to this command, so a
+                          # client that cannot send it can never receive the event.
+                          "agent_control": True,
                           "editor_liveness": True, "produced_files": True, "agent_steps": True,
                           # The chat panel can say what is on screen, so a takeover stops being
                           # decided by whether a process is alive. Gated: an older CLI would answer
@@ -4637,6 +4660,8 @@ class Backend:
             self._emit_monitors(request_id)
         elif t == "list_agents":
             self._emit_agents(request_id)
+        elif t == "agent_control":
+            self._agent_control(cmd)
         elif t == "stop_monitor":
             # Never blocks the command loop: the group is signalled here and reaped by its reader,
             # which reports monitor_ended when it is gone.
@@ -4906,6 +4931,79 @@ class Backend:
             if isinstance(it, dict) and it.get("role") == "compaction":
                 idx = i + 1
         return items[:idx] + cards + items[idx:]
+
+    def _agent_control(self, cmd: dict) -> None:
+        """Steer or stop ONE background sub-agent, for the user.
+
+        DELIBERATELY NOT IN `_BUSY_MUTATIONS`, and this is the reason, because the next reader will
+        want to put it there beside resolve_retained_task. A background child mostly exists WHILE a
+        turn runs -- that is what `background: true` is for -- so stopping one that is going the
+        wrong way is the case this command is FOR, and refusing it for the turn's duration would
+        refuse the feature in the only case it has. It is safe mid-turn because it takes no
+        workspace mutation lease and opens no checkpoint point, which are the two things that make
+        resolve_retained_task unsafe: `close` sets one threading.Event, and `message` appends under
+        the CHILD's own `_steer_lock`. Bounded, but bounded by one `_drain_steer` pass, which holds
+        that lock across a system-prompt rebuild that READS THE PROJECT'S MEMORY FILES FROM DISK
+        (`load_memories`, under `_mode_lock` via `_refresh_system`) -- local reads of small files,
+        no network and no lease, but not the "no I/O" this once claimed. That bound matters because `dispatch` is called
+        synchronously from the loop that reads stdin, so a handler that waits stalls every later
+        command, `cancel` included.
+
+        DELIBERATELY NOT IN `_WAKE_NEUTRAL_COMMANDS` either: it is the user acting on the work, not
+        reading it, so a monitor wake waits a delay after it like every other action.
+
+        `action` is an enum in COMMAND_FIELDS, so command_error rejects anything else before this
+        runs and the two branches below are exhaustive.
+        """
+        request_id = cmd.get("request_id")
+        if not isinstance(request_id, str) or not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command="agent_control", reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        agent_id = str(cmd.get("id") or "").strip()
+        if not agent_id or len(agent_id) > 128:
+            self.em.emit("command_rejected", command="agent_control", reason="unknown_agent",
+                         request_id=request_id,
+                         message="id must name one background sub-agent")
+            return
+        if str(cmd.get("action") or "") == "close":
+            signalled, why = self.agent.close_detached(agent_id)
+            if not signalled:
+                self.em.emit(
+                    "command_rejected", command="agent_control",
+                    reason="already_ended" if why == "finished" else "unknown_agent",
+                    request_id=request_id,
+                    message=(f"sub-agent {agent_id} has already finished" if why == "finished"
+                             else f"no background sub-agent {agent_id} is running"))
+                return
+            # The correlated `request_id` IS the acknowledgement, and the refreshed `agents`
+            # snapshot carries it. Be precise about what that snapshot says: NOTHING has changed at
+            # this instant -- a close sets a cancel Event, and the record still reads "running"
+            # until the child's own thread notices. The state change arrives later as `agent_ended`.
+            # A close therefore needs no event of its own: a second event for one transition gives
+            # every client two chances to disagree about when it happened.
+            self._emit_agents(request_id)
+            return
+        text = cmd.get("text")
+        if not isinstance(text, str) or not text.strip():
+            self.em.emit("command_rejected", command="agent_control", reason="invalid_message",
+                         request_id=request_id,
+                         message="text must contain the message to send")
+            return
+        if len(text) > _MAX_AGENT_MESSAGE_CHARS:
+            self.em.emit(
+                "command_rejected", command="agent_control", reason="too_large", request_id=request_id,
+                message=f"a sub-agent message exceeds the {_MAX_AGENT_MESSAGE_CHARS}-character limit")
+            return
+        delivered, why = self.agent.message_detached(agent_id, text)
+        # A child that would not take the message is REPORTED, never turned into a rejected
+        # command: the panel has to be able to tell "the child did not take it" from "the command
+        # was malformed", and the user's words must stay on the wire either way.
+        self.em.emit(
+            "agent_message", request_id=request_id, agent_id=agent_id,
+            text=redact_value(text, secret_values(getattr(self, "config", None))),
+            delivered=bool(delivered),
+            **({"reason": _AGENT_MESSAGE_WIRE_REASON.get(why, "unknown")} if why else {}))
 
     def _emit_agents(self, request_id: str | None = None) -> None:
         """The `agents` snapshot: every active record, then the most recent ended, exact counts."""

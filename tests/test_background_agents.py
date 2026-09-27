@@ -213,6 +213,156 @@ class BackgroundTaskTests(HarnessCase):
                 self.assertTrue(finalized.wait(6), "detached finalizer is still running")
 
 
+    def test_message_task_reaches_the_running_child_and_is_read_at_its_next_boundary(self):
+        h = self.make(git=True, mode="auto")
+        rounds, inside, release = [], threading.Event(), threading.Event()
+        finished = threading.Event()
+        h.agent.on_detached_ended = lambda notice: finished.set()
+
+        def steerable(messages, results, cancel):
+            rounds.append([str(m.get("content")) for m in messages if m.get("role") == "user"])
+            if not results:
+                inside.set()
+                self.assertTrue(release.wait(5))      # hold the child inside round one
+                return ChatResult(tool_calls=[ToolCall("c1", "ls", {"path": "."})])
+            return ChatResult(content="narrowed as asked")
+
+        routes = [
+            ("parent: background map", calls_then([
+                ToolCall("t1", "task", {"description": "map auth", "prompt": "look at pkg/auth.py",
+                                        "agent": "explorer", "background": True}),
+            ], final="spawned")),
+            ("look at pkg/auth.py", steerable),
+        ]
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            try:
+                self._go(h, "parent: background map", routes)
+                agent_id = h.of("agent_started")[-1]["id"]
+                self.assertTrue(inside.wait(5), "the child never entered its first round")
+                self.assertEqual(
+                    h.agent.message_detached(agent_id, "only pkg/auth.py, nothing else"),
+                    (True, ""))
+                release.set()
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline and len(rounds) < 2:
+                    time.sleep(0.05)
+                self.assertGreaterEqual(len(rounds), 2, "the child never took a second round")
+                # The property, not the return value: the words are IN the child's next request.
+                self.assertTrue(
+                    any("only pkg/auth.py, nothing else" in text for text in rounds[1]),
+                    f"the child's next request must carry the message; round two was {rounds[1]!r}")
+                # Folded into the SAME task: no second child was started.
+                self.assertEqual(len(h.of("agent_started")), 1)
+            finally:
+                # Wait for the finalizer before leaving the patch context: its sibling
+                # test_stop_detached_cancels_the_child carries the same comment, because the
+                # detached thread can still be writing .git when the fixture tears the repo down.
+                release.set()
+                h.agent.stop_detached()
+                self.assertTrue(finished.wait(8), "the detached finalizer is still running")
+
+    def test_the_child_handle_is_published_only_once_the_child_is_wired_and_is_gone_when_it_ends(self):
+        h = self.make(git=True, mode="auto")
+        finished = threading.Event()
+        h.agent.on_detached_ended = lambda notice: finished.set()
+
+        def stubborn(messages, results, cancel):
+            self.assertIsNotNone(cancel)
+            cancel.wait(4)
+            return ChatResult(content="still going")
+
+        routes = [
+            ("parent: background map", calls_then([
+                ToolCall("t1", "task", {"description": "map auth", "prompt": "look at pkg/auth.py",
+                                        "agent": "explorer", "background": True}),
+            ], final="spawned")),
+            ("look at pkg/auth.py", stubborn),
+        ]
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            try:
+                self._go(h, "parent: background map", routes)
+                agent_id = h.of("agent_started")[-1]["id"]
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    live = h.agent._detached_handle(agent_id)
+                    if live is not None and live.get("agent") is not None:
+                        break
+                    time.sleep(0.02)
+                handle = h.agent._detached_handle(agent_id)
+                self.assertIsNotNone(handle, "the spawn must publish a handle")
+                child_agent = handle.get("agent")
+                self.assertTrue(
+                    callable(getattr(child_agent, "steer", None)),
+                    "message_task's callee is Agent.steer on the CHILD object, so the child must "
+                    "be reachable from the handle -- nothing else in the process holds it")
+                self.assertIs(child_agent.cancelled, handle["cancel"],
+                              "the published child must be the fully wired one, not a bare Agent")
+            finally:
+                h.agent.stop_detached()
+                self.assertTrue(finished.wait(6), "the detached finalizer is still running")
+        # The pop is what drops the reference, and nothing may copy it forward.
+        self.assertIsNone(h.agent._detached_handle(agent_id))
+        self.assertNotIn("agent", h.agent._finished_jobs[agent_id])
+
+    def test_a_message_or_close_for_a_child_that_just_ended_says_so_instead_of_denying_it_exists(self):
+        from dgc.agent import _TaskOutcome
+        h = self.make(git=True, mode="auto")
+        # Exactly the state work()'s finally passes through: _finished_jobs written (agent.py:8393),
+        # the job popped (8394), the completion ledger NOT yet recorded. Constructed rather than
+        # raced, because the real window is microseconds wide and a sleep cannot hit it.
+        h.agent._detached_jobs, h.agent._finished_jobs = {}, {}
+        h.agent._remember_finished("sub-0123456789ab", "map auth", _TaskOutcome("done"))
+        self.assertEqual(h.agent.message_detached("sub-0123456789ab", "hi"), (False, "finished"))
+        self.assertEqual(h.agent.close_detached("sub-0123456789ab"), (False, "finished"))
+        # And a genuinely unknown id is still distinguished from it.
+        self.assertEqual(h.agent.message_detached("sub-ffffffffffff", "hi"), (False, "unknown"))
+        self.assertEqual(h.agent.close_detached("sub-ffffffffffff"), (False, "unknown"))
+
+    def test_close_task_stops_the_child_and_its_partial_work_is_retained_not_integrated(self):
+        h = self.make(git=True, mode="auto")
+        finished, wrote = threading.Event(), threading.Event()
+        h.agent.on_detached_ended = lambda notice: finished.set()
+
+        def writer(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall(
+                    "c1", "write_file", {"path": "notes.md", "content": "half\n"})])
+            wrote.set()                 # the file exists in the child's own checkout by now
+            cancel.wait(6)              # hold here until close_detached signals
+            return ChatResult(content="interrupted")
+
+        routes = [
+            ("parent: background map", calls_then([
+                ToolCall("t1", "task", {"description": "map auth", "prompt": "look at pkg/auth.py",
+                                        "agent": "worker", "background": True}),
+            ], final="spawned")),
+            ("look at pkg/auth.py", writer),
+        ]
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            try:
+                self._go(h, "parent: background map", routes)
+                agent_id = h.of("agent_started")[-1]["id"]
+                self.assertTrue(wrote.wait(8), "the child never wrote in its own checkout")
+                # "isolated" is not decoration: close_task's answer PROMISES the partial work is
+                # retained, and that promise is only true when the child had a checkout of its own.
+                # A child running in the parent tree has already written into the workspace.
+                self.assertEqual(h.agent.close_detached(agent_id), (True, "isolated"))
+                self.assertTrue(finished.wait(10), "the closed child never finalized")
+            finally:
+                h.agent.stop_detached()
+        ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
+        self.assertEqual(ended[-1]["state"], "stopped")
+        self.assertFalse((h.root / "notes.md").exists(),
+                         "a closed child's delta must NOT be integrated into the user's checkout")
+        tasks, _errors = h.agent.retained_tasks()
+        self.assertTrue(any("notes.md" in task.display_paths for task in tasks),
+                        "and it must not be thrown away either: close_task's description promises "
+                        "the partial work is preserved as retained work")
+
+
 class TerminalWakeTests(HarnessCase):
     """A detached task's result must reach a frontend that has no `on_detached_ended` callback.
 

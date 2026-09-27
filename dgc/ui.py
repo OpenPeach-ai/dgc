@@ -107,6 +107,7 @@ _ACTIVITY_VERBS = {
     "memory": "Updating memory", "artifact": "Building an artifact",
     "monitor": "Starting a monitor", "monitor_stop": "Stopping a monitor",
     "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
+    "message_task": "Messaging a sub-agent", "close_task": "Stopping a sub-agent",
 }
 
 

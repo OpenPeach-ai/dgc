@@ -30,6 +30,12 @@ REASONING_SOURCES = ("raw", "summarized", "narration", "withheld", "unknown")
 REASONING_PROVIDERS = ("anthropic", "openai")
 # v14: why get_image answered with no bytes.
 IMAGE_UNAVAILABLE_REASONS = ("invalid_ref", "not_found", "changed", "too_large", "unreadable", "busy")
+# v14: why a user's message did not reach a background sub-agent. CLOSED here and total at the
+# emitter: Emitter.emit RAISES on a validator failure (dgc/protocol.py:41), from the thread that
+# reads stdin, so an undeclared reason does not degrade one frame -- it throws inside the command
+# loop. Backend._AGENT_MESSAGE_WIRE_REASON maps every reason Agent.message_detached can return
+# into this tuple and defaults to "unknown", so a reason added to the Agent later stays harmless.
+AGENT_MESSAGE_REASONS = ("unknown", "starting", "finished", "stopping", "queue_full")
 
 
 def _f(*kinds: str, required: bool = True, enum: tuple | None = None) -> dict:
@@ -471,6 +477,21 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # nowhere else. `step` is a small record: {type: tool_call|tool_result|text, name, call_id,
     # args, output, is_error, text}, already redacted by the child's own UI.
     "agent_step": {"agent_id": _S(), "step": _O(), "seq_in_agent": _I(False)},
+    # A message the USER sent to ONE running background sub-agent, and whether the child took it.
+    #
+    # Only ever a REPLY to `agent_control`, which is why `request_id` is REQUIRED and not optional:
+    # a client that cannot send that command can never receive this event, so nothing has to be
+    # echoed back on the handshake to gate it. (An unknown event TYPE is survivable -- the
+    # extension skips it, editors/vscode/src/backend.ts:273 -- but it shows the user "skipped a
+    # backend event it does not handle yet" once per type, so silence is better than tolerance.)
+    # A model's own `message_task` call draws as an ordinary tool card and emits nothing here.
+    #
+    # `delivered: false` is the load-bearing field. Agent.steer refuses when the child is not
+    # accepting steering, when it is cancelled, and past _MAX_STEER_MESSAGES/_MAX_STEER_CHARS, and
+    # a user's words must never be dropped in silence. `reason` is present only when it is false.
+    # `text` is the message as sent, redacted, so a SECOND window on this session can draw it.
+    "agent_message": {"agent_id": _S(), "text": _S(), "delivered": _B(), "request_id": _S(),
+                      "reason": _f("string", required=False, enum=AGENT_MESSAGE_REASONS)},
     # ---- end v14 sub-agents --------------------------------------------------------------------
 }
 
@@ -669,6 +690,18 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # exactly one `image` event carrying this request_id (``ref`` is "img_" + 32 hex).
     "list_agents": {"request_id": _S(False)},
     "get_image": {"request_id": _S(), "ref": _S()},
+    # Steer or stop ONE background sub-agent, for the USER. `id` is the child's `sub-<12 hex>`, as
+    # `agent_started.id` and `agents.items[].id` carry it.
+    #
+    # The `action` enum is declared HERE on purpose: _dispatch validates with command_error(cmd)
+    # before any arm runs, so an action the CLI does not implement is rejected as invalid_command
+    # and the handler's two-way branch is exhaustive with no third arm to keep in step.
+    # `text` cannot be "required when action is message" in this table, so the handler rejects that
+    # case itself as invalid_message.
+    # `request_id` is required because both actions are correlated: "message" is answered by
+    # exactly one `agent_message` carrying it, "close" by the refreshed `agents` snapshot.
+    "agent_control": {"action": _f("string", enum=("message", "close")), "id": _S(),
+                      "request_id": _S(), "text": _S(False)},
     # ---- end v14 ----------------------------------------------------------------------------------
 }
 

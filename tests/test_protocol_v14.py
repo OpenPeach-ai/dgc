@@ -341,3 +341,49 @@ V13_SCHEMA_SHA256 = "47c74a8b535ade3bd2249840e11f499d521895795ab80f4781f0fe42ee7
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_agent_control_and_agent_message_declare_exactly_what_the_backend_sends(self):
+        ok = {"type": "agent_control", "action": "close", "id": "sub-0123456789ab",
+              "request_id": "r"}
+        self.assertIsNone(ep.command_error(ok))
+        self.assertIsNone(ep.command_error({**ok, "action": "message",
+                                            "text": "only pkg/auth.py"}))
+        # An action this CLI does not implement must never reach a handler: _dispatch validates
+        # with command_error FIRST, which is what makes the handler's two branches exhaustive.
+        self.assertIsNotNone(ep.command_error({**ok, "action": "interrupt"}))
+        # request_id is REQUIRED for both actions, because both are answered by a correlated event.
+        self.assertIsNotNone(ep.command_error({k: v for k, v in ok.items() if k != "request_id"}))
+        self.assertIsNotNone(ep.command_error({**ok, "message": "hi"}))
+
+        frame = {"type": "agent_message", "agent_id": "sub-0123456789ab", "text": "hi",
+                 "delivered": True, "request_id": "r"}
+        self.assertTrue(valid(frame))
+        self.assertTrue(valid({**frame, "delivered": False, "reason": "queue_full"}))
+        # The rename this pair exists to stop: the child's id is `agent_id`, as every other
+        # agent_* event spells it, and a bare `id` would make panel.ts's decisionId() pick a hold
+        # or a message up as an answerable decision.
+        self.assertEqual(ep.event_error({"seq": 1, **frame, "id": "sub-0123456789ab"}),
+                         "agent_message has undeclared field 'id'")
+        self.assertIsNotNone(ep.event_error({"seq": 1, **frame, "reason": "because"}))
+        # No client opt-in: the event is only ever a reply, so the handshake is untouched.
+        self.assertNotIn("agent_control", ep.COMMAND_FIELDS["set_workspace_roots"])
+        self.assertEqual(ep.PROTOCOL_VERSION, 14)
+
+    def test_agent_control_is_allowed_mid_turn_and_is_not_a_read(self):
+        from dgc import agent as agent_mod
+        self.assertNotIn(
+            "agent_control", headless._BUSY_MUTATIONS,
+            "a background child mostly exists WHILE a turn runs, so refusing this for the turn's "
+            "duration refuses the feature in its only case; it is safe there because it takes no "
+            "workspace lease and opens no checkpoint")
+        self.assertNotIn("agent_control", headless._WAKE_NEUTRAL_COMMANDS,
+                         "it is the user acting on the work, not reading it")
+        self.assertNotIn("agent_control", headless._OPTIONALLY_CORRELATED_COMMANDS,
+                         "agent_control always correlates, like get_image")
+        self.assertEqual(
+            headless._MAX_AGENT_MESSAGE_CHARS, agent_mod._MAX_STEER_CHARS,
+            "the wire bound and the child's queue bound must be the same number, or the wire "
+            "accepts a message Agent.steer then silently refuses")
+        self.assertEqual(
+            set(headless._AGENT_MESSAGE_WIRE_REASON.values()) - set(ep.AGENT_MESSAGE_REASONS),
+            set(), "every mapped reason must be one the event declares")
