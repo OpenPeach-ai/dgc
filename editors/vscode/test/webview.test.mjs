@@ -1087,6 +1087,30 @@ test("clicking the goal bar expands it; the pencil edits", () => {
   assert.deepEqual(errors, []);
 });
 
+test("the footer goal control is present only while a goal is being pursued", () => {
+  // It used to sit in the footer whatever the state, so a FINISHED goal left its mark on the
+  // composer and an empty one advertised a control for something that did not exist. The goal bar
+  // already hides itself when a goal is met; the footer has to agree with it rather than contradict
+  // it one row below. `/goal` in the command menu is how you set one, so nothing is lost.
+  const { errors, send, doc } = makeDom();
+  const control = doc.getElementById("btn-goal");
+  const goal = (status, text = "Ship 0.46.0") => send({ type: "event", event: {
+    type: "goal_changed", goal: text, status, elapsed_seconds: 5, details: {} } });
+
+  assert.equal(control.hidden, true, "absent before anything has been set");
+  goal("active");
+  assert.equal(control.hidden, false);
+  assert.equal(control.dataset.state, "active");
+  goal("blocked");
+  assert.equal(control.hidden, false, "a blocked goal is still being pursued");
+  assert.equal(control.dataset.state, "blocked");
+  goal("completed");
+  assert.equal(control.hidden, true, "a finished goal leaves no mark on the composer");
+  goal("none", "");
+  assert.equal(control.hidden, true, "and clearing one removes it");
+  assert.deepEqual(errors, []);
+});
+
 test("an expanded goal shows the evidence recorded when it was met", () => {
   const { errors, send, doc } = makeDom();
   send({ type: "event", event: { type: "goal_changed", goal: "Ship 0.46.0", status: "active",

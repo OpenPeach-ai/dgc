@@ -4621,16 +4621,27 @@
     focusQuietly($("goal-main"));
   }
 
+  /** The footer control REPORTS a goal that is being pursued. It is not a permanent affordance.
+   *
+   *  It used to sit there whatever the state, so a finished goal left its mark on the composer and
+   *  an empty one advertised a control for something that did not exist. Codex shows it for the
+   *  goal it is carrying and not otherwise. `/goal` in the command menu is how you set one, so
+   *  nothing is lost by the button being absent -- and the footer keeps its single row.
+   *
+   *  "completed" is the case that made this obvious: the goal BAR already hides itself when a goal
+   *  is met (a finished objective with a play button beside it got resumed once, and started over),
+   *  and the footer must agree with it rather than contradict it one row below. */
   function renderGoalControl() {
     const button = $("btn-goal"), label = $("goal-control-label");
     if (!button) return;
     const text = String(goalState.text || "");
     const status = text ? String(goalState.status || "active") : "none";
-    button.dataset.state = status;
-    label.textContent = text ? "Goal" : "Goal";
-    button.title = text ? `${status === "active" ? "Pursuing" : status} goal: ${text}` : "Set a standing goal";
-    button.setAttribute("aria-label", text ? `Standing goal, ${status}: ${text.slice(0, 180)}`
-                                           : "Standing goal: none set");
+    const live = !!text && (status === "active" || status === "paused" || status === "blocked");
+    button.hidden = !live;
+    button.dataset.state = live ? status : "none";
+    label.textContent = "Goal";
+    button.title = live ? `${status === "active" ? "Pursuing" : status} goal: ${text}` : "";
+    button.setAttribute("aria-label", live ? `Standing goal, ${status}: ${text.slice(0, 180)}` : "");
   }
 
   $("btn-goal").onclick = openGoalControl;

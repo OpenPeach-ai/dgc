@@ -983,24 +983,17 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 @media (forced-colors: active) { .composer-pill { border: 1px solid CanvasText; color: LinkText; } }
 
 /* The footer's Goal control, placed where Codex places it: after the permission mode, before the
-   model. Muted with no goal, lit while one is being pursued, and carrying the status otherwise --
+   model. Present only while a goal is being pursued, and coloured by its status --
    the same vocabulary the goal bar above the composer uses. */
-.goal-control[data-state="none"] { color: var(--muted); }
 .goal-control[data-state="active"] { color: var(--accent-text, var(--accent)); }
 .goal-control[data-state="paused"], .goal-control[data-state="blocked"] { color: var(--warn, var(--text)); }
-/* Measured: the footer is one row to about 700px WITH this control and to about 500px without, so
-   the word is what costs the extra row in a side panel. The icon alone carries it below that --
-   the same trade `.agents-word` already makes -- and the tooltip and aria-label keep the name.
-   A goal that EXISTS keeps its word longer, because then the control is reporting, not offering. */
-@media (max-width: 700px) {
-  .goal-control[data-state="none"] #goal-control-label { display: none; }
-}
+/* The control REPORTS a goal being pursued; it is not a permanent affordance, so it is absent
+   unless there is one and it costs the footer nothing the rest of the time. (`[hidden]` at the top
+   of this file is !important, which is what makes a `display: inline-flex` button obey it.) When it
+   IS there, the word is what tips a side panel onto a second row, so below 640px the icon carries
+   it alone -- the trade `.agents-word` already makes -- with the name kept on the title and the
+   aria-label. */
 @media (max-width: 640px) {
-  /* Measured at 400/480/560/640/720: below 640 even the icon alone tips the footer onto a second
-     row. With NO goal the control is offering something rather than reporting it, and `/goal` in
-     the command menu offers the same thing without costing a row -- so it steps aside. With a goal
-     it stays, because a standing objective is state you need to see, and a row is a fair price. */
-  .goal-control[data-state="none"] { display: none; }
   .goal-control #goal-control-label { display: none; }
 }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
