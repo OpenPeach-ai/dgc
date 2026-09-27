@@ -82,6 +82,20 @@ class _StdoutConsole(Console):
         raise SystemExit(EXIT_READER_GONE)
 
 
+def _rerun_advice(rule: str, name: str, args: dict, mode: str = "") -> str:
+    """How to permit a call that a non-interactive run had to deny.
+
+    Always the exact rule, because that is the precise answer. A mode is offered only when that
+    mode would really allow the call, and never the mode the run is already using.
+    """
+    from .permissions import modes_allowing
+    advice = f'rerun with --allow-tool "{rule}"'
+    modes = modes_allowing(name, args, exclude=str(mode or ""))
+    if modes:
+        advice += " or --mode " + "|".join(modes)
+    return advice
+
+
 class UI:
     """All user-facing rendering + interaction. The agent calls back into this."""
 
@@ -97,6 +111,7 @@ class UI:
         self.deny_reason = ""   # optional steer captured when the user denies a tool
         self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
         self.non_interactive = False   # `dgc -p`: never wait on a menu, answer on the spot
+        self.permission_mode = ""      # set for a -p run, so a denial never suggests the mode in force
         # Where relative edit paths resolve, so the approval prompt can show the diff. Set by CLI
         # below; None falls back to the process's directory, which is where `dgc` was started.
         self.project_root = None
@@ -333,12 +348,14 @@ class UI:
             # A one-shot run from a terminal used to block on this arrow menu. A script has
             # nobody to answer it: deny, and tell the model and the user how to pre-approve.
             rule = rule_for(name, args)
+            # Name only the modes that would ACTUALLY allow this call, and never the one already in
+            # force. The fixed "--mode acceptEdits|auto" told a `-p --mode acceptEdits` run to rerun
+            # with acceptEdits -- which returns ASK for `task`, so the advice was a loop.
+            advice = _rerun_advice(rule, name, args, getattr(self, "permission_mode", ""))
             self.stop_working()
             self.console.print(f"  [{DIM}]permission needed for {_markup_literal(name)} — denied: a -p run "
-                               f"never waits on a menu; rerun with --allow-tool \"{_markup_literal(rule)}\" "
-                               f"or --mode acceptEdits|auto[/]", highlight=False)
-            self.deny_reason = (f"non-interactive run: permission was not granted; the user can rerun "
-                                f"with --allow-tool \"{rule}\" or --mode acceptEdits|auto")
+                               f"never waits on a menu; {_markup_literal(advice)}[/]", highlight=False)
+            self.deny_reason = f"non-interactive run: permission was not granted; the user can {advice}"
             return "no"
         self._yield_stdin()
         section(self.console, "permission requested", name)
@@ -2857,6 +2874,7 @@ def _json_oneshot_ui(config):
 
     class _OneShotJsonUI(HeadlessUI):
         non_interactive = True
+        permission_mode = ""        # _run_oneshot sets the real one once the agent exists
         todo_clear_hint = ""        # a script has no slash line to type `/todo clear` into
 
         def __init__(self, emitter, pending):
@@ -2871,8 +2889,9 @@ def _json_oneshot_ui(config):
                          command=(args.get("command") if name == "bash" else None),
                          suggested_rule=rule, choices=["once", "always", "deny"],
                          decision="deny", reason="non-interactive run")
-            self.deny_reason = (f"non-interactive run: permission was not granted; the user can "
-                                f"rerun with --allow-tool \"{rule}\" or --mode acceptEdits|auto")
+            self.deny_reason = ("non-interactive run: permission was not granted; the user can "
+                                + _rerun_advice(rule, name, args,
+                                                getattr(self, "permission_mode", "")))
             return "no"
 
         def present_plan(self, plan):
@@ -2903,6 +2922,7 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     if not prompt.strip():
         parser.error("-p - reads the prompt from stdin, which was empty")
     cli.ui.non_interactive = True
+    cli.ui.permission_mode = str(getattr(cli.agent, "mode", "") or "")
     started = time.time()
 
     def session_id() -> str:

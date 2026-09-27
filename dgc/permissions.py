@@ -367,6 +367,31 @@ def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
     return tool, args
 
 
+def modes_allowing(name: str, args: dict, *, exclude: str = "") -> list[str]:
+    """Which permission modes would let this call through, in the order a user should try them.
+
+    A non-interactive denial used to print a fixed "--mode acceptEdits|auto" whatever had been
+    denied and whatever mode was already active. For `task` that is a loop: `acceptEdits` returns
+    ASK for it, so the advice named the very mode the run was already in. Ask the engine instead,
+    and let the caller drop the mode already in force.
+
+    Built-in tables only -- a session's own allow/deny rules are not consulted, because this
+    answers "which mode would help", and the caller prints the exact --allow-tool rule beside it
+    for the case where a rule is what is wanted.
+    """
+    empty = {"allow": [], "ask": [], "deny": []}
+    allowed = []
+    for mode in MODES:
+        if mode == exclude:
+            continue
+        try:
+            if PermissionEngine(mode, empty).decide(name, args)[0] == ALLOW:
+                allowed.append(mode)
+        except Exception:      # a decision that cannot be made is not a suggestion
+            continue
+    return allowed
+
+
 def rule_for(tool: str, args: dict) -> str:
     """Build a 'don't ask again' rule string for a specific invocation."""
     tool, args = _permission_subject(tool, args)
@@ -505,7 +530,7 @@ class PermissionEngine:
         if self.mode == "acceptEdits":
             if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"
-            return ASK, "acceptEdits: shell commands need approval"
+            return ASK, f"acceptEdits auto-approves file edits; {policy_tool} still needs approval"
         # default
         if policy_tool in READ_ONLY_TOOLS:
             return ALLOW, "read-only tool"
