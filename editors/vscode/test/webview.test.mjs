@@ -958,7 +958,9 @@ test("a restored session replays into real turns, pages by turn, and keeps live 
   assert.match(card.querySelector(".arg").textContent, /npm test/, "the command is on screen");
   assert.match(card.querySelector(".body pre").textContent, /<script>unsafe/, "so is its output");
   assert.equal(card.querySelector("script"), null);
-  assert.ok(card.classList.contains("has-output"), "a restored card shows its output without a click");
+  assert.ok(card.classList.contains("has-output"),
+    "the restored card carries its output, and the class marks that there is something to open "
+    + "(tool-card-collapse.test.mjs measures that a closed card does not SHOW it)");
   // The backend designated the answer; the panel promotes exactly that block and demotes the rest.
   const finals = [...block.querySelectorAll(".text.final")];
   assert.equal(finals.length, 1);
@@ -1401,7 +1403,7 @@ test("a tool batch shows the work while it runs, bounded, with the rest one clic
   assert.equal(group.open, true, "work you cannot see is work you cannot check");
   const first = group.querySelector(".tool");
   assert.match(first.querySelector(".arg").textContent, /app\.ts/, "the target is on screen");
-  assert.ok(first.classList.contains("has-output"), "and so is what it returned, without a click");
+  assert.ok(first.classList.contains("has-output"), "and what it returned is on the card, ready to open");
   assert.match(first.querySelector(".body pre").textContent, /second line/);
   assert.equal(first.classList.contains("open"), false, "the rest is one click away, not on screen");
   first.querySelector(".tool-toggle").click();

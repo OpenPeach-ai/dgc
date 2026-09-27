@@ -687,16 +687,19 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool[data-status="blocked"] .dot { background: var(--muted); }
 .tool[data-status="blocked"] .verb { color: var(--muted); }
 .tool .dot.deny { background: var(--faint); }
-/* Show the work. The body used to be hidden until the card was clicked, inside a group that was
-   itself collapsed the moment it was created -- so the command, its output and the fact that
-   anything had run at all were two clicks away, and nobody clicked. Now a card shows the first
-   few lines as soon as it has any, and the toggle opens the rest. */
+/* What made hiding the body wrong once was the group around it: it collapsed the moment it was
+   created, so the command, its output and the fact that anything had run at all were two clicks
+   away and nobody clicked. That is no longer how a group behaves -- it is open while the work
+   happens and folds only once the model has moved on -- so every step is on screen as it runs,
+   named, with its own status, and the body is the detail behind it. */
 .tool .body { display: none; margin: 0 var(--sp-2) var(--sp-2) var(--sp-6); padding: 0 0 0 var(--sp-2); border-left: 1px solid var(--border-strong); }
-.tool.open .body, .tool.has-output .body { display: block; }
-/* Bounded, not hidden: four lines with an ellipsis where it was cut, so a card costs the same
-   amount of the transcript whether it printed nine lines or nine hundred. */
-.tool.has-output:not(.open) .body pre { display: -webkit-box; -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical; overflow: hidden; max-height: none; }
+/* A step is ONE line until the reader opens it -- the rule Codex uses, and the one asked for.
+   `.has-output` used to show the body too, so a closed card still printed four clamped lines of
+   output. That was invisible in a clean turn (the group folds when the model moves on) and loud in
+   any turn that had trouble: one failed command holds its group open, and every successful step
+   beside it then contributed four more lines, which is the wall this was reported as. The class
+   stays -- it marks that there IS something to open, and gates the image chips below. */
+.tool.open .body { display: block; }
 /* A step whose whole result is the diff card beneath it has nothing left to disclose. */
 .tool.no-body .body, .tool.no-body .chev { display: none; }
 .tool.no-body .tool-toggle { cursor: default; padding-left: var(--sp-3); }
@@ -1576,7 +1579,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   padding: 0 6px; border-radius: var(--r-full); background: var(--surface2); color: var(--muted);
   font: var(--w-med) var(--t-xs)/1 var(--sans); font-variant-numeric: tabular-nums; }
 .tool .tool-image-count .ic { flex: none; }
-/* `.has-output` keeps a collapsed card's body on screen for its clamped text; chips wait for open. */
+/* Chips are part of the body, which only a card the reader has opened shows at all. */
 .tool:not(.open) .tool-images { display: none; }
 .tool-images { list-style: none; margin: 0 0 var(--sp-2); padding: 3px; display: flex; flex-wrap: nowrap;
   gap: var(--sp-2); overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scroll-padding-inline: 3px;

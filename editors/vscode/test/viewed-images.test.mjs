@@ -52,7 +52,7 @@ test("chips sit inside the card that produced them, collapsed shows only a count
   assert.equal(pill.querySelector(".sr-only").textContent, "1 image");
   assert.equal(pill.getAttribute("title"), null, "no nested title");
   assert.equal(card.querySelector(".tool-toggle").title, "browser · 1 image");
-  assert.ok(card.classList.contains("has-output"), "the clamped text preview stays");
+  assert.ok(card.classList.contains("has-output"), "the text it returned is there to open");
   assert.equal(p.doc.getElementById("announcer").textContent, "Viewed 1 image");
 
   p.open("c1");
