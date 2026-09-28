@@ -173,7 +173,10 @@ class TaskWorktreesAreSweptAndBoundedByDiskTest(unittest.TestCase):
             worktree._free_bytes = original
         self.assertIsNone(workspace, "a delegation must not start a checkout it cannot finish")
         self.assertIn("free", error)
-        self.assertIn(str(storage), error, "the message must name where the space is needed")
+        # resolve(): prepare() resolves the storage root, and on macOS the temp dir it was handed
+        # is a /var/folders symlink to /private/var. The unresolved spelling is not in the message.
+        self.assertIn(str(storage.resolve()), error,
+                      "the message must name where the space is needed")
 
     def test_plenty_of_space_is_not_refused(self) -> None:
         root = repo(Path(tempfile.mkdtemp(prefix="dgc-disk-ok-")) / "main")
@@ -196,7 +199,11 @@ class TaskWorktreesAreSweptAndBoundedByDiskTest(unittest.TestCase):
         finally:
             worktree.prune_worktrees = original
         self.assertTrue(workspace, error)
-        self.assertEqual(calls, [root], "stale worktree records are reclaimed before a new one")
+        # resolve(): macOS hands out /var/folders/... which is a symlink to /private/var/...,
+        # and prepare() resolves the repository path before using it. Comparing the unresolved
+        # form passes on Linux and fails on every macOS runner.
+        self.assertEqual([path.resolve() for path in calls], [root.resolve()],
+                         "stale worktree records are reclaimed before a new one")
         # And the real thing must be harmless where there is nothing to reclaim.
         worktree.prune_worktrees(root)
 
