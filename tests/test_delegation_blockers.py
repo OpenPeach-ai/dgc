@@ -18,6 +18,7 @@ confirmed by running git before anything was changed:
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -143,3 +144,70 @@ class RetainedTasksAreFilteredBeforeTheyAreBoundedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskWorktreesAreSweptAndBoundedByDiskTest(unittest.TestCase):
+    """They are the only unbounded on-disk store DGC creates, and were the only one never swept.
+
+    `grep -rn "disk_usage|statvfs|ENOSPC" dgc/*.py` returned nothing, and `git worktree prune`
+    appeared nowhere in the package. A 16-way fan-out makes sixteen full tracked-file checkouts
+    before anything notices, and git's own ENOSPC arrives one checkout at a time -- mid-task.
+    """
+
+    def test_free_space_is_measured_and_falls_back_up_the_tree(self) -> None:
+        self.assertIsInstance(worktree._free_bytes(Path(tempfile.gettempdir())), int)
+        deep = Path(tempfile.gettempdir()) / "dgc-absent-xyz" / "deeper" / "deepest"
+        self.assertIsInstance(worktree._free_bytes(deep), int,
+                              "a not-yet-created storage root must still be measurable")
+
+    def test_a_full_disk_refuses_before_the_checkout_rather_than_during(self) -> None:
+        root = repo(Path(tempfile.mkdtemp(prefix="dgc-disk-")) / "main")
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "-A", cwd=root); git("commit", "-qm", "init", cwd=root)
+        storage = Path(tempfile.mkdtemp(prefix="dgc-disk-store-"))
+        original = worktree._free_bytes
+        worktree._free_bytes = lambda path: 1024          # 1 KiB free
+        try:
+            workspace, error = worktree.TaskWorkspace.prepare(str(root), "probe", storage)
+        finally:
+            worktree._free_bytes = original
+        self.assertIsNone(workspace, "a delegation must not start a checkout it cannot finish")
+        self.assertIn("free", error)
+        self.assertIn(str(storage), error, "the message must name where the space is needed")
+
+    def test_plenty_of_space_is_not_refused(self) -> None:
+        root = repo(Path(tempfile.mkdtemp(prefix="dgc-disk-ok-")) / "main")
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "-A", cwd=root); git("commit", "-qm", "init", cwd=root)
+        workspace, error = worktree.TaskWorkspace.prepare(
+            str(root), "probe", Path(tempfile.mkdtemp()))
+        self.assertTrue(workspace, error)
+
+    def test_prune_is_called_and_a_failing_prune_is_never_fatal(self) -> None:
+        root = repo(Path(tempfile.mkdtemp(prefix="dgc-prune-")) / "main")
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "-A", cwd=root); git("commit", "-qm", "init", cwd=root)
+        calls = []
+        original = worktree.prune_worktrees
+        worktree.prune_worktrees = lambda repo_path: calls.append(repo_path)
+        try:
+            workspace, error = worktree.TaskWorkspace.prepare(
+                str(root), "probe", Path(tempfile.mkdtemp()))
+        finally:
+            worktree.prune_worktrees = original
+        self.assertTrue(workspace, error)
+        self.assertEqual(calls, [root], "stale worktree records are reclaimed before a new one")
+        # And the real thing must be harmless where there is nothing to reclaim.
+        worktree.prune_worktrees(root)
+
+    def test_prune_really_drops_a_record_whose_directory_is_gone(self) -> None:
+        root = repo(Path(tempfile.mkdtemp(prefix="dgc-prune2-")) / "main")
+        (root / "a.txt").write_text("a\n", encoding="utf-8")
+        git("add", "-A", cwd=root); git("commit", "-qm", "init", cwd=root)
+        checkout = root.parent / "gone"
+        git("worktree", "add", "-q", str(checkout), "-b", "gone", cwd=root)
+        shutil.rmtree(checkout)
+        self.assertIn("gone", git("worktree", "list", cwd=root).stdout)
+        worktree.prune_worktrees(root)
+        self.assertNotIn("gone", git("worktree", "list", cwd=root).stdout,
+                         "nothing in DGC had ever invoked this")

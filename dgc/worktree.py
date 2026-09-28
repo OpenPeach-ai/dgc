@@ -389,6 +389,35 @@ def remove(path, name: str) -> str | None:
     return None if r.returncode == 0 else (r.stderr or "git worktree remove failed").strip()
 
 
+# Task worktrees are the only unbounded on-disk store DGC creates, and the largest. Every other
+# subsystem prunes -- checkpoints, image views, the usage ledger, notes -- and nothing ever swept
+# these: `git worktree prune` appeared nowhere in the package, and no code path had ever asked how
+# much disk was left. A 16-way fan-out makes sixteen full tracked-file checkouts of the repository
+# before anything notices, and `git worktree add`'s own ENOSPC arrives one checkout at a time.
+_MIN_FREE_BYTES = 512 * 1024 * 1024        # a floor, not an estimate of what this repo needs
+
+
+def _free_bytes(path: Path) -> int | None:
+    """Free space on the filesystem holding `path`, or None when it cannot be determined."""
+    probe = path
+    for _ in range(4):
+        try:
+            return shutil.disk_usage(probe).free
+        except OSError:
+            if probe.parent == probe:
+                return None
+            probe = probe.parent
+    return None
+
+
+def prune_worktrees(repo: Path) -> None:
+    """Drop git's records of task worktrees whose directories are already gone.
+
+    Best-effort and silent: a prune that fails must never be the reason a delegation is refused.
+    """
+    _git(["worktree", "prune"], repo)
+
+
 class TaskWorkspaceError(RuntimeError):
     pass
 
@@ -779,6 +808,16 @@ class TaskWorkspace:
             pass
         path = storage_root / f"{_safe(repo.name)[:60]}-task-{slug}-{token}"
         metadata_path = storage_root / f"{path.name}.json"
+        # Reclaim records for worktrees whose directories are already gone, so a long-lived
+        # checkout does not accumulate them forever, and so the space check below sees the truth.
+        prune_worktrees(repo)
+        free = _free_bytes(storage_root)
+        if free is not None and free < _MIN_FREE_BYTES:
+            return None, (
+                f"only {free // (1024 * 1024)} MB free where isolated task checkouts are created "
+                f"({storage_root}); a delegation copies the repository's tracked files there. Free "
+                f"some space, or remove finished task worktrees with `/worktree` — a partial "
+                f"checkout would fail mid-task instead of before it starts.")
         add = _git(["worktree", "add", "--quiet", "-b", branch, str(path), base_commit], repo)
         if add.returncode != 0:
             return None, (add.stderr or "could not create isolated task worktree").strip()
