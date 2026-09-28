@@ -4,7 +4,19 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.46.0 — unreleased
+## 0.46.1 — 2026-09-28
+
+### On macOS, signing in to a remote MCP server could open a browser before you were asked
+
+DGC replaces the environment's `BROWSER` with a no-op binary while the `mcp-remote` bridge starts,
+so the bridge cannot open a sign-in page on its own; the editor or the CLI opens that URL only
+after you agree to it. The replacement was the literal `/bin/true`, and macOS does not ship one --
+`true` lives in `/usr/bin` there. So on macOS the guard returned the environment untouched and
+your own opener was handed to the bridge. It failed silently, because returning the environment
+unchanged is also how the guard opts out on a platform it does not support. It now uses the first
+no-op executable the system actually has. Linux is unchanged.
+
+## 0.46.0 — 2026-09-28
 
 0.45.0 was built and tested on one machine and never published. Auditing that build found 27
 defects, and a first real session with it found twelve more; those fixes and this release's new

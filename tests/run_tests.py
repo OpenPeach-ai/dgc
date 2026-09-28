@@ -32,6 +32,11 @@ os.environ["HOME"] = os.path.realpath(_ISOLATED_HOME.name)
 os.environ["USERPROFILE"] = os.environ["HOME"]
 os.environ.pop("XDG_CONFIG_HOME", None)
 os.environ.pop("XDG_DATA_HOME", None)
+# DGC_HOME outranks HOME, so leaving it inherited defeats the isolation above: `test_config_concurrent`
+# and friends point HOME at their own temp directory and then read the file DGC wrote, which lands in
+# DGC_HOME instead. Anyone who exports it -- to keep a test run away from a live session, which is the
+# obvious reason to -- gets 14 errors and 29 failures that look like product breakage and are not.
+os.environ.pop("DGC_HOME", None)
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))

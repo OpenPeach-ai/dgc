@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.31.0 — unreleased
+## 0.31.1 — 2026-09-28
+
+- Pairs with CLI 0.46.1, which stops a remote MCP sign-in from opening a browser before the editor
+  asks for it on macOS. The extension itself is unchanged; the handshake minimum moves with the CLI
+  version it quotes.
+
+## 0.31.0 — 2026-09-28
 
 0.30.0 was built and installed on one machine and never published. Auditing that build found 27
 defects and a first real session found twelve more; those fixes and this release's new work are all
