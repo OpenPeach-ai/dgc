@@ -159,7 +159,10 @@ def _looks_like_placeholder(value: str) -> bool:
 
 # An inlined image is base64, and base64 of zero bytes is a run of "A". A 16-character run inside
 # an icon therefore reads as an AWS key to the pattern above: `dist/settings.js` inlines the
-# connector logos as data: URIs, and one of the .ico files contains AKIAAAAAAAAAAAAAAAAA.
+# connector logos as data: URIs, and one of the .ico files carries the AWS access-key prefix
+# followed by sixteen more capital A's. That example is spelled out here rather than quoted,
+# because preflight's own `git grep` for credential markers scans this file too and a comment
+# explaining the false positive would otherwise BE one, and fail the release.
 #
 # The exemption is deliberately narrow -- ONLY the payload of a base64 IMAGE data URI. It is not
 # extended to data:text or data:application, where a literal credential could genuinely hide, and
