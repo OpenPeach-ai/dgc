@@ -1119,7 +1119,7 @@ def summariser_role(message: dict) -> str:
             return "dgc-note"
         if notice_kind(message):
             return "monitor-output (untrusted)"
-        if message.get("_dgc_steering") or (
+        if message.get("_dgc_steering") or message.get("_dgc_agent_message") or (
                 isinstance(content, str) and content.startswith(_COMPACT_PREFIX)):
             # DGC writes these under role "user" too; neither is the user asking for something.
             return "dgc-generated (not the user)"
@@ -1140,7 +1140,7 @@ def _real_user_turns(messages: list[dict]) -> list[dict]:
     for m in messages:
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
-        if notice_kind(m) or m.get("_dgc_steering"):
+        if notice_kind(m) or m.get("_dgc_steering") or m.get("_dgc_agent_message"):
             continue
         content = m.get("content")
         text = content if isinstance(content, str) else ""
@@ -3738,7 +3738,8 @@ class Agent(GoalLifecycle):
         from .ultra import native_effort
         return native_effort(self.config, level)
 
-    def steer(self, text: str, *, images=None, request_id: str = "") -> bool:
+    def steer(self, text: str, *, images=None, request_id: str = "",
+              origin: str = "user") -> bool:
         """Queue a message the user typed WHILE a turn is running; it's injected at the next
         tool-loop boundary so the model reads it and adjusts (not a separate later turn).
 
@@ -3756,7 +3757,8 @@ class Agent(GoalLifecycle):
                 maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
         except ValueError:
             return False
-        item = {"text": clean, "images": image_values, "request_id": request_id}
+        item = {"text": clean, "images": image_values, "request_id": request_id,
+                "origin": "agent" if origin == "agent" else "user"}
         with self._steer_lock:
             if not self._accepting_steer or self.cancelled.is_set():
                 return False
@@ -3789,16 +3791,31 @@ class Agent(GoalLifecycle):
                 self._mcp_query_text = (self._mcp_query_text + "\n"
                                         + _trusted_intent_text(item["text"]))[-40_000:]
             self._refresh_system()
-            from .workflows import STEERING_PREFIX, STEERING_SUFFIX
-            content = STEERING_PREFIX + joined + STEERING_SUFFIX
+            from .workflows import (AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX,
+                                    STEERING_PREFIX, STEERING_SUFFIX)
+            # Two envelopes, because there are two senders. `message_task` carries the PARENT
+            # MODEL's words; sending those under the user's envelope told the child a human had
+            # spoken and made every frontend render them as a user bubble.
             images = [image for item in msgs for image in item["images"]]
-            self.messages.append({"role": "user", "content": (
-                [{"type": "text", "text": content},
-                 *({"type": "image_url", "image_url": {"url": image}} for image in images)]
-                if images else content),
-                # Where one message ends and the next begins: the model reads them joined, but each
-                # was its own bubble live, and a restored chat shows them the same way.
-                "_dgc_steering": [m["text"] for m in msgs if m["text"].strip()]})
+            for kind, prefix, suffix in (("user", STEERING_PREFIX, STEERING_SUFFIX),
+                                         ("agent", AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX)):
+                group = [m for m in msgs
+                         if m.get("origin", "user") == kind and m["text"].strip()]
+                if not group:
+                    continue
+                content = prefix + "\n".join(m["text"] for m in group) + suffix
+                message = {"role": "user", "content": (
+                    [{"type": "text", "text": content},
+                     *({"type": "image_url", "image_url": {"url": image}} for image in images)]
+                    if images and kind == "user" else content)}
+                if kind == "user":
+                    # Where one message ends and the next begins: the model reads them joined, but
+                    # each was its own bubble live, and a restored chat shows them the same way.
+                    message["_dgc_steering"] = [m["text"] for m in group]
+                else:
+                    # NOT a user bubble, and not the user's words for anything that reads roles.
+                    message["_dgc_agent_message"] = [m["text"] for m in group]
+                self.messages.append(message)
             self.steer_queue.clear()
         applied = getattr(self.ui, "steering_applied", None)
         if callable(applied):
@@ -3808,7 +3825,11 @@ class Agent(GoalLifecycle):
         if not (callable(applied) and all(item["request_id"] for item in msgs)):
             # A frontend that was told which messages landed shows each as its own bubble at this
             # point; the joined line repeated them, and a restored chat never had it.
-            self.ui.info(f"↳ steering: {joined[:80]}")
+            # Name the sender: "steering" reads as the user interjecting, and a `message_task`
+            # note from the parent agent is not that.
+            from_agent = all(item.get("origin") == "agent" for item in msgs)
+            label = "parent agent" if from_agent else "steering"
+            self.ui.info(f"↳ {label}: {joined[:80]}")
         return True
 
     def take_deferred_steers(self) -> list[str]:
@@ -8767,7 +8788,14 @@ class Agent(GoalLifecycle):
         steer = getattr(child, "steer", None)
         if not callable(steer):
             return False, "unavailable"
-        if steer(clean):
+        # origin="agent": this is the PARENT MODEL writing, not the user. Under the user envelope
+        # the child was told "The user sent this WHILE you were working" and frontends rendered the
+        # model's words as a human bubble.
+        try:
+            accepted = steer(clean, origin="agent")
+        except TypeError:
+            accepted = steer(clean)          # an embedder's Agent without the origin parameter
+        if accepted:
             return True, ""
         cancel = getattr(child, "cancelled", None)
         if cancel is not None and cancel.is_set():

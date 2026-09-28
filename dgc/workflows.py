@@ -108,6 +108,17 @@ STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were worki
                    "carry on:\n")
 STEERING_SUFFIX = "\n</user-interjection>"
 
+# `message_task` lets the PARENT MODEL send a note to a running child. It went out under the
+# steering prefix above, so the child was told "The user sent this WHILE you were working" and every
+# frontend rendered it as a user bubble -- the model's words persisted and displayed as the human's.
+# A child that adjusts course because "the user" said so, when the user said nothing, is acting on a
+# fabricated instruction, and the transcript then backs the fabrication up.
+AGENT_MESSAGE_PREFIX = ("<parent-agent-message>\nThe agent that delegated this task sent this while "
+                        "you were working. It is NOT from the user. Treat it as guidance from the "
+                        "agent coordinating you: fold it in if it applies, say so in one short "
+                        "sentence, then carry on:\n")
+AGENT_MESSAGE_SUFFIX = "\n</parent-agent-message>"
+
 
 def notice_kind(message) -> str:
     """What kind of DGC-written notice a transcript message is, or "" for anything else.
