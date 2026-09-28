@@ -182,8 +182,17 @@ class BackgroundTaskTests(HarnessCase):
         h.agent.on_detached_ended = lambda notice: finalized.set()
 
         def stubborn(messages, results, cancel):
+            # Poll `is_set`; a cancel token is not an Event. What reaches a route is the request's
+            # own `_RouteGate`, which carries `is_set` and nothing else -- every cancel check in
+            # llm.py, mcp.py and agent.py is `is_set()`. `cancel.wait(4)` therefore raised
+            # AttributeError inside the fixture on EVERY platform, and only the scheduling hid it:
+            # on Linux the cancel had already landed, so the child was still recorded `stopped` and
+            # the suite stayed green over a route that never ran; on macOS the child reached the
+            # model first and the crash became its outcome -- `failed`.
             self.assertIsNotNone(cancel)
-            cancel.wait(4)
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not cancel.is_set():
+                time.sleep(0.02)
             return ChatResult(content="still going")
 
         routes = [
@@ -206,6 +215,8 @@ class BackgroundTaskTests(HarnessCase):
                 self.assertTrue(finalized.wait(6), "detached child did not finish cleanup")
                 ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
                 self.assertEqual(ended[-1]["state"], "stopped", ended[-1])
+                self.assertNotIn("Error:", str(ended[-1].get("message") or ""),
+                                 "a stopped child must not have ended on a crash in this fixture")
             finally:
                 # agent_ended precedes worktree finalization. Do not remove the temporary
                 # repository or unpatch the model while that finalizer can still write .git.
@@ -268,8 +279,17 @@ class BackgroundTaskTests(HarnessCase):
         h.agent.on_detached_ended = lambda notice: finished.set()
 
         def stubborn(messages, results, cancel):
+            # Poll `is_set`; a cancel token is not an Event. What reaches a route is the request's
+            # own `_RouteGate`, which carries `is_set` and nothing else -- every cancel check in
+            # llm.py, mcp.py and agent.py is `is_set()`. `cancel.wait(4)` therefore raised
+            # AttributeError inside the fixture on EVERY platform, and only the scheduling hid it:
+            # on Linux the cancel had already landed, so the child was still recorded `stopped` and
+            # the suite stayed green over a route that never ran; on macOS the child reached the
+            # model first and the crash became its outcome -- `failed`.
             self.assertIsNotNone(cancel)
-            cancel.wait(4)
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not cancel.is_set():
+                time.sleep(0.02)
             return ChatResult(content="still going")
 
         routes = [
@@ -330,7 +350,9 @@ class BackgroundTaskTests(HarnessCase):
                 return ChatResult(tool_calls=[ToolCall(
                     "c1", "write_file", {"path": "notes.md", "content": "half\n"})])
             wrote.set()                 # the file exists in the child's own checkout by now
-            cancel.wait(6)              # hold here until close_detached signals
+            deadline = time.monotonic() + 6      # hold here until close_detached signals
+            while time.monotonic() < deadline and not cancel.is_set():
+                time.sleep(0.02)
             return ChatResult(content="interrupted")
 
         routes = [
@@ -355,6 +377,8 @@ class BackgroundTaskTests(HarnessCase):
                 h.agent.stop_detached()
         ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
         self.assertEqual(ended[-1]["state"], "stopped", ended[-1])
+        self.assertNotIn("Error:", str(ended[-1].get("message") or ""),
+                         "a stopped child must not have ended on a crash in this fixture")
         self.assertFalse((h.root / "notes.md").exists(),
                          "a closed child's delta must NOT be integrated into the user's checkout")
         tasks, _errors = h.agent.retained_tasks()
