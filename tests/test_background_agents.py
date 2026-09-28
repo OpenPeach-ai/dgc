@@ -205,7 +205,7 @@ class BackgroundTaskTests(HarnessCase):
                 self.assertEqual(h.agent.stop_detached(agent_id), 1)
                 self.assertTrue(finalized.wait(6), "detached child did not finish cleanup")
                 ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
-                self.assertEqual(ended[-1]["state"], "stopped")
+                self.assertEqual(ended[-1]["state"], "stopped", ended[-1])
             finally:
                 # agent_ended precedes worktree finalization. Do not remove the temporary
                 # repository or unpatch the model while that finalizer can still write .git.
@@ -354,7 +354,7 @@ class BackgroundTaskTests(HarnessCase):
             finally:
                 h.agent.stop_detached()
         ended = [f for f in h.of("agent_ended") if f["id"] == agent_id]
-        self.assertEqual(ended[-1]["state"], "stopped")
+        self.assertEqual(ended[-1]["state"], "stopped", ended[-1])
         self.assertFalse((h.root / "notes.md").exists(),
                          "a closed child's delta must NOT be integrated into the user's checkout")
         tasks, _errors = h.agent.retained_tasks()

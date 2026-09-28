@@ -6924,10 +6924,18 @@ def test_mcp_protocol():
         check("MCP remote environment passthrough is never mistaken for Bearer auth",
               proxy_only_args[:5] == ["-y", "mcp-remote@0.8.3", "https://example.invalid/mcp", "--auth-timeout", "120"]
               and "--header" not in proxy_only_args)
+        # Assert what the guard must achieve, not the one path Linux happens to use. Pinning the
+        # literal "/bin/true" made this check agree with a macOS build in which the guard did
+        # nothing at all: macOS has no /bin/true, so the environment came back untouched and a
+        # browser could open before the editor asked.
         from dgc.mcp import _suppress_bridge_browser
         quiet_env = _suppress_bridge_browser({"PATH": "/usr/bin", "BROWSER": "xdg-open"})
+        opener = quiet_env.get("BROWSER")
         check("Remote MCP sign-in does not open a browser before the editor asks",
-              quiet_env.get("BROWSER") == "/bin/true" and quiet_env.get("PATH") == "/usr/bin")
+              isinstance(opener, str) and opener != "xdg-open" and os.path.isfile(opener)
+              and os.access(opener, os.X_OK) and quiet_env.get("PATH") == "/usr/bin",
+              f"BROWSER={opener!r} on {sys.platform}: the caller's opener must be replaced by a "
+              f"no-op executable that exists on THIS platform")
         extra_header_args = _runtime_server_args({
             "transport": "remote", "command": "npx",
             "args": ["-y", "mcp-remote", "https://example.invalid/mcp",

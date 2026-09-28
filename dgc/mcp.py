@@ -463,16 +463,37 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
 
 
+# `true` lives in /bin on Linux and in /usr/bin on macOS, which has no /bin/true at all.
+# Linux keeps its own path first, so nothing there changes.
+_NOOP_OPENERS = ("/bin/true", "/usr/bin/true")
+
+
+def _noop_opener() -> str:
+    """The first no-op executable this OS actually has, or "" if it has none."""
+    for path in _NOOP_OPENERS:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return ""
+
+
 def _suppress_bridge_browser(env: dict) -> dict:
     """Stop mcp-remote from opening a browser before the user agrees.
 
-    Its bundled opener treats BROWSER=/bin/true as success and then skips the desktop
+    Its bundled opener treats BROWSER=<a no-op binary> as success and then skips the desktop
     fallbacks. The editor or CLI opens the URL only after that consent.
+
+    The path used to be the literal "/bin/true", which macOS does not ship. There the guard
+    returned the environment unchanged and a browser opened for OAuth before anyone was asked --
+    the one thing this function exists to prevent -- and it did so silently, because returning
+    `env` is also how a legitimately unsupported platform opts out.
     """
-    if os.name != "posix" or not os.path.isfile("/bin/true"):
+    if os.name != "posix":
+        return env
+    opener = _noop_opener()
+    if not opener:
         return env
     quiet = dict(env)
-    quiet["BROWSER"] = "/bin/true"
+    quiet["BROWSER"] = opener
     return quiet
 
 
