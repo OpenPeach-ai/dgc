@@ -172,14 +172,40 @@ class ServeShutdownLogTests(unittest.TestCase):
         self.addCleanup(proc.kill)
         for pipe in (proc.stdin, proc.stdout, proc.stderr):
             self.addCleanup(pipe.close)
+
+        # `wait()` on a child whose stdout and stderr are unread pipes is the deadlock the
+        # subprocess docs warn about: once a 64 KiB buffer fills, the child blocks in write() and
+        # can never reach exit, so the wait below times out and the failure looks like a slow
+        # shutdown. Measured: an idle backend leaves 3,480 bytes in stdout after "ready" and
+        # shutdown takes 0.02s under load 8 -- comfortable today, and one busier startup or one
+        # stack dump from crossing it. So drain both, from the moment they exist, on threads.
+        drained: dict[str, list[str]] = {"stdout": [], "stderr": []}
+
+        def drain(pipe, key):
+            try:
+                for line in pipe:
+                    drained[key].append(line)
+            except ValueError:
+                pass                            # addCleanup closed it while we were reading
+        threading.Thread(target=drain, args=(proc.stderr, "stderr"), daemon=True).start()
+
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:      # the handler is installed once serve() is running
             line = proc.stdout.readline()
             self.assertTrue(line, "the backend exited before it was ready")
             if '"ready"' in line:
                 break
+        threading.Thread(target=drain, args=(proc.stdout, "stdout"), daemon=True).start()
         proc.send_signal(signal.SIGTERM)
-        status = proc.wait(timeout=60)
+        # The timeout is deliberately NOT raised. With the pipes drained, a wait that still times
+        # out is a real slow-shutdown regression, and it must say so rather than be absorbed.
+        try:
+            status = proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            self.fail("the backend did not exit within 60s of SIGTERM, with both pipes drained. "
+                      f"last stdout: {''.join(drained['stdout'][-5:])!r} "
+                      f"last stderr: {''.join(drained['stderr'][-5:])!r}")
         log = (Path(home.name) / ".dgc" / "logs" / "serve.log").read_text(encoding="utf-8")
         # Nothing tells a signal handler who sent the signal: the cause must not claim the editor did.
         self.assertIn("SIGTERM — a stop signal from another process, not a shutdown command from the editor", log)
