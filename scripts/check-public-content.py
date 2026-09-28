@@ -33,8 +33,12 @@ def _website_path(name: str) -> bool:
 
 def check(root: Path) -> list[str]:
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
+    # The wildcard covers every keyword, not just _AUDIT. It used to sit on _AUDIT alone, so
+    # `PLUGIN_COMPATIBILITY_AUDIT.md` was caught while `SETTINGS_HANDOFF.md` and
+    # `SETTINGS_PLUGINS_MIGRATION_HANDOFF.md` -- one of which opens "Migrate this implementation
+    # into the main agent's current DGC development branch" -- were published for three days.
     forbidden = re.compile(r'(?:^|/)(?:\.claude|\.codex|private-evidence|internal-evidence)(?:/|$)'
-                           r'|(?:^|/)(?:HANDOFF|TAKEOVER|WORK-LOG|NEXT-STEPS|[^/]*_AUDIT)\.md$'
+                           r'|(?:^|/)(?:[^/]*[-_])?(?:HANDOFF|TAKEOVER|WORK-LOG|NEXT-STEPS|AUDIT)\.md$'
                            r'|(?:^|/)[^/]*session[^/]*\.jsonl$', re.I)
     # Provider integrations, public comparisons and runtime session code are legitimate source.
     # Personal home paths and conversation-export markers are not release documentation.

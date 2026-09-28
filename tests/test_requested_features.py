@@ -191,14 +191,25 @@ class RequestedFeatures(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('public_content', script)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
-        (self.root / 'providers.md').write_text('Claude and Codex subscription provider setup.\n')
-        (self.root / 'WORK-LOG.md').write_text('Private release notes.\n')
+        # Kept: ordinary product documentation, including names that merely contain a keyword.
+        keep = ['providers.md', 'GIT_REVIEW.md', 'COMPATIBILITY.md', 'HANDOFF_FORMAT_NOTES.md']
+        for name in keep:
+            (self.root / name).write_text('Claude and Codex subscription provider setup.\n')
+        # Rejected: the private-record names. Every one of the prefixed forms was published for
+        # three days because the wildcard sat on `_AUDIT` alone -- a bare `AUDIT.md` escaped it
+        # too, since `[^/]*_AUDIT` demanded a prefix ending in an underscore.
+        private = ['WORK-LOG.md', 'AUDIT.md', 'SETTINGS_HANDOFF.md',
+                   'SETTINGS_PLUGINS_MIGRATION_HANDOFF.md', 'PLUGIN_COMPATIBILITY_AUDIT.md',
+                   'RELEASE_TAKEOVER.md', 'sprint-NEXT-STEPS.md']
+        for name in private:
+            (self.root / name).write_text('Private release notes.\n')
         (self.root / 'export.txt').write_text('<send_user_message_' + 'question_reply>')
         subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
         errors = module.check(self.root)
-        self.assertEqual(len(errors), 2)
-        self.assertTrue(any('WORK-LOG.md' in error for error in errors))
-        self.assertTrue(any('export.txt' in error for error in errors))
+        flagged = {error.split(':')[0] for error in errors}
+        self.assertEqual(flagged, set(private) | {'export.txt'},
+                         'a private work record that reaches the public product repo is a '
+                         'publication, and a flagged product doc is an outage of this gate')
 
     def test_native_ollama_levels_are_model_specific(self):
         profiles = ['off', 'low', 'medium', 'high', 'xhigh']
