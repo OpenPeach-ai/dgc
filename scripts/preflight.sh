@@ -33,6 +33,14 @@ if git grep -nEI '(BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-[A-
   exit 1
 fi
 
+# `--content-only` runs exactly the gates above: what may become public, and what must never be in
+# it. They take seconds. github-publish.sh calls preflight this way when DGC_SKIP_PREFLIGHT=1 asks
+# to skip the suite, so the escape hatch can no longer skip the two gates that decide what ships.
+if [ "${1:-}" = "--content-only" ]; then
+  echo "preflight: public-content and credential gates passed (suite skipped by request)"
+  exit 0
+fi
+
 "$PYTHON" -m compileall -q dgc tests/run_tests.py
 # The venv is one interpreter; CI runs several. A 3.12-only f-string (a backslash inside the
 # expression) once shipped as tag v0.31.0 and failed to import on 3.10 and 3.11, so every CPython

@@ -15,7 +15,14 @@ cd "$ROOT"
 }
 git remote get-url "$REMOTE" >/dev/null
 
-if [ "${DGC_SKIP_PREFLIGHT:-0}" != 1 ]; then
+# DGC_SKIP_PREFLIGHT exists to re-push after a failure without paying for the suite twice. It used
+# to skip EVERYTHING, including the two gates that decide what becomes public and take seconds:
+# 0.46.0 was published under it carrying six internal handoff documents, and nothing scanned the
+# tree for credentials or attribution trailers either. It now skips only the expensive part.
+if [ "${DGC_SKIP_PREFLIGHT:-0}" = 1 ]; then
+  echo "DGC_SKIP_PREFLIGHT=1: skipping the suite; the content and credential gates still run" >&2
+  "$ROOT/scripts/preflight.sh" --content-only
+else
   "$ROOT/scripts/preflight.sh"
 fi
 
