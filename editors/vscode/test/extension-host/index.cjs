@@ -440,8 +440,17 @@ async function run() {
     .filter((command) => command.type === "get_config").length > configReadsBefore);
   const nativeListCount = backendCommands(backendLogPath)
     .filter((command) => command.type === "list_models").length;
+  const modelsPostsBefore = testApi.testOnlyPostedMessages(testToken)
+    .filter((message) => message.type === "models").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "listModels" });
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  // Wait for the reply, not for a stopwatch. This was `setTimeout(200)`, and 200ms of CI is not a
+  // guarantee of anything: the job failed once on exactly this assertion, passed on a re-dispatch
+  // of the identical commit, and passed three times locally. `listModels` posts exactly one
+  // `models` message per call, and on the native path it does so only AFTER awaiting fetchModels --
+  // so once the post is visible, any native request has already been issued and the count below is
+  // final. A negative assertion needs a positive event to bound it.
+  await waitFor(() => testApi.testOnlyPostedMessages(testToken)
+    .filter((message) => message.type === "models").length > modelsPostsBefore);
   assert.equal(backendCommands(backendLogPath)
     .filter((command) => command.type === "list_models").length, nativeListCount,
   "the active subscription picker must not query the native model endpoint");
