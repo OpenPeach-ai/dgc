@@ -8258,7 +8258,13 @@ class Agent(GoalLifecycle):
                     # top-level only, so this child's own manager never has a recovery point and
                     # every external write was refused outright -- including the file some tasks
                     # were created to write.
-                    sub._external_checkpoints = self.checkpoints
+                    # `or self.checkpoints` is the depth>1 case: at depth 2 `self` is itself a
+                    # child, whose own manager was never opened (checkpoints.open() is top-level
+                    # only), so handing that down reproduced the exact refusal this line exists to
+                    # remove -- "the file was not changed - DGC could not capture its pre-edit state
+                    # first" -- one level deeper. Chain the top-level manager instead.
+                    sub._external_checkpoints = (
+                        getattr(self, "_external_checkpoints", None) or self.checkpoints)
                 sub._metrics_parent = self
                 # One link from a child to the step that started it, shared by every 0.40 feature that
                 # attributes a child's work (the agents list, viewed images).

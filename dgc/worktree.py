@@ -600,15 +600,64 @@ def _is_cache(path: str) -> bool:
     return any(part in _CACHE_DIRS for part in parts[:-1]) or path.endswith((".pyc", ".pyo"))
 
 
+def _gitlink_paths(repo: Path, project_rel: Path) -> set[str]:
+    """Submodule paths, by index mode. `git ls-files --stage` writes mode 160000 for a gitlink."""
+    pathspec = str(project_rel) if project_rel != Path(".") else "."
+    rows = _git_bytes(["ls-files", "--stage", "-z", "--", pathspec], repo)
+    if rows.returncode != 0:
+        return set()
+    found = set()
+    for record in (rows.stdout or b"").split(b"\0"):
+        if not record:
+            continue
+        meta, _, name = record.partition(b"\t")
+        if meta.split(b" ", 1)[0] == b"160000" and name:
+            found.add(os.fsdecode(name))
+    return found
+
+
 def _dirty_paths(repo: Path, base_commit: str, project_rel: Path) -> set[str]:
     pathspec = str(project_rel) if project_rel != Path(".") else "."
     tracked = _nul_paths(_git_bytes(
         ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames",
          base_commit, "--", pathspec], repo))
+    # A submodule whose HEAD differs from the recorded gitlink is reported here by name, and it is a
+    # DIRECTORY on disk. `prepare` then calls `_read_state` on it, which raises "unsupported
+    # non-file path", and `prepare` returning None refuses EVERY `task` call in the repository --
+    # so one moved submodule silently disabled delegation entirely, with the user told only
+    # "unsupported non-file path: <dir>". Skip gitlinks here; `_head_state` still refuses one that
+    # reaches integration, which is the backstop its message already claims to be.
+    gitlinks = _gitlink_paths(repo, project_rel)
+    if gitlinks:
+        tracked = [path for path in tracked if path not in gitlinks]
     untracked = [path for path in _nul_paths(_git_bytes(
         ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec], repo))
         if not _is_cache(path)]
     return {path for path in (*tracked, *untracked) if _inside_project(path, project_rel)}
+
+
+def _skip_worktree_paths(repo: Path, project_rel: Path) -> set[str]:
+    """Paths the parent has marked skip-worktree, which `git ls-files -v` tags `S`.
+
+    A new linked worktree is dense for these even when the parent's copy is absent from disk, so the
+    child sees a file the parent does not have. At integration `prior` is then `missing` while
+    `expected` is the blob, `_merge_file` refuses on the kind mismatch, and a delta consisting only
+    of such a path is refused with "parent checkout changed while the isolated task was running" --
+    which is false; the parent changed nothing. `/tasks apply` reproduces it forever.
+
+    (Cone-mode sparse-checkout does NOT do this: a new worktree inherits the parent's sparsity.
+    Measured -- only skip-worktree diverges, which is why this reads the flag rather than the
+    sparse-checkout config. dgc/git_review.py already parses the same tag.)
+    """
+    pathspec = str(project_rel) if project_rel != Path(".") else "."
+    rows = _git(["ls-files", "-v", "-z", "--", pathspec], repo)
+    if rows.returncode != 0:
+        return set()
+    found = set()
+    for record in (rows.stdout or "").split("\0"):
+        if len(record) > 2 and record[0] == "S" and record[1] == " ":
+            found.add(record[2:])
+    return found
 
 
 def _head_state(repo: Path, base_commit: str, repo_path: str) -> _FileState:
@@ -814,6 +863,7 @@ class TaskWorkspace:
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("conflict", display, conflicts, detail)
 
+        skipped = _skip_worktree_paths(self.repo, self.project_rel)
         expected: dict[str, _FileState] = {}
         desired: dict[str, _FileState] = {}
         child: dict[str, _FileState] = {}
@@ -828,6 +878,12 @@ class TaskWorkspace:
                 prior[repo_path] = _read_state(_checked_target(self.repo, repo_path))
                 if prior[repo_path] == expected[repo_path]:
                     continue        # the parent has not touched it; the child's bytes stand
+                if repo_path in skipped:
+                    # The parent asked git to ignore its copy of this path. Its absence on disk is
+                    # not a change the user made, and reporting it as one produced a refusal that
+                    # blamed them for something they had not done.
+                    conflicts.append(repo_path)
+                    continue
                 # The parent's copy moved while the task ran. That is a collision only if the two
                 # sides touched the same lines. Reconcile them, and keep the child's work on this
                 # file -- and on every other file in the delta -- when they did not.
@@ -1576,14 +1632,20 @@ def list_retained(source_root: Path, storage_root: Path | None = None
     prefixes = set(_task_repo_prefixes(repo)) if repo else set()
     tasks, errors = [], []
     try:
-        candidates = sorted(root.glob("*.json"))[:_MAX_TASK_FILES + 1]
+        # Filter to THIS repository BEFORE bounding. The bound used to be applied to the shared
+        # storage root first, and `sorted()` is lexical over `<repo-name>-task-...` stems, so one
+        # busy repository whose name sorts early pushed another repository's records entirely out
+        # of the window: `/tasks` came back empty, with "registry exceeds N records", while the
+        # user's own retained work sat on disk unreachable.
+        everything = sorted(root.glob("*.json"))
     except OSError as exc:
         return [], [f"could not list retained-task storage: {exc}"]
-    overflow = len(candidates) > _MAX_TASK_FILES
-    candidates = candidates[:_MAX_TASK_FILES]
+    if prefixes:
+        everything = [path for path in everything
+                      if any(path.stem.startswith(prefix) for prefix in prefixes)]
+    overflow = len(everything) > _MAX_TASK_FILES
+    candidates = everything[:_MAX_TASK_FILES]
     for metadata_path in candidates:
-        if prefixes and not any(metadata_path.stem.startswith(prefix) for prefix in prefixes):
-            continue
         task, error = _load_retained(metadata_path, source_root, root)
         if task is not None:
             tasks.append(task)

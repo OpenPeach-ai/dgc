@@ -63,8 +63,10 @@ class ExternalWriteTest(unittest.TestCase):
 
         from dgc import agent
         loop = inspect.getsource(agent.Agent)
-        self.assertIn("_external_checkpoints = self.checkpoints", loop,
-                      "an isolated child must be handed the manager that can undo its external writes")
+        self.assertIn("getattr(self, \"_external_checkpoints\", None) or self.checkpoints", loop,
+                      "an isolated child must be handed the manager that can undo its external "
+                      "writes -- and at depth 2 that is the TOP-LEVEL manager, not the parent "
+                      "child's, whose own was never opened")
         self.assertIn("keeper = self.checkpoints", loop)
         self.assertIn("keeper.record_file", loop,
                       "the capture must go through the chosen manager, not always self's")
