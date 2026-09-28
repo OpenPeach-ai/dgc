@@ -6409,19 +6409,30 @@ def test_context_prune():
     def _bounded_aux(**kwargs):
         compact_calls.append(("aux", kwargs))
         return _BoundedCompactor()
+    from dgc.agent import compaction_budgets as _compaction_budgets
     bounded_agent._aux_client = _bounded_aux
     bounded_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() + 5)
     aux_options = compact_calls[0][1]
     compact_prompt, compact_kwargs = compact_calls[1]
     check("compaction generation has bounded input, output, time, and reasoning",
-          aux_options.get("max_tokens") == 3500
+          # The brief and the source are budgets now, not constants -- a flat 3,500-token brief and
+          # a flat 60,000-CHARACTER source meant a 1M-token window summarised 1.68% of its own
+          # transcript. What must hold is that both stay bounded: the brief never claims more than a
+          # quarter of the window, and the prompt never exceeds the source budget.
+          0 < aux_options.get("max_tokens", 0) <= max(1, bounded_agent.context_size() // 4)
+          and aux_options.get("max_tokens", 0) <= 32_000
           and 1 <= aux_options.get("read_timeout", 0) <= 5
-          and len(compact_prompt[0]["content"]) < 6000
+          and len(compact_prompt[0]["content"])
+              <= _compaction_budgets(bounded_agent.context_size())[0] + 4_000
           and compact_kwargs.get("tools") is None
           and compact_kwargs.get("reasoning_effort") == "off"
           and hasattr(compact_kwargs.get("cancel"), "deadline")
           and bounded_agent.timing_totals["by_request_reason"] == {"compaction": 1},
-          detail=repr((aux_options, len(compact_prompt[0]["content"]), compact_kwargs)))
+          detail=repr((aux_options, len(compact_prompt[0]["content"]), compact_kwargs,
+                       {"ctx": bounded_agent.context_size(),
+                        "budget": _compaction_budgets(bounded_agent.context_size()),
+                        "by_request_reason": bounded_agent.timing_totals["by_request_reason"],
+                        "n_calls": len(compact_calls)})))
 
     # An official Responses endpoint compacts only the old group-aligned prefix. DGC keeps a
     # mechanical display brief locally, replays the opaque item exactly once, and never spends the
