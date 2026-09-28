@@ -73,8 +73,48 @@ def check(root: Path) -> list[str]:
     return errors
 
 
+# Agent tooling attributes its work with a commit trailer, and several tools add one by default.
+# On a public product repo that trailer discloses how the code was produced and maps the commit to
+# a third-party GitHub account in the contributors list, and a push cannot be taken back. Two
+# sibling checkouts on this machine hold 336 and 362 such commits between them; they are unpushed,
+# and this gate is what keeps that true even if someone publishes from the wrong tree.
+#
+# Anchored trailer forms only. Subjects that merely name a vendor are legitimate and must pass --
+# DGC integrates Claude, Codex, Qwen and Kimi subscriptions, and says so in its commit subjects.
+_TRAILER = re.compile(
+    r'^(?:Co-authored-by:.*(?:claude|anthropic)'
+    r'|.*Generated with \[Claude Code\]'
+    r'|.*noreply@anthropic\.com)',
+    re.I | re.M)
+
+
+def check_history(root: Path) -> list[str]:
+    """Reject attribution trailers and vendor addresses anywhere in the history being published."""
+    errors = []
+    # -z separates records with NUL; a message body can contain anything else, including blank
+    # lines, so no textual separator is safe here.
+    log = subprocess.run(['git', 'log', '-z', '--format=%H%n%B'], cwd=root,
+                         capture_output=True, text=True, errors='replace')
+    if log.returncode != 0:
+        return ['git history could not be read to check commit attribution']
+    for record in log.stdout.split('\x00'):
+        record = record.strip()
+        if not record:
+            continue
+        found = _TRAILER.search(record)
+        if found:
+            errors.append(f'{record.splitlines()[0][:12]}: commit attribution trailer '
+                          f'({found.group(0).strip()[:60]})')
+    idents = subprocess.run(['git', 'log', '--format=%ae%n%ce'], cwd=root,
+                            capture_output=True, text=True, errors='replace')
+    if any('anthropic' in line.lower() for line in idents.stdout.splitlines()):
+        errors.append('a commit is authored or committed under an Anthropic address')
+    return errors
+
+
 if __name__ == '__main__':
-    errors = check(Path(__file__).resolve().parent.parent)
+    root = Path(__file__).resolve().parent.parent
+    errors = check(root) + check_history(root)
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         raise SystemExit(1)

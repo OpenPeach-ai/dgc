@@ -211,6 +211,54 @@ class RequestedFeatures(unittest.TestCase):
                          'a private work record that reaches the public product repo is a '
                          'publication, and a flagged product doc is an outage of this gate')
 
+    def test_published_history_carries_no_agent_attribution_trailer(self):
+        """A trailer cannot be unpushed, and it maps the commit to a third-party contributor.
+
+        The real repository's own history is checked by the same gate in CI, so this asserts the
+        two things a regex can get wrong: it catches every trailer form, and it leaves alone the
+        commit subjects that legitimately name a vendor -- DGC integrates Claude, Codex, Qwen and
+        Kimi subscriptions and says so.
+        """
+        import importlib.util
+        script = Path(__file__).resolve().parent.parent / 'scripts/check-public-content.py'
+        spec = importlib.util.spec_from_file_location('public_content_history', script)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+        def commit(message: str, email: str = 't@t') -> None:
+            (self.root / 'f.txt').write_text(message[:40] + '\n')
+            subprocess.run(['git', '-C', str(self.root), 'add', '-A'], check=True)
+            subprocess.run(['git', '-C', str(self.root), '-c', f'user.email={email}',
+                            '-c', 'user.name=t', 'commit', '-q', '-m', message], check=True)
+
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        commit('feat(subscriptions): run your own Claude/Codex/Qwen/Kimi plan via its official CLI')
+        commit('provider: add a native Anthropic transport')
+        self.assertEqual(module.check_history(self.root), [],
+                         'a subject that names a vendor is ordinary product history')
+
+        for trailer in ['a change\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>',
+                        'a change\n\nCo-authored-by: Claude <bot@example.com>',
+                        'a change\n\n\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)']:
+            before = len(module.check_history(self.root))
+            commit(trailer)
+            self.assertGreater(len(module.check_history(self.root)), before,
+                               f'this trailer reached a public commit unnoticed: {trailer!r}')
+
+    def test_an_anthropic_author_address_is_refused_even_without_a_trailer(self):
+        import importlib.util
+        script = Path(__file__).resolve().parent.parent / 'scripts/check-public-content.py'
+        spec = importlib.util.spec_from_file_location('public_content_ident', script)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        (self.root / 'f.txt').write_text('x\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '-A'], check=True)
+        subprocess.run(['git', '-C', str(self.root), '-c', 'user.email=noreply@anthropic.com',
+                        '-c', 'user.name=mohitkalra', 'commit', '-q', '-m', 'an ordinary subject'],
+                       check=True)
+        errors = module.check_history(self.root)
+        self.assertTrue(any('Anthropic address' in error for error in errors),
+                        f'the identity is the other half of the disclosure: {errors}')
+
     def test_native_ollama_levels_are_model_specific(self):
         profiles = ['off', 'low', 'medium', 'high', 'xhigh']
         for model, expected in [
