@@ -1300,6 +1300,9 @@ def edit_file(args: dict, ctx) -> str:
         return _edit_error(content, old_string.replace("\r\n", "\n"),
                            new_string.replace("\r\n", "\n"))
     updated, count, how = result
+    if _span_is_stale(ctx, p, expected_version, how):
+        _remember_version(ctx, p, expected_version)
+        return _span_stale_error(p)
     out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else updated
     try:
         _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
@@ -1308,6 +1311,29 @@ def edit_file(args: dict, ctx) -> str:
     _refresh_version(ctx, p)
     note = "" if how == "exact" else f"  [matched via {how}]"
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p), ctx)}"
+
+
+# The one matcher tier that replaces a REGION with text the model composed, rather than patching a
+# located string. Measured against a file a colleague had changed since the model read it:
+#   corroborated line drift -> the colleague's line SURVIVED (the tier re-checks it)
+#   block anchor            -> refused outright
+#   exact / normalized      -> patch what is there, so there is nothing to lose
+#   elision                 -> the colleague's inserted line was GONE, reported as a clean success
+# Elision anchors on a head and a tail and swaps everything between them for `new`. When `new` came
+# from a stale read, whatever arrived in between is deleted and nothing notices.
+_SPAN_REPLACING_TIERS = frozenset({"elision"})
+
+
+def _span_is_stale(ctx, path, version, how: str) -> bool:
+    """True when this edit would swap a whole region using content read before the file changed."""
+    return how in _SPAN_REPLACING_TIERS and _stale_since_read(ctx, path, version)
+
+
+def _span_stale_error(path) -> str:
+    return (f"error: {path} changed after you read it, and this edit replaces a whole region "
+            f"between its first and last lines rather than patching a located string — applying it "
+            f"would delete whatever arrived in between. Read the file again and re-issue the edit "
+            f"against what is actually there; an exact `old_string` is not refused this way.")
 
 
 def _coerce_edits(args: dict):
@@ -1379,6 +1405,9 @@ def multi_edit(args: dict, ctx) -> str:
             continue
         if res is None:
             failures.append(f"#{i + 1}: {_edit_error(buf, old, new).splitlines()[0]}")
+            continue
+        if _span_is_stale(ctx, p, expected_version, res[2]):
+            failures.append(f"#{i + 1}: {_span_stale_error(p)[len('error: '):].splitlines()[0]}")
             continue
         buf = res[0]
         applied += 1
