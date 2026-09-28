@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## 0.6.9 — unreleased
+## 0.6.9 — 2026-09-28
 
 Pairs with CLI 0.46.0. The vendored copy of the editor protocol gains the `editor_state` command --
 so a backend can be told what is actually on screen, which is how a takeover stops being decided on
