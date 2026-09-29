@@ -946,7 +946,12 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 /* Shown only when the composer is genuinely empty. `:empty` is not enough: Chromium leaves a
    filler <br> behind after an edit, so the class is set from the same serializer the rest of the
    panel reads, and never from the DOM looking empty. */
-#input.is-empty::before { content: attr(data-placeholder); color: var(--faint); pointer-events: none; }
+/* Out of flow, deliberately. As an in-flow inline box the placeholder is the first thing in the
+   editing host's line, so the insertion point — and the caret with it — sat AFTER it: measured
+   197.9px right of the composer's left edge, and the first character you typed then appeared back
+   at the left. Absolute, the caret rests where the text will actually go. */
+#input.is-empty::before { content: attr(data-placeholder); display: inline-block; width: 0;
+  white-space: nowrap; overflow: visible; color: var(--faint); pointer-events: none; }
 /* An inline pill. It is an atomic inline box, so the line box has to be taller than the pill or
    two pills on consecutive wrapped lines sit with their borders almost touching -- measured at 1px
    apart, which reads as a collision when you paste several links in a row.
