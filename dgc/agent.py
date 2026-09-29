@@ -2708,7 +2708,9 @@ class Agent(GoalLifecycle):
 
         Every serious harness bounds delegation with an integer read off the real parent chain --
         Codex, Claude Code, Grok Build, opencode, qwen-code and OpenClaw all do exactly this, with
-        defaults between 1 and 5 -- because the depth of the agent that is running is a fact about
+        defaults between 1 and 5 (Grok Build: `MAX_SUBAGENT_DEPTH: u32 = 1` in
+        xai-grok-tools/src/implementations/grok_build/task/mod.rs, host-overridable) -- because the
+        depth of the agent that is running is a fact about
         the run, not something the agent can argue its way past.
         """
         try:

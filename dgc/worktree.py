@@ -946,6 +946,10 @@ class TaskWorkspace:
         # safe and very expensive: a sub-agent that edited ten files and overlapped on one lost all
         # ten, and the only way back was to resolve the retained task by hand. Apply the files that
         # DO reconcile and hold back only the ones that do not -- the shape Grok Build's
+        # `apply_worktree` uses (xai-org/grok-build, xai-grok-workspace-types/src/rpc/worktree.rs:
+        # `ApplyWorktreeResponse::Conflicts { files, conflicts: Vec<FileConflict> }`, each conflict
+        # carrying path + base/ours/theirs), verified against that source rather than a summary of it.
+        # The original comment below predates that check.
         # `apply_worktree` uses, where a conflict is reported per path.
         #
         # The cost of this, stated plainly: a change that spans two files can now half-land. It is

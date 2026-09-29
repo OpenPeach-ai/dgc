@@ -13,9 +13,15 @@ the tool; a save made seconds earlier is already inside that read. Measured befo
 
 So the anchor is taken where the model actually looked: `read_file` records the version it showed
 the model, and `write_file` refuses if the file has moved since. DGC's own writes refresh the
-anchor, so its `edit_file` never makes its next `write_file` look foreign. This is DGC's form of
-the staleness check Grok Build does with a hashline anchor — refuse, and tell the caller to
-re-read — adapted to a tool that replaces whole files rather than lines.
+anchor, so its `edit_file` never makes its next `write_file` look foreign.
+
+This is DGC's form of the staleness check Grok Build does with a hashline anchor, adapted to a tool
+that replaces whole files rather than lines -- but the two differ on what happens next, and the
+earlier version of this comment had Grok's half backwards. Grok returns FRESH ANCHORS and says
+outright "Use these anchors to immediately retry your edit -- do not re-read the file"
+(xai-org/grok-build, crates/codegen/xai-grok-tools/src/implementations/grok_build_hashline/edit/mod.rs,
+"Follow-up edits"). DGC refuses and asks for a re-read, because a whole-file write has no anchor to
+hand back. Cheaper for Grok; the two are not the same contract.
 
 A file the model never read is one it is creating or deliberately replacing. Those are not refused.
 """

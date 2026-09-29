@@ -113,7 +113,10 @@ class AnOverlapHoldsBackOnlyTheFileItTouchesTest(unittest.TestCase):
     sub-agent that edited ten files and overlapped on one lost all ten, recoverable only by
     resolving the retained task by hand.
 
-    The contract now matches Grok Build's `apply_worktree`, which reports a conflict per path: the
+    The contract now matches Grok Build's `apply_worktree` -- verified in xai-org/grok-build at
+    `xai-grok-workspace-types/src/rpc/worktree.rs`, where the response is an enum whose `Conflicts`
+    arm carries `files` alongside `conflicts: Vec<FileConflict>` and each `FileConflict` names a
+    `path` with `base`/`ours`/`theirs`. It reports a conflict per path: the
     files that reconcile land, the ones that collide are held in the worktree and named in the
     result. The colliding file itself is still never touched, and a delta where EVERY path collides
     still refuses wholesale.
