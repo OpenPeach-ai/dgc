@@ -1785,9 +1785,16 @@ body.ask-docked #tasks-panel { display: none; }
 .oask-opt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; width: 100%; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .oask-opt:hover { background: var(--surface2); border-color: var(--border-strong); }
 .oask-opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* One flex item, so no wrap can put the badge on a line without the label it qualifies. */
+.oask-head { min-width: 0; }
 .oask-label { font-weight: var(--w-med); color: var(--text-strong); }
-.oask-desc { flex: 1; min-width: 0; color: var(--muted); }
-.oask-mark { flex: none; color: var(--link); font: var(--w-med) var(--t-xs)/1 var(--mono); }
+/* A description shares the label's line only while it has room to read as a sentence. `flex: 1`
+   with `min-width: 0` let it shrink without limit: measured at a 420px panel, one 60-character
+   description was squeezed into a 90px column, wrapped to five lines and made its row 105px tall
+   beside 35px neighbours (69px and seven lines at 320px). The basis is the width below which it
+   takes its own full-width line instead -- `.oask-opt` already wraps. */
+.oask-desc { flex: 1 1 22ch; min-width: 0; color: var(--muted); }
+.oask-mark { margin-left: 6px; color: var(--link); font: var(--w-med) var(--t-xs)/1 var(--mono); white-space: nowrap; }
 .oask-opt.recommended { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); }
 .open-ask-chip { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   background: transparent; color: var(--text); font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; }

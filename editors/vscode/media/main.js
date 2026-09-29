@@ -8380,9 +8380,14 @@
         const row2 = el("button", "oask-opt" + (option.recommended ? " recommended" : ""));
         row2.type = "button";
         row2.dataset.index = String(index);
-        row2.innerHTML = `<span class="oask-label">${esc(label)}</span>`
-          + (option.description ? `<span class="oask-desc">${esc(String(option.description))}</span>` : "")
-          + (option.recommended ? `<span class="oask-mark">Recommended</span>` : "");
+        // The label and its "Recommended" badge are ONE flex item, so wrapping can never separate
+        // them: as separate items the badge was pushed onto a line of its own whenever the label
+        // filled the row -- measured at a 320px panel it landed on line two with the description
+        // starting beside it. They are inline within the head, so they wrap together as words. The
+        // description stays its own item and takes a full line when it cannot sit beside them.
+        row2.innerHTML = `<span class="oask-head"><span class="oask-label">${esc(label)}</span>`
+          + (option.recommended ? `<span class="oask-mark">Recommended</span>` : "") + "</span>"
+          + (option.description ? `<span class="oask-desc">${esc(String(option.description))}</span>` : "");
         row2.onclick = () => { input.value = label; sendOpenAsk(ask); };
         list.appendChild(row2);
       });
