@@ -4,6 +4,38 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.46.3 — 2026-09-30
+
+### An interrupt during integration no longer leaves a half-applied checkout
+
+When a sub-task's changes are applied to your files, each file lands atomically but the sequence
+does not, so DGC rolls back if anything fails partway. `except Exception` does not catch Ctrl-C, so
+an interrupt between two files skipped that rollback entirely and left some files carrying the
+sub-agent's bytes and the rest untouched. Both apply paths now roll back on an interrupt as well,
+record what happened, and re-raise.
+
+The `/tasks apply` retry also leaves a breadcrumb while it runs, as the live path already did. It is
+the path you drive by hand after something has already gone wrong once, so a failure there was the
+one most likely to be mistaken for the original.
+
+### A `git pull` during a delegation is no longer reported as your own edit
+
+Pulling, checking out or rebasing while a sub-agent works moves every file the sub-agent touched,
+and from the file state alone that cannot be told apart from you editing them. DGC said "someone
+outside this task edited them" about files nobody had touched. It now names the branch move.
+
+### `message_task` can add work instead of only correcting it
+
+A message to a running sub-task was a correction by construction — "fold it in if it applies" reads
+as "what you are doing may be wrong". Passing `adds_work` sends the same message under an envelope
+that says the opposite: what the child is already doing still stands, and this is added to it.
+
+### A sub-agent is told what to do with a decision it cannot make
+
+It has no way to ask anyone — its result is the only thing that comes back. It is now told to do
+the parts that do not depend on the decision, then stop and return the question with the options it
+was choosing between, rather than guessing silently.
+
 ## 0.46.2 — 2026-09-29
 
 ### Opening a package to read it no longer waits for the model

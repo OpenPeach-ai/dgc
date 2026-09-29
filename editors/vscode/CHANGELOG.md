@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.3 — 2026-09-30
+
+- Pairs with CLI 0.46.3, which stops an interrupt mid-integration from leaving a half-applied
+  checkout, stops a `git pull` during a delegation being reported as your own edit, and lets a
+  message to a running sub-task add work rather than only correct it. The extension itself is
+  unchanged; the handshake minimum moves with the CLI version it quotes.
+
 ## 0.31.2 — 2026-09-29
 
 - The caret in an empty prompt box rests where your first character will appear. It sat at the end
