@@ -274,6 +274,45 @@ def _inside(child: Path, parent: Path) -> bool:
         return False
 
 
+def _worktree_git_common_dir(root: Path) -> Path | None:
+    """The repository directory a linked worktree points at, or None when `root` is not one.
+
+    A delegated sub-agent works in a task worktree, whose `.git` is a POINTER FILE into the source
+    repository. The sandbox masks the user's home with a tmpfs, which erases that repository -- so
+    the pointer dangles and the child cannot run ONE git command:
+
+        git rev-parse --git-dir -> fatal: not a git repository: ~/proj/.git/worktrees/...
+
+    Read the pointer here instead of shelling out to git: `wrap` runs for every sandboxed command.
+    """
+    try:
+        marker = root / ".git"
+        if not marker.is_file():
+            return None                     # an ordinary checkout: `.git` is a directory, and the
+                                            # read-only bind of `/` already covers it
+        text = marker.read_text(encoding="utf-8", errors="replace")[:4096].strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    try:
+        private = Path(text.split(":", 1)[1].strip())
+        if not private.is_absolute():
+            private = root / private
+        private = private.resolve(strict=False)
+        # `commondir` is how a worktree names the repository it shares (usually `../..`). Binding
+        # the common directory covers the worktree's own private directory, which lives inside it.
+        commondir = private / "commondir"
+        if commondir.is_file():
+            value = commondir.read_text(encoding="utf-8", errors="replace")[:4096].strip()
+            if value:
+                shared = Path(value)
+                return (shared if shared.is_absolute() else private / shared).resolve(strict=False)
+        return private
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
 def _mask_with_workspace_link(argv: list[str], masked: Path, root: Path) -> None:
     """Mask a sensitive tree; reconstruct an in-tree workspace as a /mnt link."""
     if not masked.is_absolute() or not masked.exists() or masked == Path("/"):
@@ -339,6 +378,14 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             if candidate not in seen:
                 seen.add(candidate)
                 _mask_with_workspace_link(argv, candidate, root)
+        # AFTER the masks, so this re-exposes the one path inside them that a delegated child
+        # cannot work without. Read-only, and `.git` ONLY: binding the whole source repository
+        # would hand the child back exactly the ignored files -- `.env`, `node_modules` -- that its
+        # worktree deliberately does not have. That the child therefore cannot commit is correct
+        # and deliberate: DGC integrates a sub-task by reading its working tree, never its commits.
+        shared_git = _worktree_git_common_dir(root)
+        if shared_git is not None and shared_git.is_dir() and not _inside(shared_git, root):
+            argv += ["--ro-bind", str(shared_git), str(shared_git)]
         argv += [
             "--dir", "/tmp/dgc-home", "--proc", "/proc", "--dev", "/dev",
             "--chdir", "/mnt", "/bin/bash", "-o", "pipefail", "-c", command,
@@ -364,6 +411,11 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             profile.append(f'(deny file-read* (subpath "{q(home)}"))')
         if hidden:
             profile.append(f'(allow file-read* (subpath "{q(root)}"))')
+            # The same re-exposure as the Linux arm, for the same reason: a task worktree's `.git`
+            # is a pointer into the source repository, which the rules above have just hidden.
+            shared_git = _worktree_git_common_dir(root)
+            if shared_git is not None and shared_git.is_dir() and not _inside(shared_git, root):
+                profile.append(f'(allow file-read* (subpath "{q(shared_git)}"))')
         if not network:
             profile.append("(deny network*)")
         return [str(executable), "-p", "".join(profile),

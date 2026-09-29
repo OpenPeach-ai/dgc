@@ -2635,6 +2635,16 @@ tools (`read_file`, `edit_file`, …), and does not wrap a delegated subscriptio
 through. Other non-baseline host variables are withheld; DGC still supplies a small safe
 baseline plus sandbox-specific home, temporary, and runtime paths.
 
+## Sandboxed sub-agents
+
+A delegated sub-agent works in a private Git worktree whose `.git` is a pointer into your
+repository, so the repository directory is re-exposed **read-only** inside the sandbox — otherwise
+the pointer dangles and the child cannot run one git command. It gets `.git` only, never the
+repository's working tree: the ignored files its worktree deliberately does not have (`.env`,
+`node_modules`) stay out of reach, and so does your own uncommitted work. A sandboxed sub-agent can
+therefore read history, run `git status` and `git diff`, and **cannot commit** — which is
+deliberate, because DGC integrates a sub-task by reading its working tree, never its commits.
+
 The Python code-action is not covered by `/sandbox`. MCP server processes start unsandboxed in
 the workspace — treat a configured server command as a trusted executable.
 """.strip()),
