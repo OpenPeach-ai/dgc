@@ -1594,6 +1594,9 @@ class Backend:
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._foreground_worker: threading.Thread | None = None
+        # Reading a package is NOT a foreground operation. It runs while a turn runs, and it must
+        # not occupy the slot prompts are refused against -- see _start_package_reader.
+        self._package_reader: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
         # ordered (prompt, images, typed context[, kind[, request_id]]). The request id is kept so a
@@ -2484,6 +2487,52 @@ class Backend:
         if not saved:
             self.em.emit("error", message=detail
                          or "todo list cleared, but the session could not be saved")
+
+    def _start_package_reader(self, operation, *, label: str = "package-read") -> bool:
+        """Reserve the package-read slot. Deliberately does NOT wait for the chat turn.
+
+        Reading a package to show someone what it contains is not a change to anything. It writes
+        one capped dict on this Backend and content-addressed files under the plugin cache; nothing
+        a running turn reads, no config, no MCP server, no skills, no workspace lease, no checkpoint.
+        `inspect_plugin` is also the one command in that branch the author never put in
+        `_BUSY_MUTATIONS` -- it was already judged not to be a mutation.
+
+        It still needs a thread. `prepare_plugin` can make two sequential 25-second downloads and
+        extract a 64 MiB archive, and `_dispatch` runs synchronously on the loop that reads stdin,
+        so doing this inline would stall every later command including `cancel`.
+
+        Three things `_start_foreground_worker` does that would be wrong here:
+          * it refuses while `self._worker` is set, which is the bug -- a review someone opened to
+            decide whether to connect an app has nothing to do with the model's turn;
+          * it clears `self.agent.cancelled`, which would swallow a Stop the user had just pressed;
+          * it occupies `_foreground_worker`, which prompts are refused against (headless.py:3750),
+            so a 50-second download would make the composer reject what you typed.
+
+        What it DOES keep is mutual exclusion against another read, so two reviews cannot race for
+        the same `_prepared_plugins` entry. An install still takes the foreground slot, because
+        installing is a change; this is the read that precedes it.
+        """
+        with self._turn_state_lock():
+            if getattr(self, "_package_reader", None) is not None:
+                return False
+
+            def run():
+                current = threading.current_thread()
+                terminal = None
+                try:
+                    terminal = operation()
+                finally:
+                    with self._turn_state_lock():
+                        if self._package_reader is current:
+                            self._package_reader = None
+                if callable(terminal):
+                    terminal()
+
+            worker = threading.Thread(target=run, daemon=True,
+                                      name=f"dgc-headless-{label[:32]}")
+            self._package_reader = worker
+            worker.start()
+            return True
 
     def _start_foreground_worker(self, operation, *, label: str = "operation") -> bool:
         """Reserve a non-prompt foreground slot while stdin decisions/cancellation stay live."""
@@ -4865,10 +4914,22 @@ class Backend:
                          context_size=self._context_window_size(),
                          busy=self._busy() or bool(getattr(self, "_queue", None)),
                          **_request_fields(request_id))
-        elif t in {"inspect_plugin", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin"}:
+        elif t == "inspect_plugin":
+            # Reading a package runs DURING a turn. Someone opening the review for an app connector
+            # to decide whether to connect it was told "Wait for the current turn or plugin
+            # operation before changing packages" -- they had changed nothing and asked to change
+            # nothing. Codex draws the same line: its analog is its least-serialized RPC, and the
+            # only thing it blocks on a running turn is a change to what that turn is ALLOWED to do.
+            if not self._start_package_reader(lambda: self._plugin_operation(cmd), label="plugin-read"):
+                self.em.emit("command_rejected", command=t, reason="busy", request_id=cmd.get("request_id"),
+                             message="Another package is being read. Try again in a moment.")
+        elif t in {"uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin"}:
+            # These five change what DGC can run, so they wait. All five are in `_BUSY_MUTATIONS`,
+            # which refuses them far earlier with its own wording whenever anything is busy -- so
+            # the rejection below is a backstop for a slot taken between that check and this one.
             if not self._start_foreground_worker(lambda: self._plugin_operation(cmd), label="plugin-operation"):
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd.get("request_id"),
-                             message="Wait for the current turn or plugin operation before changing packages.")
+                             message=f"'{t}' is unavailable while a turn is running; cancel or wait")
         elif t == "list_plugin_marketplaces":
             terminal = self._plugin_operation(cmd)
             if callable(terminal): terminal()

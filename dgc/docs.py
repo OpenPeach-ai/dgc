@@ -591,6 +591,11 @@ DGC actually *verified* — which is often less than "it works": a package whose
 but whose authenticated tools were never exercised says exactly that. **Manage marketplaces** adds
 another catalog, and the filter separates DGC curated from Personal and from anything you added.
 
+Opening a package to read what it contains works while DGC is working — a review tells you what
+something would install, and reading is not installing. Installing it, removing it, and adding or
+refreshing a marketplace wait for the turn to finish, because those change what DGC can run while
+it is running.
+
 The terminal does the same work without a browser:
 
 ```text
