@@ -3505,6 +3505,24 @@ class Agent(GoalLifecycle):
             return []
         return [str(item).strip() for item in configured if str(item).strip()]
 
+    def _subagent_decision_line(self) -> list[str]:
+        """What a sub-agent should do with a decision it cannot make.
+
+        It cannot ask anyone: `ask_user` and `propose_options` are stripped from its catalog and
+        refused at execution, and its only channel is the result it returns. The existing guidance
+        that says so fires only through the options path, so a child that is simply unsure -- with
+        no options phrasing anywhere in its brief -- was told nothing, and guessing is the one thing
+        it must not do silently. Empty for the main agent, which can just ask.
+        """
+        if not self.depth:
+            return []
+        return ["- You cannot ask anyone anything: you have no channel to the user, and your result "
+                "is the only thing that comes back. If you hit a decision you genuinely cannot make "
+                "-- an ambiguity in the task, a choice between real alternatives -- do NOT guess and "
+                "carry on. Do the parts that do not depend on it, then stop and return the question "
+                "with the options you were choosing between and what you would pick. A returned "
+                "question is a useful result; a silent guess is not."]
+
     def _workspace_lines(self) -> list[str]:
         """Environment lines describing an isolated checkout's differences from the project.
 
@@ -3583,6 +3601,7 @@ class Agent(GoalLifecycle):
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
             "- Read a file before editing it. Make minimal, focused changes to EXISTING content.",
             *navigation_guidance,
+            *self._subagent_decision_line(),
             "- Do exactly what was asked — no more. Don't add unrequested features, options, "
             "abstractions, or defensive scaffolding; the simplest change that satisfies the request wins.",
             "- Implementing a stub or writing a new/near-empty file? Write the whole file with "
@@ -8731,8 +8750,15 @@ class Agent(GoalLifecycle):
             if integration.merged:
                 names = ", ".join(integration.merged[:10])
                 more = f" (+{len(integration.merged) - 10} more)" if len(integration.merged) > 10 else ""
+                # WHY they changed, not just that they did. A `git pull`, `checkout` or `rebase`
+                # during the delegation moves every one of these files, and the state alone cannot
+                # tell that apart from a hand edit — so DGC accused the user of editing files
+                # nobody had touched, on a completely ordinary action.
+                cause = ("the branch moved under the sub-agent — a pull, checkout or rebase while "
+                         "it ran" if integration.head_moved
+                         else "someone outside this task edited them")
                 reconciled = (f" {names}{more} changed in the working tree while the sub-agent ran"
-                              f" — someone outside this task edited them — so its edits were merged"
+                              f" — {cause} — so its edits were merged"
                               f" with those changes rather than written over them. Say so in your"
                               f" answer, and suggest the user review those files.")
             return _TaskOutcome(
@@ -8749,8 +8775,11 @@ class Agent(GoalLifecycle):
             reconciled = ""
             if integration.merged:
                 names = ", ".join(integration.merged[:10])
+                cause = ("the branch moved under the sub-agent — a pull, checkout or rebase while "
+                         "it ran" if integration.head_moved
+                         else "someone outside this task edited them")
                 reconciled = (f" {names} changed in the working tree while the sub-agent ran"
-                              f" — someone outside this task edited them — so its edits were merged"
+                              f" — {cause} — so its edits were merged"
                               f" with those changes rather than written over them.")
             return _TaskOutcome(
                 f"Sub-task '{description}' partly integrated. Applied {len(integration.paths)} "

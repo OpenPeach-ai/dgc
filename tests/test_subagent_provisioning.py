@@ -151,6 +151,22 @@ class TheChildIsToldBeforeItRunsAnythingTest(unittest.TestCase):
         self.assertIn("node_modules", prompt)
         self.assertIn(".venv", prompt)
 
+    def test_a_sub_agent_is_told_what_to_do_with_a_question_it_cannot_ask(self) -> None:
+        """It has no channel to anyone: `ask_user` and `propose_options` are stripped from its
+        catalog and refused at execution. The guidance that said so fired only through the options
+        path, so a child that was simply unsure was told nothing — and guessing silently is the one
+        thing it must not do."""
+        agent = self.agent()
+        agent.depth = 1
+        prompt = agent.system_prompt()
+        self.assertIn("You cannot ask anyone anything", prompt)
+        self.assertIn("return the question", prompt)
+        self.assertIn("do NOT guess", prompt)
+
+    def test_the_main_agent_is_not_told_that_it_cannot_ask(self) -> None:
+        self.assertNotIn("You cannot ask anyone anything", self.agent().system_prompt(),
+                         "the main agent can just ask")
+
     def test_a_shared_directory_is_flagged_as_not_isolated(self) -> None:
         agent = self.agent()
         agent._shared_dirs = ["node_modules"]

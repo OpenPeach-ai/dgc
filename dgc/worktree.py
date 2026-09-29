@@ -843,6 +843,12 @@ class TaskIntegration:
     # `error` silently swallows the message that explains a refusal. That is what happened when it
     # was added in the middle, and TheSafetyInvariantTest caught it.
     merged: list[str] = field(default_factory=list)
+    # True when the repository's HEAD moved while the sub-agent ran -- a pull, a checkout, a
+    # rebase. Every file the delegation touched then differs from its recorded baseline, which is
+    # indistinguishable from a hand edit by the state alone, and DGC told the user "someone outside
+    # this task edited them" about files nobody had touched. AFTER `merged`, for the same reason
+    # `merged` is after `error`.
+    head_moved: bool = False
 
 
 @dataclass
@@ -1009,6 +1015,22 @@ class TaskWorkspace:
             else:
                 self.linked.append(rel)
 
+    def _head_moved(self) -> bool:
+        """Did the repository's HEAD move while the sub-task ran?
+
+        A `git pull`, `checkout` or `rebase` during a delegation changes every file the delegation
+        touched, and from the file state alone that is indistinguishable from the user editing them
+        by hand -- so DGC reported "someone outside this task edited them" about files nobody had
+        touched, on a completely ordinary action. One `rev-parse` tells the two apart. Best-effort:
+        a failure reports False, because a wrong accusation is worse than a missing note.
+        """
+        try:
+            head = _git(["rev-parse", "HEAD"], self.repo)
+        except Exception:
+            return False
+        return head.returncode == 0 and bool(head.stdout.strip()) \
+            and head.stdout.strip() != self.base_commit
+
     def _expected(self, repo_path: str) -> _FileState:
         return self.baseline.get(repo_path) or _head_state(self.repo, self.base_commit, repo_path)
 
@@ -1126,11 +1148,15 @@ class TaskWorkspace:
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("conflict", display, shown, detail)
 
-        # A multi-file delta is not atomic. Each file lands atomically (_replace_state, :432) but the
-        # loop below is not, the except-rollback cannot run if the process is gone, and until now
-        # nothing on disk said an integration was in flight. Leave a breadcrumb first, so a torn
-        # apply is visible to `/tasks` instead of silent. Evidence, not a resume: re-applying it is
-        # refused, because the files already written no longer match the recorded baseline.
+        # A multi-file delta is not atomic. Each file lands atomically (_replace_state) but the loop
+        # below is not, and the rollback below cannot run if the process is gone. Leave a breadcrumb
+        # first, so a torn apply is visible to `/tasks` instead of silent.
+        #
+        # It IS a resume, and this comment used to say it was not: `/tasks apply` on the record
+        # re-runs the loop, and the `satisfied` branch recognises the paths the parent already holds
+        # and skips them, so the delta lands completely. Measured end to end after a real torn
+        # apply. (The same comment cited `_replace_state, :432`; line citations rot, so it names
+        # the function now.)
         self.retain("integration in progress; DGC stopped while applying this delta", changed)
         applied: list[str] = []
         try:
@@ -1158,13 +1184,22 @@ class TaskWorkspace:
                 if callable(note):
                     note(str(target))
                 applied.append(repo_path)
-        except Exception as exc:
+        except BaseException as exc:
+            # BaseException, not Exception. Ctrl-C and SystemExit are not Exceptions, so a
+            # KeyboardInterrupt between two files skipped this rollback entirely and left the
+            # user's checkout half-applied -- measured: three files carrying the child's bytes and
+            # two still at base, with no handler having run. A cancel does NOT come through here
+            # (DGC cancels with a threading.Event), so this only ever catches an interrupt or an
+            # interpreter shutdown, and it re-raises below rather than swallowing either.
             rollback_errors = []
             for repo_path in reversed(applied):
                 try:
                     _replace_state(_checked_target(self.repo, repo_path), prior[repo_path])
                 except Exception as rollback_exc:
                     rollback_errors.append(f"{repo_path}: {rollback_exc}")
+            if not isinstance(exc, Exception):
+                self.retain(f"integration interrupted: {type(exc).__name__}", changed)
+                raise
             detail = f"integration failed: {exc}"
             if rollback_errors:
                 detail += "; rollback incomplete: " + ", ".join(rollback_errors[:8])
@@ -1182,7 +1217,8 @@ class TaskWorkspace:
                       f"{len(applied)} path(s) still applied")
             metadata_error = self.retain(reason, conflicts)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("partial", landed, held, detail, merged=reconciled)
+            return TaskIntegration("partial", landed, held, detail, merged=reconciled,
+                                   head_moved=self._head_moved())
         # The delta landed: drop the in-flight breadcrumb BEFORE cleanup, so a worktree that cannot
         # be removed does not leave a retained row for work that is already applied (_cleanup_task
         # keeps the metadata on partial failure, by design).
@@ -1192,6 +1228,7 @@ class TaskWorkspace:
             pass
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, merged=reconciled,
+                               head_moved=self._head_moved(),
                                cleanup_error=cleanup_error)
 
     def cleanup(self) -> str | None:
@@ -1582,6 +1619,15 @@ class RetainedTask:
                 "worktree": str(self.path), "legacy": self.legacy,
                 "available": self.available, "problem": self.problem}
 
+    def _head_moved(self) -> bool:
+        """See TaskWorkspace._head_moved -- the retained path reports the same distinction."""
+        try:
+            head = _git(["rev-parse", "HEAD"], self.repo)
+        except Exception:
+            return False
+        return head.returncode == 0 and bool(head.stdout.strip()) \
+            and head.stdout.strip() != self.base_commit
+
     def _display_path(self, repo_path: str) -> str:
         return str(Path(repo_path).relative_to(self.project_rel)) if self.project_rel != Path(".") else repo_path
 
@@ -1686,6 +1732,10 @@ class RetainedTask:
         # `satisfied` paths are already in place, so they are neither applied nor held.
         appliable = [path for path in changed
                      if path not in conflicts and path not in satisfied]
+        # The same breadcrumb the live path leaves, and this path had none. It is the retry a user
+        # drives by hand AFTER something already went wrong once, so a tear here is the one most
+        # likely to be mistaken for the original failure. `/tasks` shows it either way.
+        self.retain("retained integration in progress; DGC stopped while applying this delta", changed)
         applied: list[str] = []
         try:
             for repo_path in appliable:
@@ -1712,13 +1762,18 @@ class RetainedTask:
                 if callable(note):
                     note(str(target))
                 applied.append(repo_path)
-        except Exception as exc:
+        except BaseException as exc:
+            # See TaskWorkspace.integrate: an interrupt is not an Exception, and skipping the
+            # rollback for it leaves the checkout half-applied.
             rollback_errors = []
             for repo_path in reversed(applied):
                 try:
                     _replace_state(_checked_target(self.repo, repo_path), prior[repo_path])
                 except Exception as rollback_exc:
                     rollback_errors.append(f"{repo_path}: {rollback_exc}")
+            if not isinstance(exc, Exception):
+                self.retain(f"retained integration interrupted: {type(exc).__name__}", changed)
+                raise
             detail = f"retained integration failed: {exc}"
             if rollback_errors:
                 detail += "; rollback incomplete: " + ", ".join(rollback_errors[:8])
@@ -1732,9 +1787,11 @@ class RetainedTask:
                       f"{len(applied)} path(s) still applied")
             metadata_error = self.retain(reason, conflicts)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("partial", landed, held, detail, merged=reconciled)
+            return TaskIntegration("partial", landed, held, detail, merged=reconciled,
+                                   head_moved=self._head_moved())
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, merged=reconciled,
+                               head_moved=self._head_moved(),
                                cleanup_error=cleanup_error)
 
 
