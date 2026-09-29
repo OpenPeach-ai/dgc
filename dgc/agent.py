@@ -1886,6 +1886,10 @@ class Agent(GoalLifecycle):
         self._agent_defs = {}
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
         self._metrics_parent: Agent | None = None  # isolated child counters roll into the root session
+        # Per-turn cost cap. `_budget_turn` names the turn whose ledger this agent's generations are
+        # charged to; a sub-agent inherits its parent's and keeps it after that turn has ended.
+        self._budget_turn = 0
+        self._turn_token_spend: dict[int, int] = {}   # root only: turn -> tokens spent, bounded
         # Whether an edit must be snapshotted before it lands. True everywhere a rewind can reach:
         # a top-level turn, and a sub-agent sharing this checkout (it records into the parent's
         # point). A sub-agent in its own disposable worktree sets it False — nothing there is
@@ -2188,8 +2192,14 @@ class Agent(GoalLifecycle):
             raise MCPInputError("sampled response cancelled before disclosure")
         return response
 
-    def _record_usage(self, raw_usage: dict | None, request_reason: object = "other") -> None:
+    def _record_usage(self, raw_usage: dict | None, request_reason: object = "other",
+                      *, budget_turn: int | None = None) -> None:
         usage = normalize_usage(raw_usage)
+        # Which turn's cost ledger this generation belongs to. It travels UP with the rollup rather
+        # than being read at the root, because a detached sub-agent outlives the turn that started
+        # it: read at the root, its tokens would be charged to whatever turn happens to be running
+        # when it finally answers, and the turn that actually asked for the work would look free.
+        turn = self._budget_turn if budget_turn is None else int(budget_turn)
         self._eta_request(usage)
         if (getattr(self, "_goal_running", False)
                 and not (usage["input_tokens"] or usage["output_tokens"])):
@@ -2211,7 +2221,66 @@ class Agent(GoalLifecycle):
             # The child retains its detailed trajectory in its private counters. The root owns the
             # aggregate session and deliberately records only that this generation belonged to an
             # isolated sub-agent, rather than pretending it was part of the parent's foreground loop.
-            parent._record_usage(usage, "subagent")
+            parent._record_usage(usage, "subagent", budget_turn=turn)
+        else:
+            # The root, and the only place the per-turn ledger is written -- charging at every level
+            # would count one generation once per ancestor.
+            self._charge_turn_tokens(turn, usage)
+
+    # --------------------------------------------------------- per-turn cost cap ---
+    # Tokens, not requests or wall-clock: a turn's cost is what the user is billed or what their
+    # local GPU actually spends, and neither a request count nor a clock tracks that. The clock
+    # (`turn_budget_s`) stays as the secondary control it already is -- it bounds a turn that HANGS,
+    # which a token budget cannot see.
+    _TURN_LEDGER_KEEP = 8      # turns of history; a detached child can still be charging an old one
+
+    def _charge_turn_tokens(self, turn: int, usage: dict) -> None:
+        """Add one generation's tokens to the root's ledger for the turn that asked for the work."""
+        spent = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+        if spent <= 0:
+            return
+        with self._usage_lock:
+            ledger = self._turn_token_spend
+            ledger[turn] = ledger.get(turn, 0) + spent
+            # Bounded, because a session runs for as long as the user keeps it open. Newest kept:
+            # an old turn's entry only still matters while a detached child is charging it, and
+            # such a child cannot be older than the jobs map allows.
+            for stale in sorted(ledger)[:-self._TURN_LEDGER_KEEP]:
+                ledger.pop(stale, None)
+
+    def _budget_root(self) -> "Agent":
+        root = self
+        seen = 0
+        while seen < 16:
+            parent = getattr(root, "_metrics_parent", None)
+            if parent is None or parent is root:
+                return root
+            root, seen = parent, seen + 1
+        return root
+
+    def turn_token_budget(self) -> int:
+        """Tokens this turn may spend, sub-agents included. 0 (the default) means no cap."""
+        try:
+            return max(0, int(self.config.get("turn_token_budget", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def turn_tokens_spent(self) -> int:
+        """Tokens charged to THIS turn so far, including every sub-agent it started."""
+        root = self._budget_root()
+        with root._usage_lock:
+            return int(root._turn_token_spend.get(self._budget_turn, 0))
+
+    def turn_budget_exceeded(self) -> bool:
+        budget = self.turn_token_budget()
+        return bool(budget) and self.turn_tokens_spent() >= budget
+
+    def turn_budget_refusal(self) -> str:
+        budget = self.turn_token_budget()
+        return (f"error: this turn has spent {self.turn_tokens_spent():,} of its "
+                f"{budget:,}-token budget, so no further sub-task will be started. Everything "
+                f"already done is kept -- finish with what you have and report it. Raise or clear "
+                f"the cap with `/set turn_token_budget <tokens>` (0 removes it).")
 
     def _record_activity(self, name: str, edit_failed: bool = False) -> None:
         with self._usage_lock:
@@ -4100,6 +4169,10 @@ class Agent(GoalLifecycle):
             # state. Serialized frontends clear at dequeue and pass reset_cancel=False, preserving
             # a cancel that races with worker startup.
             if self.depth == 0:
+                # A fresh ledger entry per foreground turn. Detached children started by an
+                # EARLIER turn keep charging that turn, so their spend is never mistaken
+                # for this one's.
+                self._budget_turn += 1
                 if reset_cancel:
                     self.cancelled.clear()
                 self._advance_todo_clear()
@@ -4394,6 +4467,10 @@ class Agent(GoalLifecycle):
                             "timeout": False, "cancelled": False, "events": 0,
                             "seconds": 0.0, "session_id": "", "persisted": False}
             if self.depth == 0:
+                # A fresh ledger entry per foreground turn. Detached children started by an
+                # EARLIER turn keep charging that turn, so their spend is never mistaken
+                # for this one's.
+                self._budget_turn += 1
                 if reset_cancel:
                     self.cancelled.clear()
                 # A delegated CLI never saw DGC's checklist, so it gets no note, but its turn still
@@ -5903,6 +5980,23 @@ class Agent(GoalLifecycle):
                         "completion withheld — the turn ended before verification")
                 self._last_turn_error = "The turn reached its time limit before completion."
                 return False
+            if self.turn_budget_exceeded():
+                # Deliberately NOT the time path above. Out of time, a mid-grind kill is coming and
+                # restoring the last green state is the only way the user keeps any credit. Out of
+                # tokens, nothing is going to kill anything: the edits on disk were paid for, and
+                # rolling them back would spend the budget and hand back nothing. So this stops
+                # asking for model output and leaves the checkout exactly as the work left it.
+                budget_tokens = self.turn_token_budget()
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the token budget was reached before verification.]",
+                        "completion withheld — the token budget was reached before verification")
+                self.ui.info(f"◆ token budget reached ({self.turn_tokens_spent():,} of "
+                             f"{budget_tokens:,}) — stopping; every change made is kept")
+                self._last_turn_error = (
+                    f"The turn reached its {budget_tokens:,}-token budget before completion. "
+                    f"The work done so far is on disk and in /rewind.")
+                return False
             steered = self._drain_steer(
                 close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
             if steered:
@@ -6929,6 +7023,22 @@ class Agent(GoalLifecycle):
                                  "and the next step in_progress. Keep unfinished steps pending "
                                  "or blocked; do not repeat completed work. Printed JSON does "
                                  "not update the checklist.")
+            token_budget = self.turn_token_budget()
+            if token_budget:                    # capped turn → say so before the cap stops the work
+                used_tokens = self.turn_tokens_spent() / token_budget
+                if used_tokens >= 0.85 and "tokens85" not in budget_nudged:
+                    budget_nudged.update(("tokens70", "tokens85"))
+                    reminders.append(
+                        f"You have spent {self.turn_tokens_spent():,} of this turn's "
+                        f"{token_budget:,}-token budget. Land the remaining edits NOW and verify "
+                        "once. Do not delegate further work — new sub-tasks are refused past the "
+                        "budget, and this turn will stop requesting model output at 100%.")
+                elif used_tokens >= 0.70 and "tokens70" not in budget_nudged:
+                    budget_nudged.add("tokens70")
+                    reminders.append(
+                        f"This turn's token budget is {int(used_tokens * 100)}% spent "
+                        f"({self.turn_tokens_spent():,} of {token_budget:,}, sub-agents included). "
+                        "Stop exploring and commit to the fix.")
             if deadline is not None:            # budgeted turn → nudge the model to triage as the clock runs down
                 used = 1.0 - max(0.0, (deadline - time.monotonic()) / budget)
                 if used >= 0.85 and 85 not in budget_nudged:
@@ -7276,6 +7386,14 @@ class Agent(GoalLifecycle):
             # the user nothing, so a sub-agent that kept trying to delegate looked idle. The
             # executor's own copy of this check has always rendered a row.
             refusal = self.depth_cap_refusal()
+            self.ui.tool_denied(name, display_args, refusal, call_id)
+            return refusal
+
+        # The cost cap is admission-only, on purpose. A child already running is left alone and its
+        # result is still integrated: stopping work that is nearly done spends the tokens and throws
+        # away what they bought. What the cap refuses is STARTING more.
+        if name == "task" and self.turn_budget_exceeded():
+            refusal = self.turn_budget_refusal()
             self.ui.tool_denied(name, display_args, refusal, call_id)
             return refusal
 
@@ -8334,6 +8452,7 @@ class Agent(GoalLifecycle):
                     sub._external_checkpoints = (
                         getattr(self, "_external_checkpoints", None) or self.checkpoints)
                 sub._metrics_parent = self
+                sub._budget_turn = self._budget_turn   # the turn that asked pays for the work
                 # One link from a child to the step that started it, shared by every 0.40 feature that
                 # attributes a child's work (the agents list, viewed images).
                 sub._parent_agent = self
@@ -9304,6 +9423,7 @@ class Agent(GoalLifecycle):
         # was never recorded, and a divergent number there is a fan-out the gate did not authorise.
         if (len(calls) < 2 or len(calls) > _MAX_PARALLEL_TASK_BATCH or limit < 2
                 or self.depth >= self.max_subagent_depth() or self.mode != "auto"
+                or self.turn_budget_exceeded()   # serial path: one visible refusal per call
                 or self.config.get("hooks") or self.cancelled.is_set()
                 or any(call.name != "task" or "_unparsed" in call.arguments for call in calls)
                 or repo_root(self.config.project_root) is None):

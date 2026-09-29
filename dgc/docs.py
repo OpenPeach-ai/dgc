@@ -3234,6 +3234,14 @@ when you want to override it.
   repeated-call and no-progress guards remain active independently.
 - `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
   reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
+- `turn_token_budget` (default `0`, meaning no limit) — token budget for a turn, counting every
+  sub-agent the turn started, however deep and whether or not it is still running in the background.
+  A detached sub-agent is charged to the turn that asked for it, not to whichever turn is running
+  when it finally reports. At 70% and 85% the model is told to converge; past 100% a new `task` is
+  refused and the turn stops requesting model output. Nothing is rolled back: unlike the wall-clock
+  limit, which restores the last test-passing state because a kill is coming, the tokens already
+  spent bought the edits on disk and discarding them would pay for nothing. Use this, not
+  `turn_budget_s`, to cap what a turn COSTS; `turn_budget_s` bounds a turn that HANGS.
 - `request_timeout` (default `1800`) — hard ceiling on socket silence, including the wait for
   response headers; an active response can take longer overall. The stall watcher below
   normally acts first.

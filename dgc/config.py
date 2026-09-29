@@ -386,6 +386,7 @@ DEFAULTS: dict = {
                                                 #   runs until completion/cancel/deadline. Set >0 only as an
                                                 #   explicit emergency backstop; no-progress guards still apply.
     "turn_budget_s": 0,                         # wall-clock seconds per turn before DGC triages to finish
+    "turn_token_budget": 0,                     # tokens per turn, sub-agents included, before DGC triages
                                                 #   (0 = OFF: no time pressure — for slow local models). When
                                                 #   >0 (e.g. a benchmark cap), DGC nudges itself to land+verify
                                                 #   the fix as the clock runs down and preserves the last
