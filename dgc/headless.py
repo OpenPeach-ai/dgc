@@ -2164,13 +2164,18 @@ class Backend:
                     shutting_down = getattr(self.agent, "stopping", False) is True
                     reason = ("error" if shutting_down else "cancelled") if cancelled else (
                         "error" if failed else "completed")
-                    # A question still open when the turn ends is resolved, never quietly dropped.
-                    # Codex expires one after thirty seconds with no record at all, so neither side
-                    # knows it was ever asked; here the model is told and every card is closed.
-                    try:
-                        self.agent.expire_open_asks()
-                    except Exception:
-                        pass
+                    # An open question deliberately SURVIVES the turn that asked it. It used to be
+                    # expired right here, which closed the card the moment the model stopped
+                    # talking -- and a user still reading three options watched them collapse into
+                    # a one-line "Not answered" they could not reopen. It is expired at the start
+                    # of the next turn instead (Agent.run_turn), which is the point where the user
+                    # has actually moved on.
+                    #
+                    # The comment that used to justify this line said Codex expires one after
+                    # thirty seconds with no record at all. That is wrong on both counts: Codex's
+                    # thirty-second timer is display-only, armed only while its picker is
+                    # collapsed and cancelled by any keypress, and its one real expiry knob is
+                    # deprecated with every caller passing None.
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
@@ -3629,21 +3634,32 @@ class Backend:
             tagged = cmd.get("answers")
             if isinstance(tagged, list) and tagged:
                 resolved = 0
+                deferred = ""
                 for entry in tagged[:4]:
                     ask_id = str((entry or {}).get("ask_id") or "") if isinstance(entry, dict) else ""
-                    if ask_id and self.agent.resolve_open_ask(ask_id, "answered", text):
+                    if not ask_id:
+                        continue
+                    if self.agent.resolve_open_ask(ask_id, "answered", text):
                         resolved += 1
+                    elif not deferred:
+                        # Still open, but its turn has ended, so there is no running turn to steer
+                        # the answer into. That is the ORDINARY case now that a card outlives its
+                        # turn, and it used to end here with the answer discarded.
+                        deferred = self.agent.defer_open_ask(ask_id, text)
                 if resolved:
                     # No prompt_accepted here: ask_resolved (emitted by resolve_open_ask) already
                     # tells every client the question closed and with what. Widening that event's
                     # state enum would change an existing event, which is the one change an
                     # un-opted-in client cannot survive.
                     return
-                self.em.emit("command_rejected", command=t, reason="unknown_ask",
-                             message="no open question with that id; it was already answered, "
-                                     "skipped, or the turn ended",
-                             **_request_fields(request_id))
-                return
+                if not deferred:
+                    self.em.emit("command_rejected", command=t, reason="unknown_ask",
+                                 message="no open question with that id; it was already answered "
+                                         "or skipped",
+                                 **_request_fields(request_id))
+                    return
+                # Falls through as an ordinary prompt, quoting the question it answers.
+                text = deferred
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
                              message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",

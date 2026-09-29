@@ -8403,8 +8403,17 @@
       if (event.key === "Escape") { event.preventDefault(); foldAsk(ask); }
     };
     folded.onclick = () => unfoldAsk(ask);
-    // Typing is a commitment: once there are words in the box it stops folding under you.
-    input.oninput = () => clearTimeout(ask.timer);
+    // ANY interaction stops it folding under you, not just typing. Typing was the only thing that
+    // cancelled this timer, so a user reading several option descriptions -- which is most of a
+    // minute when each has a line of explanation -- had the body go `display: none` with the
+    // pointer over the option they were about to click. Reading is as much a commitment as typing,
+    // and pointing at the card is the only evidence of reading there is. This is what Codex does
+    // too: any keypress or paste snoozes its picker's timer before anything else is processed.
+    const snooze = () => clearTimeout(ask.timer);
+    input.oninput = snooze;
+    body.addEventListener("pointerenter", snooze);
+    body.addEventListener("pointermove", snooze);
+    body.addEventListener("focusin", snooze);
 
     row.append(folded, body);
     openAsks.set(id, ask);
@@ -8458,8 +8467,14 @@
     ask.row.dataset.outcome = String(ev.outcome || "");
     const said = ev.outcome === "skipped" ? "Skipped" : ev.outcome === "expired" ? "Not answered"
       : "Could not be asked";
-    ask.row.textContent = "";
-    ask.row.appendChild(el("span", "open-ask-settled", `${said}: ${esc(ask.question)}`));
+    // The question and its options STAY. Emptying the row was what made the choices unrecoverable:
+    // a reply that ends "the options are in the picker above" points at one line of text reading
+    // "Not answered", and the three descriptions the user was deciding between are gone from the
+    // session for good. The row is inert from here (main.css makes a settled body
+    // pointer-events: none), but it is still the record of what was offered.
+    ask.row.querySelectorAll(".open-ask-folded").forEach((node) => node.remove());
+    ask.row.insertBefore(el("span", "open-ask-settled", `${said}: ${esc(ask.question)}`),
+                         ask.row.firstChild);
   }
 
   function renderAsked(ev) {

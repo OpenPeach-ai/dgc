@@ -2713,9 +2713,12 @@ class Agent(GoalLifecycle):
                     "propose_options to display the interactive selector, including for a demo "
                     "or test. Put your recommendation first and explain it. A prose list, an "
                     "HTML/Markdown/Python mock, or a file opened in the editor is not the "
-                    "selector — do not write one. After the user answers or dismisses it, "
-                    "continue without asking again. If the user withdraws the request, follow "
-                    "that instead.")
+                    "selector — do not write one INSTEAD of calling the tool. Once the selector "
+                    "has been shown, writing the choices out in your final reply is expected: the "
+                    "selector is a control, not a record, and a reply that says \"the options are "
+                    "in the picker\" leaves nothing behind when it closes. After the user answers "
+                    "or dismisses it, continue without asking again. If the user withdraws the "
+                    "request, follow that instead.")
         if self.depth:
             # Whatever the parent's situation, a sub-agent answers the parent, never the user.
             reason = "you are a sub-agent"
@@ -4185,6 +4188,19 @@ class Agent(GoalLifecycle):
                     self._run_lifecycle_hooks(
                         "SessionStart", {"project": str(self.config.project_root)},
                         cancelled=self.cancelled)
+            # A question still open when the LAST turn ended is expired HERE, not there. Expiring
+            # it at turn end tore the card off the screen while the user was still reading it: an
+            # open ask's lifetime was the turn's lifetime, and the three options and their
+            # descriptions were replaced by a one-line "Not answered". The question outlives the
+            # turn now, and this -- the user has moved on and said something else -- is the moment
+            # it stops being answerable.
+            #
+            # BEFORE the steering window opens, deliberately. `steer()` would accept the note here,
+            # and `_drain_steer` wraps whatever it takes in the envelope that says "The user sent
+            # this WHILE you were working" -- putting DGC's own words in the user's mouth, which is
+            # the defect `message_task` had. Refused, it goes through `_carry_note` and is picked
+            # up by `take_carried_notes()` four lines below, in this same turn.
+            self.expire_open_asks()
             with self._steer_lock:
                 self.steer_queue.clear()        # drop stale interjections from a prior turn
                 self._accepting_steer = True
@@ -7189,8 +7205,10 @@ class Agent(GoalLifecycle):
                      "is no answer yet: carry on with every part of the task that does not depend "
                      "on it, do not guess the answer, and do not ask it again. If they reply it "
                      "arrives as an ordinary message quoting your question. If the turn ends before "
-                     "they answer, say which default you took and repeat the question at the end of "
-                     "your reply, so they can answer it next turn.")
+                     "they answer, close your reply by repeating the question AND every option you "
+                     "offered, each with the one line that tells them apart — the card is not part "
+                     "of your reply and they may be reading the reply without it. Say which default "
+                     "you took if you had to take one.")
     ASK_TOO_MANY = ("error: you already have {n} questions open and unanswered. Wait for those, or "
                     "proceed on your own assumption and say so.")
 
@@ -7294,9 +7312,18 @@ class Agent(GoalLifecycle):
             except Exception:
                 pass
         if outcome in ("skipped", "expired"):
-            went = "skipped it" if outcome == "skipped" else "never answered it"
-            note = (f"[DGC] You asked: \"{question}\" - the user {went}. Decide it yourself and "
-                    f"say what you assumed; do not ask it again this turn.")
+            # "expired" no longer means "the user ignored you". It means they moved on without
+            # using the card -- and the message they moved on WITH is very often the answer,
+            # typed into the composer because the card was gone. The old wording asserted "the
+            # user never answered it" directly above "yes, proceed with A (recommended)", telling
+            # the model to disregard an answer that was right there. A skip is still a real
+            # refusal to answer, so that half keeps its wording.
+            note = (f"[DGC] You asked: \"{question}\" - the user skipped it. Decide it yourself "
+                    f"and say what you assumed; do not ask it again this turn."
+                    if outcome == "skipped" else
+                    f"[DGC] Your question \"{question}\" was never answered through its card. If "
+                    f"what the user says next answers it, follow that; otherwise decide it "
+                    f"yourself and say what you assumed. Either way do not ask it again this turn.")
             if not self.steer(note):
                 # expire_open_asks runs AFTER run_turn has returned, and run_turn's finally has
                 # already closed steering -- so this note was accepted by nobody and the model was
@@ -7305,6 +7332,34 @@ class Agent(GoalLifecycle):
                 self._carry_note(note.replace("do not ask it again this turn",
                                               "do not ask it again"))
         return True
+
+    def defer_open_ask(self, ask_id: str, answer: str) -> str:
+        """Close a question whose turn has already ended, and return the prompt its answer makes.
+
+        `resolve_open_ask` steers the answer into a RUNNING turn and refuses once that turn's
+        steering window has shut -- which is the state a card that outlives its turn is normally
+        clicked in. The backend used to answer that refusal with `command_rejected{unknown_ask}`
+        and return without queueing anything, so a click a moment after the model stopped talking
+        did nothing at all and the option the user chose was thrown away.
+
+        The same click becomes an ordinary prompt here, carrying the question it answers, so the
+        answer reads the same way in the transcript whenever it was given. Returns "" for an id
+        nobody is waiting on, so the caller can still refuse one it has never heard of.
+        """
+        asks = self._open_asks()
+        record = asks.get(str(ask_id or ""))
+        text = str(answer or "").strip()
+        if record is None or not text:
+            return ""
+        question = record["question"]
+        asks.pop(str(ask_id or ""), None)
+        emit = getattr(self.ui, "ask_resolved", None)
+        if callable(emit):
+            try:
+                emit(ask_id, "answered", question, text, record.get("call_id"))
+            except Exception:
+                pass
+        return f"> {question}\n\n{text}"
 
     def _carry_note(self, text: str) -> None:
         """Hold a line for the next turn, for when steering is already closed."""

@@ -184,13 +184,38 @@ class EndingTest(unittest.TestCase):
         self.assertIn("say what you assumed", note)
         self.assertIn("Which staging host?", note, "the model is reminded what it asked")
 
-    def test_an_unanswered_question_is_resolved_at_turn_end_not_forgotten(self):
+    def test_an_unanswered_question_is_resolved_when_the_user_moves_on_not_forgotten(self):
         a = agent()
         ask(a, question="Which staging host?")
         a.expire_open_asks()
         self.assertEqual(a.ui.resolved[0]["outcome"], "expired")
-        self.assertIn("never answered it", a.steered[0])
-        self.assertEqual(a._open_asks(), {}, "nothing is left open after the turn")
+        self.assertIn("Which staging host?", a.steered[0], "the model is reminded what it asked")
+        self.assertIn("do not ask it again", a.steered[0])
+        self.assertEqual(a._open_asks(), {}, "nothing is left open once it has expired")
+
+    def test_expiry_never_tells_the_model_the_user_did_not_answer(self):
+        """The note rides in front of the user's NEXT message, and that message is very often the
+        answer -- typed into the composer. A live session shows this verbatim:
+
+            [DGC] You asked: "..." - the user never answered it. Decide it yourself ...
+            yes, proceed with A (recommended).
+
+        DGC contradicted the user in the user's own voice. A skip is a real refusal and keeps its
+        wording; an expiry must not assert something it cannot know.
+        """
+        a = agent()
+        ask(a, question="Which staging host?")
+        a.expire_open_asks()
+        note = a.steered[0]
+        self.assertNotIn("the user never answered", note)
+        self.assertIn("If what the user says next answers it, follow that", note,
+                      "the model must be told the answer may be in the very next message")
+
+    def test_a_skip_still_says_plainly_that_they_declined(self):
+        a = agent()
+        ask(a, question="Which staging host?")
+        a.resolve_open_ask(a.ui.shown[0]["ask_id"], "skipped")
+        self.assertIn("the user skipped it", a.steered[0])
 
     def test_expiry_is_a_no_op_when_everything_was_answered(self):
         a = agent()
@@ -400,7 +425,7 @@ class UnansweredReachesTheModelTest(unittest.TestCase):
         self.assertEqual(a.ui.resolved[0]["outcome"], "expired")
         carried = a.take_carried_notes()
         self.assertEqual(len(carried), 1, "the note was dropped instead of carried")
-        self.assertIn("never answered it", carried[0])
+        self.assertIn("which host?", carried[0], "the model is reminded what it asked")
         self.assertNotIn("this turn", carried[0],
                          "carried to the NEXT turn, so the wording must not say 'this turn'")
 
@@ -423,3 +448,253 @@ class UnansweredReachesTheModelTest(unittest.TestCase):
         source = inspect.getsource(Agent.run_turn)
         self.assertIn("take_carried_notes()", source,
                       "nothing drains the carried notes into a turn")
+
+
+class TheCardOutlivesTheTurnTest(unittest.TestCase):
+    """The question the user was reading when the model stopped talking.
+
+    Reported from a live session and confirmed in its transcript: three options with a line of
+    description each, and the card collapsed to a one-line "Not answered" while the user was still
+    hovering over the option they meant to pick. `expire_open_asks()` had exactly one caller --
+    `dgc/headless.py`, three lines before `turn_end` -- so an open ask's lifetime WAS the turn's
+    lifetime. Nothing about the model finishing its sentence means the person finished reading.
+
+    It expires at the start of the NEXT turn instead: the point where the user has actually moved
+    on. These pin the lifetime, not the wording.
+    """
+
+    def live(self):
+        """A real Agent driven through real turns, with only the provider call stubbed."""
+        import tempfile
+        from dgc.config import Config
+        from dgc.llm import ChatResult
+
+        class UI(_UI):
+            def __getattr__(self, _name):
+                return lambda *a, **kw: None
+
+        config = Config(project_root=Path(tempfile.mkdtemp(prefix="dgc-ask-")))
+        # In memory only: constructing an Agent otherwise connects the machine's real MCP servers.
+        config.data["mcp_servers"] = {}
+        config.data["disabled_mcp_servers"] = []
+        a = Agent(config, UI())
+        a._chat = lambda *args, **kwargs: ChatResult(content="done", tool_calls=[])
+        return a
+
+    def asking(self, a, question="Which staging host?"):
+        """Make the next turn's model ask the question, through the real tool call, then finish."""
+        from dgc.llm import ChatResult, ToolCall
+        rounds = {"n": 0}
+
+        def chat(*_args, **_kwargs):
+            rounds["n"] += 1
+            if rounds["n"] == 1:
+                return ChatResult(content="", tool_calls=[
+                    ToolCall("c1", "ask_user", {"question": question})])
+            return ChatResult(content="done", tool_calls=[])
+
+        a._chat = chat
+
+    def test_a_question_outlives_the_turn_that_asked_it(self) -> None:
+        a = self.live()
+        self.asking(a)
+        a.run_turn("do the thing")                      # asks, then the turn ENDS
+        self.assertEqual(len(a._open_asks()), 1,
+                         "the model finishing its sentence is not the user finishing reading")
+        self.assertEqual([r["outcome"] for r in a.ui.resolved], [],
+                         "and no client was told to close the card")
+
+    def test_the_next_thing_the_user_says_is_what_closes_it(self) -> None:
+        a = self.live()
+        self.asking(a)
+        a.run_turn("do the thing")
+        a._chat = lambda *args, **kwargs: __import__("dgc.llm", fromlist=["ChatResult"]).ChatResult(
+            content="done", tool_calls=[])
+        a.run_turn("something else entirely")
+        self.assertEqual(a._open_asks(), {}, "they moved on; now it is closed")
+        self.assertEqual(a.ui.resolved[-1]["outcome"], "expired")
+
+    def test_and_the_model_is_told_inside_that_same_turn(self) -> None:
+        """Not carried to a turn after next: expiry runs before `take_carried_notes()`."""
+        a = self.live()
+        self.asking(a)
+        a.run_turn("do the thing")
+        a._chat = lambda *args, **kwargs: __import__("dgc.llm", fromlist=["ChatResult"]).ChatResult(
+            content="done", tool_calls=[])
+        a.run_turn("something else entirely")
+        prompts = [m["content"] for m in a.messages if m.get("role") == "user"]
+        self.assertTrue(any("Which staging host?" in str(p) for p in prompts),
+                        f"the note never reached the transcript: {prompts}")
+
+    def test_the_note_is_not_delivered_as_words_the_user_said(self) -> None:
+        """Expiry runs BEFORE the steering window opens. Through steering, `_drain_steer` wraps it
+        in the envelope that says 'The user sent this WHILE you were working' — DGC's own words in
+        the user's mouth, which is the defect `message_task` had."""
+        a = self.live()
+        self.asking(a)
+        a.run_turn("do the thing")
+        a._chat = lambda *args, **kwargs: __import__("dgc.llm", fromlist=["ChatResult"]).ChatResult(
+            content="done", tool_calls=[])
+        a.run_turn("something else entirely")
+        joined = "\n".join(str(m.get("content")) for m in a.messages if m.get("role") == "user")
+        self.assertIn("[DGC]", joined, "the note is marked as DGC's, not the user's")
+        self.assertNotIn("The user sent this WHILE you were working", joined)
+
+    def test_expiry_has_exactly_one_caller_and_it_is_not_the_turn_ending(self) -> None:
+        """The defect was a SECOND caller: `dgc/headless.py`, three lines before `turn_end`.
+
+        The behavioural tests above drive `Agent.run_turn` directly, so re-adding that call would
+        not fail any of them — the card would simply die again. This is the tripwire for it.
+        """
+        import re
+        callers = []
+        for path in sorted((PROJECT / "dgc").glob("*.py")):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"(?<!def )\bexpire_open_asks\s*\(", line):
+                    callers.append(f"{path.name}:{number}")
+        self.assertEqual([c.split(":")[0] for c in callers], ["agent.py"],
+                         f"expire_open_asks is called from {callers}; an open question is closed "
+                         "when the user moves on, never because a turn ended")
+
+    def test_a_question_survives_until_something_expires_it(self) -> None:
+        a = agent()
+        ask(a, question="Which staging host?")
+        self.assertEqual(len(a._open_asks()), 1)
+        a.expire_open_asks()
+        self.assertEqual(a._open_asks(), {}, "and then it is gone, once")
+
+
+class AnAnswerAfterTheTurnEndsIsNotThrownAwayTest(unittest.TestCase):
+    """A click a moment after the model stopped talking.
+
+    `resolve_open_ask` steers the answer into a RUNNING turn and refuses once that turn's steering
+    window has shut — which is now the ordinary state of a card, because the card outlives its
+    turn. The backend answered that refusal with `command_rejected{unknown_ask}` and returned
+    without queueing anything, so the option the user chose was discarded.
+    """
+
+    def setUp(self) -> None:
+        self.a = agent()
+        self.a.steer = lambda text, **kwargs: False        # the turn has ended; steering refuses
+        ask(self.a, question="Which staging host?")
+        self.ask_id = self.a.ui.shown[0]["ask_id"]
+
+    def test_the_premise_steering_really_does_refuse(self) -> None:
+        self.assertFalse(self.a.resolve_open_ask(self.ask_id, "answered", "the blue one"),
+                         "without this the deferral below is never reached")
+        self.assertIn(self.ask_id, self.a._open_asks(), "a refused answer leaves it open")
+
+    def test_the_answer_becomes_a_prompt_quoting_its_question(self) -> None:
+        text = self.a.defer_open_ask(self.ask_id, "the blue one")
+        self.assertEqual(text, "> Which staging host?\n\nthe blue one")
+
+    def test_deferring_closes_the_question_and_tells_every_client(self) -> None:
+        self.a.defer_open_ask(self.ask_id, "the blue one")
+        self.assertEqual(self.a._open_asks(), {})
+        self.assertEqual(self.a.ui.resolved[-1]["outcome"], "answered")
+        self.assertEqual(self.a.ui.resolved[-1]["answer"], "the blue one")
+
+    def test_an_id_nobody_is_waiting_on_is_still_refused(self) -> None:
+        """So the backend can keep telling a client its id was unknown, rather than inventing a
+        prompt out of a stale click."""
+        self.assertEqual(self.a.defer_open_ask("ask-nobody", "the blue one"), "")
+        self.assertEqual(self.a.defer_open_ask(self.ask_id, "   "), "",
+                         "an empty answer is not an answer")
+        self.assertIn(self.ask_id, self.a._open_asks(), "and it stays open")
+
+
+class TheRealBackendQueuesALateAnswerTest(unittest.TestCase):
+    """Through `Backend._dispatch` itself, because the drop happened in the backend, not the Agent.
+
+    Driven against the real dispatch with only `_start_turn` and the emitter stubbed: a stub of the
+    path under test would prove nothing, which is the lesson `RealBackendTest` above records.
+    """
+
+    def backend(self, open_asks: dict):
+        from dgc.headless import Backend
+
+        class Em:
+            def __init__(self): self.sent = []
+            def emit(self, name, **fields): self.sent.append((name, fields))
+
+        a = agent()
+        a.steer = lambda text, **kwargs: False          # the turn has ended; steering refuses
+        a._open_ask_table = dict(open_asks)
+        b = object.__new__(Backend)
+        b.agent = a
+        b.em = Em()
+        b.started = []
+        b._start_turn = lambda *args, **kwargs: (b.started.append(args[0]), ("started", None))[1]
+        return b
+
+    OPEN = {"ask-1": {"question": "Which staging host?", "call_id": "c1", "options": []}}
+
+    def test_a_click_after_the_turn_ended_starts_a_turn_with_the_answer(self) -> None:
+        b = self.backend(self.OPEN)
+        b._dispatch({"type": "prompt", "text": "the blue one",
+                     "answers": [{"ask_id": "ask-1"}], "request_id": "r1"})
+        self.assertEqual(b.started, ["> Which staging host?\n\nthe blue one"],
+                         "the answer used to be discarded here")
+        self.assertEqual([name for name, _ in b.em.sent], ["prompt_accepted"])
+
+    def test_the_client_is_told_the_question_was_answered(self) -> None:
+        b = self.backend(self.OPEN)
+        b._dispatch({"type": "prompt", "text": "the blue one",
+                     "answers": [{"ask_id": "ask-1"}], "request_id": "r1"})
+        self.assertEqual(b.agent.ui.resolved[-1]["outcome"], "answered")
+        self.assertEqual(b.agent._open_asks(), {})
+
+    def test_an_id_nobody_is_waiting_on_is_still_rejected(self) -> None:
+        b = self.backend(self.OPEN)
+        b._dispatch({"type": "prompt", "text": "the blue one",
+                     "answers": [{"ask_id": "ask-gone"}], "request_id": "r1"})
+        self.assertEqual(b.started, [], "a stale click must not invent a turn")
+        self.assertEqual([name for name, _ in b.em.sent], ["command_rejected"])
+        self.assertEqual(b.em.sent[0][1]["reason"], "unknown_ask")
+
+    def test_a_running_turn_still_takes_the_answer_by_steering(self) -> None:
+        """The unchanged path: while the turn IS running, the answer goes in as steering and no
+        new turn is started."""
+        b = self.backend(self.OPEN)
+        b.agent.steer = lambda text, **kwargs: True
+        b._dispatch({"type": "prompt", "text": "the blue one",
+                     "answers": [{"ask_id": "ask-1"}], "request_id": "r1"})
+        self.assertEqual(b.started, [])
+        self.assertEqual(b.em.sent, [], "ask_resolved already told every client")
+
+
+class TheReplyCarriesTheOptionsTest(unittest.TestCase):
+    """The second half of the same report: "it did give me its recommendation, but completely
+    slipped to list out all options."
+
+    The model was obeying DGC. `ASK_DELIVERED` said "repeat the question" and never mentioned the
+    options, and because the user's own prompt had asked to be offered choices, the requested-picker
+    block was live and said a prose list "is not the selector — do not write one". So the reply
+    said "the picker above has the full descriptions" and the picker was then erased.
+    """
+
+    def test_the_tool_result_asks_for_the_options_too(self) -> None:
+        delivered = Agent.ASK_DELIVERED
+        self.assertIn("option", delivered.lower(),
+                      "the word never appeared, which is why B and C were dropped")
+        self.assertIn("card is not part of your reply", delivered,
+                      "and it has to say why: the reply outlives the card")
+
+    def test_the_picker_block_no_longer_bans_writing_the_choices_down(self) -> None:
+        a = object.__new__(Agent)
+        a._active_tool_intents = {"options"}
+        a.depth = 0
+        a._picker_offered = lambda: True
+        block = Agent._options_unavailable_note(a)
+        self.assertIn("do not write one INSTEAD of calling the tool", block,
+                      "the ban stays, but only against replacing the tool with prose")
+        self.assertIn("writing the choices out in your final reply is expected", block)
+
+    def test_it_still_refuses_a_prose_list_as_a_substitute_for_the_picker(self) -> None:
+        a = object.__new__(Agent)
+        a._active_tool_intents = {"options"}
+        a.depth = 0
+        a._picker_offered = lambda: True
+        block = Agent._options_unavailable_note(a)
+        self.assertIn("is not the selector", block)
+        self.assertIn("Call propose_options", block)

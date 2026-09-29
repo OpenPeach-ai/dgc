@@ -2310,10 +2310,18 @@ Enter, take one of the suggested answers if any fit, or **Skip**. Your answer is
 the question above it, as an ordinary message, so a reopened session shows it the way it happened.
 
 Leave it and it folds to a single line reading **Answer question**; click that whenever you like
-and it opens again. Nothing is lost by ignoring it: a question still unanswered when the turn ends
-is recorded as unanswered, the model is told before it finishes so it decides for itself and says
-what it assumed, and it repeats the question at the end of its reply so you can answer it in your
-next message. Skip does the same immediately, minus the repeat.
+and it opens again. Pointing at the card, or typing in it, stops it folding under you.
+
+**The question outlives the turn.** The model finishing its reply does not close it: the card stays
+where it is, with its options, and answering it a minute later works — the answer starts a new turn
+with the question quoted above it, exactly as it reads when you answer while the turn is running.
+The model also ends that reply by repeating the question and every option it offered, so the choice
+is readable even in a reopened session where no card is drawn.
+
+It closes when you move on. The next message you send that is not an answer retires the card — the
+question and its options stay in the transcript as a record of what was offered — and the model is
+told, in that same turn, that the card went unanswered and that your message may be the answer.
+**Skip** closes it immediately instead, and says plainly that you declined.
 
 Words you had started typing are yours, and retiring the card used to take them with it. In the
 editor they come back: whatever was in the answer box is appended to the composer on its own line,

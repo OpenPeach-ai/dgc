@@ -1762,6 +1762,14 @@ body.ask-docked #tasks-panel { display: none; }
 .open-ask-why { margin: var(--sp-2) 0 0; color: var(--err-text, var(--muted));
   font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .open-ask[data-state="settled"] { border-style: dashed; border-color: var(--border); background: transparent; }
+/* A settled card keeps its question and options on screen as the record of what was offered --
+   emptying the row was what made the choices unrecoverable once the card closed. Inert, dimmed,
+   and with the answer box and buttons gone, because the question is no longer answerable here. */
+.open-ask[data-state="settled"] .open-ask-body { opacity: .6; pointer-events: none; padding-top: 0; }
+.open-ask[data-state="settled"] .open-ask-q,
+.open-ask[data-state="settled"] .open-ask-input,
+.open-ask[data-state="settled"] .open-ask-actions,
+.open-ask[data-state="settled"] .open-ask-chips { display: none; }
 .open-ask-folded { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3);
   border: 0; background: transparent; color: var(--accent-text, var(--accent)); font: var(--w-reg) var(--t-sm)/1.4 var(--sans);
   text-align: left; cursor: pointer; }

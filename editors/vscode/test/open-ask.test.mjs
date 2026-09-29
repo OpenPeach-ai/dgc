@@ -221,3 +221,65 @@ test("a refusal for some other prompt leaves the card alone", () => {
             reason: "full", message: "the queue is full" });
   assert.equal(card.dataset.state, "sent", "only its own refusal reopens it");
 });
+
+// --- the card must not go away while you are reading it -------------------------------------------
+// Reported from a live session: three options with a line of description each, and the card went
+// while the user was hovering over the one they meant to pick. Two independent mechanisms did it,
+// and neither noticed a pointer: a 30-second fold that ONLY typing cancelled, and turn end, where
+// the backend expired the ask and this file replaced the whole row with a one-line "Not answered".
+
+test("pointing at the card stops it folding under you", () => {
+  const p = panel();
+  const row = askOpened(p, { options: [{ label: "A (Recommended)", description: "the small one" },
+                                       { label: "B", description: "a new board" }] });
+  const body = row.querySelector(".open-ask-body");
+  assert.ok(body, "the body is what a reader points at");
+  // The fold is a timer; the test drives the listeners rather than sleeping 30 seconds.
+  const snoozes = [];
+  for (const kind of ["pointerenter", "pointermove", "focusin"]) {
+    const event = new p.dom.window.Event(kind, { bubbles: true });
+    body.dispatchEvent(event);
+    snoozes.push(kind);
+  }
+  assert.deepEqual(snoozes, ["pointerenter", "pointermove", "focusin"]);
+  assert.match(mainJs, /const snooze = \(\) => clearTimeout\(ask\.timer\)/,
+               "one snooze, wired to reading as well as typing");
+  for (const kind of ["pointerenter", "pointermove", "focusin", "input"]) {
+    assert.ok(mainJs.includes(`"${kind}", snooze`) || mainJs.includes(`${kind} = snooze`),
+              `${kind} must snooze the fold timer`);
+  }
+});
+
+test("an unanswered question keeps its options on screen, not just its title", () => {
+  const p = panel();
+  askOpened(p, { options: [{ label: "A — make the filters real (Recommended)",
+                             description: "smallest change, uses what already exists" },
+                           { label: "B — a dedicated board",
+                             description: "needs a new aggregation endpoint" },
+                           { label: "C — every unit's children",
+                             description: "the same breakdown everywhere" }] });
+  p.event({ type: "ask_resolved", ask_id: "a1", outcome: "expired", question: QUESTION });
+  const row = p.doc.querySelector(".open-ask");
+  assert.equal(row.dataset.state, "settled");
+  assert.match(row.textContent, /Not answered/);
+  // The whole point: the reply said "the options are in the picker above", and the picker had
+  // become one line of text. Every option and the line that tells it apart has to survive.
+  for (const text of ["make the filters real", "a dedicated board", "every unit's children",
+                      "smallest change", "new aggregation endpoint"]) {
+    assert.match(row.textContent, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+                 `"${text}" was erased when the card settled`);
+  }
+});
+
+test("a settled card cannot be answered any more", () => {
+  const p = panel();
+  askOpened(p, { options: [{ label: "A", description: "the small one" }] });
+  p.event({ type: "ask_resolved", ask_id: "a1", outcome: "expired", question: QUESTION });
+  const row = p.doc.querySelector(".open-ask");
+  assert.equal(row.querySelector(".open-ask-folded"), null,
+               "no 'Answer question' chip on a question that can no longer be answered");
+  assert.match(mainCss, /\.open-ask\[data-state="settled"\] \.open-ask-body \{[^}]*pointer-events: none/,
+               "the surviving options are a record, not a control");
+  assert.match(mainCss, /\.open-ask\[data-state="settled"\] \.open-ask-actions/,
+               "Send and Skip go with it");
+});
