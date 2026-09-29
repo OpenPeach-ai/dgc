@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.31.2 — 2026-09-29
+
+- The caret in an empty prompt box rests where your first character will appear. It sat at the end
+  of "Ask DGC to build, fix or explain…" and the text then appeared back at the left.
+
+- An open question's card stays on screen after the turn that asked it ends, and stays answerable:
+  clicking an option a minute later starts a new turn with your answer. It used to be replaced by a
+  single "Not answered" line the moment the model stopped talking, taking every option with it.
+- Pointing at the card stops it folding. Only typing did before, so a card with several options to
+  read folded away mid-read after thirty seconds.
+- A question that has closed keeps its options on screen as the record of what was offered, dimmed
+  and no longer clickable, instead of being emptied.
+- An option's description no longer shrinks into a narrow column beside a long label: it takes a
+  line of its own when there is not room to read it, and the "Recommended" badge stays on the
+  label's line at every panel width.
+- Build-time dependency lock refreshed: two advisories in packages used only to build and test
+  the extension. The published VSIX has no runtime dependencies and is unaffected.
+- Pairs with CLI 0.46.2.
+
 ## 0.31.1 — 2026-09-28
 
 - Pairs with CLI 0.46.1, which stops a remote MCP sign-in from opening a browser before the editor

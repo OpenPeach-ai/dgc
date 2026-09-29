@@ -4,6 +4,81 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.46.2 — 2026-09-29
+
+### Opening a package to read it no longer waits for the model
+
+Clicking "Connect Composio" while DGC was working answered "Wait for the current turn or plugin
+operation before changing packages." That button opens the review that shows what the package
+contains, before anything is installed — you had changed nothing and asked to change nothing.
+Reading a package now works while DGC works. Installing one, removing one, and adding or refreshing
+a marketplace still wait, because those change what DGC can run while it is running.
+
+### A question the model asks you no longer disappears while you are reading it
+
+An open question — the kind DGC asks without stopping the turn — was closed the instant the model
+stopped talking. Its card, with every option and the line describing each one, collapsed to a single
+"Not answered" line that could not be reopened. Reported by someone who was hovering over the option
+they meant to pick. The question outlives the turn now: the card stays where it is, and answering it
+a minute later works, starting a new turn with the question quoted above your answer, exactly as it
+reads when you answer mid-turn. It closes when you move on — the next message you send that is not
+an answer — and the question and its options stay in the transcript as the record of what was
+offered.
+
+A click that crossed the turn boundary used to be refused, and the option you chose was discarded.
+It becomes an ordinary prompt now.
+
+The reply that goes with such a question lists the options too. It recommended one and pointed at the
+card for the rest, which was exactly what DGC asked it to do; it now restates every option with the
+line that tells them apart, so the choice survives in a reopened session where no card is drawn.
+
+The note DGC leaves for the model when a question goes unanswered no longer says you did not answer
+it. That note rides in front of your next message, and your next message is very often the answer,
+typed into the box because the card had gone.
+
+### A sub-agent is told what its checkout does not have
+
+A delegated sub-agent works in its own Git worktree, which holds tracked files only — so the
+project's ignored dependency and build directories are simply not there. It used to find out by
+running the project's own command and reading the failure. It is now told, before it runs anything,
+which directories are missing and that it should install what it needs inside its own checkout.
+
+`subagent_link_paths` (empty by default) shares named Git-ignored directories with sub-agents
+instead, for a project where that install is expensive enough to trade the isolation for it. Only
+ignored paths can be shared.
+
+### A per-turn cost cap, counted in tokens
+
+`turn_token_budget` (0 by default, meaning no cap) bounds what one turn spends, including every
+sub-agent it starts, however deep and whether or not it is still running in the background. A
+sub-agent that outlives the turn that started it is charged to that turn, not to whichever turn is
+running when it finally reports. At 70% and 85% the model is told to converge; past 100% no new
+sub-task is started and the turn stops asking for model output. Nothing is rolled back: unlike the
+wall-clock limit, the tokens are already spent and the edits they bought are on disk.
+
+### `/tasks` shows work a sub-agent's own sub-agent left behind
+
+When a sub-agent delegated again and that grandchild's work was retained, its checkout and its
+branch were created in your repository but `/tasks` showed nothing — and once the parent's checkout
+was cleaned up, which is how a delegation normally ends, there was no way to see the work, apply it
+or delete it. Such work is now listed against the repository that owns the branch, for reading and
+for dropping.
+
+### With the sandbox on, a sub-agent can run git again
+
+A task worktree's `.git` is a pointer into your repository, and the sandbox masks your home — so
+every git command in a delegated sub-agent failed with "not a git repository". The repository
+directory is re-exposed read-only, and `.git` only: the ignored files its worktree deliberately does
+not have stay out of reach, and so does your own uncommitted work. It follows that a sandboxed
+sub-agent cannot commit, which is intended — DGC integrates a sub-task by reading its working tree.
+
+### Delegation is refused where two tracked paths are one file on disk
+
+On a case-insensitive filesystem (macOS and Windows by default), a project tracking both `README.md`
+and `readme.md` has one file. An isolated checkout reports them as changed before anything touches
+them, and integrating its result would write one file's content over the other's. DGC names both
+paths and suggests `git mv` rather than losing one.
+
 ## 0.46.1 — 2026-09-28
 
 ### On macOS, signing in to a remote MCP server could open a browser before you were asked
