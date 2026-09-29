@@ -876,6 +876,9 @@ class TaskWorkspace:
         base = _git(["rev-parse", "HEAD"], repo)
         if base.returncode != 0 or not base.stdout.strip():
             return None, "repository has no committed HEAD"
+        refusal = _case_alias_refusal(source_root)
+        if refusal:
+            return None, refusal
         base_commit = base.stdout.strip()
         token = uuid.uuid4().hex[:10]
         slug = _bounded_safe(name, 40)
@@ -1250,6 +1253,9 @@ class FleetWorkspace:
         base = _git(["rev-parse", "HEAD"], repo)
         if base.returncode != 0 or not base.stdout.strip():
             return None, "repository has no committed HEAD"
+        refusal = _case_alias_refusal(source_root)
+        if refusal:
+            return None, refusal
         base_commit = base.stdout.strip()
         token = uuid.uuid4().hex[:10]
         slug = _bounded_safe(name, 40)
@@ -1737,6 +1743,81 @@ def _retained_storage_root(storage_root: Path | None) -> Path:
         from .config import USER_HOME
         storage_root = USER_HOME / "worktrees"
     return Path(storage_root).expanduser().resolve(strict=False)
+
+
+_MAX_CASE_COLLISIONS_SHOWN = 6
+
+
+def aliased_tracked_paths(root: Path, limit: int = _MAX_CASE_COLLISIONS_SHOWN) -> list[str]:
+    """Tracked paths that differ only in case AND are one file on disk.
+
+    Measured on the real thing -- macOS 26.5.1, APFS, git 2.50.1 -- with `README.md` and
+    `readme.md` both in the index:
+
+        core.ignorecase = true
+        index entries:  README.md, readme.md
+        files on disk:  readme.md
+        a pristine `git worktree add` immediately reports:  M README.md
+        both names read:  CONTENT-LOWER
+        writing through `readme.md` changes what `README.md` reads
+
+    For an isolated checkout that is a data-loss shape, not an inconvenience. Its delta contains a
+    file nothing touched; each of the two names is compared against its OWN expected blob, so both
+    look changed; and integrating the result writes one file's content over the other's in the
+    user's own checkout. DGC cannot make a filesystem case-sensitive, so it refuses instead.
+
+    The test is exact rather than inferred: two names in one casefold group whose `lstat` reports
+    the same (device, inode) really are one file, whatever `core.ignorecase` claims. That config
+    only decides whether listing the files is worth it at all, which keeps this free on Linux.
+    `lstat`, not `stat`, so a tracked symlink between the two names is not mistaken for aliasing --
+    git stores a symlink as a symlink and DGC reads it as one.
+    """
+    try:
+        if _git(["config", "--type=bool", "--get", "core.ignorecase"],
+                root).stdout.strip() != "true":
+            return []
+        out = _git_bytes(["ls-files", "-z"], root, timeout=_GIT_TIMEOUT,
+                         max_stdout=_MAX_GIT_PATH_BYTES)
+    except Exception:
+        return []
+    if out.returncode != 0:
+        return []
+    groups: dict[str, list[str]] = {}
+    for raw in out.stdout.split(b"\0"):
+        if not raw:
+            continue
+        name = raw.decode("utf-8", "surrogateescape")
+        groups.setdefault(name.casefold(), []).append(name)
+    aliased: list[str] = []
+    for names in groups.values():
+        if len(names) < 2:
+            continue
+        seen_ids: dict[tuple, str] = {}
+        for name in sorted(names):
+            try:
+                info = os.lstat(root / name)
+            except OSError:
+                continue
+            key = (info.st_dev, info.st_ino)
+            if key in seen_ids:
+                aliased.extend(sorted(names))
+                break
+            seen_ids[key] = name
+        if len(aliased) >= limit:
+            break
+    return sorted(dict.fromkeys(aliased))[:limit]
+
+
+def _case_alias_refusal(root: Path) -> str:
+    """The one refusal message, used by both isolated-checkout builders."""
+    aliased = aliased_tracked_paths(root)
+    if not aliased:
+        return ""
+    return ("this project tracks paths that differ only in case and this filesystem stores them as "
+            f"one file ({', '.join(aliased)}). An isolated checkout reports them as changed before "
+            "anything has touched them, and integrating its result would write one file's content "
+            "over the other's. Rename one of them (`git mv`), or keep the project on a "
+            "case-sensitive volume.")
 
 
 def _branch_exists(repo: Path, branch: str) -> bool:

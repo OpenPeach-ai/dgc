@@ -2687,6 +2687,12 @@ dirty before delegation or changed in the parent, and adds an applied result to 
 `/tasks drop ID --confirm` permanently removes the isolated checkout. The editor's command
 palette exposes the same typed recovery.
 
+Delegation is refused outright in one case: a project that tracks two paths differing only in case
+on a filesystem that stores them as one file (macOS and Windows by default). There, an isolated
+checkout reports them as changed before anything touches them, and integrating its result would
+write one file's content over the other's. DGC names both paths and suggests `git mv`; renaming one
+makes delegation work again, as does keeping the project on a case-sensitive volume.
+
 `subagent_worktree_root` (empty = `~/.dgc/worktrees`) must sit outside the source repository. A
 delegated checkout has no `node_modules`, `.venv` or build output — the sub-agent is told what is
 missing and provisions its own. `subagent_link_paths` shares named Git-ignored directories with it
