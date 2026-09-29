@@ -1739,6 +1739,35 @@ def _retained_storage_root(storage_root: Path | None) -> Path:
     return Path(storage_root).expanduser().resolve(strict=False)
 
 
+def _branch_exists(repo: Path, branch: str) -> bool:
+    """Does this repository hold that branch? (A worktree's branch lives in the common dir.)"""
+    if not branch:
+        return False
+    return _git(["rev-parse", "--verify", "--quiet",
+                 f"refs/heads/{branch}"], repo).returncode == 0
+
+
+def _is_task_checkout_of(candidate: Path, source_root: Path, storage_root: Path) -> bool:
+    """Is `candidate` a delegated checkout of the project at `source_root`?
+
+    Used to decide whether a retained record written against something other than the user's
+    project still belongs to it. Two properties have to hold and both are structural rather than
+    inferred from a path that may no longer exist: the checkout sat directly in the private
+    storage root (created 0700, and never inside the repository), and its directory name carries
+    this repository's own task prefix, which is what ties the record to the repository whose
+    branch and worktree registration it owns.
+    """
+    try:
+        if candidate.parent != storage_root or not candidate.name:
+            return False
+        repo = repo_root(source_root)
+        if repo is None:
+            return False
+        return any(candidate.name.startswith(prefix) for prefix in _task_repo_prefixes(repo))
+    except (OSError, ValueError):
+        return False
+
+
 def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
                    ) -> tuple[RetainedTask | None, str | None]:
     try:
@@ -1748,12 +1777,22 @@ def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
         if payload.get("kind") != "dgc-isolated-task":
             return None, f"invalid retained-task metadata: {metadata_path.name}"
         recorded_source = Path(str(payload.get("source", ""))).resolve(strict=False)
-        if recorded_source != source_root:
+        # A NESTED record: a grandchild retained work against its parent's delegated checkout, not
+        # against the user's project. Measured, that checkout is normally gone by the time anyone
+        # looks -- and its worktree and its `dgc/task-...` branch stay registered in the USER's
+        # repository, with `/tasks` showing nothing, so there was no way to see the work, apply it,
+        # or even delete it. It is listed here instead, against the repository that really owns the
+        # branch, so at minimum it can be dropped.
+        nested = recorded_source != source_root
+        if nested and not _is_task_checkout_of(recorded_source, source_root, storage_root):
             return None, None
         repo = repo_root(source_root)
         if repo is None:
             return None, "retained task belongs to a project that is no longer a Git repository"
-        project_rel = source_root.relative_to(repo)
+        project_rel = (Path(str(payload.get("project_rel", "."))) if nested
+                       else source_root.relative_to(repo))
+        if nested and (project_rel.is_absolute() or ".." in project_rel.parts):
+            raise TaskWorkspaceError("invalid retained task project root")
         task_id = metadata_path.stem
         path = Path(str(payload.get("worktree", ""))).resolve(strict=False)
         if path.parent != storage_root or path.name != task_id:
@@ -1761,16 +1800,29 @@ def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
         branch = str(payload.get("branch", ""))
         if not branch.startswith("dgc/task-") or len(branch) > 128:
             raise TaskWorkspaceError("invalid retained task branch")
+        if nested and not _branch_exists(repo, branch):
+            # The storage root is SHARED, and the task prefix is built from the repository's
+            # directory name -- so two projects both called `app` produce records that look alike.
+            # For an ordinary record the recorded source settles ownership; a nested one has given
+            # that up, so ownership is taken from the thing this repository actually holds: the
+            # branch `git worktree add -b` created in it. Silent, because another project's record
+            # is not an error here.
+            return None, None
         task_prefix = next((prefix for prefix in _task_repo_prefixes(repo)
                             if task_id.startswith(prefix)), "")
-        if not task_prefix or branch != f"dgc/task-{task_id[len(task_prefix):]}":
+        # A nested id carries its whole lineage (`repo-task-child-X-task-grand-Y`) while the branch
+        # names only the last hop, so the branch is checked against the segment after the LAST
+        # `-task-`. The prefix still has to be this repository's: that is what ties the record to
+        # the repo whose branch is about to be deleted.
+        stem = task_id.rsplit("-task-", 1)[1] if nested else task_id[len(task_prefix):]
+        if not task_prefix or branch != f"dgc/task-{stem}":
             raise TaskWorkspaceError("retained task id, path, and branch do not match")
         base_commit = str(payload.get("base_commit", ""))
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_commit):
             raise TaskWorkspaceError("invalid retained task base commit")
         schema = payload.get("schema_version")
         legacy = schema != _RETAINED_SCHEMA or "protected_baseline" not in payload
-        if not legacy and str(payload.get("project_rel", ".")) != str(project_rel):
+        if not legacy and not nested and str(payload.get("project_rel", ".")) != str(project_rel):
             raise TaskWorkspaceError("retained task project root no longer matches its metadata")
         raw_paths = payload.get("repo_changed_paths") if not legacy else payload.get("changed_paths", [])
         if not isinstance(raw_paths, list) or len(raw_paths) > _MAX_TASK_FILES:
@@ -1801,9 +1853,19 @@ def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
                            if Path(item.get("path", "")).resolve(strict=False) == path), None)
         available = bool(path.exists() and registered and registered.get("branch") == branch)
         problem = "" if available else "retained worktree or branch is missing/stale"
+        if available and nested:
+            # Listed, never applied from here. This record's delta was written against a DELEGATED
+            # checkout, not against this project, and that checkout is usually already gone --
+            # applying it from the project's `/tasks` would mean writing one tree's state into a
+            # different one. What the project genuinely owns is the branch and the worktree
+            # registration, so what it offers is seeing the work and removing it.
+            available = False
+            problem = ("nested sub-task: written against a delegated checkout, not against this "
+                       "project, so it cannot be applied here — read it at its worktree path, or "
+                       "drop it to remove the worktree and branch it left in this repository")
         display = [str(Path(p).relative_to(project_rel)) if project_rel != Path(".") else p
                    for p in changed]
-        return RetainedTask(task_id, source_root, repo, project_rel, path, path / project_rel,
+        return RetainedTask(task_id, recorded_source, repo, project_rel, path, path / project_rel,
                             branch, base_commit, str(payload.get("reason", ""))[:2000],
                             changed, display, protected, metadata_path, legacy, available,
                             problem, payload), None
