@@ -2677,7 +2677,10 @@ dirty before delegation or changed in the parent, and adds an applied result to 
 `/tasks drop ID --confirm` permanently removes the isolated checkout. The editor's command
 palette exposes the same typed recovery.
 
-`subagent_worktree_root` (empty = `~/.dgc/worktrees`) must sit outside the source repository.
+`subagent_worktree_root` (empty = `~/.dgc/worktrees`) must sit outside the source repository. A
+delegated checkout has no `node_modules`, `.venv` or build output — the sub-agent is told what is
+missing and provisions its own. `subagent_link_paths` shares named Git-ignored directories with it
+instead, trading that isolation for the install time.
 
 See **Multiple agents** for the dashboard, and **Sub-agents** for named specialists and
 background tasks.
@@ -3179,6 +3182,14 @@ Useful keys:
   next sub-agent, as a new main model applies from the next request.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
+- `subagent_link_paths` — empty by default, and normally left that way. A delegated checkout holds
+  tracked files only, so the project's ignored dependency and build directories are not in it; the
+  sub-agent is told which ones are missing and installs what it needs into its own checkout, where
+  the work is thrown away with the checkout. Listing a path here shares the project's real directory
+  with every sub-agent instead, so an install runs once — and so a sub-agent's writes land in your
+  own copy immediately, outside `/rewind` and outside the delta `/tasks apply` reviews. Only
+  Git-ignored paths can be shared; anything else is refused, because a shared path must never reach
+  the integrated result.
 - `fleet_worktree_root` — optional private storage for automatically isolated TUI agents; empty uses
   `~/.dgc/fleet-worktrees`. Conversation resume state remains scoped to the source project, and
   changed managed checkouts are retained rather than force-removed.

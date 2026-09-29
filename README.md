@@ -288,6 +288,11 @@ memory-conscious recommendation for known model families (64K for Qwen3.8, whose
 256K); `/settings` or `/set context_size …` remains authoritative.
 Set `subagent_worktree_root` only if private delegated checkouts should live somewhere other than
 `~/.dgc/worktrees`; DGC rejects a task-worktree root inside the source repository.
+`subagent_link_paths` is empty by default: a delegated checkout contains tracked files only, the
+sub-agent is told which Git-ignored directories are absent, and it installs what it needs inside its
+own throwaway checkout. List a path there to share the project's real directory with sub-agents
+instead — one install rather than one per task, at the cost of their writes landing in your own copy
+immediately. Only Git-ignored paths can be shared.
 Set `fleet_worktree_root` only to move automatically managed TUI checkouts from
 `~/.dgc/fleet-worktrees`; DGC rejects storage inside the source repository. Conversation files stay
 in the source project's private session scope so `/resume` can safely reconnect retained work.

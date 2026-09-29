@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _MAX_TASK_FILES = 4096
 _MAX_TASK_BYTES = 64 * 1024 * 1024
@@ -418,6 +418,95 @@ def prune_worktrees(repo: Path) -> None:
     _git(["worktree", "prune"], repo)
 
 
+_MAX_ABSENT_DIRS = 12
+_ABSENT_SCAN_TIMEOUT = 5.0
+# Absent from the child by design, and of no use to it: git's own directory and DGC's state.
+_ABSENT_UNINTERESTING = {".git", ".dgc"}
+
+
+def ignored_dirs(root) -> list[str]:
+    """Directories this repository ignores, as git itself reports them, relative to `root`.
+
+    `--directory` collapses a wholly-ignored tree into a single entry and does not descend into it,
+    which is what keeps this cheap on exactly the repositories that have the most to report.
+
+    This is the one source of ignore truth in this module: `git check-ignore` cannot be used,
+    because every git call here runs with `GIT_LITERAL_PATHSPECS=1` and that command rejects
+    pathspec magic outright (`fatal: pathspec magic not supported by this command: 'literal'`).
+    Best-effort: any failure reports nothing.
+    """
+    try:
+        out = _git_bytes(
+            ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory",
+             "--no-empty-directory", "-z"],
+            root, timeout=_ABSENT_SCAN_TIMEOUT, max_stdout=_MAX_GIT_PATH_BYTES)
+    except Exception:
+        return []
+    if out.returncode != 0:
+        return []
+    names = []
+    for raw in out.stdout.split(b"\0"):
+        if not raw.endswith(b"/"):          # `--directory` marks directories, and only those matter
+            continue
+        try:
+            rel = raw.decode("utf-8", "strict").rstrip("/")
+        except UnicodeDecodeError:
+            continue
+        if not rel or rel.startswith("/") or ".." in rel.split("/"):
+            continue
+        names.append(rel)
+    return names
+
+
+def absent_ignored_dirs(main_root, child_root, *, limit: int = _MAX_ABSENT_DIRS) -> list[str]:
+    """Git-ignored directories the parent checkout has and an isolated child's does not.
+
+    `git worktree add` checks out tracked files only, so everything the project deliberately keeps
+    out of Git -- `node_modules`, a `.venv`, a built `dist`, a Rust `target` -- is simply not there
+    for a sub-agent. Measured against a real delegation, the child discovers this by running the
+    project's own command and reading the failure (`sh: 1: jest: not found`), then recovers by
+    installing into its own checkout. That recovery works, but it costs a turn and it is the one
+    moment where a capable model can instead conclude the task itself is impossible. Naming the
+    absent directories up front costs one line of prompt.
+
+    Returns repo-relative directory names, shallowest first, capped at `limit`. Best-effort: every
+    failure path returns an empty list, because a hint must never be the reason a delegation is
+    refused or delayed.
+    """
+    try:
+        main = Path(main_root).resolve(strict=False)
+        child = Path(child_root).resolve(strict=False)
+    except Exception:
+        return []
+    if main == child:
+        return []          # a shortcut: the per-entry `exists` check below also covers this
+    found: list[tuple[int, str]] = []
+    for rel in ignored_dirs(main):
+        if set(rel.split("/")) & _ABSENT_UNINTERESTING:
+            continue
+        target = main / rel
+        # The worktree root itself can sit inside the project and be ignored there; reporting the
+        # directory the child is standing in as missing would be nonsense.
+        if _inside_dir(child, target):
+            continue
+        try:
+            if (child / rel).exists():      # an opt-in link, or a path the child made for itself
+                continue
+        except OSError:
+            continue
+        found.append((rel.count("/"), rel))
+    found.sort()
+    return [rel for _, rel in found[:max(0, int(limit))]]
+
+
+def _inside_dir(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 class TaskWorkspaceError(RuntimeError):
     pass
 
@@ -768,10 +857,14 @@ class TaskWorkspace:
     initial_dirty: set[str]
     baseline: dict[str, _FileState]
     metadata_path: Path
+    # The opt-in escape hatch (`subagent_link_paths`). LAST and defaulted, because every existing
+    # construction of this class is positional.
+    linked: list[str] = field(default_factory=list)
+    link_errors: list[str] = field(default_factory=list)
 
     @classmethod
-    def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None
-                ) -> tuple["TaskWorkspace | None", str | None]:
+    def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None,
+                link_paths=()) -> tuple["TaskWorkspace | None", str | None]:
         source_root = Path(source_root).resolve(strict=False)
         repo = repo_root(source_root)
         if repo is None:
@@ -842,6 +935,9 @@ class TaskWorkspace:
             for repo_path, expected in task.baseline.items():
                 if _read_state(_checked_target(repo, repo_path)) != expected:
                     raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+            # LAST: after the baseline is copied and verified, so a link can never be mistaken for
+            # source state that changed mid-isolation.
+            task._link_shared(link_paths)
             return task, None
         except Exception as exc:
             cleanup_error = task.cleanup()
@@ -850,6 +946,65 @@ class TaskWorkspace:
                 detail += (f"; cleanup failed for {task.path} on branch {task.branch}: "
                            f"{cleanup_error}")
             return None, detail
+
+    def _link_shared(self, link_paths) -> None:
+        """Share a few parent directories into this checkout, by explicit user opt-in only.
+
+        A worktree holds tracked files only, so a delegated child re-installs a project's
+        dependencies in its own checkout. Measured on a real Node delegation that is one
+        `npm install` -- the child recovered by itself and the parent's `node_modules` was provably
+        untouched -- so isolation stays the default. This hatch exists for the project where that
+        install is expensive enough that the user would rather share the tree and accept that the
+        child's writes land in the parent's copy.
+
+        Every path is refused unless it is relative, inside this checkout, present in the parent,
+        absent here, and ignored by this repository's own rules -- the last gate is what keeps a
+        link out of the integration delta, because `changed_paths()` reads git's view of the
+        worktree and would otherwise offer to write a symlink into the user's project. It also
+        settles trackedness for free: a tracked path is never in git's ignore listing. A refusal is
+        recorded, never raised: the hatch is a convenience and must not fail a delegation.
+        """
+        requested = list(link_paths or ())[:32]
+        if not requested:
+            return
+        ignored = set(ignored_dirs(self.source_root))
+        for raw in requested:
+            # Trailing separators only. Stripping a LEADING one would silently reinterpret an
+            # absolute path as a relative one instead of telling the user their entry is wrong.
+            rel = str(raw or "").strip().replace("\\", "/").rstrip("/")
+            if not rel:
+                continue
+            if len(self.linked) + len(self.link_errors) >= 32:
+                break
+            try:
+                parts = PurePosixPath(rel).parts
+                if not parts or ".." in parts or PurePosixPath(rel).is_absolute():
+                    raise TaskWorkspaceError("must be a relative path inside the project")
+                source = self.source_root / rel
+                dest = self.project_root / rel
+                # Containment FIRST, before anything follows this path. A checked-out symlink in
+                # the middle of `rel` makes the two lexist checks below answer about a directory
+                # somewhere else entirely, so asking them first would decide the case on the wrong
+                # file -- and, with no `..` to catch, the traversal check above sees nothing wrong.
+                if not _inside_dir(dest.resolve(strict=False).parent,
+                                   self.project_root.resolve(strict=False)):
+                    raise TaskWorkspaceError("resolves outside the isolated checkout")
+                if not os.path.lexists(source):
+                    raise TaskWorkspaceError("not present in the project")
+                if os.path.lexists(dest):
+                    raise TaskWorkspaceError("already present in the isolated checkout")
+                # `rel` itself, or an ancestor git collapsed into one ignored entry.
+                ancestors = {"/".join(parts[:i]) for i in range(1, len(parts) + 1)}
+                if not (ancestors & ignored):
+                    raise TaskWorkspaceError(
+                        "not ignored by this repository, so sharing it would put a symlink in the "
+                        "integrated result")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(source, dest, target_is_directory=source.is_dir())
+            except (TaskWorkspaceError, OSError, ValueError) as exc:
+                self.link_errors.append(f"{rel}: {exc}")
+            else:
+                self.linked.append(rel)
 
     def _expected(self, repo_path: str) -> _FileState:
         return self.baseline.get(repo_path) or _head_state(self.repo, self.base_commit, repo_path)

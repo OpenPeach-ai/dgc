@@ -3421,6 +3421,41 @@ class Agent(GoalLifecycle):
                 self.messages[0]["content"] = self.system_prompt()
             self._mode_prompt_dirty = False
 
+    def _subagent_link_paths(self) -> list[str]:
+        """Project paths the user has explicitly opted to share into task checkouts."""
+        configured = self.config.get("subagent_link_paths", []) or []
+        if isinstance(configured, str):
+            configured = [part.strip() for part in configured.split(",")]
+        if not isinstance(configured, (list, tuple)):
+            return []
+        return [str(item).strip() for item in configured if str(item).strip()]
+
+    def _workspace_lines(self) -> list[str]:
+        """Environment lines describing an isolated checkout's differences from the project.
+
+        A sub-agent works in a worktree, which holds tracked files only, so the project's ignored
+        build and dependency directories are absent. Left unsaid, the child learns it from a failing
+        command -- a measured delegation hit `sh: 1: jest: not found`, recovered, and spent a turn
+        doing it. Said here, it plans around it from its first tool call.
+
+        Both lists are empty for the main agent and for a child with nothing to report, so no other
+        run's prompt changes.
+        """
+        lines = []
+        absent = tuple(getattr(self, "_absent_dirs", ()) or ())
+        shared = tuple(getattr(self, "_shared_dirs", ()) or ())
+        if absent:
+            lines.append(
+                f"- Not in this checkout (Git-ignored in the project, so the worktree has none of "
+                f"them): {', '.join(absent)}. Re-create in THIS checkout whatever the task needs "
+                f"(install dependencies, run the build); never read or write the parent copy.")
+        if shared:
+            lines.append(
+                f"- Shared with the real project, NOT isolated: {', '.join(shared)}. What you write "
+                f"there changes the user's own copy immediately and no integration step can take it "
+                f"back, so treat those paths as read-only unless the task is about them.")
+        return lines
+
     # ------------------------------------------------------ system prompt ---
     def system_prompt(self) -> str:
         cfg = self.config
@@ -3466,6 +3501,7 @@ class Agent(GoalLifecycle):
             f"- Date: {clock.environment_date(datetime.now())}",
             f"- OS: {platform.system()} {platform.release()}",
             f"- Project root (cwd for all tools): {cfg.project_root}",
+            *self._workspace_lines(),
             f"- Model: {cfg.model} @ {_prompt_endpoint(cfg.base_url)}",
             "",
             "# How to work",
@@ -8237,6 +8273,7 @@ class Agent(GoalLifecycle):
                 pass
             isolated = workspace is not None
             child_root = workspace.project_root if isolated else self.config.project_root
+            from .worktree import absent_ignored_dirs
             try:
                 child_config = self.config.clone_for_root(child_root)
             except Exception as exc:
@@ -8265,6 +8302,14 @@ class Agent(GoalLifecycle):
                 sub._agent_defs_config = self._agent_defs_config
                 if adef and adef.tool_allow:
                     sub._agent_tool_allowlist = adef.tool_allow
+                if isolated:
+                    # After construction, so it is set on the object whose prompt it belongs to,
+                    # and refreshed because __init__ already built messages[0] from a bare agent.
+                    sub._absent_dirs = absent_ignored_dirs(
+                        self.config.project_root, child_root)
+                    sub._shared_dirs = list(getattr(workspace, "linked", ()) or ())
+                    if sub._absent_dirs or sub._shared_dirs:
+                        sub._refresh_system()
                 if registry is not None and agent_id:
                     sub.subagents = registry             # one list per chat, whatever the depth
                     sub._subagent_id = agent_id
@@ -8564,7 +8609,8 @@ class Agent(GoalLifecycle):
                 configured_root = str(self.config.get("subagent_worktree_root", "") or "").strip()
                 workspace, isolation_error = TaskWorkspace.prepare(
                     self.config.project_root, description or "delegated-work",
-                    Path(configured_root) if configured_root else None)
+                    Path(configured_root) if configured_root else None,
+                    link_paths=self._subagent_link_paths())
             except Exception as exc:
                 isolation_error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -8576,6 +8622,10 @@ class Agent(GoalLifecycle):
                     "was left unchanged.")
         if workspace is not None:
             self.ui.info(self._safe_text(f"↳ isolated checkout: {workspace.project_root}"))
+            # A configured share that could not be made is the one thing here the user must see:
+            # the task runs either way, but it runs without what they asked to share.
+            for failure in getattr(workspace, "link_errors", ()) or ():
+                self.ui.info(self._safe_text(f"↳ subagent_link_paths not shared — {failure}"))
         else:
             self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
 
@@ -9305,7 +9355,8 @@ class Agent(GoalLifecycle):
                         continue
                     try:
                         workspace, error = TaskWorkspace.prepare(
-                            self.config.project_root, description or "delegated-work", storage_root)
+                            self.config.project_root, description or "delegated-work", storage_root,
+                            link_paths=self._subagent_link_paths())
                     except Exception as exc:
                         workspace, error = None, f"{type(exc).__name__}: {exc}"
                     if workspace is None:

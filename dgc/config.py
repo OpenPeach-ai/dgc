@@ -457,6 +457,7 @@ DEFAULTS: dict = {
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
     "subagent_context_size": 0,                 # sub-agents' context window in tokens (0: the main one's)
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
+    "subagent_link_paths": [],                   # opt-in: ignored dirs shared INTO task checkouts (e.g. node_modules)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
     "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
     "max_subagent_depth": 1,                     # how deep `task` may nest; 1 = a child cannot delegate (0-8)
