@@ -177,6 +177,9 @@ class TheCapRefusesNewWorkAndKeepsFinishedWorkTest(unittest.TestCase):
         spend(root, 1_200)
         refusal = root.turn_budget_refusal()
         self.assertIn("turn_token_budget", refusal)
+        self.assertNotIn("/set", refusal,
+                         "`/set` is a TUI command only; an editor or -p user told to run it gets "
+                         "'unknown command' — which a live run of this message really did")
         self.assertIn("1,200", refusal)
         self.assertIn("1,000", refusal)
 
@@ -296,6 +299,32 @@ class ARealTurnStopsAtTheCapWithoutLosingWorkTest(unittest.TestCase):
         root.run_turn("second")
         self.assertEqual(seen["chat"], 2,
                          "the second turn must get its own budget, not inherit an exhausted one")
+
+    def test_an_endpoint_that_reports_no_usage_says_so(self) -> None:
+        """A cap that cannot see what it is capping is worse than none, because the user believes
+        they have one. It stays a notice, not a refusal: the work is still worth doing."""
+        ui = _UI()
+        root = agent(1_000, ui)
+        seen = {"chat": 0}
+
+        def fake_chat(*_args, **_kwargs):
+            seen["chat"] += 1
+            root._record_usage({}, "user_turn")          # an endpoint that reports nothing
+            if seen["chat"] >= 4:
+                return ChatResult(content="done", tool_calls=[])
+            return ChatResult(content="", tool_calls=[
+                ToolCall(f"c{seen['chat']}", "bash", {"command": "true"})])
+
+        root._chat = fake_chat
+        completed = root.run_turn("do the thing")
+        self.assertTrue(completed, "the turn still runs; it is a notice, not a refusal")
+        said = [line for line in ui.info_lines if "no token usage" in line]
+        self.assertEqual(len(said), 1, f"once per turn, not once per request: {ui.info_lines}")
+
+    def test_a_measured_turn_says_nothing_of_the_kind(self) -> None:
+        _root, ui, _seen, _marker, _completed = self.turn(1_000, 600)
+        self.assertEqual([line for line in ui.info_lines if "no token usage" in line], [],
+                         "the notice must not fire on a turn whose usage is perfectly visible")
 
     def test_an_uncapped_turn_runs_to_its_own_end(self) -> None:
         """The premise: the stop above is the budget's doing, not the stub running out."""

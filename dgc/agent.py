@@ -2277,10 +2277,13 @@ class Agent(GoalLifecycle):
 
     def turn_budget_refusal(self) -> str:
         budget = self.turn_token_budget()
+        # Names the SETTING, not a command. `/set` is a TUI command only (dgc/commands.py:134),
+        # so telling an editor or `-p` user to run it sends them after something that answers
+        # "unknown command" -- which is what a live run of this message did.
         return (f"error: this turn has spent {self.turn_tokens_spent():,} of its "
                 f"{budget:,}-token budget, so no further sub-task will be started. Everything "
-                f"already done is kept -- finish with what you have and report it. Raise or clear "
-                f"the cap with `/set turn_token_budget <tokens>` (0 removes it).")
+                f"already done is kept -- finish with what you have and report it. The user can "
+                f"raise or clear the cap with the `turn_token_budget` setting (0 removes it).")
 
     def _record_activity(self, name: str, edit_failed: bool = False) -> None:
         with self._usage_lock:
@@ -7024,6 +7027,14 @@ class Agent(GoalLifecycle):
                                  "or blocked; do not repeat completed work. Printed JSON does "
                                  "not update the checklist.")
             token_budget = self.turn_token_budget()
+            if token_budget and iteration >= 2 and self.turn_tokens_spent() == 0 \
+                    and "tokens-unmeasured" not in budget_nudged:
+                # A cap that cannot see what it is capping is worse than no cap, because the user
+                # believes they have one. Some endpoints return no usage at all; the goal budget
+                # already treats that as a stop, and a turn budget at least has to SAY it.
+                budget_nudged.add("tokens-unmeasured")
+                self.ui.info("token budget set, but this endpoint has reported no token usage — "
+                             "the cap cannot be enforced on this turn")
             if token_budget:                    # capped turn → say so before the cap stops the work
                 used_tokens = self.turn_tokens_spent() / token_budget
                 if used_tokens >= 0.85 and "tokens85" not in budget_nudged:
