@@ -231,6 +231,7 @@ class ScreenshotVisionTests(unittest.TestCase):
         (self.root / ".dgc" / "notes.lock").write_text("x")
         import time as _time
         names = chat_changes._names(self.root, _time.monotonic() + 5)
+        names, _bounded = names          # `_names` returns (names, bounded) since the large-repo fix
         self.assertIn("app.py", names)
         self.assertFalse([name for name in names if name.startswith(".dgc/")], names)
 

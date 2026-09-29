@@ -33,13 +33,46 @@ def _path(value):
 
 
 def _names(root, deadline):
+    """`(names, bounded)` -- the workspace's files, and whether that list had to be cut short.
+
+    `Review.entries()` REFUSES a repository with more than MAX_FILES entries ("more than 4096
+    entries; narrow path and retry"), which is right for `/diff` -- a review the user asked for
+    should say it cannot show everything rather than show a slice. It is wrong here: this is the
+    chat's own change journal, and refusing meant a large repository recorded NOTHING, so Files and
+    Changes were empty and a reloaded session had nothing to undo. Fall back to a bounded, sorted
+    listing instead, and tell the caller it is bounded.
+    """
     try:
         review = Review(root, root, deadline=deadline)
     except ValueError as exc:
         if "not a git repository" not in str(exc).lower():
             raise
     else:
-        names = set(review.entries())
+        bounded = False
+        try:
+            names = set(review.entries())
+        except ValueError as exc:
+            if "entries" not in str(exc).lower():
+                raise
+            # Too large to enumerate whole. Select by what a chat change IS -- a file that differs
+            # from HEAD -- rather than an arbitrary prefix. A sorted prefix was measured selecting
+            # 4,096 `f*.txt` files and excluding the one file the turn actually edited, which is
+            # the same empty change set by a longer route.
+            raw_status = review.git(["status", "--porcelain=1", "-z", "--untracked-files=all",
+                                     "--no-renames", "--", review.scope])
+            names = set()
+            for record in raw_status.rstrip(b"\0").split(b"\0"):
+                if len(record) <= 3:
+                    continue
+                candidate = review.path(record[3:])
+                # The same exclusion the untracked listing below applies. Without it a bounded
+                # capture would pull DGC's own folder -- browser screenshots, locks -- and
+                # dependency directories into the chat's change set, which the unbounded path
+                # deliberately keeps out.
+                if any(part in _IGNORED for part in str(candidate).split("/")):
+                    continue
+                names.add(candidate)
+            bounded = True
         raw = review.git(["ls-files", "--others", "--exclude-standard", "-z", "--", review.scope])
         # Untracked files in DGC's own folder (browser screenshots, locks) or in dependency and
         # cache folders are not the chat's edits, exactly as the non-Git scan below treats them.
@@ -48,8 +81,11 @@ def _names(root, deadline):
                      if not any(part in _IGNORED for part in str(name).split("/")))
         # Names relative to the root as Git sees it: its real path (see git_review._within).
         base = review.repo / review.scope if review.scope != "." else review.repo
-        return [(review.repo / name).relative_to(base).as_posix() for name in sorted(names)
-                if name not in review.skip_worktree]
+        listed = [(review.repo / name).relative_to(base).as_posix() for name in sorted(names)
+                  if name not in review.skip_worktree]
+        if len(listed) > MAX_FILES:
+            listed, bounded = listed[:MAX_FILES], True
+        return listed, bounded
     # Non-Git folders still support chat reviews. Descriptor-based enumeration refuses parent
     # symlink races, just like the exact-path reads below.
     pending, names, scanned = [root], [], 0
@@ -69,20 +105,36 @@ def _names(root, deadline):
                 pending.append(path)
             else:
                 names.append(path.relative_to(root).as_posix())
-    return names
+    names.sort()                  # stable prefix when a bounded read has to stop early
+    if len(names) > MAX_FILES:
+        return names[:MAX_FILES], True
+    return names, False
 
 
 def capture(root: Path) -> dict:
-    """All-or-nothing enumeration, with explicitly skipped unreadable/oversize files."""
-    result = {"files": {}, "skipped": set(), "complete": False}
+    """Enumerate the workspace, keeping what was reachable and saying when that was not all.
+
+    This used to be all-or-nothing: any deadline, entry cap or byte cap returned an EMPTY result
+    with `complete: False`, and `finish()` then discarded the whole turn. Measured on a real
+    4,090-name repository against `MAX_FILES = 4096` -- six files of headroom -- with a 5-second
+    deadline for reading every file TWICE per turn. Once it tripped, `incomplete` was sticky, so
+    Files and Changes were dead for the rest of the session and a reloaded session had nothing left
+    to review or undo: `chat_changes` persisted as `{"files": [], "incomplete": true}`.
+
+    Names arrive sorted, so a bounded read takes the same prefix on both sides of a turn and the two
+    captures still overlap. `finish()` compares only names BOTH captures saw, which is what makes
+    keeping a partial read sound rather than a source of invented creations and deletions.
+    """
+    result = {"files": {}, "skipped": set(), "complete": False, "selected": set()}
     deadline, size = time.monotonic() + 5, 0
     try:
-        names = _names(root, deadline)
-        if len(names) > MAX_FILES:
-            return result
+        names, bounded = _names(root, deadline)
+        result["selected"] = set(names)        # what was CONSIDERED, which a deletion leaves out of
+        result["complete"] = not bounded       # `files`; provisional -- any bound below revokes it
         for name in names:
             if time.monotonic() >= deadline:
-                return result
+                result["complete"] = False
+                break
             if not _path(name):
                 result["skipped"].add(name)
                 continue
@@ -90,7 +142,8 @@ def capture(root: Path) -> dict:
                 kind, raw, mode = capture_file_state(root / name, maximum=MAX_FILE_BYTES)
                 size += len(raw)
                 if size > MAX_READ_BYTES:
-                    return result
+                    result["complete"] = False
+                    break
                 if kind == "missing":
                     continue
                 text = None
@@ -103,10 +156,28 @@ def capture(root: Path) -> dict:
                                          "mode": mode, "text": text}
             except (OSError, ValueError):
                 result["skipped"].add(name)
-        result["complete"] = True
     except (OSError, ValueError):
+        result["complete"] = False
         pass
     return result
+
+
+def _head_state(root: Path, name: str) -> dict:
+    """What `name` held at HEAD, in the same shape `capture` records, or `_MISSING` if untracked."""
+    try:
+        review = Review(root, root, deadline=time.monotonic() + 5)
+        raw = review.git(["cat-file", "blob", f"HEAD:{name}"])
+    except (OSError, ValueError):
+        return _MISSING
+    if raw is None:
+        return _MISSING
+    text = None
+    if b"\0" not in raw and len(raw) <= MAX_DIFF_BYTES:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+    return {"kind": "file", "hash": hashlib.sha256(raw).hexdigest(), "mode": 0o644, "text": text}
 
 
 def _same(left, right):
@@ -142,15 +213,31 @@ class ChatChanges:
         with self.lock:
             if self._active_before is before:
                 self._active_before = None
-            if not before["complete"] or not after["complete"]:
+            bounded = not before["complete"] or not after["complete"]
+            if bounded:
                 self.incomplete = True
-                return
             skipped = before["skipped"] | after["skipped"]
             self.incomplete |= bool(skipped)
-            for name in sorted(before["files"].keys() | after["files"].keys()):
+            # A bounded scan compares only what BOTH captures saw: a name one side missed is
+            # UNKNOWN, not created or deleted, and inventing either would be worse than omitting it.
+            # Returning here instead -- which is what this did -- threw away every real change in
+            # the turn as well, which is how a large repository ended up with an empty change set.
+            names = before["files"].keys() | after["files"].keys()
+            if bounded:
+                # A deleted file is in neither capture's `files` -- `capture` skips a missing path --
+                # so a bounded turn that deleted something would record nothing at all. The selected
+                # sets still name it. Unchanged names added here compare equal and drop out below.
+                names |= before.get("selected", set()) | after.get("selected", set())
+            for name in sorted(names):
                 if name in skipped:
                     continue
                 left, right = before["files"].get(name, _MISSING), after["files"].get(name, _MISSING)
+                if bounded and name not in before["files"]:
+                    # A bounded `before` only listed what already differed from HEAD, so a file the
+                    # turn edited from CLEAN is absent from it. Absent does not mean "created": its
+                    # state at the start of the turn was HEAD's, and reading it from there is what
+                    # keeps the edit visible instead of reporting a new file or dropping it.
+                    left = _head_state(self.root, name)
                 if _same(left, right):
                     continue
                 old = self.files.get(name, [])

@@ -114,9 +114,15 @@ class ChatChangesTests(unittest.TestCase):
         linked = Path(links.name) / "project"
         linked.symlink_to(self.root, target_is_directory=True)
         import time
-        self.assertEqual(sorted(chat_changes._names(linked, time.monotonic() + 5)), ["app.py", "pkg/mod.py"])
+        # `_names` returns (names, bounded): a large repository is now enumerated in a bounded form
+        # rather than refused outright, and the caller has to know which it got.
+        names, bounded = chat_changes._names(linked, time.monotonic() + 5)
+        self.assertEqual(sorted(names), ["app.py", "pkg/mod.py"])
+        self.assertFalse(bounded, "a two-file repository is not bounded by anything")
         self.git("add", "app.py")
-        self.assertEqual(sorted(chat_changes._names(linked / "pkg", time.monotonic() + 5)), ["mod.py"])
+        scoped, scoped_bounded = chat_changes._names(linked / "pkg", time.monotonic() + 5)
+        self.assertEqual(sorted(scoped), ["mod.py"])
+        self.assertFalse(scoped_bounded)
         journal = ChatChanges(linked)
         before = journal.begin()
         self.write("app.py", "print('hi')\nprint('there')\n")
