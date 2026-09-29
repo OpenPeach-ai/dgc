@@ -40,6 +40,17 @@ def git(*args, cwd) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def _case_sensitive(directory: Path) -> bool:
+    """Ask the filesystem rather than the platform: a case-sensitive volume can be mounted on a
+    Mac, and a case-insensitive one on Linux, so `sys.platform` is the wrong question."""
+    probe = directory / ".dgc-case-probe"
+    try:
+        probe.write_text("", encoding="utf-8")
+        return not (directory / ".DGC-CASE-PROBE").exists()
+    finally:
+        probe.unlink(missing_ok=True)
+
+
 class ACaseAliasedProjectRefusesDelegationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.base = Path(tempfile.mkdtemp(prefix="dgc-case-")).resolve()
@@ -54,9 +65,25 @@ class ACaseAliasedProjectRefusesDelegationTest(unittest.TestCase):
         git("commit", "-qm", "init", cwd=self.main)
 
     def alias(self) -> None:
-        """One file, two tracked names -- the property the Mac gets from its filesystem."""
-        os.link(self.main / "readme.md", self.main / "README.md")
-        git("add", "README.md", cwd=self.main)
+        """One file, two tracked names -- the property the Mac gets from its filesystem.
+
+        How the second name is made has to differ by filesystem, and getting that wrong is what
+        broke the macOS release matrix: `os.link` is how you FAKE this on a case-sensitive one,
+        and on a case-insensitive one the two names are already the same path, so the link
+        raises FileExistsError and every test here errors in setUp.
+
+        On a case-insensitive filesystem only the INDEX needs the second spelling -- which is
+        exactly the shape the real thing has: a repository authored on Linux, checked out on a
+        Mac, where `git ls-files` lists both and the disk holds one. That is the case the
+        docstring on aliased_tracked_paths was measured against.
+        """
+        if _case_sensitive(self.main):
+            os.link(self.main / "readme.md", self.main / "README.md")
+            git("add", "README.md", cwd=self.main)
+        else:
+            blob = git("rev-parse", "HEAD:readme.md", cwd=self.main).stdout.strip()
+            git("update-index", "--add", "--cacheinfo", f"100644,{blob},README.md",
+                cwd=self.main)
         git("commit", "-qm", "alias", cwd=self.main)
         git("config", "core.ignorecase", "true", cwd=self.main)
 
