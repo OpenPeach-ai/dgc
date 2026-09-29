@@ -119,6 +119,21 @@ AGENT_MESSAGE_PREFIX = ("<parent-agent-message>\nThe agent that delegated this t
                         "sentence, then carry on:\n")
 AGENT_MESSAGE_SUFFIX = "\n</parent-agent-message>"
 
+# The same channel, saying the opposite thing. `message_task` was a CORRECTION by construction --
+# "fold it in if it applies" reads as "what you are doing may be wrong" -- so a parent with more
+# work for a running child had to phrase an addition as a correction, and the envelope then told
+# the child the opposite of what was meant. Codex draws exactly this line with one word in its
+# envelope (MESSAGE vs NEW_TASK) on one shared send path; this is DGC's half of it.
+#
+# NOT a wake: DGC's children have no idle state to wake into, and the finished ones leave nothing
+# to resume. This adds scope to a child that is still working, and says so.
+AGENT_TASK_PREFIX = ("<parent-agent-task>\nThe agent that delegated this task sent this while you "
+                     "were working. It is NOT from the user, and it is NOT a correction: what you "
+                     "are already doing still stands. This is ADDITIONAL work added to your brief. "
+                     "Finish what you have and do this too, and account for both when you "
+                     "report:\n")
+AGENT_TASK_SUFFIX = "\n</parent-agent-task>"
+
 
 def notice_kind(message) -> str:
     """What kind of DGC-written notice a transcript message is, or "" for anything else.

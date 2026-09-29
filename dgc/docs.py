@@ -1071,12 +1071,15 @@ silently receives it.
   this chat. Either way it returns as soon as the first of those has a result nobody has read.
   `timeout_s` is 30 seconds by default and is clamped to 5–600 rather than refused. Four results
   come back at once; the rest are announced and wait for the next call.
-- **`message_task`** — one message into a child that is still working: a correction, a constraint
-  that was left out, a narrowing of the brief. It is folded into the task the child is already
-  doing, at its next tool boundary. It starts no new task, restarts nothing and waits for nothing,
-  and a child that has already finished cannot read it — the answer says so and points at
-  `wait_tasks`. The two control tools need a child that is still RUNNING, not merely a result
-  nobody has read.
+- **`message_task`** — one message into a child that is still working, of one of two kinds. By
+  default a **correction**: a constraint that was left out, a narrowing of the brief, something the
+  child is getting wrong. With `adds_work`, **more work**: what the child is already doing still
+  stands, and this is added to it. The child is told which, in so many words — before, everything
+  arrived as a correction, so a parent adding scope told the child the opposite of what it meant.
+  Either way it is folded in at the child's next tool boundary: it starts no new task, restarts
+  nothing and waits for nothing, and a child that has already finished cannot read it — the answer
+  says so and points at `wait_tasks`. The two control tools need a child that is still RUNNING, not
+  merely a result nobody has read.
 - **`close_task`** — stop a child whose work is no longer wanted. Its changes are **not**
   integrated: whatever it had written to its own checkout is preserved as retained work, so
   `/tasks` can apply or drop it, and nothing is silently thrown away. Stopping a child stops

@@ -3889,8 +3889,10 @@ class Agent(GoalLifecycle):
                 maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
         except ValueError:
             return False
+        # A closed set, normalised here so no caller can invent an origin the drain does not group:
+        # an unknown value would silently fall out of every envelope and reach the model bare.
         item = {"text": clean, "images": image_values, "request_id": request_id,
-                "origin": "agent" if origin == "agent" else "user"}
+                "origin": origin if origin in ("agent", "agent_task") else "user"}
         with self._steer_lock:
             if not self._accepting_steer or self.cancelled.is_set():
                 return False
@@ -3924,13 +3926,15 @@ class Agent(GoalLifecycle):
                                         + _trusted_intent_text(item["text"]))[-40_000:]
             self._refresh_system()
             from .workflows import (AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX,
+                                    AGENT_TASK_PREFIX, AGENT_TASK_SUFFIX,
                                     STEERING_PREFIX, STEERING_SUFFIX)
-            # Two envelopes, because there are two senders. `message_task` carries the PARENT
+            # Three envelopes, because there are three things to say. `message_task` carries the PARENT
             # MODEL's words; sending those under the user's envelope told the child a human had
             # spoken and made every frontend render them as a user bubble.
             images = [image for item in msgs for image in item["images"]]
             for kind, prefix, suffix in (("user", STEERING_PREFIX, STEERING_SUFFIX),
-                                         ("agent", AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX)):
+                                         ("agent", AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX),
+                                         ("agent_task", AGENT_TASK_PREFIX, AGENT_TASK_SUFFIX)):
                 group = [m for m in msgs
                          if m.get("origin", "user") == kind and m["text"].strip()]
                 if not group:
@@ -9022,7 +9026,8 @@ class Agent(GoalLifecycle):
             return True
         return any(row["id"] == key for row in self._detached_results())
 
-    def message_detached(self, agent_id: str, text: str) -> tuple[bool, str]:
+    def message_detached(self, agent_id: str, text: str, *, adds_work: bool = False
+                         ) -> tuple[bool, str]:
         """Queue one message for a running detached child. Returns (delivered, reason).
 
         The callee is `Agent.steer` on the CHILD object, which `_execute_prepared_subagent`
@@ -9057,8 +9062,12 @@ class Agent(GoalLifecycle):
         # origin="agent": this is the PARENT MODEL writing, not the user. Under the user envelope
         # the child was told "The user sent this WHILE you were working" and frontends rendered the
         # model's words as a human bubble.
+        #
+        # `adds_work` picks the other agent envelope. Same channel, same delivery, same tool -- the
+        # only difference is whether the child is told its brief was WRONG or that it GREW, and
+        # without the second one a parent adding scope had to phrase it as a correction.
         try:
-            accepted = steer(clean, origin="agent")
+            accepted = steer(clean, origin="agent_task" if adds_work else "agent")
         except TypeError:
             accepted = steer(clean)          # an embedder's Agent without the origin parameter
         if accepted:
@@ -9100,11 +9109,15 @@ class Agent(GoalLifecycle):
         agent_id = str(args.get("id", "") or "").strip()
         if not agent_id:
             return "error: id is required. Call list_tasks for the ids that exist."
-        delivered, reason = self.message_detached(agent_id, str(args.get("text", "") or ""))
+        adds_work = args.get("adds_work") is True
+        delivered, reason = self.message_detached(agent_id, str(args.get("text", "") or ""),
+                                                  adds_work=adds_work)
         if delivered:
-            return (f"Delivered to {agent_id}. It reads your message at its next tool boundary, "
-                    "inside the task it is already doing: this starts no new task, restarts "
-                    "nothing, and waits for nothing. Its result still arrives the usual way.")
+            what = ("added to its brief — what it is already doing still stands"
+                    if adds_work else "folded into the work it is already doing")
+            return (f"Delivered to {agent_id}, {what}. It reads your message at its next tool "
+                    "boundary: this starts no new task, restarts nothing, and waits for nothing. "
+                    "Its result still arrives the usual way.")
         return "error: " + {
             "empty": "the message was empty.",
             "unknown": (f"this conversation has no background sub-task with the id {agent_id}. "

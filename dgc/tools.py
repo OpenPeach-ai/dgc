@@ -411,16 +411,21 @@ SUPERVISION_TOOL_SCHEMAS = [
                                       "still running. Default 30, minimum 5, maximum 600; a value "
                                       "outside that range is clamped, not refused."}},
         []),
-    _fn("message_task", "Send ONE message to a background sub-task that is still running: a "
-        "correction, a constraint you left out, or a narrowing of its brief. It is folded into the "
-        "work the child is already doing, at its next tool boundary -- it starts no new task, "
-        "restarts nothing, and does not wait for a reply. Use it when the brief turned out to be "
-        "wrong, not to converse: a child's instructions belong in the `task` prompt, and a child "
-        "that has already finished cannot read anything.",
+    _fn("message_task", "Send ONE message to a background sub-task that is still running. Two "
+        "kinds: by default a CORRECTION -- a constraint you left out, a narrowing of its brief, "
+        "something it is getting wrong -- or, with adds_work, MORE WORK added to what it is "
+        "already doing. Either way it is read at the child's next tool boundary: it starts no new "
+        "task, restarts nothing, and does not wait for a reply. Not for conversing: a child's "
+        "instructions belong in the `task` prompt, and one that has already finished cannot read "
+        "anything.",
         {"id": {"type": "string", "description": "The background sub-task's id (from `task` or "
                                                  "`list_tasks`)"},
          "text": {"type": "string", "description": "What the child should know or do differently, "
-                  "self-contained: it cannot see this conversation"}},
+                  "self-contained: it cannot see this conversation"},
+         "adds_work": {"type": "boolean", "description": "True when this ADDS to the brief and "
+                       "what the child is already doing still stands. False (the default) when it "
+                       "corrects or narrows what it is doing. Getting this backwards tells the "
+                       "child the opposite of what you mean"}},
         ["id", "text"]),
     _fn("close_task", "Stop a background sub-task that is still running, when its work is no "
         "longer wanted: the request changed, you did it yourself, or it is going the wrong way. "

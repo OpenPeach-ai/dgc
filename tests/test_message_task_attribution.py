@@ -185,3 +185,134 @@ class TheTerminalLineNamesTheSenderTest(unittest.TestCase):
         agent.steer("actually use postgres", origin="user")
         agent._drain_steer()
         self.assertIn("steering", agent.ui.lines[-1])
+
+
+class MoreWorkIsNotACorrectionTest(unittest.TestCase):
+    """The same channel, saying the opposite thing.
+
+    `message_task` was a correction by construction — "fold it in if it applies" reads as "what you
+    are doing may be wrong" — so a parent with MORE work for a running child had to phrase an
+    addition as a correction, and the envelope then told the child the opposite of what was meant.
+
+    Codex draws exactly this line, with one word in its envelope (MESSAGE vs NEW_TASK) on one shared
+    send path. This is DGC's half of it: same tool, same delivery, same next-tool-boundary, and the
+    child told which of the two it is. It is NOT Codex's wake — DGC's children have no idle state to
+    wake into and its finished ones leave nothing to resume.
+    """
+
+    def drain(self, *sends) -> list[dict]:
+        agent = Fake()
+        for text, origin in sends:
+            self.assertTrue(agent.steer(text, origin=origin), f"steer rejected {text!r}")
+        agent._drain_steer()
+        return agent.messages
+
+    def test_added_work_says_what_the_child_is_doing_still_stands(self) -> None:
+        from dgc.workflows import AGENT_TASK_PREFIX, AGENT_TASK_SUFFIX
+        [message] = self.drain(("also add a migration guide", "agent_task"))
+        text = message["content"]
+        self.assertIn(AGENT_TASK_PREFIX, text)
+        self.assertIn(AGENT_TASK_SUFFIX, text)
+        self.assertIn("still stands", text)
+        self.assertIn("ADDITIONAL work", text)
+
+    def test_added_work_is_still_not_the_user(self) -> None:
+        """The defect the first envelope exists for must not come back through the second."""
+        [message] = self.drain(("also add a migration guide", "agent_task"))
+        text = message["content"]
+        self.assertNotIn("The user sent this", text)
+        self.assertIn("It is NOT from the user", text)
+        self.assertIn("_dgc_agent_message", message,
+                      "it is the agent's words, so it must not replay as a user bubble")
+        self.assertNotIn("_dgc_steering", message)
+
+    def test_a_correction_never_says_the_work_still_stands(self) -> None:
+        """The two must be distinguishable by the child, or the parameter buys nothing."""
+        [message] = self.drain(("you are editing the wrong file", "agent"))
+        self.assertNotIn("still stands", message["content"])
+        self.assertNotIn("ADDITIONAL work", message["content"])
+
+    def test_the_three_kinds_land_in_three_separate_envelopes(self) -> None:
+        messages = self.drain(("the user typed this", "user"),
+                              ("you are editing the wrong file", "agent"),
+                              ("also add a migration guide", "agent_task"))
+        self.assertEqual(len(messages), 3, "a shared envelope would merge two different meanings")
+        joined = [m["content"] for m in messages]
+        self.assertTrue(any("user-interjection" in t for t in joined))
+        self.assertTrue(any("parent-agent-message" in t for t in joined))
+        self.assertTrue(any("parent-agent-task" in t for t in joined))
+
+    def test_an_invented_origin_cannot_reach_the_model_bare(self) -> None:
+        """Every origin must fall into one of the three groups: one that did not would be dropped
+        from the drain entirely, or reach the model with no envelope at all."""
+        agent = Fake()
+        self.assertTrue(agent.steer("something", origin="not-a-real-origin"))
+        agent._drain_steer()
+        [message] = agent.messages
+        self.assertIn(STEERING_PREFIX, message["content"],
+                      "an unknown origin must normalise to the safest envelope, not vanish")
+
+
+class TheToolSaysWhichKindItIsTest(unittest.TestCase):
+    def test_the_schema_offers_the_choice_and_defaults_to_a_correction(self) -> None:
+        from dgc.tools import SUPERVISION_TOOL_SCHEMAS, TOOL_SCHEMAS
+        spec = next(t["function"] for t in (*TOOL_SCHEMAS, *SUPERVISION_TOOL_SCHEMAS)
+                    if t.get("function", {}).get("name") == "message_task")
+        properties = spec["parameters"]["properties"]
+        self.assertIn("adds_work", properties)
+        self.assertEqual(properties["adds_work"]["type"], "boolean")
+        self.assertNotIn("adds_work", spec["parameters"].get("required", []),
+                         "a correction is the default; adding work is the deliberate act")
+        self.assertIn("correct", spec["description"].lower())
+
+
+class TheToolActuallyPicksTheEnvelopeTest(unittest.TestCase):
+    """Through `message_detached`, not by calling `steer` with the origin by hand.
+
+    The tests above prove the two envelopes differ. They do not prove the tool reaches the right
+    one — a mutation sweep showed `adds_work` could be dropped on the send and every one of them
+    still passed.
+    """
+
+    def parent(self, child):
+        from dgc.agent import Agent
+        parent = object.__new__(Agent)
+        parent._detached_jobs = {"a1": {"agent": child}}
+        parent._detached_handle = lambda agent_id: parent._detached_jobs.get(agent_id)
+        parent._knows_finished = lambda agent_id: False
+        parent.message_detached = Agent.message_detached.__get__(parent)
+        parent._message_task_result = Agent._message_task_result.__get__(parent)
+        return parent
+
+    def envelope_for(self, **args) -> str:
+        child = Fake()
+        parent = self.parent(child)
+        result = parent._message_task_result({"id": "a1", "text": "also add a migration guide",
+                                              **args})
+        self.assertNotIn("error", result.lower(), result)
+        child._drain_steer()
+        self.assertEqual(len(child.messages), 1, child.messages)
+        return child.messages[0]["content"]
+
+    def test_adds_work_reaches_the_added_work_envelope(self) -> None:
+        self.assertIn("parent-agent-task", self.envelope_for(adds_work=True))
+
+    def test_the_default_is_still_a_correction(self) -> None:
+        text = self.envelope_for()
+        self.assertIn("parent-agent-message", text)
+        self.assertNotIn("parent-agent-task", text)
+
+    def test_only_a_real_true_adds_work(self) -> None:
+        """A model that sends the string "false" must not get the opposite of what it asked for."""
+        for value in ("false", "no", 0, None, ""):
+            with self.subTest(value=value):
+                self.assertIn("parent-agent-message", self.envelope_for(adds_work=value))
+
+    def test_the_tool_result_says_which_one_it_sent(self) -> None:
+        child = Fake()
+        parent = self.parent(child)
+        added = parent._message_task_result({"id": "a1", "text": "x", "adds_work": True})
+        fixed = parent._message_task_result({"id": "a1", "text": "y"})
+        self.assertIn("added to its brief", added)
+        self.assertIn("still stands", added)
+        self.assertIn("folded into the work", fixed)
