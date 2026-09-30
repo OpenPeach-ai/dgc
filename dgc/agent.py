@@ -4587,6 +4587,19 @@ class Agent(GoalLifecycle):
         next request) then held only the part after the cut. Provider-state messages (Responses
         items, Anthropic pause state) are left as they are: their stored shape is exact.
 
+        THE JOIN IS LITERAL, and that is a decision rather than an oversight. The continuation is a
+        FRESH generation, and a fresh generation does not begin with a leading space, so a cut that
+        fell between two words used to lose the space between them and the two words ran together:
+        "install it in the backend" + "image." read as "backendimage." -- reported from a real
+        session, always at the seam, while the same message's other spaces were untouched. It is
+        fixed where it is caused, in the continuation prompt, which now tells the model the reply is
+        appended with nothing between and to begin with a space when the cut fell between words.
+
+        Inserting the space HERE instead was the other candidate and it is rejected: the join cannot
+        tell a cut between words from a cut inside one, so a heuristic that fixes "backendimage"
+        turns "backend" cut after "back" into "back end". A wrong space is as visible as a missing
+        one, and unlike the missing one it would be DGC inventing text the model never wrote.
+
         What the two private records said survives the join: both requests' reasoning blocks, and a
         stream-recovery prompt's ``_dgc_notice`` (kept in order on ``_dgc_stream_recoveries``, so a
         replay still draws the reconnect line that led to this answer). A continuation that embedded
@@ -6421,7 +6434,10 @@ class Agent(GoalLifecycle):
                         else:
                             self.messages.append({"role": "user", "content": (
                                 "Your previous response was cut off at the length limit. Continue exactly "
-                                "where you left off — do not repeat what you already wrote.")})
+                                "where you left off — do not repeat what you already wrote. Your reply is "
+                                "appended directly to the cut-off text with nothing inserted between "
+                                "them, so begin with the exact character that comes next: if the cut fell "
+                                "between two words, begin with a space.")})
                         if (result.content or "").strip():
                             continued_prose = (self.messages[-1], assistant)
                         next_request_reason = "output_continue"
