@@ -32,6 +32,28 @@ from dgc_sdk import (  # noqa: E402
 )
 from dgc_sdk.schema import extract_json, validate  # noqa: E402
 
+
+def _process_alive(pid: int) -> bool:
+    """Is this pid still running? Portable, because `/proc` is Linux-only.
+
+    `os.path.exists(f"/proc/{pid}")` is always False on macOS, which turns an assertion about a
+    reaped child into `assertFalse(False)` -- a test that proves nothing on half the CI matrix
+    while reporting green -- and turns a cleanup guard into a short circuit that never runs the
+    kill, leaking the process on every run. The product itself has always used this form
+    (dgc/install_layout.py, dgc/subscriptions.py, dgc/hooks.py, dgc/monitors.py); only these
+    tests reached for `/proc`. Signal 0 checks for existence without delivering anything.
+    A zombie is still a pid until it is reaped, which is what these callers mean by alive.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:      # alive, and owned by somebody else
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
+
 if INSTALLED:
     import dgc_sdk as _installed  # noqa: E402
     assert not Path(_installed.__file__).resolve().is_relative_to(ROOT), \
@@ -635,7 +657,7 @@ class SdkTests(unittest.TestCase):
             pid = session.raw._proc.pid if session.raw._proc is not None else None
         if pid:
             time.sleep(0.3)
-            self.assertFalse(os.path.exists(f"/proc/{pid}"), f"dgc serve {pid} still alive")
+            self.assertFalse(_process_alive(pid), f"dgc serve {pid} still alive")
 
     def test_resume_while_source_session_is_open_does_not_touch_host(self):
         before = self._host_snapshot()
@@ -736,9 +758,9 @@ class SdkTests(unittest.TestCase):
         # Waiting for an orphan to be reaped: the assertion is that it goes away, not that
         # it goes away inside three seconds. A loaded runner can take longer.
         deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline and os.path.exists(f"/proc/{pid}"):
+        while time.monotonic() < deadline and _process_alive(pid):
             time.sleep(0.1)
-        self.assertFalse(os.path.exists(f"/proc/{pid}"), f"orphaned dgc serve pid {pid}")
+        self.assertFalse(_process_alive(pid), f"orphaned dgc serve pid {pid}")
 
     def test_usage_and_cost_are_queryable_by_department(self):
         with self._client(pricing=Pricing(input_per_million=1.0, output_per_million=2.0),

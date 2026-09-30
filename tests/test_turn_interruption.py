@@ -37,6 +37,28 @@ from dgc.agent import Agent            # noqa: E402  (after the redirect above)
 from dgc.config import Config          # noqa: E402
 from dgc import sessions               # noqa: E402
 
+
+def _process_alive(pid: int) -> bool:
+    """Is this pid still running? Portable, because `/proc` is Linux-only.
+
+    `os.path.exists(f"/proc/{pid}")` is always False on macOS, which turns an assertion about a
+    reaped child into `assertFalse(False)` -- a test that proves nothing on half the CI matrix
+    while reporting green -- and turns a cleanup guard into a short circuit that never runs the
+    kill, leaking the process on every run. The product itself has always used this form
+    (dgc/install_layout.py, dgc/subscriptions.py, dgc/hooks.py, dgc/monitors.py); only these
+    tests reached for `/proc`. Signal 0 checks for existence without delivering anything.
+    A zombie is still a pid until it is reaped, which is what these callers mean by alive.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:      # alive, and owned by somebody else
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
+
 PROJECT = Path(__file__).resolve().parents[1]
 
 
@@ -331,7 +353,7 @@ class KilledBackendResumeTests(unittest.TestCase):
         time.sleep(0.2)
         try:
             sleeper = int(pid_file.read_text().strip())
-            self.addCleanup(lambda: os.path.exists(f"/proc/{sleeper}") and os.kill(sleeper, signal.SIGKILL))
+            self.addCleanup(lambda: _process_alive(sleeper) and os.kill(sleeper, signal.SIGKILL))
         except ValueError:
             pass
         first.kill()                               # SIGKILL: no finally block, no grace path
@@ -643,7 +665,7 @@ class KilledBackendResumeTests(unittest.TestCase):
         time.sleep(0.2)
         try:
             sleeper = int(pid_file.read_text().strip())
-            self.addCleanup(lambda: os.path.exists(f"/proc/{sleeper}") and os.kill(sleeper, signal.SIGKILL))
+            self.addCleanup(lambda: _process_alive(sleeper) and os.kill(sleeper, signal.SIGKILL))
         except ValueError:
             pass
         first.kill()                               # SIGKILL between two calls of one batch
