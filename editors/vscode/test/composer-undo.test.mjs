@@ -177,7 +177,7 @@ test("undoing Show in text field folds the pasted text back into its chip", asyn
   }, big);
   const chips = () => page.evaluate(() => document.querySelectorAll("#attachments .pasted-chip").length);
   assert.equal(await chips(), 1);
-  await page.click("#attachments .chip-action");
+  await page.click("#attachments .pasted-chip .chip-action");
   assert.equal((await value()).length, 14 + big.length);
   assert.equal(await chips(), 0);
   await page.click("#input");
@@ -188,4 +188,69 @@ test("undoing Show in text field folds the pasted text back into its chip", asyn
   assert.equal((await value()).length, 14 + big.length);
   assert.equal(await chips(), 0, "and redo shows it in the text field again");
   await clearBox();
+});
+
+// A paste that folds into a chip is the one kind of paste Cmd+Z could not reach. Every other route
+// into the composer goes through insertText, so the browser records a step and the key works; the
+// chip branches call preventDefault and push onto `attachments`, changing no text, so there was
+// nothing in the undo stack to act on and the chip could only be dismissed by finding its button.
+const pastedChips = () => page.evaluate(() =>
+  document.querySelectorAll("#attachments .pasted-chip").length);
+const pasteText = (text) => page.evaluate((t) => {
+  const input = document.getElementById("input");
+  input.focus();
+  const data = new DataTransfer();
+  data.setData("text/plain", t);
+  input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+}, text);
+
+test("a pasted wall of text folds into a chip, and undo takes it back", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await page.evaluate(() => { document.getElementById("input").textContent = ""; });
+  await pasteText("x".repeat(6000));
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length > 0);
+  assert.ok((await pastedChips()) >= 1, "the paste became a chip");
+  await undo();
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length === 0);
+  assert.equal((await pastedChips()), 0, "Cmd+Z took the pasted chip back");
+});
+
+test("redo puts the pasted chip back", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await page.evaluate(() => { document.getElementById("input").textContent = ""; });
+  await pasteText("y".repeat(6000));
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length > 0);
+  await undo();
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length === 0);
+  await redo();
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length > 0);
+  assert.ok((await pastedChips()) >= 1, "redo restored it");
+});
+
+// The stack property: typing on top of a paste is undone FIRST, one native step at a time, and the
+// chip only goes when the box is back to where the paste happened. Without this the key would eat
+// the chip while the text you typed after it stayed, which is not what undo means anywhere else.
+test("typing after a paste is undone before the chip is", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await page.evaluate(() => { document.getElementById("input").textContent = ""; });
+  await pasteText("z".repeat(6000));
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length > 0);
+  await page.keyboard.type("hello");
+  await page.waitForFunction(() => document.getElementById("input").innerText.includes("hello"));
+  await undo();
+  assert.ok((await pastedChips()) >= 1, "the chip survives while typed text is still being undone");
+  for (let i = 0; i < 8 && (await pastedChips()) >= 1; i += 1) await undo();
+  assert.equal((await pastedChips()), 0, "once the typing is gone, the next undo takes the chip");
+});
+
+// Dismissing a chip by hand is a decision, not an edit. Undo must not resurrect it.
+test("a chip removed by hand is not brought back by undo", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await page.evaluate(() => { document.getElementById("input").textContent = ""; });
+  await pasteText("q".repeat(6000));
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length > 0);
+  await page.click("#attachments .pasted-chip button.x");
+  await page.waitForFunction(() => document.querySelectorAll("#attachments .pasted-chip").length === 0);
+  await undo();
+  assert.equal((await pastedChips()), 0, "undo did not resurrect a dismissed chip");
 });

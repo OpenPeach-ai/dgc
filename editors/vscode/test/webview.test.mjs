@@ -1028,6 +1028,14 @@ test("stream batching flushes final text and partial changes stay explicit", () 
   assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
   send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
   assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
+  // A bounded scan that recorded NOTHING is the same kind of statement, not a failure: it is the
+  // ordinary mid-turn state on a large repository. It used to read "Changes unavailable", which
+  // says the feature is broken rather than that the scan could not reach that far.
+  send({ type: "chat_changes", total: 0, files: [], notices: ["Some changes could not be recorded within the safe inspection limits."] });
+  assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
+  assert.doesNotMatch(doc.getElementById("changes-count").textContent, /unavailable/i);
+  assert.match(doc.getElementById("changesbar").title, /could not be recorded/);
+  send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
   doc.getElementById("changes-review-button").click();
   assert.match(doc.getElementById("changes-review-list").textContent, /Showing 500 of 900/);
   assert.deepEqual(errors, []);

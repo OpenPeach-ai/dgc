@@ -1098,6 +1098,7 @@
       shownPastes.length = 0;
     }
     setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
+    dropPastedChips();
     setComposerRange(draft.start, draft.end);
     renderAtts(); autosizeComposer();
     hidePop(); restoringDraft = false; persistDraft();
@@ -3247,8 +3248,15 @@
       notices: Array.isArray(next?.notices) ? next.notices.map(String).slice(0, 34) : [],
     };
     changesBar.hidden = changeState.total === 0 && !changeState.notices.length;
+    // "Changes unavailable" read as "this is broken" for the state it actually describes: a scan
+    // that hit its bounds and therefore cannot say whether anything changed. It is the ordinary
+    // mid-turn state on a large repository -- `capture()` stops at its deadline or file cap and
+    // compares only the names BOTH sides saw, so an edit outside that prefix is UNKNOWN, not
+    // absent. Say that, and say it the same way as the case just below it, so the two read as one
+    // scale rather than one number and one failure. The reason itself is on the bar's title.
     $("changes-count").textContent = changeState.notices.length
-      ? (changeState.total ? `${changeState.total} changed in this chat · partial scan` : "Changes unavailable")
+      ? (changeState.total ? `${changeState.total} changed in this chat · partial scan`
+                           : "Changes not recorded · partial scan")
       : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
     changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded", ...changeState.notices].join("\n");
     $("changes-add").hidden = $("changes-del").hidden = changeState.total === 0;
@@ -4758,7 +4766,7 @@
       delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });
-    clearComposer(); attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
+    clearComposer(); attachments.length = 0; dropPastedChips(); renderAtts(); persistDraft(); setSending(true); scroll();
   }
   // An attached image is shown, not named: the same tile the sent prompt carries, so you can see
   // what you are about to send (and that it is the right screenshot) before you send it.
@@ -4809,7 +4817,7 @@
         const drop = el("button", "x", "\u00d7");
         drop.type = "button"; drop.title = "Remove this image";
         drop.setAttribute("aria-label", "Remove attached image");
-        drop.onclick = () => { attachments.splice(i, 1); renderAtts(); };
+        drop.onclick = () => { forgetPastedChip(attachments[i]); attachments.splice(i, 1); renderAtts(); };
         atts.appendChild(imageAttachmentChip(a, drop));
         return;
       }
@@ -4821,7 +4829,7 @@
       // (No pill to take with it: pillShowing() suppresses a chip for as long as a pill stands for
       // the same selection, so a chip and its pill are never both on screen. Measured in Chromium
       // -- two skills picked, #attachments is empty.)
-      remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
+      remove.onclick = () => { forgetPastedChip(attachments[i]); attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label);
       if (a.pasted) {
         // The paste is not hidden, only folded away. One click puts it back where it was typed.
@@ -5076,6 +5084,68 @@
     autosizeComposer();
   }
 
+  // A paste that becomes a CHIP is invisible to Cmd+Z, and that is a gap rather than a choice.
+  // Every other way text enters the composer goes through `insertText`, so the browser records an
+  // undo step and the key just works. The two paste branches that fold into an attachment -- an
+  // image, and text past PASTED_TEXT_LIMIT -- call preventDefault and push onto `attachments`
+  // instead, changing no text at all. There is therefore NOTHING in the browser's undo stack to
+  // undo: Cmd+Z does not "fail", it has nothing to act on, so the chip sits there and the only way
+  // out is to find and click its remove button. Codex and Claude both take the paste back.
+  //
+  // So keep our own stack for exactly those chips and splice it into the browser's. What decides
+  // whether a chip is takeable is the TEXT the box held when it arrived, not a count of edits:
+  // Chromium groups a typing run into one undo step, so counting keystrokes and counting native
+  // undo steps drift apart immediately -- five characters typed, one step to undo them -- and a
+  // counter can never come back down to where it started. Comparing the text cannot drift. Type
+  // after pasting and the key undoes the typing first, a run at a time; when the box reads as it
+  // did at the paste, the next press takes the chip. That is a stack, which is what the key means
+  // everywhere else, and it is the same test `syncShownPaste` just above already relies on.
+  // var, for the reason composerSizedWidth is: selectDraftSession and the send path sit ABOVE this
+  // line and call into these, and a `let` would leave them in the temporal dead zone if either ever
+  // runs during evaluation rather than from a later message.
+  var pastedChips = [];
+  var undonePastedChips = [];
+  function recordPastedChip(item) {
+    pastedChips.push({ item, index: attachments.indexOf(item), before: composerText() });
+  }
+  function forgetPastedChip(item) {
+    for (let i = pastedChips.length - 1; i >= 0; i -= 1) {
+      if (pastedChips[i].item === item) pastedChips.splice(i, 1);
+    }
+  }
+  function dropPastedChips() { pastedChips.length = 0; undonePastedChips.length = 0; }
+  function undoPastedChip() {
+    const top = pastedChips[pastedChips.length - 1];
+    if (!top || composerText() !== top.before) return false;
+    const at = attachments.indexOf(top.item);
+    if (at < 0) { pastedChips.pop(); return undoPastedChip(); }   // already removed by hand
+    attachments.splice(at, 1);
+    pastedChips.pop();
+    undonePastedChips.push({ ...top, index: at });
+    renderAtts(); persistDraft(); autosizeComposer();
+    return true;
+  }
+  function redoPastedChip() {
+    const top = undonePastedChips[undonePastedChips.length - 1];
+    if (!top || composerText() !== top.before || attachments.includes(top.item)) return false;
+    attachments.splice(Math.min(top.index, attachments.length), 0, top.item);
+    undonePastedChips.pop();
+    pastedChips.push({ ...top });
+    renderAtts(); persistDraft(); autosizeComposer();
+    return true;
+  }
+  // Ctrl/Cmd+Z reaches us before the editing host acts on it, so returning without preventDefault
+  // leaves the native undo exactly as it was.
+  input.addEventListener("keydown", (event) => {
+    if ((event.key !== "z" && event.key !== "Z" && event.key !== "y" && event.key !== "Y")
+        || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+    const redo = event.key === "y" || event.key === "Y" || event.shiftKey;
+    if (redo ? redoPastedChip() : undoPastedChip()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+
   // "Show in text field" moved a pasted chip's text into the box. When undo or redo lands back on
   // either side of that edit, put the chip back or take it away again to match.
   const shownPastes = [];
@@ -5222,7 +5292,7 @@
           }
           const image = { label: "Image", img: true, data: r.result, bytes: file.size };
           if (owner.session === draftSession) {
-            attachments.push(image); renderAtts();
+            attachments.push(image); recordPastedChip(image); renderAtts();
           } else {
             const draft = draftEntries.get(owner.session)
               || { text: "", attachments: [], start: 0, end: 0, updated: Date.now() };
@@ -5252,7 +5322,9 @@
     // it means classifying the attachment, not the draft, and giving the chip its own notice.
     if (pasted.length >= PASTED_TEXT_LIMIT && canAttach()) {
       e.preventDefault();
-      attachments.push({ label: "Pasted text", pasted, chars: pasted.length });
+      const chip = { label: "Pasted text", pasted, chars: pasted.length };
+      attachments.push(chip);
+      recordPastedChip(chip);
       renderAtts();
       sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
       return;
