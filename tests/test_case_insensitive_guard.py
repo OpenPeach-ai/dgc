@@ -63,6 +63,13 @@ class ACaseAliasedProjectRefusesDelegationTest(unittest.TestCase):
         (self.main / "other.txt").write_text("unrelated\n", encoding="utf-8")
         git("add", "-A", cwd=self.main)
         git("commit", "-qm", "init", cwd=self.main)
+        # Whatever git called the first branch. It is `master` here and `main` under Apple Git
+        # 2.50.1 with init.defaultBranch unset in every scope, so the NAME is not the property --
+        # "the refusal added nothing" is.
+        self.branches_before = self.branch_names()
+
+    def branch_names(self) -> list[str]:
+        return sorted(git("branch", "--format=%(refname:short)", cwd=self.main).stdout.split())
 
     def alias(self) -> None:
         """One file, two tracked names -- the property the Mac gets from its filesystem.
@@ -110,8 +117,8 @@ class ACaseAliasedProjectRefusesDelegationTest(unittest.TestCase):
     def test_nothing_is_created_by_the_refusal(self) -> None:
         self.alias()
         worktree.TaskWorkspace.prepare(self.main, "task", self.base / "store")
-        self.assertEqual(git("branch", "--format=%(refname:short)", cwd=self.main).stdout.split(),
-                         ["master"])
+        self.assertEqual(self.branch_names(), self.branches_before,
+                         "the refusal must not leave a branch behind")
         self.assertEqual(len(worktree.list_worktrees(self.main)), 1)
 
     def test_a_fleet_checkout_is_refused_too(self) -> None:
@@ -146,7 +153,16 @@ class ACaseAliasedProjectRefusesDelegationTest(unittest.TestCase):
 
     def test_a_tracked_symlink_between_the_two_names_is_not_aliasing(self) -> None:
         """git stores a symlink as a symlink and DGC reads it as one, so `lstat` is the right
-        question -- `stat` would follow it and refuse a project that is perfectly fine."""
+        question -- `stat` would follow it and refuse a project that is perfectly fine.
+
+        Case-sensitive filesystems only, and not for convenience: the scenario needs `readme.md`
+        and a SEPARATE `README.md` symlink pointing at it, and on a case-insensitive volume those
+        are one name -- `symlink_to` raises FileExistsError, which is what this test did on every
+        macOS CI run. There is no macOS equivalent to gate differently, because there the symlink
+        case collapses into the plain aliasing case that the other tests already cover.
+        """
+        if not _case_sensitive(self.main):
+            self.skipTest("needs two distinct directory entries; this volume collapses their case")
         (self.main / "README.md").symlink_to("readme.md")
         git("add", "-A", cwd=self.main)
         git("commit", "-qm", "symlinked alias", cwd=self.main)
