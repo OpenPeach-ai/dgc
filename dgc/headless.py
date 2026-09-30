@@ -1570,7 +1570,82 @@ class HeadlessUI:
                    if isinstance(response.get("content"), dict) else {})}
 
 
+class Chat:
+    """One conversation's own state: its agent, its turn, its queue.
+
+    DGC runs ONE `Backend` per process holding ONE conversation, so switching to an existing chat
+    rewrites that conversation in place -- which is why `resume_session` is refused while a turn
+    runs. `Chat` is the object that ends that: a backend will hold several, one per conversation,
+    and a turn will belong to its chat rather than to the process. Everything here is state a
+    second conversation would need its own copy of.
+
+    NOT here, and each for a reason that bites if it moves:
+
+    * `em` -- ONE Emitter per stdout is a protocol requirement, not a preference. `seq` comes from
+      a single counter inside the write lock, and all three clients drop the connection on a
+      non-increasing seq, so a second emitter would look like a corrupt stream.
+    * `pending` -- `PendingRequests` mints ids from a per-instance `itertools.count(1)` and
+      `cancel_all` has no owner filter, while `permission_response` resolves by bare id. Two
+      registries would both mint `r1` and the answer would land on whichever asked first.
+    * `config`, MCP, skills, plugins, permission rules, the checkout lease -- one machine, one
+      checkout, one set of connections. Chats share them by design; that sharing IS the reason to
+      collapse several `dgc serve` processes into one.
+    * `_wake_suppressed`, `_monitors_timer`, `_agents_timer` -- these sit between the per-chat
+      fields in `__init__` and look identical in shape, but they are counted per COMMAND and
+      coalesce one stdout. They belong to the process.
+
+    `_live_turn` is here and is NOT in `Backend.__init__`; it exists only where a turn sets it. It
+    is read as a pair with `_running_turn_kind`, and a reader that gets one without the other
+    reports a running turn as finished, so the two are declared together and move together.
+    """
+
+    __slots__ = ("agent", "ui", "_worker", "_foreground_worker", "_package_reader", "_turn_lock",
+                 "_turn_n", "_queue", "_goal_auto_resumes", "_steer_payloads",
+                 "_running_turn_kind", "_live_turn", "_wake_yield", "_wake_timer", "_agent_wakes")
+
+    # NO __init__, and that is the whole design of this step rather than an omission.
+    #
+    # Every slot starts UNSET, so reading one raises AttributeError exactly as reading an attribute
+    # that was never assigned does. Once these names become properties over `_chat()`, that is the
+    # behaviour they have to reproduce: `hasattr(backend, "_worker")` must be False on a Backend
+    # nothing has touched, because 20 sites read the agent as `getattr(self, "agent", None)` WITH a
+    # default and `_maybe_wake` guards itself with `if not hasattr(self, "_queue")`. Give this class
+    # defaults and every one of those reads starts succeeding with None -- eleven functions quietly
+    # become no-ops and the suite stays green. Absent and None are different answers here.
+    #
+    # Nothing is lost by leaving them unset: `Backend.__init__` assigns 14 of these 15 itself, so
+    # every default already has exactly one source and cannot drift from a second copy. The
+    # fifteenth is `_live_turn`, which `Backend.__init__` does NOT assign -- it is set only where a
+    # turn begins and is read as `getattr(self, "_live_turn", None)` -- so absent is its correct
+    # post-init state too.
+
+
 class Backend:
+    def _chat(self) -> "Chat":
+        """This backend's one chat, created on first use.
+
+        Lazy, and reached through `__dict__` rather than an attribute, for one reason each:
+
+        LAZY, because `Backend` is routinely built with `object.__new__(Backend)` -- 29 test files
+        do it -- and those fixtures assign only the two or three fields they need. A `Chat` built in
+        `__init__` would simply not exist on such an object, so the accessor has to be able to make
+        one from nothing.
+
+        THROUGH `__dict__`, because the per-chat names become properties that call this. Reading
+        `self._chat_obj` as an attribute once `_chat_obj` were itself managed would recurse; going
+        to the instance dict directly cannot.
+
+        Deliberately NOT thread-safe on creation: two threads racing here would each build a Chat
+        and one would win, which is a lost queue. It is safe today because nothing calls it, and
+        the step that gives it callers gives it the turn lock. Until then this is dead code, and
+        saying so is cheaper than a lock that would look load-bearing to the next reader.
+        """
+        chat = self.__dict__.get("_chat_obj")
+        if chat is None:
+            chat = Chat()
+            self.__dict__["_chat_obj"] = chat
+        return chat
+
     def __init__(self, config: Config):
         from .trust import is_trusted
         self.workspace_trusted = is_trusted(config, config.project_root)
