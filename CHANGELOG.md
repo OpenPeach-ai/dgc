@@ -4,6 +4,40 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.46.4 — 2026-09-30
+
+### A cut-off reply no longer loses the space where it was cut
+
+A reply that hits the length limit is continued by a second request, and the two halves are joined
+to make one answer. The continuation is a fresh generation, and a fresh generation does not begin
+with a leading space — so a cut that fell between two words ran them together. "install it in the
+backend image" arrived as "backendimage". It is fixed where it is caused: the continuation prompt
+now says the reply is appended with nothing between it and the cut-off text, and to begin with a
+space when the cut fell between words. The join stays literal on purpose — it cannot tell a cut
+between words from a cut inside one, so repairing this there would turn a cut after "back" into
+"back end", which is DGC inventing text you never wrote.
+
+### Undo takes back a pasted attachment
+
+A paste large enough to fold into a chip, or a pasted image, could not be taken back with Ctrl+Z or
+Cmd+Z: those two paths change no text, so the browser had nothing to undo and the only way out was
+to find the chip's remove button. Undo now takes the chip back and redo returns it. Typing after a
+paste is undone first, a run at a time, and a chip you removed by hand is not resurrected.
+
+### With the sandbox on, a delegated sub-agent can run git on macOS
+
+Completing what 0.46.2 fixed on Linux. Re-exposing the repository was not enough to reach it: `bwrap`
+masks your home so the path components are absent and git treats them as "nothing there", while
+`sandbox-exec` denies them and git treats that as fatal before it ever reaches the repository. The
+path components a resolver walks now carry the metadata it needs — existence and `stat`, nothing
+else, no contents and no listing — for both the checkout and the repository it points at. What the
+sandbox hides stays hidden: your ignored files, your other work, your keys.
+
+### A command the sandbox refused says so
+
+`Operation not permitted` reads as a broken machine, and a model that reads it that way goes looking
+for a fault that is not there. A refusal is now named as a policy result, with what to do instead.
+
 ## 0.46.3 — 2026-09-30
 
 ### An interrupt during integration no longer leaves a half-applied checkout

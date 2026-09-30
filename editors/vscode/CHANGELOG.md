@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.31.4 — 2026-09-30
+
+- Undo takes back a pasted attachment. A paste big enough to fold into a chip, or a pasted image,
+  changed no text in the box, so Ctrl+Z and Cmd+Z had nothing to act on and the chip could only be
+  dismissed by finding its remove button. Undo now takes it back and redo returns it; typing after
+  a paste is undone first, a run at a time.
+- The changed-files bar no longer reads as broken when a scan could not reach far enough. On a large
+  repository it stops at its limits and cannot say whether anything changed — it now says that,
+  instead of "Changes unavailable".
+- Requires CLI 0.46.4; editor protocol v14.
+
 ## 0.31.3 — 2026-09-30
 
 - Pairs with CLI 0.46.3, which stops an interrupt mid-integration from leaving a half-applied
