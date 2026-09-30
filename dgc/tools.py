@@ -1880,7 +1880,37 @@ def bash(args: dict, ctx) -> str:
         out = _long_output_preview(_safe_command_label(command, ctx), out, proc.returncode, ctx,
                                    source_chars=source_chars, already_omitted=omitted_chars,
                                    is_verify=verify)
-    return f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}"
+    return _explain_sandbox_denial(
+        f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}",
+        proc.returncode, sandbox_requested)
+
+
+# `Operation not permitted` from inside the sandbox reads like a broken machine, and a model that
+# reads it that way goes looking for the wrong fault -- a missing file, a permissions problem on the
+# user's disk, a corrupt checkout. It is none of those: it is DGC's own policy, working. Naming it
+# costs one line and turns a dead end into a decision the user can make.
+_SANDBOX_DENIALS = (
+    "operation not permitted",
+    "permission denied",
+    "read-only file system",
+)
+# Shell misuse and command-not-found carry their own meaning and must not be relabelled.
+_NOT_A_DENIAL = frozenset({2, 126, 127})
+
+
+def _explain_sandbox_denial(rendered: str, returncode: int, sandboxed: bool) -> str:
+    """Say when a failure was the sandbox refusing, not the command being wrong."""
+    if not sandboxed or returncode == 0 or returncode in _NOT_A_DENIAL:
+        return rendered
+    lowered = rendered.lower()
+    if not any(term in lowered for term in _SANDBOX_DENIALS):
+        return rendered
+    return rendered + (
+        "\n\n[dgc] The sandbox refused this, so it is a policy result rather than a fault on this"
+        " machine: the command reached a path outside the project, and DGC denies those while"
+        " `sandbox` is on. Work inside the project, or ask the user to turn the sandbox off for"
+        " this run -- do not retry the same command expecting a different answer."
+    )
 
 
 def direct_bash(command: str, ctx) -> str:

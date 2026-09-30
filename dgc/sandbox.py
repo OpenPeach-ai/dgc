@@ -416,6 +416,23 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             shared_git = _worktree_git_common_dir(root)
             if shared_git is not None and shared_git.is_dir() and not _inside(shared_git, root):
                 profile.append(f'(allow file-read* (subpath "{q(shared_git)}"))')
+            # Re-exposing the two directories is not enough to REACH them. bwrap masks the home
+            # with a tmpfs, so everything under it is absent and a resolver treats it as "not
+            # there"; seatbelt denies it, and a resolver that walks a path component by component
+            # gets EPERM and stops. git is the case that proved it -- `strbuf_realpath` lstats each
+            # component of the gitdir, so a sub-agent could not reach its own checkout and every
+            # git command died with `fatal: Invalid path '<home>': Operation not permitted`.
+            #
+            # Absent is fine; forbidden is fatal. So grant the path COMPONENTS the metadata a walk
+            # needs and nothing else: `stat`/`lstat` and an existence test on a fixed, finite list
+            # of directories. No contents, no listing -- `file-read-metadata`, never `file-read*`,
+            # and never `subpath`, which would re-expose everything underneath and undo the point.
+            # Both chains are needed: the checkout's own ancestors AND the shared repository's.
+            # Granting only the first still failed, on the second's -- that is the whole bug.
+            for reachable in (root, shared_git):
+                if reachable is not None:
+                    profile.append('(allow file-read-metadata file-test-existence '
+                                   f'(path-ancestors "{q(reachable)}"))')
         if not network:
             profile.append("(deny network*)")
         return [str(executable), "-p", "".join(profile),

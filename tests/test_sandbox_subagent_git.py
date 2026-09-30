@@ -39,22 +39,23 @@ def git(*args, cwd) -> subprocess.CompletedProcess:
 
 
 SANDBOX_AVAILABLE = sandbox._backend() is not None
-BACKEND = sandbox._backend()[0] if SANDBOX_AVAILABLE else ""
-
-# The `.git` re-exposure below is implemented on BOTH arms and both are exercised here, but a
-# confined child can only actually RUN git under bwrap today. Measured on the real thing --
-# macOS 26.5.1, APFS, git 2.50.1, through the product's own sandbox.wrap:
+# Both sandbox arms are exercised here, and git has to work under both. It did not, on macOS, until
+# the profile granted the path components a resolver needs. Measured on the real thing --
+# macOS 26.5.1, APFS, git 2.50.1, through the product's own sandbox.wrap + process_env:
 #
-#   as shipped:                 fatal: unable to access '/Users/<me>/.gitconfig': Operation not permitted
-#   with the global config off: fatal: Invalid path '/Users/<me>': Operation not permitted
-#   + ancestor metadata:        fatal: Invalid path '/Users/<me>/<base>/...': Operation not permitted
+#   before:  fatal: Invalid path '/Users/<me>': Operation not permitted     (rc 128)
+#   after:   rc 0
 #
-# bwrap masks the home with a tmpfs, so the global config and the ancestors are ABSENT and git
-# proceeds. sandbox-exec denies them instead, and git treats EPERM as fatal where it treats ENOENT
-# as "nothing configured". Absent is fine; forbidden is fatal. Re-exposing enough of the path for
-# git to walk up to its own checkout is a profile change that needs its own review, so the gap is
-# named here rather than papered over: these skips must come off with that fix, not before it.
-GIT_RUNS_CONFINED = BACKEND == "bwrap"
+# bwrap masks the home with a tmpfs, so the components are ABSENT and git treats absent as
+# "nothing there"; sandbox-exec DENIES them and git treats EPERM as fatal, stopping before it ever
+# reaches the repository. Absent is fine; forbidden is fatal. Measuring this without process_env
+# reports `unable to access '~/.gitconfig'` instead, which is a HARNESS artifact -- the real HOME
+# leaks in -- and is not what a user sees.
+#
+# The negative tests below are the ones that matter for that grant: it hands out file-read-METADATA
+# on path components only, so the parent's ignored files and working tree must stay unreadable.
+# If a change ever makes those pass by accident, the grant has become a subpath read and the
+# isolation this whole file exists to hold is gone.
 
 
 class ADelegatedChildCanReadItsOwnHistoryTest(unittest.TestCase):
@@ -90,13 +91,17 @@ class ADelegatedChildCanReadItsOwnHistoryTest(unittest.TestCase):
         shutil.rmtree(getattr(cls, "base", Path("/nonexistent")), ignore_errors=True)
 
     def run_confined(self, command: str) -> subprocess.CompletedProcess:
-        # `cwd=` exactly as production does it (tools.py passes cwd=ctx.project_root to Popen).
-        # Without it this only ever worked on Linux, where bwrap's own `--chdir /mnt` covered for
-        # the omission; sandbox-exec has no such remap, so the child ran in the RUNNER's directory
-        # and every git command here failed 128 on macOS for a reason the product does not have.
+        # `cwd=` AND `env=` exactly as production does it: tools.py:1776 passes
+        # cwd=ctx.project_root and env=sandbox.process_env(ctx.config) to Popen. Both matter and
+        # each hid a different phantom failure on macOS. Without cwd the child ran in the RUNNER's
+        # directory (bwrap's own `--chdir /mnt` had been covering for that on Linux). Without env
+        # the real HOME leaked in, so git found the user's ~/.gitconfig, was denied it, and died --
+        # where production sets HOME=/tmp/dgc-home and never looks there. A sandbox test that does
+        # not build the process the way the product builds it measures its own scaffolding.
         argv = sandbox.wrap(command, self.workspace.project_root, None)
         self.assertIsNotNone(argv, "the backend was available a moment ago")
         return subprocess.run(argv, cwd=self.workspace.project_root,
+                              env=sandbox.process_env(None),
                               capture_output=True, text=True)
 
     def test_the_premise_its_git_is_a_pointer_into_the_source_repository(self) -> None:
@@ -115,18 +120,12 @@ class ADelegatedChildCanReadItsOwnHistoryTest(unittest.TestCase):
         self.assertEqual(observed, expected)
         self.assertNotEqual(observed, str(self.main), "never the parent's checkout")
 
-    @unittest.skipUnless(GIT_RUNS_CONFINED,
-                         "a confined child cannot run git under sandbox-exec yet "
-                         "(see GIT_RUNS_CONFINED above for the measured reason)")
     def test_git_works(self) -> None:
         for command in ("git rev-parse --git-dir", "git status --porcelain",
                         "git log --oneline -1", "git diff --stat HEAD"):
             with self.subTest(command=command):
                 self.assertEqual(self.run_confined(command).returncode, 0, command)
 
-    @unittest.skipUnless(GIT_RUNS_CONFINED,
-                         "a confined child cannot run git under sandbox-exec yet "
-                         "(see GIT_RUNS_CONFINED above for the measured reason)")
     def test_git_sees_the_childs_own_work(self) -> None:
         result = self.run_confined("echo new > b.txt && git status --porcelain")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -142,9 +141,6 @@ class ADelegatedChildCanReadItsOwnHistoryTest(unittest.TestCase):
     def test_the_parents_working_tree_stays_invisible(self) -> None:
         self.assertNotEqual(self.run_confined(f"ls {self.main}/a.txt").returncode, 0)
 
-    @unittest.skipUnless(GIT_RUNS_CONFINED,
-                         "a confined child cannot run git under sandbox-exec yet "
-                         "(see GIT_RUNS_CONFINED above for the measured reason)")
     def test_committing_is_refused(self) -> None:
         """Deliberate, and worth pinning: the bind is read-only, and DGC integrates a sub-task by
         reading its working tree rather than its commits.

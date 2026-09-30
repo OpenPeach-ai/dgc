@@ -96,13 +96,25 @@ was cleaned up, which is how a delegation normally ends, there was no way to see
 or delete it. Such work is now listed against the repository that owns the branch, for reading and
 for dropping.
 
-### With the sandbox on, a sub-agent can run git again
+### With the sandbox on, a sub-agent can run git again (Linux)
 
 A task worktree's `.git` is a pointer into your repository, and the sandbox masks your home — so
 every git command in a delegated sub-agent failed with "not a git repository". The repository
 directory is re-exposed read-only, and `.git` only: the ignored files its worktree deliberately does
 not have stay out of reach, and so does your own uncommitted work. It follows that a sandboxed
 sub-agent cannot commit, which is intended — DGC integrates a sub-task by reading its working tree.
+
+**Correction, 2026-09-30: this shipped as Linux-only and was not said so at the time.** The `.git`
+re-exposure is in both sandbox backends and works in both, but on macOS a sandboxed sub-agent still
+cannot run git, for a different reason found after release. `bwrap` masks the home with a tmpfs, so
+everything under it is *absent* and git treats a missing global config — and a missing parent — as
+"nothing configured". `sandbox-exec` *denies* them instead, and git treats the resulting
+`Operation not permitted` as fatal before it ever reaches the repository. Absent is fine; forbidden
+is fatal: git cannot walk up to its own checkout, because the worktree sits inside the denied home.
+The symptom is `fatal: Invalid path '/Users/<you>': Operation not permitted`, usually preceded by
+`git: error: couldn't create cache file '/var/folders/.../xcrun_db-...'` from Apple's xcrun shim.
+The sandbox is off by default, so this affects a macOS user who has turned it on and delegates to a
+sub-agent. Tracked for a fix in its own release.
 
 ### Delegation is refused where two tracked paths are one file on disk
 
