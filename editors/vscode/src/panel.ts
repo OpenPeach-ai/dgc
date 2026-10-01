@@ -54,6 +54,12 @@ const PANEL_DISPOSED_CAUSE = "panel disposed (window reload, close or extension 
 /** Prefix for a backend stopped because the user closed its chat. A close is not a crash, and
  *  the teardown handler must not log it as one or arm the dead slot to resume. */
 const CHAT_CLOSED_CAUSE = "chat closed: ";
+
+/** How a child ended, for the exit line and for the cause it reports: Node gives (code=null,
+ *  signal="SIGKILL") for a killed process, and a code alone made a crash read as a clean stop. */
+function exitHow(code: number | null, signal?: string | null): string {
+  return signal ? `killed by ${signal}` : code === null ? "killed by an unreported signal" : `code ${code}`;
+}
 /** One animation frame's worth. Long enough to collapse a streamed response into a few rail
  *  posts, short enough that an unread count still reads as live. */
 const CHAT_SLOTS_COALESCE_MS = 120;
@@ -693,9 +699,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.slots = this.slots.filter((candidate) => candidate.id !== slot.id);
     // close, not dispose: if this slot started the process that other chats were opened on, the
     // process stays up for them and stops when the last of them closes.
-    try { be?.close(`${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`); } catch { /* already gone */ }
+    const cause = `${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`;
+    try { be?.close(cause); } catch { /* already gone */ }
     const released = be as DgcBackend | undefined;
     if (released?.ownerReleased && released.chatUsers instanceof Set) {
+      // Nothing about the process to log -- it did not stop -- but the chat did end.
+      const others = released.chatUsers.size;
+      this.backendNote(`[extension: closed the chat in ${slot.cwd || this.cwd()} — ${cause}; dgc serve pid `
+        + `${released.childPid ?? "?"} stays up for ${others} other chat${others === 1 ? "" : "s"}]`);
       // The process stays up for the chats opened on it; this slot's handlers go. What its own
       // chat says from here (the retirement close() asked for) has no tab to go to.
       for (const [name, handler] of this.backendListeners.get(released) || []) {
@@ -1915,7 +1926,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be: ChatBackend = host
       ? new OpenedChat(host, folder, this.nextRequestId("open-chat"))
       : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion);
-    if (!host) { this.processEpochs.set(be, this.processEpoch); }
+    if (!host) {
+      this.processEpochs.set(be, this.processEpoch);
+      this.logProcess(be as DgcBackend);
+    }
     slot.backend = be;
     const wired: Array<[string, (...args: any[]) => void]> = [];
     this.backendListeners.set(be, wired);
@@ -1927,16 +1941,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
     let serveCause = "";
     on("event", (ev: DgcEvent) => this.routeEvent(slot, ev));
+    // The backend log: what the process says about itself is written by the process, once
+    // (logProcess). A chat opened on it writes only what happened to that chat.
+    on("chat-log", (line: string) => this.backendNote(line));
     on("stderr", (line: string) => {
       const ended = /serve loop ended: ([^;\n]+)/.exec(line);
       if (ended) { serveCause = ended[1].trim().slice(0, 300); }
-      if (slot.id !== this.activeSlotId) { this.backendNote(line); return; }
-      this.backendNote(line); this.post({ type: "stderr", line });
+      if (slot.id === this.activeSlotId) { this.post({ type: "stderr", line }); }
     });
-    on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
-    on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
-    on("teardown", (cause: string, pid?: number) => {
-      this.backendNote(`[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
+    on("teardown", (cause: string) => {
       // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
       // send() start a child on it, whose own later death was then mislabelled and never recovered.
@@ -1949,18 +1962,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     });
     on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
       const facts: ChildExitInfo = info || { uptimeMs: be.uptimeMs, framesWritten: 0 };
-      // "code 0" alone reads like a clean, asked-for stop. Whether WE asked is the whole question
-      // when a turn disappears, so the log says it outright, with what the child was last sent.
-      const how = signal ? `killed by ${signal}`
-        : code === null ? "killed by an unreported signal" : `code ${code}`;
-      const up = Math.round((facts.uptimeMs || 0) / 1000);
-      const asked = facts.cause ? `yes (${facts.cause})` : "no";
-      this.backendNote(`[dgc serve exited: ${how} · extension asked for it: ${asked} · up ${up}s`
-        + ` · pid ${facts.pid ?? "?"} · frames sent ${facts.framesWritten}`
-        + `${facts.lastFrame ? `, last '${facts.lastFrame}'` : ""}`
-        + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
+      const how = exitHow(code, signal);
       if (slot.id === this.activeSlotId) { this.mcpUrls.clear(); }
-      if (facts.cause) { return; }             // our own teardown: logged above and already handled
+      if (facts.cause) { return; }             // our own teardown: already logged and handled
       // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
       // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
       const cause = serveCause || (signal || code === null ? how : `exited with ${how}`);
@@ -1987,6 +1991,32 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.start();
     this.backend = be;
     return be;
+  }
+
+  /** What a `dgc serve` says about itself -- its stderr, its start, a start that failed, being
+   *  stopped, its exit -- written to the backend log once, by the process, however many chats run
+   *  on it. Each chat's slot used to write what its backend heard, and every chat opened on a
+   *  process hears the process: with three chats on one, every traceback and exit line appeared
+   *  three times. These stay on the process for its whole life; a slot that closes takes off only
+   *  its own handlers. */
+  private logProcess(serve: DgcBackend): void {
+    serve.on("stderr", (line: string) => this.backendNote(line));
+    serve.on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
+    serve.on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
+    serve.on("teardown", (cause: string, pid?: number) => {
+      this.backendNote(`[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
+    });
+    serve.on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
+      const facts: ChildExitInfo = info || { uptimeMs: serve.uptimeMs, framesWritten: 0 };
+      // "code 0" alone reads like a clean, asked-for stop. Whether WE asked is the whole question
+      // when a turn disappears, so the log says it outright, with what the child was last sent.
+      const up = Math.round((facts.uptimeMs || 0) / 1000);
+      const asked = facts.cause ? `yes (${facts.cause})` : "no";
+      this.backendNote(`[dgc serve exited: ${exitHow(code, signal)} · extension asked for it: ${asked} · up ${up}s`
+        + ` · pid ${facts.pid ?? "?"} · frames sent ${facts.framesWritten}`
+        + `${facts.lastFrame ? `, last '${facts.lastFrame}'` : ""}`
+        + `${facts.transport ? `, transport ${facts.transport}` : ""}]`);
+    });
   }
 
   /** A running backend this slot's chat can open on -- one process, every chat in its own folder --

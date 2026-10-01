@@ -323,3 +323,67 @@ test("a refusal of an opened chat's command reaches that chat, not the first one
     be.dispose("test over");
   }
 });
+
+// ---- the backend log: a chat says what happened to the chat, never what the process did ----------
+
+test("a chat logs its own opening and closing, and says nothing of the process", async () => {
+  const be = await startedBackend(chatsBackend("chat-log-backend"));
+  try {
+    const lines = [];
+    const chat = new OpenedChat(be, "/srv/logged", "open-log");
+    chat.on("chat-log", (line) => lines.push(line));
+    const ready = waitFor(chat, "event", (ev) => ev.type === "ready");
+    chat.start();
+    await ready;
+    assert.deepEqual(lines, [`[extension: chat c1 opened in /srv/logged on dgc serve pid ${be.childPid}]`]);
+    be.emit("stderr", "Traceback: the process's own line");   // forwarded as stderr, not as the chat's
+    assert.equal(lines.length, 1, "a process line became one of the chat's own");
+    chat.dispose("chat closed: Logged");
+    assert.deepEqual(lines.slice(1),
+      [`[extension: closed chat c1 in /srv/logged on dgc serve pid ${be.childPid} — chat closed: Logged]`]);
+    assert.ok(be.childPid !== undefined, "premise: the process keeps running");
+  } finally {
+    be.dispose("test over");
+  }
+});
+
+test("a chat the backend ended, or never opened, says which chat and why", async () => {
+  const be = await startedBackend(chatsBackend("chat-log-ended-backend"));
+  const refusing = await startedBackend(chatsBackend("chat-log-refusing-backend", { refuse: true }));
+  try {
+    const { chat } = await openedChat(be, "/srv/handed");
+    chat.completeHandshake();
+    const lines = [];
+    chat.on("chat-log", (line) => lines.push(line));
+    const ended = waitFor(chat, "exit");
+    be.send({ type: "prompt", text: `emit ${JSON.stringify({ type: "chat_closed", chat_id: "c1", reason: "handed_over" })}` });
+    await ended;
+    assert.deepEqual(lines, [`[extension: dgc serve pid ${be.childPid} closed chat c1 in /srv/handed — handed_over]`]);
+
+    const refused = new OpenedChat(refusing, "relative/dir", "open-refused-log");
+    const said = [];
+    refused.on("chat-log", (line) => said.push(line));
+    const exited = waitFor(refused, "exit");
+    refused.start();
+    await exited;
+    assert.deepEqual(said, [`[extension: could not open a chat in relative/dir on dgc serve pid ${refusing.childPid}`
+      + " — cwd must be an existing absolute directory]"]);
+  } finally {
+    be.dispose("test over");
+    refusing.dispose("test over");
+  }
+});
+
+test("a chat closed before it opened says so, not which process it was on", async () => {
+  const be = await startedBackend(chatsBackend("chat-log-early-backend"));
+  try {
+    const chat = new OpenedChat(be, "/srv/early", "open-early");
+    const lines = [];
+    chat.on("chat-log", (line) => lines.push(line));
+    chat.start();
+    chat.dispose("chat closed: Early");
+    assert.deepEqual(lines, ["[extension: closed the chat in /srv/early before it finished opening — chat closed: Early]"]);
+  } finally {
+    be.dispose("test over");
+  }
+});

@@ -36,6 +36,11 @@ const MAX_HELD = 256;
  * capabilities -- so the panel runs the same handshake it runs for a process it spawned. Everything
  * it sends carries its chat id, and it hears only its own chat's events. What the process says
  * about itself -- stderr, an exit -- every chat on it hears, because every chat on it is affected.
+ *
+ * The backend log is another matter: the process's own lines are written once, by the process, and
+ * a chat reports only what happened to the chat -- opened, could not open, closed -- as `chat-log`
+ * lines. Closing one chat used to be logged as "dgc serve exited" while that process kept serving
+ * the others.
  */
 export class OpenedChat extends EventEmitter implements ChatBackend {
   ready = false;
@@ -99,6 +104,7 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
   private failToOpen(message: string): void {
     this.closed = true;
     this.detach();
+    this.emit("chat-log", `[extension: could not open a chat in ${this.cwd} on dgc serve ${this.hostPid()} — ${message}]`);
     this.emit("launch_failed", message);
     this.emit("stderr", `serve loop ended: ${message}`);
     this.emit("exit", 1, null, { uptimeMs: 0, framesWritten: 0 } as ChildExitInfo);
@@ -110,6 +116,7 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
       if (ev.type === "chat_opened" && (ev as any).request_id === this.openRequestId) {
         this.chatId = chat;
         this.ready = true;
+        this.emit("chat-log", `[extension: chat ${chat} opened in ${this.cwd} on dgc serve ${this.hostPid()}]`);
         this.deliver(this.readyFrom(ev));
       }
       return;
@@ -118,9 +125,11 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
     this.deliver(ev);
     if (ev.type === "chat_closed" && !this.closed) {
       // Ended by the backend, not by us: report it as this chat's backend going away.
+      const reason = String((ev as any).reason || "closed");
+      this.emit("chat-log", `[extension: dgc serve ${this.hostPid()} closed chat ${this.chatId} in ${this.cwd} — ${reason}]`);
       this.closed = true;
       this.detach();
-      this.emit("stderr", `serve loop ended: the chat was ${String((ev as any).reason || "closed")}`);
+      this.emit("stderr", `serve loop ended: the chat was ${reason}`);
       this.emit("exit", 0, null, { uptimeMs: this.uptimeMs, framesWritten: 0 } as ChildExitInfo);
     }
   }
@@ -185,6 +194,11 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
     const pid = this.childPid;
     this.closed = true;
     this.detach();
+    // The chat ends; the process does not, unless this was the last chat keeping it up -- and then
+    // the process's own stop and exit lines follow this one.
+    this.emit("chat-log", chatId
+      ? `[extension: closed chat ${chatId} in ${this.cwd} on dgc serve ${this.hostPid()} — ${cause}]`
+      : `[extension: closed the chat in ${this.cwd} before it finished opening — ${cause}]`);
     if (chatId) {
       this.sendClose(chatId);
     } else {
@@ -234,6 +248,11 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
     host.on("chat-event", opened);
     host.on("chat-open-failed", failed);
     host.on("exit", done);
+  }
+
+  /** "pid N" of the process this chat is on, for the chat's own log lines. */
+  private hostPid(): string {
+    return `pid ${this.host.childPid ?? "?"}`;
   }
 
   /** The slot that started the process has already gone; this was the last chat keeping it up. */

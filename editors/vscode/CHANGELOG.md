@@ -67,6 +67,11 @@
   twice, as you sent it; only one used to show.
 - **Latest** goes all the way to the end of the chat. It used to stop about 15 pixels short until
   the next line arrived.
+- The DGC Backend log writes what a shared `dgc serve` says about itself — a traceback, a stop, its
+  exit — once, however many chats run on it; with three chats every line appeared three times.
+  Closing a chat is logged as that chat closing, with its folder, instead of as "dgc serve exited"
+  while the process went on serving the other chats, and a chat that could not open says so
+  instead of reading as a backend that failed to start.
 - Requires CLI 0.47.0; editor protocol v14.
 
 ## 0.31.4 — 2026-09-30
