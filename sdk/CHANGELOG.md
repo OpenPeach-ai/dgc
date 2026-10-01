@@ -1,5 +1,14 @@
 # DGC SDK changelog
 
+## 0.6.10 — 2026-10-01
+
+Pairs with CLI 0.47.0. The vendored copy of the editor protocol gains the commands that open a
+chat in another directory and close one -- `open_chat` and `close_chat` -- with their replies
+`chat_opened` and `chat_closed`, and the `chat_id` envelope a client opts into with its first
+`open_chat`. An SDK session never sends `open_chat`, so it never sees `chat_id`: everything it
+sends and receives is unchanged. The two events join the TypeScript client's known-event set, so
+it does not discard them as unrecognised.
+
 ## 0.6.9 — 2026-09-28
 
 Pairs with CLI 0.46.0. The vendored copy of the editor protocol gains the `editor_state` command --

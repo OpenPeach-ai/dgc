@@ -1,5 +1,5 @@
 """SDK version and the runtime it pairs with. Bump with sdk/typescript (package.json, types.ts)."""
 
-__version__ = "0.6.9"
+__version__ = "0.6.10"
 PROTOCOL = 14
-REQUIRES_CLI = "0.46.0"
+REQUIRES_CLI = "0.47.0"
