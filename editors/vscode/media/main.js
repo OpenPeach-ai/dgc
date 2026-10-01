@@ -3288,7 +3288,7 @@
     const changeState = reviewScope === "chat" ? currentChatChanges() : workspaceChangeState;
     $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this chat" : "Workspace changes";
     $("changes-review-description").textContent = reviewScope === "chat"
-      ? "Saved before/after snapshots from this chat’s runs in the primary project folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
+      ? "Saved before/after snapshots from this chat’s runs in this chat’s folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
       : "All pending changes since the last Git commit, including edits made before this chat or by other tools.";
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
