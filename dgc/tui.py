@@ -5294,6 +5294,7 @@ class TUI:
 
         try:
             session_config = _Config(root)
+            session_config.inherit_trust(source_config)    # a checkout of the launch project
             agent = Agent(session_config, self)
             agent._agent_defs_config = source_config
             agent.session_root = self._fleet_root
@@ -7257,6 +7258,7 @@ class TUI:
             project_rel = Path(".")
         project_root = wt_path / project_rel
         new_config = _Config(project_root)
+        new_config.inherit_trust(old_agent.config)       # a checkout of this session's project
         try:
             new_agent = Agent(new_config, self)
             new_agent._agent_defs_config = old_agent._agent_defs_config

@@ -447,6 +447,77 @@ class ConcurrentConfigTest(unittest.TestCase):
         child._parent_agent = parent
         self.assertEqual(child.exit_plan("auto"), "auto")
 
+    def test_a_migrating_config_with_trusted_folders_still_loads(self):
+        """load() saves a migration before its first baseline. With trusted_dirs on disk that save
+        read a baseline that did not exist yet, and Config() raised at startup on every surface."""
+        self.path.write_text(json.dumps({"model": "start", "trusted_dirs": [], "max_turns": 40}))
+        self.C.Config()
+        self.assertEqual(self.disk()["max_turns"], 0, "and the migration was written")
+
+    def test_reading_the_users_rules_never_forgets_the_projects(self):
+        cfg = self._project_with_rules()
+        live = cfg.permissions["deny"]
+        cfg.permissions["deny"] = []                  # another thread's save, mid-rebuild
+        cfg.user_permissions()                        # the editor's add command reads right then
+        cfg.permissions["deny"] = live                # that save finishes
+        cfg.set("model", "x")
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny",
+                         "a read during another save forgot the project's deny for the session")
+        self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"],
+                         "or wrote it into the user's config as if the user had added it")
+
+    def test_no_decision_mid_save_sees_a_stripped_allow(self):
+        self.path.write_text(json.dumps({"model": "start", "permissions":
+                                         {"allow": ["Bash(curl *)"], "ask": [], "deny": []}}))
+        os.environ["DGC_SESSION_POLICY"] = json.dumps({"version": 1, "project_allow": False})
+        self.addCleanup(os.environ.pop, "DGC_SESSION_POLICY", None)
+        work = self.home / "work"
+        work.mkdir()
+        cfg = self.C.Config(project_root=work)
+        import dgc.trust as trust
+        real, seen = trust.is_trusted, []
+
+        def decide_mid_save(config, path):
+            if config is cfg:
+                seen.append(self._decide(cfg, "curl https://x"))
+            return real(config, path)
+        with patch.object(trust, "is_trusted", decide_mid_save):
+            cfg.set("thinking", "high")
+        self.assertTrue(seen, "premise: the save consulted trust part-way through")
+        self.assertNotIn("allow", seen, "a decision taken mid-save saw the stored allow re-armed")
+
+    def test_a_mode_the_user_picks_after_the_hold_is_saved(self):
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        untrusted = self.home / "cloned-repo"
+        untrusted.mkdir()
+        cfg = self.C.Config(project_root=untrusted)
+        self.assertTrue(cfg.hold_untrusted_mode())
+        cfg.set("mode", "plan")                       # the user lowers it, deliberately
+        self.assertEqual(self.disk()["mode"], "plan",
+                         "the user's own choice was dropped, and auto came back on the next launch")
+
+    def test_a_checkout_of_a_trusted_project_carries_its_rules(self):
+        from dgc.trust import mark_trusted
+        source = self._project_with_rules()
+        mark_trusted(source, source.project_root)
+        checkout = self.home / "proj-feature"            # a sibling worktree: not in trusted_dirs
+        checkout.mkdir()
+        cfg = self.C.Config(project_root=checkout)
+        self.assertTrue(cfg.inherit_trust(source))
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny")
+        cfg.set("thinking", "high")
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny", "across saves too")
+        self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"], "never persisted")
+
+    def test_a_checkout_of_an_untrusted_project_is_held(self):
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        (self.home / "src").mkdir()
+        (self.home / "src-feature").mkdir()
+        source = self.C.Config(project_root=self.home / "src")
+        cfg = self.C.Config(project_root=self.home / "src-feature")
+        self.assertFalse(cfg.inherit_trust(source))
+        self.assertEqual(cfg.mode, "default")
+
     def test_no_config_shares_a_default_container(self):
         a = self.C.Config()
         a.data["disabled_skills"].append("leaked")

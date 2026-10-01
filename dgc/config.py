@@ -1027,7 +1027,13 @@ class Config:
         from .trust import is_trusted
         if self.mode not in ("acceptEdits", "auto") or is_trusted(self, self.project_root):
             return False
-        self.mark_ephemeral("mode")
+        ephemeral = self.__dict__.setdefault("_ephemeral_keys", set())
+        if "mode" not in ephemeral:
+            # Held, not one-shot: the hold stands in for the user only until they choose. Kept
+            # ephemeral for life, every mode they chose afterwards was dropped too, and the stored
+            # auto came back on the next launch even after they lowered it. See set().
+            ephemeral.add("mode")
+            self.__dict__.setdefault("_held_keys", set()).add("mode")
         self.data["mode"] = "default"
         return True
 
@@ -1070,52 +1076,85 @@ class Config:
         if getattr(self, "_project_permissions_applied", False):
             return False
         self._project_permissions_applied = True
+        return self._add_project_rules(self._read_project_rules())
+
+    def _read_project_rules(self) -> dict:
+        """`<project>/.dgc/permissions.json` as rules per action; empty lists when there is none."""
+        rules: dict = {"allow": [], "ask": [], "deny": []}
         proj_perms = self.project_dir / "permissions.json"
-        if not proj_perms.exists():
-            return False
         try:
-            pp = json.loads(proj_perms.read_text())
+            pp = json.loads(proj_perms.read_text()) if proj_perms.exists() else {}
         except (OSError, json.JSONDecodeError):
-            return False
+            return rules
         if not isinstance(pp, dict):
-            return False
-        merged = False
+            return rules
         actions = ("allow", "ask", "deny")
         if _policy_strips_allow():
             # The process that launched this session reviews commands itself (the SDK with a
             # RuntimePolicy): rules the workspace brings may narrow what runs, not pre-approve it.
             actions = ("ask", "deny")
-        contributed = self.__dict__.setdefault("_project_rules", {"allow": [], "ask": [], "deny": []})
         for action in actions:
-            rules = pp.get(action, [])
-            if isinstance(rules, list) and rules:
-                added = [str(rule) for rule in rules]
-                self.permissions[action] += added
-                contributed[action] += added
+            value = pp.get(action, [])
+            if isinstance(value, list):
+                rules[action] = [str(rule) for rule in value]
+        return rules
+
+    def _add_project_rules(self, rules: dict) -> bool:
+        """Make `rules` live as the trusted project's. Returns whether there were any.
+
+        Workspace rules are live for THIS project and never persisted. They are recorded rather
+        than folded into the baseline, because save() needs them in two places: subtracted from
+        what it writes, and put back after it rebuilds the live set from disk. Each list is
+        replaced in one assignment, never grown in place, so a permission decision on another
+        thread sees all of them or none.
+        """
+        contributed = self.__dict__.setdefault("_project_rules", {"allow": [], "ask": [], "deny": []})
+        merged = False
+        for action, added in rules.items():
+            if added:
+                self.permissions[action] = list(self.permissions.get(action, [])) + list(added)
+                contributed[action] = list(contributed.get(action, [])) + list(added)
                 merged = True
-        # Workspace rules are live for THIS project and never persisted. They are recorded rather
-        # than folded into the baseline, because save() needs them in two places: subtracted from
-        # what it writes, and put back after it rebuilds the live set from disk. See save().
         return merged
 
+    def inherit_trust(self, source: "Config") -> bool:
+        """Take the trust of the project this checkout was made from.
+
+        A TUI worktree or fleet agent works in a checkout of the launch project, rooted outside
+        trusted_dirs (a sibling folder, or under ~/.dgc), so nothing loaded the project's rules:
+        auto carried over and the project's deny vanished for any work moved there. A sub-agent's
+        clone_for_root() view already shares its parent's rules; this gives the TUI's sessions the
+        same. An untrusted source holds the mode instead. Returns whether the source is trusted.
+        """
+        from .trust import is_trusted
+        if not is_trusted(source, source.project_root):
+            self.hold_untrusted_mode()
+            return False
+        if not getattr(self, "_project_permissions_applied", False):
+            self._project_permissions_applied = True
+            self._add_project_rules(source._project_contribution())
+        return True
+
     def _project_contribution(self) -> dict:
-        """The trusted project's rules that are still live, forgetting any the user removed.
+        """The trusted project's recorded rules that the live set still holds.
 
         The editor lists project and user rules together, so a project rule can be removed like
         any other. It stays removed for this session (there is nothing to write: it was never in
-        the user's config) and returns with the project's file next session. Without this, save()
-        put it straight back from the record, and removing a project's `allow` did nothing.
+        the user's config) and returns with the project's file next session; save() drops it
+        from the record. Read-only, and that is load-bearing: a read that pruned could land in
+        another thread's save while the live lists were being rebuilt, and forget the project's
+        deny for the rest of the session.
         """
-        recorded = getattr(self, "_project_rules", None) or {}
-        for action, rules in recorded.items():
+        still: dict = {}
+        for action, rules in (getattr(self, "_project_rules", None) or {}).items():
             live = list(self.permissions.get(action, []))
             kept = []
             for rule in rules:
                 if rule in live:
                     live.remove(rule)
                     kept.append(rule)
-            rules[:] = kept
-        return recorded
+            still[action] = kept
+        return still
 
     def user_permissions(self) -> dict:
         """The live rules minus what the trusted project contributes: the user's own, which save()
@@ -1159,7 +1198,10 @@ class Config:
                 payload.update({k: v for k, v in changed.items() if k not in SECRET_KEYS})
                 for key in _ENTRY_MERGED_KEYS:          # over the whole list `changed` holds
                     if key in changed:
-                        payload[key] = _merge_entries(on_disk.get(key), (self._baseline_data or {}).get(key),
+                        # getattr: load() saves a migration BEFORE its first baseline, and a bare
+                        # attribute read here made Config() raise at startup on every surface.
+                        baseline = getattr(self, "_baseline_data", None) or {}
+                        payload[key] = _merge_entries(on_disk.get(key), baseline.get(key),
                                                       self.data.get(key))
                 for key in SECRET_KEYS:
                     payload.pop(key, None)
@@ -1187,30 +1229,34 @@ class Config:
                             and key not in ephemeral and key not in self._env_secret_keys):
                         self.data[key] = value
                 own_allow = self.user_permissions()["allow"]
-                contributed = {a: list(r) for a, r in self._project_contribution().items()}
-                # In place, never rebound: clone_for_root() hands every running sub-agent THIS dict so
-                # that a rule the user adds mid-run reaches it. Rebinding cut them all off at the
-                # first save, and a deny added afterwards never reached a sub-agent running in auto.
-                for action in ("allow", "ask", "deny"):
-                    self.permissions[action] = list(merged[action])
-                # The disk never holds project rules, so a live set rebuilt from it had silently lost
-                # them: one unrelated save -- changing the model -- and a trusted project's `deny`
-                # stopped applying. Fails OPEN. Put back exactly what the project contributed.
-                for action, rules in contributed.items():
-                    self.permissions[action].extend(rules)
+                contributed = self._project_contribution()     # a rule the user removed drops here
                 # Trust another session granted arrives through the adopt loop above, but only load()
                 # and mark_trusted() applied a project's rules: a second session in the same folder
                 # became trusted -- auto allowed -- without the project's deny. Fails OPEN.
                 if not getattr(self, "_project_permissions_applied", False):
                     from .trust import is_trusted
                     if is_trusted(self, self.project_root):
-                        self.apply_project_permissions()
+                        self._project_permissions_applied = True
+                        for action, rules in self._read_project_rules().items():
+                            contributed[action] = contributed.get(action, []) + rules
+                # The disk never holds project rules, so a live set rebuilt from it had silently lost
+                # them: one unrelated save -- changing the model -- and a trusted project's `deny`
+                # stopped applying. Fails OPEN. Put back exactly what the project contributes.
+                rebuilt = {a: list(merged[a]) + list(contributed.get(a, [])) for a in merged}
                 if _policy_strips_allow():
                     # The user's stored allow rules were stripped at load because the launcher
                     # reviews commands itself. The rebuild from disk re-armed every one of them, and
                     # the callback's own first "always" answer is a save. Keep what THIS process
                     # approved, nothing else.
-                    self.permissions["allow"] = own_allow
+                    rebuilt["allow"] = list(own_allow)
+                self._project_rules = contributed
+                # Each final list is published in ONE assignment, and into this same dict: built
+                # step by step in the live dict, a permission decision on another thread could land
+                # between steps and see the stored allows re-armed or the project's deny missing.
+                # And never rebound: clone_for_root() hands every running sub-agent THIS dict, so a
+                # rule the user adds mid-run reaches them; rebinding cut them off at the first save.
+                for action in ("allow", "ask", "deny"):
+                    self.permissions[action] = rebuilt[action]
             _write_private_json(USER_CONFIG, payload)
             self._rebaseline()
             self._save_secrets()
@@ -1355,6 +1401,10 @@ class Config:
                 if name not in value or previous.get(name) != value.get(name):
                     self._stored_mcp_env.pop(name, None)
                     self._stored_mcp_identity.pop(name, None)
+        held = getattr(self, "_held_keys", None)
+        if held and key in held:
+            held.discard(key)                          # the user chose: the hold is over
+            self._ephemeral_keys.discard(key)
         self.data[key] = value
         if key == "tool_profile":
             # Setting it is choosing it: the one-shot 0.41.7 migration must never take it back.
