@@ -634,6 +634,23 @@ def find_project_root(start: Path | None = None) -> Path:
     return p
 
 
+# Lists several processes edit one entry at a time. Written whole, a Config that loaded before
+# another revoked a trusted folder wrote it back the next time it trusted a different one: the
+# revoke was undone in the unsafe direction.
+_ENTRY_MERGED_KEYS = ("trusted_dirs",)
+
+
+def _merge_entries(on_disk, baseline, now) -> list:
+    """`on_disk` with exactly this process's additions and removals since `baseline` applied."""
+    def entries(value):
+        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+    was, mine = entries(baseline), entries(now)
+    removed = {item for item in was if item not in mine}
+    merged = [item for item in entries(on_disk) if item not in removed]
+    merged += [item for item in mine if item not in was and item not in merged]
+    return merged
+
+
 def _policy_strips_allow() -> bool:
     """Whether the launching process reviews commands itself (an SDK RuntimePolicy with
     project_allow=False, or an invalid policy). Stored and workspace allow rules then pre-approve
@@ -648,7 +665,10 @@ class Config:
         self.project_root = project_root or find_project_root()
         self.project_dir = self.project_root / ".dgc"
         self._persist = True
-        self.data: dict = dict(DEFAULTS)
+        # Deep: a shallow copy shared every list and dict in DEFAULTS, so a setting mutated in place
+        # (`setdefault(...).append`) changed the default for every Config built after it -- and
+        # one process holds several Configs (ACP, the TUI fleet, every chat).
+        self.data: dict = copy.deepcopy(DEFAULTS)
         self._stored_secrets: dict = {}
         self._stored_provider_identity: dict[str, str] = {}
         self._provider_secret_identity: dict[str, str] = {}
@@ -978,6 +998,22 @@ class Config:
         self._baseline_data = copy.deepcopy(self.data)
         self._baseline_permissions = copy.deepcopy(self.user_permissions())
 
+    def hold_untrusted_mode(self) -> bool:
+        """Run an untrusted workspace in `default`, without touching the user's stored mode.
+
+        acceptEdits and auto act without asking, so they need workspace trust. The downgrade was
+        written straight into `data` under a comment saying it was not persisted -- and the next
+        save of anything wrote it: opening one untrusted folder reset the user's global `auto` to
+        `default` everywhere. Ephemeral, so no save writes it and none adopts `auto` back over it.
+        Returns whether it downgraded.
+        """
+        from .trust import is_trusted
+        if self.mode not in ("acceptEdits", "auto") or is_trusted(self, self.project_root):
+            return False
+        self.mark_ephemeral("mode")
+        self.data["mode"] = "default"
+        return True
+
     def mark_ephemeral(self, *keys: str) -> None:
         """Hold these settings for THIS process only; no save may write them.
 
@@ -1104,6 +1140,10 @@ class Config:
                 for key in dropped:
                     payload.pop(key, None)
                 payload.update({k: v for k, v in changed.items() if k not in SECRET_KEYS})
+                for key in _ENTRY_MERGED_KEYS:          # over the whole list `changed` holds
+                    if key in changed:
+                        payload[key] = _merge_entries(on_disk.get(key), (self._baseline_data or {}).get(key),
+                                                      self.data.get(key))
                 for key in SECRET_KEYS:
                     payload.pop(key, None)
                 base = on_disk.get("permissions")
@@ -1118,6 +1158,9 @@ class Config:
                 payload["permissions"] = merged
                 # What is on disk is now what this process believes; anything another backend
                 # wrote in the meantime is adopted rather than fought over.
+                for key in _ENTRY_MERGED_KEYS:
+                    if key in changed:
+                        self.data[key] = list(payload[key])
                 for key, value in payload.items():
                     # An ephemeral key is deliberately absent from `changed`, so without this it
                     # would be adopted back FROM DISK over the value this run was given -- a
@@ -1138,6 +1181,13 @@ class Config:
                 # stopped applying. Fails OPEN. Put back exactly what the project contributed.
                 for action, rules in contributed.items():
                     self.permissions[action].extend(rules)
+                # Trust another session granted arrives through the adopt loop above, but only load()
+                # and mark_trusted() applied a project's rules: a second session in the same folder
+                # became trusted -- auto allowed -- without the project's deny. Fails OPEN.
+                if not getattr(self, "_project_permissions_applied", False):
+                    from .trust import is_trusted
+                    if is_trusted(self, self.project_root):
+                        self.apply_project_permissions()
                 if _policy_strips_allow():
                     # The user's stored allow rules were stripped at load because the launcher
                     # reviews commands itself. The rebuild from disk re-armed every one of them, and

@@ -1726,8 +1726,8 @@ class Backend:
     def __init__(self, config: Config):
         from .trust import is_trusted
         self.workspace_trusted = is_trusted(config, config.project_root)
-        if not self.workspace_trusted and config.mode in ("acceptEdits", "auto"):
-            config.data["mode"] = "default"  # do not persist a downgrade of the user's global preference
+        if not self.workspace_trusted:
+            config.hold_untrusted_mode()
         self.config = config
         self.em = HistoryEmitter(
             sys.stdout, validator=event_error,

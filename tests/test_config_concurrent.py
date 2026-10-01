@@ -245,6 +245,94 @@ class ConcurrentConfigTest(unittest.TestCase):
         self.assertEqual(self._decide(child, "rm -rf build", mode="auto"), "deny",
                          "a sub-agent running in auto never saw the deny the user just added")
 
+    # ---- trust and mode: an untrusted folder, a revoked one -----------------------------------
+
+    def test_an_untrusted_folder_never_rewrites_the_stored_mode(self):
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        untrusted = self.home / "cloned-repo"
+        untrusted.mkdir()
+        cfg = self.C.Config(project_root=untrusted)
+        self.assertTrue(cfg.hold_untrusted_mode(), "premise: auto needs trust")
+        cfg.set("thinking", "high")                   # any save at all
+        self.assertEqual(self.disk()["mode"], "auto",
+                         "opening one untrusted folder reset the user's mode everywhere")
+        self.assertEqual(cfg.mode, "default", "and the save did not adopt auto back over the hold")
+
+    def test_the_editor_backend_never_rewrites_the_stored_mode(self):
+        from dgc.headless import Backend
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        untrusted = self.home / "cloned-repo"
+        untrusted.mkdir()
+        backend = Backend(self.C.Config(project_root=untrusted))
+        self.addCleanup(backend.agent.mcp.stop_all)
+        self.assertEqual(backend.agent.mode, "default", "premise: auto needs trust")
+        backend.config.set("thinking", "high")
+        self.assertEqual(self.disk()["mode"], "auto",
+                         "opening an untrusted folder in the editor reset the user's mode everywhere")
+
+    def test_an_acp_session_never_rewrites_the_stored_mode(self):
+        from dgc import acp
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        untrusted = self.home / "cloned-repo"
+        untrusted.mkdir()
+        server, replies = acp.ACPServer(), []
+        server.respond = lambda rid, result=None, error=None: replies.append(result or error)
+        server.notify = lambda method, params: None
+        server._dispatch({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}})
+        server._dispatch({"jsonrpc": "2.0", "id": 2, "method": "session/new",
+                          "params": {"cwd": str(untrusted), "mcpServers": []}})
+        state = server._sessions[replies[-1]["sessionId"]]
+        self.addCleanup(state.agent.mcp.stop_all)
+        self.assertEqual(state.config.mode, "default", "premise: auto needs trust")
+        state.config.set("thinking", "high")
+        self.assertEqual(self.disk()["mode"], "auto", "an ACP session in an untrusted folder reset it")
+
+    def test_a_trusted_folder_keeps_its_mode(self):
+        self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
+        mine = self.home / "mine"
+        mine.mkdir()
+        cfg = self.C.Config(project_root=mine)
+        from dgc.trust import mark_trusted
+        mark_trusted(cfg, mine)
+        self.assertFalse(cfg.hold_untrusted_mode())
+        self.assertEqual(cfg.mode, "auto")
+
+    def test_a_stale_config_cannot_bring_back_a_revoked_folder(self):
+        from dgc.trust import mark_trusted, revoke_trust
+        x, y = self.home / "x", self.home / "y"
+        x.mkdir()
+        y.mkdir()
+        mark_trusted(self.C.Config(), x)
+        a, b = self.C.Config(), self.C.Config()        # both loaded while x was trusted
+        self.assertTrue(revoke_trust(a, x))
+        mark_trusted(b, y)                             # b still holds x in memory
+        stored = [os.path.realpath(t) for t in self.disk()["trusted_dirs"]]
+        self.assertEqual(stored, [os.path.realpath(y)], "the revoke was undone by a stale writer")
+        self.assertNotIn(os.path.realpath(x), [os.path.realpath(t) for t in b.data["trusted_dirs"]],
+                         "and b itself no longer believes x is trusted")
+
+    def test_trust_granted_elsewhere_brings_the_project_rules_with_it(self):
+        """Two sessions in one folder (ACP today, every chat soon): A trusts it and loads the
+        project's deny; B adopts the trust at its next save and must load the same rules."""
+        from dgc.trust import is_trusted, mark_trusted
+        project = self.home / "p"
+        (project / ".dgc").mkdir(parents=True)
+        (project / ".dgc" / "permissions.json").write_text(json.dumps({"deny": ["Bash(rm -rf *)"]}))
+        a, b = self.C.Config(project_root=project), self.C.Config(project_root=project)
+        mark_trusted(a, project)
+        self.assertEqual(self._decide(a, "rm -rf build", mode="auto"), "deny", "premise")
+        b.set("thinking", "high")                   # any save: B adopts trusted_dirs from disk
+        self.assertTrue(is_trusted(b, project), "premise: B now treats the folder as trusted")
+        self.assertEqual(self._decide(b, "rm -rf build", mode="auto"), "deny",
+                         "B is trusted here but never loaded the project's deny (fails OPEN)")
+        self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"], "and still never persisted")
+
+    def test_no_config_shares_a_default_container(self):
+        a = self.C.Config()
+        a.data["disabled_skills"].append("leaked")
+        self.assertNotIn("leaked", self.C.DEFAULTS["disabled_skills"])
+        self.assertNotIn("leaked", self.C.Config().data.get("disabled_skills", []))
+
     # ---- the file itself ----------------------------------------------------------------------
 
     def test_a_missing_config_is_written_whole(self):

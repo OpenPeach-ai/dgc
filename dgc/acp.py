@@ -309,9 +309,7 @@ class ACPServer:
             except ValueError as e:
                 self.respond(rid, error={"code": -32602, "message": str(e)})
                 return
-            from .trust import is_trusted
-            if not is_trusted(config, config.project_root) and config.mode in ("acceptEdits", "auto"):
-                config.data["mode"] = "default"
+            config.hold_untrusted_mode()
             session_file = sessions.new_path(config.project_root)
             ui = _ACPUi(self, session_file.stem, config.project_root,
                         approval_timeout_s=float(config.get("approval_timeout_s", 300) or 300))
@@ -335,9 +333,7 @@ class ACPServer:
             except ValueError as e:
                 self.respond(rid, error={"code": -32602, "message": str(e)})
                 return
-            from .trust import is_trusted
-            if not is_trusted(config, config.project_root) and config.mode in ("acceptEdits", "auto"):
-                config.data["mode"] = "default"
+            config.hold_untrusted_mode()
             path = sessions.by_id(config.project_root, sid)
             if not path:
                 self.respond(rid, error={"code": -32001, "message": "session not found in this workspace"})
