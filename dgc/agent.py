@@ -2457,13 +2457,19 @@ class Agent(GoalLifecycle):
         return self._active_skill_names != before
 
     def reload_skills(self) -> None:
-        """Refresh metadata at a turn/management boundary while preserving the tool context map."""
+        """Refresh the skill catalog, safely even while a turn runs.
+
+        Rebound, never cleared and refilled in place: a plugin installed mid-turn reloads from
+        another thread while the turn iterates this dict to build its prompt, and emptying it under
+        that loop is "dictionary changed size during iteration" -- or, the quiet half, a request
+        sent with no skills at all. A reader already iterating finishes on the old dict; the next
+        takes the new one whole. ctx.skills is re-pointed with it, so the skill tool agrees.
+        """
         fresh = discover_skills(self.config.project_root,
                                 disabled_names=self.config.get("disabled_skills", []))
-        self.skills.clear()
-        self.skills.update(fresh)
+        self.skills = fresh
         if getattr(self, "ctx", None) is not None:
-            self.ctx.skills = self.skills
+            self.ctx.skills = fresh
 
     def _skill_catalog(self):
         profile = str(self.config.get("tool_profile", "standard") or "standard").lower()

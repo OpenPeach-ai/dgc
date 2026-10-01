@@ -168,13 +168,14 @@ class PluginReadDuringTurnTests(unittest.TestCase):
         self.assertIsNone(self.backend._package_reader,
                           "a failed read must not wedge every later review")
 
-    # ------------------------------------------------- what still waits, and why ---
+    # ------------------------------------------------- changing packages, beside the turn ---
 
-    def test_installing_and_removing_still_wait_for_the_turn(self):
-        """These change what the model can run. `uninstall_plugin` stops live MCP servers and calls
-        `reload_skills()`, which does clear()+update() on the dict the turn iterates — the codebase
-        says in so many words that it may do that BECAUSE it is refused while a turn runs."""
+    def test_package_changes_run_beside_the_turn(self):
+        """These change what the model CAN run, not what it is ALLOWED to do -- Codex's line. They
+        used to wait because `reload_skills()` emptied the dict the turn iterates; it swaps it now,
+        so they run on the package slot while the turn carries on."""
         self.in_a_turn(lambda: None)
+        ran = []
         # Each command's own declared fields: the schema refuses an undeclared one before any gate.
         for command, fields in (("uninstall_plugin", {"name": "fixture"}),
                                 ("add_plugin_marketplace", {"source": "https://example.invalid/m"}),
@@ -182,23 +183,33 @@ class PluginReadDuringTurnTests(unittest.TestCase):
                                 ("refresh_plugin_marketplace", {"name": "fixture"}),
                                 ("create_plugin", {"name": "fixture", "display_name": "Fixture",
                                                    "description": "a fixture"})):
-            with self.subTest(command=command):
+            with self.subTest(command=command), \
+                    patch.object(self.backend, "_plugin_operation",
+                                 side_effect=lambda cmd: ran.append(cmd["type"])):
                 self.backend.dispatch({"type": command, **fields, "request_id": command})
-                event = self.wait("command_rejected", request_id=command)
-                self.assertEqual(event["reason"], "turn_in_progress")
-                self.assertIn(command, event["message"], "the refusal names the command")
+                for _ in range(200):
+                    if self.backend._package_reader is None:
+                        break
+                    threading.Event().wait(0.02)
+                refused = [e for e in self.events if e.get("type") == "command_rejected"
+                           and e.get("request_id") == command]
+                self.assertEqual(refused, [], f"{command} still waited for the turn")
+                self.assertIn(command, ran)
 
     def test_nothing_still_tells_anyone_they_are_changing_packages(self):
-        """The sentence the user was shown named an action they had not taken. It is gone: the five
-        commands that really do change packages are refused by `_BUSY_MUTATIONS`, in its own words,
-        naming the command."""
+        """The sentence the user was shown named an action they had not taken. It is gone, and so
+        is the refusal behind it: a package change during a turn simply runs."""
         self.in_a_turn(lambda: None)
-        self.backend.dispatch({"type": "uninstall_plugin", "name": "fixture", "request_id": "u"})
-        message = self.wait("command_rejected", request_id="u")["message"]
-        self.assertIn("uninstall_plugin", message, "it names what was actually refused")
+        with patch.object(self.backend, "_plugin_operation", side_effect=lambda cmd: None):
+            self.backend.dispatch({"type": "uninstall_plugin", "name": "fixture", "request_id": "u"})
+            for _ in range(200):
+                if self.backend._package_reader is None:
+                    break
+                threading.Event().wait(0.02)
         for event in self.events:
             self.assertNotIn("before changing packages", str(event.get("message", "")),
                              f"the reported wording is still reachable: {event}")
+            self.assertNotEqual(event.get("reason"), "turn_in_progress", event)
 
 
 if __name__ == "__main__":

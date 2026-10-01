@@ -146,7 +146,10 @@ _BUSY_MUTATIONS = {
     "add_permission_rule", "remove_permission_rule", "add_memory",
     # Continuing an interrupted turn is offered on an idle chat; while a turn runs there is
     # nothing interrupted to continue.
-    "resume_turn", "uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin",
+    "resume_turn",
+    # Plugin and marketplace changes are absent: they change what a turn CAN do (its next model
+    # request sees the new tools), not what it is ALLOWED to do, so they run on the package slot
+    # beside the turn -- Codex draws the same line.
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "prompt", "start_goal", "resume_turn",
@@ -2695,7 +2698,11 @@ class Backend:
                          or "todo list cleared, but the session could not be saved")
 
     def _start_package_reader(self, operation, *, label: str = "package-read") -> bool:
-        """Reserve the package-read slot. Deliberately does NOT wait for the chat turn.
+        """Reserve the package slot. Deliberately does NOT wait for the chat turn.
+
+        Every plugin and marketplace operation runs here now -- installs and uninstalls too, since
+        Agent.reload_skills swaps the catalog instead of emptying it under a running turn. What
+        follows explains why reading was first.
 
         Reading a package to show someone what it contains is not a change to anything. It writes
         one capped dict on this Backend and content-addressed files under the plugin cache; nothing
@@ -2714,9 +2721,8 @@ class Backend:
           * it occupies `_foreground_worker`, which prompts are refused against (headless.py:3750),
             so a 50-second download would make the composer reject what you typed.
 
-        What it DOES keep is mutual exclusion against another read, so two reviews cannot race for
-        the same `_prepared_plugins` entry. An install still takes the foreground slot, because
-        installing is a change; this is the read that precedes it.
+        What it DOES keep is mutual exclusion against every other package operation, so a review
+        and an install cannot race for the same `_prepared_plugins` entry.
         """
         with self._turn_state_lock():
             if getattr(self, "_package_reader", None) is not None:
@@ -3721,7 +3727,9 @@ class Backend:
             if record_servers(record) and not record.get("setup_required"):
                 self.em.emit("plugin_catalog", items=self._editor_plugins(opening=name), **_request_fields(request_id))
             if record_servers(record):
-                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input, cancel=self.agent.cancelled)
+                # Its own cancel, not the turn's: an install now runs beside a turn, and the turn's
+                # Stop -- or a Stop pressed before the install began, still set -- is not about it.
+                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input, cancel=threading.Event())
                 failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record) if self.agent.mcp.failures.get(n)), None)
                 if failure:
                     detail = str(failure)
@@ -5137,22 +5145,23 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="busy", request_id=cmd.get("request_id"),
                              message="Another package is being read. Try again in a moment.")
         elif t in {"uninstall_plugin", "add_plugin_marketplace", "remove_plugin_marketplace", "refresh_plugin_marketplace", "create_plugin"}:
-            # These five change what DGC can run, so they wait. All five are in `_BUSY_MUTATIONS`,
-            # which refuses them far earlier with its own wording whenever anything is busy -- so
-            # the rejection below is a backstop for a slot taken between that check and this one.
-            if not self._start_foreground_worker(lambda: self._plugin_operation(cmd), label="plugin-operation"):
-                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd.get("request_id"),
-                             message=f"'{t}' is unavailable while a turn is running; cancel or wait")
+            # These change what DGC can run -- not what a turn is allowed to do -- so they run beside
+            # a turn, on the package slot. They wait only for another package operation.
+            if not self._start_package_reader(lambda: self._plugin_operation(cmd), label="plugin-operation"):
+                self.em.emit("command_rejected", command=t, reason="busy", request_id=cmd.get("request_id"),
+                             message="Another plugin operation is running. Try again in a moment.")
         elif t == "list_plugin_marketplaces":
             terminal = self._plugin_operation(cmd)
             if callable(terminal): terminal()
         elif t == "list_plugins":
             self.em.emit("plugin_catalog", items=self._editor_plugins(), **_request_fields(request_id))
         elif t == "install_plugin":
-            if not self._start_foreground_worker(lambda: self._install_plugin(cmd), label="plugin-install"):
-                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+            # Beside the turn, on the package slot: "Wait for the current turn" was what the user got
+            # for clicking Connect mid-turn. The new tools reach that turn's next model request.
+            if not self._start_package_reader(lambda: self._install_plugin(cmd), label="plugin-install"):
+                self.em.emit("command_rejected", command=t, reason="busy",
                              request_id=cmd.get("request_id"),
-                             message="A turn or plugin install is already running; cancel or wait")
+                             message="Another plugin operation is running. Try again in a moment.")
         elif t == "shutdown":
             raise _Shutdown()
         else:
