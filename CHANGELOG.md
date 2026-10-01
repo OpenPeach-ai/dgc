@@ -4,6 +4,98 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.47.0 — 2026-10-01
+
+### Several chats, several folders, one backend
+
+`dgc serve` can now hold several chats at once, the way Codex runs its threads: one process, and
+each chat with its own project, trust, MCP servers, skills, permission rules and mode, in the same
+folder or another one. A client opens one with `open_chat {cwd}` and closes it with `close_chat`; from the first
+`open_chat` every chat-scoped event and command carries `chat_id`, and a client that never opts in
+sees exactly the wire it saw before. `ready.capabilities.chats` says how many a process will hold.
+
+What one chat does no longer reaches into another:
+
+- An approval card belongs to the chat that asked. A Stop or a new chat in one chat used to expire
+  every other chat's open cards, and those turns carried on as if you had said no.
+- Each chat's commands run in order on its own thread, so one chat's compact, rewind or MCP reload
+  never freezes another chat's Stop or approvals. Answers to a request a turn is waiting on are
+  handled the moment they arrive.
+- A change that is yours rather than a chat's — a permission rule, a trusted folder, an MCP server
+  added or removed — reaches every open chat at once, not at that chat's next save. A server that
+  did not change is never restarted under a turn that may be using it.
+- The shared wire redacts every open chat's secrets, the process stays alive while any chat is
+  working, and shutting down gives every chat the whole grace window.
+- Another DGC asking whether a session is free finds it under whichever chat holds it, and a
+  takeover ask for any of them is answered.
+
+### What you can do while a turn runs
+
+- **Rename the chat.** It was refused mid-turn; the turn's own later save keeps the new name.
+- **Open a saved session.** It opens in a chat of its own beside the running one, instead of being
+  refused.
+- **Install or remove a plugin.** Its tools and skills reach the running turn at its next model
+  request. Stop no longer aborts an install, and an install no longer waits for the turn.
+
+### A chat comes back in the mode it ran in
+
+Mode belongs to the conversation now: reopening a chat restores its mode — re-checked, not trusted
+from the file: `acceptEdits` and `auto` only while the folder is still trusted. Reopening never
+changes your default; choosing a mode afterwards does, as before.
+
+### Permissions, trust and mode: fixes, several of which failed open in 0.46.4
+
+- A trusted project's `.dgc/permissions.json` deny stopped applying after any unrelated settings
+  change. **Fails open.** The rules now stay live for the whole session.
+- The first save on a new install wrote a trusted project's rules into your user config, so every
+  other project — untrusted ones included — inherited its allow rules. They stay with the project.
+- An SDK session whose policy strips your stored allow rules had them re-armed by its own first
+  "always" answer. **Fails open.**
+- The TUI's `/worktree` and fleet agents ran in a checkout without the project's rules while
+  keeping a stored `auto`: the project's denies did not apply there. **Fails open.** They take the
+  launch project's trust and rules now.
+- Approving a plan into `auto` in an untrusted folder ran it in `auto` with no trust prompt. It runs
+  in `default` now, and says why.
+- Opening one untrusted folder reset your global `auto` to `default` everywhere, at the next save of
+  anything. A revoked folder could also come back as trusted from another window's save.
+- A rule you added that matched a project's rule could not be saved, so a deny you meant for every
+  project applied only inside that one.
+
+### Two windows no longer overwrite each other
+
+With two sessions open, a model or mode switch in one moved the other's running conversation to it
+at its next unrelated save, mid-turn and without a word. A running conversation's own settings --
+mode, model route and its credentials, sampling — are never adopted from disk now; the change is
+still saved as the default the next session starts from. `secrets.json` is merged the way
+`config.json` is, so one window switching endpoint and key no longer has its new key wiped by the
+other's next save.
+
+### The changes bar shows the turn's own edits, however large the folder
+
+The bar compared a bounded scan of the whole workspace: a non-Git folder past 4,096 files recorded
+nothing, and an edit the scan did not reach was invisible while the model made it in front of you.
+DGC's file tools now tell the bar what they write, so their edits always show, mid-turn too. A shell
+command's edits still rely on the scan, which still says when it was partial.
+
+### A background sub-task's work reaches your files when the turn is waiting on it
+
+`wait_tasks` on a background sub-task could end with "integration failed: could not capture rewind
+checkpoint" and the work kept in a worktree: the child tried to save the session while the parent's
+turn held it. The child's work is now integrated by whichever thread holds the session.
+
+### A rule in the middle of a long DGC.md is never dropped
+
+An over-long instruction file kept its start and end and dropped the middle — a rule written there
+was simply absent. Blocks headed `## Rule: …` / `## Rules`, or marked `<!-- dgc:rule -->`, are now
+kept whole and placed first; if the rules alone do not fit, the ones left out are named so you can
+consolidate the file. A file within the limit is unchanged.
+
+### A message to a sub-agent names the agent
+
+Steering a running sub-agent read "Used tool · message task" in the editor and a bare
+`message_task` in the terminal. It now reads "Sent message to <what that agent was asked to do>",
+in every surface and again when the chat is reopened.
+
 ## 0.46.4 — 2026-09-30
 
 ### A cut-off reply no longer loses the space where it was cut

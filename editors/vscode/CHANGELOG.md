@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.32.0 — 2026-10-01
+
+- Every chat can have its own folder. **Open a chat in another folder** (in the header, and as
+  *DGC: Open a Chat in Another Folder…*) opens one in a different project, with that project's
+  settings, trust, MCP servers, skills, permission rules and mode. Its tab names the folder.
+- Chats share one `dgc serve`, the way Codex runs its threads, instead of one process each. A Stop
+  ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
+  chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
+  for the chats still on it. `dgc.shareBackend` turns sharing off; an older CLI gets one backend per
+  chat, as before.
+- While a turn runs you can rename the chat, open a saved session (it opens beside the running
+  chat instead of being refused with "unavailable while a turn is running"), and install or remove
+  a plugin.
+- A chat comes back in the permission mode it ran in when you reopen it.
+- A chat tab keeps its folder name whole; a long chat name gives way first.
+- A message to a running sub-agent reads "Sent message to <what it was asked to do>", with a
+  message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear
+  the sub-agent mark.
+- The changes bar shows the turn's own edits in a folder too large for its workspace scan.
+- The diagram renderer's DOMPurify moves to 3.4.16 (GHSA-p98j-92pf-mc4p, low severity; the
+  affected IN_PLACE mode is not one mermaid uses, and the panel's content security policy blocks
+  inline event handlers either way).
+- Requires CLI 0.47.0; editor protocol v14.
+
 ## 0.31.4 — 2026-09-30
 
 - Undo takes back a pasted attachment. A paste big enough to fold into a chip, or a pasted image,
