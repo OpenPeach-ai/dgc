@@ -33,9 +33,13 @@ from dgc.headless import Backend                                       # noqa: E
 from dgc.history_stream import HistoryEmitter                          # noqa: E402
 from dgc.editor_protocol import event_error                            # noqa: E402
 
-PER_CHAT = ("agent", "ui", "_queue", "_turn_n", "_worker", "_foreground_worker",
-            "_package_reader", "_turn_lock", "_running_turn_kind", "_live_turn",
-            "_steer_payloads", "_goal_auto_resumes")
+# Derived from Chat.__slots__, not written out by hand. The hand-written list this replaced named
+# twelve fields and silently left out `_wake_yield`, `_wake_timer` and `_agent_wakes` -- the last of
+# which no test assigns anywhere, so nothing guarded it at all. A list that can drift from the thing
+# it describes will.
+from dgc.headless import Chat                                          # noqa: E402
+
+PER_CHAT = tuple(Chat.__slots__)
 
 
 class AbsentIsNotNoneTest(unittest.TestCase):

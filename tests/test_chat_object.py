@@ -119,9 +119,7 @@ class TheAccessorWorksOnTheFixtureShapeTest(unittest.TestCase):
         Update MOVED as each step lands. If a field moves without being added here, or is added
         here without moving, this fails and says which.
         """
-        MOVED = {"agent", "ui", "_turn_lock", "_worker", "_foreground_worker", "_package_reader",
-                 "_turn_n", "_queue", "_steer_payloads", "_running_turn_kind", "_live_turn",
-                 "_wake_yield"}
+        MOVED = set(Chat.__slots__)       # P1 step 5: every per-chat field now lives on the chat
         for name in Chat.__slots__:
             with self.subTest(field=name):
                 backend = object.__new__(Backend)

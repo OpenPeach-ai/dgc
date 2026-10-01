@@ -1685,6 +1685,12 @@ class Backend:
     _running_turn_kind = _chat_field("_running_turn_kind")
     _live_turn = _chat_field("_live_turn")
     _wake_yield = _chat_field("_wake_yield")
+    # Step 5: the last three. `_goal_auto_resumes` is this chat's retry budget; `_agent_wakes` and
+    # `_wake_timer` arm a wake whose only effect is appending to THIS chat's queue. All three are read
+    # with a default and initialised lazily through the setter, which the property preserves.
+    _goal_auto_resumes = _chat_field("_goal_auto_resumes")
+    _agent_wakes = _chat_field("_agent_wakes")
+    _wake_timer = _chat_field("_wake_timer")
 
     def _chat(self) -> "Chat":
         """This backend's one chat, created on first use, exactly once.
