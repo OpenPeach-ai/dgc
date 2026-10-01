@@ -132,6 +132,39 @@ test("custom tool runs in the host process", async () => {
   }
 });
 
+test("resume runs in the mode it asked for, and its replay never reaches the first run", async () => {
+  // DGC 0.47.0 reopens a transcript in the mode it last ran in when that asks no less than the
+  // mode it replaces: a session saved in plan and resumed asking for auto ran in plan.
+  const { server, baseUrl } = await startModel("text");
+  const work = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-work-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-state-"));
+  writeFileSync(join(work, "README.md"), "empty cart checkout\n");
+  const dgc = new DGC({
+    stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local",
+    runtime: [process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
+  });
+  try {
+    const session = await dgc.session({ cwd: work, permissions: { mode: "plan", unhandled: "deny" } });
+    assert.equal((await session.run("Summarize README. Do not edit files.", { timeoutMs: 60_000 })).status, "completed");
+    const sessionId = session.sessionId;
+    await session.close();
+    const restored = await dgc.resume({ sessionId, cwd: work, permissions: { mode: "auto", unhandled: "deny" } });
+    const handle = restored.stream("edit the guard", { timeoutMs: 60_000 });
+    const events = [];
+    for await (const event of handle) events.push(event.type);
+    const result = await handle.result();
+    assert.equal(result.status, "completed", result.error);
+    assert.equal(existsSync(join(work, "guard.py")), true, "the resumed session ran in the plan its transcript was saved in");
+    assert.ok(!events.includes("mode_changed"), "the resume's mode event reached the first run");
+    assert.ok(!events.includes("history"), "the resume's history replay reached the first run");
+  } finally {
+    await dgc.close();
+    server.close();
+    rmSync(work, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("outputSchema is validated on the harness", async () => {
   const { server, baseUrl } = await startModel("json");
   const work = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-work-"));

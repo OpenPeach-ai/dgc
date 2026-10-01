@@ -429,6 +429,27 @@ class SdkTests(unittest.TestCase):
             again = restored.run("What did I just ask you to do? Do not edit files.", timeout=60)
             self.assertEqual(again.status, "completed")
 
+    def test_resume_runs_in_the_mode_it_asked_for(self):
+        # DGC 0.47.0 reopens a transcript in the mode it last ran in when that asks no less than
+        # the mode it replaces, so a session saved in plan and resumed asking for auto ran in
+        # plan, and the resume's mode event and history replay were handed to the first run.
+        with self._client() as dgc:
+            session = dgc.session(cwd=self.work, permissions={"mode": "plan", "unhandled": "deny"})
+            self.assertEqual(session.run("Summarize README. Do not edit files.", timeout=60).status,
+                             "completed")
+            session_id = session.session_id
+            session.close()
+            restored = dgc.resume(session_id, cwd=self.work,
+                                  permissions={"mode": "auto", "unhandled": "deny"})
+            handle = restored.stream("edit the guard", timeout=60)
+            events = [event.type for event in handle]
+            result = handle.result()
+        self.assertEqual(result.status, "completed", result.error)
+        self.assertEqual((self.work / "guard.py").read_text(encoding="utf-8"), "ok\n",
+                         "the resumed session ran in the plan its transcript was saved in")
+        self.assertNotIn("mode_changed", events, "the resume's mode event reached the first run")
+        self.assertNotIn("history", events, "the resume's history replay reached the first run")
+
     def test_resume_unknown_id_fails_closed(self):
         with self._client() as dgc:
             with self.assertRaises(DGCConfigError):

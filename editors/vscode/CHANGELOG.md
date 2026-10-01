@@ -13,7 +13,8 @@
 - While a turn runs you can rename the chat, open a saved session (it opens beside the running
   chat instead of being refused with "unavailable while a turn is running"), and install or remove
   a plugin.
-- A chat comes back in the permission mode it ran in when you reopen it.
+- A chat comes back in the permission mode it ran in when you reopen it, when that mode asks no
+  less than the one you are in; a new chat after it starts in your mode again.
 - Sub-agents working at the same time never share a face. The same eight faces, handed out
   seafoam, coral, violet, amber, lime first so look-alikes are never side by side, and kept
   through a reload, a chat switch and a restart. Chats saved before this keep their faces.

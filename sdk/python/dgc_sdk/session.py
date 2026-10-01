@@ -44,7 +44,7 @@ _LOOPBACK = re.compile(r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?/\S+", re.I
 # attributed to the next run.
 _IDLE_EVENT_TYPES = frozenset({
     "history", "agents", "context", "goal_changed", "monitors", "info", "todos",
-    "session", "session_named", "handoff_started", "ready", "config",
+    "session", "session_named", "handoff_started", "ready", "config", "mode_changed",
 })
 _TASK_MAP = {
     "done": "completed", "completed": "completed",
@@ -1305,6 +1305,21 @@ class Session:
                        for key in USAGE_TOTAL_KEYS},
                 })
         self._usage_last = totals
+
+    def _keep_requested_mode(self, timeout: float | None) -> None:
+        """After a resume: run in the mode this session asked for, not the transcript's.
+
+        DGC 0.47.0 reopens a transcript in the mode it last ran in, when that asks no less than
+        the mode it replaces: a session that asked for auto came back in plan. Isolated sessions
+        only; an inherited one takes your own DGC's mode, which this must not save over.
+        """
+        if not self._isolated:
+            return
+        command: dict[str, Any] = {"type": "set_mode", "mode": self._permission_mode,
+                                   "request_id": f"mode-{uuid.uuid4().hex[:12]}"}
+        if self._permission_mode in ("acceptEdits", "auto"):
+            command["acknowledge_workspace_trust"] = True
+        self._client.request(command, "mode_changed", timeout=timeout)
 
     def _discard_idle_events(self, timeout: float = 0.25) -> None:
         deadline = time.monotonic() + max(0.05, float(timeout))

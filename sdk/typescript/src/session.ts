@@ -25,7 +25,7 @@ const LOOPBACK = /https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/\S+/gi;
 // Control events left on the pipe after resume/fork/rewind; not attributed to the next run.
 const IDLE_EVENT_TYPES = new Set([
   "history", "agents", "context", "goal_changed", "monitors", "info", "todos",
-  "session", "session_named", "handoff_started", "ready", "config",
+  "session", "session_named", "handoff_started", "ready", "config", "mode_changed",
 ]);
 const TASK_MAP: Record<string, TaskItem["status"]> = {
   done: "completed", completed: "completed", in_progress: "in_progress", progress: "in_progress",
@@ -880,6 +880,19 @@ export class Session {
       }
     }
     this.usageLast = totals;
+  }
+
+  /**
+   * After a resume: run in the mode this session asked for, not the transcript's. DGC 0.47.0
+   * reopens a transcript in the mode it last ran in, when that asks no less than the mode it
+   * replaces. Isolated sessions only; an inherited one takes your own DGC's mode.
+   */
+  async keepRequestedMode(timeoutMs: number): Promise<void> {
+    if (!this.init.isolated) return;
+    const mode = this.init.permissionMode;
+    const command: Frame = { type: "set_mode", mode, request_id: newId("mode") };
+    if (mode === "acceptEdits" || mode === "auto") command.acknowledge_workspace_trust = true;
+    await this.transport.request(command, "mode_changed", { timeoutMs });
   }
 
   /** Drop control events left on the pipe (after resume/fork/rewind); stop at anything else. */

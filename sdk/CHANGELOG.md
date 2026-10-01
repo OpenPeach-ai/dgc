@@ -5,13 +5,20 @@
 Pairs with CLI 0.47.0. The vendored copy of the editor protocol gains the commands that open a
 chat in another directory and close one -- `open_chat` and `close_chat` -- with their replies
 `chat_opened` and `chat_closed`, and the `chat_id` envelope a client opts into with its first
-`open_chat`. An SDK session never sends `open_chat`, so it never sees `chat_id`: everything it
-sends and receives is unchanged. The two events join the TypeScript client's known-event set, so
-it does not discard them as unrecognised.
+`open_chat`. An SDK session never sends `open_chat`, so it never sees `chat_id`. The two events
+join the TypeScript client's known-event set, so it does not discard them as unrecognised.
 
 The vendored protocol also declares the optional `agent_started.face_slot` and
 `set_workspace_roots.agent_faces`. An SDK session never sends `agent_faces`, so it never receives
 `face_slot`.
+
+`resume()` runs in the mode it asked for. CLI 0.47.0 reopens a transcript in the mode it last ran
+in, when that asks no less than the mode it replaces, so a session saved in `plan` and resumed
+with `mode="auto"` ran in `plan`. An isolated session now sends `set_mode` with its own mode right
+after `resume_session`, and the resume fails if DGC refuses it; an `inherit_user_state` session
+keeps the mode your own DGC reopens it in. The `mode_changed` a resume can send is drained with
+the rest of the resume's replay: it used to stop the drain, and the first run then received the
+whole history, agents, context and goal replay as its own events.
 
 ## 0.6.9 — 2026-09-28
 

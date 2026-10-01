@@ -2618,6 +2618,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # these never got the same treatment.
     if args.mode:
         config.data["mode"] = args.mode
+        config.mode_explicit = True                   # --continue/--resume keep it
         if not _persist_flags:
             config.mark_ephemeral("mode")
     if args.think and not _oneshot_engine:

@@ -72,6 +72,8 @@ _TODO_NOTICE_ITEMS = 3  # open items named in that notice
 _TODO_NOTICE_CHARS = 60 # per item
 _RESUME_COMPACT_RATIO = 0.5  # a restored transcript filling this much of the window is compacted
                              # before the next prompt is appended, so there is room to answer
+# How much a mode does without asking: a reopened session may bring back a lower one, never a higher.
+_MODE_RANK = {"plan": 0, "default": 1, "acceptEdits": 2, "auto": 3}
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
 _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
@@ -1903,6 +1905,9 @@ class Agent(GoalLifecycle):
         self._accepting_steer = False        # false once a final response owns the completion boundary
         self._mode_lock = threading.RLock()
         self._mode_prompt_dirty = False
+        # (mode, already held or one-shot) before a reopened session's mode replaced it; a new
+        # chat goes back to it. None once the user chooses a mode.
+        self._mode_before_restore: tuple[str, bool] | None = None
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self._recall_pending: list[dict] = []   # display rows the last compaction dropped
         self._notes = None                      # context notes, opened on first use
@@ -3434,6 +3439,7 @@ class Agent(GoalLifecycle):
             except Exception:
                 self.config.data["mode"] = previous
                 raise
+            self._mode_before_restore = None           # chosen: a new chat keeps it
             if mode == "plan" and previous != "plan":
                 self.plan_return_mode = previous
             self._mode_prompt_dirty = True
@@ -3452,13 +3458,19 @@ class Agent(GoalLifecycle):
     def _restore_session_mode(self, record: dict) -> None:
         """Reopen a session in the mode it ran in -- mode is per chat, as Codex keeps it per thread.
 
-        Re-checked now, not trusted from the file: acceptEdits and auto only in a workspace that
-        is still trusted, and only a mode the active subscription engine supports. Held for this
-        process, so reopening a chat never rewrites the user's default; choosing a mode after it
-        still does. A session saved before modes were recorded keeps the current mode.
+        Lower only. A session last run in auto, reopened by `dgc -p --mode plan --continue`, by
+        a script with no --mode, or by an SDK app that asked for default, ran in auto: nothing
+        it did asked first. So never over a mode named for this run (`dgc --mode`), and never
+        to one that asks less than the mode this chat would be in without it; a chat that was
+        planning still comes back planning. Re-checked, not trusted from the file: acceptEdits
+        and auto only in a workspace still trusted, and only a mode the active subscription
+        engine supports. Held for this process, so reopening never rewrites the user's default,
+        and a new chat goes back to the mode it replaced (see reset). A session saved before
+        modes were recorded keeps the current mode.
         """
         saved = record.get("mode")
-        if self.depth > 0 or saved not in ("default", "acceptEdits", "plan", "auto"):
+        if (self.depth > 0 or saved not in _MODE_RANK
+                or getattr(self.config, "mode_explicit", False)):
             return
         if saved in ("acceptEdits", "auto") and not self._workspace_trusted():
             saved = "default"
@@ -3469,18 +3481,55 @@ class Agent(GoalLifecycle):
             return
         hold = getattr(self.config, "hold", None)
         with self._mode_lock:
-            if callable(hold):
-                hold("mode", saved)
-            else:
-                self.config.data["mode"] = saved
+            # The mode this chat would be in without a reopened session's: what the first reopen
+            # replaced, until someone chooses one.
+            before = self._mode_before_restore
+            base = before[0] if before is not None else self.mode
+            if base not in _MODE_RANK:
+                return
+            target = saved if _MODE_RANK[saved] <= _MODE_RANK[base] else base
             back = record.get("plan_return_mode")
-            self.plan_return_mode = (back if saved == "plan"
-                                     and back in ("default", "acceptEdits", "auto") else None)
+            if back not in ("default", "acceptEdits", "auto") or target != "plan":
+                back = None
+            elif _MODE_RANK[back] > _MODE_RANK[base]:
+                back = base if base != "plan" else None   # approving a plan: no further than before
+            if target != self.mode or before is not None:
+                if before is None:
+                    ephemeral = getattr(self.config, "_ephemeral_keys", None) or ()
+                    self._mode_before_restore = (self.mode, "mode" in ephemeral)
+                if callable(hold):
+                    hold("mode", target)
+                else:
+                    self.config.data["mode"] = target
+            self.plan_return_mode = back
+            self._mode_prompt_dirty = True
+
+    def _undo_session_mode(self) -> None:
+        """A new chat starts in the mode the reopened one replaced, not in the reopened one's.
+
+        A held mode outlived its chat: reopen an old chat that ran in auto, click New chat, and
+        the new chat ran in auto -- a mode it never chose, over a stored default.
+        """
+        with self._mode_lock:
+            before, self._mode_before_restore = self._mode_before_restore, None
+            if before is None:
+                return
+            mode, kept = before             # kept: held or one-shot already, and stays so
+            config = self.config
+            if not kept:
+                held_keys = getattr(config, "_held_keys", None)
+                if "mode" not in (held_keys or ()):
+                    return              # a mode was chosen since, by a path that skips set_mode
+                # The hold the reopen took ends here; the stored mode applies again.
+                held_keys.discard("mode")
+                getattr(config, "_ephemeral_keys", set()).discard("mode")
+            config.data["mode"] = mode
             self._mode_prompt_dirty = True
 
     def exit_plan(self, to_mode: str | None = None) -> str:
         target = to_mode or self.plan_return_mode or "default"
-        if target in ("acceptEdits", "auto") and not self._workspace_trusted():
+        substituted = target in ("acceptEdits", "auto") and not self._workspace_trusted()
+        if substituted:
             # The plan card offers auto everywhere, and acceptEdits and auto act without asking, so
             # they need the trust the mode picker asks for. Approving a plan is not that: approving
             # into auto ran an untrusted folder in auto with no trust prompt at all.
@@ -3491,7 +3540,15 @@ class Agent(GoalLifecycle):
         # THIS turn, though: the approval's own tool result tells the model to execute the plan now.
         self._executing_plan = bool(getattr(self, "_plan_presented", False))
         self._plan_approved_this_turn = self._executing_plan
-        self.set_mode(target)
+        hold = getattr(self.config, "hold", None)
+        if substituted and callable(hold):
+            # Held, like the untrusted downgrade: default stands in for the mode they asked for,
+            # and it is not theirs to keep. Saved, it replaced a stored auto everywhere.
+            with self._mode_lock:
+                hold("mode", target)
+                self._mode_prompt_dirty = True
+        else:
+            self.set_mode(target)
         return target
 
     def reset(self) -> None:
@@ -3541,6 +3598,7 @@ class Agent(GoalLifecycle):
         self._plan_approved_this_turn = False
         self._goal_progress = None
         self._reset_todo_clear()
+        self._undo_session_mode()           # before the prompt below, which names the mode
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._explicit_skill_instructions: dict[str, dict] = {}

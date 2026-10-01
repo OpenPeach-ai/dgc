@@ -537,6 +537,7 @@ class DGC:
                     path = match.path
                 command["path"] = path
             event = session.raw.request(command, "session", timeout=self._request_timeout)
+            session._keep_requested_mode(self._request_timeout)
         except BaseException as exc:
             session.close()
             if session in self._sessions:

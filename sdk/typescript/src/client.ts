@@ -412,6 +412,7 @@ export class DGC {
         command.path = path;
       }
       event = await session.transport.request(command, "session", { timeoutMs: this.requestTimeoutMs });
+      await session.keepRequestedMode(this.requestTimeoutMs);
     } catch (error) {
       await session.close();
       const index = this.sessions.indexOf(session);

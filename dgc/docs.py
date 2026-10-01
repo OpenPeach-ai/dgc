@@ -384,8 +384,12 @@ The **Sandbox** page covers backends, what is confined, and what is not.
 Each chat keeps its own mode, so a risky refactor can sit in **default** while a scratch chat
 beside it runs **auto**. Choosing a mode also makes it the default for chats you start
 afterwards; it never moves a chat that is already open, in this window or another one.
-Reopening a session brings back the mode it ran in, checked again rather than trusted from the
-file: **acceptEdits** and **auto** only while that folder is still trusted.
+Reopening a session brings back the mode it ran in when that mode asks no less than the one you
+are in: a chat that was planning comes back planning, and one that ran in **auto** comes back in
+**auto** when **auto** is your mode. It is checked again rather than trusted from the file:
+**acceptEdits** and **auto** only while that folder is still trusted. A mode you name for the run
+wins (`dgc --mode plan --continue` runs in **plan**), and a new chat after a reopened one starts
+in the mode the reopened chat replaced.
 
 In a folder you have not trusted, **acceptEdits** and **auto** start as **default**, for that
 session only — your stored default is left as it was. Approving a plan into **auto** there runs

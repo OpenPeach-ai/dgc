@@ -39,9 +39,13 @@ What one chat does no longer reaches into another:
 
 ### A chat comes back in the mode it ran in
 
-Mode belongs to the conversation now: reopening a chat restores its mode — re-checked, not trusted
-from the file: `acceptEdits` and `auto` only while the folder is still trusted. Reopening never
-changes your default; choosing a mode afterwards does, as before.
+Mode belongs to the conversation now: reopening a chat restores its mode, when that mode asks no
+less than the one you are in — a chat that was planning comes back planning, and a chat that ran
+in `auto` comes back in `auto` when `auto` is your mode. It is re-checked, not trusted from the
+file: `acceptEdits` and `auto` only while the folder is still trusted. A mode you name for the run
+wins: `dgc --mode plan --continue` runs in `plan` whatever the session ran in. Reopening never
+changes your default, and a new chat after it starts in the mode the reopened chat replaced;
+choosing a mode afterwards changes your default, as before.
 
 ### Permissions, trust and mode: fixes, several of which failed open in 0.46.4
 

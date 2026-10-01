@@ -719,6 +719,9 @@ def _policy_strips_allow() -> bool:
 
 
 class Config:
+    # The mode was named for this run (`dgc --mode`): reopening a session never changes it.
+    mode_explicit = False
+
     def __init__(self, project_root: Path | None = None):
         self.project_root = project_root or find_project_root()
         self.project_dir = self.project_root / ".dgc"
@@ -1420,7 +1423,8 @@ class Config:
                     self._stored_mcp_env.pop(name, None)
                     self._stored_mcp_identity.pop(name, None)
         held = getattr(self, "_held_keys", None)
-        if held and key in held:
+        was_held = bool(held and key in held)
+        if was_held:
             held.discard(key)                          # the user chose: the hold is over
             self._ephemeral_keys.discard(key)
         self.data[key] = value
@@ -1438,7 +1442,16 @@ class Config:
         if key not in SECRET_KEYS:
             self._explicit_keys.add(key)
         if persist:
-            self.save()
+            try:
+                self.save()
+            except Exception:
+                if was_held:
+                    # Not saved, so not chosen: the hold stands. Ended here, the next save of
+                    # anything wrote the held value -- a reopened chat's auto, an untrusted
+                    # folder's default -- as the user's own.
+                    held.add(key)
+                    self._ephemeral_keys.add(key)
+                raise
 
     def adopt_runtime_secrets(self, base: "Config") -> None:
         """Take the runtime credentials the process's first Config was given.

@@ -3366,6 +3366,13 @@ class Backend:
         except (TypeError, ValueError, OverflowError):
             return 0
 
+    def _emit_mode_if_changed(self, before: str) -> None:
+        """A reopened chat comes back in its own mode, and a new chat after it goes back to the
+        mode the reopened one replaced. Say so, or the picker shows the old one."""
+        if getattr(self.agent, "mode", "") != before:
+            self.em.emit("mode_changed", mode=self.agent.mode,
+                         workspace_trusted=self.workspace_trusted)
+
     def _emit_goal(self, request_id: str | None = None) -> None:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
                      status=getattr(self.agent, "goal_status", "none"),
@@ -4759,11 +4766,13 @@ class Backend:
                                  message="the running turn did not stop in time; try again",
                                  **_request_fields(request_id))
                     return
+            mode_before = getattr(self.agent, "mode", "")
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, name="",
                          **_request_fields(request_id))
+            self._emit_mode_if_changed(mode_before)
             self._emit_context(request_id)
             self._emit_goal()
             self._emit_monitors()
@@ -4798,11 +4807,13 @@ class Backend:
             # Archive the prior persisted transcript and start an actually empty model context.
             # The old webview implementation only removed DOM nodes while the model retained every
             # prior turn, which made `/clear` misleading and potentially leaked stale context.
+            mode_before = getattr(self.agent, "mode", "")
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="cleared", message_count=0,
                          session_id=self.agent.session_file.stem, name="",
                          **_request_fields(request_id))
+            self._emit_mode_if_changed(mode_before)
             self.em.emit("history", items=[])
             self._emit_context()
             self._emit_goal()
@@ -4826,10 +4837,7 @@ class Backend:
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
-                if getattr(self.agent, "mode", "") != mode_before:
-                    # The reopened chat came back in its own mode: say so, or the picker shows the old one.
-                    self.em.emit("mode_changed", mode=self.agent.mode,
-                                 workspace_trusted=self.workspace_trusted)
+                self._emit_mode_if_changed(mode_before)
                 self._emit_history()
                 self._emit_agents()
                 self._emit_context()
