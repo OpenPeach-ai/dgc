@@ -1394,8 +1394,8 @@ class BackendYieldTests(unittest.TestCase):
         with backend._turn_state_lock():
             backend._queue.append(("a real prompt", None, None, "prompt", "p1"))
         backend._await_idle = lambda timeout: False
-        backend.dispatch({"type": "name_session", "name": "busy-wake", "request_id": "cmd"})
-        self.assertEqual([e["command"] for e in self.rejected()], ["name_session"])
+        backend.dispatch({"type": "reload_skills", "request_id": "cmd"})
+        self.assertEqual([e["command"] for e in self.rejected()], ["reload_skills"])
         self.assertEqual([item[3] for item in backend._queue], ["monitor", "prompt"])
         with backend._turn_state_lock():
             backend._queue.clear()

@@ -4096,11 +4096,15 @@ class Agent(GoalLifecycle):
 
     # ------------------------------------------------------------- main loop ---
     @contextmanager
-    def _session_turn_scope(self, *, reentrant: bool = True, reclaim: bool = False):
+    def _session_turn_scope(self, *, reentrant: bool = True, reclaim: bool = False,
+                            shared: bool = False):
         """Reserve this saved session across processes for a turn or durable mutation.
 
         The OS owns crash recovery. Nested persistence on the owning thread is re-entrant without
-        trying to lock the same file descriptor again; a different local thread fails immediately.
+        trying to lock the same file descriptor again; a different local thread fails immediately
+        -- unless ``shared``: a metadata write (a rename) may join the reservation THIS agent's own
+        turn holds, from the command thread, because the persist lock serialises it with that
+        turn's saves. Another agent, or another process, still cannot.
         """
         if self.depth > 0 or not self.session_file:
             yield True
@@ -4110,7 +4114,7 @@ class Agent(GoalLifecycle):
         lease = None
         with self._session_turn_state_lock:
             if self._session_turn_lease is not None:
-                allowed = bool(reentrant and self._session_turn_owner == owner)
+                allowed = bool(reentrant and (self._session_turn_owner == owner or shared))
                 if allowed:
                     self._session_turn_depth += 1
                     entered = True
@@ -4781,7 +4785,10 @@ class Agent(GoalLifecycle):
     def name_session(self, name: str) -> bool:
         """Give the current session a human name (shown in --resume / the session picker)."""
         value = self._safe_text(name).strip() or None
-        with self._session_turn_scope() as reserved:
+        # shared: renaming a chat while its turn runs is not a competing mutation -- it rewrites
+        # one field, under the lock every save of that turn takes. Refused, the user could not
+        # rename a chat until it finished.
+        with self._session_turn_scope(shared=True) as reserved:
             if not reserved:
                 self._last_persist_error = (
                     "Session rename stopped because another DGC process owns its active turn.")

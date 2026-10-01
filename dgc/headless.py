@@ -139,7 +139,9 @@ _BUSY_MUTATIONS = {
     "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     # set_skill_enabled is absent: a skill switch only changes what the next prompt may load.
-    "resolve_retained_task", "reload_skills", "create_skill", "install_skill", "generate_handoff", "name_session",
+    # name_session is absent: a rename joins the running turn's own session reservation and is
+    # saved under the same lock as that turn's saves (Agent.name_session).
+    "resolve_retained_task", "reload_skills", "create_skill", "install_skill", "generate_handoff",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
     # Continuing an interrupted turn is offered on an idle chat; while a turn runs there is
