@@ -4198,6 +4198,11 @@ class Agent(GoalLifecycle):
         """Why the turn was refused, naming the holder and what it said when the registry knows."""
         note = getattr(self, "_held_session_note", None)
         reason = str(getattr(self, "_held_session_reason", "") or "")
+        sibling = getattr(self, "_sibling_holding", None)
+        if callable(sibling) and sibling(str(self.session_file or "")):
+            # Another chat of this same process: no other window, no 15-minute release.
+            return ("This session is open in another chat in this window. Carry on there, or start "
+                    f"a new session here. {tail}")
         if not isinstance(note, dict):
             return ("This session has an active turn in another DGC process. "
                     + _HELD_SESSION_REMEDY + " " + tail)
@@ -8484,11 +8489,14 @@ class Agent(GoalLifecycle):
                       limit_chars=limit_chars)
 
     def _peers_here(self) -> list[dict]:
-        """Other DGC agents in this checkout, or [] if the registry cannot be read."""
+        """Other DGC agents in this checkout, or [] if the registry cannot be read: other processes,
+        and other chats of this one (see Host.siblings_of)."""
         try:
             from . import peers as _peers
-            return _peers.others(project_root=str(self.config.project_root),
-                                 git_common_dir=self._git_common_dir())
+            found = _peers.others(project_root=str(self.config.project_root),
+                                  git_common_dir=self._git_common_dir())
+            siblings = getattr(self, "_sibling_peers", None)
+            return found + (list(siblings()) if callable(siblings) else [])
         except Exception:
             return []                  # peer awareness is a courtesy; never fail a turn over it
 

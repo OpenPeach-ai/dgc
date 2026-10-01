@@ -1602,6 +1602,10 @@ class MCPManager:
         self.disabled_names = ({name for name in disabled_names if isinstance(name, str)}
                                if isinstance(disabled_names, (list, tuple, set)) else set())
         self._runtime_specs: dict[str, dict] = {}
+        # The saved form of each server, where it differs from what it was launched with: an
+        # editor connects a credentialed server with its token, and saves it without one.
+        self._persisted_specs: dict[str, dict] = {}
+        self._closed = False
         self._tool_schema_cache: tuple[dict, ...] = ()
         self._tool_search_cache: tuple[tuple, ...] = ()
         self._catalog_state_lock = threading.RLock()
@@ -1615,7 +1619,7 @@ class MCPManager:
         if not isinstance(config_servers, dict):
             return
         for server_index, (raw_name, raw_spec) in enumerate(config_servers.items()):
-            if cancel is not None and cancel.is_set():
+            if (cancel is not None and cancel.is_set()) or self._closed:
                 break
             # Keep startup work and child-process fan-out bounded even when config.json was
             # hand-edited.  The editor/headless mutation APIs enforce the same public limit, but
@@ -1635,6 +1639,7 @@ class MCPManager:
                 continue
             name = str(raw_name)
             self._runtime_specs[name] = dict(raw_spec)
+            self._persisted_specs.pop(name, None)
             self.failures.pop(name, None)
             old = self.servers.pop(name, None)
             if old is not None:
@@ -1673,15 +1678,46 @@ class MCPManager:
             except BaseException:
                 server.stop()
                 raise
-            if started:
-                self.servers[name] = server
-            else:
+            with self._catalog_state_lock:
+                closed = self._closed
+                if started and not closed:
+                    self.servers[name] = server
+            if closed:
+                # Its chat closed while this connect ran on another thread; stop_all() had already
+                # emptied the table, so nothing would ever have stopped it.
+                server.stop()
+                break
+            if not started:
                 self.failures[name] = server.error or "connection failed"
         self._rebuild_routes()
+
+    def note_persisted(self, name: str, spec: dict | None) -> None:
+        """Record the saved form of a server just connected with a different, runtime one."""
+        if isinstance(spec, dict) and name in self.servers:
+            self._persisted_specs[name] = dict(spec)
+
+    def unchanged(self, name: str, saved: dict | None, runtime: dict | None) -> bool:
+        """Whether the running server is the one `saved` describes. Compared by its saved form
+        when it was launched with credentials the saved form leaves out: compared by the launch
+        form, every credentialed server looked changed and was restarted without its token."""
+        if name not in self.servers:
+            return False
+        known = self._persisted_specs.get(name)
+        if known is not None:
+            return known == saved
+        return self._runtime_specs.get(name) == runtime
+
+    def close(self) -> None:
+        """Stop every server for good: this manager's chat is closing while its process lives on.
+        A connect still running on another thread stops the server it starts."""
+        with self._catalog_state_lock:
+            self._closed = True
+        self.stop_all()
 
     def disconnect(self, name: str) -> None:
         server = self.servers.pop(name, None)
         self.failures.pop(name, None)
+        self._persisted_specs.pop(name, None)
         if server is not None:
             server.stop()
         self._rebuild_routes()
@@ -2020,6 +2056,7 @@ class MCPManager:
             self._routes.clear()
             self._context_routes.clear()
             self._runtime_specs.clear()
+            self._persisted_specs.clear()
             self._tool_schema_cache = ()
             self._tool_search_cache = ()
         self.failures.clear()

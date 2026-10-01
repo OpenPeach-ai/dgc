@@ -857,3 +857,124 @@ test("a chat in another folder lists its own folder's changes, not the window's"
     rmSync(other, { recursive: true, force: true });
   }
 });
+
+// ---- restarting, closing and disposing chats that share a process ----------------------------------
+
+test("restarting a shared process arms every other chat on it to come back on its own session", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = shared;
+  first.saved = { ...(first.saved || {}), backend: shared, currentSessionId: "alpha" };
+  const opened = { ...fakeBackend("opened"), host: shared };
+  second.backend = opened;
+  provider.backend = opened;
+  provider.restart("test");
+  assert.match(first.lost || "", /restarted/, "the first chat kept a backend that was killed under it");
+  assert.equal(first.backend, undefined);
+  assert.equal(first.saved.sessionRestoreCandidate, "alpha", "it comes back on the session it was on");
+});
+
+test("a chat never opens on a process started before the last restart", () => {
+  const { provider, first, second } = twoSlots();
+  const old = fakeProcess("old");
+  first.backend = old;
+  provider.processEpochs.set(old, provider.processEpoch);
+  assert.equal(provider.chatHost(second), old, "premise: before a restart it would");
+  provider.processEpoch++;
+  assert.equal(provider.chatHost(second), undefined, "a restart's new CLI was skipped for the old one");
+});
+
+test("a dgc.command change waits for a turn in another chat on the same process", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = shared;
+  first.busy = true;                                 // a turn runs there, off screen
+  const opened = { ...fakeBackend("opened"), host: shared };
+  second.backend = opened;
+  provider.backend = opened;
+  provider.turnActive = false;
+  provider.commandPathChanged();
+  assert.equal(provider.pendingCommandRestart, true, "the restart did not wait");
+  assert.equal(opened.disposed, "", "the other chat's turn was killed by the restart");
+});
+
+test("a deferred dgc.command restart runs when the other chat's turn ends", async () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = shared;
+  first.busy = true;
+  const opened = { ...fakeBackend("opened"), host: shared };
+  second.backend = opened;
+  provider.backend = opened;
+  provider.turnActive = false;
+  provider.commandPathChanged();
+  assert.equal(opened.disposed, "", "premise: it waits");
+  provider.backgroundEvent(first, { type: "turn_end" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(opened.disposed, /dgc\.command/, "the restart waited for a turn that had ended");
+});
+
+test("a deferred dgc.command restart does not even ask while another chat on the process works", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = shared;
+  first.busy = true;
+  const opened = { ...fakeBackend("opened"), host: shared };
+  second.backend = opened;
+  provider.backend = opened;
+  provider.turnActive = false;
+  provider.pendingCommandRestart = true;
+  provider.runPendingCommandRestart();
+  assert.ok(!opened.sent.some((c) => c && c.type === "status"),
+    "a status check went out while the other chat's turn was still running");
+});
+
+test("closing the first chat takes its handlers off a process that stays up", () => {
+  const { provider, first } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  const removed = [];
+  shared.off = (name, handler) => { removed.push([name, handler]); };
+  const handler = () => {};
+  provider.backendListeners.set(shared, [["event", handler]]);
+  first.backend = shared;
+  first.saved = { ...(first.saved || {}), backend: shared };
+  provider.closeChatSlot(first.id);
+  assert.deepEqual(removed, [["event", handler]], "the closed chat still heard the process");
+});
+
+test("closing the window closes opened chats before the processes they are on", () => {
+  const { provider, first, second } = twoSlots();
+  const order = [];
+  const shared = Object.assign(fakeProcess("shared", { users: 1 }), {
+    dispose() { order.push("process"); },
+  });
+  const opened = { ...fakeBackend("opened"), host: shared, dispose() { order.push("opened"); } };
+  first.backend = shared;
+  second.backend = opened;
+  provider.backend = shared;
+  provider.dispose();
+  assert.deepEqual(order.slice(0, 2), ["opened", "process"],
+    "the process went first, and closing the chat on it started a new one");
+});
+
+test("picking a session another chat has open switches to that chat", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "20260930-held", name: "Holder" });
+  const holder = provider.activeSlotId;
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Other" });
+  provider.confirmedTurnActive = true;
+  provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-held.json");
+  assert.equal(provider.activeSlotId, holder, "a duplicate chat was opened on a session already open");
+  assert.equal(provider.slots.length, 2);
+  assert.ok(!spawned.some((be) => be.sent.some((c) => c.type === "resume_session")));
+});
+
+test("picking the session on screen opens nothing", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "20260930-mine", name: "Mine" });
+  provider.confirmedTurnActive = true;
+  provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-mine.json");
+  assert.equal(provider.slots.length, 1, "a second chat was opened on the chat's own session");
+  assert.equal(spawned.length, 1);
+});

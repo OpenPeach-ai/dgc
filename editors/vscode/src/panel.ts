@@ -346,6 +346,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private backend?: ChatBackend;
   /** Backends whose own slot has closed while chats other slots opened on them are still running. */
   private releasedHosts = new Set<DgcBackend>();
+  /** What the panel hung on each backend for its slot, so a slot that goes away can take it off a
+   *  process that stays up for other chats. */
+  private readonly backendListeners = new WeakMap<object, Array<[string, (...args: any[]) => void]>>();
+  /** Bumped by every restart. A chat opens only on a process started since the last one: a restart
+   *  is how a new CLI is loaded, and a chat that opened on an older process kept the old one. */
+  private processEpoch = 0;
+  private readonly processEpochs = new WeakMap<object, number>();
   private state = { model: "", mode: "default", think: "off", ultra: false,
                     baseUrl: "", workspaceTrusted: false,
                     subscriptionEngine: "",
@@ -685,6 +692,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try { be?.close(`${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`); } catch { /* already gone */ }
     const released = be as DgcBackend | undefined;
     if (released?.ownerReleased && released.chatUsers instanceof Set) {
+      // The process stays up for the chats opened on it; this slot's handlers go. What its own
+      // chat says from here (the retirement close() asked for) has no tab to go to.
+      for (const [name, handler] of this.backendListeners.get(released) || []) {
+        released.off(name, handler);
+      }
       this.releasedHosts.add(released);
       released.once("exit", () => this.releasedHosts.delete(released));
       released.once("disposed", () => this.releasedHosts.delete(released));
@@ -890,7 +902,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const type = String((ev as any)?.type || "");
     switch (type) {
       case "turn_start": slot.busy = true; break;
-      case "turn_end": slot.busy = false; break;
+      case "turn_end":
+        slot.busy = false;
+        // A dgc.command restart waits for every chat on the process, not only the one on screen.
+        if (this.pendingCommandRestart) { setTimeout(() => this.runPendingCommandRestart(), 0); }
+        break;
       case "session":
         slot.label = String((ev as any).name || "").trim()
           || String((ev as any).session_id || "").slice(-6) || "New chat";
@@ -1895,20 +1911,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be: ChatBackend = host
       ? new OpenedChat(host, folder, this.nextRequestId("open-chat"))
       : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion);
+    if (!host) { this.processEpochs.set(be, this.processEpoch); }
     slot.backend = be;
+    const wired: Array<[string, (...args: any[]) => void]> = [];
+    this.backendListeners.set(be, wired);
+    const on = (name: string, handler: (...args: any[]) => void) => {
+      be.on(name, handler);
+      wired.push([name, handler]);
+    };
     // The backend's own last word ("serve loop ended: <cause>; …") arrives on stderr before the
     // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
     let serveCause = "";
-    be.on("event", (ev: DgcEvent) => this.routeEvent(slot, ev));
-    be.on("stderr", (line: string) => {
+    on("event", (ev: DgcEvent) => this.routeEvent(slot, ev));
+    on("stderr", (line: string) => {
       const ended = /serve loop ended: ([^;\n]+)/.exec(line);
       if (ended) { serveCause = ended[1].trim().slice(0, 300); }
       if (slot.id !== this.activeSlotId) { this.backendNote(line); return; }
       this.backendNote(line); this.post({ type: "stderr", line });
     });
-    be.on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
-    be.on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
-    be.on("teardown", (cause: string, pid?: number) => {
+    on("spawned", (pid?: number) => this.backendNote(`[dgc serve started: pid ${pid ?? "?"}, host pid ${process.pid}]`));
+    on("launch_failed", (message: string) => this.backendNote(`[dgc serve failed to start: ${message}]`));
+    on("teardown", (cause: string, pid?: number) => {
       this.backendNote(`[extension: stopping the backend — ${cause}${pid ? ` (pid ${pid})` : ""}]`);
       // restart() and dispose() own their own lifecycle. Any other teardown (a protocol failure, a
       // restore that timed out) retires this instance NOW: leaving it as this.backend let the next
@@ -1920,7 +1943,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.retireBackend();
       this.post({ type: "backend_exit", code: null, signal: null, recovering: false, cause, resumes: "none" });
     });
-    be.on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
+    on("exit", (code: number | null, signal?: string | null, info?: ChildExitInfo) => {
       const facts: ChildExitInfo = info || { uptimeMs: be.uptimeMs, framesWritten: 0 };
       // "code 0" alone reads like a clean, asked-for stop. Whether WE asked is the whole question
       // when a turn disappears, so the log says it outright, with what the child was last sent.
@@ -1979,7 +2002,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (!hosts.includes(released)) { hosts.push(released); }
     }
     return hosts.find((process) => process.chats && process.handshakeComplete
-      && process.childPid !== undefined && process.chatUsers.size + 1 < process.chats.max);
+      && process.childPid !== undefined && process.chatUsers.size + 1 < process.chats.max
+      && (this.processEpochs.get(process) ?? this.processEpoch) === this.processEpoch);
+  }
+
+  /** The `dgc serve` a chat's backend runs on: the backend itself, or the process it was opened on. */
+  private processOf(be: ChatBackend | undefined): DgcBackend | undefined {
+    const process = ((be as OpenedChat | undefined)?.host ?? be) as DgcBackend | undefined;
+    return process?.chatUsers instanceof Set ? process : undefined;
+  }
+
+  /** A turn runs in a chat on the active chat's process: restarting it would end that turn too. */
+  private processBusy(): boolean {
+    if (this.turnActive) { return true; }
+    const process = this.processOf(this.backend);
+    return !!process && this.slots.some((other) => other.id !== this.activeSlotId && other.busy
+      && this.processOf(other.backend || (other.saved?.backend as ChatBackend | undefined)) === process);
   }
 
   /** Forget the current backend and every piece of per-connection state that went with it. */
@@ -2156,7 +2194,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * mid-turn kills the turn, so a running turn finishes first and the restart follows its end.
    */
   commandPathChanged(): void {
-    if (this.turnActive) {
+    if (this.processBusy()) {
       if (!this.pendingCommandRestart) {
         this.pendingCommandRestart = true;
         this.backendNote("[extension: dgc.command changed during a turn — restarting when it ends]");
@@ -2180,7 +2218,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * restart pending for the next turn_end.
    */
   private runPendingCommandRestart(): void {
-    if (!this.pendingCommandRestart || this.turnActive) { return; }
+    if (!this.pendingCommandRestart || this.processBusy()) { return; }
     // One status check at a time; a turn that ends while one is out is looked at again after it.
     if (this.commandRestartCheck) { this.commandRestartRecheck = true; return; }
     this.commandRestartRecheck = false;
@@ -2192,13 +2230,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     };
     if (!be) {
       // After the event being handled reaches the webview, so a finished turn renders as finished.
-      setTimeout(() => { if (this.pendingCommandRestart && !this.turnActive) { apply(); } }, 0);
+      setTimeout(() => { if (this.pendingCommandRestart && !this.processBusy()) { apply(); } }, 0);
       return;
     }
     const check = this.requestState(be, "command-restart", { type: "status" }, "status", 10000)
       .then((status: any) => {
         if (!this.pendingCommandRestart || this.backend !== be) { return; }
-        if (this.turnActive || status?.busy === true) {
+        if (this.processBusy() || status?.busy === true) {
           this.backendNote("[extension: dgc.command restart still waiting — the backend has more work queued]");
           // The next turn_end asks again. A foreground operation that ends with no turn event (a
           // compaction) would leave nothing to ask, so look again later too; a no-op once applied.
@@ -2237,7 +2275,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.noteInterruptedTurn(undefined);
     this.queuedPromptsLost();                          // the backend holding them is going away
     // A new process, not a new chat on the old one: a changed CLI or a wedged backend is the
-    // reason to restart, and every chat on a shared process restarts with it.
+    // reason to restart, and every chat on a shared process restarts with it. The others are
+    // armed to come back on their own sessions when you switch to them. Left as they were, an
+    // opened chat took every prompt and never sent it, and its tab kept a working dot.
+    const process = this.processOf(this.backend);
+    if (process) {
+      for (const other of this.slots) {
+        if (other.id === this.activeSlotId) { continue; }
+        if (this.processOf(other.backend || (other.saved?.backend as ChatBackend | undefined)) === process) {
+          this.backgroundBackendLost(other, `the backend was restarted (${reason})`);
+        }
+      }
+    }
+    this.processEpoch++;
     this.backend?.restartProcess(`restart: ${reason}`);
     this.backend = undefined;
     this.intentionalShutdown = false;
@@ -4371,8 +4421,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  conversation that turn belongs to, which the backend refuses ("resume_session is unavailable
    *  while a turn is running"), so the switch failed and the turn was the only way out. */
   private openPastSession(be: ChatBackend, sessionPath: string): void {
+    const picked = path.basename(sessionPath).replace(/\.json$/i, "");
+    // A session one of the open chats is on opens there. A second chat on it was refused as held
+    // by "another DGC process", which it was not.
+    if (picked && picked === this.currentSessionId) {
+      void vscode.window.showInformationMessage("That session is the chat on screen.");
+      return;
+    }
+    const holder = this.slots.find((slot) => slot.id !== this.activeSlotId
+      && String(slot.saved?.currentSessionId || "") === picked
+      && (slot.cwd || "") === (this.activeSlot().cwd || ""));
+    if (picked && holder) {
+      this.switchToSlot(holder.id);
+      return;
+    }
     if (this.turnActive || this.confirmedTurnActive) {
-      const id = path.basename(sessionPath).replace(/\.json$/i, "");
+      const id = picked;
       if (/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
         this.openChatSlot(this.activeSlot().cwd, id);
         return;
@@ -5753,14 +5817,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshDirty = false;
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
-    this.backend?.dispose(PANEL_DISPOSED_CAUSE);
     // A chat parked in the background still holds a live `dgc serve`. Closing the window must take
-    // every one of them with it, or a child outlives the editor that owns it.
+    // every one of them with it, or a child outlives the editor that owns it. Chats opened on a
+    // process go first: closing one is a command to its process, and a process already stopped
+    // started a new `dgc serve` to carry it.
+    const all = new Set<ChatBackend>();
+    if (this.backend) { all.add(this.backend); }
     for (const slot of this.slots) {
       const parked = slot.backend || (slot.saved?.backend as ChatBackend | undefined);
-      if (parked && parked !== this.backend) {
-        try { parked.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
-      }
+      if (parked) { all.add(parked); }
+    }
+    const opened = [...all].filter((be) => (be as OpenedChat).host !== undefined);
+    for (const be of [...opened, ...[...all].filter((be) => !opened.includes(be)), ...this.releasedHosts]) {
+      try { be.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
     }
     this.sb.dispose();
     // Last: the backend's exit line arrives after this and still reaches backend.log.

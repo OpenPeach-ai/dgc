@@ -229,3 +229,79 @@ test("the process ending ends every chat on it", async () => {
   assert.equal(chat.ready, false);
   assert.equal(be.chatUsers.size, 0);
 });
+
+// ---- closing, restarting and failing to open ---------------------------------------------------
+
+test("closing the first chat ends its conversation and keeps the process for the others", async () => {
+  const be = await startedBackend(chatsBackend("retiring-backend"));
+  try {
+    const { chat } = await openedChat(be);
+    chat.completeHandshake();
+    const asked = [];
+    be.on("event", (ev) => { if (ev.type === "info") asked.push(String(ev.message)); });
+    const retired = waitFor(be, "event", (ev) => ev.type === "info" && String(ev.message).includes('"new_session"'));
+    be.close("chat closed: First");
+    await retired;
+    assert.ok(be.childPid !== undefined, "closing the first chat ended the other chats too");
+    be.close("chat closed: First");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(asked.filter((line) => line.includes('"new_session"')).length, 1,
+      "the first chat was retired more than once");
+  } finally {
+    be.dispose("test over");
+  }
+});
+
+test("a chat closed before it opened is closed the moment it opens", async () => {
+  const be = await startedBackend(chatsBackend("late-open-backend"));
+  try {
+    const chat = new OpenedChat(be, "/srv/late", "open-late");
+    const closed = waitFor(be, "chat-event", (_chat, ev) => ev.type === "chat_closed");
+    chat.start();
+    chat.dispose("chat closed: Late");            // before chat_opened can have arrived
+    const [chatId] = await closed;
+    assert.equal(chatId, "c1", "the chat the backend built for this slot was never closed");
+  } finally {
+    be.dispose("test over");
+  }
+});
+
+test("closing a chat on a process that has stopped starts no new process", async () => {
+  const be = await startedBackend(chatsBackend("stopped-host-backend"));
+  try {
+    const { chat } = await openedChat(be);
+    chat.completeHandshake();
+    be.dispose("test stops the process");
+    chat.dispose("chat closed: Second");           // before the process's exit is observed
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(be.childPid, undefined, "closing the chat started a new dgc serve to carry close_chat");
+  } finally {
+    be.dispose("test over");                       // whatever a failure started
+  }
+});
+
+test("a chat whose process ended takes no more commands and has no process to wait for", async () => {
+  const be = await startedBackend(chatsBackend("ended-host-backend"));
+  const { chat } = await openedChat(be);
+  chat.completeHandshake();
+  const ended = waitFor(chat, "exit");
+  be.dispose("test kills the process");
+  await ended;
+  assert.equal(chat.childPid, undefined);
+  assert.equal(chat.send({ type: "prompt", text: "hello" }), false,
+    "the prompt was taken and held for a handshake that could never come");
+});
+
+test("a chat that could not open has no process to wait for", async () => {
+  const be = await startedBackend(chatsBackend("refusing-pid-backend", { refuse: true }));
+  try {
+    const chat = new OpenedChat(be, "relative/dir", "open-refused");
+    const exited = waitFor(chat, "exit");
+    chat.start();
+    await exited;
+    assert.ok(be.childPid !== undefined, "premise: the process itself is still running");
+    assert.equal(chat.childPid, undefined, "the slot would wait for it as if it were reconnecting");
+  } finally {
+    be.dispose("test over");
+  }
+});

@@ -2175,9 +2175,11 @@ def _reap_background(now: float | None = None) -> None:
             _BG.pop(bid, None)
 
 
-def _shutdown_background() -> None:
+def _shutdown_background(owner: str | None = None) -> None:
+    """Stop running background shells: one agent's -- a chat closing while its process lives on --
+    or, at exit, everyone's."""
     with _BG_LOCK:
-        entries = list(_BG.values())
+        entries = [entry for entry in _BG.values() if owner is None or entry.get("owner") == owner]
     for entry in entries:
         # Completed handles remain inspectable for 30 minutes. Never signal their stale process-group
         # IDs: the kernel may have reused one for an unrelated process by interpreter shutdown.
@@ -2185,6 +2187,12 @@ def _shutdown_background() -> None:
             entry["killed"] = True
             _terminate_background(entry["proc"], sweep_exited_group=True)
             _join_background_reader(entry)
+
+
+def shutdown_background(owner: str) -> None:
+    """One agent's running background shells, and nobody else's."""
+    if owner:
+        _shutdown_background(owner)
 
 
 atexit.register(_shutdown_background)

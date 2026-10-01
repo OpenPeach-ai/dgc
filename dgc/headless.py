@@ -1784,6 +1784,13 @@ class Backend:
                              float(config.get("approval_timeout_s", 300) or 300))
         self.ui.preview_root = config.project_root   # edit previews on approval cards
         self.agent = Agent(config, self.ui)
+        if host is not None:
+            # Chats on one `dgc serve` share a pid, and the peer registry skips its own process's
+            # note: two chats in one checkout never knew about each other. The host answers.
+            self.agent._sibling_peers = lambda: host.siblings_of(self)
+            self.agent._sibling_holding = lambda path: host.session_open_elsewhere(self, path)
+        # A plugin install's connect is cancelled by closing its chat, not by the turn's Stop.
+        self._package_cancel = threading.Event()
         self.ui.cancelled = self.agent.cancelled
         self.ui._goal_hook = self._emit_goal
         self.ui._rule_hook = self._add_rule
@@ -3064,6 +3071,9 @@ class Backend:
                                       input_handler=self.agent._handle_mcp_input if interactive else None)
         except Exception as exc:
             return finish(f"MCP connection failed ({type(exc).__name__})")
+        note = getattr(self.agent.mcp, "note_persisted", None)
+        if callable(note):
+            note(name, persisted)
         return finish()
 
     def _emit_permissions(self, request_id: str) -> None:
@@ -3200,9 +3210,28 @@ class Backend:
                 self._wake_suppressed = getattr(self, "_wake_suppressed", 0) + 1
                 self._cancel_wake_timer_locked()
             hub.shutdown("shutdown", wait=2.0)
+        package_cancel = getattr(self, "_package_cancel", None)
+        if package_cancel is not None:
+            package_cancel.set()
+        reader = getattr(self, "_package_reader", None)
+        if isinstance(reader, threading.Thread) and reader is not threading.current_thread():
+            reader.join(timeout=2)
         manager = getattr(self.agent, "mcp", None)
         if manager is not None:
-            manager.stop_all()
+            stop = getattr(manager, "close", None) if not process else None
+            (stop if callable(stop) else manager.stop_all)()
+        if not process:
+            # One chat of a shared process: its background shells, Python kernel and browser were
+            # killed only at process exit, so closing its tab left a dev server holding its port
+            # until every chat in the window had closed.
+            owner = str(getattr(getattr(self.agent, "ctx", None), "tool_owner", "") or "")
+            if owner:
+                from .tools import shutdown_background, shutdown_browsers, shutdown_python_kernels
+                for stop_owned in (shutdown_background, shutdown_python_kernels, shutdown_browsers):
+                    try:
+                        stop_owned(owner)
+                    except Exception:
+                        pass
         return outcome
 
     def _editor_image_mentions(self, context, images):
@@ -3762,7 +3791,8 @@ class Backend:
             if record_servers(record):
                 # Its own cancel, not the turn's: an install now runs beside a turn, and the turn's
                 # Stop -- or a Stop pressed before the install began, still set -- is not about it.
-                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input, cancel=threading.Event())
+                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input,
+                        cancel=getattr(self, "_package_cancel", None) or threading.Event())
                 failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record) if self.agent.mcp.failures.get(n)), None)
                 if failure:
                     detail = str(failure)
@@ -6097,6 +6127,17 @@ _UNQUEUED_COMMANDS = frozenset({"permission_response", "plan_response", "options
                                 "mcp_input_response", "ask_skip", "ping", "editor_state",
                                 "shutdown"})
 
+def _needs_editor_credentials(spec: dict) -> bool:
+    """A server whose credentials only an editor holds: environment names it declares that neither
+    its restored secrets nor this process's environment supply."""
+    names = [name for name in (spec.get("env_names") or []) if isinstance(name, str)]
+    auth = spec.get("auth_env")
+    if isinstance(auth, str) and auth:
+        names.append(auth)
+    env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+    return any(name not in env and name not in os.environ for name in names)
+
+
 # How many chats one backend holds. Each owns an Agent with its own MCP connections, so this bounds
 # processes and memory too, not just bookkeeping.
 _MAX_CHATS = 16
@@ -6165,7 +6206,8 @@ class Host:
     # _SESSION_KEYS, which a refresh never adopts.
     def _user_state_saved(self, config: Config, keys: set, rules_moved: bool) -> None:
         with self._chats_lock:
-            others = [chat for chat in self.chats.values() if chat.config is not config]
+            others = [chat for chat_id, chat in self.chats.items()
+                      if chat.config is not config and chat_id not in self._closing]
         catalogs = keys & {"mcp_servers", "disabled_mcp_servers", "disabled_skills"}
         for chat in others:
             try:
@@ -6178,6 +6220,58 @@ class Host:
             if catalogs:
                 threading.Thread(target=self._refresh_catalogs, args=(chat, catalogs), daemon=True,
                                  name=f"dgc-refresh-{chat.chat_id}").start()
+
+    def siblings_of(self, chat: "Backend") -> list[dict]:
+        """The other open chats of this process in the same checkout, as peer notes. The registry
+        skips its own pid, so chats sharing one `dgc serve` never saw each other: two models edited
+        one checkout, each told it was alone, where two windows had been told about each other."""
+        from . import peers as _peers
+        try:
+            root, common = str(chat.config.project_root), chat.agent._git_common_dir()
+        except Exception:
+            return []
+        with self._chats_lock:
+            others = [other for chat_id, other in self.chats.items()
+                      if other is not chat and chat_id not in self._closing]
+        found = []
+        for other in others:
+            try:
+                record = {"pid": os.getpid(), "chat": other.chat_id, "liveness": "live",
+                          "project_root": str(other.config.project_root),
+                          "git_common_dir": other.agent._git_common_dir()}
+            except Exception:
+                continue
+            if _peers._same_place(record, root, common):
+                found.append(record)
+        return found
+
+    def session_open_elsewhere(self, chat: "Backend", path: str) -> bool:
+        """Whether another chat of this process has this session open."""
+        if not path:
+            return False
+        with self._chats_lock:
+            others = [other for other in self.chats.values() if other is not chat]
+        for other in others:
+            try:
+                if str(other.agent.session_file or "") == path:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _adopt_user_state(self, chat: "Backend") -> None:
+        """A chat built while another chat saved a user-wide change missed it: it read the config
+        before, and the fan-out reached only the chats already open. A deny added meanwhile did not
+        bind it. Take what is on disk now, as the fan-out would have."""
+        try:
+            chat.config.save()              # nothing of its own to write: it adopts what is on disk
+        except Exception:
+            return
+        from .trust import is_trusted
+        chat.workspace_trusted = is_trusted(chat.config, chat.config.project_root)
+        threading.Thread(target=self._refresh_catalogs,
+                         args=(chat, {"mcp_servers", "disabled_mcp_servers", "disabled_skills"}),
+                         daemon=True, name=f"dgc-refresh-{chat.chat_id}").start()
 
     @staticmethod
     def _refresh_catalogs(chat: "Backend", keys: set) -> None:
@@ -6192,12 +6286,24 @@ class Host:
                 manager.disabled_names = {name for name in raw if isinstance(name, str)}
                 servers = (config.mcp_runtime_servers() if hasattr(config, "mcp_runtime_servers")
                            else dict(config.get("mcp_servers", {}) or {}))
+                saved = dict(config.get("mcp_servers", {}) or {})
                 for name in list(manager.servers):
                     if name not in servers or name in manager.disabled_names:
                         manager.disconnect(name)
-                moved = {name: spec for name, spec in servers.items()
-                         if name not in manager.disabled_names
-                         and (name not in manager.servers or manager._runtime_specs.get(name) != spec)}
+                unchanged = getattr(manager, "unchanged", None)
+                moved = {}
+                for name, spec in servers.items():
+                    if name in manager.disabled_names or not isinstance(spec, dict):
+                        continue
+                    if (unchanged(name, saved.get(name), spec) if callable(unchanged)
+                            else name in manager.servers and manager._runtime_specs.get(name) == spec):
+                        continue
+                    # Set up only by an editor, with credentials only it holds: launched from here
+                    # it ran unauthenticated, or a setup-only preset ran that must never auto-start.
+                    # That chat's own editor connects it.
+                    if spec.get("defer_until_setup") is True or _needs_editor_credentials(spec):
+                        continue
+                    moved[name] = spec
                 if moved:
                     manager.connect_all(moved)
             if "disabled_skills" in keys:
@@ -6258,6 +6364,7 @@ class Host:
             if late:
                 chat.close(grace_s=0.0, process=False)
                 return
+            self._adopt_user_state(chat)
         except Exception as exc:
             detail = str(exc).strip() or type(exc).__name__
             self._reject({"type": "open_chat", "request_id": request_id}, "open_failed",

@@ -385,5 +385,202 @@ class OpenChatTest(unittest.TestCase):
         self.assertFalse([f for f in self.frames() if f["type"] == "chat_opened"])
 
 
+    # ---- the user-wide MCP fan-out ---------------------------------------------------------------
+
+    def fan_out(self, other, saved: dict, live: dict):
+        """Both chats hold `saved`; `other` runs `live` ({name: (runtime spec, saved spec)})."""
+        connected, stopped = [], []
+
+        class Live:
+            tools = []
+
+            def __init__(self, name):
+                self.name = name
+
+            def stop(self):
+                stopped.append(self.name)
+        for chat in (self.host.default, other):
+            chat.config.data["mcp_servers"] = {name: dict(spec) for name, spec in saved.items()}
+            chat.config._rebaseline()
+        manager = other.agent.mcp
+        for name, (runtime, persisted) in live.items():
+            manager.servers[name] = Live(name)
+            manager._runtime_specs[name] = dict(runtime)
+            manager.note_persisted(name, persisted)
+        manager.connect_all = lambda servers, **kw: connected.extend(servers)
+        return connected, stopped
+
+    def settle_fan_out(self):
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if not [t for t in threading.enumerate() if t.name.startswith("dgc-refresh-")]:
+                return
+            time.sleep(0.02)
+
+    def test_another_chats_change_never_restarts_a_credentialed_server(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        os.environ.pop("GH_TOKEN", None)
+        persisted = {"command": "gh-mcp", "args": [], "env_names": ["GH_TOKEN"]}
+        runtime = {**persisted, "env": {"GH_TOKEN": "ghp-chat-b-token-0123456789"}}
+        connected, stopped = self.fan_out(other, {"gh": persisted}, {"gh": (runtime, persisted)})
+        self.host.default.config.set("mcp_servers", {"gh": dict(persisted),
+                                                     "plain": {"command": "plain-bin", "args": []}})
+        self.settle_fan_out()
+        self.assertEqual(stopped, [], "the authenticated server was stopped under the other chat")
+        self.assertEqual(connected, ["plain"], "the server was restarted without its token")
+
+    def test_another_chats_change_never_launches_a_setup_only_or_credentialed_server(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        os.environ.pop("NEEDS_TOKEN", None)
+        connected, _ = self.fan_out(other, {}, {})
+        self.host.default.config.set("mcp_servers", {
+            "setup": {"command": "setup-bin", "args": [], "defer_until_setup": True},
+            "cred": {"command": "cred-bin", "args": [], "env_names": ["NEEDS_TOKEN"]},
+            "plain": {"command": "plain-bin", "args": []}})
+        self.settle_fan_out()
+        self.assertEqual(connected, ["plain"])
+
+    def test_a_server_whose_saved_form_changed_is_reconnected(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        old = {"command": "srv-bin", "args": ["--old"]}
+        connected, stopped = self.fan_out(other, {"srv": old}, {"srv": (old, old)})
+        self.host.default.config.set("mcp_servers", {"srv": {"command": "srv-bin", "args": ["--new"]}})
+        self.settle_fan_out()
+        self.assertEqual(connected, ["srv"], "a changed server kept running its old configuration")
+
+    def test_a_server_connected_with_credentials_remembers_its_saved_form(self):
+        manager = self.host.default.agent.mcp
+        class Live:
+            tools = []
+
+            def stop(self):
+                pass
+        manager.connect_all = lambda servers, **kw: manager.servers.update(
+            {name: Live() for name in servers})
+        persisted = {"command": "gh-mcp", "args": [], "env_names": ["GH_TOKEN"]}
+        runtime = {**persisted, "env": {"GH_TOKEN": "ghp-default-token-0123456789"}}
+        with patch.object(self.host.default, "_emit_mcp_servers", lambda *a, **k: None):
+            self.host.dispatch({"type": "upsert_mcp_server", "request_id": "gh", "name": "gh",
+                                "runtime": runtime, "persisted": persisted})
+        saved = self.host.default.config.get("mcp_servers")["gh"]
+        self.assertTrue(manager.unchanged("gh", saved, runtime),
+                        "the next fan-out would restart it without its token")
+
+    def test_a_chat_that_is_closing_takes_no_fan_out(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        connected, _ = self.fan_out(other, {}, {})
+        self.host._closing.add(opened["chat_id"])
+        self.host.default.config.set("mcp_servers", {"plain": {"command": "plain-bin", "args": []}})
+        self.settle_fan_out()
+        self.assertEqual(connected, [], "a closing chat connected a server nothing would ever stop")
+
+    def test_a_connect_that_finishes_after_its_chat_closed_stops_its_server(self):
+        from dgc import mcp as mcp_module
+        manager = mcp_module.MCPManager(self.tmp / "a")
+        stopped, started = [], []
+
+        class Server:
+            tools, error, remote_bridge = [], "", False
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self, **kwargs):
+                started.append(True)
+                manager.close()                     # the chat closes while this connect runs
+                return True
+
+            def stop(self):
+                stopped.append(True)
+        with patch.object(mcp_module, "MCPServer", Server):
+            manager.connect_all({"late": {"command": "late-bin", "args": []}})
+            self.assertEqual(manager.servers, {}, "a server started after close was kept")
+            self.assertEqual(stopped, [True], "and nothing would ever have stopped it")
+            manager.connect_all({"later": {"command": "later-bin", "args": []}})
+        self.assertEqual(started, [True], "a closed chat's manager started another server")
+
+    # ---- a chat that closes, a chat still being built -------------------------------------------
+
+    def test_a_closed_chat_takes_its_shells_kernel_and_browser_with_it(self):
+        from dgc import tools as tools_module
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        owner = other.agent.ctx.tool_owner
+        stopped = []
+        with patch.object(tools_module, "shutdown_background", lambda o: stopped.append(("bash", o))), \
+                patch.object(tools_module, "shutdown_python_kernels", lambda o=None: stopped.append(("python", o))), \
+                patch.object(tools_module, "shutdown_browsers", lambda o=None: stopped.append(("browser", o))):
+            self.host.dispatch({"type": "close_chat", "request_id": "bye", "chat_id": opened["chat_id"]})
+            self.wait_for(lambda f: f["type"] == "chat_closed")
+        self.assertEqual(sorted(stopped), [("bash", owner), ("browser", owner), ("python", owner)])
+        self.assertTrue(other._package_cancel.is_set(), "a plugin connect in flight kept running")
+        self.assertTrue(other.agent.mcp._closed, "a connect still running could add a server after close")
+
+    def test_only_that_owners_background_shells_are_stopped(self):
+        from dgc import tools as tools_module
+        killed = []
+        entries = {"b1": {"owner": "mine", "finished": None, "proc": "p-mine"},
+                   "b2": {"owner": "theirs", "finished": None, "proc": "p-theirs"},
+                   "b3": {"owner": "mine", "finished": 1.0, "proc": "p-done"}}
+        with patch.dict(tools_module._BG, entries, clear=True), \
+                patch.object(tools_module, "_terminate_background", lambda proc, **kw: killed.append(proc)), \
+                patch.object(tools_module, "_join_background_reader", lambda entry: None):
+            tools_module.shutdown_background("mine")
+            self.assertEqual(killed, ["p-mine"])
+            tools_module.shutdown_background("")
+            self.assertEqual(killed, ["p-mine"], "an empty owner stopped everyone's")
+
+    def test_a_chat_built_while_another_saved_a_deny_takes_it(self):
+        from dgc.permissions import PermissionEngine
+        release, entered = threading.Event(), threading.Event()
+        real = headless.Backend.__init__
+
+        def slow_init(backend, *args, **kwargs):
+            if kwargs.get("chat_id") not in ("", self.host.default.chat_id):
+                entered.set()
+                release.wait(10)
+            return real(backend, *args, **kwargs)
+        with patch.object(headless.Backend, "__init__", slow_init):
+            self.host.dispatch({"type": "open_chat", "request_id": "slow", "cwd": str(self.tmp / "b")})
+            self.assertTrue(entered.wait(10))
+            self.host.dispatch({"type": "add_permission_rule", "request_id": "deny", "action": "deny",
+                                "rule": "Bash(rm -rf *)"})
+            self.wait_for(lambda f: f["type"] == "permissions" and f.get("request_id") == "deny")
+            release.set()
+            opened = self.wait_for(lambda f: f["type"] == "chat_opened" and f.get("request_id") == "slow")
+        chat = self.host.chats[opened["chat_id"]]
+        rules = {a: list(chat.config.permissions.get(a, [])) for a in ("allow", "ask", "deny")}
+        self.assertEqual(PermissionEngine("auto", rules, chat.config.project_root).decide(
+            "bash", {"command": "rm -rf build"})[0], "deny",
+            "a deny saved while the chat was being built did not bind it")
+
+    # ---- chats that share one checkout ------------------------------------------------------------
+
+    def test_chats_in_one_checkout_know_about_each_other(self):
+        self.host.dispatch({"type": "open_chat", "request_id": "same", "cwd": str(self.tmp / "a")})
+        sibling = self.host.chats[self.wait_for(
+            lambda f: f["type"] == "chat_opened" and f.get("request_id") == "same")["chat_id"]]
+        self.open_b()
+        with patch("dgc.peers.others", lambda **kw: []):
+            seen = self.host.default.agent._peers_here()
+            line = self.host.default.agent._attach_peer_line("hello")
+        self.assertEqual([p["chat"] for p in seen], [sibling.chat_id],
+                         "a chat in another folder counted, or the sibling did not")
+        self.assertIn("<dgc-peers>1 other DGC agent", line)
+
+    def test_a_session_open_in_another_chat_says_so(self):
+        self.host.dispatch({"type": "open_chat", "request_id": "same", "cwd": str(self.tmp / "a")})
+        sibling = self.host.chats[self.wait_for(
+            lambda f: f["type"] == "chat_opened" and f.get("request_id") == "same")["chat_id"]]
+        sibling.agent.session_file = self.host.default.agent.session_file
+        message = sibling.agent._held_session_message("Start a new session.")
+        self.assertIn("open in another chat in this window", message)
+        self.assertNotIn("15 minutes", message)
+
+
 if __name__ == "__main__":
     unittest.main()

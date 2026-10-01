@@ -49,7 +49,9 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
     super();
   }
 
-  get childPid(): number | undefined { return this.host.childPid; }
+  /** The process's, while this chat is on it. A closed chat has none: reporting the live process's
+   *  pid made the panel wait for a chat that could never come back as if it were reconnecting. */
+  get childPid(): number | undefined { return this.closed ? undefined : this.host.childPid; }
   get uptimeMs(): number { return this.host.uptimeMs; }
 
   start(): void {
@@ -64,7 +66,9 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
       this.listen(name, (...args: any[]) => this.emit(name, ...args));
     }
     this.listen("exit", (...args: any[]) => {
-      // The process is gone, and every chat on it with it.
+      // The process is gone, and every chat on it with it. Closed, not just detached: a detached
+      // chat still took every command and held it for a handshake that could never come.
+      this.closed = true;
       this.detach();
       this.emit("exit", ...args);
     });
@@ -177,12 +181,14 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
 
   dispose(cause = "disposed"): void {
     if (this.closed) { return; }
-    this.closed = true;
     const chatId = this.chatId;
     const pid = this.childPid;
+    this.closed = true;
     this.detach();
     if (chatId) {
-      this.host.send({ type: "close_chat", request_id: this.openRequestId + "-close", chat_id: chatId } as DgcCommand);
+      this.sendClose(chatId);
+    } else {
+      this.closeWhenOpened();
     }
     // The same shape a deliberately stopped process reports, so the slot treats it as asked-for.
     this.emit("teardown", cause, pid);
@@ -197,6 +203,37 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
 
   restartProcess(cause: string): void {
     this.host.restartProcess(cause);
+  }
+
+  /** close_chat, through a running process only: a stopped DgcBackend starts a new `dgc serve` to
+   *  carry any command, and one started to close a chat outlived the panel. */
+  private sendClose(chatId: string): void {
+    if (!this.host.ready || this.host.childPid === undefined) { return; }
+    this.host.send({ type: "close_chat", request_id: this.openRequestId + "-close", chat_id: chatId } as DgcCommand);
+  }
+
+  /** Closed before it finished opening. The backend still builds the chat and announces it to
+   *  nobody, and it kept its MCP servers and a place among the process's chats until the process
+   *  exited. Close it the moment it opens. */
+  private closeWhenOpened(): void {
+    if (!this.host.ready || this.host.childPid === undefined) { return; }
+    const host = this.host;
+    const done = () => {
+      host.off("chat-event", opened);
+      host.off("chat-open-failed", failed);
+      host.off("exit", done);
+    };
+    const opened = (chat: string, ev: DgcEvent) => {
+      if (ev.type !== "chat_opened" || (ev as any).request_id !== this.openRequestId) { return; }
+      done();
+      this.sendClose(chat);
+    };
+    const failed = (ev: DgcEvent) => {
+      if ((ev as any).request_id === this.openRequestId) { done(); }
+    };
+    host.on("chat-event", opened);
+    host.on("chat-open-failed", failed);
+    host.on("exit", done);
   }
 
   /** The slot that started the process has already gone; this was the last chat keeping it up. */

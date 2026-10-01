@@ -868,9 +868,15 @@ export class DgcBackend extends EventEmitter {
   get handshakeComplete(): boolean { return this.ready && this.released; }
 
   /** The slot that started this backend is closing. Chats other slots opened on it keep the process
-   *  alive -- closing one chat must not end the others -- and the last of them to close stops it. */
+   *  alive -- closing one chat must not end the others -- and the last of them to close stops it.
+   *  The chat this slot showed ends all the same: a new session stops its turn, its queued prompts,
+   *  its sub-tasks, monitors and goal, and expires its open cards. Left alone it kept editing files
+   *  with no tab, no transcript and no Stop until the last other chat closed. */
   close(cause: string): void {
     if (this.chatUsers.size) {
+      if (!this.ownerReleased && this.handshakeComplete) {
+        this.send({ type: "new_session", request_id: `retire-${this.childPid ?? 0}-${Date.now()}` } as DgcCommand);
+      }
       this.ownerReleased = true;
       return;
     }
