@@ -667,6 +667,48 @@ def _merge_entries(on_disk, baseline, now) -> list:
     return merged
 
 
+def _read_project_rules(project_dir: Path) -> dict:
+    """`<project>/.dgc/permissions.json` as rules per action; empty lists when there is none."""
+    rules: dict = {"allow": [], "ask": [], "deny": []}
+    proj_perms = Path(project_dir) / "permissions.json"
+    try:
+        pp = json.loads(proj_perms.read_text()) if proj_perms.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        return rules
+    if not isinstance(pp, dict):
+        return rules
+    actions = ("allow", "ask", "deny")
+    if _policy_strips_allow():
+        # The process that launched this session reviews commands itself (the SDK with a
+        # RuntimePolicy): rules the workspace brings may narrow what runs, not pre-approve it.
+        actions = ("ask", "deny")
+    for action in actions:
+        value = pp.get(action, [])
+        if isinstance(value, list):
+            rules[action] = [str(rule) for rule in value]
+    return rules
+
+
+def _add_project_rules(config, rules: dict) -> bool:
+    """Make `rules` live as the trusted project's in `config`. Returns whether there were any.
+
+    Workspace rules are live for THIS project and never persisted. They are recorded rather than
+    folded into the baseline, because save() needs them in two places: subtracted from what it
+    writes, and put back after it rebuilds the live set from disk. Each list is replaced in one
+    assignment, never grown in place, so a permission decision on another thread sees all of them
+    or none. Module-level, like _read_project_rules, so apply_project_permissions works on anything
+    shaped like a Config -- the session-policy checks call it on a bare namespace.
+    """
+    contributed = config.__dict__.setdefault("_project_rules", {"allow": [], "ask": [], "deny": []})
+    merged = False
+    for action, added in rules.items():
+        if added:
+            config.permissions[action] = list(config.permissions.get(action, [])) + list(added)
+            contributed[action] = list(contributed.get(action, [])) + list(added)
+            merged = True
+    return merged
+
+
 def _policy_strips_allow() -> bool:
     """Whether the launching process reviews commands itself (an SDK RuntimePolicy with
     project_allow=False, or an invalid policy). Stored and workspace allow rules then pre-approve
@@ -1076,46 +1118,7 @@ class Config:
         if getattr(self, "_project_permissions_applied", False):
             return False
         self._project_permissions_applied = True
-        return self._add_project_rules(self._read_project_rules())
-
-    def _read_project_rules(self) -> dict:
-        """`<project>/.dgc/permissions.json` as rules per action; empty lists when there is none."""
-        rules: dict = {"allow": [], "ask": [], "deny": []}
-        proj_perms = self.project_dir / "permissions.json"
-        try:
-            pp = json.loads(proj_perms.read_text()) if proj_perms.exists() else {}
-        except (OSError, json.JSONDecodeError):
-            return rules
-        if not isinstance(pp, dict):
-            return rules
-        actions = ("allow", "ask", "deny")
-        if _policy_strips_allow():
-            # The process that launched this session reviews commands itself (the SDK with a
-            # RuntimePolicy): rules the workspace brings may narrow what runs, not pre-approve it.
-            actions = ("ask", "deny")
-        for action in actions:
-            value = pp.get(action, [])
-            if isinstance(value, list):
-                rules[action] = [str(rule) for rule in value]
-        return rules
-
-    def _add_project_rules(self, rules: dict) -> bool:
-        """Make `rules` live as the trusted project's. Returns whether there were any.
-
-        Workspace rules are live for THIS project and never persisted. They are recorded rather
-        than folded into the baseline, because save() needs them in two places: subtracted from
-        what it writes, and put back after it rebuilds the live set from disk. Each list is
-        replaced in one assignment, never grown in place, so a permission decision on another
-        thread sees all of them or none.
-        """
-        contributed = self.__dict__.setdefault("_project_rules", {"allow": [], "ask": [], "deny": []})
-        merged = False
-        for action, added in rules.items():
-            if added:
-                self.permissions[action] = list(self.permissions.get(action, [])) + list(added)
-                contributed[action] = list(contributed.get(action, [])) + list(added)
-                merged = True
-        return merged
+        return _add_project_rules(self, _read_project_rules(self.project_dir))
 
     def inherit_trust(self, source: "Config") -> bool:
         """Take the trust of the project this checkout was made from.
@@ -1132,7 +1135,7 @@ class Config:
             return False
         if not getattr(self, "_project_permissions_applied", False):
             self._project_permissions_applied = True
-            self._add_project_rules(source._project_contribution())
+            _add_project_rules(self, source._project_contribution())
         return True
 
     def _project_contribution(self) -> dict:
@@ -1237,7 +1240,7 @@ class Config:
                     from .trust import is_trusted
                     if is_trusted(self, self.project_root):
                         self._project_permissions_applied = True
-                        for action, rules in self._read_project_rules().items():
+                        for action, rules in _read_project_rules(self.project_dir).items():
                             contributed[action] = contributed.get(action, []) + rules
                 # The disk never holds project rules, so a live set rebuilt from it had silently lost
                 # them: one unrelated save -- changing the model -- and a trusted project's `deny`
