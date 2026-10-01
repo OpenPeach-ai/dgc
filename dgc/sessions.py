@@ -403,7 +403,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          agents: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
-         redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
+         redact_secrets: tuple[str, ...] | list[str] | None = None,
+         mode: str | None = None, plan_return_mode: str | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
@@ -420,6 +421,12 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
                 "updated": time.time(), "messages": messages}
         if name:
             data["name"] = name
+        if mode in ("default", "acceptEdits", "plan", "auto"):
+            # The mode this conversation ran in: mode is per chat, so reopening the chat brings it
+            # back (re-checked against trust then; see Agent._restore_session_mode).
+            data["mode"] = mode
+            if mode == "plan" and plan_return_mode in ("default", "acceptEdits", "auto"):
+                data["plan_return_mode"] = plan_return_mode
         if todos:
             # What is done, in progress and still pending. Without this a reopened session shows
             # an empty checklist and a resumed goal has nothing to pick up from.

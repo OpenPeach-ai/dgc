@@ -4785,6 +4785,7 @@ class Backend:
                 p = sessions_mod.latest(self.config.project_root)
                 path = str(p) if p else None
             if path:
+                mode_before = getattr(self.agent, "mode", "")
                 try:
                     n = self.agent.load_session(path)
                 except (OSError, ValueError) as exc:
@@ -4796,6 +4797,10 @@ class Backend:
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
+                if getattr(self.agent, "mode", "") != mode_before:
+                    # The reopened chat came back in its own mode: say so, or the picker shows the old one.
+                    self.em.emit("mode_changed", mode=self.agent.mode,
+                                 workspace_trusted=self.workspace_trusted)
                 self._emit_history()
                 self._emit_agents()
                 self._emit_context()

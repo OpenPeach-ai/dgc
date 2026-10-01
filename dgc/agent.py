@@ -3408,6 +3408,35 @@ class Agent(GoalLifecycle):
         from .trust import is_trusted
         return is_trusted(top.config, top.config.project_root)
 
+    def _restore_session_mode(self, record: dict) -> None:
+        """Reopen a session in the mode it ran in -- mode is per chat, as Codex keeps it per thread.
+
+        Re-checked now, not trusted from the file: acceptEdits and auto only in a workspace that
+        is still trusted, and only a mode the active subscription engine supports. Held for this
+        process, so reopening a chat never rewrites the user's default; choosing a mode after it
+        still does. A session saved before modes were recorded keeps the current mode.
+        """
+        saved = record.get("mode")
+        if self.depth > 0 or saved not in ("default", "acceptEdits", "plan", "auto"):
+            return
+        if saved in ("acceptEdits", "auto") and not self._workspace_trusted():
+            saved = "default"
+        try:
+            from .subscriptions import validate_engine_mode
+            validate_engine_mode(str(self.config.get("subscription_engine", "") or "").lower(), saved)
+        except Exception:
+            return
+        hold = getattr(self.config, "hold", None)
+        with self._mode_lock:
+            if callable(hold):
+                hold("mode", saved)
+            else:
+                self.config.data["mode"] = saved
+            back = record.get("plan_return_mode")
+            self.plan_return_mode = (back if saved == "plan"
+                                     and back in ("default", "acceptEdits", "auto") else None)
+            self._mode_prompt_dirty = True
+
     def exit_plan(self, to_mode: str | None = None) -> str:
         target = to_mode or self.plan_return_mode or "default"
         if target in ("acceptEdits", "auto") and not self._workspace_trusted():
@@ -4770,6 +4799,7 @@ class Agent(GoalLifecycle):
                         subscription_sessions=self.subscription_sessions,
                         images=image_index,
                         agents=self.subagents.saved_state(),
+                        mode=self.mode, plan_return_mode=self.plan_return_mode,
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists,
                         redact_secrets=redact_secrets)
@@ -5145,6 +5175,7 @@ class Agent(GoalLifecycle):
             self._plan_presented = False
             self._executing_plan = False
             self._plan_approved_this_turn = False
+            self._restore_session_mode(record)
             self._reset_todo_clear()
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.image_views = image_views.load_index(record.get("images"))   # images: its index

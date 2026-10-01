@@ -1069,15 +1069,23 @@ class Config:
         from .trust import is_trusted
         if self.mode not in ("acceptEdits", "auto") or is_trusted(self, self.project_root):
             return False
-        ephemeral = self.__dict__.setdefault("_ephemeral_keys", set())
-        if "mode" not in ephemeral:
-            # Held, not one-shot: the hold stands in for the user only until they choose. Kept
-            # ephemeral for life, every mode they chose afterwards was dropped too, and the stored
-            # auto came back on the next launch even after they lowered it. See set().
-            ephemeral.add("mode")
-            self.__dict__.setdefault("_held_keys", set()).add("mode")
-        self.data["mode"] = "default"
+        self.hold("mode", "default")
         return True
+
+    def hold(self, key: str, value) -> None:
+        """Set `key` for this process only, until the user chooses a value themselves.
+
+        Held, not one-shot: no save writes it, none adopts the stored value back over it, and an
+        explicit set() ends the hold and is saved like any other choice. Kept ephemeral for life
+        instead, every mode the user chose afterwards was dropped too, and the stored auto came
+        back on the next launch even after they lowered it. A key already one-shot (`dgc -p
+        --mode`) stays one-shot.
+        """
+        ephemeral = self.__dict__.setdefault("_ephemeral_keys", set())
+        if key not in ephemeral:
+            ephemeral.add(key)
+            self.__dict__.setdefault("_held_keys", set()).add(key)
+        self.data[key] = value
 
     def mark_ephemeral(self, *keys: str) -> None:
         """Hold these settings for THIS process only; no save may write them.
