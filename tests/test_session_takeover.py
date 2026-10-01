@@ -95,6 +95,19 @@ class FindingTheHolder(_Home):
         self.assertIn("editor window", line)
         self.assertIn("running a turn", line)
 
+    def test_a_second_chat_holding_the_session_is_the_one_described(self):
+        # The top level of a note is the on-screen agent's (terminal) or the first chat's (serve);
+        # the refusal named that folder when another chat of the same process held the session.
+        note = self.note(pid=4242, liveness="live", sessions=[
+            {"session": "/s/one.json", "cwd": "/w", "project_root": "/w", "status": "idle"},
+            {"session": "/s/two.json", "cwd": "/other", "project_root": "/other", "status": "working"}])
+        line = peers.describe_holder(note, "/s/two.json")
+        self.assertIn("/other", line)
+        self.assertNotIn("/w", line)
+        self.assertIn("running a turn", line)
+        self.assertIn("/w", peers.describe_holder(note, "/s/one.json"))
+        self.assertIn("/w", peers.describe_holder(note), "without a session it names the note itself")
+
     def test_a_terminal_holder_is_described_as_a_terminal(self):
         self.assertIn("terminal", peers.describe_holder(self.note(kind="tui", liveness="live")))
 
@@ -507,6 +520,17 @@ class TheRefusalSaysWhoHasIt(_Home):
         self.assertIn("321", text)
         self.assertIn("still connected", text)
         self.assertIn("Nothing was started.", text)
+
+    def test_it_names_the_folder_of_the_chat_holding_this_session(self):
+        from dgc.agent import Agent
+        note = self.note(pid=321, liveness="live", sessions=[
+            {"session": "/s/one.json", "cwd": "/w", "project_root": "/w", "status": "idle"},
+            {"session": "/s/two.json", "cwd": "/other", "project_root": "/other", "status": "working"}])
+        holder = SimpleNamespace(_held_session_note=note, _held_session_reason="",
+                                 session_file=Path("/s/two.json"))
+        text = Agent._held_session_message.__get__(holder)("Nothing was started.")
+        self.assertIn("/other", text, "it named the first chat's folder, not the one holding the session")
+        self.assertNotIn("/w,", text)
 
     def test_a_holder_that_agreed_is_not_described_as_a_holder_that_refused(self):
         from dgc.agent import _STOOD_DOWN_REASON

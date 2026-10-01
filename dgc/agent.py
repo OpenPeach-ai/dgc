@@ -4229,7 +4229,7 @@ class Agent(GoalLifecycle):
                     + _HELD_SESSION_REMEDY + " " + tail)
         try:
             from . import peers
-            who = peers.describe_holder(note)
+            who = peers.describe_holder(note, str(getattr(self, "session_file", "") or ""))
         except Exception:
             return ("This session has an active turn in another DGC process. "
                     + _HELD_SESSION_REMEDY + " " + tail)

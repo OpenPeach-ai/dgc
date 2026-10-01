@@ -347,11 +347,18 @@ def session_holder(session: str, *, now: float | None = None) -> dict | None:
     return None
 
 
-def describe_holder(record: dict) -> str:
-    """Name the holder for a person: who, where, and what it appears to be doing."""
+def describe_holder(record: dict, session: str = "") -> str:
+    """Name the holder for a person: who, where, and what it appears to be doing.
+
+    With `session`, where and what are the chat that holds it. A note's top level is the agent on
+    screen (a terminal) or the first chat (dgc serve), and a refusal named that one's folder when a
+    second chat, or a background /new DIR agent, held the session."""
+    place = next((item for item in _places(record)[1:]
+                  if session and item.get("session")
+                  and os.path.normpath(str(item["session"])) == os.path.normpath(session)), record)
     pid = record.get("pid")
     kind = str(record.get("kind") or "")
-    where = str(record.get("cwd") or record.get("project_root") or "")
+    where = str(place.get("cwd") or place.get("project_root") or "")
     what = {"serve": "a DGC editor window", "tui": "a DGC running in a terminal"}.get(
         kind, "another DGC")
     line = f"{what} (pid {pid}"
@@ -360,7 +367,7 @@ def describe_holder(record: dict) -> str:
     line += ")"
     if record.get("liveness") == "unknown":
         return line + ", which may or may not still be running"
-    if str(record.get("status") or "") == "working":
+    if str(place.get("status") or record.get("status") or "") == "working":
         return line + ", which is running a turn"
     return line
 
