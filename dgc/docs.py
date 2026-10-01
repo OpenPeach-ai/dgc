@@ -1005,10 +1005,11 @@ A permission rule or a trusted folder you save in one agent applies to all of th
 **/new DIR** opens an agent in another folder, next to the ones you have, the way the editor opens
 a chat in another folder. `~`, quotes and relative paths work; a relative path starts from the
 project of the agent on screen. DGC opens the folder's project — it walks up to the nearest `.git`,
-`DGC.md` or `.dgc` — and the agent brings that project's own trust, permission rules, named agents,
-skills, `DGC.md`, MCP servers and mode with it: nothing of the launch project's. Its chats are
-saved with that project, so `/resume` inside it lists them, and so do `dgc --continue` and the
-editor opened there. Closing it says how to come back: `/new` the folder, then `/resume`.
+`DGC.md` or `.dgc` — and the agent works with that project's trust, permission rules, named agents,
+skills and `DGC.md`, not the launch project's. Your MCP servers start for it in that folder, and it
+has its own permission mode, as every agent does. Its chats are saved with that project, so
+`/resume` inside it lists them, and so do `dgc --continue` and the editor opened there. Closing it
+says how to come back: `/new` the folder, then `/resume`.
 
 A folder you have not trusted shows the trust card first — **Trust it and open** or **Cancel** —
 and nothing from it runs until you choose: no agent, no MCP server, no hook, not even git. Trusting
