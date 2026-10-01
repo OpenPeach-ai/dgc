@@ -6189,8 +6189,10 @@ class TUI:
             def _render(action: str) -> str:
                 # An unparseable rule is listed but not enforced, so mark it rather than letting
                 # it read as a guard that is in place.
-                shown = [f"{text}  (invalid — NOT in force)" if (action, str(text)) in broken
-                         else str(text) for text in perms.get(action, [])]
+                # Once each: a rule the user added that a trusted project also has is live twice,
+                # and was listed twice with no way to tell the copies apart.
+                shown = [f"{text}  (invalid — NOT in force)" if (action, text) in broken
+                         else text for text in dict.fromkeys(str(t) for t in perms.get(action, []))]
                 return _esc(", ".join(shown) or "—")
 
             lines = [f"  [{th.accent}]{a}[/]  [{th.faint}]{_render(a)}[/]"

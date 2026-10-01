@@ -4420,3 +4420,16 @@ test("with wake-ups off, the monitors row says events are waiting for your next 
   assert.equal(count.textContent, "3 waiting");
   assert.deepEqual(errors, []);
 });
+
+test("at the chat limit the folder button is off too, not only +", () => {
+  const { doc, send, errors } = makeDom();
+  const items = [{ id: "a", label: "One", active: true }, { id: "b", label: "Two" }];
+  send({ type: "chat_slots", items, max: 2, activeId: "a" });
+  const add = doc.getElementById("chat-add"), folder = doc.getElementById("chat-add-folder");
+  assert.equal(add.disabled, true, "premise: + is off at the limit");
+  assert.equal(folder.disabled, true, "the folder button opened a picker the limit then refused");
+  assert.match(folder.title, /dgc\.maxLiveChats/);
+  send({ type: "chat_slots", items, max: 0, activeId: "a" });
+  assert.equal(folder.disabled, false, "with no limit it is on");
+  assert.deepEqual(errors, []);
+});

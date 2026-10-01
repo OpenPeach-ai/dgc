@@ -978,3 +978,18 @@ test("picking the session on screen opens nothing", () => {
   assert.equal(provider.slots.length, 1, "a second chat was opened on the chat's own session");
   assert.equal(spawned.length, 1);
 });
+
+test("at the chat limit, opening a chat in another folder never shows the folder picker", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Only" });
+  configuredMaxChats.value = 1;
+  let pickers = 0;
+  globalThis.__DGC_TEST_VSCODE.window.showOpenDialog = async () => { pickers += 1; return undefined; };
+  try {
+    await provider.newChatInFolder();
+  } finally {
+    delete globalThis.__DGC_TEST_VSCODE.window.showOpenDialog;
+  }
+  assert.equal(pickers, 0, "the picker opened, and the limit refused the folder only after it was chosen");
+  assert.ok(notices.info.some((line) => /dgc\.maxLiveChats/.test(line)));
+});

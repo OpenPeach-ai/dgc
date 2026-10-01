@@ -101,6 +101,15 @@ class TuiPermissionsTest(unittest.TestCase):
         ui._handle_slash("/permissions deny Bash(curl *)")
         self.assertEqual(self.config.permissions["deny"].count("Bash(curl *)"), 1)
 
+    def test_a_rule_the_user_and_the_project_both_have_is_listed_once(self):
+        ui = self.tui()
+        ui._handle_slash("/permissions deny Bash(rm -rf *)")
+        shown = []
+        ui._rich = lambda text: text
+        ui._append = shown.append
+        ui._handle_slash("/permissions")
+        self.assertEqual(shown[-1].count("Bash(rm -rf *)"), 1, shown[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

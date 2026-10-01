@@ -5519,6 +5519,13 @@
       add.title = full ? `DGC is at your limit of ${ceiling} chats (dgc.maxLiveChats)`
         : items.length > 1 ? "Open another chat" : "Open a second chat";
       add.setAttribute("aria-label", add.title);
+      // Another folder is another chat: the same ceiling, and nothing to pick a folder for.
+      const folder = $("chat-add-folder");
+      if (folder) {
+        folder.disabled = full;
+        folder.title = full ? add.title : "Open a chat in another folder";
+        folder.setAttribute("aria-label", folder.title);
+      }
     }
     // One chat needs no rail: the header already names it.
     if (items.length < 2) { bar.hidden = true; bar.replaceChildren(); return; }

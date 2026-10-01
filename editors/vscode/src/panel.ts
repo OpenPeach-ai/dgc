@@ -632,6 +632,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Palette and header: DGC: Open a Chat in Another Folder. */
   async newChatInFolder(): Promise<void> {
+    if (this.atChatLimit()) { return; }          // before the picker, not after a folder is chosen
     const picked = await vscode.window.showOpenDialog({
       canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
       openLabel: "Open chat here", title: "Open a DGC chat in a folder",
@@ -643,15 +644,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Start a second (or third, if the ceiling ever rises) chat with its own backend. */
+  /** At the user's own ceiling (`dgc.maxLiveChats`): says so, and returns true. */
+  private atChatLimit(): boolean {
+    if (this.slots.length < maxLiveChats()) { return false; }
+    // Only reachable when the user set a ceiling themselves.
+    void vscode.window.showInformationMessage(
+      `DGC is running ${this.slots.length} chats, the limit set in "dgc.maxLiveChats". `
+      + "Close one, or raise the setting.");
+    return true;
+  }
+
   private openChatSlot(cwd?: string, sessionId = ""): void {
-    const ceiling = maxLiveChats();
-    if (this.slots.length >= ceiling) {
-      // Only reachable when the user set a ceiling themselves.
-      void vscode.window.showInformationMessage(
-        `DGC is running ${this.slots.length} chats, the limit set in "dgc.maxLiveChats". `
-        + "Close one, or raise the setting.");
-      return;
-    }
+    if (this.atChatLimit()) { return; }
     this.parkActiveSlot();
     const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New chat", busy: false, needsYou: false, unread: 0,
                              ...(cwd && cwd !== this.cwd() ? { cwd } : {}) };
