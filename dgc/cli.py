@@ -99,6 +99,10 @@ def _rerun_advice(rule: str, name: str, args: dict, mode: str = "") -> str:
 class UI:
     """All user-facing rendering + interaction. The agent calls back into this."""
 
+    # Fallbacks for a UI built without __init__ (tests and probes use object.__new__(UI)).
+    _work_lock = threading.RLock()
+    _work_label = "working"
+
     def __init__(self):
         self.console = _StdoutConsole(theme=render.markdown_theme(), highlight=False)
         self._theme_pushed = False   # did refresh_theme() already stack a palette on this console?
@@ -107,6 +111,8 @@ class UI:
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
         self._live = None       # set by CLI during a live turn: the key-reader that owns stdin
         self._work_stop = None  # set while a "working…" spinner is running
+        self._work_lock = threading.RLock()  # orders spinner frames against the wipe that ends them
+        self._work_label = "working"
         self._tool_count = 0    # tools used in the current turn (for the done marker)
         self.deny_reason = ""   # optional steer captured when the user denies a tool
         self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
@@ -139,9 +145,11 @@ class UI:
         if not sys.stdout.isatty():
             return
         label = terminal_safe_text(label).replace("\n", " ")
-        self.stop_working()
-        stop = threading.Event()
-        self._work_stop = stop
+        lock = self._work_lock
+        with lock:
+            self.stop_working()
+            stop = threading.Event()
+            self._work_stop, self._work_label = stop, label
 
         def spin() -> None:
             frames = glyphs.THINK_FRAMES
@@ -150,20 +158,33 @@ class UI:
             while not stop.wait(0.14):
                 el = int(time.time() - t0)
                 et = f" {el}s" if el else ""
-                sys.stdout.write(f"\r  {acc}{frames[i % len(frames)]}{rst} {dim}{label}…{et}"
-                                 f"   {glyphs.MIDDOT} esc to stop{rst}\x1b[K")
-                sys.stdout.flush()
+                frame = (f"\r  {acc}{frames[i % len(frames)]}{rst} {dim}{label}…{et}"
+                         f"   {glyphs.MIDDOT} esc to stop{rst}\x1b[K")
+                with lock:
+                    # wait() can time out an instant before stop_working() sets the event, and a
+                    # frame written after its wipe sits under the next row of output.
+                    if stop.is_set():
+                        return
+                    sys.stdout.write(frame)
+                    sys.stdout.flush()
                 i += 1
-        threading.Thread(target=spin, daemon=True).start()
+        threading.Thread(target=spin, daemon=True, name="dgc-spinner").start()
 
     def stop_working(self) -> None:
-        stop = self._work_stop
-        if stop and not stop.is_set():
-            stop.set()
-            if sys.stdout.isatty():
-                sys.stdout.write("\r\x1b[K")   # wipe the spinner line before real output
-                sys.stdout.flush()
-        self._work_stop = None
+        with self._work_lock:
+            stop, self._work_stop = self._work_stop, None
+            if stop and not stop.is_set():
+                stop.set()
+                if sys.stdout.isatty():
+                    sys.stdout.write("\r\x1b[K")   # wipe the spinner line before real output
+                    sys.stdout.flush()
+
+    def _pause_working(self) -> str | None:
+        """Wipe a live spinner so a row can print; return its label to resume it with, or None."""
+        with self._work_lock:
+            label = self._work_label if self._work_stop is not None else None
+            self.stop_working()
+        return label
 
     def turn_complete(self, elapsed: float, cancelled: bool = False,
                       failed: bool = False) -> None:
@@ -247,8 +268,9 @@ class UI:
                    origin=None) -> None:
         """A silent model request renames a live spinner ("No response from the model…"). Tokens
         resuming stop the spinner themselves, so clearing needs nothing here."""
-        if label and self._work_stop is not None and sys.stdout.isatty():
-            self.start_working(str(label))
+        with self._work_lock:   # never revive a spinner the stream thread just stopped for prose
+            if label and self._work_stop is not None and sys.stdout.isatty():
+                self.start_working(str(label))
 
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
@@ -274,6 +296,9 @@ class UI:
         self.start_working(name)
 
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
+        # A tool that reported progress (wait_tasks, an MCP server) or a sub-agent's forwarded
+        # result left the spinner drawing on this row; the result printed after it, on the same line.
+        self.stop_working()
         out = terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
@@ -292,6 +317,7 @@ class UI:
     def tool_images(self, call_id, images, caption: str = "", *, items=None, omitted: int = 0,
                     meta=None) -> None:
         """images: one dim line per image the step produced; the pixels stay in the chat panels."""
+        lines = []
         for row in (meta or []):
             if not isinstance(row, dict):
                 continue
@@ -299,14 +325,19 @@ class UI:
             shape = f"{width}×{height}" if width and height else ""
             path = terminal_safe_text(str(row.get("path") or ""))
             if path:
-                line = f"  ↳ image: {path}" + (f" ({shape})" if shape else "")
+                lines.append(f"  ↳ image: {path}" + (f" ({shape})" if shape else ""))
             else:
                 name = terminal_safe_text(str(row.get("name") or "image"))
-                line = f"  ↳ image: {name} (" + (f"{shape}, " if shape else "") + "not saved)"
-            self.console.print(line, style=DIM, markup=False, highlight=False, soft_wrap=True)
+                lines.append(f"  ↳ image: {name} (" + (f"{shape}, " if shape else "") + "not saved)")
         if omitted:
-            self.console.print(f"  ↳ {int(omitted)} more image{'s' if int(omitted) != 1 else ''} not kept",
-                               style=DIM, markup=False, highlight=False)
+            lines.append(f"  ↳ {int(omitted)} more image{'s' if int(omitted) != 1 else ''} not kept")
+        if not lines:
+            return
+        resume = self._pause_working()   # tool_result restarted the spinner, and storing images took time
+        for line in lines:
+            self.console.print(line, style=DIM, markup=False, highlight=False, soft_wrap=True)
+        if resume is not None:
+            self.start_working(resume)
 
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
@@ -320,11 +351,14 @@ class UI:
         if status == "started":
             return
         detail = f" · {terminal_safe_text(message)}" if message else ""
+        resume = self._pause_working()   # a prompt, compaction or tool hook can land mid-spin
         self.console.print(
             f"  · hook {terminal_safe_text(event)} {terminal_safe_text(status)} · "
             f"{configured} configured · {duration_ms}ms{detail}",
             style="red" if status not in ("completed",) else DIM,
             markup=False, highlight=False)
+        if resume is not None:
+            self.start_working(resume)   # model_wait() only renames a live spinner
 
     @staticmethod
     def _arg_summary(name: str, args: dict) -> str:
@@ -397,7 +431,9 @@ class UI:
 
     def present_plan(self, plan: str):
         """Return target mode string on approval, or None to keep planning."""
-        if not getattr(self, "non_interactive", False):
+        if getattr(self, "non_interactive", False):
+            self.stop_working()   # no tool row precedes a plan, and a -p run never yields stdin
+        else:
             self._yield_stdin()
         section(self.console, "📋 proposed plan")
         self.console.print(render.render_markdown(terminal_safe_text(plan or "(empty plan)")))
@@ -441,6 +477,7 @@ class UI:
         (an unanswered question counts as skipped). Esc closes the question without an answer.
         """
         if getattr(self, "non_interactive", False):
+            self.stop_working()
             first = questions[0]["question"] if questions else ""
             self.console.print(f"  [{DIM}]question skipped in a -p run: {_markup_literal(first)}[/]",
                                highlight=False)
@@ -1875,12 +1912,15 @@ class CLI:
                     break
                 if ch in ("\x1b", "\x03"):       # Esc / Ctrl-C — interrupt this turn
                     self.agent.cancelled.set()
+                    self.ui.stop_working()
                     self.console.print("\n[dim]⎋ interrupting…[/dim]", highlight=False)
                     buf = ""
                 elif ch in ("\r", "\n", "\t"):
                     if buf.strip():
                         entry = buf.strip()
                         action = entry.lower()
+                        # Every row below prints while the turn's spinner is drawing on this line.
+                        resume = self.ui._pause_working()
                         from .commands import resolve_command
                         name, _, arguments = entry[1:].partition(" ") if entry.startswith("/") else ("", "", "")
                         spec = resolve_command(name, "classic")
@@ -1903,6 +1943,8 @@ class CLI:
                         else:
                             queue.append(entry)
                             self.console.print(f"[dim]↵ queued: {_markup_literal(entry[:70])}[/dim]", highlight=False)
+                        if resume is not None and not self.agent.cancelled.is_set():
+                            self.ui.start_working(resume)
                     buf = ""
                 elif ch == "\x7f":               # backspace
                     buf = buf[:-1]
@@ -2925,6 +2967,35 @@ def _json_oneshot_ui(config):
         event, secret_values(config))), PendingRequests())
 
 
+def _end_one_shot_children(agent, *, grace_s: float = 10.0) -> int:
+    """`dgc -p` exits with this turn. Stop the background sub-tasks still running, and let them settle.
+
+    Their threads are daemons, so the exit used to kill them mid-step -- or mid-way through writing
+    the user's files, the half-applied delta `wait_finalizers` exists to prevent. Stopped, a child
+    keeps what it wrote in its own checkout as retained work (`/tasks` applies or drops it) instead
+    of integrating it; one with no checkout of its own has already written into the project. Waits,
+    bounded, for each to wind down, then for any integration already past its lease. Returns how
+    many were stopped.
+    """
+    jobs = getattr(agent, "_detached_jobs", None) or {}
+    stop = getattr(agent, "stop_detached", None)
+    if not jobs or not callable(stop):
+        return 0
+    stopped = stop()
+    deadline = time.monotonic() + grace_s
+    while getattr(agent, "_detached_jobs", None) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    waiter = getattr(agent, "wait_finalizers", None)
+    still = waiter(2.0) if callable(waiter) else ""
+    if stopped:
+        print(f"dgc: stopped {stopped} background sub-task{'s' if stopped != 1 else ''} still "
+              "running when this one-shot run ended; work in its own checkout is kept for /tasks.",
+              file=sys.stderr)
+    if still:
+        print(f"dgc: {still}", file=sys.stderr)
+    return stopped
+
+
 def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     """`dgc -p`: one turn, then exit with 0 on success — as text, or as NDJSON events."""
     json_mode = args.output_format == "json"
@@ -2949,9 +3020,12 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
         if config.data.get("mode") == "auto" and not json_mode:
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         ok = cli.agent.run_turn(cli.expand_mentions(prompt)) is not False
+        if not json_mode:
+            cli.ui.stop_working()   # -p never calls turn_complete(): a turn can end on a live spinner
         cli.ui.end_stream()
         if not json_mode:
             print()
+        _end_one_shot_children(cli.agent)
     text = _last_assistant_text(cli.agent)
     if args.output:
         from pathlib import Path

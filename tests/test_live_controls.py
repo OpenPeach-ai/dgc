@@ -354,7 +354,10 @@ fixture.doCleanups()
                     if not chunk:
                         break
                     output += chunk
-                    if b"LIVE-READY" in output and not sent:
+                    # Type only once the turn's spinner is drawing, so every row the key reader
+                    # prints lands where a spinner frame is.
+                    if (b"LIVE-READY" in output and not sent
+                            and b"esc to stop" in output.split(b"LIVE-READY", 1)[1]):
                         # Give the main reader time to enter cbreak after worker startup.
                         time.sleep(0.1)
                         os.write(master, "/skills show orchid\n/mode acceptEdits\ncafé\nlater\t".encode())
@@ -371,10 +374,75 @@ fixture.doCleanups()
         self.assertIn("Include the orchid marker.", decoded)
         result = json.loads(decoded.split("LIVE-RESULT:")[-1].splitlines()[0])
         self.assertEqual(result, {"queue": ["later"], "mode": "acceptEdits", "steered": True})
+        # What the key reader printed while the turn's spinner was drawing starts on its own row:
+        # no row of the final screen holds a spinner frame (the fixture's own LIVE-READY print is
+        # the one thing that may race the first frame).
+        from test_classic_spinner import screen
+        rows = screen(decoded)
+        self.assertTrue([row for row in rows if "queued: later" in row], rows)
+        self.assertFalse([row for row in rows if "esc to stop" in row and "LIVE-READY" not in row], rows)
 
-
-if __name__ == "__main__":
-    unittest.main()
+    @unittest.skipUnless(os.name == "posix", "requires a real POSIX terminal")
+    def test_classic_terminal_esc_interrupts_on_a_row_of_its_own(self):
+        import pty
+        import select
+        script = '''
+import sys, time
+sys.path.insert(0, "tests")
+from test_live_controls import LiveControlTests
+from dgc.cli import CLI
+from dgc.llm import ChatResult
+fixture = LiveControlTests(); fixture.setUp()
+cli = CLI(fixture.agent.config)
+cli.agent = fixture.agent; cli.agent.ui = cli.ui
+def chat(messages, **kwargs):
+    print("LIVE-READY", flush=True)
+    deadline = time.monotonic() + 8
+    while not cli.agent.cancelled.is_set() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.3)   # the turn's own end wipes the spinner too; let the key reader print first
+    return ChatResult(content="Stopped")
+cli.agent.client.chat = chat
+cli._run_turn_live("Inspect", [])
+print("LIVE-DONE", flush=True)
+fixture.doCleanups()
+'''
+        master, slave = pty.openpty()
+        process = subprocess.Popen([sys.executable, "-c", script], stdin=slave, stdout=slave, stderr=slave,
+                                   cwd=Path(__file__).resolve().parents[1])
+        os.close(slave)
+        output = b""
+        sent = False
+        deadline = time.monotonic() + 90
+        try:
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output += chunk
+                    if (b"LIVE-READY" in output and not sent
+                            and b"esc to stop" in output.split(b"LIVE-READY", 1)[1]):
+                        time.sleep(0.1)
+                        os.write(master, b"\x1b")
+                        sent = True
+                elif process.poll() is not None:
+                    break
+            process.wait(timeout=2)
+        finally:
+            if process.poll() is None:
+                process.kill(); process.wait()
+            os.close(master)
+        decoded = output.decode("utf-8", "replace")
+        self.assertEqual(process.returncode, 0, decoded)
+        self.assertIn("LIVE-DONE", decoded)
+        from test_classic_spinner import screen
+        rows = screen(decoded)
+        self.assertTrue([row for row in rows if "interrupting" in row], rows)
+        self.assertFalse([row for row in rows if "esc to stop" in row and "LIVE-READY" not in row], rows)
 
     def test_a_user_message_to_a_child_is_answered_mid_turn_and_does_not_stall_the_command_loop(self):
         taken, refuse = [], {"value": False}
@@ -430,3 +498,7 @@ if __name__ == "__main__":
         frame = self.wait("agent_message", request_id="m3")
         self.assertFalse(frame["delivered"])
         self.assertIn(frame["reason"], ep.AGENT_MESSAGE_REASONS)
+
+
+if __name__ == "__main__":
+    unittest.main()
