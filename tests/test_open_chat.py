@@ -282,6 +282,54 @@ class OpenChatTest(unittest.TestCase):
         self.host.default.config.set("model", "another-model")
         self.assertEqual(other.config.data["model"], "fixture", "one chat's model switch moved another's")
 
+    def test_a_slow_command_in_one_chat_never_holds_another(self):
+        """A compact is a model request; inline on the stdin thread it froze every chat."""
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        release, started = threading.Event(), threading.Event()
+
+        def slow_compact(**kwargs):
+            started.set()
+            release.wait(10)
+            return False
+        other.agent.maybe_compact = slow_compact
+        self.host.dispatch({"type": "compact", "request_id": "slow", "chat_id": opened["chat_id"]})
+        self.assertTrue(started.wait(5), "premise: chat B's compact is running")
+        self.host.dispatch({"type": "name_session", "request_id": "a-meanwhile", "name": "a"})
+        self.wait_for(lambda f: f.get("request_id") == "a-meanwhile", timeout=2)
+        self.host.dispatch({"type": "name_session", "request_id": "b-after", "name": "b",
+                            "chat_id": opened["chat_id"]})
+        time.sleep(0.2)
+        self.assertFalse([f for f in self.frames() if f.get("request_id") == "b-after"],
+                         "chat B's own commands keep their order behind its compact")
+        rid, answered = other.pending.register()
+        self.host.dispatch({"type": "permission_response", "id": rid, "decision": "once",
+                            "chat_id": opened["chat_id"]})
+        self.assertTrue(answered.wait(2), "an answer the turn waits on was queued behind the compact")
+        release.set()
+        self.wait_for(lambda f: f.get("request_id") == "b-after", timeout=5)
+
+    def test_a_queued_command_that_raises_is_reported_and_the_queue_lives(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        failures = []
+        self.host.command_failed = lambda cmd, exc: failures.append(cmd["type"])
+        real = other.dispatch
+
+        def explode(cmd):
+            if cmd.get("type") == "get_goal":
+                raise RuntimeError("boom")
+            return real(cmd)
+        other.dispatch = explode
+        with patch("sys.stderr", io.StringIO()):
+            self.host.dispatch({"type": "get_goal", "request_id": "g", "chat_id": opened["chat_id"]})
+            error = self.wait_for(lambda f: f["type"] == "error" and "boom" in f.get("message", ""))
+            self.assertEqual(error["chat_id"], opened["chat_id"])
+            self.host.dispatch({"type": "name_session", "request_id": "next", "name": "x",
+                                "chat_id": opened["chat_id"]})
+            self.wait_for(lambda f: f.get("request_id") == "next")
+        self.assertEqual(failures, ["get_goal"])
+
     def test_the_envelope_is_valid_only_as_a_short_string(self):
         self.assertIsNone(command_error({"type": "ping", "chat_id": "c1"}))
         self.assertIsNotNone(command_error({"type": "ping", "chat_id": ""}))

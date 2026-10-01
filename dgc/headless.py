@@ -17,7 +17,9 @@ import sys
 import signal
 import threading
 import os
+import queue
 import time
+import traceback
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -6007,6 +6009,14 @@ def _end_line(crash_log, line: str) -> None:
         pass
 
 
+# Handled the moment they arrive, never queued behind their chat's other commands: an answer to a
+# request the chat is already blocked on (a slow command ahead of it -- a compact, a rewind waiting
+# on the checkout -- would hold the very approval the turn is waiting for), the editor's liveness,
+# and shutdown, which only the stdin thread can act on.
+_UNQUEUED_COMMANDS = frozenset({"permission_response", "plan_response", "options_response",
+                                "mcp_input_response", "ask_skip", "ping", "editor_state",
+                                "shutdown"})
+
 # How many chats one backend holds. Each owns an Agent with its own MCP connections, so this bounds
 # processes and memory too, not just bookkeeping.
 _MAX_CHATS = 16
@@ -6044,6 +6054,8 @@ class Host:
         self._closing: set[str] = set()      # still emitting their last events
         self._retired_secrets: set[str] = set()
         self._shutting_down = False
+        self._queues: dict[str, queue.SimpleQueue] = {}
+        self.command_failed = None           # serve() logs a command that raised: (cmd, exc)
         self._editor_liveness = None
         self._finalizer_wait = ""
         self.default = self.add_chat(config)
@@ -6191,6 +6203,7 @@ class Host:
         request_id = str(cmd.get("request_id") or "")
 
         def close() -> None:
+            self._stop_queue(chat_id)
             try:
                 chat.close(grace_s=0.0, process=False)     # closing a chat abandons its turn
             finally:
@@ -6221,14 +6234,56 @@ class Host:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             return self._open_chat(cmd) if kind == "open_chat" else self._close_chat(cmd)
         if "chat_id" not in cmd:
-            return self.default.dispatch(cmd)
+            return self._deliver(self.default, cmd)
         chat_id = cmd.get("chat_id")
         with self._chats_lock:
             chat = self.chats.get(chat_id) if chat_id not in self._closing else None
         if chat is None:
             return self._reject(cmd, "unknown_chat", "no open chat has that id",
                                 chat_id if isinstance(chat_id, str) else "")
-        chat.dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
+        self._deliver(chat, {key: value for key, value in cmd.items() if key != "chat_id"})
+
+    def _deliver(self, chat: "Backend", cmd: dict) -> None:
+        """Run a chat's command: inline while the client holds one chat -- exactly as a lone
+        Backend did -- and, once it holds several, in order on that chat's own command thread.
+
+        Inline on the stdin thread, one chat's slow command froze every other chat: a compact is
+        a model request, a rewind waits on the checkout with no deadline, a new chat waits up to
+        20s for the turn it replaces, an MCP reload connects every server. A chat's commands keep
+        their order; only answers and liveness (_UNQUEUED_COMMANDS) skip the line.
+        """
+        if not self.core.tag_chats or cmd.get("type") in _UNQUEUED_COMMANDS:
+            return chat.dispatch(cmd)
+        with self._chats_lock:
+            commands = self._queues.get(chat.chat_id)
+            if commands is None:
+                commands = self._queues[chat.chat_id] = queue.SimpleQueue()
+                threading.Thread(target=self._drain, args=(chat, commands), daemon=True,
+                                 name=f"dgc-commands-{chat.chat_id}").start()
+        commands.put(cmd)
+
+    def _drain(self, chat: "Backend", commands: "queue.SimpleQueue") -> None:
+        while True:
+            cmd = commands.get()
+            if cmd is None:
+                return
+            try:
+                chat.dispatch(cmd)
+            except Exception as exc:         # one bad command must NOT kill the chat's queue
+                detail = str(exc).strip() or exc.__class__.__name__
+                try:
+                    chat.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
+                except Exception:
+                    pass
+                sys.stderr.write(traceback.format_exc())
+                if callable(self.command_failed):
+                    self.command_failed(cmd, exc)
+
+    def _stop_queue(self, chat_id: str) -> None:
+        with self._chats_lock:
+            commands = self._queues.pop(chat_id, None)
+        if commands is not None:
+            commands.put(None)
 
     def _busy(self) -> bool:
         return any(_safe_busy(chat) for chat in list(self.chats.values()))
@@ -6254,6 +6309,9 @@ class Host:
         with self._chats_lock:
             self._shutting_down = True        # a chat still being built closes itself
             chats = list(self.chats.values())
+            queues, self._queues = list(self._queues.values()), {}
+        for commands in queues:
+            commands.put(None)
         outcomes: list[str] = []
         if len(chats) == 1:
             outcomes.append(chats[0].close(grace_s=grace_s, process=False))
@@ -6359,6 +6417,8 @@ def serve(config: Config) -> None:
         host.start()
         liveness = _EditorLiveness(host, command_stream, wake=wake_reader)
         host.attach_liveness(liveness)
+        host.command_failed = lambda cmd, exc: _log_crash(
+            crash_log, f"command {cmd.get('type', '?')!r} failed", exc)
         liveness.start()
         for line, frame_problem in _command_lines(command_stream, pipe_watch):
             if frame_problem:
