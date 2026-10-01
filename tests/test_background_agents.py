@@ -1,7 +1,9 @@
 """Plan 3: background task children outlive the parent turn and notify when they land."""
 from __future__ import annotations
 
+import re
 import time
+import types
 import threading
 from unittest.mock import patch
 
@@ -9,6 +11,12 @@ from dgc.config import Config
 from dgc.headless import HeadlessUI
 from dgc.llm import ChatResult, LLMClient, ToolCall
 from test_subagents import HarnessCase, Script, calls_then, child, clone_fixture
+
+
+def _spawned_id(output: str) -> str:
+    match = re.search(r"\(id (sub-[0-9a-f]{12})\)", output)
+    assert match, output
+    return match.group(1)
 
 
 class BackgroundTaskTests(HarnessCase):
@@ -540,7 +548,159 @@ class PromiseOnlyWhatThisFrontendDeliversTests(HarnessCase):
         output = self._output(h)
         self.assertNotIn("I will continue when it finishes.", output)
         self.assertNotIn("next message", output, "there is no next message in a one-shot run")
-        self.assertIn("do not wait for it", output)
+        self.assertNotIn("check on it later", output, "there is no later in a one-shot run")
+        self.assertIn("one-shot run ends with this turn", output)
+        self.assertIn(f"call wait_tasks with id {_spawned_id(output)}", output)
+
+    def test_no_frontend_talks_the_model_out_of_waiting(self):
+        """The live report: `dgc -p` was asked to wait and told "do not wait for it". Every frontend
+        names the call that gets the result now, and none discourages it."""
+        frontends = {
+            "editor": dict(callback=True),
+            "terminal, wakes on": dict(wake_enabled=True),
+            "terminal, wakes off": dict(wake_enabled=True, config={"monitor_wake": False}),
+            "classic REPL / ACP": dict(),
+            "dgc -p": dict(one_shot=True),
+        }
+        for label, how in frontends.items():
+            with self.subTest(frontend=label):
+                h = self.make(git=True, mode="auto", **how.get("config", {}))
+                if how.get("callback"):
+                    h.agent.on_detached_ended = lambda notice: None
+                if how.get("wake_enabled"):
+                    h.ui.monitor_wake_enabled = True
+                if how.get("one_shot"):
+                    h.ui.non_interactive = True
+                output = self._output(h)
+                self.assertNotIn("do not wait", output.lower())
+                self.assertIn(f"call wait_tasks with id {_spawned_id(output)}", output)
+
+    def test_a_session_not_offered_wait_tasks_is_never_told_to_call_it(self):
+        from dgc.agent import Agent
+        for one_shot in (True, False):
+            with self.subTest(one_shot=one_shot), \
+                    patch.object(Agent, "_supervision_exposed", lambda self: False):
+                h = self.make(git=True, mode="auto")
+                h.ui.non_interactive = one_shot
+                output = self._output(h)
+                self.assertNotIn("wait_tasks", output)
+                if one_shot:
+                    self.assertIn("do not report its outcome as known", output)
+
+    def test_a_one_shot_run_is_never_told_a_background_child_outlives_the_turn(self):
+        h = self.make(git=True, mode="auto")
+        for ultra in (False, True):
+            with self.subTest(ultra=ultra):
+                h.config.data["ultra_mode"] = ultra
+                h.ui.non_interactive = False
+                interactive = "\n".join(h.agent._delegation_guidance("auto"))
+                h.ui.non_interactive = True
+                one_shot = "\n".join(h.agent._delegation_guidance("auto"))
+                self.assertIn("one-shot `dgc -p` run", one_shot)
+                self.assertIn("wait_tasks", one_shot)
+                self.assertNotIn("runs on after the turn", one_shot)
+                self.assertNotIn("A part whose result you will not use this turn", one_shot)
+                self.assertNotIn("one-shot", interactive)
+                self.assertIn("runs on after the turn" if ultra
+                              else "A part whose result you will not use this turn", interactive)
+
+    def test_a_one_shot_runs_task_schema_does_not_promise_the_child_outlives_it(self):
+        from dgc.tools import TOOL_SCHEMAS
+        h = self.make(git=True, mode="auto")
+
+        def background():
+            task = next(tool for tool in h.agent._tool_schemas()
+                        if tool.get("function", {}).get("name") == "task")
+            return task["function"]["parameters"]["properties"]["background"]["description"]
+        h.ui.non_interactive = False
+        self.assertIn("outlives the turn", background())
+        h.ui.non_interactive = True
+        self.assertIn("one-shot `dgc -p` run", background())
+        self.assertNotIn("outlives the turn", background())
+        shared = next(tool for tool in TOOL_SCHEMAS if tool["function"]["name"] == "task")
+        self.assertIn("outlives the turn",
+                      shared["function"]["parameters"]["properties"]["background"]["description"],
+                      "the shared schema every other frontend uses was rewritten")
+
+
+class AOneShotRunAskedToWaitTests(HarnessCase):
+    """The live report, end to end: `dgc -p` asked to start a background task and wait for it."""
+
+    def test_the_spawn_answer_points_at_wait_tasks_and_waiting_lands_the_work(self):
+        h = self.make(git=True, mode="auto")
+        h.ui.non_interactive = True
+        seen = {}
+
+        def parent(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("t1", "task", {
+                    "description": "write notes", "prompt": "WRITE-NOTES: create notes.md",
+                    "agent": "worker", "background": True})])
+            if len(results) == 1:
+                seen["spawn"] = str(results[0].get("content") or "")
+                seen["offered"] = set(getattr(h.agent, "_offered_tool_names", None) or ())
+                return ChatResult(tool_calls=[ToolCall("w1", "wait_tasks", {
+                    "ids": [_spawned_id(seen["spawn"])], "timeout_s": 30})])
+            seen["wait"] = str(results[-1].get("content") or "")
+            return ChatResult(content="notes.md is in the project")
+        routes = [("WRITE-NOTES", calls_then([ToolCall("c1", "write_file", {
+                      "path": "notes.md", "content": "notes\n"})], final="Wrote notes.md.\nFILES: notes.md")),
+                  ("parent: start and wait", parent)]
+        h.ui.turn_id = "t1"
+        h.ui.reset_turn_messages()
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            self.assertTrue(h.agent.run_turn("parent: start and wait for it"))
+        self.assertIn("one-shot run ends with this turn", seen["spawn"])
+        self.assertNotIn("do not wait", seen["spawn"].lower())
+        self.assertIn(f"call wait_tasks with id {_spawned_id(seen['spawn'])}", seen["spawn"])
+        self.assertIn("wait_tasks", seen["offered"], "the answer named a tool that was not offered")
+        self.assertIn("notes.md", seen["wait"])
+        self.assertEqual((h.root / "notes.md").read_text(), "notes\n")
+
+
+class ANoticeThatDeliveredAResultMarksItReadTests(HarnessCase):
+    """Only wait_tasks marked a result read: after a notice delivered it, list_tasks still said
+    "unread", the supervision tools stayed offered, and a wait_tasks returned it a second time."""
+
+    def finished_child(self, h):
+        h.ui.turn_id = "t1"
+        h.ui.reset_turn_messages()
+        with patch.object(LLMClient, "chat", Script(TerminalWakeTests.ROUTES)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            h.agent.run_turn("parent: background map")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and h.agent._detached_jobs:
+                time.sleep(0.05)
+            time.sleep(0.05)
+        self.assertEqual(h.agent.monitors.pending_count(), 1, "premise: the result is queued")
+        self.assertTrue(h.agent._detached_results(unconsumed_only=True), "premise: unread")
+
+    def test_an_inline_fold_marks_it_read(self):
+        h = self.make(git=True, mode="auto")
+        self.finished_child(h)
+        self.assertTrue(h.agent._drain_monitors(with_prompt=True))
+        self.assertEqual(h.agent._detached_results(unconsumed_only=True), [])
+        self.assertFalse(h.agent._supervision_exposed(), "nothing is left to supervise")
+
+    def test_a_wake_turn_marks_it_read(self):
+        h = self.make(git=True, mode="auto")
+        self.finished_child(h)
+        notification = h.agent.monitors.take_pending()
+        with patch.object(LLMClient, "chat", Script(TerminalWakeTests.ROUTES)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            self.assertTrue(h.agent.run_monitor_turn(notification))
+        self.assertEqual(h.agent._detached_results(unconsumed_only=True), [])
+
+    def test_the_editors_wake_marks_it_read_once_it_reached_the_model(self):
+        from dgc.headless import _note_agent_wake_delivered
+        marked = []
+        agent = types.SimpleNamespace(messages=[], _consume_detached_results=marked.extend)
+        _note_agent_wake_delivered(agent, {"id": "sub-0123456789ab"}, "WAKE PROMPT")
+        self.assertEqual(marked, [], "a turn refused before it started delivered nothing")
+        agent.messages = [{"role": "user", "content": "Local time: 12:00\nWAKE PROMPT"}]
+        _note_agent_wake_delivered(agent, {"id": "sub-0123456789ab"}, "WAKE PROMPT")
+        self.assertEqual(marked, ["sub-0123456789ab"])
 
 
 class AResultForAReplacedChatIsDroppedTests(HarnessCase):

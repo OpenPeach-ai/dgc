@@ -98,10 +98,6 @@ class WhoIsOfferedThePairTest(unittest.TestCase):
         # And with no host policy the same agent is offered them, so the patch is what decided it.
         self.assertTrue(self.gate(jobs={"sub-1": object()}, waiting=True))
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def control_gate(self, *, depth=0, jobs=None, waiting=False) -> bool:
         agent = SimpleNamespace(depth=depth, _detached_jobs=jobs or {},
                                 _detached_result_waiting=lambda: waiting)
@@ -140,3 +136,7 @@ if __name__ == "__main__":
         # rejects -- which makes _parse_session_policy `broken` and denies every tool in the
         # session. The consequence, accepted knowingly: no rule can name either tool.
         self.assertEqual({"message_task", "close_task"} & set(permissions.DISPLAY), set())
+
+
+if __name__ == "__main__":
+    unittest.main()

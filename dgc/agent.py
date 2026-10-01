@@ -1625,6 +1625,31 @@ class _SubUI:
         return self._failure.strip()
 
 
+def _one_shot_task_schema(tool: dict) -> dict:
+    """`task` for a `dgc -p` run, whose `background` must not promise a child outlives the turn.
+
+    The shared description says a background child "outlives the turn" and is for a result "you will
+    not use this turn". A one-shot run ends with its turn and stops a child still running, so in it
+    those words described work that is simply lost. Replaced, not appended: two contradictory
+    sentences in one description are worse than either.
+    """
+    function = dict(tool.get("function") or {})
+    params = dict(function.get("parameters") or {})
+    props = dict(params.get("properties") or {})
+    if "background" not in props:
+        return tool
+    background = dict(props["background"])
+    background["description"] = (
+        "True to run it as a parallel track inside this turn: the call returns at once and the "
+        "child works while you do other things. This one-shot `dgc -p` run ends with this turn and "
+        "stops a child still running, so collect its result with wait_tasks before you answer. "
+        "False when your next step needs the answer. Default false.")
+    props["background"] = background
+    params["properties"] = props
+    function["parameters"] = params
+    return {**tool, "function": function}
+
+
 class Agent(GoalLifecycle):
     @staticmethod
     def _mcp_client_capabilities(ui) -> dict:
@@ -2914,12 +2939,24 @@ class Agent(GoalLifecycle):
             "When a child returns, tell the user in one or two sentences what came back and name "
             "the files. Do not paste the child's logs.",
         ]
+        from .permissions import session_policy
+        one_shot = self._non_interactive()
+        # `dgc -p` ends with this turn and stops a background child still running: nothing outlives
+        # it, so "a part whose result you will not use this turn" is a part whose result is lost.
+        if one_shot:
+            background = ("This is a one-shot `dgc -p` run: it ends with this turn and nothing wakes it "
+                          "later. Start a part with `background: true` only to overlap it with other "
+                          "work, and " + ("collect its result with `wait_tasks` before you answer."
+                                          if session_policy() is None else
+                                          "run any part whose result you need in the foreground."))
+        else:
+            background = "A part whose result you will not use this turn takes `background: true`."
         if not self.config.get("ultra_mode", False):
             return lines + [
                 "Delegate when it clearly helps: a broad search across many files or areas "
                 "(explorer), independent chunks that can run in parallel (one task each, all in ONE "
                 "response), or an independent review (critic). Do small or tightly coupled work "
-                "yourself. A part whose result you will not use this turn takes `background: true`. "
+                f"yourself. {background} "
                 "After a researcher writes a design or plan file, spawn critic on that path before "
                 "implementing, unless the user asked you to skip review.",
             ]
@@ -2945,9 +2982,10 @@ class Agent(GoalLifecycle):
             "workers), naming its files and symbols. Put those calls LAST in the response: anything "
             "you want done first goes before them and runs first, while a call placed after them "
             "runs the whole batch one child at a time. The batch ends when its foreground parts do, "
-            "so every part goes in that batch or none does. `background: true` returns at once, runs "
-            "on after the turn, and starts after the foreground ones. Parts that share a file or one "
-            "investigation count as one part.",
+            "so every part goes in that batch or none does. `background: true` returns at once, "
+            + ("runs only until this one-shot run ends with the turn" if one_shot else "runs on after the turn")
+            + ", and starts after the foreground ones. Parts that share a file or one investigation "
+            "count as one part." + (f" {background}" if one_shot else ""),
             "3. Do it yourself when the turn has one part, when running code answers the question, "
             "or when you already know every exact edit: briefing a child costs more than the edit.",
             "4. Integrate: reconcile every child result, then run the tests yourself. Read a file "
@@ -2961,6 +2999,7 @@ class Agent(GoalLifecycle):
     def _monitor_schema_filter(self, schemas: list[dict]) -> list[dict]:
         exposed = self._monitor_exposed()
         notify_exit = self._monitor_delivery()
+        one_shot = self._non_interactive()
         hub = getattr(self, "monitors", None)
         running = bool(hub is not None and hub.has_running())
         wake_turn = bool(getattr(self, "_monitor_turn", False))
@@ -2980,6 +3019,8 @@ class Agent(GoalLifecycle):
                 function["description"] = (str(function.get("description", ""))
                                            + " You are notified once when it exits.")
                 tool = {**tool, "function": function}
+            if name == "task" and one_shot:
+                tool = _one_shot_task_schema(tool)
             out.append(tool)
         return out
 
@@ -4575,6 +4616,7 @@ class Agent(GoalLifecycle):
             return False
         self._trim_session_notices(len(notification.text))
         self.messages.append(self._notice_message(notification, "inline"))
+        self._note_subtasks_delivered(notification)
         self._monitor_turn_notice_chars += len(notification.text)
         if not with_prompt:
             self._activity("continuing", "Reading monitor events")
@@ -5913,6 +5955,7 @@ class Agent(GoalLifecycle):
             # carries with the time it arrived, so one here would be a second, vaguer copy.
             self._trim_session_notices(len(user_text))
             self.messages.append(self._notice_message(notification, "wake"))
+            self._note_subtasks_delivered(notification)
             self._monitor_turn_notice_chars += len(user_text)
             effort_text = ""
         else:
@@ -9105,31 +9148,52 @@ class Agent(GoalLifecycle):
                         except Exception:
                             pass
 
+        # Asked BEFORE the thread starts, while the job published above is certainly listed: a
+        # child that finished at once would sit between its pop and its ledger row, in neither map.
+        waitable = self._supervision_exposed()
         threading.Thread(target=work, daemon=True, name=f"dgc-bg-{agent_id[-8:]}").start()
-        # Promise only the delivery that will actually happen. Three cases: the editor backend's
-        # callback wakes the parent; the hub's pending queue wakes the terminal when monitor wakes
-        # are on, and otherwise still hands the result to the model alongside the user's next
-        # message; a frontend with neither never hears again. Promising a wake in all three meant a
-        # model was told "I will continue when it finishes" and then either waited for nothing or
-        # reported work whose result it had never seen.
+        # Promise only the delivery that will actually happen, and never talk the model out of
+        # waiting. The editor backend's callback, or the terminal's wake, starts a turn; a frontend
+        # with neither folds the result into this turn between tool calls or into the user's next
+        # prompt (_drain_monitors); `dgc -p` ends with this turn and stops a child still running.
+        # In every one of them `wait_tasks` is how the model has the result NOW. This text predates
+        # that tool, and told a `dgc -p` model whose user had asked for the wait "do not wait for
+        # it: ... check on it later" -- in a run that has no later. The call is named only where it
+        # is offered (_supervision_exposed: a launching application's policy withholds it).
         from .monitors import wake_settings
         running = f"Sub-task '{description}' is running in the background (id {agent_id}). "
+        wait = f"call wait_tasks with id {agent_id}" if waitable else ""
         queued = hub is not None and notify_epoch is not None
-        if callable(getattr(self, "on_detached_ended", None)):
-            return running + "I will continue when it finishes."
         # `_monitor_delivery` is the predicate for "this frontend starts turns on its own": the TUI
         # and the editor backend set it, `dgc -p` and the classic REPL do not. Every Agent builds a
         # hub, so a hub is NOT evidence that anything is watching it -- keying on one told `dgc -p`
         # a result was coming, and its process then exited with the child still running.
-        if queued and self._monitor_delivery() and wake_settings(self.config)[0]:
-            return running + "I will continue when it finishes."
-        # No wake, but the next turn still carries whatever is pending (_drain_monitors with_prompt),
-        # so a frontend that will run another turn does get the result -- just not on its own.
-        if queued and getattr(self.ui, "non_interactive", False) is not True:
-            return (running + "Nothing will start a turn when it lands; its result reaches me with "
-                    "the user's next message. Do not wait for it.")
-        return (running + "Nothing will wake this conversation when it lands here, so do not wait "
-                "for it: carry on, and check on it later.")
+        if callable(getattr(self, "on_detached_ended", None)) or (
+                queued and self._monitor_delivery() and wake_settings(self.config)[0]):
+            # A wake is coming, so a wait only holds this turn open: offered for the user's sake.
+            return (running + "I will continue when it finishes."
+                    + (f" If the user asked you to wait for it, {wait} in this turn." if wait else ""))
+        if self._non_interactive():
+            # `dgc -p`: one turn, then the process exits, and _end_one_shot_children stops a child
+            # still running. Never "next message": there is none.
+            ending = (running + "Nothing will wake this conversation when it finishes, and this "
+                      "one-shot run ends with this turn: a sub-task still running then is stopped "
+                      "before it finishes.")
+            if wait:
+                return (ending + " When you need its result or its changes, or the user asked you to "
+                        f"wait for it, {wait} before you answer; until then, carry on with other work.")
+            return ending + " Nothing in this session can wait for it, so do not report its outcome as known."
+        if queued:
+            # No wake, but whatever is pending reaches the model between tool calls of a turn still
+            # running, or with the next prompt (_drain_monitors).
+            return (running + "Nothing will start a turn when it finishes: its result reaches me "
+                    "between tool calls if this turn is still running, otherwise with the user's "
+                    "next message."
+                    + (f" If you need it sooner, or the user asked you to wait for it, {wait} in "
+                       "this turn." if wait else ""))
+        return (running + "Nothing will deliver its result on its own."
+                + (f" When you need it, or the user asked you to wait for it, {wait} in this turn."
+                   if wait else ""))
 
     # ---- supervising background children: parent -> child CONTROL -------------------------------
     # One implementation per action, called by BOTH the model's tool and the editor's
@@ -9448,6 +9512,19 @@ class Agent(GoalLifecycle):
         lock, ledger = self._detached_ledger()
         with lock:
             return frozenset(key for key, entry in ledger.items() if entry["consumed"])
+
+    def _note_subtasks_delivered(self, notification) -> None:
+        """A notice just put these background results in the conversation: they are read now.
+
+        Only wait_tasks marked a result read. After an inline fold or a wake turn had delivered it,
+        the ledger still called it unread: list_tasks said "result unread", the supervision tools
+        stayed offered with nothing left to supervise, and a wait_tasks the spawn answer invites
+        handed the model the same result a second time.
+        """
+        ids = [batch.monitor_id for batch in getattr(notification, "batches", None) or ()
+               if getattr(batch, "kind", "") == "subtask_ended"]
+        if ids:
+            self._consume_detached_results(ids)
 
     def _consume_detached_results(self, ids) -> None:
         """Mark results the model has now been handed, on BOTH delivery paths.

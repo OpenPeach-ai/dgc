@@ -96,6 +96,22 @@ Steering a running sub-agent read "Used tool · message task" in the editor and 
 `message_task` in the terminal. It now reads "Sent message to <what that agent was asked to do>",
 in every surface and again when the chat is reopened.
 
+### A background sub-task no longer tells the model not to wait
+
+In `dgc -p`, starting one answered "do not wait for it: carry on, and check on it later", even when
+you had asked for the wait and `wait_tasks` was offered — in a run that has no later. Every surface
+now names the `wait_tasks` call that gets the result now; `dgc -p` says its run ends with the turn,
+and stops a sub-task still running then instead of letting the process kill it mid-step, keeping
+the work in its own checkout for `/tasks`. A result a notice already delivered (a wake, or a fold
+between tool calls) counts as read, so `wait_tasks` never hands it over a second time.
+
+### The terminal's spinner never shares a row with what comes after it
+
+`dgc -p` printed a `wait_tasks` result straight after "… esc to stop", on the spinner's own row. A
+result after another result, image rows, hook rows, a `-p` plan, and what the classic REPL prints
+while a turn runs did the same. Each wipes the spinner first, and no late spinner frame can land
+after that wipe.
+
 ## 0.46.4 — 2026-09-30
 
 ### A cut-off reply no longer loses the space where it was cut

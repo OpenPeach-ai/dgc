@@ -265,9 +265,10 @@ person is unavailable and the model is told so rather than left hanging: no plan
 `present_plan`), no options picker, no background monitors, and `@path` in the prompt text is
 ordinary text, not an attachment — the composer is what turns `@` into a bounded file, so pass the
 file another way. Permission prompts do not appear either: a tool that would ask is denied, with
-the `--allow-tool` rule that would have permitted it. A background sub-task started here is not
-waited for, and an artifact or document server started here dies when the command exits, so its URL
-is only good while the run lasts. Only a pipe or a redirected file is read — a
+the `--allow-tool` rule that would have permitted it. A background sub-task started here is
+waited for only if the model calls `wait_tasks`; one still running when the turn ends is stopped,
+and the work in its own checkout is kept for `/tasks`. An artifact or document server started here
+dies when the command exits, so its URL is only good while the run lasts. Only a pipe or a redirected file is read — a
   terminal, `/dev/null`, and an fd inherited from a launcher (a supervisor, an editor) are left
   alone, so `-p` never waits on input nobody is going to send. A `-p` run never waits on a menu: a tool
   that would ask is denied with the rule to pre-approve, a plan is reported, not executed.
@@ -1042,8 +1043,12 @@ and edits do not dump into the parent chat.
 
 `task` accepts `background: true` so the child keeps working after the current turn ends.
 The composer stays free. The agents pill remains while that specialist runs. When it
-lands, DGC starts a wake turn with the child's summary; you do not sit in a blocked turn
-polling it. Foreground `task` (the default) still waits.
+lands, DGC starts a wake turn with the child's summary in the editor, and in the terminal while
+wake-ups are on; elsewhere the result reaches the model between tool calls or with your next
+message. Either way you do not sit in a blocked turn polling it, and `wait_tasks` collects it the
+moment you need it. A `dgc -p` run ends with its turn, so there a background child is for overlap
+within the turn: one still running at the end is stopped. Foreground `task` (the default) still
+waits.
 
 A background child belongs to the chat that started it. Starting a new chat — `/new`, `/clear`, or
 the editor's New Session — stops any that are still running and says how many, because the chat
@@ -1063,9 +1068,10 @@ allow-list of built-in tool names.
 
 ## Watching, and waiting on purpose
 
-A foreground `task` blocks until the child is done. A `background: true` one does not, and DGC wakes
-a turn when it lands. Between those two the model was blind: it had started something detached and
-had no way to ask about it.
+A foreground `task` blocks until the child is done. A `background: true` one does not, and its
+result arrives on its own (a wake turn in the editor and the terminal, otherwise with the next
+message). Between those two the model was blind: it had started something detached and had no way
+to ask about it.
 
 Four tools close that. None is offered unless there is something to act on — a
 background child still running, or one whose result nobody has read yet — so a pointless wait is not
@@ -1342,7 +1348,8 @@ choosing.
 ## Agent, memory, and control
 
 - `task` — a sub-agent: `agent` picks explorer / researcher / critic / worker (or a named
-  definition); `background: true` outlives the turn (see **Sub-agents**).
+  definition); `background: true` runs on after the turn, except in a one-shot `dgc -p` run (see
+  **Sub-agents**).
 - `list_tasks` · `wait_tasks` — what this chat's sub-agents are doing, and block for a background
   one's result. Read-only, and offered only while there is a background child or a result nobody
   has read (see **Sub-agents**).
@@ -2942,8 +2949,8 @@ outside Ultra, at most 8; concurrent in auto mode) — then
 integrates and runs the tests. A sub-agent starts cold, so it only saves time beside others: a
 single part, parts that share files or one investigation, and edits the lead already knows stay
 with the lead. Critic reviews a change when you ask for a review or when no test can check it.
-Long work that does not block the rest of the turn can use `task` with `background: true`; DGC
-starts a wake turn when that child lands.
+Long work that does not block the rest of the turn can use `task` with `background: true`; in the
+editor, and in the terminal while wake-ups are on, DGC starts a wake turn when that child lands.
 
 - `/ultra` · `/ultra on|off` — toggle; the status line shows the profile while it is on.
 - `--ultra` / `--no-ultra` — the same for one `dgc` launch.

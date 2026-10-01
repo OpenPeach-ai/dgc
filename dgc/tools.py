@@ -399,9 +399,9 @@ SUPERVISION_TOOL_SCHEMAS = [
     _fn("wait_tasks", "Block until a background sub-task reaches a final state, then return its "
         "full result -- the same text a foreground `task` call would have returned, including "
         "which paths were integrated. An id that is already final returns immediately. Use it "
-        "sparingly: only when you need a child's result for your very next step and cannot make "
-        "progress without it. Do not wait by reflex, and prefer one long wait to repeated short "
-        "ones. It also returns early if the user says something mid-turn, so you read them first.",
+        "when you need a child's result before you can go on, or when the user asked you to wait "
+        "for it. Do not wait by reflex, and prefer one long wait to repeated short ones. It also "
+        "returns early if the user says something mid-turn, so you read them first.",
         {"ids": {"type": "array", "items": {"type": "string"},
                  "description": "Background sub-task ids (from `task` or `list_tasks`). Pass "
                                 "several to return as soon as ANY of them finishes. Omit to wait "

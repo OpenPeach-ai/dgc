@@ -68,6 +68,25 @@ _AGENT_MESSAGE_WIRE_REASON = {
 _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 
 
+def _wake_reached_the_model(agent, prompt: str) -> bool:
+    """Did a wake turn's prompt reach the conversation? A turn refused before it starts (another
+    process holds the session) never appends it, and its child's result is then still unread."""
+    for message in reversed(list(getattr(agent, "messages", None) or [])[-50:]):
+        if (isinstance(message, dict) and message.get("role") == "user"
+                and prompt in str(message.get("content") or "")):
+            return True
+    return False
+
+
+def _note_agent_wake_delivered(agent, notice: dict, prompt: str) -> None:
+    """The editor's wake turn handed the model a child's result: it is read now, once the prompt
+    really reached the conversation (Agent._note_subtasks_delivered says why it matters)."""
+    mark = getattr(agent, "_consume_detached_results", None)
+    identity = str((notice or {}).get("id") or "")
+    if identity and callable(mark) and _wake_reached_the_model(agent, prompt):
+        mark([identity])
+
+
 def _agent_wake_prompt(notice: dict) -> str:
     """The user-role payload of a wake turn: the child's handoff as data, not instructions."""
     description = str(notice.get("description") or "specialist").strip() or "specialist"
@@ -2303,8 +2322,9 @@ class Backend:
                     if notification is not None:
                         outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
                     elif agent_notice is not None:
-                        outcome = self.agent.run_turn(
-                            _agent_wake_prompt(agent_notice), reset_cancel=False)
+                        wake_prompt = _agent_wake_prompt(agent_notice)
+                        outcome = self.agent.run_turn(wake_prompt, reset_cancel=False)
+                        _note_agent_wake_delivered(self.agent, agent_notice, wake_prompt)
                     elif engine_key and images:
                         self.agent._pending_images = None
                         self.ui.error(

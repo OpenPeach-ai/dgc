@@ -488,6 +488,28 @@ fixture.doCleanups()
             self.backend.dispatch({"type": "list_agents", "request_id": "after"})
             self.wait("agents", request_id="after")
 
+    def test_an_editor_wake_turn_marks_the_childs_result_read(self):
+        """Only wait_tasks marked a result read, so after this wake turn delivered a child's result,
+        list_tasks still said "unread" and a wait_tasks handed the same result back again."""
+        lock, ledger = self.agent._detached_ledger()
+        with lock:
+            ledger["sub-0123456789ab"] = {
+                "id": "sub-0123456789ab", "description": "map auth",
+                "output": "Auth lives in pkg/auth.py.", "integrated": True,
+                "ended_at": time.time(), "epoch": None, "consumed": False}
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="Summarized")):
+            self.backend._on_detached_ended({"id": "sub-0123456789ab", "description": "map auth",
+                                             "message": "Auth lives in pkg/auth.py.",
+                                             "integrated": True})
+            self.wait("turn_end")
+            worker = self.backend._worker
+            if worker and worker is not threading.current_thread():
+                worker.join(5)
+        self.assertTrue(any("sub-0123456789ab" in str(m.get("content") or "")
+                            for m in self.agent.messages if m.get("role") == "user"),
+                        "premise: the wake turn delivered the child's result")
+        self.assertEqual(self.agent._detached_results(unconsumed_only=True), [])
+
     def test_a_reason_the_agent_adds_later_cannot_take_the_command_loop_down(self):
         from dgc import editor_protocol as ep
         self.agent._detached_jobs = {"sub-0123456789ab": {
