@@ -26,13 +26,19 @@ class ChatFolderRootsTests(HarnessCase):
     def elsewhere(self) -> Path:
         return Path(tempfile.mkdtemp(prefix="dgc-window-folder-")).resolve()
 
+    @staticmethod
+    def spelled_out(roots) -> list[str]:
+        """The roots as real paths: the event names the chat's own folder as it was given, and a
+        temporary folder on macOS is given as /var/... while its real path is /private/var/..."""
+        return [str(Path(root).resolve()) for root in roots]
+
     def test_a_chat_in_another_folder_is_granted_none_of_the_windows_folders(self):
         h = self.make(git=True)
         window = self.elsewhere()
         event = self.roots(h, window)
         self.assertEqual(h.backend.config.session_permissions["allow"], [],
                          "the window's folder became an allow rule for a chat in another folder")
-        self.assertEqual(event["roots"], [str(h.root.resolve())])
+        self.assertEqual(self.spelled_out(event["roots"]), [str(h.root.resolve())])
 
     def test_a_chat_in_another_folder_asks_before_writing_into_the_window(self):
         from dgc.permissions import ALLOW, PermissionEngine
@@ -52,7 +58,7 @@ class ChatFolderRootsTests(HarnessCase):
         other = self.elsewhere()
         event = self.roots(h, h.root, other)
         self.assertEqual(h.backend.config.session_permissions["allow"], [f"ExternalDirectory({other})"])
-        self.assertEqual(event["roots"], [str(h.root.resolve()), str(other)])
+        self.assertEqual(self.spelled_out(event["roots"]), [str(h.root.resolve()), str(other)])
 
     def test_a_window_folder_that_holds_the_chats_project_is_its_workspace(self):
         h = self.make(git=True)
