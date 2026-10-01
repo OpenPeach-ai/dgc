@@ -20,6 +20,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+class _QuietUI:
+    non_interactive = False
+
+    def __getattr__(self, name):
+        if name.startswith("_") or name == "console":
+            raise AttributeError(name)
+        return lambda *args, **kwargs: None
+
+
 class ConcurrentConfigTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
@@ -326,6 +335,59 @@ class ConcurrentConfigTest(unittest.TestCase):
         self.assertEqual(self._decide(b, "rm -rf build", mode="auto"), "deny",
                          "B is trusted here but never loaded the project's deny (fails OPEN)")
         self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"], "and still never persisted")
+
+    def _plan_agent(self, root, trusted, ui=None):
+        from dgc.agent import Agent
+        from dgc.trust import mark_trusted
+        root.mkdir(exist_ok=True)
+        cfg = self.C.Config(project_root=root)
+        if trusted:
+            mark_trusted(cfg, root)
+        agent = Agent(cfg, ui or _QuietUI())
+        self.addCleanup(agent.mcp.stop_all)
+        agent.set_mode("plan")
+        return agent
+
+    def test_approving_a_plan_cannot_run_an_untrusted_folder_in_auto(self):
+        agent = self._plan_agent(self.home / "cloned-repo", trusted=False)
+        self.assertEqual(agent.exit_plan("auto"), "default")
+        self.assertEqual(agent.mode, "default", "the plan card moved an untrusted folder into auto")
+        agent.set_mode("plan")
+        self.assertEqual(agent.exit_plan("acceptEdits"), "default")
+
+    def test_the_plan_card_says_why_auto_did_not_apply(self):
+        from dgc.llm import ToolCall
+
+        class ApproveIntoAuto(_QuietUI):
+            def __init__(self):
+                self.notes = []
+
+            def present_plan(self, plan):
+                return "auto"
+
+            def info(self, message):
+                self.notes.append(message)
+
+        ui = ApproveIntoAuto()
+        agent = self._plan_agent(self.home / "cloned-repo", trusted=False, ui=ui)
+        agent.config.data["plan_artifact"] = False
+        out = agent._handle_call(ToolCall("p1", "present_plan", {"plan": "1. patch the parser"}))
+        self.assertIn("'default', not 'auto'", out, "the model is told the mode it actually got")
+        self.assertIn("not trusted", out)
+        self.assertEqual(agent.mode, "default")
+        self.assertTrue(any("not trusted" in note for note in ui.notes), "and so is the user")
+
+    def test_approving_a_plan_in_a_trusted_folder_runs_as_chosen(self):
+        agent = self._plan_agent(self.home / "mine", trusted=True)
+        self.assertEqual(agent.exit_plan("auto"), "auto")
+        self.assertEqual(agent.mode, "auto")
+
+    def test_a_subagent_answers_for_its_sessions_trust(self):
+        """A child works in its own checkout under ~/.dgc, which is never in trusted_dirs."""
+        parent = self._plan_agent(self.home / "mine", trusted=True)
+        child = self._plan_agent(self.home / "worktree", trusted=False)
+        child._parent_agent = parent
+        self.assertEqual(child.exit_plan("auto"), "auto")
 
     def test_no_config_shares_a_default_container(self):
         a = self.C.Config()

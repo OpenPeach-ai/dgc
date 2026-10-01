@@ -3389,8 +3389,22 @@ class Agent(GoalLifecycle):
             # Never mutate a transcript from a control thread, including unsaved sessions.
             # Permission decisions use the new mode immediately; _chat refreshes the prompt.
 
+    def _workspace_trusted(self) -> bool:
+        """Whether the folder the user works in is trusted. A sub-agent runs in its own checkout
+        under ~/.dgc, so it answers for the session that spawned it."""
+        top = self
+        while getattr(top, "_parent_agent", None) is not None:
+            top = top._parent_agent
+        from .trust import is_trusted
+        return is_trusted(top.config, top.config.project_root)
+
     def exit_plan(self, to_mode: str | None = None) -> str:
         target = to_mode or self.plan_return_mode or "default"
+        if target in ("acceptEdits", "auto") and not self._workspace_trusted():
+            # The plan card offers auto everywhere, and acceptEdits and auto act without asking, so
+            # they need the trust the mode picker asks for. Approving a plan is not that: approving
+            # into auto ran an untrusted folder in auto with no trust prompt at all.
+            target = "default"
         self.plan_return_mode = None
         # Leaving plan mode with a plan behind you means the user approved it; the next turns are
         # its execution, and the answer contract for them is different (see system_prompt). Not
@@ -7593,6 +7607,12 @@ class Agent(GoalLifecycle):
                 return ("Plan NOT approved — stay in plan mode, address the feedback, and present a revised "
                         "plan." + suffix)
             target = self.exit_plan(choice)
+            if choice in ("acceptEdits", "auto") and target != choice:
+                self.ui.info(f"This folder is not trusted, so the plan runs in {target} mode and each "
+                             f"change is asked for. Trust it from the mode picker to use {choice}.")
+                return (f"Plan APPROVED. Plan mode exited; permission mode is now '{target}', not "
+                        f"'{choice}': this workspace is not trusted, so each change will be asked "
+                        "for. Execute the plan now.")
             return f"Plan APPROVED. Plan mode exited; permission mode is now '{target}'. Execute the plan now."
 
         if name == "monitor" and not self._monitor_delivery():
