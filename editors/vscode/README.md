@@ -8,6 +8,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 ## What it does
 
 - **Where you want it** — the chat is offered in the activity bar and in the secondary side bar; open it in either and the same conversation follows. The copy you leave behind says where it went.
+- **Several chats, several folders** — open another chat beside one that is working, or one in a different folder (**Open a chat in another folder**). Each has its own project, trust, MCP servers, permission rules and mode, all on one `dgc serve`, the way Codex runs its threads. While a turn runs you can switch chats, rename one, open a saved session beside it, or install a plugin.
 - **Chat panel** — CommonMark responses with headings, lists, quotes, tables, safe file/source links, syntax-highlighted code and exact-source copy. Reasoning and tool batches collapse into compact rows, with visible failures and a separate final response. Surfaces follow your Cursor/VS Code theme with DGC purple accents.
 - **Live controls** — browse skills and change permission mode during a turn. Enter steers native-model work at the next boundary; Alt+Enter or Queue submits a later turn. A separate Stop button remains available while drafting. Subscription CLI follow-ups queue, and their mode changes apply on the next turn. Unapplied steering, and turns still queued when you press Stop, come back marked not sent and can be restored.
 - **Turn ETA and walk-away notifications** — while a native turn runs, the timer shows a calibrated range such as `~2–4 min left · 3/5 tasks`, learned from this project's own history and the turn's task list (CLI 0.30.0, additive protocol-v6 `turn_eta` event). Enable **DGC: Notify On Turn End** for a notification when a turn longer than 20 seconds finishes while the panel is hidden.
@@ -94,6 +95,6 @@ Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · Apache License 2.0
 A fresh chat starts without a changed-file card. **Changes in this chat** records the deltas observed
 while that chat runs, using actual pre-run contents even when files were already modified. Saved
 reviews survive reloads; later manual edits do not change the saved preview. **Workspace changes**
-opens the separate Git review, including work that predates the chat. Tracking covers the primary
-project folder; concurrent external edits during a run may be included. Older chats have no
+opens the separate Git review, including work that predates the chat. Tracking covers that chat's
+folder; concurrent external edits during a run may be included. Older chats have no
 retroactive baseline.

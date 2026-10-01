@@ -378,6 +378,19 @@ blocked by default on both. Unsupported platforms fail closed instead of running
 requested sandbox without confinement. Use `/sandbox network on` only when needed.
 The **Sandbox** page covers backends, what is confined, and what is not.
 
+## Mode belongs to the chat
+
+Each chat keeps its own mode, so a risky refactor can sit in **default** while a scratch chat
+beside it runs **auto**. Choosing a mode also makes it the default for chats you start
+afterwards; it never moves a chat that is already open, in this window or another one.
+Reopening a session brings back the mode it ran in, checked again rather than trusted from the
+file: **acceptEdits** and **auto** only while that folder is still trusted.
+
+In a folder you have not trusted, **acceptEdits** and **auto** start as **default**, for that
+session only — your stored default is left as it was. Approving a plan into **auto** there runs
+it in **default** and says why. Trust the folder to change that; the editor asks when you pick a
+mode that needs it.
+
 ## In VS Code and Cursor
 
 The approval card shows what the step will do — its summary and, for an edit, the diff it
@@ -591,10 +604,10 @@ DGC actually *verified* — which is often less than "it works": a package whose
 but whose authenticated tools were never exercised says exactly that. **Manage marketplaces** adds
 another catalog, and the filter separates DGC curated from Personal and from anything you added.
 
-Opening a package to read what it contains works while DGC is working — a review tells you what
-something would install, and reading is not installing. Installing it, removing it, and adding or
-refreshing a marketplace wait for the turn to finish, because those change what DGC can run while
-it is running.
+Opening a package to read what it contains works while DGC is working, and so do installing it,
+removing it, and adding or refreshing a marketplace. A plugin changes what DGC *can* do — tools
+and skills, which a running turn picks up at its next model request — never what it is *allowed*
+to do. Stop ends the turn, not an install you started beside it.
 
 The terminal does the same work without a browser:
 
@@ -1079,7 +1092,9 @@ silently receives it.
   Either way it is folded in at the child's next tool boundary: it starts no new task, restarts
   nothing and waits for nothing, and a child that has already finished cannot read it — the answer
   says so and points at `wait_tasks`. The two control tools need a child that is still RUNNING, not
-  merely a result nobody has read.
+  merely a result nobody has read. The transcript names the child by what it was asked to do:
+  *Sent message to Write the parser*, in the editor and the terminal, and again when the chat is
+  reopened.
 - **`close_task`** — stop a child whose work is no longer wanted. Its changes are **not**
   integrated: whatever it had written to its own checkout is preserved as retained work, so
   `/tasks` can apply or drop it, and nothing is silently thrown away. Stopping a child stops
@@ -1402,6 +1417,18 @@ do not receive this DGC injection.
 Both are bounded (about 32k characters of prompt view, 1 MiB on disk) and redacted the same way
 saved sessions are. Missing files are simply empty.
 
+## Rules survive a long file
+
+A file over that bound keeps its beginning and its newest end, and the middle is left out. A
+rule must never be the part that goes, so say which parts are rules. A section whose heading
+starts with the word **Rule** or **Rules** (`## Rule: run the tests before committing`,
+`### Rules`), or any section containing `<!-- dgc:rule -->`, is kept whole and placed first. A
+section runs from its heading to the next one.
+
+If the rules alone do not fit, DGC keeps as many as fit, in order, and names the ones it left
+out, so you know the file needs consolidating — only you can choose what to cut. A file within
+the bound loads exactly as written.
+
 ## Writing it
 
 - **`#a fact`** in the composer — appends that line to project `DGC.md` atomically.
@@ -1449,7 +1476,7 @@ Every conversation is a session, saved as you go.
 
 - **/resume** — reopen a past session (newest first); `dN` deletes one.
 - **/new** (Ctrl+N) — start fresh; DGC auto-titles it from your first prompt.
-- **/name** — rename the current session.
+- **/name** — rename the current session, while a turn is running too.
 - **/branch** (`/fork`) — continue in a new chat from here. Everything so far comes with you —
   the conversation, the standing goal, the todos, the recovery points — and the chat you branched
   from keeps exactly what it had, so a second approach costs you nothing. `/branch <name>` names
@@ -1490,33 +1517,54 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
   turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
   *Checkpoints & rewind*.
 
-## Two chats at once, in one panel
+## Several chats, several folders, in one panel
 
-The **+** beside the model name opens a second chat. It is a second `dgc serve` with its own model
-context, its own session file and its own turn — not a second view of the same conversation — so
-the chat you switch away from keeps working. A rail appears above the transcript with one tab per
-chat; a pulsing dot means that chat is mid-turn, a square amber dot means it is waiting on a
-decision only you can make, and a number is how much it has said since you last looked. Click a
-tab to switch, the **×** to close one. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same
-from the command palette.
+The **+** beside the model name opens another chat in the same folder, and **Open a chat in another
+folder** (also *DGC: Open a Chat in Another Folder…*) opens one in a different project. Every chat
+has its own model context, session file, turn and permission mode — not a second view of the same
+conversation — so the chat you switch away from keeps working. A chat in another folder also brings
+that folder's project settings, trust, MCP servers, skills and permission rules with it. A rail
+appears above the transcript with one tab per chat, naming the folder when it is not the window's;
+a pulsing dot means that chat is mid-turn, a square amber dot means it is waiting on a decision
+only you can make, and a number is how much it has said since you last looked. Click a tab to
+switch, the **×** to close one. *DGC: Open a Second Chat* and *DGC: Switch Chat* do the same from
+the command palette.
 
-There is no built-in ceiling — open as many as your machine and your model budget allow. DGC does
-not pick a number for you: a backend is about 9 MB, and writes from several chats into one checkout
-are already serialised by the workspace write lease, so nothing inside DGC strains as the count
-rises. What another chat really costs is another model context — tokens on a cloud endpoint, or a
-share of a local model — and only you can judge that. If you want DGC to stop you at a ceiling, set
-`dgc.maxLiveChats` in the editor's settings; 1 keeps it single-chat.
+All of them run in one `dgc serve`, the way Codex runs its threads: one process, each chat in its
+own folder. Each still starts the MCP servers its own folder configures. What one chat does stays
+in that chat — a Stop ends only its own turn and its own approval cards, and a slow command in one
+(a compaction, a rewind, reconnecting MCP servers) never holds another chat's Stop or approvals.
+What is yours rather than a chat's — a permission rule, a trusted folder, an MCP server you add or
+remove — reaches every open chat at once. `dgc.shareBackend` turns the sharing off and gives each
+chat a process of its own; a CLI older than 0.47.0 always gets one per chat.
+
+While a chat's turn runs you can still:
+
+- **switch** to another chat, or open a new one — the turn carries on;
+- **rename** it (*DGC: Name Session*, or `/name`);
+- **open a saved session** — it opens in a chat of its own beside the running one, instead of
+  replacing the conversation that turn belongs to;
+- **install or remove a plugin** — its tools and skills reach the running turn at its next request.
+
+There is no built-in ceiling — open as many as your machine and your model budget allow. What
+another chat really costs is another model context — tokens on a cloud endpoint, or a share of a
+local model — and only you can judge that. Writes from several chats into one checkout are
+serialised by the workspace write lease; chats in different checkouts write at the same time. If
+you want DGC to stop you at a ceiling, set `dgc.maxLiveChats` in the editor's settings; 1 keeps it
+single-chat.
 
 A second chat is for parking long work — a migration, a long test run — while you carry on.
 Delegation (*Sub-agents*) is still the right tool for fanning out one task across workers.
 
-Switching does not replay anything the panel kept: the chat you arrive at is rebuilt from its own
-backend's snapshot, which is taken under that backend's turn lock and is followed by a fresh
-announcement of whatever approval or question it is blocked on. So a chat you left mid-turn comes
-back exactly where it is now, not where it was when you left it.
+Switching does not replay anything the panel kept: the chat you arrive at is rebuilt from the
+backend's snapshot of that chat, taken under its turn lock and followed by a fresh announcement of
+whatever approval or question it is blocked on. So a chat you left mid-turn comes back exactly
+where it is now, not where it was when you left it.
 
-Closing the window stops both. If a background chat's backend dies while you are not watching, its
-tab says so and switching to it starts a new one on the same session rather than an empty chat.
+Closing the window stops every chat in it. Closing one chat stops only that chat; the backend
+keeps running for the others, and the last one to close stops it. If a background chat's backend
+dies while you are not watching, its tab says so and switching to it starts a new one on the same
+session rather than an empty chat.
 
 ## When another DGC is working here
 
@@ -1564,7 +1612,15 @@ Permission rules merge the same way, rule by rule. This matters most in the dire
 protects you: a **deny** added in one window used to be erased by an unrelated settings change in
 another, because a save rewrote the whole file from one process's memory. A rule you revoke is
 still revoked — the merge carries removals, not only additions. Rules a *workspace* brings
-(`<project>/.dgc/permissions.json`) stay live-only and are never written into your own config.
+(`<project>/.dgc/permissions.json`) stay live-only and are never written into your own config,
+and they stay in force for the whole session, whatever else is saved. Trusted folders merge
+folder by folder, so a folder you revoke in one window is not trusted again by another's save.
+
+What a running conversation is using is never changed underneath it. Its permission mode, its
+model and endpoint with their key, and its sampling settings stay as they are when another
+window or chat changes them; the change is saved, and it is what the next session starts with.
+Keys in `~/.dgc/secrets.json` merge the same way as the settings, so switching endpoint and key
+in one window no longer has the new key wiped by the other window's next save.
 
 ## One session, one chat at a time
 
@@ -1938,7 +1994,9 @@ returned only when the selected scope was inspected completely and had none.
 ## In the editor: Changes in this chat
 
 The composer card **Changes in this chat** records deltas observed while *this* chat ran, using
-the actual file state before each run — even when the file was already dirty. A fresh chat starts
+the actual file state before each run — even when the file was already dirty. Edits DGC's own
+file tools make are always recorded, however large the folder; a shell command's edits rely on
+the workspace scan, which says when it stopped at its limits. A fresh chat starts
 empty. Opening a chat and finishing a read-only turn produce no card. Saved previews survive
 reload; later manual edits do not rewrite them. Older sessions have no retroactive baseline.
 
