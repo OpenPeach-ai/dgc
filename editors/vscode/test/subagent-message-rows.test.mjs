@@ -48,16 +48,39 @@ test("stopping a sub-agent names the agent that was stopped", () => {
   assert.deepEqual(errors, []);
 });
 
-test("a lone message in its group says the whole thing, not a verb waiting for its object", () => {
-  // The group sentence carries the running step's verb but not the card's detail, so "Sending
-  // message to" would have been left hanging there.
+test("a folded group says who the message went to, while it runs and after", () => {
+  // A finished group folds to its sentence, and the sentence was "Used 1 tool" -- the live
+  // recording showed the "Sent message to" row hidden behind it. It names the agent now.
+  for (const [name, running, done] of [
+    ["message_task", "Sending message to Write the parser", "Sent message to Write the parser"],
+    ["close_task", "Stopping Write the parser", "Stopped Write the parser"],
+  ]) {
+    const { doc, event, errors } = panel();
+    event({ type: "tool_call", call_id: "x1", name, args: { id: "sub-0123456789ab", agent: "Write the parser" },
+            summary: "Write the parser" });
+    assert.equal(groupLabel(doc), running, name);
+    result(event, name, "x1", "ok");
+    event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+    assert.equal(groupLabel(doc), done, name);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("beside other work it joins the sentence; with no agent known it says what it is doing", () => {
+  const mixed = panel();
+  mixed.event({ type: "tool_call", call_id: "r1", name: "read_file", args: {}, summary: "README.md" });
+  mixed.event({ type: "tool_call", call_id: "m1", name: "message_task", args: {}, summary: "Write the parser" });
+  result(mixed.event, "read_file", "r1", "x");
+  result(mixed.event, "message_task", "m1", "ok");
+  mixed.event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  assert.equal(groupLabel(mixed.doc), "Read 1 file and sent message to Write the parser");
   for (const [name, said] of [["message_task", "Messaging a sub-agent"], ["close_task", "Stopping a sub-agent"]]) {
     const { doc, event, errors } = panel();
-    event({ type: "tool_call", call_id: "x1", name, args: { id: "sub-0123456789ab" },
-            summary: "sub-0123456789ab" });
+    event({ type: "tool_call", call_id: "x1", name, args: {}, summary: "" });
     assert.equal(groupLabel(doc), said, name);
     assert.deepEqual(errors, []);
   }
+  assert.deepEqual(mixed.errors, []);
 });
 
 test("the other supervision tools wear the sub-agent mark, not the wrench", () => {

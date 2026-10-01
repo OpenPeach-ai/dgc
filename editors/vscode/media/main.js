@@ -933,9 +933,11 @@
     message_task: ["Sending message to", "Sent message to"],
     close_task: ["Stopping", "Stopped"],
   };
-  // A lone running step names itself in its group's sentence, where the card's detail is not.
-  // These verbs take their object from that detail, so the sentence says them whole — the
-  // CLI's own activity words (dgc/ui.py).
+  // A lone step names itself in its group's sentence, and a folded group shows only that sentence.
+  // These two take their object from the card's detail -- the agent, by what it was asked to do --
+  // so the sentence carries it, in both tenses: "Sent message to Write the parser", where it used
+  // to say "Used 1 tool". Without a detail they fall back to the CLI's own words (dgc/ui.py).
+  const NAMES_ITS_AGENT = new Set(["message_task", "close_task"]);
   const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent" };
   function pluginLogoHtml(name) {
     const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
@@ -2627,10 +2629,14 @@
     // The present tense reads "a file" for one: "Reading a file", not "Reading 1 file".
     const some = (n, one, many) => (past ? plural(n, one, many) : n === 1 ? `a ${one}` : `${n} ${many}`);
     // One running tool DGC has a specific verb for ("Updating plan", "Delegating") keeps it.
-    const lone = !past && counts.other === 1
+    const loneOther = counts.other === 1
       ? cards.find((card) => !TOOL_BUCKET[canonicalTool(card.dataset.toolName)]) : null;
-    const loneName = lone && canonicalTool(lone.dataset.toolName);
-    const loneCopy = lone && (LONE_PRESENT[loneName] || TOOL_COPY[loneName]?.[0].toLowerCase());
+    const loneName = loneOther && canonicalTool(loneOther.dataset.toolName);
+    const agent = loneOther && NAMES_ITS_AGENT.has(loneName)
+      ? String(loneOther.querySelector(".arg")?.textContent || "").trim() : "";
+    const named = agent ? `${TOOL_COPY[loneName][past ? 1 : 0].toLowerCase()} ${agent}` : "";
+    const lone = !past ? loneOther : null;
+    const loneCopy = lone && (named || LONE_PRESENT[loneName] || TOOL_COPY[loneName]?.[0].toLowerCase());
     const otherPresent = loneCopy ? loneCopy
       : lone && String(lone.dataset.toolName).startsWith("mcp__") ? "calling an MCP tool"
         : `using ${some(counts.other || 0, "tool", "tools")}`;
@@ -2644,7 +2650,7 @@
       counts.looked && `${past ? "looked at" : "looking at"} ${some(counts.looked, "page", "pages")}`,
       counts.viewed && viewedPhrase(cards, past),
       counts.web && (past ? "searched the web" : "searching the web"),
-      counts.other && (past ? `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
+      counts.other && (past ? named || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
     ].filter(Boolean);
     const sentence = phrases.length > 1
       ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
