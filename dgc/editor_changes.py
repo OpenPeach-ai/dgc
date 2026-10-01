@@ -12,6 +12,7 @@ from .workspace_changes import collect_changes, read_change
 class EditorChanges:
     def __init__(self, root: Path, emit):
         self.roots = (root.resolve(),)
+        self.scan_roots = self.roots
         self.emit = emit
         self.lock = threading.RLock()
         self.generation = 0
@@ -29,10 +30,17 @@ class EditorChanges:
                 self._reject(job["command"], "inspection_cancelled", "Workspace inspection was cancelled.")
                 job["replied"] = True
 
-    def set_roots(self, roots: list[Path]):
+    def set_roots(self, roots: list[Path], scan: list[Path] | None = None):
+        """``roots`` may be inspected and read; ``scan`` is what Workspace changes lists (default:
+        all of them). They differ when the chat's project encloses an editor folder: the window
+        opened on a package of a larger repository, say. The project root must be inspectable --
+        the chat's own changes are recorded there -- but scanning it swallowed the folder the editor
+        shows, whose report then never arrived ("no change report was returned")."""
         with self.lock:
             self.generation += 1
             self.roots = tuple(dict.fromkeys(root.resolve() for root in roots))[:16]
+            scanned = tuple(dict.fromkeys(root.resolve() for root in (scan or roots)))[:16]
+            self.scan_roots = tuple(root for root in scanned if root in self.roots) or self.roots
             self._cancel()
 
     def request(self, command: dict, *, journal=None, session_id=""):
@@ -46,6 +54,7 @@ class EditorChanges:
                 self._reject(command, "inspection_in_progress", "A workspace inspection is already running. Try again when it finishes.")
                 return
             roots = self.roots
+            scan_roots = self.scan_roots
             root = None
             if kind == "read":
                 try:
@@ -74,8 +83,8 @@ class EditorChanges:
                         deadline = time.monotonic() + 20
                         reports = []
                         retained_bytes, retained_files = 0, 0
-                        scopes = [folder for folder in roots
-                                  if not any(other in folder.parents for other in roots)]
+                        scopes = [folder for folder in scan_roots
+                                  if not any(other in folder.parents for other in scan_roots)]
                         for folder in scopes:
                             if job["cancel"].is_set():
                                 raise ValueError("Workspace inspection was cancelled.")

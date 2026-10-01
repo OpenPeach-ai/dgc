@@ -1595,6 +1595,12 @@ class HeadlessUI:
 
     def mcp_input(self, server: str, kind: str, payload: dict, *, cancel=None) -> dict:
         rid, ev = self.pending.register()
+        # Which server each request was for: a Cancel that arrives once the request is answered (a
+        # sign-in already opened in the browser) still has to find what it was about.
+        asked = self.__dict__.setdefault("mcp_input_servers", {})
+        asked[rid] = str(server)
+        while len(asked) > 64:
+            asked.pop(next(iter(asked)))
         self.em.emit("mcp_input_request", id=rid, server=str(server)[:120], kind=kind,
                      payload=payload)
         response = self._await(rid, ev, cancel=cancel)
@@ -3768,6 +3774,48 @@ class Backend:
                 row["connection_error"] = str(failure)[:500]
         return rows
 
+    def _stop_turn(self) -> None:
+        """Stop: the turn, its queue, its monitors' wakes and its open requests."""
+        with self._turn_state_lock():
+            self.agent.cancelled.set()
+            # Stop stops the queue too, but the messages in it are the person's words. Dropping
+            # them silently left their bubbles looking sent in the editor with nothing to restore;
+            # hand each one back by its id, the way close() does when the backend goes down.
+            returned = [item[4] for item in self._queue if len(item) > 4 and item[4]]
+            self._queue.clear()
+            for index, request_id in enumerate(returned):
+                fields = {}
+                if index == 0:
+                    many = len(returned) > 1
+                    fields["message"] = (f"Stopped before {len(returned)} queued messages ran; they were not sent."
+                                         if many else "Stopped before the queued message ran; it was not sent.")
+                self.em.emit("steering_update", request_id=request_id, state="returned", **fields)
+        hub = getattr(self.agent, "monitors", None)
+        if hub is not None and hub.pending_count():
+            # Stop means stop: events keep arriving but no turn starts on them until the next
+            # prompt (or /monitors wake on).
+            hub.policy.pause("stopped")
+            self._schedule_monitors_snapshot()
+        expired = self.pending.cancel_all(
+            {"decision": "no", "choice": None, "action": "cancel"})
+        for rid in expired:
+            self.em.emit("request_expired", id=rid)
+
+    def _cancel_opened_sign_in(self, rid: str) -> None:
+        """Cancel on a sign-in the browser already opened. Its request was answered when the browser
+        opened, so stop what waits on the sign-in instead. For a plugin install that is the install's
+        own cancel: an install runs beside a turn now and the turn's Stop does not reach it -- the
+        editor's Cancel used to send that Stop, ending a running turn while the plugin went on
+        connecting. For a sign-in some other connection asked for, it is the turn, as before."""
+        server = getattr(self.ui, "mcp_input_servers", {}).get(rid)
+        if server is None:
+            return                                       # not a request this chat made
+        install = getattr(self, "_install_cancel", None)
+        if install is not None and server in getattr(self, "_installing_servers", ()):
+            install.set()
+            return
+        self._stop_turn()
+
     def _install_plugin(self, cmd: dict) -> None:
         from .plugins import PluginError, _installed, connect, install, record_servers
         request_id = str(cmd.get("request_id") or "")
@@ -3791,8 +3839,15 @@ class Backend:
             if record_servers(record):
                 # Its own cancel, not the turn's: an install now runs beside a turn, and the turn's
                 # Stop -- or a Stop pressed before the install began, still set -- is not about it.
-                connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input,
-                        cancel=getattr(self, "_package_cancel", None) or threading.Event())
+                # Closing the chat ends it, and so does Cancel on its sign-in (_cancel_opened_sign_in).
+                from .mcp import _AnyCancel
+                own = threading.Event()
+                self._install_cancel, self._installing_servers = own, set(record_servers(record))
+                try:
+                    connect(self.config, self.agent.mcp, record, input_handler=self.agent._handle_mcp_input,
+                            cancel=_AnyCancel(getattr(self, "_package_cancel", None), own))
+                finally:
+                    self._install_cancel, self._installing_servers = None, set()
                 failure = next((self.agent.mcp.failures.get(n) for n in record_servers(record) if self.agent.mcp.failures.get(n)), None)
                 if failure:
                     detail = str(failure)
@@ -3947,7 +4002,8 @@ class Backend:
             if getattr(self, "_editor_inspection", None) is None:
                 self._editor_inspection = EditorChanges(self.config.project_root, self.em.emit)
                 if hasattr(self, "_editor_inspection_roots"):
-                    self._editor_inspection.set_roots(self._editor_inspection_roots)
+                    self._editor_inspection.set_roots(self._editor_inspection_roots,
+                                                      scan=getattr(self, "_editor_scan_roots", None))
             if t in ("get_chat_changes", "get_chat_change"):
                 self._editor_inspection.request(dict(cmd), journal=self.agent.chat_changes,
                     session_id=self.agent.session_file.stem if self.agent.session_file else "")
@@ -4462,8 +4518,11 @@ class Backend:
             # Replaced by the editor's folders, a chat whose project was not one of them listed
             # none of its own changes and refused to open one.
             self._editor_inspection_roots = [own, *(path for path in visible if path != own)][:16]
+            # What Workspace changes lists is still the editor's own folders, as before; only a
+            # chat with none of them (one in another folder) lists its own.
+            self._editor_scan_roots = visible[:16] or [own]
             if getattr(self, "_editor_inspection", None) is not None:
-                self._editor_inspection.set_roots(self._editor_inspection_roots)
+                self._editor_inspection.set_roots(self._editor_inspection_roots, scan=self._editor_scan_roots)
             self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
                          **_request_fields(request_id))
 
@@ -4475,8 +4534,10 @@ class Backend:
         elif t == "options_response":
             self._resolve_options_response(cmd)
         elif t == "mcp_input_response":
-            self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
-                                                  "content": cmd.get("content")})
+            if not self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
+                                                         "content": cmd.get("content")}) \
+                    and cmd.get("action") == "cancel":
+                self._cancel_opened_sign_in(str(cmd.get("id") or ""))
 
         elif t == "ping":
             # No reply: the editor is telling us it is still there, not asking anything. Seeing one
@@ -4502,30 +4563,7 @@ class Backend:
                              **_request_fields(request_id))
 
         elif t in ("cancel", "interrupt"):
-            with self._turn_state_lock():
-                self.agent.cancelled.set()
-                # Stop stops the queue too, but the messages in it are the person's words. Dropping
-                # them silently left their bubbles looking sent in the editor with nothing to restore;
-                # hand each one back by its id, the way close() does when the backend goes down.
-                returned = [item[4] for item in self._queue if len(item) > 4 and item[4]]
-                self._queue.clear()
-                for index, request_id in enumerate(returned):
-                    fields = {}
-                    if index == 0:
-                        many = len(returned) > 1
-                        fields["message"] = (f"Stopped before {len(returned)} queued messages ran; they were not sent."
-                                             if many else "Stopped before the queued message ran; it was not sent.")
-                    self.em.emit("steering_update", request_id=request_id, state="returned", **fields)
-            hub = getattr(self.agent, "monitors", None)
-            if hub is not None and hub.pending_count():
-                # Stop means stop: events keep arriving but no turn starts on them until the next
-                # prompt (or /monitors wake on).
-                hub.policy.pause("stopped")
-                self._schedule_monitors_snapshot()
-            expired = self.pending.cancel_all(
-                {"decision": "no", "choice": None, "action": "cancel"})
-            for rid in expired:
-                self.em.emit("request_expired", id=rid)
+            self._stop_turn()
 
         elif t == "set_mode":
             if self._busy() and cmd.get("live") is not True:

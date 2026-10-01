@@ -104,5 +104,98 @@ class PluginOperationsBesideATurnTest(unittest.TestCase):
         self.assertFalse(seen["cancel"].is_set(), "a Stop pressed for the turn aborted the install")
 
 
+class CancelOnAnOpenedSignInTest(unittest.TestCase):
+    """Cancel on a plugin sign-in the browser already opened.
+
+    The editor's Cancel sent the turn's Stop. With installs running beside a turn, that Stop no
+    longer reached the install -- the plugin went on connecting when sign-in finished -- and it
+    ended the turn on screen instead: queued messages handed back, approval cards expired. Cancel
+    now names the sign-in, and the chat stops what waits on it."""
+
+    def backend(self, *, servers=("s",)):
+        backend = PluginOperationsBesideATurnTest.backend(self)
+        backend.ui = SimpleNamespace(mcp_input_servers={})
+        backend._queue = []
+        backend.pending = SimpleNamespace(resolve=lambda rid, value: False,   # already answered
+                                          cancel_all=lambda value: [])
+        backend._install_cancel = threading.Event()
+        backend._installing_servers = set(servers)
+        return backend
+
+    def test_it_cancels_the_install_and_leaves_the_turn_alone(self):
+        backend = self.backend()
+        backend.ui.mcp_input_servers["r7"] = "s"
+        backend._dispatch({"type": "mcp_input_response", "id": "r7", "action": "cancel"})
+        self.assertTrue(backend._install_cancel.is_set(), "the install went on connecting")
+        self.assertFalse(backend.agent.cancelled.is_set(), "Cancel on a sign-in stopped the running turn")
+
+    def test_a_sign_in_for_another_connection_still_stops_the_turn(self):
+        backend = self.backend()
+        backend.ui.mcp_input_servers["r8"] = "other"
+        backend._dispatch({"type": "mcp_input_response", "id": "r8", "action": "cancel"})
+        self.assertTrue(backend.agent.cancelled.is_set(), "what Cancel did before, outside an install")
+        self.assertFalse(backend._install_cancel.is_set())
+
+    def test_a_request_this_chat_never_made_changes_nothing(self):
+        backend = self.backend()
+        backend._dispatch({"type": "mcp_input_response", "id": "r404", "action": "cancel"})
+        backend._dispatch({"type": "mcp_input_response", "id": "r404", "action": "accept"})
+        self.assertFalse(backend._install_cancel.is_set())
+        self.assertFalse(backend.agent.cancelled.is_set())
+
+    def test_the_install_connect_sees_the_cancel_and_ends(self):
+        import time
+        from dgc import plugins
+        backend = PluginOperationsBesideATurnTest.backend(self)
+        backend.ui = SimpleNamespace(mcp_input_servers={})
+        backend._queue = []
+        backend.pending = SimpleNamespace(resolve=lambda rid, value: False, cancel_all=lambda value: [])
+        backend.agent.reload_skills = lambda: None
+        backend.agent.mcp = SimpleNamespace(failures={}, servers={})
+        backend.agent._handle_mcp_input = lambda *a, **k: None
+        backend._editor_plugins = lambda **k: []
+        backend._prepared_plugins = {"demo": {"name": "demo"}}
+        asked, outcome = threading.Event(), {}
+
+        def connect(config, manager, record, *, input_handler, cancel):
+            backend.ui.mcp_input_servers["r9"] = "s"     # its sign-in, as HeadlessUI.mcp_input records it
+            asked.set()
+            deadline = time.monotonic() + 5
+            while not cancel.is_set() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            outcome["cancelled"] = cancel.is_set()
+
+        with unittest.mock.patch.object(plugins, "install", lambda item, **k: {"name": "demo", "servers": ["s"]}), \
+                unittest.mock.patch.object(plugins, "_installed", lambda: []), \
+                unittest.mock.patch.object(plugins, "record_servers", lambda record: ["s"]), \
+                unittest.mock.patch.object(plugins, "connect", connect):
+            worker = threading.Thread(target=backend._install_plugin, args=({"name": "demo", "request_id": "i1"},))
+            worker.start()
+            self.assertTrue(asked.wait(5))
+            backend._dispatch({"type": "mcp_input_response", "id": "r9", "action": "cancel"})
+            worker.join(5)
+        self.assertTrue(outcome.get("cancelled"), "the install's connect never saw the Cancel")
+        self.assertFalse(backend.agent.cancelled.is_set())
+        self.assertIsNone(backend._install_cancel, "the next install would start already cancelled")
+
+    def test_the_ui_remembers_which_server_each_request_was_for(self):
+        from dgc.protocol import PendingRequests
+        emitted = []
+        pending = PendingRequests()
+        ui = headless.HeadlessUI(SimpleNamespace(emit=lambda event, /, **f: emitted.append({"type": event, **f})),
+                                 pending, approval_timeout_s=5)
+        answer = {}
+        asking = threading.Thread(target=lambda: answer.update(ui.mcp_input("make", "elicitation", {"mode": "url"})))
+        asking.start()
+        for _ in range(500):
+            if emitted:
+                break
+            threading.Event().wait(0.01)
+        rid = emitted[0]["id"]
+        self.assertTrue(pending.resolve(rid, {"action": "accept"}))
+        asking.join(5)
+        self.assertEqual(ui.mcp_input_servers.get(rid), "make")
+
+
 if __name__ == "__main__":
     unittest.main()

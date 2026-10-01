@@ -5,6 +5,7 @@
 - Every chat can have its own folder. **Open a chat in another folder** (in the header, and as
   *DGC: Open a Chat in Another Folder…*) opens one in a different project, with that project's
   settings, trust, MCP servers, skills, permission rules and mode. Its tab names the folder.
+  Restart Backend, or recovery after a crash, brings it back on its own conversation.
 - Chats share one `dgc serve`, the way Codex runs its threads, instead of one process each. A Stop
   ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
   chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
@@ -12,7 +13,7 @@
   0.47.0 or newer.
 - While a turn runs you can rename the chat, open a saved session (it opens beside the running
   chat instead of being refused with "unavailable while a turn is running"), and install or remove
-  a plugin.
+  a plugin. Cancel on a plugin's browser sign-in stops that install, not the turn on screen.
 - A chat comes back in the permission mode it ran in when you reopen it, when that mode asks no
   less than the one you are in; a new chat after it starts in your mode again.
 - Sub-agents working at the same time never share a face. The same eight faces, handed out

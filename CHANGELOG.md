@@ -55,7 +55,8 @@ dashboard's **+ Agent in another folder…** does the same.
 - **Open a saved session.** It opens in a chat of its own beside the running one, instead of being
   refused.
 - **Install or remove a plugin.** Its tools and skills reach the running turn at its next model
-  request. Stop no longer aborts an install, and an install no longer waits for the turn.
+  request. Stop no longer aborts an install, and an install no longer waits for the turn. Cancel
+  on a plugin's browser sign-in stops that install and leaves a running turn alone.
 
 ### A chat comes back in the mode it ran in
 

@@ -548,6 +548,37 @@ test("MCP sign-in ignores duplicate acceptance and cannot open after cancellatio
   } finally { api.Uri = original.Uri; api.env = original.env; }
 });
 
+test("Cancel on a sign-in opened in the browser cancels that sign-in, never the chat's turn", async () => {
+  // It sent the turn's Stop. Installs run beside a turn now and that Stop never reaches one: the
+  // plugin went on connecting, and a running turn was ended instead -- its queued messages handed
+  // back, its approval cards expired. The backend maps a cancel for the sign-in's own id onto the
+  // install (tests/test_plugins_mid_turn.py).
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { Uri: api.Uri, env: api.env };
+  const sent = [];
+  api.Uri = { parse: value => new URL(value) };
+  api.env = { remoteName: undefined, asExternalUri: async uri => uri, openExternal: async () => true };
+  const { provider } = catalogHarness([]);
+  provider.backend = { ready: true, send: command => { sent.push(command); return true; } };
+  const callback = "http://localhost:43124/oauth/callback";
+  const url = "https://auth.example.invalid/authorize?redirect_uri=" + encodeURIComponent(callback);
+  const signIn = id => ({ type: "mcp_input_request", id, server: "make", kind: "elicitation",
+    payload: { mode: "url", url, _dgc_bridge_callback: callback } });
+  try {
+    provider.onEvent(signIn("opened"));
+    await provider.onMessage({ type: "mcp_input_response", id: "opened", action: "accept" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(sent.map(command => [command.type, command.action]), [["mcp_input_response", "accept"]],
+      "premise: the browser opened and the request was answered");
+    await provider.onSettingsMessage({ type: "cancelSignIn" });
+    assert.ok(!sent.some(command => command.type === "cancel"), "Cancel sent the turn's Stop");
+    assert.deepEqual(sent.at(-1), { type: "mcp_input_response", id: "opened", action: "cancel" });
+    sent.length = 0;
+    await provider.onSettingsMessage({ type: "cancelSignIn" });
+    assert.deepEqual(sent, [], "a second Cancel has nothing left to cancel");
+  } finally { api.Uri = original.Uri; api.env = original.env; }
+});
+
 test("a server-sent url elicitation is asked about, not opened", async () => {
   // Only the local sign-in bridge carries _dgc_bridge_callback, and only because the user clicked
   // Connect. A url elicitation without it can come from any connected server, unprompted, while it

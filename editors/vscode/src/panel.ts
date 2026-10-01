@@ -386,6 +386,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private settingsEditor?: vscode.WebviewPanel;
   private pendingSignIn?: McpBrowserRequest;
   private pendingSignInServer = "";
+  /** The sign-in the browser was opened for: its request id and the chat that asked. Cancel needs
+   *  both once the request is answered, to cancel that sign-in rather than the chat's turn. */
+  private openedSignIn?: { id: string; be: ChatBackend };
   private settingsSelection = { section: "general", range: "7d" };
   private settingsCatalog: any[] = [];
   private settingsInstalls = new Map<string, string>();
@@ -1909,6 +1912,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // session it is being restarted onto). Reading the workspace's remembered id here is right for
     // the first chat and wrong for a second one: both would resume the same session, and the
     // backend refuses the second because a session is held by whoever is running a turn in it.
+    if (!this.sessionRestoreSuppressed && this.activeSlot().cwd) {
+      // A chat in another folder is never the window's remembered chat (rememberSession skips it),
+      // and its sessions live in its own project. Restart Backend and crash recovery brought it
+      // back on the window's remembered id: "no such session", then a new empty chat -- or, in a
+      // folder inside the window's project, the window's own last chat. It comes back on its own.
+      this.sessionRestoreCandidate = /^[A-Za-z0-9_-]{1,128}$/.test(this.currentSessionId) ? this.currentSessionId : "";
+      this.sessionRestoreSaved = this.currentSessionSaved;
+      this.sessionRestoreSuppressed = true;       // so `ready` keeps it instead of re-reading the window's
+    }
     if (!this.sessionRestoreSuppressed) {
       const saved = this.context.workspaceState.get<{ scope?: string; id?: string; saved?: boolean }>("dgc.activeSession.v1");
       this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
@@ -2674,7 +2686,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
       const row = (ev as any).items?.find((item: any) => item.name === this.pendingSignInServer);
       if (row && ["connected", "failed", "disabled"].includes(row.state)) {
-        this.pendingSignIn = undefined;
+        this.pendingSignIn = undefined; this.openedSignIn = undefined;
         this.pendingSignInServer = "";
         this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
       }
@@ -2719,7 +2731,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const name = this.settingsInstalls.get(String(ev.request_id || ""));
       if (name) {
         this.settingsInstalls.delete(String(ev.request_id));
-        this.pendingSignIn = undefined;
+        this.pendingSignIn = undefined; this.openedSignIn = undefined;
         this.pendingSignInServer = "";
         this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: String(ev.message || "Plugin install failed.") });
@@ -2729,7 +2741,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "plugin_catalog" && Array.isArray((ev as any).items)) {
       this.settingsCatalog = (ev as any).items;
       if (this.pendingSignInServer && this.settingsCatalog.some(row => (row.name === this.pendingSignInServer || row.server_names?.includes(this.pendingSignInServer)) && row.connected)) {
-        this.pendingSignIn = undefined;
+        this.pendingSignIn = undefined; this.openedSignIn = undefined;
         this.pendingSignInServer = "";
         this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
       }
@@ -2776,12 +2788,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (!current()) return; // an expired dialog must not clear a newer connection banner
     if (action !== "accept") {
-      this.pendingSignIn = undefined;
+      this.pendingSignIn = undefined; this.openedSignIn = undefined;
       this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
     }
     if (this.backend !== be || !this.mcpUrls.has(id)) return;
     this.mcpUrls.delete(id);
     be.send({ type: "mcp_input_response", id, action });
+    if (action === "accept" && this.pendingSignIn === request) { this.openedSignIn = { id, be }; }
   }
 
   private promptInstallCli(): void {
@@ -5161,8 +5174,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           be.send({ type: "mcp_input_response", id, action: "cancel" });
         }
       }
-      if (this.pendingSignIn) be.send({ type: "cancel" });
-      this.pendingSignIn = undefined;
+      // Opened in the browser, its request is answered: cancel it by its id, which the backend turns
+      // into the install's own cancel. The `cancel` sent here before is the turn's Stop, and with
+      // installs running beside a turn it ended the turn on screen -- handing back its queued
+      // messages, expiring its cards -- while the plugin went on connecting.
+      const opened = this.openedSignIn;
+      if (this.pendingSignIn && opened) {
+        opened.be.send({ type: "mcp_input_response", id: opened.id, action: "cancel" });
+      }
+      this.pendingSignIn = undefined; this.openedSignIn = undefined;
       this.pendingSignInServer = "";
       this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
     } else if (msg?.type === "inspectPlugin") {

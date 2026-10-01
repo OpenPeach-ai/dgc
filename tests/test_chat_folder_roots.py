@@ -26,6 +26,19 @@ class ChatFolderRootsTests(HarnessCase):
     def elsewhere(self) -> Path:
         return Path(tempfile.mkdtemp(prefix="dgc-window-folder-")).resolve()
 
+    def workspace_changes(self, h) -> dict:
+        import time
+        before = len(h.of("workspace_changes"))
+        h.backend.dispatch({"type": "get_workspace_changes", "request_id": f"changes-{before}"})
+        deadline = time.monotonic() + 20
+        while len(h.of("workspace_changes")) == before and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertGreater(len(h.of("workspace_changes")), before, "no workspace_changes arrived")
+        inspection = getattr(h.backend, "_editor_inspection", None)
+        if inspection is not None:
+            self.addCleanup(inspection.close)
+        return h.of("workspace_changes")[-1]
+
     @staticmethod
     def spelled_out(roots) -> list[str]:
         """The roots as real paths: the event names the chat's own folder as it was given, and a
@@ -76,6 +89,30 @@ class ChatFolderRootsTests(HarnessCase):
         other = self.elsewhere()
         self.roots(h, h.root, other)
         self.assertEqual(h.backend._editor_inspection_roots, [h.root.resolve(), other])
+
+
+    def test_a_window_on_a_folder_inside_the_project_lists_that_folders_changes(self):
+        # The window opened on a package of a larger repository: the chat's project is the
+        # repository (DGC walks up to its .git), the editor's folder is the package. 0.46.4 listed
+        # the package's pending changes. Scanning the project root instead swallowed the package (a
+        # nested root is skipped), and the editor, which keeps only the report for its own folder,
+        # said "pkg: no change report was returned".
+        h = self.make(git=True)
+        package = h.root / "pkg"
+        package.mkdir()
+        (package / "app.py").write_text("x = 1\n")
+        self.roots(h, package)
+        self.assertEqual(h.backend._editor_scan_roots, [package.resolve()])
+        self.assertEqual(h.backend._editor_inspection_roots, [h.root.resolve(), package.resolve()],
+                         "the chat's own folder stays inspectable: its changes are recorded there")
+        report = self.workspace_changes(h)
+        self.assertEqual(self.spelled_out(r["root"] for r in report["roots"]), [str(package.resolve())])
+        self.assertEqual([f["path"] for f in report["roots"][0]["files"]], ["app.py"])
+
+    def test_a_chat_in_another_folder_lists_its_own_folder(self):
+        h = self.make(git=True)
+        self.roots(h, self.elsewhere())
+        self.assertEqual(h.backend._editor_scan_roots, [h.root.resolve()])
 
 
 if __name__ == "__main__":
