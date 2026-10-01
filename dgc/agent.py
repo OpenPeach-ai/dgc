@@ -7813,6 +7813,9 @@ class Agent(GoalLifecycle):
                         if (not _within_own_checkout(self, args.get("path"))
                                 and getattr(self, "_external_checkpoints", None) is not None):
                             keeper = self._external_checkpoints
+                        changes = getattr(self, "chat_changes", None)
+                        if changes is not None and hasattr(changes, "touched"):
+                            changes.touched(abs_path)    # before the write: what the turn started from
                         if not keeper.record_file(str(abs_path)):
                             why = (getattr(keeper, "last_record_error", "")
                                    or self._last_persist_error or "the reason is not recorded")

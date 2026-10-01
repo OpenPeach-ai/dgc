@@ -111,6 +111,23 @@ def _names(root, deadline):
     return names, False
 
 
+def _state(path: Path) -> dict | None:
+    """One file's state in the shape `capture` records, or None when it cannot be read safely."""
+    try:
+        kind, raw, mode = capture_file_state(path, maximum=MAX_FILE_BYTES)
+    except (OSError, ValueError):
+        return None
+    if kind == "missing":
+        return dict(_MISSING)
+    text = None
+    if b"\0" not in raw and len(raw) <= MAX_DIFF_BYTES:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+    return {"kind": kind, "hash": hashlib.sha256(raw).hexdigest(), "mode": mode, "text": text}
+
+
 def capture(root: Path) -> dict:
     """Enumerate the workspace, keeping what was reachable and saying when that was not all.
 
@@ -191,12 +208,39 @@ class ChatChanges:
         self.files: dict[str, list[dict]] = {}
         self.incomplete = False
         self._active_before = None
+        # This turn's own edits: what each file held just before one of DGC's file tools wrote it.
+        self._touched: dict[str, dict] = {}
 
     def begin(self):
         before = capture(self.root)
         with self.lock:
             self._active_before = before
+            self._touched = {}
         return before
+
+    def touched(self, path) -> None:
+        """A file tool is about to write `path`: remember what it holds now.
+
+        The workspace scan is bounded -- a non-Git folder past 4,096 files records nothing, a
+        repository with more changed files than that keeps a prefix, a slow tree stops at the
+        deadline -- and an edit it does not reach was invisible: the bar said "Changes not
+        recorded" while the model was editing files in front of you. DGC made these edits itself,
+        so it never has to go looking for them. A shell command's edits still rely on the scan.
+        """
+        try:
+            name = Path(path).resolve().relative_to(self.root).as_posix()
+        except (OSError, ValueError):
+            return                     # outside this chat's root: never this chat's change set
+        if not _path(name):
+            return
+        with self.lock:
+            if (self._active_before is None or name in self._touched
+                    or len(self._touched) >= MAX_CHANGED_FILES):
+                return
+        state = _state(self.root / name)
+        if state is not None:
+            with self.lock:
+                self._touched.setdefault(name, state)
 
     def view(self):
         """An owner-only live projection; never mutate durable evidence from an inspection."""
@@ -205,14 +249,20 @@ class ChatChanges:
             if before is None:
                 return self
             preview = self.from_state(self.root, self.state())
-        preview.finish(before)
+            touched = dict(self._touched)
+        preview.finish(before, touched=touched)
         return preview
 
-    def finish(self, before):
+    def finish(self, before, touched: dict | None = None):
         after = capture(self.root)
+        with self.lock:
+            own = dict(self._touched if touched is None else touched)
+        # Read now, outside the lock, exactly as `capture` reads.
+        own_after = {name: _state(self.root / name) for name in own}
         with self.lock:
             if self._active_before is before:
                 self._active_before = None
+                self._touched = {}
             bounded = not before["complete"] or not after["complete"]
             if bounded:
                 self.incomplete = True
@@ -223,6 +273,8 @@ class ChatChanges:
             # Returning here instead -- which is what this did -- threw away every real change in
             # the turn as well, which is how a large repository ended up with an empty change set.
             names = before["files"].keys() | after["files"].keys()
+            # Every file this turn's tools wrote, wherever the scan stopped.
+            names |= {name for name, state in own_after.items() if state is not None}
             if bounded:
                 # A deleted file is in neither capture's `files` -- `capture` skips a missing path --
                 # so a bounded turn that deleted something would record nothing at all. The selected
@@ -232,7 +284,13 @@ class ChatChanges:
                 if name in skipped:
                     continue
                 left, right = before["files"].get(name, _MISSING), after["files"].get(name, _MISSING)
-                if bounded and name not in before["files"]:
+                if name in own and name not in before["files"]:
+                    # The scan never saw it, but the tool recorded it just before writing: that,
+                    # not HEAD or "missing", is what the turn started from.
+                    left = own[name]
+                    if name not in after["files"] and own_after.get(name) is not None:
+                        right = own_after[name]
+                elif bounded and name not in before["files"]:
                     # A bounded `before` only listed what already differed from HEAD, so a file the
                     # turn edited from CLEAN is absent from it. Absent does not mean "created": its
                     # state at the start of the turn was HEAD's, and reading it from there is what
