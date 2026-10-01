@@ -524,6 +524,9 @@
   let queuedCount = 0, customCommands = [], skillRows = [];
   let skillManagement = false;
   let liveSteering = false, nativeSteering = false;
+  // The backend reports its sub-agents as agent frames (capabilities.agents): their lines in the
+  // transcript then say what the backend's own spawn notices used to.
+  let agentsLive = false;
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
@@ -937,8 +940,12 @@
   // These two take their object from the card's detail -- the agent, by what it was asked to do --
   // so the sentence carries it, in both tenses: "Sent message to Write the parser", where it used
   // to say "Used 1 tool". Without a detail they fall back to the CLI's own words (dgc/ui.py).
-  const NAMES_ITS_AGENT = new Set(["message_task", "close_task"]);
-  const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent" };
+  // A delegation names the agent it started the same way: a spawn no agent line has taken (an older
+  // CLI, a task that was refused or never started, an agent the backend stopped listing) reads
+  // "Delegated Write the parser", which is also what a reload of it draws.
+  const NAMES_ITS_AGENT = new Set(["message_task", "close_task", "task"]);
+  const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent",
+    task: "delegating to a sub-agent" };
   function pluginLogoHtml(name) {
     const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
     const src = match && pluginLogos[match[1]];
@@ -1469,6 +1476,29 @@
   function scheduleRepin(delay) {
     clearTimeout(repinTimer); repinTimer = setTimeout(() => repinStaleBlocks(), delay);
   }
+  // The top-level block at the top of the view: the one a reader is reading, which must not move
+  // when something above it changes height.
+  function readingAnchor() {
+    const top = log.getBoundingClientRect().top;
+    return [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
+      .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > top) || null;
+  }
+  // Change the transcript without moving what is being read: whatever the change did to the height
+  // of the blocks above the view, the block at its top stays where it was (#log sets
+  // overflow-anchor: none, so the browser does not do this for us). A reader following the end
+  // gets the follow scroll instead.
+  function holdReadingPlace(mutate) {
+    const anchor = following ? null : readingAnchor();
+    const before = anchor?.getBoundingClientRect().top;
+    mutate();
+    if (anchor?.isConnected) log.scrollTop += anchor.getBoundingClientRect().top - before;
+  }
+  // A settled block that changed inside may be skipped right now, laid out at its pinned height: mark
+  // its pin stale, so it is measured again (with the reader held in place) before a scroll reaches it.
+  function repinBlockOf(node) {
+    const block = node?.closest?.(".msg.settled");
+    if (block) { block._pinnedWidth = -1; scheduleRepin(0); }
+  }
   // `nearView`: only the blocks a scroll is about to reach, leaving the rest to the timer. Chromium
   // renders skippable blocks up to 150% of the view's height beyond either edge, so that is where a
   // block starts drawing at its real height: within three view heights of the middle covers that
@@ -1498,9 +1528,7 @@
       .slice(0, REPIN_BATCH).map(([, node]) => node);
     if (!stale.length && !loose.length) return;
     if (!nearView && candidates.length > REPIN_BATCH) repinTimer = setTimeout(() => repinStaleBlocks(), 16);
-    const logTop = view.top;
-    const anchor = following ? null : [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
-      .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > logTop);
+    const anchor = following ? null : readingAnchor();
     const anchorTop = anchor?.getBoundingClientRect().top;
     for (const node of stale) node.classList.remove("settled");   // rendered again, so laid out at this width
     // Inside the anchor above, so a fold appearing or going away over the reader does not move them.
@@ -2865,8 +2893,20 @@
       group.open = true;
     }
   }
+  // A DGC delegation from the chat's own model: the step that starts a sub-agent the transcript
+  // draws as an agent line. The exact name, not canonicalTool(): Claude's and Codex's own "Task"
+  // send no agent frames, so their card is the only view of that work and keeps today's grouping.
+  // A child's spawn (a sub- prefixed call id) is the child's work and is grouped like its other steps.
+  function isTopLevelSpawn(card) { return card.dataset.toolName === "task" && !agentIdFromCall(card.dataset.callId); }
   function appendTool(card) {
     if (!turn) return;
+    // Every delegation gets a group of its own, and the step's next tool opens a new one below it,
+    // so the agent line drawn after the spawn sits between them. Live, the claim hides the spawn's
+    // group the moment its agent starts; a replay draws every call of the step before any result,
+    // and without this a [task, bash] step put the bash group above the line after a reload and
+    // below it live. The group the spawn left folds when the model moves on, like any other.
+    const spawn = isTopLevelSpawn(card);
+    if (spawn && turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
       turn.toolGroup.innerHTML = `<summary><span class="tg-icon" data-icon="wrench" aria-hidden="true">${icon("wrench")}</span>`
@@ -2875,7 +2915,11 @@
       // the moment it was created, so a run of twenty commands showed one grey line and the
       // reader had no idea what had just been done to their project. The summary sentence still
       // sits in the header when the group is folded by hand.
-      turn.toolGroup.open = true;
+      //
+      // A spawn's group starts folded: its header already reads "Delegating <what it was asked to
+      // do>", the card inside would only repeat it, and the agent's own work is on its page.
+      // refreshToolGroup still opens it the first time the delegation fails or is refused.
+      turn.toolGroup.open = !spawn;
       // Capture the element. Reading it back through `turn` fires after a rewind or a turn change
       // has already cleared turn.toolGroup, and the listener then throws on null -- which took out
       // nineteen tests across agents, reloads, steering replay and the image viewer.
@@ -2888,6 +2932,7 @@
     }
     turn.toolGroup.appendChild(card);
     refreshToolGroup(turn.toolGroup);
+    if (spawn) turn.toolGroup = null;
   }
 
   // Tools whose summary is a shell command, so there is something worth copying verbatim.
@@ -2951,14 +2996,21 @@
       if (elapsed) elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
     }, 200);
   }
-  function toolCard(ev) {
+  // `detached`: a card drawn somewhere other than the live turn (an agent page rebuilt from the
+  // agent's own step log). It is never put in the turn, never breaks the turn's streaming text, never
+  // runs a clock and is never offered to the agents lane.
+  function toolCard(ev, { detached = false } = {}) {
     const c = el("div", "tool");
     c.dataset.toolName = String(ev.name || "");
     c.dataset.callId = String(ev.call_id || "");
     c.dataset.summary = String(ev.summary || "");
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
-    const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
+    // A delegation is named by what it was asked to do. The CLI's summary of a task call is empty
+    // (dgc/ui.py arg_summary has no key for it), and a refused one carries the refusal there.
+    const described = canonicalTool(ev.name) === "task" && typeof ev.args?.description === "string"
+      ? ev.args.description.replace(/\s+/g, " ").trim() : "";
+    const detail = [copy.target, described || ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
     const pluginMark = pluginLogoHtml(ev.name);
     c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${pluginMark || icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
@@ -2979,12 +3031,13 @@
     toggle.appendChild(status);
     // Nothing is running in a replayed turn, so neither the pulse nor the stopwatch is started:
     // both would be animating a step that finished before the window was reopened.
-    const dot = el("span", replaying ? "dot" : "dot run"); dot.setAttribute("aria-hidden", "true");
+    const dot = el("span", replaying || detached ? "dot" : "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
     head.appendChild(el("span", "tool-time", ""));
-    if (!replaying) startToolClock(c);
+    if (!replaying && !detached) startToolClock(c);
     setToolStatus(c, "running");
+    if (detached) return c;
     appendTool(c); breakText(); agentsOnToolCard(c, ev); return c;
   }
   // A tool card shows its output as soon as there is any: the head says what ran, the body shows
@@ -3981,6 +4034,7 @@
         skillManagement = ev.capabilities?.skill_management === true;
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
+        agentsLive = ev.capabilities?.agents === true;
         imageSpool = ev.capabilities?.image_spool === true;
         mcpContextSupported = ev.capabilities?.mcp_context === true;
         mcpManagement = ev.capabilities?.mcp_management === true;
@@ -4140,11 +4194,16 @@
         break;
       }
       case "text_delta": ensureTurn(); finishReasoning(); releaseToolGroup(); turn.chars += ev.text.length; appendText(ev.text); break;
+      // A background sub-agent's own work arrives after the turn that started it has ended. It is on
+      // the agent's page, never in the chat: it must not open a turn, scroll, or raise "New". (The
+      // returns below skip the follow tail at the end of this switch on purpose.)
       case "thinking_delta":
-        if (!turn && (ev.agent || agentIdFromCall(ev.call_id))) break;
+        if (!turn && (ev.agent || agentIdFromCall(ev.call_id))) return;
         ensureTurn(); turn.chars += String(ev.text || "").length;
         reasoningDelta(ev); break;
-      case "thinking_end": ensureTurn(); reasoningEnd(ev); break;
+      case "thinking_end":
+        if (!turn && ev.agent) return;
+        ensureTurn(); reasoningEnd(ev); break;
       // The block that just closed, named and classified by the backend. `phase` absent means
       // undetermined (a cancelled or errored round genuinely does not know), and then nothing is
       // claimed here: `turn_end` still designates the answer.
@@ -4173,7 +4232,7 @@
             placeChildTool(childId, card);
             agentsOnToolCard(card, ev);
           }
-          break;
+          return;
         }
         ensureTurn(); finishReasoning();
         turn._tools = turn._tools || Object.create(null);
@@ -4206,7 +4265,7 @@
           // A background child's step that outlived its turn still reports progress.
           const c = ev.call_id ? childToolBucket(childId)[ev.call_id] : null;
           if (c && c.dataset.status === "running") showToolProgress(c, ev);
-          break;
+          return;
         }
         ensureTurn();
         turn._tools = turn._tools || Object.create(null);
@@ -4229,9 +4288,12 @@
           if (ev.is_diff && ev.diff) {
             c.classList.add("no-body");
             const rendered = renderDiff(ev.diff); c.after(rendered);
-            rendered.dataset.agentId = childId; rendered.classList.add("agent-owned");
+            // The card's own owner: a nested child's edit belongs on that child's page.
+            rendered.dataset.agentId = c.dataset.agentId || childId; rendered.classList.add("agent-owned");
           } else setToolOutput(c, String(ev.output || "").slice(0, 4000));
-          break;
+          // A nested delegation's result is that child's integration outcome, on its page.
+          if (agentPageId && c.dataset.toolName === "task" && c.dataset.agentId === agentPageId) paintAgentPage(agentPageId);
+          return;
         }
         ensureTurn();
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
@@ -4270,6 +4332,9 @@
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
         }
+        // The open page of the agent this delegation started: its outcome note reads this result,
+        // which arrives after the agent's own end.
+        if (agentPageId && c.dataset.toolName === "task" && c.dataset.agentId === agentPageId) paintAgentPage(agentPageId);
         breakText(); break;
       }
       case "tool_denied": {
@@ -4474,10 +4539,22 @@
       case "monitors":
         renderMonitors(ev);
         break;
-      case "agent_started": applyAgentEvent(ev); break;
-      case "agent_updated": applyAgentEvent(ev); break;
-      case "agent_ended": applyAgentEvent(ev); break;
-      case "agents": renderAgentsSnapshot(ev); break;
+      // An agent's line changes in place: a reader following the end stays pinned to it, and one
+      // who scrolled back is neither moved nor told there is something "New". Only a top-level
+      // agent starting in the live turn is new content at the bottom, with the usual tail.
+      case "agent_started":
+        applyAgentEvent(ev);
+        if (turn && !ev.parent_id) break;
+        if (stick || following) scroll();
+        return;
+      case "agent_updated": case "agent_ended":
+        applyAgentEvent(ev);
+        if (stick || following) scroll();
+        return;
+      case "agents":
+        renderAgentsSnapshot(ev);
+        if (stick || following) scroll();
+        return;
       case "files_ready": {
         // A file the model made, as a chip under the step that made it. Codex's model exactly:
         // the event carries a PATH, and clicking asks the editor to open it -- no bytes cross the
@@ -4501,13 +4578,15 @@
         // replay — interleaving several children there is what buffering exists to prevent — but
         // this page shows one agent, so it can have the step now. Without it the page sat empty
         // behind a running timer for as long as the child worked.
+        // It never touches the chat, so it returns past the follow tail: a step of a background
+        // agent whose turn has ended raised "New" for nothing a reader could see.
         const who = String(ev.agent_id || "");
         const step = ev.step && typeof ev.step === "object" ? ev.step : null;
-        if (!who || !step) break;
+        if (!who || !step) return;
         const record = agentRecords.get(who);
-        if (!record) break;
+        if (!record) return;
         if (!Array.isArray(record.log)) record.log = [];
-        if (record.log.length >= 400) break;                  // a page, not an archive
+        if (record.log.length >= 400) return;                 // a page, not an archive
         record.log.push(step);
         // Repainting on every step is QUADRATIC: paintAgentPage clears and rebuilds the whole log,
         // so a child that makes hundreds of calls rebuilds a growing list hundreds of times. The
@@ -4519,7 +4598,7 @@
             if (agentPageId === who) paintAgentPage(who);
           }, 60);
         }
-        break;
+        return;
       }
       case "artifact_ready": {
         ensureTurn();
@@ -4633,6 +4712,11 @@
         break;
       case "rule_added": sysLine("rule: " + ev.rule, false, "shield-plus"); break;
       case "info":
+        // A sub-agent's spawn notices ("⟳ sub-task: …", "↳ isolated checkout: …", "↯ running N
+        // isolated sub-tasks in parallel") are what its line in the transcript now says, and the
+        // agent's page names an isolated checkout. They were never replayed either, so a reload
+        // always drew the chat without them. A backend without agent frames still prints them.
+        if (agentsLive && AGENT_SPAWN_NOTICE.test(String(ev.message || ""))) return;
         if (String(ev.message || "").startsWith("Switched to ")) {
           const line = el("div", "sys model-switch", esc(ev.message));
           appendConversationContent(line);
@@ -6245,6 +6329,9 @@
     if (!turn) return;
     retireToolGroup(turn.toolGroup);
     turn.toolGroup = null;
+    // The groups a delegation split off earlier in the step (see appendTool) fold now too: every
+    // release point comes after the step's results, live and replayed alike.
+    for (const group of turn.leftGroups?.splice(0) || []) retireToolGroup(group);
   }
   function endToolGroup() { releaseToolGroup(); }
   // ---- end 0.40 shared ----------------------------------------------------------------------------
@@ -6270,8 +6357,15 @@
   let agentPageParentTitle = "";
   let agentPageScroll = 0;
   let agentPageTick = null;
+  // Pages opened from a nested agent's name, so Back steps back to the parent page; and the control
+  // that opened the first page, which gets focus back when the chat returns.
+  let agentPageStack = [], agentPageReturnFocus = null;
+  // The agent lines: one per batch of top-level agents started together in #log, and the lines of
+  // the open page's nested agents (rebuilt with the page).
+  const agentLines = new Set();
+  let agentPageLines = [];
   // Pack B identity marks in media/agents/. Same file on light and dark (they hold on #141414).
-  // Always the still frame: the -animated swirl reads as a colour smear at chip size. The face is
+  // Always the still frame: the -animated swirl reads as a colour smear at 16px. The face is
   // drawn bare, with no ring around it, live or finished (`.is-live` is state only). Which face an
   // agent wears is the CLI's face slot when it sends one (first free, so two at work never match);
   // otherwise the id's own face.
@@ -6283,9 +6377,17 @@
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
   }
+  // A child's call ids are prefixed with its agent's id at every level (sub-parent:sub-child:call_3,
+  // dgc/agent.py). This is the outermost, the top-level agent whose line hosts the work.
   function agentIdFromCall(callId) {
     const match = String(callId || "").match(/^(sub-[0-9a-f]{12})(?::|$)/i);
     return match ? match[1] : "";
+  }
+  // ...and this the innermost: the agent that made the call, whose page it belongs on (the same id a
+  // child's reasoning carries in `agent`).
+  function innermostAgentId(callId) {
+    const chain = String(callId || "").match(/^(?:sub-[0-9a-f]{12}(?::|$))+/i)?.[0] || "";
+    return chain.split(":").filter(Boolean).at(-1) || "";
   }
   // The id's own face. Math.imul(h, 33) ≡ h (mod 8), so this is the sum of the id's character
   // codes mod 8: ids made of the same characters always collide (sid(1) and sid(9) both seafoam).
@@ -6339,75 +6441,329 @@
     }
     if (img.getAttribute("src") !== src) img.setAttribute("src", src);
   }
-  function agentStatusWord(record) {
-    if (record.state === "finished" || record.state === "failed" || record.state === "stopped") return record.state;
-    if (record.state === "waiting") return "waiting";
-    if (record.state === "queued") return "queued";
-    return "working";
+  // ---- the lines in the transcript ----
+  // Codex's inline sub-agent line: one quiet line for each batch of top-level agents started
+  // together, where each used to get a full-width row of its own. Faces first, then a sentence in
+  // which only the names are controls, each opening that agent's page: "Durable rules review, Remote
+  // web and Paper pip concept started working". The names keep their call order and never move --
+  // the founder reported agents "switching their place" when every one had its own row, and Codex
+  // keeps an agent where it started. Only the words between the names change: one word per agent,
+  // and neighbours that share a word share it, "A and B finished · C running".
+  const AGENT_START_MS = 2000, AGENT_NAMES_SHOWN = 3, AGENT_FACES_SHOWN = 4;
+  // What splits a batch: only what the model itself wrote -- a visible tool group, prose, its
+  // reasoning -- and the user's steering. Everything else that can sit between two spawns exists in
+  // one stream and not the other: an approval card live and its recorded decision only on replay,
+  // notices and retry lines, file chips, artifacts and monitor cards, a child's hidden work. Leaving
+  // all of it out is what makes a reload draw the lines the live turn drew.
+  const AGENT_LINE_SPLIT = ".tool-group:not(.agent-owned), .text, .answer, .disclosure:not(.agent-owned), "
+    + ".reasoning:not(.agent-owned), .thought-note, .thought-static:not(.agent-owned), .msg.user";
+  // The order a collapsed line counts its words in: agentSummary's.
+  const AGENT_WORD_ORDER = ["started working", "running", "waiting for your permission", "waiting for your answer",
+    "queued", "finished", "failed", "stopped"];
+  const AGENT_WORD_STATE = { "started working": "started", running: "running", "waiting for your permission": "waiting",
+    "waiting for your answer": "waiting", queued: "queued", finished: "finished", failed: "failed", stopped: "stopped" };
+  // The backend's own notices for a spawn (dgc/agent.py; a test pins the wording to them).
+  const AGENT_SPAWN_NOTICE = /^(?:⟳ sub-task: |↳ isolated checkout: |↯ running \d+ isolated sub-tasks in parallel\b)/;
+  // A clause separator: " · " for the eye, a comma for a screen reader (reasonAgentPrefix's pause).
+  const AGENT_SEP = { sep: true };
+  // First members of the lines whose "N more" was used: an expanded line stays expanded for the
+  // session, through a repaint of the page it is on.
+  const agentLinesExpanded = new Set();
+  function agentDisplayName(record) {
+    return String(record?.description || "").replace(/\s+/g, " ").trim() || "Agent";
   }
-  function agentChipOf(id) {
-    const sel = `.agent-chip[data-agent-id="${cssEscape(id)}"]`;
-    return (appendTarget && appendTarget.querySelector ? appendTarget.querySelector(sel) : null) || log.querySelector(sel);
+  // agentTree's order: by start, a restored record (no start time) first, then first seen.
+  function agentByStart(a, b) {
+    const at = (r) => (r.started_at === undefined || r.started_at === null ? -Infinity : Number(r.started_at));
+    return (at(a) - at(b)) || a.order - b.order;
+  }
+  // What a line says for one agent. "started working" is said only live, for two seconds from the
+  // moment the agent really starts: a parallel child waiting for a worker reads "queued" until one
+  // takes it. A reload, a resume or a chat switch draws the word the agent has now.
+  function agentLineWord(record, now) {
+    const state = record.state;
+    if (state === "finished" || state === "failed" || state === "stopped") return { word: state, state };
+    if (state === "waiting") {
+      return { word: record.waiting_for === "answer" ? "waiting for your answer" : "waiting for your permission", state: "waiting" };
+    }
+    if (state === "queued") return { word: "queued", state: "queued" };
+    if (record.startedLiveAt != null && now - record.startedLiveAt < AGENT_START_MS) return { word: "started working", state: "started" };
+    return { word: "running", state: "running" };
   }
   const childToolStores = new Map();
   function childToolBucket(id) {
     if (!childToolStores.has(id)) childToolStores.set(id, Object.create(null));
     return childToolStores.get(id);
   }
+  function agentLineOf(id) {
+    for (const line of agentLines) if (line.ids.includes(id)) return line;
+    return null;
+  }
+  // A background child's step that arrives after its turn ended: hidden, on its own agent, in the
+  // block that holds its top-level agent's line. Found in the live DOM: a reload replaces the blocks.
   function placeChildTool(id, card) {
-    card.dataset.agentId = id;
+    card.dataset.agentId = innermostAgentId(card.dataset.callId) || id;
     card.classList.add("agent-owned");
-    const chip = agentChipOf(id);
-    const host = (chip && chip.closest(".msg")) || log;
-    host.appendChild(card);
+    const line = log.querySelector(`.agent-line[data-agent-ids~="${cssEscape(id)}"]`);
+    (line?.closest(".msg") || log).appendChild(card);
   }
-  function placeAgentChip(chip, id) {
-    // A chip is placed ONCE and then stays put. `group.after(chip)` MOVES a node that is already
-    // in the document, so re-running this on every update dragged each agent's chip down to its
-    // newest tool group — and with two agents delegated, each one's next tool call yanked it below
-    // the other. They swapped places under the reader for the whole turn. Codex keeps an agent
-    // where it started, and so does this now: once anchored, it stays anchored.
-    if (chip.dataset.anchored === "1") return;
-    const anchor = agentAnchor(id);
-    if (anchor && anchor.isConnected) {
-      const group = anchor.closest(".tool-group") || anchor;
-      group.after(chip);
-      chip.dataset.anchored = "1";        // anchored to its own work; never relocate again
-      return;
-    }
-    if (chip.isConnected) return;        // placed provisionally; a real anchor may still claim it
-    if (turn) appendTurnContent(chip);
-    else (appendTarget || log).appendChild(chip);
+  function newAgentLine({ provisional = false, page = false } = {}) {
+    const node = el("div", "agent-line");
+    node.setAttribute("role", "group");
+    node.setAttribute("aria-label", "Sub-agent");
+    const faces = el("span", "agent-line-faces");
+    faces.setAttribute("aria-hidden", "true");
+    const text = el("span", "agent-line-text");
+    const tail = el("span", "agent-line-tail");
+    text.appendChild(tail);
+    node.append(faces, text);
+    const line = { node, faces, text, tail, ids: [], names: new Map(), marks: new Map(), glues: new Map(),
+      more: null, moreGlue: null, expanded: false, timer: 0, provisional, page, sig: "" };
+    if (!page) agentLines.add(line);
+    return line;
   }
-  function ensureAgentChip(record) {
-    if (!record?.id) return;
-    const id = String(record.id);
-    const live = AGENT_ACTIVE.has(record.state);
-    if (!live && !agentAnchor(id)) {
-      const stray = agentChipOf(id);
-      if (stray && stray.isConnected) stray.remove();
-      return;
+  function dropAgentLine(line) {
+    clearTimeout(line.timer); line.timer = 0;
+    repinBlockOf(line.node);
+    line.node.remove();
+    agentLines.delete(line);
+  }
+
+  // ---- which spawns share a line ----
+  function spawnGroupOf(card) { return card.closest(".tool-group") || card; }
+  function splitsAgentBatch(node) {
+    if (!node.matches(AGENT_LINE_SPLIT)) return false;
+    // Blank prose is never replayed (dgc/headless.py draws a message's text only when it has some).
+    if (node.matches(".text, .answer")) return !!node.textContent.trim();
+    // A plan update on its own is bookkeeping the backend runs beside a batch, not a step.
+    if (node.matches(".tool-group")) {
+      return [...node.querySelectorAll(":scope > .tool:not(.agent-owned)")]
+        .some((card) => canonicalTool(card.dataset.toolName) !== "todo");
     }
-    let chip = agentChipOf(id);
-    if (!chip) {
-      chip = el("button", "agent-chip");
-      chip.type = "button";
-      chip.dataset.agentId = id;
-      const mark = el("span", "agent-mark");
-      mark.setAttribute("aria-hidden", "true");
-      const label = el("span", "agent-chip-label");
-      chip.append(mark, label);
-      chip.addEventListener("click", () => openAgentPage(id));
+    return true;
+  }
+  function spawnsAdjacent(a, b) {
+    const ga = spawnGroupOf(a), gb = spawnGroupOf(b);
+    if (ga === gb) return true;
+    if (!ga.parentElement || ga.parentElement !== gb.parentElement) return false;
+    for (let node = ga.nextElementSibling; node; node = node.nextElementSibling) {
+      if (node === gb) return true;
+      if (splitsAgentBatch(node)) return false;
     }
-    placeAgentChip(chip, id);
-    paintAgentMark(chip.querySelector(".agent-mark"), id, AGENT_ACTIVE.has(record.state));
-    const label = chip.querySelector(".agent-chip-label");
-    const name = String(record.description || "Agent").trim() || "Agent";
-    const status = agentStatusWord(record);
-    agentsSetText(label, `${name} ${status}`);
-    chip.title = `Open ${name}`;
-    chip.setAttribute("aria-label", `Open ${name}, ${status}`);
-    if (agentPageId === id) paintAgentPage(id);
+    return false;
+  }
+  // The claimed spawn cards of top-level agents, in document order.
+  function agentLineCards() {
+    return [...log.querySelectorAll('.msg .tool[data-tool-name="task"][data-agent-id]')].filter((card) => {
+      const record = agentRecords.get(card.dataset.agentId);
+      return !!record && !record.parent_id && !agentIdFromCall(card.dataset.callId) && agentAnchor(record.id) === card;
+    });
+  }
+  // Lines are derived from the DOM, never from the order things arrived in: the claimed spawn cards,
+  // and whether anything between their groups splits them. Live claims, claims made out of order and
+  // the snapshot after a history therefore all converge on the same lines. A line sits after the
+  // group of its first spawn, and moves only if an earlier spawn joins its batch.
+  function layoutAgentLines() {
+    holdReadingPlace(() => {
+      const runs = [];
+      for (const card of agentLineCards()) {
+        const run = runs.at(-1);
+        if (run && spawnsAdjacent(run.at(-1), card)) run.push(card); else runs.push([card]);
+      }
+      const used = new Set();
+      for (const run of runs) {
+        const ids = run.map((card) => card.dataset.agentId);
+        const line = ids.map(agentLineOf).find((l) => l && !l.provisional && !used.has(l)) || newAgentLine();
+        used.add(line);
+        line.ids = ids;
+        const group = spawnGroupOf(run[0]);
+        if (group.nextElementSibling !== line.node) { group.after(line.node); repinBlockOf(line.node); }
+      }
+      for (const line of [...agentLines]) if (!line.provisional && !used.has(line)) dropAgentLine(line);
+      pruneProvisionalLines();
+      for (const line of used) paintAgentLine(line);
+    });
+  }
+  // A provisional line holds live agents whose spawn card is not on screen yet (an agent can start
+  // before its tool_call arrives). A member leaves it once its card is claimed -- the line then forms
+  // under the card -- or when it ends without one, as the row it replaced did: a reload draws no line
+  // for an agent with no card either.
+  function pruneProvisionalLines() {
+    for (const line of [...agentLines]) {
+      if (!line.provisional) continue;
+      line.ids = line.ids.filter((id) => {
+        const record = agentRecords.get(id);
+        return !!record && !record.parent_id && AGENT_ACTIVE.has(record.state) && !agentAnchor(id);
+      });
+      if (!line.ids.length || !line.node.isConnected) dropAgentLine(line);
+      else paintAgentLine(line);
+    }
+  }
+  function provisionalAgentLine(record) {
+    if (agentsHoldClaims || record.parent_id || !AGENT_ACTIVE.has(record.state)
+        || agentAnchor(record.id) || agentLineOf(record.id)) return;
+    const last = turn ? turn.act.previousElementSibling : log.lastElementChild;
+    let line = [...agentLines].find((l) => l.provisional && l.node === last);
+    if (!line) {
+      line = newAgentLine({ provisional: true });
+      if (turn) appendTurnContent(line.node); else log.appendChild(line.node);
+    }
+    line.ids = [...line.ids, record.id].sort((a, b) => agentByStart(agentRecords.get(a), agentRecords.get(b)));
+    paintAgentLine(line);
+  }
+  function repaintAgentLines() {
+    pruneProvisionalLines();
+    for (const line of [...agentLines]) if (!line.provisional) paintAgentLine(line);
+    for (const line of agentPageLines) paintAgentLine(line);
+  }
+
+  // ---- painting a line ----
+  function agentLineFace(line, record) {
+    let mark = line.marks.get(record.id);
+    if (!mark) {
+      mark = el("span", "agent-mark");
+      mark.dataset.agentId = record.id;
+      line.marks.set(record.id, mark);
+    }
+    paintAgentMark(mark, record.id, AGENT_ACTIVE.has(record.state));
+    return mark;
+  }
+  // One button per agent, kept for the line's life and never moved, so a focused name keeps focus
+  // through every repaint. Its label is the whole name, however it is clipped on screen.
+  function agentLineName(line, record) {
+    let button = line.names.get(record.id);
+    if (!button) {
+      button = el("button", "agent-name");
+      button.type = "button";
+      button.dataset.agentId = record.id;
+      const id = record.id, opener = button;
+      button.addEventListener("click", () => openAgentPage(id, { from: opener, nested: line.page }));
+      line.names.set(record.id, button);
+    }
+    const name = agentDisplayName(record);
+    agentsSetText(button, name);
+    const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
+    hoverTip.retitle(button, `Open ${name}${why ? `\n${why}` : ""}`);
+    return button;
+  }
+  // The words between the names: strings, {state, text} for an agent's word, AGENT_SEP between
+  // clauses. A span rebuilds its children only when its own parts change.
+  function setAgentLineParts(span, parts) {
+    const sig = JSON.stringify(parts);
+    if (span._sig === sig) return;
+    span._sig = sig;
+    span.replaceChildren(...parts.flatMap((part) => {
+      if (part === AGENT_SEP) {
+        const dot = el("span"); dot.setAttribute("aria-hidden", "true"); dot.textContent = " · ";
+        const pause = el("span", "sr-only"); pause.textContent = ",";
+        return [dot, pause];
+      }
+      if (typeof part === "string") return [document.createTextNode(part)];
+      const word = el("span", "agent-state");
+      word.dataset.state = part.state;
+      word.textContent = part.text;
+      return [word];
+    }));
+  }
+  // The one painter for the chat's lines and an agent page's lines.
+  function paintAgentLine(line) {
+    const now = agentNow();
+    const members = line.ids.map((id) => agentRecords.get(id)).filter(Boolean);
+    if (!members.length) { if (!line.page) dropAgentLine(line); return; }
+    if (agentLinesExpanded.has(line.ids[0])) line.expanded = true;
+    agentsPlace(line.faces, members.slice(0, AGENT_FACES_SHOWN).map((record) => agentLineFace(line, record)));
+    const words = members.map((record) => agentLineWord(record, now));
+    const uniform = words.every((w) => w.word === words[0].word);
+    const collapsed = members.length > AGENT_NAMES_SHOWN && !line.expanded;
+    const shown = collapsed ? members.slice(0, 2) : members;
+    const said = (w) => ({ state: w.state, text: w.word });
+    // Between two names: the join when they share a word ("A, B and C"), else the first one's word
+    // and a clause separator. Names never move; only these change.
+    const glues = shown.slice(0, -1).map((record, i) => {
+      if (collapsed) return [", "];
+      if (words[i].word !== words[i + 1].word) return [" ", said(words[i]), AGENT_SEP];
+      const lastOfRun = i + 2 >= shown.length || words[i + 2].word !== words[i + 1].word;
+      return [lastOfRun ? " and " : ", "];
+    });
+    const hidden = collapsed ? members.length - shown.length : 0;
+    let tail = [" ", said(words.at(-1))];
+    if (collapsed && !uniform) {
+      // "A, B and 14 more · 4 running · 10 queued · 2 finished": the batch's counts, in the pill's order.
+      tail = [];
+      for (const word of AGENT_WORD_ORDER) {
+        const count = words.filter((w) => w.word === word).length;
+        // A no-break space: a row never ends on the bare number ("· 3" above "running").
+        if (count) tail.push(AGENT_SEP, { state: AGENT_WORD_STATE[word], text: `${count}\u00a0${word}` });
+      }
+    }
+    const names = shown.map((record) => agentLineName(line, record));
+    const sig = JSON.stringify([shown.map((record) => [record.id, agentDisplayName(record)]), glues, hidden, tail]);
+    if (sig !== line.sig) {
+      const apply = () => {
+        const nodes = [];
+        names.forEach((button, i) => {
+          nodes.push(button);
+          if (i >= glues.length) return;
+          const id = shown[i].id;
+          let glue = line.glues.get(id);
+          if (!glue) { glue = el("span", "agent-line-glue"); line.glues.set(id, glue); }
+          setAgentLineParts(glue, glues[i]);
+          nodes.push(glue);
+        });
+        if (hidden) {
+          if (!line.more) {
+            line.moreGlue = el("span", "agent-line-glue");
+            const more = line.more = el("button", "agent-line-more");
+            more.type = "button";
+            // One way: it reveals every name in place and is gone, so it has no expanded state to
+            // report. Focus moves to the first name it revealed rather than being lost with it.
+            more.addEventListener("click", () => {
+              line.expanded = true;
+              if (line.ids[0]) agentLinesExpanded.add(line.ids[0]);
+              paintAgentLine(line);
+              focusQuietly(line.names.get(line.ids[2]), { preventScroll: true });
+            });
+          }
+          setAgentLineParts(line.moreGlue, [" and "]);
+          agentsSetText(line.more, `${hidden} more`);
+          line.more.setAttribute("aria-label", `Show ${hidden} more agents`);
+          nodes.push(line.moreGlue, line.more);
+        }
+        setAgentLineParts(line.tail, tail);
+        nodes.push(line.tail);
+        agentsPlace(line.text, nodes);
+      };
+      // The sentence wraps, so a word can change a line's height -- in a settled block too, off
+      // screen. Keep the reader where they are, and have that block measured again.
+      if (line.page) apply(); else holdReadingPlace(apply);
+      line.sig = sig;
+      repinBlockOf(line.node);
+    }
+    line.node.dataset.agentIds = line.ids.join(" ");
+    line.node.setAttribute("aria-label", members.length === 1 ? "Sub-agent" : "Sub-agents");
+    // "started working" turns to "running" on its own: one timer for the line, at the latest window's
+    // end, so agents started a few milliseconds apart change together.
+    clearTimeout(line.timer); line.timer = 0;
+    const until = Math.max(0, ...members.filter((r) => r.state === "running" && r.startedLiveAt != null)
+      .map((r) => r.startedLiveAt + AGENT_START_MS));
+    if (until > now) line.timer = setTimeout(() => { line.timer = 0; if (line.node.isConnected) paintAgentLine(line); }, until - now);
+  }
+  // An agent's record changed: its line (or the provisional one it waits in), and the open page.
+  // `pagePainted`: the claim this change made already repainted the page.
+  function agentLineChanged(record, kind, pagePainted = false) {
+    if (!record.parent_id) {
+      const line = agentLineOf(record.id);
+      if (line?.provisional && !AGENT_ACTIVE.has(record.state)) pruneProvisionalLines();
+      else if (line) paintAgentLine(line);
+      else provisionalAgentLine(record);
+    }
+    if (!agentPageId) return;
+    if (agentPageId === record.id || (kind === "agent_started" && record.parent_id === agentPageId)) {
+      if (!pagePainted) paintAgentPage(agentPageId);
+    } else if (record.parent_id === agentPageId) {
+      // A nested agent's frequent updates repaint its line on the page in place, not the page.
+      for (const line of agentPageLines) if (line.ids.includes(record.id)) paintAgentLine(line);
+    }
   }
   function agentAnswerText(record) {
     return String(record.message || "").split("\n").filter((line) => !/^\s*FILES:/i.test(line)).join("\n").trim();
@@ -6442,45 +6798,76 @@
   }
   function paintAgentTranscript(id, into) {
     let cloned = 0;
+    const placed = new Set();
+    // A nested agent's spawn is drawn on its parent's page as the chat draws its own: a line, its
+    // name opening the child's page. Spawns with nothing of the parent's between them share one.
+    const pageLine = (childId) => {
+      let line = agentPageLines.find((l) => l.node === into.lastElementChild);
+      if (!line) {
+        line = newAgentLine({ page: true });
+        into.appendChild(line.node);
+        agentPageLines.push(line);
+      }
+      if (!line.ids.includes(childId)) line.ids.push(childId);
+      placed.add(childId);
+    };
     for (const node of log.querySelectorAll(".tool.agent-owned, .diff.agent-owned, button.disclosure.agent-owned, .reasoning.agent-owned, .thought-static.agent-owned, .thought-note.agent-owned")) {
+      if (node.classList.contains("tool") && node.dataset.toolName === "task") {
+        const child = agentRecords.get(node.dataset.agentId);
+        if (child && child.parent_id === id && agentAnchor(child.id) === node) { pageLine(child.id); cloned += 1; continue; }
+      }
       if ((node.dataset.agentId || node.dataset.agent) !== id) continue;
-      // The parent's `task` spawn card is tagged with this id for the pill; it is not the child's work.
+      // The spawn that started this agent is its parent's step, not this agent's work.
       if (node.classList.contains("tool") && node.dataset.toolName === "task"
-          && !String(node.dataset.callId || "").startsWith(`${id}:`)) continue;
+          && innermostAgentId(node.dataset.callId) !== id) continue;
       const clone = node.cloneNode(true);
       rebindAgentClone(clone);
       into.appendChild(clone);
       cloned += 1;
     }
-    if (cloned) return;
     const record = agentRecords.get(id);
-    const events = Array.isArray(record?.log) ? record.log : [];
-    const store = Object.create(null);
-    for (const ev of events) {
-      if (!ev || typeof ev !== "object") continue;
-      if (ev.type === "tool_call") {
-        const card = toolCard({ name: ev.name, call_id: ev.call_id, args: ev.args || {}, summary: ev.summary });
-        card.classList.add("agent-owned");
-        card.dataset.agentId = id;
-        store[ev.call_id || ev.name] = card;
-        into.appendChild(card);
-      } else if (ev.type === "tool_result") {
-        const key = ev.call_id || ev.name;
-        const card = store[key] || (store[key] = toolCard({ name: ev.name, call_id: ev.call_id }));
-        if (!card.isConnected) {
+    if (!cloned) {
+      // No steps of its own in the chat: the agent's saved (or live) step log. Its cards are drawn
+      // detached -- building them must not touch the live turn.
+      const events = Array.isArray(record?.log) ? record.log : [];
+      const store = Object.create(null);
+      const nested = (ev) => (ev.name === "task" && ev.call_id
+        ? [...agentRecords.values()].find((r) => r.parent_id === id && r.call_id === ev.call_id) : null);
+      for (const ev of events) {
+        if (!ev || typeof ev !== "object") continue;
+        if (ev.type === "tool_call") {
+          const child = nested(ev);
+          if (child) { pageLine(child.id); continue; }
+          const card = toolCard({ name: ev.name, call_id: ev.call_id, args: ev.args || {}, summary: ev.summary }, { detached: true });
           card.classList.add("agent-owned");
           card.dataset.agentId = id;
+          store[ev.call_id || ev.name] = card;
           into.appendChild(card);
+        } else if (ev.type === "tool_result") {
+          if (nested(ev)) continue;
+          const key = ev.call_id || ev.name;
+          const card = store[key] || (store[key] = toolCard({ name: ev.name, call_id: ev.call_id }, { detached: true }));
+          if (!card.isConnected) {
+            card.classList.add("agent-owned");
+            card.dataset.agentId = id;
+            into.appendChild(card);
+          }
+          setToolStatus(card, ev.is_error ? "failed" : "completed");
+          setToolOutput(card, String(ev.output || "").slice(0, 4000));
         }
-        setToolStatus(card, ev.is_error ? "failed" : "completed");
-        setToolOutput(card, String(ev.output || "").slice(0, 4000));
+      }
+      if (record?.restored && ![...into.children].some((node) => !node.classList.contains("agent-page-outcome"))) {
+        const note = el("div", "sys hist");
+        note.textContent = "This agent's tool steps were not kept in the parent chat. The summary above is what it reported.";
+        into.appendChild(note);
       }
     }
-    if (!into.childElementCount && record?.restored) {
-      const note = el("div", "sys hist");
-      note.textContent = "This agent's tool steps were not kept in the parent chat. The summary above is what it reported.";
-      into.appendChild(note);
+    // Children whose spawn is not drawn here -- a parallel parent's trace has not replayed yet, or
+    // was not kept -- still get a line, at the end, in the order they started.
+    for (const child of [...agentRecords.values()].filter((r) => r.parent_id === id && !placed.has(r.id)).sort(agentByStart)) {
+      pageLine(child.id);
     }
+    for (const line of agentPageLines) paintAgentLine(line);
   }
   function paintAgentFiles(into, record) {
     const items = agentHandoffFiles(record.message);
@@ -6522,15 +6909,36 @@
     if (!record || !meta) return;
     const working = AGENT_ACTIVE.has(record.state);
     const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
-    meta.textContent = `${working ? "Working" : "Worked"} for ${agentElapsed(ms)}`;
+    // Where the agent worked, which the chat's "↳ isolated checkout" notice used to say.
+    meta.textContent = `${working ? "Working" : "Worked"} for ${agentElapsed(ms)}${record.isolated ? " · isolated checkout" : ""}`;
+  }
+  // The spawn's own result says whether the agent's changes reached your checkout; its line only says
+  // it finished. The page says what was integrated, above the agent's report -- and says it plainly
+  // when the changes were held back, with where the worktree is kept (dgc/agent.py; a test pins the
+  // sentences). The result is replayed, so a reload draws the same note. A background spawn's result
+  // ("is running in the background") is not an outcome and draws none.
+  const AGENT_OUTCOME = /^Sub-task '[\s\S]*?' (?:completed and integrated|partly integrated|completed but its changes were NOT integrated)/;
+  const AGENT_OUTCOME_HELD = /^Sub-task '[\s\S]*?' (?:partly integrated|completed but its changes were NOT integrated)/;
+  function agentOutcomeNote(id) {
+    const out = agentAnchor(id)?.querySelector(".body pre")?.textContent || "";
+    if (!AGENT_OUTCOME.test(out)) return null;
+    const note = el("p", "agent-page-outcome");
+    note.textContent = out.split("\nSummary:")[0].trim().slice(0, 600);
+    if (AGENT_OUTCOME_HELD.test(out)) note.dataset.held = "1";
+    return note;
   }
   function paintAgentPage(id) {
     const record = agentRecords.get(id);
     const page = $("agent-page"), agentLog = $("agent-log"), mark = $("agent-mark"), title = $("thread-title");
     if (!record || !page || !agentLog) return;
-    const name = String(record.description || "Agent").trim() || "Agent";
+    for (const line of agentPageLines) clearTimeout(line.timer);
+    agentPageLines = [];
+    const name = agentDisplayName(record);
     const keepBottom = page.scrollHeight - page.scrollTop - page.clientHeight < 24;
     const keep = page.scrollTop;
+    // The page is rebuilt; a nested agent's name that had focus gets it back.
+    const active = document.activeElement;
+    const focused = active && agentLog.contains(active) ? active.closest(".agent-name")?.dataset.agentId || "" : "";
     if (mark) { mark.hidden = false; paintAgentMark(mark, id, AGENT_ACTIVE.has(record.state)); }
     if (title) {
       title.textContent = name;
@@ -6539,6 +6947,8 @@
     }
     paintAgentPageMeta(id);
     agentLog.replaceChildren();
+    const outcome = agentOutcomeNote(id);
+    if (outcome) agentLog.appendChild(outcome);
     const answer = agentAnswerText(record);
     if (answer) {
       const block = el("div", "text agent-answer");
@@ -6549,14 +6959,39 @@
     paintAgentTranscript(id, agentLog);
     syncAgentPageTick();
     page.scrollTop = keepBottom ? page.scrollHeight : keep;
+    if (focused) focusQuietly(agentLog.querySelector(`.agent-name[data-agent-id="${cssEscape(focused)}"]`), { preventScroll: true });
   }
-  function openAgentPage(id) {
+  // Back says where it goes: to the parent agent's page when this one was opened from it, else to the
+  // chat. Through retitle: hoverTip.hide() puts back the title it lifted, undoing a direct write.
+  function paintAgentBack() {
+    const back = $("agent-back");
+    if (!back) return;
+    const parent = agentPageStack.length ? agentRecords.get(agentPageStack.at(-1)) : null;
+    const label = parent ? `Back to ${agentDisplayName(parent)}` : "Back to chat";
+    hoverTip.retitle(back, label);
+    back.setAttribute("aria-label", label);
+  }
+  // `from`: the control that opened the page, which gets focus back when the chat does. `nested`:
+  // opened from a nested agent's name on its parent's page, so Back returns to that page. Any other
+  // way in (the chat, the agents list) starts over, and Back goes to the chat.
+  function openAgentPage(id, { from = null, nested = false } = {}) {
     const record = agentRecords.get(id);
     if (!record) return;
     agentsHideMenu();
     if (!agentPageId) {
       agentPageParentTitle = $("thread-title")?.textContent || "";
       agentPageScroll = log.scrollTop;
+      agentPageReturnFocus = from;
+      agentPageStack = [];
+    } else if (nested) {
+      if (agentPageId !== id) {
+        const at = agentPageStack.indexOf(id);
+        if (at >= 0) agentPageStack.length = at;
+        agentPageStack.push(agentPageId);
+      }
+    } else {
+      agentPageStack = [];
+      if (from) agentPageReturnFocus = from;
     }
     agentPageId = id;
     document.body.dataset.agentPage = id;
@@ -6565,21 +7000,44 @@
     const page = $("agent-page");
     if (page) page.hidden = false;
     log.setAttribute("aria-hidden", "true");
+    paintAgentBack();
     paintAgentPage(id);
     back?.focus();
   }
-  function closeAgentPage() {
+  // One level at a time: from a nested agent's page back to its parent's (focus on the name that
+  // was used), and from there to the chat. `all` closes every level at once (a chat reset).
+  function closeAgentPage({ all = false } = {}) {
     if (!agentPageId) return;
+    const left = agentPageId;
+    if (!all) {
+      while (agentPageStack.length) {
+        const parent = agentPageStack.pop();
+        if (!agentRecords.has(parent)) continue;
+        agentPageId = parent;
+        document.body.dataset.agentPage = parent;
+        paintAgentBack();
+        paintAgentPage(parent);
+        focusQuietly($("agent-log")?.querySelector(`.agent-name[data-agent-id="${cssEscape(left)}"]`) || $("agent-back"),
+          { preventScroll: true });
+        return;
+      }
+    }
     const restoreTitle = agentPageParentTitle;
     const restoreScroll = agentPageScroll;
+    const returnFocus = agentPageReturnFocus;
     agentPageId = "";
     agentPageParentTitle = "";
     agentPageScroll = 0;
+    agentPageStack = [];
+    agentPageReturnFocus = null;
     delete document.body.dataset.agentPage;
     const back = $("agent-back"), mark = $("agent-mark"), page = $("agent-page"), agentLog = $("agent-log"), title = $("thread-title");
     if (back) back.hidden = true;
+    paintAgentBack();
     if (mark) { mark.hidden = true; mark.removeAttribute("data-mark"); mark.removeAttribute("data-face"); }
     if (page) page.hidden = true;
+    for (const line of agentPageLines) clearTimeout(line.timer);
+    agentPageLines = [];
     if (agentLog) agentLog.replaceChildren();
     log.removeAttribute("aria-hidden");
     if (title) {
@@ -6591,6 +7049,12 @@
     }
     if (agentPageTick) { clearInterval(agentPageTick); agentPageTick = null; }
     log.scrollTop = restoreScroll;
+    // Back where the reader left: the name (or the agents pill) that opened the page. A chat reset
+    // closing every level leaves focus where the reset put it.
+    if (all) return;
+    const target = returnFocus?.isConnected && !returnFocus.closest("[hidden]") ? returnFocus
+      : log.querySelector(`.agent-name[data-agent-id="${cssEscape(left)}"]`);
+    if (target) focusQuietly(target, { preventScroll: true });
   }
   const agentAnchors = new Map();          // id -> the task card this record claimed
   let agentTotalExtra = 0, agentActiveExtra = 0;   // a snapshot's records it did not itemise
@@ -6670,16 +7134,22 @@
     if (!id) return;
     const record = agentRecords.get(id);
     const now = agentNow();
+    let pagePainted = false;
     if (ev.type === "agent_started") {
       if (record) return;
       agentsHoldClaims = false;
       agentsTurnLive = true;
-      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0, seenLive: true }, now));
+      // The start of its "started working" window -- unless it is queued behind a worker, when the
+      // window opens as one takes it (below).
+      agentRecords.set(id, agentRecordFrom({ ...ev, elapsed_ms: 0, seenLive: true,
+        startedLiveAt: ev.state === "queued" ? undefined : now }, now));
       agentsBatch.add(id);
-      claimAgentAnchors();
+      pagePainted = claimAgentAnchors();
     } else if (ev.type === "agent_updated") {
       if (!record || !AGENT_ACTIVE.has(record.state)) return;
-      if (record.state === "queued" && ev.state !== "queued") { record.receivedAt = now; record.elapsed_ms = 0; }
+      if (record.state === "queued" && ev.state !== "queued") {
+        record.receivedAt = now; record.elapsed_ms = 0; record.startedLiveAt = now;
+      }
       record.state = String(ev.state || record.state);
       if (ev.state === "waiting" && ev.waiting_for) record.waiting_for = ev.waiting_for; else delete record.waiting_for;
       for (const key of ["activity", "model", "tool_calls", "tokens"]) if (key in ev) record[key] = ev[key];
@@ -6693,7 +7163,7 @@
       delete record.waiting_for; delete record.activity;
     }
     const current = agentRecords.get(id);
-    if (current) ensureAgentChip(current);
+    if (current) agentLineChanged(current, ev.type, pagePainted);
     renderAgents();
     agentAnnounce();
   }
@@ -6713,6 +7183,9 @@
         // whatever order the backend happened to list them, and the rows moved around mid-turn.
         if (prior && typeof prior.order === "number") record.order = prior.order;
         record.endedAt = prior?.endedAt;
+        // A snapshot carries a live start window over and never opens one: a reload, a resume or a
+        // chat switch never says "started working".
+        record.startedLiveAt = prior?.startedLiveAt;
         record.seenLive = prior?.seenLive === true && prior.epoch === agentsEpoch;
         if (prior?.epoch === agentsEpoch) record.epoch = prior.epoch;
         agentRecords.set(String(item.id), record);
@@ -6722,12 +7195,24 @@
     agentTotalExtra = Math.max(0, Number(ev.total || 0) - agentRecords.size);
     agentActiveExtra = Math.max(0, Number(ev.active || 0) - listedActive);
     if (listedActive > 0 || agentActiveExtra > 0) agentsTurnLive = true;
-    for (const [id, card] of [...agentAnchors]) {
-      if (!agentRecords.has(id) || !card.isConnected) agentAnchors.delete(id);
-    }
-    agentsHoldClaims = false;
-    claimAgentAnchors();
-    for (const record of agentRecords.values()) ensureAgentChip(record);
+    let pagePainted = false;
+    holdReadingPlace(() => {
+      // A record the snapshot no longer lists (it holds 64 at most: the active, then the newest
+      // ended) gives its card back. Its spawn then reads "Delegated <what it was asked to do>", which
+      // is what a reload draws for it, since a card no record claims stays the plain step it is.
+      for (const [id, card] of [...agentAnchors]) {
+        if (!agentRecords.has(id)) {
+          if (card.isConnected && card.dataset.agentId === id) unclaimAgentCard(card);
+          agentAnchors.delete(id);
+        } else if (!card.isConnected) agentAnchors.delete(id);
+      }
+      agentsHoldClaims = false;
+      pagePainted = claimAgentAnchors();
+      layoutAgentLines();          // a card given back can split a batch, even when nothing was claimed
+      for (const record of agentRecords.values()) provisionalAgentLine(record);
+      repaintAgentLines();
+    });
+    if (agentPageId && agentRecords.has(agentPageId) && !pagePainted) paintAgentPage(agentPageId);
     // A snapshot never speaks. It drops from the batch only the agents it no longer lists, so an
     // agent that ended before a mid-batch snapshot (list_agents while busy, a reload, a resync)
     // is still in the "Agents finished: …" count when the batch ends.
@@ -6748,8 +7233,19 @@
     if (card) agentAnchors.delete(id);
     return null;
   }
+  // A claimed spawn card back to what it was before the claim: a top-level step of the chat, shown,
+  // or a nested agent's spawn, which stays its parent's hidden work.
+  function unclaimAgentCard(card) {
+    const owner = innermostAgentId(card.dataset.callId);
+    if (owner) card.dataset.agentId = owner;
+    else { delete card.dataset.agentId; card.classList.remove("agent-owned"); }
+    refreshToolGroup(card.closest(".tool-group"));
+  }
+  // Pairs records with their cards and, when it claims any, lays the lines out: every caller (an
+  // agent starting, a task card arriving, the agents list, a snapshot) gets the same layout. True
+  // when it repainted the open agent page.
   function claimAgentAnchors() {
-    if (agentsHoldClaims) return;
+    if (agentsHoldClaims) return false;
     const waiting = new Map();
     for (const record of [...agentRecords.values()].sort((a, b) => a.order - b.order)) {
       if (!record.call_id || agentAnchor(record.id)) continue;
@@ -6757,33 +7253,47 @@
       if (!waiting.has(key)) waiting.set(key, []);
       waiting.get(key).push(record);
     }
-    if (!waiting.size) return;
-    const cards = [...document.querySelectorAll('.tool[data-tool-name="task"]')];
+    if (!waiting.size) return false;
+    // The chat's own cards only. An open agent page holds clones of them, later in the document, and
+    // the newest-first pairing would hand a clone to the newest record.
+    const cards = [...log.querySelectorAll('.tool[data-tool-name="task"]')];
+    const pairs = [];
     for (const [callId, records] of waiting) {
       const free = cards.filter((card) => card.dataset.callId === callId
         && !(card.dataset.agentId && agentAnchor(card.dataset.agentId) === card));
-      for (let i = records.length - 1, j = free.length - 1; i >= 0 && j >= 0; i -= 1, j -= 1) {
-        free[j].dataset.agentId = records[i].id;
-        free[j].classList.add("agent-owned");
-        refreshToolGroup(free[j].closest(".tool-group"));
-        agentAnchors.set(records[i].id, free[j]);
-      }
+      for (let i = records.length - 1, j = free.length - 1; i >= 0 && j >= 0; i -= 1, j -= 1) pairs.push([records[i], free[j]]);
     }
+    if (!pairs.length) return false;
+    // A claim hides the spawn's group, so the block it is in gets shorter -- often a block above the
+    // reader, when a snapshot claims a whole history. The reader stays where they are.
+    holdReadingPlace(() => {
+      for (const [record, card] of pairs) {
+        card.dataset.agentId = record.id;
+        card.classList.add("agent-owned");
+        refreshToolGroup(card.closest(".tool-group"));
+        agentAnchors.set(record.id, card);
+      }
+      layoutAgentLines();
+    });
+    const claimed = pairs.map(([record]) => record);
+    if (agentPageId && claimed.some((r) => r.id === agentPageId || r.parent_id === agentPageId)) {
+      paintAgentPage(agentPageId);
+      return true;
+    }
+    return false;
   }
   function agentsToolCard(card, ev) {
     const fromCall = agentIdFromCall(card.dataset.callId || ev.call_id);
     if (fromCall) {
-      card.dataset.agentId = fromCall;
+      // A child's step belongs to the agent that made it -- the innermost id, as its reasoning's
+      // `agent` is -- so a nested child's work is on its own page, not its parent's.
+      card.dataset.agentId = innermostAgentId(card.dataset.callId || ev.call_id) || fromCall;
       card.classList.add("agent-owned");
       refreshToolGroup(card.closest(".tool-group"));
     }
     if (card.dataset.toolName !== "task" || !agentRecords.size) return;
     // A replayed page is built detached and inserted when it is complete; claim once it is.
-    const claim = () => {
-      claimAgentAnchors();
-      for (const record of agentRecords.values()) ensureAgentChip(record);
-      scheduleAgentsMenuRender();
-    };
+    const claim = () => { claimAgentAnchors(); scheduleAgentsMenuRender(); };
     if (replaying || !card.isConnected) queueMicrotask(claim);
     else claim();
   }
@@ -7001,7 +7511,7 @@
   function agentJump(id) {
     if (!agentRecords.get(id)) return;
     agentsHideMenu();
-    openAgentPage(id);
+    openAgentPage(id, { from: $("agents-pill") });
   }
   $("agents-pill").addEventListener("click", (event) => {
     event.stopPropagation();
@@ -7063,7 +7573,12 @@
 
   // ---- chat boundaries and backend exits ----
   function agentsSessionReset(kind) {
-    closeAgentPage();
+    closeAgentPage({ all: true });
+    // Every kind empties the transcript (a rewind and a chat switch too), and with it every line.
+    for (const line of agentLines) clearTimeout(line.timer);
+    for (const line of agentPageLines) clearTimeout(line.timer);
+    agentLines.clear(); agentLinesExpanded.clear();
+    agentPageLines = []; agentPageStack = []; agentPageReturnFocus = null;
     if (kind === "rewound") {
       // Records are kept until the snapshot that follows the history, but their anchors are not:
       // the history rebuilds every card, and claiming those cards now would pair them with records
@@ -7096,7 +7611,8 @@
     agentActiveExtra = 0;
     clearTimeout(agentsAnnounceTimer); agentsAnnounceTimer = null; agentsSpokenActive = false; agentsBatch.clear();
     agentsHideMenu();
-    for (const record of agentRecords.values()) ensureAgentChip(record);
+    // Their lines say "stopped", with why on each name, until the new backend's snapshot says more.
+    repaintAgentLines();
     if (agentPageId) paintAgentPage(agentPageId);
     renderAgents();
   }

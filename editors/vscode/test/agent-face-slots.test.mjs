@@ -22,7 +22,8 @@ function startAgent(event, n, extra = {}) {
   event({ type: "agent_started", id: sid(n), parent_id: null, call_id: `call_${n}`, description: `part ${n}`,
     depth: 1, state: "running", started_at: n, isolated: true, parallel: true, ...extra });
 }
-const face = (doc, n) => doc.querySelector(`.agent-chip[data-agent-id="${sid(n)}"] .agent-mark`)?.dataset.face;
+// The face an agent wears on its line in the transcript.
+const face = (doc, n) => doc.querySelector(`.agent-line .agent-mark[data-agent-id="${sid(n)}"]`)?.dataset.face;
 
 test("two agents whose ids hash alike wear different faces once the CLI sends their slots", () => {
   const guard = view();

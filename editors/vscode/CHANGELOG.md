@@ -22,6 +22,22 @@
 - A message to a running sub-agent reads "Sent message to <what it was asked to do>", with a
   message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear
   the sub-agent mark.
+- Sub-agents read the way they do in Codex: one quiet line for the agents started together, their
+  faces first, then "Durable rules review, Remote web and Paper pip concept started working" — where
+  each used to get a full-width row of its own. Only the names are links, each opening that agent's
+  page, and Back or Escape brings you back to the name you used. The words change in place —
+  started working, running, queued, waiting for your permission or your answer, finished, failed,
+  stopped — and the names never move: "Durable rules review running · Remote web finished · Paper
+  pip concept running". More than three read "A, B and 14 more", and "14 more" shows them all.
+- The "⟳ sub-task", "↳ isolated checkout" and "↯ running N isolated sub-tasks" notices are gone;
+  the agent's line says it, and its page says when it worked in an isolated checkout. When an
+  agent's changes were only partly integrated or not integrated, its page says so, with where the
+  worktree is kept.
+- An agent started by another agent is a line on its parent's page instead of in the chat, and
+  Back from it returns to the parent.
+- A background sub-agent's late work no longer opens an empty "Working" turn or raises "New".
+- A delegation that never started an agent reads "Delegated <what it was asked to do>" instead of
+  "Used 1 tool".
 - A reopened chat folds each finished run of tools, as the live chat did; it used to show every
   run open.
 - The changes bar shows the turn's own edits in a folder too large for its workspace scan.

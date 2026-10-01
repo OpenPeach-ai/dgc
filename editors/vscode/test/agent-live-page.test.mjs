@@ -20,7 +20,7 @@ function delegated() {
   event({ type: "agent_started", id: "sub-1", call_id: "c1", description: "responsive flows", state: "running" });
   return { h, event };
 }
-const openPage = (h) => h.doc.querySelector(".agent-chip")?.click();
+const openPage = (h) => h.doc.querySelector(".agent-name")?.click();
 const pageText = (h) => h.doc.getElementById("agent-log")?.textContent || "";
 // Repaints are coalesced to one per frame — rebuilding the whole page per step is quadratic and
 // ran the panel out of memory at 600 steps. So a test must let that frame pass.

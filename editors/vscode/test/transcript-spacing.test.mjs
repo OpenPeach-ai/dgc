@@ -78,7 +78,7 @@ const interruptedSnapshot = (older = []) => [...older, ...answeredTurn("h1"), ..
   { type: "turn_end", turn_id: "h2", reason: "cancelled", token_estimate: 0, final_message_id: null }];
 
 // ---- panel driver --------------------------------------------------------------------------------
-async function openPanel(width, { steering = false } = {}) {
+async function openPanel(width, { steering = false, agents = false } = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 2 });
   await page.setContent(html, { waitUntil: "load" });
   await page.evaluate(([mjs, mdjs]) => {
@@ -109,7 +109,8 @@ async function openPanel(width, { steering = false } = {}) {
     }, text),
   };
   await panel.send({ type: "session_ready", sessionId: "s1" }, { type: "event", event: { type: "ready",
-    capabilities: { history_snapshot: true, ...(steering ? { live_steering: true, steering_native: true } : {}) },
+    capabilities: { history_snapshot: true, ...(steering ? { live_steering: true, steering_native: true } : {}),
+      ...(agents ? { agents: true } : {}) },
     model: "qwen3.8:27b", mode: "default", think: "off", commands: [], custom_commands: [],
     goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" } });
   return panel;
@@ -576,6 +577,40 @@ for (const width of WIDTHS) {
 }
 // Steered, and the turn ends at once: spaced like a prompt above, and the turn's closing line
 // ("Worked for 2s") follows it at 16px, like any reply.
+// A sub-agent line is followed by the hidden groups of the batch's other spawns, so it is never the
+// steered prompt's visible neighbour in the DOM, and the rule that zeroes that neighbour's margin
+// cannot reach it. It has no margin of its own for that reason.
+for (const width of WIDTHS) {
+  test(`a prompt steered in after a sub-agent line stands 24px below it (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width, { steering: true, agents: true });
+    try {
+      const ids = [1, 2, 3].map((n) => `sub-${String(n).padStart(12, "0")}`);
+      await panel.events([{ type: "turn_start", turn_id: "t1", prompt: PROMPT1, kind: "prompt" },
+        ...[1, 2, 3].map((n) => ({ type: "tool_call", call_id: `call_${n}`, name: "task", args: { description: `Survey part ${n}` }, summary: "" })),
+        ...ids.map((id, i) => ({ type: "agent_started", id, parent_id: null, call_id: `call_${i + 1}`, description: `Survey part ${i + 1}`,
+          depth: 1, state: "queued", started_at: i + 1, isolated: true, parallel: true }))]);
+      await panel.settle();
+      const id = await panel.prompt("S1 steered after an agent line");
+      await panel.events([{ type: "prompt_accepted", request_id: id, state: "steered" }, { type: "steering_update", request_id: id, state: "applied" }]);
+      await panel.settle(); await toBottom(panel); await panel.settle();
+      const between = await panel.page.evaluate(() => {
+        const prompt = [...document.querySelectorAll(".msg.dgc > .msg.user")].at(-1);
+        const seen = [];
+        let node = prompt.previousElementSibling;
+        while (node && !node.matches(".agent-line")) { seen.push(node.className); node = node.previousElementSibling; }
+        return { line: !!node, seen };
+      });
+      assert.ok(between.line, "the steered prompt follows the line");
+      assert.ok(between.seen.length >= 2 && between.seen.every((name) => /agent-owned/.test(name)),
+        `premise: only hidden spawn groups sit between them (${between.seen.join(" | ")})`);
+      const m = await measure(panel);
+      assertSpacing(m, `steered after a sub-agent line at ${width}px`);
+      assert.equal(around(m, "S1 steered after an agent line").above, ABOVE_PROMPT);
+    } finally { await panel.page.close(); }
+  });
+}
+
 test("a steer applied as the turn ends is spaced like a prompt, and the turn's closing line follows at 16px", async (t) => {
   if (skipOrFail(t)) return;
   const panel = await openPanel(460, { steering: true });

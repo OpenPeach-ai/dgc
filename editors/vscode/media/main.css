@@ -184,11 +184,6 @@ body[data-agent-page] #to-latest { display: none; }
 #agent-log { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .agent-change-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
 .agent-change-title { display: flex; align-items: center; gap: var(--sp-2); font: var(--w-med) var(--t-sm)/1.3 var(--sans); margin: 0 0 var(--sp-2); }
-.agent-chip { display: flex; align-items: center; gap: var(--sp-2); align-self: flex-start; max-width: 100%; border: 0; background: transparent; color: var(--text); cursor: pointer; padding: var(--sp-1) 0; font: var(--w-med) var(--t-sm)/1.3 var(--sans); text-align: left; }
-.agent-chip:hover { color: var(--text-strong); }
-.agent-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
-.agent-chip .agent-mark { width: 16px; height: 16px; flex: none; }
-.agent-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #log .agent-owned { display: none; }
 .agent-mark {
   display: inline-block; position: relative; width: 16px; height: 16px; flex: none;
@@ -1581,6 +1576,35 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   background: var(--agent-wait); }
 .agent-dot[data-state="queued"] { background: transparent; border: 1px solid var(--agent-idle); }
 .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: var(--del); }
+/* Sub-agents in the transcript: one muted line per batch started together. Faces first, then a
+   sentence whose names -- only the names -- open each agent's page. Same type and tone as a tool
+   group's header. No margin: the line is usually followed by hidden spawn groups, and a steered
+   prompt's rule (`.msg.dgc > :not(.role):has(+ .msg.user)`) zeroes only its visible neighbour's
+   margin. Not selectable, like Codex's group: a copied transcript carries none of it. */
+.agent-line { display: flex; align-items: flex-start; gap: 6px; min-width: 0; margin: 0; padding: var(--sp-1) 0;
+  color: var(--muted); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); user-select: none; }
+/* One text line tall, so the faces centre on the sentence's first line however it wraps. */
+.agent-line-faces { flex: none; display: inline-flex; align-items: center; gap: var(--sp-1); height: calc(var(--t-sm) * 1.45); }
+.agent-line-faces .agent-mark { width: 16px; height: 16px; }
+/* The sentence wraps in its own column, never under the faces. */
+.agent-line-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.agent-name, .agent-line-more { margin: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; color: inherit;
+  font: inherit; cursor: pointer; text-align: left; text-decoration: underline; text-decoration-thickness: 1px;
+  text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+/* A long name is clipped to the column with an ellipsis; its label and title keep all of it.
+   Top-aligned, so its text shares the baseline of the words around it (an inline-block that clips
+   has its baseline at its bottom edge), with a pixel below it for the underline. */
+.agent-name { display: inline-block; max-width: min(32ch, 100%); vertical-align: top; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; unicode-bidi: isolate; padding-bottom: 1px; margin-bottom: -1px; }
+.agent-line-more { white-space: nowrap; text-decoration-style: dotted; }
+.agent-name:hover, .agent-line-more:hover { color: var(--text); text-decoration-color: currentColor; }
+.agent-name:focus-visible, .agent-line-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+/* Waiting and failed need the reader: brighter and heavier. Never --err-text, which is about 3:1 on
+   the light themes (see .model-error). The word says the state; colour only adds to it. */
+.agent-state[data-state="waiting"], .agent-state[data-state="failed"] { color: var(--text); font-weight: var(--w-med); }
+/* What became of an agent's changes, above its report on its page. */
+.agent-page-outcome { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
+.agent-page-outcome[data-held] { color: var(--text); }
 .agent-text { min-width: 0; display: grid; gap: 2px; }
 .agent-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 /* The meta line carries one line of a failure message, and two rows of it at most: the whole
@@ -1607,6 +1631,9 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   .agents-pill[data-state="waiting"] .agents-need { color: CanvasText; font-weight: var(--w-bold); text-decoration: underline; }
   .tool.flash { outline-color: Highlight; }
   .agent-row[aria-disabled="true"] .agent-desc { color: GrayText; }
+  .agent-name, .agent-line-more { color: LinkText; text-decoration-color: LinkText; }
+  .agent-name:focus-visible, .agent-line-more:focus-visible { outline: 2px solid Highlight; }
+  .agent-state[data-state="waiting"], .agent-state[data-state="failed"] { color: CanvasText; font-weight: var(--w-semi); }
 }
 /* ---- end 0.40 agents -------------------------------------------------------------------------- */
 

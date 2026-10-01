@@ -4,6 +4,10 @@
 //   node test/render-agents.mjs /tmp/pill.png [--width=460] [--light] [--narrow] [--menu] [--auto]
 //                                             [--waiting] [--idle] [--forced]
 //   node test/render-agents.mjs --all <dir>      every capture the review asks for, into <dir>
+//   node test/render-agents.mjs --transcript <dir>
+//                                             the sub-agent lines in the transcript, in dark, light and
+//                                             high contrast at 300 and 460px (agent-lines-layout.test.mjs
+//                                             measures what these show)
 //
 // --narrow is 300px. --menu opens the dialog (a nested child, ended rows, "+N more", the Stop note).
 // --auto puts the composer in auto mode (the olive border) to check the green against it.
@@ -12,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { chromium } from "@playwright/test";
+import { linesScene, openAgentLines, sendEvents, settle, sid } from "./support/agent-lines-scene.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
@@ -116,10 +121,67 @@ async function capture(browser, out, options) {
   console.log(out, JSON.stringify(facts));
 }
 
+// The sub-agent lines: one agent started, running and finished; a batch mid-flight, a failed and a
+// waiting member, six collapsed and expanded (one scene); a nested agent on its parent's page.
+async function transcript(browser, dir) {
+  mkdirSync(dir, { recursive: true });
+  const live = (n, description, extra = {}) => [
+    { type: "tool_call", call_id: `call_${n}`, name: "task", args: { description }, summary: "" },
+    { type: "agent_started", id: sid(n), parent_id: null, call_id: `call_${n}`, description, depth: 1, state: "running",
+      started_at: n, isolated: true, parallel: false, ...extra }];
+  const shoot = async (page, name) => {
+    await settle(page);
+    const file = join(dir, name);
+    await page.screenshot({ path: file, fullPage: false });
+    console.log(file);
+  };
+  for (const theme of ["dark-modern", "light-modern", "hc"]) {
+    for (const width of [300, 460]) {
+      const tag = `${theme}-${width}`;
+      // One agent, live: started working, then running, then finished.
+      const single = await openAgentLines(browser, { width, height: 420, theme, deviceScaleFactor: 2, events: [
+        { type: "turn_start", turn_id: "t1", prompt: "Count the lines in the README", kind: "prompt" },
+        { type: "text_delta", text: "I will hand that to a sub-agent." }, { type: "stream_end", message_id: "t1:1", phase: "commentary" },
+        ...live(1, "Count the lines in README.md")] });
+      await shoot(single, `single-started-${tag}.png`);
+      await single.waitForTimeout(2100);
+      await shoot(single, `single-running-${tag}.png`);
+      await sendEvents(single, [{ type: "agent_ended", id: sid(1), state: "finished", duration_ms: 4000, tool_calls: 2, message: "README.md has 120 lines." }]);
+      await shoot(single, `single-finished-${tag}.png`);
+      await single.close();
+      // Every batch at once, from a history and a snapshot; then the six expanded.
+      const lines = await openAgentLines(browser, { width, height: 900, theme, deviceScaleFactor: 2, events: linesScene() });
+      await lines.evaluate(() => { document.getElementById("log").scrollTop = 0; });
+      await shoot(lines, `batches-${tag}.png`);
+      await lines.evaluate(() => document.querySelector("#log .agent-line-more")?.click());
+      await shoot(lines, `batches-expanded-${tag}.png`);
+      await lines.close();
+      // A nested agent, on its parent's page.
+      const nested = await openAgentLines(browser, { width, height: 520, theme, deviceScaleFactor: 2, events: [
+        { type: "turn_start", turn_id: "t1", prompt: "Review the settings work", kind: "prompt" },
+        ...live(1, "Review the settings work"),
+        { type: "tool_call", call_id: `${sid(1)}:r1`, name: "read_file", args: { path: "src/settings.ts" }, summary: "src/settings.ts" },
+        { type: "tool_result", call_id: `${sid(1)}:r1`, name: "read_file", output: "export const settings = {};", is_error: false },
+        ...[2, 3].flatMap((n) => [
+          { type: "tool_call", call_id: `${sid(1)}:call_${n}`, name: "task", args: { description: n === 2 ? "Check keyboard reachability" : "Check contrast" }, summary: "" },
+          { type: "agent_started", id: sid(n), parent_id: sid(1), call_id: `${sid(1)}:call_${n}`,
+            description: n === 2 ? "Check keyboard reachability" : "Check contrast", depth: 2, state: "running", started_at: n, isolated: false, parallel: false }]),
+        { type: "agent_ended", id: sid(3), state: "finished", duration_ms: 3000, tool_calls: 2, message: "Contrast holds." }] });
+      await nested.waitForTimeout(2100);
+      await nested.evaluate((id) => document.querySelector(`#log .agent-name[data-agent-id="${id}"]`).click(), sid(1));
+      await shoot(nested, `nested-page-${tag}.png`);
+      await nested.close();
+    }
+  }
+}
+
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox", "--force-color-profile=srgb"] });
 try {
   const allAt = process.argv.indexOf("--all");
-  if (allAt >= 0) {
+  const transcriptAt = process.argv.indexOf("--transcript");
+  if (transcriptAt >= 0) {
+    await transcript(browser, process.argv[transcriptAt + 1] || join(here, "..", "shots-agent-lines"));
+  } else if (allAt >= 0) {
     const dir = process.argv[allAt + 1];
     mkdirSync(dir, { recursive: true });
     const set = {

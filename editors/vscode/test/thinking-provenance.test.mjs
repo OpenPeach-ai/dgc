@@ -128,7 +128,7 @@ for (const width of [300, 460]) {
       });
       assert.ok(parentHidden.owned >= 1, "child thinking stays in the DOM for the inner page");
       assert.equal(parentHidden.visible, 0, "child thinking does not dump into the parent transcript");
-      await page.click('.agent-chip[data-agent-id="sub-e051bf6ba1c3"]');
+      await page.click('.agent-name[data-agent-id="sub-e051bf6ba1c3"]');
       await page.waitForSelector("#agent-page:not([hidden])");
       const facts = await page.evaluate(() => {
         const root = document.getElementById("agent-log");
