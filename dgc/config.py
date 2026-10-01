@@ -634,6 +634,22 @@ def find_project_root(start: Path | None = None) -> Path:
     return p
 
 
+# What a running conversation is: its permission mode, its model route (and the credentials bound
+# to it), and how it samples. A change in one session is still written -- it is the default the
+# next session starts from -- but no OTHER running session adopts it at its next save. Adopted, a
+# model switch in one window moved every other window's chat to that model mid-conversation, a
+# mode switch put a chat sitting in `default` into `auto`, and an endpoint switch left the other
+# sessions on the new endpoint holding the old endpoint's key.
+_SESSION_KEYS = frozenset({
+    "mode", "model", "base_url", "api_mode", "context_size", "thinking", "ultra_mode",
+    "think_budget_tokens", "max_tokens", "temperature", "top_p", "top_k", "min_p",
+    "tool_profile", "tool_profile_chosen", "subscription_engine", "subscription_model",
+    "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key",
+    "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode",
+    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size",
+})
+
+
 # Lists several processes edit one entry at a time. Written whole, a Config that loaded before
 # another revoked a trusted folder wrote it back the next time it trusted a different one: the
 # revoke was undone in the unsafe direction.
@@ -981,6 +997,7 @@ class Config:
         if migrated:
             self.save()
         self._rebaseline()
+        self._baseline_secrets = self._own_secrets()
 
     # ---- concurrent writers -----------------------------------------------------------------
     # Several backends share ~/.dgc/config.json: two VS Code windows today, and one per chat once
@@ -1166,7 +1183,7 @@ class Config:
                     # would be adopted back FROM DISK over the value this run was given -- a
                     # `--mode auto` would quietly stop applying the moment anything saved, and a
                     # stored `mode: auto` would be restored over an explicit one-shot downgrade.
-                    if (key != "permissions" and key not in changed
+                    if (key != "permissions" and key not in changed and key not in _SESSION_KEYS
                             and key not in ephemeral and key not in self._env_secret_keys):
                         self.data[key] = value
                 own_allow = self.user_permissions()["allow"]
@@ -1196,17 +1213,20 @@ class Config:
                     self.permissions["allow"] = own_allow
             _write_private_json(USER_CONFIG, payload)
             self._rebaseline()
-        # Environment-provided credentials are ephemeral references. A harmless settings change
-        # must never copy a CI/process secret into ~/.dgc/secrets.json. Provider credentials carry
-        # the normalized endpoint identity they were issued for, so either half of an interrupted
-        # two-file update fails closed on the next load.
+            self._save_secrets()
+
+    def _own_secrets(self) -> dict:
+        """What this process would store: each key with the endpoint identity it is bound to.
+
+        Environment-provided credentials are ephemeral references. A harmless settings change
+        must never copy a CI/process secret into ~/.dgc/secrets.json. Provider credentials carry
+        the normalized endpoint identity they were issued for, so either half of an interrupted
+        two-file update fails closed on the next load.
+        """
         search_value = (self._stored_secrets.get("search_api_key", "")
                         if "search_api_key" in self._env_secret_keys
                         else self.data.get("search_api_key", ""))
-        secrets: dict = {
-            "search_api_key": search_value if isinstance(search_value, str) else "",
-        }
-        stored_provider_identity: dict[str, str] = {}
+        own: dict = {"search_api_key": (search_value if isinstance(search_value, str) else "", "")}
         for key in _PROVIDER_SECRET_KEYS:
             if key in self._env_secret_keys:
                 value = self._stored_secrets.get(key, "")
@@ -1216,19 +1236,60 @@ class Config:
                 bound = self._provider_secret_identity.get(key, "")
             expected = _provider_secret_identity(self.data, key)
             if isinstance(value, str) and value and expected and bound == expected:
-                secrets[key] = value
-                stored_provider_identity[key] = expected
+                own[key] = (value, expected)
             else:
-                secrets[key] = ""
-        self._stored_secrets = {key: value for key, value in secrets.items()
-                                if key in SECRET_KEYS}
+                own[key] = ("", "")
+        own["mcp"] = {name: (copy.deepcopy(env), self._stored_mcp_identity.get(name, ""))
+                      for name, env in self._stored_mcp_env.items()}
+        return own
+
+    def _save_secrets(self) -> None:
+        """Write ~/.dgc/secrets.json the way save() writes config.json: what is on disk, with this
+        process's own changes since its baseline applied.
+
+        It was written whole. With two sessions open, one switching endpoint and key, the other's
+        next save of anything wrote its own view back: the new key was wiped, and every new session
+        failed to authenticate until the key was entered again.
+        """
+        now, was = self._own_secrets(), getattr(self, "_baseline_secrets", None)
+        disk: dict = {}
+        if was is not None and USER_SECRETS.exists():
+            try:
+                value = json.loads(USER_SECRETS.read_text())
+                disk = value if isinstance(value, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                disk = {}
+        disk_identity = disk.get("provider_identity") if isinstance(disk.get("provider_identity"), dict) else {}
+        secrets: dict = {}
+        stored_provider_identity: dict[str, str] = {}
+        for key in ("search_api_key", *sorted(_PROVIDER_SECRET_KEYS)):
+            if was is None or now[key] != was.get(key):
+                value, identity = now[key]
+            else:
+                value = disk.get(key, "") if isinstance(disk.get(key, ""), str) else ""
+                identity = str(disk_identity.get(key, "") or "")
+            secrets[key] = value
+            if key in _PROVIDER_SECRET_KEYS and value and identity:
+                stored_provider_identity[key] = identity
+        mcp_env = _clean_mcp_secret_map(disk.get("mcp_env", {})) if was is not None else {}
+        mcp_identity = _clean_mcp_identity_map(disk.get("mcp_identity", {})) if was is not None else {}
+        before = (was or {}).get("mcp", {})
+        for name in set(now["mcp"]) | set(before):
+            if was is not None and now["mcp"].get(name) == before.get(name):
+                continue                                  # not ours to change: disk's stands
+            mcp_env.pop(name, None)
+            mcp_identity.pop(name, None)
+            if name in now["mcp"]:
+                mcp_env[name], mcp_identity[name] = now["mcp"][name]
+        self._stored_secrets = {key: value for key, value in secrets.items() if key in SECRET_KEYS}
         self._stored_provider_identity = stored_provider_identity
         if stored_provider_identity:
             secrets["provider_identity"] = copy.deepcopy(stored_provider_identity)
-        if self._stored_mcp_env:
-            secrets["mcp_env"] = copy.deepcopy(self._stored_mcp_env)
-            secrets["mcp_identity"] = copy.deepcopy(self._stored_mcp_identity)
+        if mcp_env:
+            secrets["mcp_env"] = copy.deepcopy(mcp_env)
+            secrets["mcp_identity"] = {name: mcp_identity.get(name, "") for name in mcp_env}
         _write_private_json(USER_SECRETS, secrets)
+        self._baseline_secrets = self._own_secrets()
 
     def clone_for_root(self, project_root: Path) -> "Config":
         """Return a non-persisting configuration view rooted at an isolated checkout.

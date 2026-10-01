@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -60,10 +61,67 @@ class ConcurrentConfigTest(unittest.TestCase):
 
     def test_the_later_writer_adopts_what_it_did_not_change(self):
         a, b = self.C.Config(), self.C.Config()
-        a.set("model", "qwen-A")
+        a.set("theme", "light")
         b.set("thinking", "high")
-        self.assertEqual(b.data.get("model"), "qwen-A",
+        self.assertEqual(b.data.get("theme"), "light",
                          "B should end up holding what A wrote, not its own stale value")
+
+    # ---- a running session keeps its own model, mode and key -----------------------------------
+
+    def test_a_model_switch_in_one_session_does_not_move_another(self):
+        a, b = self.C.Config(), self.C.Config()
+        a.set("model", "qwen-A")
+        b.set("logo_animation", False)                # B saves anything
+        self.assertEqual(b.data["model"], "start", "A's switch moved B's running chat to A's model")
+        self.assertEqual(self.disk()["model"], "qwen-A", "B's save did not revert A's choice")
+        self.assertEqual(self.C.Config().data["model"], "qwen-A", "a new session starts from it")
+
+    def test_a_mode_switch_in_one_session_does_not_move_another(self):
+        a, b = self.C.Config(), self.C.Config()
+        a.set("mode", "auto")
+        b.set("logo_animation", False)
+        self.assertEqual(b.mode, "default", "a chat sitting in default was put into auto by another one")
+
+    def test_a_second_session_does_not_wipe_the_saved_key(self):
+        with patch.dict(os.environ):
+            for name in [k for k in os.environ if k.startswith("DGC_") and "API_KEY" in k]:
+                del os.environ[name]
+            a, b = self.C.Config(), self.C.Config()
+            a.set("base_url", "https://new.example/v1")
+            a.set("api_key", "sk-new-key")
+            b.set("logo_animation", False)
+            self.assertEqual(self.C.Config().get("api_key"), "sk-new-key",
+                             "B's save wiped the key A saved: every new session failed to authenticate")
+            self.assertEqual(b.data["base_url"], self.C.DEFAULTS["base_url"], "B keeps its own endpoint")
+            b.set("base_url", "https://b.example/v1")
+            b.set("api_key", "sk-b")
+            self.assertEqual(self.C.Config().get("api_key"), "sk-b", "B's own key change is still saved")
+
+    def test_a_sessions_old_key_change_is_not_written_again(self):
+        with patch.dict(os.environ):
+            for name in [k for k in os.environ if k.startswith("DGC_") and "API_KEY" in k]:
+                del os.environ[name]
+            a, b = self.C.Config(), self.C.Config()
+            b.set("base_url", "https://shared.example/v1")
+            b.set("api_key", "sk-b")                      # B's change, saved
+            a.set("base_url", "https://shared.example/v1")
+            a.set("api_key", "sk-a")                      # then A's, saved
+            b.set("logo_animation", False)                # B saves anything
+            self.assertEqual(self.C.Config().get("api_key"), "sk-a",
+                             "B wrote its own earlier key change again, over A's newer one")
+
+    def test_a_removed_mcp_servers_secret_is_not_written_back(self):
+        spec = {"command": "srv-bin", "args": [], "env_names": ["TOKEN"]}
+        self.path.write_text(json.dumps({"model": "start", "mcp_servers": {"srv": spec}}))
+        (self.home / ".dgc" / "secrets.json").write_text(json.dumps({
+            "mcp_env": {"srv": {"TOKEN": "t0k3n"}},
+            "mcp_identity": {"srv": self.C._mcp_spec_fingerprint(spec)}}))
+        a, b = self.C.Config(), self.C.Config()
+        self.assertIn("srv", a._stored_mcp_env, "premise: the stored credential loaded")
+        a.set("mcp_servers", {})                      # A removes the server and its credential
+        b.set("logo_animation", False)
+        stored = json.loads((self.home / ".dgc" / "secrets.json").read_text())
+        self.assertNotIn("srv", stored.get("mcp_env", {}), "B wrote a removed server's credential back")
 
     def test_a_key_this_process_removes_is_removed(self):
         a = self.C.Config()
