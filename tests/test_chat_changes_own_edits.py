@@ -55,6 +55,43 @@ class OwnEditsTest(unittest.TestCase):
         self.assertTrue(files["notes.txt"]["untracked"], "a file the turn created read as an edit")
         self.assertEqual((files["notes.txt"]["additions"], files["notes.txt"]["deletions"]), (1, 0))
 
+    def test_an_edit_of_an_ignored_file_is_an_edit_not_a_new_file(self):
+        """A complete scan never lists what .gitignore excludes, nor DGC's and dependency folders:
+        an edit of an existing .env read as a brand-new file, every line added."""
+        root = self.small_repo()
+        (root / ".gitignore").write_text(".env\nbuild/\n")
+        (root / ".env").write_text("A=1\n")
+        (root / "node_modules" / "pkg").mkdir(parents=True)
+        (root / "node_modules" / "pkg" / "index.js").write_text("old\n")
+        changes = ChatChanges(root)
+        before = changes.begin()
+        self.assertTrue(before["complete"])
+        self.assertNotIn(".env", before["files"], "premise: the scan leaves ignored files out")
+        self.edit(changes, root / ".env", "A=2\n")
+        self.edit(changes, root / "node_modules" / "pkg" / "index.js", "new\n")
+        (root / "build").mkdir()
+        self.edit(changes, root / "build" / "out.txt", "made\n")       # an ignored file it created
+        changes.finish(before)
+        files = {f["path"]: f for f in changes.report()["files"]}
+        self.assertFalse(files[".env"]["untracked"], "an edit of an existing ignored file read as new")
+        self.assertEqual((files[".env"]["additions"], files[".env"]["deletions"]), (1, 1))
+        self.assertEqual((files["node_modules/pkg/index.js"]["additions"],
+                          files["node_modules/pkg/index.js"]["deletions"]), (1, 1))
+        self.assertTrue(files["build/out.txt"]["untracked"], "an ignored file the tool created is new")
+
+    def test_an_edit_of_a_skip_worktree_file_is_an_edit(self):
+        root = self.small_repo()
+        subprocess.run(["git", "update-index", "--skip-worktree", "kept.txt"], cwd=root, check=True,
+                       capture_output=True)
+        changes = ChatChanges(root)
+        before = changes.begin()
+        self.assertNotIn("kept.txt", before["files"], "premise: the scan leaves skip-worktree entries out")
+        self.edit(changes, root / "kept.txt", "changed\n")
+        changes.finish(before)
+        files = {f["path"]: f for f in changes.report()["files"]}
+        self.assertFalse(files["kept.txt"]["untracked"], "a tracked file the tool edited read as new")
+        self.assertEqual((files["kept.txt"]["additions"], files["kept.txt"]["deletions"]), (1, 1))
+
     def test_a_tool_edit_is_reported_in_a_folder_too_big_to_scan(self):
         root = self.big_folder()
         changes = ChatChanges(root)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path, PureWindowsPath
 import stat
 import threading
@@ -179,6 +180,46 @@ def capture(root: Path) -> dict:
     return result
 
 
+def _unlisted(root: Path, names: set[str]) -> set[str]:
+    """Which of `names` a complete capture leaves out whatever they hold: DGC's own and dependency
+    folders, untracked files .gitignore excludes, skip-worktree entries. Their absence from a
+    complete `before` says nothing about whether they existed. Two `ls-files` for the lot, not a
+    pair of git processes per file."""
+    out = {name for name in names if any(part in _IGNORED for part in name.split("/"))}
+    rest = sorted(names - out)
+    if not rest:
+        return out
+    try:
+        review = Review(root, root, deadline=time.monotonic() + 5)
+    except (OSError, ValueError):
+        return out                                      # not Git: a complete scan lists the rest
+    prefix = "" if review.scope == "." else review.scope + "/"
+    by_relative = {prefix + name: name for name in rest}
+    try:
+        flags = review.git(["ls-files", "-v", "-z", "--", *by_relative])
+    except (OSError, ValueError):
+        flags = b""
+    tracked = set()
+    for record in flags.rstrip(b"\0").split(b"\0"):
+        if len(record) > 2:
+            path = os.fsdecode(record[2:])
+            tracked.add(path)
+            if record[:1] == b"S" and path in by_relative:
+                out.add(by_relative[path])              # skip-worktree
+    untracked = [path for path in by_relative if path not in tracked]
+    if untracked:
+        # check-ignore would say it directly, but refuses the literal pathspecs read-only git runs
+        # with; ls-files lists the ignored ones among exactly these paths.
+        try:
+            ignored = review.git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z",
+                                  "--", *untracked])
+        except (OSError, ValueError):
+            ignored = b""
+        out.update(by_relative[os.fsdecode(path)] for path in ignored.rstrip(b"\0").split(b"\0")
+                   if path and os.fsdecode(path) in by_relative)
+    return out
+
+
 def _head_state(root: Path, name: str) -> dict:
     """What `name` held at HEAD, in the same shape `capture` records, or `_MISSING` if untracked."""
     try:
@@ -259,6 +300,12 @@ class ChatChanges:
             own = dict(self._touched if touched is None else touched)
         # Read now, outside the lock, exactly as `capture` reads.
         own_after = {name: _state(self.root / name) for name in own}
+        # A complete capture still never lists some files -- one .gitignore excludes, DGC's own and
+        # dependency folders, a skip-worktree entry -- so a tool-written one absent from it may well
+        # have existed. Read as created, an edit of an existing .env showed every line as added and
+        # an empty "before". (Git runs here, outside the lock, like the reads above.)
+        unlisted = (_unlisted(self.root, {name for name in own if name not in before["files"]})
+                    if before["complete"] else set())
         with self.lock:
             if self._active_before is before:
                 self._active_before = None
@@ -284,10 +331,12 @@ class ChatChanges:
                 if name in skipped:
                     continue
                 left, right = before["files"].get(name, _MISSING), after["files"].get(name, _MISSING)
-                # A COMPLETE `before` lists every file, so a name absent from it did not exist when
-                # the turn began -- whatever a shell command made of it before a tool wrote it.
-                # Taking the tool's own record (made just before it wrote) there reported a file
-                # `printf a > notes.txt` created as an edit of an existing 'a'.
+                if name in unlisted:
+                    left = own[name]                    # what the tool saw just before it wrote
+                # A COMPLETE `before` lists every file it can list, so such a name absent from it did
+                # not exist when the turn began -- whatever a shell command made of it before a tool
+                # wrote it. Taking the tool's own record (made just before it wrote) there reported a
+                # file `printf a > notes.txt` created as an edit of an existing 'a'.
                 if (name not in before["files"] and not before["complete"]
                         and name not in before.get("selected", set())):
                     # A bounded `before` only considered what already differed from HEAD, so a
