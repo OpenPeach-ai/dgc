@@ -305,3 +305,21 @@ test("a chat that could not open has no process to wait for", async () => {
     be.dispose("test over");
   }
 });
+
+test("a refusal of an opened chat's command reaches that chat, not the first one", async () => {
+  const be = await startedBackend(chatsBackend("refusal-routing-backend"));
+  try {
+    const { chat } = await openedChat(be);
+    chat.completeHandshake();
+    const first = [], mine = [];
+    be.on("event", (ev) => { if (ev.type === "command_rejected") first.push(ev); });
+    chat.on("event", (ev) => { if (ev.type === "command_rejected") mine.push(ev); });
+    chat.send({ type: "permission_response", id: "settled-long-ago", decision: "once" });
+    assert.equal(mine.length, 1, "the chat that answered never heard why");
+    chat.send({ type: "permission_response", id: "bad", decision: "maybe" });   // fails the schema
+    assert.equal(mine.length, 2, "a malformed command's refusal went elsewhere");
+    assert.deepEqual(first, [], "it landed in the first chat's transcript");
+  } finally {
+    be.dispose("test over");
+  }
+});

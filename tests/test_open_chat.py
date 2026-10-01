@@ -558,6 +558,60 @@ class OpenChatTest(unittest.TestCase):
             "bash", {"command": "rm -rf build"})[0], "deny",
             "a deny saved while the chat was being built did not bind it")
 
+    def test_a_malformed_chat_id_is_refused_by_name(self):
+        self.open_b()
+        for bad in ([1], "c" * 65, ""):
+            with self.subTest(bad=bad):
+                self.host.dispatch({"type": "get_config", "request_id": "g1", "chat_id": bad})
+                refused = self.wait_for(lambda f: f["type"] == "command_rejected"
+                                        and f.get("request_id") == "g1")
+                self.assertEqual(refused["reason"], "invalid_command")
+                self.wire.truncate(0)
+                self.wire.seek(0)
+
+    def test_shutdown_finishes_a_running_chat_command_and_starts_no_queued_one(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        started, release, ran = threading.Event(), threading.Event(), []
+        real = other.dispatch
+
+        def dispatch(cmd):
+            if cmd.get("type") == "rewind":
+                started.set()
+                release.wait(10)                 # a rewind writing the user's files
+                ran.append("rewind")
+                return None
+            ran.append(cmd.get("type"))
+            return real(cmd)
+        other.dispatch = dispatch
+        self.host.dispatch({"type": "rewind", "request_id": "r", "index": 0, "chat_id": opened["chat_id"]})
+        self.host.dispatch({"type": "get_config", "request_id": "q", "chat_id": opened["chat_id"]})
+        self.assertTrue(started.wait(5))
+        threading.Timer(0.3, release.set).start()
+        with patch("dgc.peers.withdraw", lambda: None):
+            self.host.close(grace_s=0)
+        self.assertEqual(ran, ["rewind"], "shutdown cut the rewind off, or started what was queued")
+
+    def test_two_reloads_never_discover_at_once(self):
+        import dgc.agent as agent_module
+        agent = self.host.default.agent
+        inside, peak, gate = [0], [0], threading.Event()
+        real = agent_module.discover_skills
+
+        def discover(*args, **kwargs):
+            inside[0] += 1
+            peak[0] = max(peak[0], inside[0])
+            gate.wait(0.3)
+            inside[0] -= 1
+            return real(*args, **kwargs)
+        with patch.object(agent_module, "discover_skills", discover):
+            threads = [threading.Thread(target=agent.reload_skills) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(5)
+        self.assertEqual(peak[0], 1, "an older discovery could finish last and drop the new skills")
+
     # ---- chats that share one checkout ------------------------------------------------------------
 
     def test_chats_in_one_checkout_know_about_each_other(self):

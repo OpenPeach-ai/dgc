@@ -2499,10 +2499,6 @@ class Agent(GoalLifecycle):
         return self._active_skill_names != before
 
     def reload_skills(self) -> None:
-        # The skill list is in the system prompt, which a running turn rebuilds only when told:
-        # a plugin installed mid-turn showed its skills from the turn after.
-        with self._mode_lock:
-            self._mode_prompt_dirty = True
         """Refresh the skill catalog, safely even while a turn runs.
 
         Rebound, never cleared and refilled in place: a plugin installed mid-turn reloads from
@@ -2510,12 +2506,20 @@ class Agent(GoalLifecycle):
         that loop is "dictionary changed size during iteration" -- or, the quiet half, a request
         sent with no skills at all. A reader already iterating finishes on the old dict; the next
         takes the new one whole. ctx.skills is re-pointed with it, so the skill tool agrees.
+
+        One reload at a time: a plugin install and a turn's start both reload, and the older
+        discovery finishing last put back a catalog without the new plugin's skills. And the list
+        is in the system prompt, which a running turn rebuilds only when told: a plugin installed
+        mid-turn showed its skills from the turn after.
         """
-        fresh = discover_skills(self.config.project_root,
-                                disabled_names=self.config.get("disabled_skills", []))
-        self.skills = fresh
-        if getattr(self, "ctx", None) is not None:
-            self.ctx.skills = fresh
+        with self.__dict__.setdefault("_skills_reload_lock", threading.Lock()):
+            fresh = discover_skills(self.config.project_root,
+                                    disabled_names=self.config.get("disabled_skills", []))
+            self.skills = fresh
+            if getattr(self, "ctx", None) is not None:
+                self.ctx.skills = fresh
+        with self._mode_lock:
+            self._mode_prompt_dirty = True
 
     def _skill_catalog(self):
         profile = str(self.config.get("tool_profile", "standard") or "standard").lower()

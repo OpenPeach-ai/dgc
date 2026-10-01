@@ -1103,8 +1103,8 @@ silently receives it.
   nothing and waits for nothing, and a child that has already finished cannot read it — the answer
   says so and points at `wait_tasks`. The two control tools need a child that is still RUNNING, not
   merely a result nobody has read. The transcript names the child by what it was asked to do:
-  *Sent message to Write the parser*, in the editor and the terminal, and again when the chat is
-  reopened.
+  *Sent message to Write the parser*, in the editor (and again when the chat is reopened there)
+  and in the terminal UI as it happens.
 - **`close_task`** — stop a child whose work is no longer wanted. Its changes are **not**
   integrated: whatever it had written to its own checkout is preserved as retained work, so
   `/tasks` can apply or drop it, and nothing is silently thrown away. Stopping a child stops
@@ -1547,7 +1547,7 @@ in that chat — a Stop ends only its own turn and its own approval cards, and a
 (a compaction, a rewind, reconnecting MCP servers) never holds another chat's Stop or approvals.
 What is yours rather than a chat's — a permission rule, a trusted folder, an MCP server you add or
 remove — reaches every open chat at once. `dgc.shareBackend` turns the sharing off and gives each
-chat a process of its own; a CLI older than 0.47.0 always gets one per chat.
+chat a process of its own. The extension needs DGC CLI 0.47.0 or newer.
 
 While a chat's turn runs you can still:
 

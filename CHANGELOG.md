@@ -106,8 +106,8 @@ client's frames are unchanged.
 ### A message to a sub-agent names the agent
 
 Steering a running sub-agent read "Used tool · message task" in the editor and a bare
-`message_task` in the terminal. It now reads "Sent message to <what that agent was asked to do>",
-in every surface and again when the chat is reopened.
+`message_task` in the terminal. It now reads "Sent message to <what that agent was asked to do>"
+in the editor, also when the chat is reopened, and in the terminal UI as it happens.
 
 ### A background sub-task no longer tells the model not to wait
 

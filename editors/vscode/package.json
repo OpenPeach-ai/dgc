@@ -494,7 +494,7 @@
         "dgc.shareBackend": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Run every chat in one `dgc serve`, the way Codex runs its threads — each chat still in its own folder, with its own project, trust, MCP servers and mode. Turn it off to give each chat a process of its own. Needs a CLI that can hold several chats (0.47.0 or newer); older ones always get one backend per chat."
+          "markdownDescription": "Run every chat in one `dgc serve`, the way Codex runs its threads — each chat still in its own folder, with its own project, trust, MCP servers and mode. Turn it off to give each chat a process of its own. A backend pinned to one project (`DGC_PROJECT_ROOT`) cannot hold chats in other folders, so those get a process of their own."
         },
         "dgc.maxLiveChats": {
           "type": "number",

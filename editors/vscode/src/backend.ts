@@ -587,8 +587,12 @@ export class DgcBackend extends EventEmitter {
     return true;
   }
 
-  private reject(message: string, count = 1): void {
-    this.emit("event", { type: "command_rejected", message, count });
+  private reject(message: string, count = 1, chat = ""): void {
+    const ev = { type: "command_rejected", message, count } as unknown as DgcEvent;
+    // To the chat whose command it was: an opened chat's stale approval, or the prompts its Stop
+    // dropped, were reported in the transcript of the chat this backend started with.
+    if (chat) { this.emit("chat-event", chat, ev); return; }
+    this.emit("event", ev);
   }
 
   private rejectPending(message: string): void {
@@ -712,19 +716,20 @@ export class DgcBackend extends EventEmitter {
       this.reject("DGC command is not JSON-serializable");
       return undefined;
     }
+    const chat = this.chatKey((wireCommand as any)?.chat_id);
     const schemaProblem = dgcCommandError(wireCommand);
     if (schemaProblem) {
-      this.reject(`DGC command violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
+      this.reject(`DGC command violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`, 1, chat);
       return undefined;
     }
     const bytes = Buffer.byteLength(frame, "utf8");
     if (bytes > MAX_COMMAND_BYTES) {
-      this.reject(`DGC command exceeded ${MAX_COMMAND_BYTES} bytes`);
+      this.reject(`DGC command exceeded ${MAX_COMMAND_BYTES} bytes`, 1, chat);
       return undefined;
     }
     return { frame, bytes, type: String(wireCommand.type),
              requestId: "id" in wireCommand ? String((wireCommand as any).id ?? "") : undefined,
-             chat: this.chatKey((wireCommand as any).chat_id) };
+             chat };
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */
@@ -781,7 +786,7 @@ export class DgcBackend extends EventEmitter {
     if (isResponse) {
       const expected = item.requestId ? this.activeRequests.get(item.requestId) : undefined;
       if (expected !== item.type || this.respondedRequests.has(item.requestId || "")) {
-        this.reject("DGC ignored a stale, duplicate, or mismatched approval response");
+        this.reject("DGC ignored a stale, duplicate, or mismatched approval response", 1, item.chat);
         return false;
       }
     }
@@ -791,12 +796,12 @@ export class DgcBackend extends EventEmitter {
       this.endChatRequests(item.chat);
       const dropped = this.dropQueuedTurns(item.chat);
       if (dropped) {
-        this.reject(`DGC cancelled ${dropped} queued prompt${dropped === 1 ? "" : "s"}`, dropped);
+        this.reject(`DGC cancelled ${dropped} queued prompt${dropped === 1 ? "" : "s"}`, dropped, item.chat);
       }
     }
     if (!this.proc) {
       if (isControl) {
-        this.reject("DGC ignored a stale decision or cancellation after the backend exited");
+        this.reject("DGC ignored a stale decision or cancellation after the backend exited", 1, item.chat);
         return false;
       }
       this.start();

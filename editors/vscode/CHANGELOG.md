@@ -8,8 +8,8 @@
 - Chats share one `dgc serve`, the way Codex runs its threads, instead of one process each. A Stop
   ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
   chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
-  for the chats still on it. `dgc.shareBackend` turns sharing off; an older CLI gets one backend per
-  chat, as before.
+  for the chats still on it. `dgc.shareBackend` turns sharing off. This extension needs DGC CLI
+  0.47.0 or newer.
 - While a turn runs you can rename the chat, open a saved session (it opens beside the running
   chat instead of being refused with "unavailable while a turn is running"), and install or remove
   a plugin.

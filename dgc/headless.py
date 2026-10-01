@@ -6127,6 +6127,9 @@ _UNQUEUED_COMMANDS = frozenset({"permission_response", "plan_response", "options
                                 "mcp_input_response", "ask_skip", "ping", "editor_state",
                                 "shutdown"})
 
+_MAX_CHAT_ID_CHARS = 64
+
+
 def _needs_editor_credentials(spec: dict) -> bool:
     """A server whose credentials only an editor holds: environment names it declares that neither
     its restored secrets nor this process's environment supply."""
@@ -6176,6 +6179,7 @@ class Host:
         self._retired_secrets: set[str] = set()
         self._shutting_down = False
         self._queues: dict[str, queue.SimpleQueue] = {}
+        self._drains: dict[str, threading.Thread] = {}
         self.command_failed = None           # serve() logs a command that raised: (cmd, exc)
         self._editor_liveness = None
         self._finalizer_wait = ""
@@ -6425,6 +6429,10 @@ class Host:
         if "chat_id" not in cmd:
             return self._deliver(self.default, cmd)
         chat_id = cmd.get("chat_id")
+        if not isinstance(chat_id, str) or not 0 < len(chat_id) <= _MAX_CHAT_ID_CHARS:
+            # Unhashable, it raised past the router and the client's request timed out; too long,
+            # the refusal that echoed it failed the wire's own validation.
+            return self._reject(cmd, "invalid_command", "chat_id must be a short non-empty string")
         with self._chats_lock:
             chat = self.chats.get(chat_id) if chat_id not in self._closing else None
         if chat is None:
@@ -6447,8 +6455,10 @@ class Host:
             commands = self._queues.get(chat.chat_id)
             if commands is None:
                 commands = self._queues[chat.chat_id] = queue.SimpleQueue()
-                threading.Thread(target=self._drain, args=(chat, commands), daemon=True,
-                                 name=f"dgc-commands-{chat.chat_id}").start()
+                drain = threading.Thread(target=self._drain, args=(chat, commands), daemon=True,
+                                         name=f"dgc-commands-{chat.chat_id}")
+                self._drains[chat.chat_id] = drain
+                drain.start()
         commands.put(cmd)
 
     def _drain(self, chat: "Backend", commands: "queue.SimpleQueue") -> None:
@@ -6523,8 +6533,22 @@ class Host:
             self._shutting_down = True        # a chat still being built closes itself
             chats = list(self.chats.values())
             queues, self._queues = list(self._queues.values()), {}
+            drains, self._drains = list(self._drains.values()), {}
         for commands in queues:
+            # What has not started never will: queued behind the None, it started during shutdown.
+            while True:
+                try:
+                    commands.get_nowait()
+                except queue.Empty:
+                    break
             commands.put(None)
+        # What has started finishes. A rewind or a retained task's apply writes the user's files
+        # one at a time on its chat's command thread; ended at interpreter exit between two writes,
+        # it left the workspace half restored.
+        deadline = time.monotonic() + max(5.0, float(grace_s or 0))
+        for drain in drains:
+            if drain is not threading.current_thread():
+                drain.join(timeout=max(0.0, deadline - time.monotonic()))
         outcomes: list[str] = []
         if len(chats) == 1:
             outcomes.append(chats[0].close(grace_s=grace_s, process=False))
