@@ -94,3 +94,29 @@ test("the reader can still open a folded group by hand", () => {
   event({ type: "turn_end", turn_id: "t", reason: "completed" });
   assert.equal(group.open, true, "a turn ending must not re-fold what the reader opened");
 });
+
+// A reload replays the turn into a detached fragment, and the fold used to be skipped for a group
+// that was not in the document -- so a reopened chat showed every group open, the wall of cards the
+// live turn had folded away. A failed step's group stays open there too.
+test("a reloaded turn folds its finished groups the way the live one did", () => {
+  const h = makeDom();
+  const event = (d) => h.send({ type: "event", event: d });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "history", complete: true, items: [
+    { type: "turn_start", turn_id: "h1", prompt: "do some work", kind: "prompt" },
+    { type: "tool_call", call_id: "c1", name: "bash", args: { command: "ls" } },
+    { type: "tool_result", call_id: "c1", name: "bash", output: "out", is_error: false },
+    { type: "text_delta", text: "Then the failing one." },
+    { type: "stream_end", message_id: "h1:1", phase: "commentary" },
+    { type: "tool_call", call_id: "c2", name: "bash", args: { command: "false" } },
+    { type: "tool_result", call_id: "c2", name: "bash", output: "exit code: 1", is_error: true },
+    { type: "text_delta", text: "It failed." },
+    { type: "stream_end", message_id: "h1:2", phase: "answer" },
+    { type: "turn_end", turn_id: "h1", reason: "completed", final_message_id: "h1:2" },
+  ] });
+  const groups = [...h.doc.querySelectorAll(".tool-group")];
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].open, false, "a finished run folds on a reload too");
+  assert.equal(groups[1].open, true, "and a failed one stays open");
+  assert.deepEqual(h.errors, []);
+});

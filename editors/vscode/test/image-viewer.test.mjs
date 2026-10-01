@@ -282,6 +282,8 @@ test("an image arriving by ref does not move the transcript", async (t) => {
     await panel.settle();
     await panel.page.evaluate(() => {
       const card = document.querySelector('.tool[data-call-id="hc"]');
+      // A finished group folds on a reload too, as it does live: a reader opens it first.
+      card.closest(".tool-group")?.setAttribute("open", "");
       card.querySelector(".tool-toggle").click();
       card.scrollIntoView({ block: "center" });
       document.getElementById("log").dispatchEvent(new WheelEvent("wheel"));

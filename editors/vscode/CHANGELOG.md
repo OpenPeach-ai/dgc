@@ -22,6 +22,8 @@
 - A message to a running sub-agent reads "Sent message to <what it was asked to do>", with a
   message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear
   the sub-agent mark.
+- A reopened chat folds each finished run of tools, as the live chat did; it used to show every
+  run open.
 - The changes bar shows the turn's own edits in a folder too large for its workspace scan.
 - A background sub-agent's step that is still running when your turn ends keeps its card: it no
   longer reads "stopped", its progress keeps arriving, and its result lands on it instead of on a

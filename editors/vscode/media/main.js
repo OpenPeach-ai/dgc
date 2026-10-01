@@ -6230,8 +6230,11 @@
   //
   // A group that failed, was denied, or was stopped stays open. An error is the one thing you
   // must never have to expand to find.
+  //
+  // A replayed turn is built in a detached fragment, so "connected" is not the test there: without
+  // this a reloaded chat left every group open, a wall of cards the live turn had folded away.
   function retireToolGroup(group) {
-    if (!group || !group.isConnected) return;
+    if (!group || (!group.isConnected && !replaying)) return;
     const cards = [...group.querySelectorAll(":scope > .tool")];
     if (!cards.length) return;
     const unsettled = cards.some((card) => card.dataset.status === "running");
