@@ -352,6 +352,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private backend?: ChatBackend;
   /** Backends whose own slot has closed while chats other slots opened on them are still running. */
   private releasedHosts = new Set<DgcBackend>();
+  /** Folders outside this window you agreed to open a chat in (mayOpenChatIn). */
+  private readonly foldersOpenedHere = new Set<string>();
   /** What the panel hung on each backend for its slot, so a slot that goes away can take it off a
    *  process that stays up for other chats. */
   private readonly backendListeners = new WeakMap<object, Array<[string, (...args: any[]) => void]>>();
@@ -648,8 +650,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     });
     const folder = picked?.[0]?.fsPath;
     if (!folder) { return; }
+    if (!(await this.mayOpenChatIn(folder))) { return; }
     this.focus();
     this.inVisiblePanel(() => this.openChatSlot(folder));
+  }
+
+  /** A chat in a folder starts your MCP servers there and runs your hooks with it as their working
+   *  directory before you type anything -- a cloned repository's own scripts among them (a relative
+   *  hook command, a package npx finds in its node_modules). VS Code's workspace trust covers only
+   *  this window's folders, and the extension does not run in a window that is not trusted; any
+   *  other folder is asked about first, as the terminal's /new DIR does. Once per folder per window. */
+  private async mayOpenChatIn(folder: string): Promise<boolean> {
+    const real = (target: string) => { try { return fs.realpathSync(target); } catch { return resolve(target); } };
+    const target = real(folder);
+    const inWindow = vscode.workspace.isTrusted !== false && (vscode.workspace.workspaceFolders || [])
+      .some((root) => { const base = real(root.uri.fsPath); return target === base || target.startsWith(base + sep); });
+    if (inWindow || this.foldersOpenedHere.has(target)) { return true; }
+    const open = "Trust it and open";
+    const choice = await vscode.window.showWarningMessage(`Open a DGC chat in ${target}?`, {
+      modal: true,
+      detail: "DGC starts your MCP servers there and runs your hooks with that folder as their working "
+        + "directory, so scripts it contains can run. Open it only if you trust what is in it.",
+    }, open);
+    if (choice !== open) { return false; }
+    this.foldersOpenedHere.add(target);
+    return true;
   }
 
   /** Start a second (or third, if the ceiling ever rises) chat with its own backend. */

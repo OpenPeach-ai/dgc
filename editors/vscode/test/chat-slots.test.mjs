@@ -6,7 +6,7 @@
 // interesting failures are all in the bookkeeping rather than in the pipe.
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -992,4 +992,68 @@ test("at the chat limit, opening a chat in another folder never shows the folder
   }
   assert.equal(pickers, 0, "the picker opened, and the limit refused the folder only after it was chosen");
   assert.ok(notices.info.some((line) => /dgc\.maxLiveChats/.test(line)));
+});
+
+
+// ---- a chat in a folder outside the window ------------------------------------------------------------
+// It starts your MCP servers there and runs your hooks with it as their working directory before you
+// type anything. VS Code's workspace trust covers only the window's folders; any other is asked about
+// first, as the terminal's /new DIR asks.
+
+async function pickFolder(provider, folder, answer) {
+  const vs = globalThis.__DGC_TEST_VSCODE.window;
+  const asked = [];
+  const saved = vs.showWarningMessage;
+  vs.showOpenDialog = async () => [{ fsPath: folder }];
+  vs.showWarningMessage = async (message, options, ...items) => {
+    asked.push({ message, options, items });
+    return answer === "open" ? items[0] : undefined;
+  };
+  provider.inVisiblePanel = (action) => action();
+  try {
+    await provider.newChatInFolder();
+  } finally {
+    delete vs.showOpenDialog;
+    vs.showWarningMessage = saved;
+  }
+  return asked;
+}
+
+test("a chat in a folder outside the window is asked about first, and Cancel opens nothing", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Window" });
+  const outside = mkdtempSync(join(tmpdir(), "dgc-cloned-repo-"));
+  try {
+    const asked = await pickFolder(provider, outside, "cancel");
+    assert.equal(asked.length, 1, "a chat opened in a folder nobody vouched for");
+    assert.equal(asked[0].options.modal, true);
+    assert.match(asked[0].options.detail, /MCP servers[\s\S]*hooks/);
+    assert.equal(provider.slots.length, 1, "Cancel still opened the chat");
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("a folder you agreed to opens, and is not asked about again in this window", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Window" });
+  const outside = mkdtempSync(join(tmpdir(), "dgc-cloned-repo-"));
+  try {
+    assert.equal((await pickFolder(provider, outside, "open")).length, 1);
+    assert.equal(provider.slots.length, 2);
+    assert.equal(provider.activeSlot().cwd, outside);
+    assert.equal((await pickFolder(provider, outside, "open")).length, 0, "asked twice about one folder");
+    assert.equal(provider.slots.length, 3);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("a folder inside the window's own workspace opens without asking", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Window" });
+  const inside = join(scratch, "pkg-inside");
+  mkdirSync(inside, { recursive: true });
+  assert.equal((await pickFolder(provider, inside, "cancel")).length, 0, "VS Code already trusts the window's folders");
+  assert.equal(provider.slots.length, 2);
 });

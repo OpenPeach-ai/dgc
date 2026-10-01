@@ -5,7 +5,9 @@
 - Every chat can have its own folder. **Open a chat in another folder** (in the header, and as
   *DGC: Open a Chat in Another Folder…*) opens one in a different project, with that project's
   settings, trust, MCP servers, skills, permission rules and mode. Its tab names the folder.
-  Restart Backend, or recovery after a crash, brings it back on its own conversation.
+  A folder outside your window is asked about first, as `/new DIR` asks in the terminal: your
+  MCP servers start there and your hooks run there before you type anything. Restart Backend,
+  or recovery after a crash, brings the chat back on its own conversation.
 - Chats share one `dgc serve`, the way Codex runs its threads, instead of one process each. A Stop
   ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
   chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
