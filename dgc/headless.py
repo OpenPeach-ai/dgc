@@ -4419,9 +4419,19 @@ class Backend:
                         visible.append(path)
                     if not is_within(path, self.config.project_root) and path not in roots:
                         roots.append(path)
+            own = Path(self.config.project_root).resolve()
+            # The editor's folders are this chat's workspace only when its project is among them.
+            # A chat opened in another folder that was sent the window's folders got each one as
+            # an ExternalDirectory allow: writes into the window's project with no approval card,
+            # while its own files still asked.
+            if not any(is_within(own, path) or is_within(path, own) for path in visible):
+                roots, visible = [], []
             self.config.session_permissions = {
                 "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
-            self._editor_inspection_roots = visible[:16]
+            # Its own folder is always one it inspects: that is where its changes are recorded.
+            # Replaced by the editor's folders, a chat whose project was not one of them listed
+            # none of its own changes and refused to open one.
+            self._editor_inspection_roots = [own, *(path for path in visible if path != own)][:16]
             if getattr(self, "_editor_inspection", None) is not None:
                 self._editor_inspection.set_roots(self._editor_inspection_roots)
             self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],

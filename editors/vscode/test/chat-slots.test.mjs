@@ -6,7 +6,7 @@
 // interesting failures are all in the bookkeeping rather than in the pipe.
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -805,4 +805,55 @@ test("a new chat opened on a saved session keeps its folder", () => {
   provider.confirmedTurnActive = true;
   provider.openPastSession(provider.backend, "/srv/other-repo/.dgc/sessions/s1.json");
   assert.equal(provider.activeSlot().cwd, "/srv/other-repo", "the session belongs to that folder's project");
+});
+
+// A chat opened in another folder works in that folder only. Every chat's handshake sent the
+// window's folders as its roots, and `dgc serve` grants each root outside the chat's project as an
+// ExternalDirectory allow: the chat could write into the window's project with no approval card,
+// while a write to its own files still asked. Its Changes views scanned the window's folder too.
+function syncRoots(provider, be) {
+  provider.workspaceRootsInFlight = undefined;
+  provider.workspaceRootsDirty = true;
+  provider.syncWorkspaceRoots(be, true);
+  return be.sent.filter((c) => c && c.type === "set_workspace_roots").at(-1)?.roots;
+}
+
+test("a chat opened in another folder is sent that folder as its roots, never the window's", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Window" });
+  const windowChat = provider.activeSlotId;
+  provider.openChatSlot();
+  provider.activeSlot().cwd = "/srv/other-repo/pkg";
+  const be = provider.ensureBackend();
+  provider.lastReadyEvent = { type: "ready", capabilities: {} };
+  assert.deepEqual(syncRoots(provider, be), ["/srv/other-repo/pkg"],
+    "before DGC names the chat's project, the folder it was opened in");
+  provider.lastReadyEvent = { type: "ready", capabilities: {}, project_root: "/srv/other-repo" };
+  assert.deepEqual(syncRoots(provider, be), ["/srv/other-repo"], "the chat's own project, and nothing of the window's");
+
+  provider.switchToSlot(windowChat);
+  assert.deepEqual(syncRoots(provider, provider.backend), [scratch], "the window's own chat keeps the window's folders");
+});
+
+test("a chat in another folder lists its own folder's changes, not the window's", async () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Window" });
+  provider.openChatSlot();
+  const other = mkdtempSync(join(tmpdir(), "dgc-other-folder-"));
+  try {
+    provider.activeSlot().cwd = other;
+    const be = provider.ensureBackend();
+    provider.lastReadyEvent = { type: "ready", capabilities: { workspace_inspection: true }, project_root: other };
+    provider.workspaceRootsInFlight = undefined;
+    provider.workspaceRootsDirty = false;
+    const row = (path) => ({ path, additions: 1, deletions: 0 });
+    be.request = async () => ({ type: "workspace_changes", roots: [
+      { root: realpathSync(scratch), files: [row("window.txt")], total: 1, complete: true },
+      { root: realpathSync(other), files: [row("mine.txt")], total: 1, complete: true },
+    ] });
+    const { files } = await provider.collectWorkspaceChanges();
+    assert.deepEqual(files.map((file) => file.path), ["mine.txt"]);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
 });

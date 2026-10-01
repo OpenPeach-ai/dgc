@@ -1430,13 +1430,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       : { command: { type: "set_think", level }, response: "think_changed" };
   }
 
-  /** Keep the backend's external-directory grants identical to the live VS Code
-   * workspace. Root mutations are blocked by `dgc serve` during a turn, so one
-   * acknowledged update is kept in flight and newer changes are coalesced until
-   * the backend is idle. The backend supports the project root plus 32 external
-   * roots; keep the editor side within the same explicit bound. */
+  /** The folders this chat works in: the window's, or, for a chat opened in another folder, that
+   *  chat's project and nothing else. Sent the window's folders, such a chat got each one as an
+   *  external-directory grant -- writes into the window's project with no approval card, while
+   *  its own files still asked -- and its Changes views scanned the window's folder, not its own. */
+  private chatFolders(): Array<{ name: string; fsPath: string }> {
+    const cwd = this.activeSlot().cwd;
+    if (cwd) {
+      const reported = this.lastReadyEvent?.project_root;
+      const root = typeof reported === "string" && reported ? reported : cwd;
+      return [{ name: basename(root) || root, fsPath: root }];
+    }
+    return (vscode.workspace.workspaceFolders || []).map((f) => ({ name: f.name, fsPath: f.uri.fsPath }));
+  }
+
+  /** Keep the backend's external-directory grants identical to this chat's folders. Root
+   * mutations are blocked by `dgc serve` during a turn, so one acknowledged update is kept in
+   * flight and newer changes are coalesced until the backend is idle. The backend supports the
+   * project root plus 32 external roots; keep the editor side within the same explicit bound. */
   private workspaceRoots(): string[] {
-    return (vscode.workspace.workspaceFolders || []).slice(0, 33).map((f) => f.uri.fsPath);
+    return this.chatFolders().slice(0, 33).map((f) => f.fsPath);
   }
 
   private syncWorkspaceRoots(be = this.backend, setup = false): void {
@@ -1605,10 +1618,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ? "Update the DGC CLI to inspect workspace changes."
         : "Workspace changes will be available when DGC reconnects."] };
     }
-    const allFolders = vscode.workspace.workspaceFolders || [];
+    const allFolders = this.chatFolders();
     const notices = allFolders.length > 16 ? ["Only the first 16 workspace folders were scanned."] : [];
     const folders = (await Promise.all(allFolders.slice(0, 16).map(async folder => ({
-      name: folder.name, path: await realpath(folder.uri.fsPath).catch(() => ""),
+      name: folder.name, path: await realpath(folder.fsPath).catch(() => ""),
     })))).filter(folder => {
       if (!folder.path) notices.push(`${folder.name}: workspace folder is unavailable.`);
       return !!folder.path;
