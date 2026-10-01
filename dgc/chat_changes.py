@@ -284,18 +284,21 @@ class ChatChanges:
                 if name in skipped:
                     continue
                 left, right = before["files"].get(name, _MISSING), after["files"].get(name, _MISSING)
-                if name in own and name not in before["files"]:
-                    # The scan never saw it, but the tool recorded it just before writing: that,
-                    # not HEAD or "missing", is what the turn started from.
-                    left = own[name]
-                    if name not in after["files"] and own_after.get(name) is not None:
-                        right = own_after[name]
-                elif bounded and name not in before["files"]:
-                    # A bounded `before` only listed what already differed from HEAD, so a file the
-                    # turn edited from CLEAN is absent from it. Absent does not mean "created": its
-                    # state at the start of the turn was HEAD's, and reading it from there is what
-                    # keeps the edit visible instead of reporting a new file or dropping it.
+                # A COMPLETE `before` lists every file, so a name absent from it did not exist when
+                # the turn began -- whatever a shell command made of it before a tool wrote it.
+                # Taking the tool's own record (made just before it wrote) there reported a file
+                # `printf a > notes.txt` created as an edit of an existing 'a'.
+                if (name not in before["files"] and not before["complete"]
+                        and name not in before.get("selected", set())):
+                    # A bounded `before` only considered what already differed from HEAD, so a
+                    # file the turn changed from CLEAN is absent from it: its state at the start was
+                    # HEAD's. Only where HEAD cannot tell (an untracked file, a folder outside git)
+                    # is the tool's record the best there is.
                     left = _head_state(self.root, name)
+                    if left == _MISSING and name in own:
+                        left = own[name]
+                if name in own and name not in after["files"] and own_after.get(name) is not None:
+                    right = own_after[name]             # the scan stopped before it; the tool knows
                 if _same(left, right):
                     continue
                 old = self.files.get(name, [])

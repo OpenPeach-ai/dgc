@@ -55,6 +55,7 @@ def user_memory_path() -> Path:
 _RULE_HEADING = re.compile(r"^#{1,6}[ \t]+rules?\b", re.IGNORECASE)
 _RULE_MARKER = "<!-- dgc:rule -->"
 _ANY_HEADING = re.compile(r"^#{1,6}[ \t]")
+_FENCE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
 _RULES_LABEL = "[Rules from this file -- always kept in full]\n\n"
 
 
@@ -63,11 +64,23 @@ def _instruction_blocks(text: str) -> list[str]:
 
     Splitting at line boundaries is what keeps this sentinel-safe: a `[REDACTED]` marker never spans
     a newline, so keeping or dropping WHOLE blocks can never leave half of one behind.
+
+    Never inside a fenced code block: a rule's `# from the repo root` in a ```sh fence was taken
+    for a heading, the rule was cut there, and the rest of it -- its unterminated fence turning
+    the following text into code -- went into the middle the view drops.
     """
     blocks: list[str] = []
     current: list[str] = []
+    fence = ""                                  # the open fence's marker, inside a code block
     for line in text.splitlines(keepends=True):
-        if _ANY_HEADING.match(line) and current:
+        marker = _FENCE.match(line)
+        if fence:
+            if (marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence)
+                    and not line[marker.end():].strip()):
+                fence = ""
+        elif marker:
+            fence = marker.group(1)
+        elif _ANY_HEADING.match(line) and current:
             blocks.append("".join(current))
             current = []
         current.append(line)

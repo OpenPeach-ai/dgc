@@ -72,6 +72,10 @@ _TODO_NOTICE_ITEMS = 3  # open items named in that notice
 _TODO_NOTICE_CHARS = 60 # per item
 _RESUME_COMPACT_RATIO = 0.5  # a restored transcript filling this much of the window is compacted
                              # before the next prompt is appended, so there is room to answer
+class _IntegrateLater(Exception):
+    """A handed-over integration found the workspace busy at a turn boundary: run it later."""
+
+
 # How much a mode does without asking: a reopened session may bring back a lower one, never a higher.
 _MODE_RANK = {"plan": 0, "default": 1, "acceptEdits": 2, "auto": 3}
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
@@ -1883,10 +1887,14 @@ class Agent(GoalLifecycle):
         # Work other threads hand the thread that holds this session for a turn (see
         # _as_session_owner): it alone may save the session.
         self._handed_over: "queue.SimpleQueue" = queue.SimpleQueue()
+        # Set while the session's own turn thread runs handed-over jobs at a boundary.
+        self._handover_local = threading.local()
         self._session_turn_state_lock = threading.Lock()
         self._session_turn_lease = None
         self._session_turn_owner: int | None = None
         self._session_turn_depth = 0
+        # Threads that joined a turn's reservation without owning it (a rename): thread -> depth.
+        self._session_turn_joiners: dict[int, int] = {}
         self._held_session_note = None      # who held it when we last had to refuse, and
         self._held_session_reason = ""      # what they said when asked to hand it over
         self._session_revision = 0
@@ -2491,6 +2499,10 @@ class Agent(GoalLifecycle):
         return self._active_skill_names != before
 
     def reload_skills(self) -> None:
+        # The skill list is in the system prompt, which a running turn rebuilds only when told:
+        # a plugin installed mid-turn showed its skills from the turn after.
+        with self._mode_lock:
+            self._mode_prompt_dirty = True
         """Refresh the skill catalog, safely even while a turn runs.
 
         Rebound, never cleared and refilled in place: a plugin installed mid-turn reloads from
@@ -4260,14 +4272,31 @@ class Agent(GoalLifecycle):
             yield True
             return
         owner = threading.get_ident()
-        entered = False
+        entered = joined = False
         lease = None
+        joiners = self.__dict__.setdefault("_session_turn_joiners", {})
+        if not shared and owner not in joiners:
+            # A rename that joined the turn that just ended can still be writing: it held the
+            # lease past that turn, and the next queued turn was refused as "an active turn in
+            # another DGC process". A rename takes milliseconds; wait that out, briefly.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                with self._session_turn_state_lock:
+                    joiners_only = (self._session_turn_lease is not None
+                                    and self._session_turn_owner is None)
+                if not joiners_only:
+                    break
+                time.sleep(0.02)
         with self._session_turn_state_lock:
             if self._session_turn_lease is not None:
-                allowed = bool(reentrant and (self._session_turn_owner == owner or shared))
+                mine = self._session_turn_owner == owner
+                allowed = bool(reentrant and (mine or shared or owner in joiners))
                 if allowed:
                     self._session_turn_depth += 1
                     entered = True
+                    if not mine:
+                        joined = True
+                        joiners[owner] = joiners.get(owner, 0) + 1
             else:
                 from . import sessions
                 try:
@@ -4301,10 +4330,20 @@ class Agent(GoalLifecycle):
             if entered:
                 with self._session_turn_state_lock:
                     self._session_turn_depth -= 1
+                    if joined:
+                        left = joiners.get(owner, 1) - 1
+                        if left > 0:
+                            joiners[owner] = left
+                        else:
+                            joiners.pop(owner, None)
                     if self._session_turn_depth == 0:
                         release = self._session_turn_lease
                         self._session_turn_lease = None
                         self._session_turn_owner = None
+                        joiners.clear()
+                    elif (not joined and self._session_turn_owner == owner
+                          and self._session_turn_depth == sum(joiners.values())):
+                        self._session_turn_owner = None     # the turn is over; only joiners remain
                 if release is not None:
                     release.release()
 
@@ -4330,29 +4369,44 @@ class Agent(GoalLifecycle):
         def job():
             try:
                 box["value"] = operation()
+            except _IntegrateLater:
+                self._handed_over.put(job)        # a later boundary, or this thread once it ends
+                return
             except BaseException as exc:         # handed back to the caller's thread
                 box["error"] = exc
-            finally:
-                done.set()
+            done.set()
         self._handed_over.put(job)
         while not done.wait(0.25):
             with self._session_turn_state_lock:
                 free = self._session_turn_lease is None
             if free:
-                self._run_handed_over()           # nobody holds the session now: run it here
+                self._run_handed_over(at_boundary=False)   # nobody holds the session: run it here
         if "error" in box:
             raise box["error"]
         return box.get("value")
 
-    def _run_handed_over(self) -> None:
-        """Run what other threads handed this session's owner; the turn calls it at boundaries."""
+    def _run_handed_over(self, *, at_boundary: bool = True) -> None:
+        """Run what other threads handed this session's owner; the turn calls it at boundaries.
+
+        What is there now, once each: a job that cannot run yet goes back for the next boundary
+        instead of spinning this one.
+        """
         pending = getattr(self, "_handed_over", None)
-        while pending is not None:
+        if pending is None:
+            return
+        jobs = []
+        while True:
             try:
-                job = pending.get_nowait()
+                jobs.append(pending.get_nowait())
             except queue.Empty:
-                return
-            job()
+                break
+        local = self._handover_local
+        local.at_boundary = at_boundary
+        try:
+            for job in jobs:
+                job()
+        finally:
+            local.at_boundary = False
 
     def _record_chat_step(self, runner, prompt):
         if self.depth != 0:
@@ -5000,6 +5054,11 @@ class Agent(GoalLifecycle):
                     self._last_persist_error = ""
                     return True
                 if not self._session_exists:          # a brand-new session with no turns yet
+                    if self._a_running_turn_saves_it():
+                        # Its own save writes the name. Saved from here, the write was refused as
+                        # "another DGC process owns its active turn" -- this chat's own turn.
+                        self._last_persist_error = ""
+                        return True
                     saved = self._persist()
                 elif self.session_name:
                     from . import sessions
@@ -5021,6 +5080,12 @@ class Agent(GoalLifecycle):
                 if not saved:
                     self.session_name = previous
                 return saved
+
+    def _a_running_turn_saves_it(self) -> bool:
+        """Whether a turn on another thread holds this session, and will save it."""
+        with self._session_turn_state_lock:
+            owner = self._session_turn_owner if self._session_turn_lease is not None else None
+        return owner is not None and owner != threading.get_ident()
 
     def generate_title(self, prompt: str, cancel=None) -> str | None:
         """A short, distinctive 5-10 word session title derived from the first prompt (
@@ -8983,7 +9048,17 @@ class Agent(GoalLifecycle):
                 f"This task ran sequentially because an isolated Git checkout was unavailable. Summary:\n{result}")
 
         lease = workspace_mutation_lock(self.config.project_root)
-        if not acquire_cancellable(lease, cancel if cancel is not None else self.cancelled):
+        if getattr(self._handover_local, "at_boundary", False):
+            # On the parent turn's own thread. Waiting here on another chat's long command froze
+            # that turn for as long as the command ran, and its Stop with it: the wait watched
+            # only the child's cancel. Busy, the integration waits for a later boundary, or for
+            # the child's own thread once the turn ends.
+            acquired = lease.acquire(timeout=0.5)
+            if not acquired and not lease.last_error:
+                raise _IntegrateLater()
+        else:
+            acquired = acquire_cancellable(lease, cancel if cancel is not None else self.cancelled)
+        if not acquired:
             detail = lease.last_error or "cancelled while waiting to integrate"
             kept = self._preserve_task_workspace(workspace, detail, cancel=cancel,
                                                  may_remove=False)

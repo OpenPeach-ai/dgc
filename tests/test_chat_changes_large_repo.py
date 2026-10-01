@@ -124,6 +124,22 @@ class SmallRepositoriesAreUnaffectedTest(unittest.TestCase):
         self.assertTrue(report["complete"], "nothing was bounded, so nothing may claim it was")
 
 
+class ACommandBeforeAToolTest(unittest.TestCase):
+    def test_a_clean_file_a_command_changed_keeps_that_change(self) -> None:
+        """A bounded scan never saw the clean file; the tool's record was made after `sed -i`."""
+        root = repository(MAX_FILES + 40)
+        changes = ChatChanges(root)
+        before = changes.begin()
+        self.assertFalse(before["complete"], "premise: the repository is too large to list whole")
+        (root / "real.txt").write_text("sed\n", encoding="utf-8")      # `sed -i`, earlier in the turn
+        changes.touched(root / "real.txt")
+        (root / "real.txt").write_text("tool\n", encoding="utf-8")
+        changes.finish(before)
+        segment = changes.files["real.txt"][0]
+        self.assertEqual(segment["before"]["text"], "before\n", "the command's change was lost")
+        self.assertEqual(segment["after"]["text"], "tool\n")
+
+
 if __name__ == "__main__":
     unittest.main()
 

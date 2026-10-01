@@ -5,6 +5,7 @@ changed files than that keeps a prefix, a slow tree stops at the deadline. An ed
 was invisible, and the bar said "Changes not recorded" while the model edited files in front of you.
 DGC's own file tools know what they write, so those edits never depend on the scan.
 """
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -31,6 +32,28 @@ class OwnEditsTest(unittest.TestCase):
     def edit(self, changes: ChatChanges, path: Path, text: str) -> None:
         changes.touched(path)                    # what the file tool does just before writing
         path.write_text(text)
+
+    def small_repo(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="dgc-own-edits-git-"))
+        for args in (["init", "-q", "."], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+        (root / "kept.txt").write_text("k\n")
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True, capture_output=True)
+        return root
+
+    def test_a_file_a_shell_command_made_earlier_in_the_turn_is_new(self):
+        """`printf 'a\\n' > notes.txt`, then an edit_file: recorded as an edit of an existing 'a'."""
+        root = self.small_repo()
+        changes = ChatChanges(root)
+        before = changes.begin()
+        self.assertTrue(before["complete"], "premise: a small repository is scanned whole")
+        (root / "notes.txt").write_text("a\n")            # the shell command, earlier in the turn
+        self.edit(changes, root / "notes.txt", "b\n")
+        changes.finish(before)
+        files = {f["path"]: f for f in changes.report()["files"]}
+        self.assertTrue(files["notes.txt"]["untracked"], "a file the turn created read as an edit")
+        self.assertEqual((files["notes.txt"]["additions"], files["notes.txt"]["deletions"]), (1, 0))
 
     def test_a_tool_edit_is_reported_in_a_folder_too_big_to_scan(self):
         root = self.big_folder()

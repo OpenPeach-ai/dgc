@@ -152,5 +152,25 @@ class ARedactionSentinelIsNeverSlicedTest(unittest.TestCase):
                 self.assertGreaterEqual(whole, 0)
 
 
+class ARuleWithFencedCodeTest(unittest.TestCase):
+    RULE = ("## Rule: never push without tests\n\nRun:\n\n```sh\n# from the repo root\nmake test\n"
+            "```\n\nIf it fails, stop.\n\n")
+
+    def test_a_comment_in_a_fence_is_not_a_heading(self) -> None:
+        out = bounded_memory_view(long_file(self.RULE))
+        self.assertIn("make test", out, "the rule was cut at the # comment inside its code block")
+        self.assertIn("If it fails, stop.", out)
+
+    def test_a_tilde_fence_too(self) -> None:
+        out = bounded_memory_view(long_file(self.RULE.replace("```", "~~~")))
+        self.assertIn("If it fails, stop.", out)
+
+    def test_a_closing_fence_must_match_its_opening(self) -> None:
+        rule = ("## Rule: quote fences\n\n````md\n```sh\n# not a heading\n```\nstill inside\n````\n\n"
+                "KEPT-AFTER-THE-FENCE\n\n")
+        out = bounded_memory_view(long_file(rule))
+        self.assertIn("KEPT-AFTER-THE-FENCE", out, "a shorter inner fence closed the outer one")
+
+
 if __name__ == "__main__":
     unittest.main()
