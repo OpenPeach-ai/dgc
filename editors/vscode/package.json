@@ -106,6 +106,12 @@
         "icon": "$(split-horizontal)"
       },
       {
+        "command": "dgc.newChatInFolder",
+        "title": "Open a Chat in Another Folder…",
+        "category": "DGC",
+        "icon": "$(folder-opened)"
+      },
+      {
         "command": "dgc.switchChat",
         "title": "Switch Chat",
         "category": "DGC"
@@ -484,6 +490,11 @@
             "responses"
           ],
           "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
+        },
+        "dgc.shareBackend": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run every chat in one `dgc serve`, each in its own folder with its own project, trust, MCP servers and mode — the way Codex runs its threads. Turn it off to give each chat a backend of its own (more processes, each with its own copy of every MCP server). Needs a CLI that can hold several chats; older ones always get one backend per chat."
         },
         "dgc.maxLiveChats": {
           "type": "number",

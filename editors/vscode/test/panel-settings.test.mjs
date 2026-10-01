@@ -195,7 +195,7 @@ function restorationHarness() {
       calls.push({ command, response, timeout, setup });
       return new Promise((yes, no) => { resolve = yes; reject = no; });
     },
-    completeHandshake() { released++; }, dispose() { disposed++; },
+    completeHandshake() { released++; }, dispose() { disposed++; }, close() { disposed++; },
   };
   Object.assign(provider, { backend, initializingBackend: backend, nativeSettingsReady: true,
     workspaceRootsDirty: false, currentSessionId: "new-chat", sessionRestoreCandidate: "saved-chat",
@@ -1723,7 +1723,7 @@ setTimeout(() => process.exit(0), 100);`);
 
 test("restore timeout names its cause and clears the backend", async () => {
   const panelSource = readFileSync(join(here, "../src/panel.ts"), "utf8");
-  assert.match(panelSource, /timed out"\)\) \{\s*be\.dispose\("chat restoration timed out"\)/,
+  assert.match(panelSource, /timed out"\)\) \{\s*be\.close\("chat restoration timed out"\)/,
     "the restore-timeout path passes its cause");
   const fixture = nodeFixture("panel-lingers", `setTimeout(() => {}, 10000);
 process.stdin.on("data", (chunk) => { if (String(chunk).includes("shutdown")) process.exit(0); });`);

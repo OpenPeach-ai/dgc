@@ -20,6 +20,8 @@ const bundle = join(scratch, "panel.cjs");
 const notices = { info: [], warnings: [], errors: [], quickPick: [] };
 /** `dgc.maxLiveChats`; 0 is the shipped default and means no limit. */
 const configuredMaxChats = { value: 0 };
+/** `dgc.shareBackend`; true is the shipped default. */
+const configuredShare = { value: true };
 let quickPickAnswer;
 const statusBar = { text: "", tooltip: "", command: "", show() {}, hide() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
@@ -45,7 +47,8 @@ globalThis.__DGC_TEST_VSCODE = {
     workspaceFile: undefined,
     workspaceFolders: [{ uri: { fsPath: scratch, toString: () => `file://${scratch}` } }],
     getConfiguration: () => ({
-      get: (key, fallback) => (key === "maxLiveChats" ? configuredMaxChats.value : fallback),
+      get: (key, fallback) => (key === "maxLiveChats" ? configuredMaxChats.value
+        : key === "shareBackend" ? configuredShare.value : fallback),
       inspect: () => undefined,
       async update() {},
     }),
@@ -72,6 +75,7 @@ after(() => { delete globalThis.__DGC_TEST_VSCODE; rmSync(scratch, { recursive: 
 beforeEach(() => {
   notices.info.length = 0; notices.quickPick.length = 0; quickPickAnswer = undefined;
   configuredMaxChats.value = 0;                    // shipped default: unlimited
+  configuredShare.value = true;                    // shipped default: chats share a backend
 });
 
 /** A backend that records what it was sent and never spawns anything. */
@@ -83,6 +87,9 @@ function fakeBackend(name) {
     request(command) { this.sent.push(command); return Promise.resolve({ type: "ok" }); },
     completeHandshake() {}, start() {},
     dispose(cause) { this.disposed = cause || "disposed"; },
+    // A backend no other chat was opened on: closing it stops it, as disposing does.
+    close(cause) { this.disposed = cause || "disposed"; },
+    restartProcess(cause) { this.disposed = cause || "disposed"; },
   };
 }
 
@@ -693,4 +700,75 @@ test("a rejected plan clears it too", async () => {
   provider.onEvent({ type: "plan_proposal", id: "plan2", plan: "do it", choices: [] });
   await provider.onMessage({ type: "plan_response", id: "plan2", decision: "reject" });
   assert.equal(provider.openDecisions.size, 0);
+});
+
+
+// ---- chats sharing one `dgc serve` ---------------------------------------------------------------------
+
+/** A running process that can hold chats, as DgcBackend presents itself to the panel. */
+function fakeProcess(name, { max = 4, complete = true, pid = 4242, users = 0, chats = true } = {}) {
+  const listeners = {};
+  const be = Object.assign(fakeBackend(name), {
+    chats: chats ? { version: 1, max, default: "c0" } : undefined,
+    handshakeComplete: complete, childPid: pid, ownerReleased: false,
+    chatUsers: new Set(Array.from({ length: users }, (_, i) => `user-${i}`)),
+    once(event, fn) { (listeners[event] ||= []).push(fn); },
+    fire(event) { for (const fn of listeners[event] || []) fn(); },
+    close(cause) {
+      if (this.chatUsers.size) { this.ownerReleased = true; return; }
+      this.disposed = cause;
+    },
+  });
+  return be;
+}
+
+function twoSlots() {
+  const h = harness();
+  makeLive(h.provider, { sessionId: "alpha", name: "First" });
+  const first = h.provider.slots[0];
+  h.provider.openChatSlot();
+  return { ...h, first, second: h.provider.activeSlot() };
+}
+
+test("a second chat opens on a backend that can hold chats", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared");
+  first.backend = shared;
+  assert.equal(provider.chatHost(second), shared);
+});
+
+test("a chat opened on a process leads a third chat to that same process", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = { ...fakeBackend("opened"), host: shared };
+  assert.equal(provider.chatHost(second), shared);
+});
+
+test("each chat gets a backend of its own when sharing is off or the backend cannot take one", () => {
+  const { provider, first, second } = twoSlots();
+  first.backend = fakeProcess("shared");
+  configuredShare.value = false;
+  assert.equal(provider.chatHost(second), undefined, "dgc.shareBackend off");
+  configuredShare.value = true;
+  first.backend = fakeProcess("old-cli", { chats: false });
+  assert.equal(provider.chatHost(second), undefined, "a CLI that cannot hold chats");
+  first.backend = fakeProcess("starting", { complete: false });
+  assert.equal(provider.chatHost(second), undefined, "a backend still in its handshake");
+  first.backend = Object.assign(fakeProcess("dead"), { childPid: undefined });
+  assert.equal(provider.chatHost(second), undefined, "a backend with no process");
+  first.backend = fakeProcess("full", { max: 2, users: 1 });
+  assert.equal(provider.chatHost(second), undefined, "a backend already at its ceiling");
+});
+
+test("closing the chat that started a shared backend keeps it running for the chats on it", () => {
+  const { provider, first, second } = twoSlots();
+  const shared = fakeProcess("shared", { users: 1 });
+  first.backend = shared;
+  first.saved = { ...(first.saved || {}), backend: shared };
+  provider.closeChatSlot(first.id);
+  assert.equal(shared.disposed, "", "closing one chat ended every chat on its process");
+  assert.equal(shared.ownerReleased, true);
+  assert.equal(provider.chatHost(second), shared, "a later chat can still open on it");
+  shared.fire("exit");
+  assert.equal(provider.chatHost(second), undefined, "until the process is gone");
 });

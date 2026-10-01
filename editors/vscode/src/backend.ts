@@ -43,6 +43,16 @@ interface PendingFrame {
   bytes: number;
   type: string;
   requestId?: string;
+  /** The chat the command addresses: "" for the backend's default chat. */
+  chat: string;
+}
+
+/** ready.capabilities.chats: this backend can hold several chats, each in its own directory. */
+export interface ChatsCapability {
+  version: number;
+  max: number;
+  /** The id the backend gave the chat it started with; its events carry it once chats are open. */
+  default: string;
 }
 
 const REQUEST_RESPONSES = new Map<string, string>([
@@ -58,6 +68,75 @@ const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt", "
 // patience (15 minutes), so a missed tick or a slow machine never reads as a closed window.
 const LIVENESS_PING_MS = 60_000;
 const QUEUED_TURN_COMMANDS = new Set(["prompt", "slash_command"]);
+
+/** Send a query/state command and settle only from the response belonging to this request.
+ * Current protocol-v7 backends echo `request_id`; callers may omit it only for a negotiated
+ * legacy backend, where installing the listener before `send` still provides a post-send
+ * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
+ * every listener. `source` is whatever emits this chat's events: a backend, or a chat on one. */
+export function awaitResponse(source: EventEmitter, send: (cmd: DgcCommand) => boolean, cmd: DgcCommand,
+                              responseType: DgcEventType, timeoutMs = 5000): Promise<DgcEvent> {
+  const rawRequestId = (cmd as any).request_id;
+  const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
+  // Manual compaction may use the backend's 120-second summarization deadline. Keep the
+  // transport watchdog bounded, but long enough that the UI does not report a timeout while
+  // a valid compaction request is still running.
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 180000) {
+    return Promise.reject(new Error("DGC request timeout must be between 1 and 180000ms"));
+  }
+  return new Promise<DgcEvent>((resolve, reject) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (timer) { clearTimeout(timer); }
+      source.off("event", onEvent);
+      source.off("exit", onExit);
+      source.off("disposed", onDisposed);
+    };
+    const finish = (event: DgcEvent) => {
+      if (settled) { return; }
+      settled = true;
+      cleanup();
+      resolve(event);
+    };
+    const fail = (message: string) => {
+      if (settled) { return; }
+      settled = true;
+      cleanup();
+      reject(new Error(message));
+    };
+    const belongsToRequest = (event: DgcEvent): boolean => {
+      if (requestId !== undefined) {
+        return event.request_id === requestId;
+      }
+      // Older protocol implementations did not echo optional state request IDs. Preserve
+      // their best-effort post-send barrier by matching only the expected command route.
+      return event.type !== "command_rejected" || event.command === cmd.type;
+    };
+    const onEvent = (event: DgcEvent) => {
+      if (event.type === "error" && (event as any).fatal === true) {
+        fail(String(event.message || `DGC failed while running ${cmd.type}`));
+        return;
+      }
+      if (!belongsToRequest(event)) { return; }
+      if (event.type === responseType) {
+        finish(event);
+      } else if (event.type === "command_rejected" || event.type === "error") {
+        fail(String(event.message || `DGC rejected ${cmd.type}`));
+      }
+    };
+    const onExit = () => fail(`DGC backend exited while waiting for ${responseType}`);
+    const onDisposed = () => fail(`DGC backend restarted or closed while waiting for ${responseType}`);
+    source.on("event", onEvent);
+    source.on("exit", onExit);
+    source.on("disposed", onDisposed);
+    timer = setTimeout(
+      () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
+    if (!send(cmd)) {
+      fail(`DGC rejected ${cmd.type} before it could run`);
+    }
+  });
+}
 
 /**
  * Owns the `dgc serve` child process: writes JSON commands to its stdin, parses
@@ -82,6 +161,19 @@ export class DgcBackend extends EventEmitter {
   private pendingBytes = 0;
   private activeRequests = new Map<string, string>();
   private respondedRequests = new Set<string>();
+  /** Which chat each open request belongs to. A Stop or a turn_end ends ITS chat's requests only:
+   *  once one backend holds several chats, clearing them all forgot another chat's open approval
+   *  card, and the user's answer to it was then refused as stale. */
+  private requestChats = new Map<string, string>();
+  /** What `ready` offered for several chats, or undefined from a CLI that cannot hold them. */
+  chats: ChatsCapability | undefined;
+  /** This process's own `ready`: a chat opened on it borrows the version and capabilities. */
+  readyEvent: DgcEvent | undefined;
+  /** Chats other slots opened on this backend. While any remains, this process must outlive the
+   *  slot that started it. */
+  readonly chatUsers = new Set<unknown>();
+  /** The slot that started this backend has closed, but chats on it are still open. */
+  ownerReleased = false;
   private ignoredUnknownTypes = new Set<string>();
   private draining = false;
   private startedAt = 0;
@@ -118,6 +210,7 @@ export class DgcBackend extends EventEmitter {
     this.buf = "";
     this.activeRequests.clear();
     this.respondedRequests.clear();
+    this.requestChats.clear();
     this.ignoredUnknownTypes.clear();
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -180,6 +273,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend command stream failed before queued commands could run");
       this.emit("event", {
@@ -213,6 +307,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       this.rejectPending("the backend failed before queued commands could run");
       this.launchError(err);
@@ -245,6 +340,7 @@ export class DgcBackend extends EventEmitter {
       this.buf = "";
       this.activeRequests.clear();
       this.respondedRequests.clear();
+      this.requestChats.clear();
       this.ignoredUnknownTypes.clear();
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
@@ -378,6 +474,12 @@ export class DgcBackend extends EventEmitter {
           }
         }
         this.ready = true;
+        this.readyEvent = ev;
+        const offered = (ev as any).capabilities?.chats;
+        this.chats = offered && typeof offered === "object" && typeof offered.default === "string"
+            && offered.default && Number.isSafeInteger(offered.max) && offered.max > 0
+          ? { version: Number(offered.version) || 1, max: offered.max, default: offered.default }
+          : undefined;
         // An editor that goes away without closing its backend's stdin -- a reload that leaves the
         // old extension host running -- used to strand the session lease for as long as that host
         // lived. Saying "still here" on a timer lets the backend tell a closed window from a
@@ -410,9 +512,25 @@ export class DgcBackend extends EventEmitter {
     }
   }
 
+  /** "" for the default chat -- untagged, or tagged with the id `ready` gave it -- else the chat's id. */
+  chatKey(chatId: unknown): string {
+    return typeof chatId === "string" && chatId && chatId !== this.chats?.default ? chatId : "";
+  }
+
+  /** Forget one chat's open requests: its turn ended, or the user stopped it. */
+  private endChatRequests(chat: string): void {
+    for (const [requestId, owner] of [...this.requestChats]) {
+      if (owner !== chat) { continue; }
+      this.requestChats.delete(requestId);
+      this.activeRequests.delete(requestId);
+      this.respondedRequests.delete(requestId);
+    }
+  }
+
   private emitEvent(ev: DgcEvent): boolean {
     const expectedResponse = REQUEST_RESPONSES.get(ev.type);
     const requestId = "id" in ev ? String((ev as any).id ?? "") : "";
+    const chat = this.chatKey((ev as any).chat_id);
     if (expectedResponse) {
       const active = requestId ? this.activeRequests.get(requestId) : undefined;
       if (!requestId || (active !== undefined && active !== expectedResponse)) {
@@ -427,19 +545,38 @@ export class DgcBackend extends EventEmitter {
         }
       }
       this.activeRequests.set(requestId, expectedResponse);
+      this.requestChats.set(requestId, chat);
     } else if (ev.type === "request_expired") {
       this.activeRequests.delete(requestId);
       this.respondedRequests.delete(requestId);
+      this.requestChats.delete(requestId);
       this.dropQueuedResponse(requestId);
     } else if (ev.type === "turn_end") {
-      this.activeRequests.clear();
-      this.respondedRequests.clear();
+      this.endChatRequests(chat);
       // A response or Stop frame that never reached the just-ended turn must not spill into
       // the next queued turn. Ordinary queued prompts retain their documented FIFO lifecycle.
+      // Only this chat's: another chat's turn is still running and still waiting on its own.
+      const keep: PendingFrame[] = [];
       for (const item of this.controlPending) {
-        this.pendingBytes -= item.bytes;
+        if (item.chat === chat) {
+          this.pendingBytes -= item.bytes;
+        } else {
+          keep.push(item);
+        }
       }
-      this.controlPending = [];
+      this.controlPending = keep;
+    }
+    if (chat) {
+      // Another chat's event. The listener on "event" is the chat this backend started with, and a
+      // second chat's tokens must never land in its transcript: they go to that chat's channel.
+      this.emit("chat-event", chat, ev);
+      return true;
+    }
+    if (ev.type === "command_rejected" && (ev as any).command === "open_chat") {
+      // A chat that could not open has no id to carry yet. Its refusal belongs to the slot that
+      // asked for it, not to the transcript of the chat this backend started with.
+      this.emit("chat-open-failed", ev);
+      return true;
     }
     this.emit("event", ev);
     // Backend output is an external protocol, so it must not reach EventEmitter's own lifecycle
@@ -508,11 +645,11 @@ export class DgcBackend extends EventEmitter {
     this.controlPending = keep;
   }
 
-  private dropQueuedTurns(): number {
+  private dropQueuedTurns(chat: string): number {
     const keep: PendingFrame[] = [];
     let dropped = 0;
     for (const item of this.pending) {
-      if (QUEUED_TURN_COMMANDS.has(item.type)) {
+      if (QUEUED_TURN_COMMANDS.has(item.type) && item.chat === chat) {
         this.pendingBytes -= item.bytes;
         dropped += 1;
       } else {
@@ -586,7 +723,8 @@ export class DgcBackend extends EventEmitter {
       return undefined;
     }
     return { frame, bytes, type: String(wireCommand.type),
-             requestId: "id" in wireCommand ? String((wireCommand as any).id ?? "") : undefined };
+             requestId: "id" in wireCommand ? String((wireCommand as any).id ?? "") : undefined,
+             chat: this.chatKey((wireCommand as any).chat_id) };
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */
@@ -648,9 +786,10 @@ export class DgcBackend extends EventEmitter {
       }
     }
     if (item.type === "cancel" || item.type === "interrupt") {
-      this.activeRequests.clear();
-      this.respondedRequests.clear();
-      const dropped = this.dropQueuedTurns();
+      // The chat that was stopped: another chat's open approvals and queued prompts are not this
+      // Stop's to end.
+      this.endChatRequests(item.chat);
+      const dropped = this.dropQueuedTurns(item.chat);
       if (dropped) {
         this.reject(`DGC cancelled ${dropped} queued prompt${dropped === 1 ? "" : "s"}`, dropped);
       }
@@ -693,66 +832,8 @@ export class DgcBackend extends EventEmitter {
    * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
    * every listener. */
   request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000, setup = false): Promise<DgcEvent> {
-    const rawRequestId = (cmd as any).request_id;
-    const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
-    // Manual compaction may use the backend's 120-second summarization deadline. Keep the
-    // transport watchdog bounded, but long enough that the UI does not report a timeout while
-    // a valid compaction request is still running.
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 180000) {
-      return Promise.reject(new Error("DGC request timeout must be between 1 and 180000ms"));
-    }
-    return new Promise<DgcEvent>((resolve, reject) => {
-      let settled = false;
-      let timer: NodeJS.Timeout | undefined;
-      const cleanup = () => {
-        if (timer) { clearTimeout(timer); }
-        this.off("event", onEvent);
-        this.off("exit", onExit);
-        this.off("disposed", onDisposed);
-      };
-      const finish = (event: DgcEvent) => {
-        if (settled) { return; }
-        settled = true;
-        cleanup();
-        resolve(event);
-      };
-      const fail = (message: string) => {
-        if (settled) { return; }
-        settled = true;
-        cleanup();
-        reject(new Error(message));
-      };
-      const belongsToRequest = (event: DgcEvent): boolean => {
-        if (requestId !== undefined) {
-          return event.request_id === requestId;
-        }
-        // Older protocol implementations did not echo optional state request IDs. Preserve
-        // their best-effort post-send barrier by matching only the expected command route.
-        return event.type !== "command_rejected" || event.command === cmd.type;
-      };
-      const onEvent = (event: DgcEvent) => {
-        if (event.type === "error" && (event as any).fatal === true) {
-          fail(String(event.message || `DGC failed while running ${cmd.type}`));
-          return;
-        }
-        if (!belongsToRequest(event)) { return; }
-        if (event.type === responseType) {
-          finish(event);
-        } else if (event.type === "command_rejected" || event.type === "error") {
-          fail(String(event.message || `DGC rejected ${cmd.type}`));
-        }
-      };
-      const onExit = () => fail(`DGC backend exited while waiting for ${responseType}`);
-      const onDisposed = () => fail(`DGC backend restarted or closed while waiting for ${responseType}`);
-      this.on("event", onEvent);
-      this.on("exit", onExit);
-      this.on("disposed", onDisposed);
-      timer = setTimeout(
-        () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
-      if (!(setup ? this.sendSetup(cmd) : this.send(cmd))) {
-        fail(`DGC rejected ${cmd.type} before it could run`);
-      }
-    });
+    return awaitResponse(this, (command) => (setup ? this.sendSetup(command) : this.send(command)),
+                         cmd, responseType, timeoutMs);
   }
 
   /** Send handshake configuration ahead of user commands queued during backend startup. */
@@ -783,6 +864,24 @@ export class DgcBackend extends EventEmitter {
     this.flushPending();
   }
 
+  /** Whether user commands flow: ready, and the slot that started it finished its handshake. */
+  get handshakeComplete(): boolean { return this.ready && this.released; }
+
+  /** The slot that started this backend is closing. Chats other slots opened on it keep the process
+   *  alive -- closing one chat must not end the others -- and the last of them to close stops it. */
+  close(cause: string): void {
+    if (this.chatUsers.size) {
+      this.ownerReleased = true;
+      return;
+    }
+    this.dispose(cause);
+  }
+
+  /** Restart means a new process: every chat on this one goes with it. */
+  restartProcess(cause: string): void {
+    this.dispose(cause);
+  }
+
   /** Stop the current child on purpose. `cause` is what the exit line and the panel will report. */
   dispose(cause = "disposed"): void {
     this.stopping = true;
@@ -795,6 +894,7 @@ export class DgcBackend extends EventEmitter {
     this.pendingBytes = 0;
     this.activeRequests.clear();
     this.respondedRequests.clear();
+    this.requestChats.clear();
     const p = this.proc;
     this.proc = undefined;
     // The doomed child keeps its `life` record until its exit is observed, now carrying the

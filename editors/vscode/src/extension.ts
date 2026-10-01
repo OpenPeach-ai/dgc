@@ -60,6 +60,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.openCommandMenu", () => provider.openCommandMenu()),
     vscode.commands.registerCommand("dgc.newSession", () => provider.newSession()),
     vscode.commands.registerCommand("dgc.newParallelChat", () => provider.newParallelChat()),
+    vscode.commands.registerCommand("dgc.newChatInFolder", () => provider.newChatInFolder()),
     vscode.commands.registerCommand("dgc.switchChat", () => provider.pickChat()),
     vscode.commands.registerCommand("dgc.selectModel", () => provider.selectModel()),
     vscode.commands.registerCommand("dgc.connect", () => provider.connect()),

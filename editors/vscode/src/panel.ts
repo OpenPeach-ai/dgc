@@ -8,6 +8,7 @@ import { homedir } from "os";
 import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { ChildExitInfo, DgcBackend, DgcEvent } from "./backend";
+import { ChatBackend, OpenedChat } from "./chatChannel";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
@@ -262,6 +263,12 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
  *  running it can judge. `dgc.maxLiveChats` exists for someone who WANTS a ceiling (set it to 1 to
  *  keep DGC single-chat); left alone, the limit is the machine.
  */
+/** `dgc.shareBackend`: chats open on one `dgc serve` when the CLI can hold several (Codex's model:
+ *  one process, every session in its own folder). Off, each chat starts its own backend. */
+function shareBackend(): boolean {
+  return vscode.workspace.getConfiguration("dgc").get<boolean>("shareBackend", true) !== false;
+}
+
 function maxLiveChats(): number {
   const raw = vscode.workspace.getConfiguration("dgc").get<number>("maxLiveChats", 0);
   const value = Number.isFinite(raw) ? Math.floor(Number(raw)) : 0;
@@ -309,7 +316,10 @@ interface ChatSlot {
   /** Captured panel fields while this slot is in the background; undefined while it is active. */
   saved?: Record<string, unknown>;
   /** The backend, mirrored here so a background slot can be found without restoring it. */
-  backend?: DgcBackend;
+  backend?: ChatBackend;
+  /** The folder this chat works in, when it is not the window's own. Its project root, config,
+   *  trust, MCP servers and sessions are that folder's. */
+  cwd?: string;
   /** A turn is running in this chat. */
   busy: boolean;
   /** This chat is blocked on a decision only the user can make. */
@@ -333,7 +343,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private viewType = "dgc.chat";   // the container the chat currently lives in
   private turnStartedAt = 0;
-  private backend?: DgcBackend;
+  private backend?: ChatBackend;
+  /** Backends whose own slot has closed while chats other slots opened on them are still running. */
+  private releasedHosts = new Set<DgcBackend>();
   private state = { model: "", mode: "default", think: "off", ultra: false,
                     baseUrl: "", workspaceTrusted: false,
                     subscriptionEngine: "",
@@ -392,7 +404,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
   private workspaceRootsInFlight: { revision: number; requestId?: string } | undefined;
-  private initializingBackend?: DgcBackend;
+  private initializingBackend?: ChatBackend;
   private chatSlotsTimer?: ReturnType<typeof setTimeout>;
   private nativeSettingsReady = false;
   private webviewReady = false;
@@ -611,8 +623,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.scheduleWorkspaceChanges(0);
   }
 
+  /** Palette and header: DGC: Open a Chat in Another Folder. */
+  async newChatInFolder(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+      openLabel: "Open chat here", title: "Open a DGC chat in a folder",
+    });
+    const folder = picked?.[0]?.fsPath;
+    if (!folder) { return; }
+    this.focus();
+    this.inVisiblePanel(() => this.openChatSlot(folder));
+  }
+
   /** Start a second (or third, if the ceiling ever rises) chat with its own backend. */
-  private openChatSlot(): void {
+  private openChatSlot(cwd?: string): void {
     const ceiling = maxLiveChats();
     if (this.slots.length >= ceiling) {
       // Only reachable when the user set a ceiling themselves.
@@ -622,7 +646,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.parkActiveSlot();
-    const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New chat", busy: false, needsYou: false, unread: 0 };
+    const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "New chat", busy: false, needsYou: false, unread: 0,
+                             ...(cwd && cwd !== this.cwd() ? { cwd } : {}) };
     this.slots.push(slot);
     this.activeSlotId = slot.id;
     // A brand-new chat starts from the field initializers, not from whatever the last chat left.
@@ -652,9 +677,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Move off it first so the panel is never describing a chat that is being torn down.
       this.switchToSlot(other.id);
     }
-    const be = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+    const be = slot.backend || (slot.saved?.backend as ChatBackend | undefined);
     this.slots = this.slots.filter((candidate) => candidate.id !== slot.id);
-    try { be?.dispose(`${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`); } catch { /* already gone */ }
+    // close, not dispose: if this slot started the process that other chats were opened on, the
+    // process stays up for them and stops when the last of them closes.
+    try { be?.close(`${CHAT_CLOSED_CAUSE}${slot.label || slot.id}`); } catch { /* already gone */ }
+    const released = be as DgcBackend | undefined;
+    if (released?.ownerReleased && released.chatUsers instanceof Set) {
+      this.releasedHosts.add(released);
+      released.once("exit", () => this.releasedHosts.delete(released));
+      released.once("disposed", () => this.releasedHosts.delete(released));
+    }
     this.postChatSlots();
   }
 
@@ -753,6 +786,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         busy: slot.id === this.activeSlotId ? this.confirmedTurnActive : slot.busy,
         needsYou: slot.id === this.activeSlotId ? false : slot.needsYou,
         unread: slot.id === this.activeSlotId ? 0 : slot.unread,
+        ...(slot.cwd ? { folder: path.basename(slot.cwd) || slot.cwd } : {}),
       })),
     });
   }
@@ -925,6 +959,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private rememberSession(): void {
     if (!this.currentSessionId) { return; }
+    // A chat in another folder: its session is that folder's, and the window reopens on its own.
+    if (this.slots.find((slot) => slot.id === this.activeSlotId)?.cwd) { return; }
     void this.context.workspaceState.update("dgc.activeSession.v1", {
       scope: this.draftScope(), id: this.currentSessionId, saved: this.currentSessionSaved,
     }).then(undefined, () => this.post({ type: "event", event: { type: "error",
@@ -941,7 +977,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch { /* a stub host without commands — the key is only a palette convenience */ }
   }
 
-  private finishSessionHandshake(be: DgcBackend, adoptDraftFrom = ""): void {
+  private finishSessionHandshake(be: ChatBackend, adoptDraftFrom = ""): void {
     if (this.backend !== be) { return; }
     this.sessionReady = true;
     this.setReadyContext(true);                                             // gates palette entries
@@ -973,7 +1009,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * behind the user's back, because a half-finished step (a partial install, a migration) may not
    * be safe to repeat.
    */
-  private async resumeInterruptedWork(be: DgcBackend): Promise<void> {
+  private async resumeInterruptedWork(be: ChatBackend): Promise<void> {
     const goal = this.context.workspaceState.get<{ scope?: string; id?: string }>(GOAL_PURSUIT_KEY);
     if (goal && goal.scope === this.draftScope() && goal.id === this.currentSessionId) {
       await this.forgetInterruptedTurn();          // the goal's own resume covers its turn
@@ -1000,7 +1036,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .then(undefined, () => { /* losing the marker only costs a Continue offer */ });
   }
 
-  private async offerInterruptedTurn(be: DgcBackend): Promise<void> {
+  private async offerInterruptedTurn(be: ChatBackend): Promise<void> {
     const mark = this.context.workspaceState.get<InterruptedTurnMark>(INTERRUPTED_TURN_KEY);
     if (!mark) { return; }
     if (mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
@@ -1080,7 +1116,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * cleared the moment the user pauses, completes or clears it. A stale marker is ignored, so
    * reopening yesterday's chat still waits for a human.
    */
-  private async resumeInterruptedGoal(be: DgcBackend): Promise<void> {
+  private async resumeInterruptedGoal(be: ChatBackend): Promise<void> {
     const mark = this.context.workspaceState.get<{ scope?: string; id?: string; at?: number }>(GOAL_PURSUIT_KEY);
     if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
     const age = Date.now() - Number(mark.at || 0);
@@ -1126,7 +1162,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       : command;
   }
 
-  private requestState(be: DgcBackend, prefix: string, command: any,
+  private requestState(be: ChatBackend, prefix: string, command: any,
                        responseType: DgcEvent["type"], timeoutMs = 5000): Promise<DgcEvent> {
     return be.request(this.stateCommand(prefix, command), responseType, timeoutMs);
   }
@@ -1325,7 +1361,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Goal mutations are deliberately unavailable while the agent worker owns the session.
    * Observe the terminal turn event before persisting pause/clear so the control cannot race the
    * backend's busy gate and leave a still-active goal behind. */
-  private async stopActiveTurn(be: DgcBackend): Promise<void> {
+  private async stopActiveTurn(be: ChatBackend): Promise<void> {
     if (!this.turnActive) { return; }
     await new Promise<void>((resolveStop, rejectStop) => {
       let settled = false;
@@ -1448,7 +1484,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  be left dangling are redone: the native-settings promise whose `.finally` found a different
    *  active chat, and the roots acknowledgement that was dropped as a background event. Session
    *  restore is not touched -- it can only have started once both of those had already passed. */
-  private redriveHandshake(be: DgcBackend): void {
+  private redriveHandshake(be: ChatBackend): void {
     if (this.workspaceRootsInFlight !== undefined) {
       this.workspaceRootsInFlight = undefined;
       this.workspaceRootsDirty = true;                 // re-ask, and wait for THIS acknowledgement
@@ -1470,7 +1506,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       });
   }
 
-  private maybeCompleteHandshake(be: DgcBackend): void {
+  private maybeCompleteHandshake(be: ChatBackend): void {
     if (this.backend !== be || this.initializingBackend !== be || !this.nativeSettingsReady) {
       return;
     }
@@ -1515,7 +1551,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       .catch((error: any) => {
         if (this.backend !== be || generation !== this.sessionHandshakeGeneration) { return; }
         if (!be.ready || String(error?.message || "").includes("timed out")) {
-          be.dispose("chat restoration timed out");
+          be.close("chat restoration timed out");
+          if (this.backend === be) { this.retireBackend(); }    // its process may live on for other chats
           this.post({ type: "event", event: { type: "error",
             message: "Chat restoration did not complete. Your draft is retained; restart DGC to reconnect." } });
           return;
@@ -1804,7 +1841,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch { /* the channel is already disposed */ }
   }
 
-  private ensureBackend(): DgcBackend {
+  private ensureBackend(): ChatBackend {
     if (vscode.workspace.isTrusted === false) {
       throw new Error("DGC is disabled until this workspace is trusted.");
     }
@@ -1831,11 +1868,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     this.sessionRestoreStarted = false;
     this.sessionReady = false;
-    const be = new DgcBackend(this.cwd(), cmd, this.context.extension.packageJSON.dgcCliVersion);
     // The chat this child belongs to, captured now. Every handler below asks the slot rather than
     // comparing against `this.backend`: with a second chat running, `this.backend` is whichever
     // chat the user is looking at, and a background child's own death must still be handled.
     const slot = this.activeSlot();
+    const folder = slot.cwd || this.cwd();
+    const host = this.chatHost(slot);
+    const be: ChatBackend = host
+      ? new OpenedChat(host, folder, this.nextRequestId("open-chat"))
+      : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion);
     slot.backend = be;
     // The backend's own last word ("serve loop ended: <cause>; …") arrives on stderr before the
     // exit does. Keep it per instance: it is the cause the Continue card and the breaker name.
@@ -1901,6 +1942,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.start();
     this.backend = be;
     return be;
+  }
+
+  /** A running backend this slot's chat can open on -- one process, every chat in its own folder --
+   *  or undefined, and the slot starts a backend of its own: sharing is off, the CLI cannot hold
+   *  several chats, no other backend has finished starting, or the ones there are full. */
+  private chatHost(slot: ChatSlot): DgcBackend | undefined {
+    if (!shareBackend()) { return undefined; }
+    const hosts: DgcBackend[] = [];
+    for (const other of this.slots) {
+      if (other === slot) { continue; }
+      const be = other.backend || (other.saved?.backend as ChatBackend | undefined);
+      // A chat opened on a process leads to that process; a process is whatever holds chat users.
+      const process = ((be as OpenedChat | undefined)?.host ?? be) as DgcBackend | undefined;
+      if (process?.chatUsers instanceof Set && !hosts.includes(process)) { hosts.push(process); }
+    }
+    for (const released of this.releasedHosts) {
+      if (!hosts.includes(released)) { hosts.push(released); }
+    }
+    return hosts.find((process) => process.chats && process.handshakeComplete
+      && process.childPid !== undefined && process.chatUsers.size + 1 < process.chats.max);
   }
 
   /** Forget the current backend and every piece of per-connection state that went with it. */
@@ -2157,7 +2218,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Restarting is the user's (or the updater's) decision, so a turn it cuts off is not offered back.
     this.noteInterruptedTurn(undefined);
     this.queuedPromptsLost();                          // the backend holding them is going away
-    this.backend?.dispose(`restart: ${reason}`);
+    // A new process, not a new chat on the old one: a changed CLI or a wedged backend is the
+    // reason to restart, and every chat on a shared process restarts with it.
+    this.backend?.restartProcess(`restart: ${reason}`);
     this.backend = undefined;
     this.intentionalShutdown = false;
     this.mcpUrls.clear();
@@ -2936,10 +2999,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Every `dgc serve` this panel currently owns: the active chat's and each parked chat's. */
-  private liveBackends(): DgcBackend[] {
-    const all: DgcBackend[] = this.backend ? [this.backend] : [];
+  private liveBackends(): ChatBackend[] {
+    const all: ChatBackend[] = this.backend ? [this.backend] : [];
     for (const slot of this.slots) {
-      const parked = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+      const parked = slot.backend || (slot.saved?.backend as ChatBackend | undefined);
       if (parked && !all.includes(parked)) { all.push(parked); }
     }
     return all;
@@ -3037,6 +3100,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "newChat": {
         this.openChatSlot();
+        return;
+      }
+      case "newChatInFolder": {
+        void this.newChatInFolder();
         return;
       }
       case "closeChat": {
@@ -3677,14 +3744,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     else { await this.context.secrets.store(key, value); }
   }
 
-  private async removeManagedMcpBackend(be: DgcBackend, name: string, prefix: string): Promise<void> {
+  private async removeManagedMcpBackend(be: ChatBackend, name: string, prefix: string): Promise<void> {
     const event = await this.requestState(be, prefix, {
       type: "remove_mcp_server", name,
     }, "mcp_servers", 10000);
     if ((event as any).error) { throw new Error(String((event as any).error)); }
   }
 
-  private async sendManagedMcp(be: DgcBackend, item: ManagedMcpServer,
+  private async sendManagedMcp(be: ChatBackend, item: ManagedMcpServer,
                                setup = false, suppliedSecrets?: ManagedMcpSecrets,
                                waitForAck = false): Promise<boolean> {
     if (item.connector && this.lastReadyEvent?.capabilities?.app_connectors !== true) {
@@ -3754,7 +3821,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  private async requestMcpContext(be: DgcBackend, msg: any, listing: boolean): Promise<void> {
+  private async requestMcpContext(be: ChatBackend, msg: any, listing: boolean): Promise<void> {
     const requestId = String(msg.requestId || this.nextRequestId("mcp-context"));
     const event = listing ? "mcp_context_catalog" : "mcp_context";
     const fields = { request_id: requestId, server: String(msg.server || ""), kind: String(msg.kind || "") };
@@ -5043,7 +5110,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.settingsSaveInFlight = true;
-    let backend: DgcBackend | undefined;
+    let backend: ChatBackend | undefined;
     const appliedStages: string[] = [];
     const previousMode = this.state.mode;
     const previousSubscription = {
@@ -5659,7 +5726,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // A chat parked in the background still holds a live `dgc serve`. Closing the window must take
     // every one of them with it, or a child outlives the editor that owns it.
     for (const slot of this.slots) {
-      const parked = slot.backend || (slot.saved?.backend as DgcBackend | undefined);
+      const parked = slot.backend || (slot.saved?.backend as ChatBackend | undefined);
       if (parked && parked !== this.backend) {
         try { parked.dispose(PANEL_DISPOSED_CAUSE); } catch { /* already gone */ }
       }
@@ -5696,7 +5763,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
-<header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button></header>
+<header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>

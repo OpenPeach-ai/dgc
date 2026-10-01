@@ -5499,11 +5499,19 @@
       name.className = "chat-name";
       name.textContent = String(item.label || "New chat");
       tab.append(dot, name);
+      if (item.folder) {
+        // A chat in another folder says which: two chats named "New chat" in two repos look alike.
+        const where = document.createElement("span");
+        where.className = "chat-folder";
+        where.textContent = String(item.folder);
+        tab.append(where);
+      }
       // The state is in the accessible name too, not only in the dot's colour.
       const state = item.needsYou ? "waiting for you" : item.busy ? "working" : "idle";
       const unread = !item.active && item.unread > 0 ? `, ${item.unread} new` : "";
-      tab.title = `${name.textContent} — ${state}${item.active ? " (showing)" : ""}`;
-      tab.setAttribute("aria-label", `Chat ${name.textContent}, ${state}${unread}${item.active ? ", showing" : ""}`);
+      const inFolder = item.folder ? ` in ${String(item.folder)}` : "";
+      tab.title = `${name.textContent}${inFolder} — ${state}${item.active ? " (showing)" : ""}`;
+      tab.setAttribute("aria-label", `Chat ${name.textContent}${inFolder}, ${state}${unread}${item.active ? ", showing" : ""}`);
       if (item.active) tab.setAttribute("aria-current", "true");
       if (!item.active && item.unread > 0) {
         const count = document.createElement("span");
@@ -5550,6 +5558,8 @@
 
   const chatAdd = $("chat-add");
   if (chatAdd) chatAdd.onclick = () => vscode.postMessage({ type: "newChat" });
+  const chatAddFolder = $("chat-add-folder");
+  if (chatAddFolder) chatAddFolder.onclick = () => vscode.postMessage({ type: "newChatInFolder" });
 
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
   $("thread-title").onclick = () => {
