@@ -14,6 +14,9 @@
 //   npm run shot -- /tmp/mon.png --monitors [--light] [--narrow]  a monitor wake turn, event cards, the monitors rail
 //   npm run shot -- /tmp/usage.png --usage --width=300 --theme=light --usage-report=reports.json
 //                                                     the Token Usage settings tab (--empty for none)
+//   npm run shot -- /tmp/fold.png --long-prompt [--light|--hc|--forced] [--narrow]
+//                                                     a long prompt's fold: rest, -hover, -focus, -open,
+//                                                     -open-scrolled and -images
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -50,6 +53,129 @@ await page.evaluate(([mjs, mdjs]) => {
 }, [mainJs, markdownJs]);
 const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: e } })), event);
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+if (process.argv.includes("--long-prompt")) {
+  // The six faces of a long prompt's fold, the ones that were approved: <out>.png at rest, -hover,
+  // -focus (the pill reached with Tab), -open (Show less under the last line), -open-scrolled (Show
+  // less stuck above the Latest pill while the end of the prompt is out of view) and -images (image
+  // tiles above folded text). Dark Modern by default; --light, --hc (VS Code High Contrast) or
+  // --forced (OS forced colours); --narrow renders 300px instead of 460px. Prints what each face
+  // measured and exits non-zero if one is not what it should be.
+  //   npm run shot -- /tmp/fold.png --long-prompt [--light|--hc|--forced] [--narrow]
+  const { THEMES } = await import("./support/options-scene.mjs");
+  await page.close();
+  const out = process.argv[2] || "/tmp/fold.png";
+  const shot = (suffix) => out.replace(/\.png$/, "") + suffix + ".png";
+  const width = process.argv.includes("--narrow") ? 300 : 460;
+  const theme = process.argv.includes("--light") ? "light-modern" : process.argv.includes("--hc") ? "hc" : "dark-modern";
+  const forced = process.argv.includes("--forced");
+  const LONG = [
+    "Refactor the settings sync so it survives a laptop going to sleep mid-write:",
+    "1. Write to a temp file in the same directory, then rename it over the old one.",
+    "2. Keep the last good copy as settings.json.bak and restore it if the parse fails.",
+    "3. Debounce writes by 300ms so dragging a slider does not write forty times.",
+    "4. Log every restore with the reason, so a user report can be matched to it.",
+    "5. Add a test that kills the process between the write and the rename.",
+    "6. Make the conflict prompt name the machine that wrote the newer copy.",
+    "7. Keep the public API the same: load(), save() and onChange() do not change.",
+    "Do not touch the migration code in src/settings/migrate.ts; it is frozen for the release.",
+  ].join("\n");
+  const TALL = Array.from({ length: 40 }, (_, i) => `${i + 1}. A requirement from the pasted spec, one per line, so the prompt runs long.`).join("\n");
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAABkCAIAAABM5OhcAAAA0klEQVR42u3SMQ0AAAjAMOZf9DDBwUcrYVlTwIJfYGAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLxoKxYCwYC8aCsWAsGAvGgrFgLBgLbw1wAa3mAWHtHrAAAAAASUVORK5CYII=";
+  const turn = (id, prompt, answer) => [
+    { type: "turn_start", turn_id: id, prompt, kind: "prompt" }, { type: "text_delta", text: answer },
+    { type: "stream_end", message_id: `${id}:1`, phase: "answer" },
+    { type: "turn_end", turn_id: id, reason: "completed", token_estimate: 0, final_message_id: `${id}:1` }];
+  const ANSWER = "Done. Writes go to a temp file and are renamed into place, the last good copy is kept beside it, "
+    + "and a test kills the process between the two steps. The public API is unchanged.\n";
+  async function scene(height = 900) {
+    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, forcedColors: forced ? "active" : "none" });
+    await p.setContent(html, { waitUntil: "load" });
+    await p.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }
+      body { background: var(--bg); color: var(--text); }` });
+    await p.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
+    await p.evaluate(([mjs, mdjs]) => {
+      window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+      eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+      eval(mjs);
+    }, [mainJs, markdownJs]);
+    const post = (data) => p.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
+    await post({ type: "session_ready", sessionId: "s1" });
+    for (const event of [{ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", commands: [],
+      custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" }]) await post({ type: "event", event });
+    const events = async (list) => { for (const event of list) await post({ type: "event", event }); };
+    const settle = () => p.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 200)))));
+    return { p, post, events, settle };
+  }
+  const faceOf = (p, index = -1) => p.evaluate((i) => {
+    const bubble = [...document.querySelectorAll(".msg.user > .bubble")].at(i);
+    const toggle = bubble?.querySelector(".prompt-fold"), text = bubble?.querySelector(".prompt-text");
+    const log = document.getElementById("log").getBoundingClientRect();
+    return { fold: bubble?.dataset.fold || "none", opacity: toggle ? getComputedStyle(toggle).opacity : null,
+      lines: text ? Math.round(text.clientHeight / parseFloat(getComputedStyle(text).lineHeight)) : null,
+      mask: text ? getComputedStyle(text).webkitMaskImage.slice(0, 15) : null,
+      pillFromLogBottom: toggle ? Math.round(log.bottom - toggle.getBoundingClientRect().bottom) : null,
+      latest: !document.getElementById("to-latest").hidden };
+  }, index);
+  const report = {};
+  const a = await scene();
+  await a.events([...turn("t0", "Why does settings sync lose a change when the laptop sleeps?", "Because the write is not atomic: a sleep mid-write leaves a truncated file.\n"),
+    ...turn("t1", LONG, ANSWER)]);
+  await a.settle();
+  await a.p.mouse.move(1, 1);
+  report.rest = await faceOf(a.p);
+  await a.p.screenshot({ path: out });
+  await a.p.hover(".msg.user >> nth=-1 >> .bubble");
+  await a.p.waitForTimeout(250);
+  report.hover = await faceOf(a.p);
+  await a.p.screenshot({ path: shot("-hover") });
+  await a.p.mouse.move(1, 1);
+  await a.p.evaluate(() => [...document.querySelectorAll(".ract-edit")].at(-2).focus());
+  await a.p.keyboard.press("Tab");
+  await a.p.waitForTimeout(250);
+  report.focus = { ...(await faceOf(a.p)), focused: await a.p.evaluate(() => document.activeElement?.className) };
+  await a.p.screenshot({ path: shot("-focus") });
+  await a.p.keyboard.press("Enter");
+  await a.settle();
+  await a.p.evaluate(() => { const log = document.getElementById("log"); log.scrollTop = log.scrollHeight; });
+  await a.settle();
+  report.open = await faceOf(a.p);
+  await a.p.screenshot({ path: shot("-open") });
+  await a.p.close();
+
+  const b = await scene(640);
+  await b.events([...turn("t0", "Summarise the spec before you start.", "It asks for forty changes; the list follows.\n"), ...turn("t1", TALL, ANSWER)]);
+  await b.settle();
+  await b.p.click(".msg.user >> nth=-1 >> .prompt-fold");
+  await b.p.evaluate(() => {
+    const log = document.getElementById("log"), bubble = [...document.querySelectorAll(".msg.user > .bubble")].at(-1);
+    log.dispatchEvent(new WheelEvent("wheel"));
+    log.scrollTop += bubble.getBoundingClientRect().top - log.getBoundingClientRect().top + 160;
+  });
+  await b.settle();
+  await b.p.mouse.move(1, 1);
+  report.openScrolled = await faceOf(b.p);
+  await b.p.screenshot({ path: shot("-open-scrolled") });
+  await b.p.close();
+
+  const c = await scene();
+  await c.events(turn("t0", "Why does settings sync lose a change when the laptop sleeps?", "Because the write is not atomic.\n"));
+  await c.post({ type: "prompts_queued", items: [{ requestId: "q-1", text: LONG,
+    draft: { text: LONG, attachments: [{ label: "📷 sleep-crash.png", img: true, data: PNG, bytes: 211 }, { label: "📷 timeline.png", img: true, data: PNG, bytes: 211 }] } }] });
+  await c.settle();
+  await c.p.mouse.move(1, 1);
+  report.images = { ...(await faceOf(c.p)), tiles: await c.p.evaluate(() => [...document.querySelectorAll(".msg.user > .bubble")].at(-1).querySelectorAll(".prompt-atts .image-chip").length) };
+  await c.p.screenshot({ path: shot("-images") });
+  await c.p.close();
+
+  console.log(JSON.stringify({ theme, forced, width, ...report }, null, 1));
+  const always = theme === "hc" || forced;
+  const ok = report.rest.fold === "folded" && report.rest.lines === 5 && report.rest.opacity === (always ? "1" : "0")
+    && report.hover.opacity === "1" && report.focus.opacity === "1" && /prompt-fold/.test(report.focus.focused || "")
+    && report.open.fold === "open" && report.openScrolled.fold === "open" && report.openScrolled.latest
+    && report.openScrolled.pillFromLogBottom >= 36 && report.images.fold === "folded" && report.images.tiles === 2;
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
+}
 if (process.argv.includes("--usage")) {
   // The Token Usage tab, answered from a report the real CLI produced (`dgc usage --json`, or a
   // map of range -> report). Without --usage-report it uses a built-in 30-day report with

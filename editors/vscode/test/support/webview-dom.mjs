@@ -49,7 +49,70 @@ export const html = htmlMatch.replace(/\$\{[^}]*\}/g, "");
 export const activeDoms = new Set();
 afterEach(() => { for (const dom of activeDoms) dom.window.close(); activeDoms.clear(); });
 
+// A stand-in for layout, for tests of code that decides things from real geometry (the long-prompt
+// fold). jsdom lays nothing out, so every size it reports is 0 -- which is why, without this option,
+// no prompt ever folds and every other test sees today's DOM. With it, `#log` is `width` px wide, a
+// `.prompt-text` wraps at `char` px a character (7.5: 40 to a line at 300px, 120 at 900px; a wider
+// value stands in for new fonts) on `line` px lines and is clipped to five of them while its bubble
+// is folded, and a `.msg` is 40px plus the visible height of the prompts inside it, so blocks settle,
+// pin, and change height when they fold. The object is live: a test changes `layout.width` to stand
+// in for a resize, and width 0 is a hidden panel (display: none), where nothing is laid out and every
+// size is 0. Only a real browser can say what the CSS does with all this; prompt-fold-layout.test.mjs
+// checks the real geometry.
+function installLayout(window, layout) {
+  const proto = window.HTMLElement.prototype;
+  const isText = (node) => node.classList?.contains("prompt-text");
+  const laidOut = (node) => node.isConnected && layout.width > 0;
+  const natural = (node) => {
+    const perLine = Math.max(1, Math.floor(layout.width / layout.char));
+    const lines = String(node.textContent).split("\n").reduce((sum, row) => sum + Math.max(1, Math.ceil(row.length / perLine)), 0);
+    return lines * layout.line;
+  };
+  const visible = (node) => (node.parentElement?.dataset.fold === "folded" ? Math.min(natural(node), 5 * layout.line) : natural(node));
+  const getters = {
+    clientWidth() {
+      if (!laidOut(this)) return 0;
+      return this.id === "log" ? layout.width : isText(this) ? Math.max(0, layout.width - 60) : 0;
+    },
+    scrollHeight() { return laidOut(this) && isText(this) ? natural(this) : 0; },
+    clientHeight() { return laidOut(this) && isText(this) ? visible(this) : 0; },
+    offsetHeight() {
+      if (!laidOut(this) || !this.classList?.contains("msg")) return 0;
+      return 40 + [...this.querySelectorAll(".prompt-text")].reduce((sum, text) => sum + visible(text), 0);
+    },
+  };
+  for (const [name, get] of Object.entries(getters)) Object.defineProperty(proto, name, { configurable: true, get });
+  const realStyle = window.getComputedStyle.bind(window);
+  window.getComputedStyle = (node, pseudo) => {
+    const style = realStyle(node, pseudo);
+    if (pseudo || !isText(node)) return style;
+    return new Proxy(style, { get: (target, key) => {
+      if (key === "lineHeight") return `${layout.line}px`;
+      const value = target[key];
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+  };
+}
+
+// A ResizeObserver that never fires on its own: `resize(target)` delivers one entry for `target` to
+// every observer watching it, in the order they were created, exactly when the test says so.
+function installResizeObservers(window) {
+  const observers = [];
+  window.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; this.targets = new Set(); observers.push(this); }
+    observe(target) { this.targets.add(target); }
+    unobserve(target) { this.targets.delete(target); }
+    disconnect() { this.targets.clear(); }
+  };
+  return (target) => {
+    for (const observer of [...observers]) if (observer.targets.has(target)) observer.callback([{ target }], observer);
+  };
+}
+
 // `options.script` replaces media/main.js (a test that instruments a hook stub evaluates its own copy).
+// `options.layout` ({ width = 300, line = 21, char = 7.5 }) stands in for layout (installLayout), and
+// `options.resizeObservers` installs observers the test fires with `resize(target)`. Both are opt-in,
+// so every test that does not ask for them runs against plain jsdom, as it always has.
 export function makeDom(options = {}) {
   const errors = [];
   const vc = new VirtualConsole();
@@ -82,8 +145,12 @@ export function makeDom(options = {}) {
     }
     now = until;
   };
+  const layout = options.layout ? { width: 300, line: 21, char: 7.5, ...options.layout } : null;
+  if (layout) installLayout(dom.window, layout);
+  const resize = options.resizeObservers ? installResizeObservers(dom.window)
+    : () => { throw new Error("resize() needs makeDom({ resizeObservers: true })"); };
   dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(options.script ?? mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
-  return { dom, errors, posted, send, advance, doc: dom.window.document, savedState: () => savedState };
+  return { dom, errors, posted, send, advance, layout, resize, doc: dom.window.document, savedState: () => savedState };
 }

@@ -29,6 +29,13 @@
 - The diagram renderer's DOMPurify moves to 3.4.16 (GHSA-p98j-92pf-mc4p, low severity; the
   affected IN_PLACE mode is not one mermaid uses, and the panel's content security policy blocks
   inline event handlers either way).
+- A long message you sent no longer fills the screen. One that runs to seven lines or more shows
+  its first five, fading out, with **Show more** when you point at it or Tab to it (always shown on
+  touch screens and in high contrast). Open, **Show less** stays in reach at the bottom of the chat
+  while you read down a long one. Attachments, images and the question an answer replies to always
+  show in full, and Run again, Edit and Restore still use the whole message. Opening one while DGC
+  is still answering keeps you where you are; **Latest** takes you back to the end. A message you
+  opened stays open when you switch chats and come back.
 - Requires CLI 0.47.0; editor protocol v14.
 
 ## 0.31.4 — 2026-09-30

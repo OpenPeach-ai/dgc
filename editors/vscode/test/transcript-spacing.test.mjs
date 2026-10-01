@@ -898,3 +898,72 @@ for (const width of WIDTHS) {
   });
   }
 }
+
+// ---- long prompts --------------------------------------------------------------------------------
+// A prompt of 7+ lines folds to five until "Show more" (prompt-fold.test.mjs, prompt-fold-layout.test.mjs).
+// Folded or open, it is spaced like any prompt: the pill is inside the bubble, never a block of its own.
+// And opening one is reading it: a turn still streaming below must not pull the reader back to the end
+// (follow-5), until they ask for the end again with the Latest pill.
+const TWELVE = Array.from({ length: 12 }, (_, i) => `Step ${i + 1} of the plan`).join("\n");
+const lastPromptToggle = (panel) => panel.page.locator("#log > .msg.user > .bubble").last().locator(".prompt-fold");
+for (const width of WIDTHS) {
+  for (const state of ["folded", "open"]) {
+    test(`${state === "open" ? "an" : "a"} ${state} long prompt keeps the prompt rhythm (${width}px)`, async (t) => {
+      if (skipOrFail(t)) return;
+      const panel = await openPanel(width);
+      try {
+        await panel.events([...answeredTurn("t1"), ...answeredTurn("t2", TWELVE), ...answeredTurn("t3", PROMPT2)]);
+        await panel.settle();
+        const bubble = panel.page.locator("#log > .msg.user > .bubble").nth(1);
+        assert.equal(await bubble.getAttribute("data-fold"), "folded");
+        if (state === "open") {
+          await bubble.locator(".prompt-fold").click();
+          assert.equal(await bubble.getAttribute("data-fold"), "open");
+        }
+        await panel.settle(); await toBottom(panel); await panel.settle();
+        const m = await measure(panel);
+        assertSpacing(m, `${state} long prompt at ${width}px`);
+        assert.deepEqual(around(m, TWELVE), { above: ABOVE_PROMPT, below: BETWEEN_BLOCKS },
+          "24px above it and 16px to the turn it asks for, as for any prompt");
+      } finally { await panel.page.close(); }
+    });
+  }
+}
+test("opening a long prompt during a run keeps the reader on it (follow-5)", async (t) => {
+  if (skipOrFail(t)) return;
+  const panel = await openPanel(460);
+  // `atEnd`: on the last pixel. `nearEnd`: what main.js itself calls the bottom (atBottom, < 60px).
+  // The Latest pill gives the log back a few px as it hides (a flex item of body, it is squeezed
+  // below its 28px once the transcript overflows), so the click itself is held to the latter.
+  const view = () => panel.page.evaluate(() => {
+    const log = document.getElementById("log"), gap = log.scrollHeight - log.scrollTop - log.clientHeight;
+    return { top: log.scrollTop, atEnd: gap < 2, nearEnd: gap < 60, pill: !document.getElementById("to-latest").hidden };
+  });
+  const stream = (n) => panel.events(Array.from({ length: n }, (_, i) => ({ type: "text_delta", text: `Restarted service ${i + 1} of the stack. ` })));
+  try {
+    await longChat(panel, 6);
+    const requestId = await panel.prompt(TWELVE);
+    await panel.events([{ type: "prompt_accepted", request_id: requestId, state: "started" },
+      { type: "turn_start", turn_id: "f1", prompt: TWELVE, kind: "prompt", request_id: requestId },
+      { type: "text_delta", text: "Checking the new keys and restarting the API to pick them up." }]);
+    await panel.settle();
+    assert.equal((await view()).atEnd, true, "following the run at the end");
+    await lastPromptToggle(panel).click();
+    await panel.settle();
+    const opened = await view();
+    assert.equal(opened.pill, true, "opening it pushed the end out of view, so the Latest pill shows");
+    await stream(5);
+    await panel.settle();
+    const read = await view();
+    assert.ok(Math.abs(read.top - opened.top) <= 1, `five deltas later the reader is still on the prompt (${opened.top} -> ${read.top})`);
+    assert.equal(read.pill, true);
+    await panel.page.click("#to-latest");
+    await panel.settle();
+    const back = await view();
+    assert.equal(back.nearEnd, true, "Latest goes back to the end");
+    assert.equal(back.pill, false);
+    await stream(1);
+    await panel.settle();
+    assert.equal((await view()).atEnd, true, "and the run is followed again");
+  } finally { await panel.page.close(); }
+});

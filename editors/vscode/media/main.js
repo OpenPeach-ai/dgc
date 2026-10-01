@@ -1444,6 +1444,10 @@
 
   function settleBlock(node) {
     if (!node || node.classList.contains("settled")) return;
+    // A block inside another (a steering message placed in its turn before a retry below came
+    // round) is part of that block: measured, pinned and skipped with it, never on its own.
+    if (node.parentElement?.closest(".msg")) return;
+    fitPromptFolds(node);   // a prompt's fold is part of its height: decide it before the pin
     if (!pinBlockHeight(node)) {          // not laid out yet; settle on a later frame
       requestAnimationFrame(() => settleBlock(node));
       return;
@@ -1475,22 +1479,32 @@
     const pad = getComputedStyle(log);
     // Hidden, or too narrow to hold a word: whatever is measured now is not what anyone will read.
     if (width - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight) < 48) return;
+    // A prompt's fold is part of its block's height, decided at one width in one set of fonts. A block
+    // on screen is re-pinned by blockSizes the moment its height moves -- at the NEW width (recordPin)
+    // -- so the pin test below never offers it again: its folds are found by their own record.
+    const folds = [...log.querySelectorAll(".msg.user > .bubble > .prompt-text")].map((text) => text.parentElement)
+      .filter((bubble) => bubble._foldWidth !== width || bubble._foldFont !== fontEpoch);
+    const holders = new Set(folds.map((bubble) => bubble.closest(".msg.settled")));
+    // A prompt in no settled block (the turn still running, or not laid out yet): re-decided every pass.
+    const loose = folds.filter((bubble) => !bubble.closest(".msg.settled"));
     const candidates = [...log.querySelectorAll(".msg.settled")]
-      .filter((node) => node._pinnedWidth !== width || node._pinnedFont !== fontEpoch);
-    if (!candidates.length) return;
+      .filter((node) => node._pinnedWidth !== width || node._pinnedFont !== fontEpoch || holders.has(node));
+    if (!candidates.length && !loose.length) return;
     const view = log.getBoundingClientRect();
     const middle = view.top + view.height / 2;
     const distance = (node) => { const r = node.getBoundingClientRect(); return r.bottom < middle ? middle - r.bottom : Math.max(0, r.top - middle); };
     const stale = candidates.map((node) => [distance(node), node])
       .filter(([far]) => !nearView || far < view.height * 3).sort((a, b) => a[0] - b[0])
       .slice(0, REPIN_BATCH).map(([, node]) => node);
-    if (!stale.length) return;
+    if (!stale.length && !loose.length) return;
     if (!nearView && candidates.length > REPIN_BATCH) repinTimer = setTimeout(() => repinStaleBlocks(), 16);
     const logTop = view.top;
     const anchor = following ? null : [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
       .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > logTop);
     const anchorTop = anchor?.getBoundingClientRect().top;
     for (const node of stale) node.classList.remove("settled");   // rendered again, so laid out at this width
+    // Inside the anchor above, so a fold appearing or going away over the reader does not move them.
+    fitPromptFolds([...stale, ...loose.map((bubble) => bubble.parentElement)], width);   // the pins below are the folded heights
     // Every height read before any is written: one layout for the lot, not one per block.
     const heights = stale.map((node) => Math.round(node.offsetHeight));
     stale.forEach((node, i) => {
@@ -1531,12 +1545,15 @@
     });
     for (const line of fontProbe.children) fontsObserver.observe(line);
   }
-  // Is the view still tracking the end of the run? It stops only when you scroll away yourself.
+  // Is the view still tracking the end of the run? It stops when you scroll away yourself, and when
+  // you open a long prompt whose new height pushes the end out of view (togglePromptFold): you are
+  // reading that prompt, and the next streamed line must not drag you off it. The Latest pill brings
+  // you back, and following resumes there.
   // Following "whenever we happen to be at the bottom" is not enough: anything that moves the
   // transcript once — a focused control scrolled into view, a card resolving, the composer
   // growing — leaves it more than a screen-edge away, and from then on nothing ever scrolls
   // again, so a run keeps writing into a part of the panel nobody is looking at.
-  window.__dgcPanelBuild = "follow-4";   // proves which panel code a recording actually ran
+  window.__dgcPanelBuild = "follow-5";   // proves which panel code a recording actually ran
   let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { if (replaying) return; log.scrollTop = log.scrollHeight; following = true; }
@@ -1612,6 +1629,119 @@
       text: raw.replace(/\s*📷\s*/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\s+$/g, "").trimEnd(),
       attachments: marked ? [{ label: "image", img: true }] : [],
     };
+  }
+  // ---- long prompts fold ----
+  // A sent prompt of 7+ lines shows its first 5 until "Show more" (main.css, "long prompts"). Decided
+  // only from the text's real height once it is in the transcript (settleBlock), and again whenever
+  // the width or fonts change (repinStaleBlocks). Never from a guess, so a live bubble and the same
+  // prompt replayed from history run the same code. Only `.prompt-text` folds: chips, image tiles and
+  // an answered question above it always stay whole. The one place the state lives is the bubble's
+  // `data-fold` ("folded" | "open", absent when the prompt fits); setPromptFold is its only writer.
+  const PROMPT_FOLD_LINES = 5;    // = --prompt-fold-lines in main.css (prompt-fold.test.mjs pins both)
+  const PROMPT_FOLD_SPARE = 2;    // fold only when 2+ lines would be hidden: 7 lines fold, 6 do not
+  // Prompts opened in this panel's life. A chat switch, reconnect or rewind rebuilds the transcript,
+  // and a prompt being read must not fold back. Keyed by the chat tab (chat_switched/chat_slots) AND
+  // the conversation, so a new chat with no session id yet, or /new in the same tab, starts clean.
+  // Memory only: a reloaded webview starts folded. Grows only by clicks (<=512 chars a key).
+  let promptChat = "";
+  const promptsOpened = new Map();
+  const promptChatKey = () => `${promptChat}\n${draftSession}`;
+  // Live, the bubble shows the composer's trimmed text; replayed, the backend's text after
+  // splitPromptMarks. Same words, different whitespace.
+  function promptFoldKey(bubble) {
+    const text = bubble.querySelector(":scope > .prompt-text")?.textContent || "";
+    return text.slice(0, 4096).replace(/\s+/g, " ").trim().slice(0, 512);
+  }
+  function promptRemembered(bubble) { return !!promptsOpened.get(promptChatKey())?.has(promptFoldKey(bubble)); }
+  function rememberPrompt(bubble, open) {
+    const chat = promptChatKey();
+    if (!promptsOpened.has(chat)) promptsOpened.set(chat, new Set());
+    promptsOpened.get(chat)[open ? "add" : "delete"](promptFoldKey(bubble));
+  }
+  function setPromptFold(bubble, state) {          // "folded" | "open" | "" (fits)
+    const body = bubble.querySelector(":scope > .prompt-text");
+    let toggle = bubble.querySelector(":scope > .prompt-fold");
+    if (!state || !body) {
+      delete bubble.dataset.fold;
+      if (toggle && toggle === document.activeElement && body) {
+        // A keyboard user keeps their place: the text the control belonged to takes focus.
+        body.tabIndex = -1; body.focus({ preventScroll: true });
+        body.addEventListener("blur", () => body.removeAttribute("tabindex"), { once: true });
+      }
+      toggle?.remove();
+      return;
+    }
+    bubble.dataset.fold = state;
+    if (!toggle) {
+      toggle = el("button", "prompt-fold"); toggle.type = "button";
+      if (!body.id) body.id = `prompt-text-${++disclosureId}`;
+      toggle.setAttribute("aria-controls", body.id);
+      toggle.onclick = () => togglePromptFold(bubble);
+      // A held key auto-repeats: one press is one toggle (Claude Code does the same).
+      toggle.onkeydown = (event) => { if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault(); };
+      bubble.appendChild(toggle);
+    }
+    const open = state === "open", label = open ? "Show less" : "Show more";
+    toggle.dataset.label = label;            // drawn by ::before: never in textContent or a copy
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.innerHTML = `<span class="codicon codicon-chevron-${open ? "up" : "down"}" aria-hidden="true"></span>`;
+  }
+  function promptLine(node) {
+    const style = getComputedStyle(node), px = parseFloat(style.lineHeight);
+    return /px$/.test(style.lineHeight) && px > 0 ? px : (parseFloat(style.fontSize) || 13) * 1.62;
+  }
+  // true: fold. false: fits. null: not laid out (hidden panel, agent page, detached page, jsdom).
+  // scrollHeight is the natural height folded or not, so the verdict never depends on the state.
+  function measurePromptFold(bubble) {
+    const body = bubble.querySelector(":scope > .prompt-text");
+    if (!body?.isConnected || !body.clientWidth) return null;
+    return body.scrollHeight > promptLine(body) * (PROMPT_FOLD_LINES + PROMPT_FOLD_SPARE - 0.5);
+  }
+  // `blocks`: .msg elements (or one). A block's own bubble is found too: querySelectorAll matches
+  // ".msg.user > .bubble" against the whole tree. Every height is read before any fold is written.
+  function fitPromptFolds(blocks, width = log.clientWidth) {
+    const bubbles = new Set();
+    for (const block of [].concat(blocks)) for (const bubble of block?.querySelectorAll?.(".msg.user > .bubble") || []) bubbles.add(bubble);
+    const verdicts = [];
+    for (const bubble of bubbles) {
+      bubble._foldWidth = width; bubble._foldFont = fontEpoch;   // as the pins do, even unmeasured
+      const long = measurePromptFold(bubble);
+      if (long !== null) verdicts.push([bubble, long]);
+    }
+    for (const [bubble, long] of verdicts) {
+      const state = bubble.dataset.fold || "";
+      if (long && !state) setPromptFold(bubble, promptRemembered(bubble) ? "open" : "folded");
+      else if (!long && state) setPromptFold(bubble, "");
+    }
+    for (const [bubble] of verdicts) syncPromptLinks(bubble);
+  }
+  // A link not wholly inside the visible lines leaves the tab order until the prompt opens: Tab never
+  // lands on what nobody can see, and never opens a prompt by itself. Screen readers keep every link.
+  function syncPromptLinks(bubble) {
+    const body = bubble.querySelector(":scope > .prompt-text");
+    const links = body ? [...body.querySelectorAll(".prompt-link")] : [];
+    if (!links.length) return;
+    const edge = bubble.dataset.fold === "folded" && body.clientHeight ? body.getBoundingClientRect().top + body.clientHeight : null;
+    for (const link of links) {
+      if (edge !== null && link.getBoundingClientRect().bottom > edge + 1) link.tabIndex = -1;
+      else link.removeAttribute("tabindex");
+    }
+  }
+  function togglePromptFold(bubble) {
+    const open = bubble.dataset.fold !== "open";
+    setPromptFold(bubble, open ? "open" : "folded");
+    syncPromptLinks(bubble);
+    rememberPrompt(bubble, open);
+    if (open) {
+      // Opened, a prompt is being read: a running turn must not scroll() the reader away from it.
+      if (!atBottom()) following = false;
+    } else {
+      // Folded while read from inside: its top is above the view. Bring it back, 16px clear.
+      const above = bubble.getBoundingClientRect().top - log.getBoundingClientRect().top;
+      if (above < 0) log.scrollTop += above - 16;
+    }
+    renderToLatest();   // the Latest pill while away; following again once back at the end
   }
   function fillUserBubble(bubble, text, attachments) {
     bubble.replaceChildren();
@@ -4714,7 +4844,9 @@
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, objective, attachments);
     m.appendChild(bubble);
-    log.appendChild(m); setSending(true);
+    // Settled like every other prompt: pinned, skippable off screen, and its fold decided and
+    // re-decided with the width. It was the one user bubble that never was.
+    log.appendChild(m); settleBlock(m); setSending(true);
     return m;
   }
   function submitGoal(objective, restoreText = composerText()) {
@@ -5708,7 +5840,12 @@
     flushText(); finishReasoning();
     if (turn.textEl) { turn.textEl.classList.add("commentary"); commentaryCopy(turn.textEl); }
     turn.textEl = null; turn._buf = ""; releaseToolGroup();
+    // Part of the turn from here on: measured, pinned and skipped as the turn's block -- how a replayed
+    // steering message has always been drawn. A settled block nested in another is laid out by neither
+    // when the outer one is skipped, so its fold could never be measured again.
+    node.classList.remove("settled"); blockSizes?.unobserve(node); node.style.removeProperty("contain-intrinsic-size");
     appendTurnContent(node);
+    if (!replaying) fitPromptFolds(node);   // the turn's column, not the log's: decide again
   }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
@@ -5858,8 +5995,11 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
-    else if (msg.type === "chat_slots") renderChatBar(msg);
+    else if (msg.type === "chat_slots") { promptChat = String(msg.activeId || promptChat); renderChatBar(msg); }
     else if (msg.type === "chat_switched") {
+      // First: every event of the incoming chat follows this one, and its prompts are remembered
+      // under its tab (prompts_queued arrives before chat_slots does). The memory outlives the wipe.
+      promptChat = String(msg.slotId || "");
       clearForChatSwitch();
       // The incoming backend's own `ready` lands right behind this with the real name; until then
       // the chip's label is the best thing to show, and an unnamed chat is a new one.
