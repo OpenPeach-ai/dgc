@@ -25,6 +25,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "roots": {
               "type": "array"
             },
@@ -54,6 +59,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "root": {
               "type": "string"
@@ -101,6 +111,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "roots": {
               "type": "array"
             },
@@ -126,6 +141,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "root": {
               "type": "string"
@@ -168,6 +188,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "version": {
               "type": "string"
@@ -292,6 +317,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "turn_id": {
               "type": "string"
             },
@@ -330,6 +360,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "turn_id": {
               "type": "string"
@@ -377,6 +412,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "turn_id": {
               "type": "string"
@@ -438,6 +478,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "turn_id": {
               "type": "string"
             },
@@ -481,6 +526,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "text": {
               "type": "string"
             }
@@ -502,6 +552,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "text": {
               "type": "string"
@@ -549,6 +604,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "block": {
               "type": "string"
@@ -609,6 +669,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "message_id": {
               "type": "string"
             },
@@ -636,6 +701,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "call_id": {
               "anyOf": [
@@ -676,6 +746,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "call_id": {
               "anyOf": [
@@ -736,6 +811,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "call_id": {
               "anyOf": [
                 {
@@ -783,6 +863,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "call_id": {
               "anyOf": [
                 {
@@ -825,6 +910,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -883,6 +973,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "call_id": {
               "anyOf": [
                 {
@@ -923,6 +1018,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "todos": {
               "type": "array"
             }
@@ -944,6 +1044,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -979,6 +1084,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "call_id": {
               "anyOf": [
                 {
@@ -1013,6 +1123,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "goal": {
               "type": "string"
@@ -1058,6 +1173,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "message": {
               "type": "string"
             }
@@ -1079,6 +1199,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "message": {
               "type": "string"
@@ -1107,6 +1232,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "retry_id": {
               "type": "string"
@@ -1227,6 +1357,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             }
@@ -1248,6 +1383,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -1320,6 +1460,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "call_id": {
               "anyOf": [
                 {
@@ -1369,6 +1514,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "rule": {
               "type": "string"
             }
@@ -1390,6 +1540,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -1420,6 +1575,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "call_id": {
               "anyOf": [
@@ -1465,6 +1625,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "call_id": {
               "anyOf": [
@@ -1515,6 +1680,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -1550,6 +1720,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "anyOf": [
@@ -1607,6 +1782,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -1645,6 +1825,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -1713,6 +1898,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -1792,6 +1982,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -1816,6 +2011,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -1997,6 +2197,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2073,6 +2278,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "model": {
               "type": "string"
             },
@@ -2101,6 +2311,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2139,6 +2354,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "think": {
               "type": "string",
               "enum": [
@@ -2171,6 +2391,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2207,6 +2432,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2266,6 +2496,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2310,6 +2545,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2342,6 +2582,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2369,6 +2614,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2407,6 +2657,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2433,6 +2688,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2458,6 +2718,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2497,6 +2762,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2540,6 +2810,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2571,6 +2846,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2614,6 +2894,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2649,6 +2934,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2680,6 +2970,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2714,6 +3009,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2738,6 +3038,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2776,6 +3081,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "event": {
               "type": "string",
@@ -2840,6 +3150,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -2861,6 +3176,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2902,6 +3222,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -2938,6 +3263,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -2984,6 +3314,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -3018,6 +3353,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -3074,6 +3414,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "count": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -3101,6 +3446,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -3136,6 +3486,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -3170,6 +3525,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -3203,6 +3563,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "message": {
               "type": "string"
@@ -3240,6 +3605,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "roots": {
               "type": "array"
             },
@@ -3264,6 +3634,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "plan": {
               "type": "string"
@@ -3293,6 +3668,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "kind": {
               "type": "string",
@@ -3340,6 +3720,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -3370,6 +3755,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "items": {
               "type": "array"
@@ -3412,6 +3802,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -3440,6 +3835,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -3464,6 +3864,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "ok": {
               "type": "boolean"
@@ -3495,6 +3900,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "items": {
               "type": "array"
@@ -3528,6 +3938,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -3574,6 +3989,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -3636,6 +4056,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -3696,6 +4121,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -3730,6 +4160,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -3785,6 +4220,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -3874,6 +4314,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -3928,6 +4373,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -3979,6 +4429,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "items": {
               "type": "array"
             },
@@ -4016,6 +4471,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "agent_id": {
               "type": "string"
             },
@@ -4046,6 +4506,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "agent_id": {
               "type": "string"
@@ -4079,6 +4544,158 @@
             "request_id"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chat_opened"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "default",
+                "acceptEdits",
+                "plan",
+                "auto"
+              ]
+            },
+            "think": {
+              "type": "string",
+              "enum": [
+                "off",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            },
+            "ultra_mode": {
+              "type": "boolean"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "subagent_base_url": {
+              "type": "string"
+            },
+            "fallback_base_url": {
+              "type": "string"
+            },
+            "project_root": {
+              "type": "string"
+            },
+            "workspace_trusted": {
+              "type": "boolean"
+            },
+            "commands": {
+              "type": "array"
+            },
+            "custom_commands": {
+              "type": "array"
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "tools_supported": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "provider_capabilities": {
+              "type": "object"
+            },
+            "tools": {
+              "type": "array"
+            },
+            "skills": {
+              "type": "array"
+            },
+            "goal": {
+              "type": "object"
+            },
+            "context_size": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "session_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "model",
+            "mode",
+            "think",
+            "base_url",
+            "workspace_trusted",
+            "commands",
+            "custom_commands",
+            "goal",
+            "context_size"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chat_closed"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "closed",
+                "handed_over"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "reason"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -4089,6 +4706,11 @@
           "properties": {
             "type": {
               "const": "get_chat_changes"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4105,6 +4727,11 @@
           "properties": {
             "type": {
               "const": "get_chat_change"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "root": {
               "type": "string"
@@ -4134,6 +4761,11 @@
             "type": {
               "const": "get_workspace_changes"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4149,6 +4781,11 @@
           "properties": {
             "type": {
               "const": "get_workspace_change"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "root": {
               "type": "string"
@@ -4173,6 +4810,11 @@
           "properties": {
             "type": {
               "const": "prompt"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "text": {
               "type": "string"
@@ -4254,6 +4896,11 @@
             "type": {
               "const": "slash_command"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "text": {
               "type": "string"
             }
@@ -4269,6 +4916,11 @@
           "properties": {
             "type": {
               "const": "set_workspace_roots"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "roots": {
               "type": "array"
@@ -4297,6 +4949,11 @@
           "properties": {
             "type": {
               "const": "permission_response"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -4330,6 +4987,11 @@
             "type": {
               "const": "plan_response"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -4359,6 +5021,11 @@
             "type": {
               "const": "options_response"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "id": {
               "type": "string"
             },
@@ -4380,6 +5047,11 @@
           "properties": {
             "type": {
               "const": "mcp_input_response"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -4408,6 +5080,11 @@
           "properties": {
             "type": {
               "const": "cancel"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -4420,6 +5097,11 @@
           "properties": {
             "type": {
               "const": "interrupt"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -4432,6 +5114,11 @@
           "properties": {
             "type": {
               "const": "ask_skip"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "ask_id": {
               "type": "string"
@@ -4451,6 +5138,11 @@
           "properties": {
             "type": {
               "const": "ping"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -4463,6 +5155,11 @@
           "properties": {
             "type": {
               "const": "editor_state"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "source": {
               "type": "string",
@@ -4491,6 +5188,11 @@
           "properties": {
             "type": {
               "const": "set_mode"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "mode": {
               "type": "string",
@@ -4522,6 +5224,11 @@
           "properties": {
             "type": {
               "const": "set_model"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "model": {
               "type": "string"
@@ -4557,6 +5264,11 @@
             "type": {
               "const": "list_models"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4571,6 +5283,11 @@
           "properties": {
             "type": {
               "const": "list_mcp_tools"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4597,6 +5314,11 @@
           "properties": {
             "type": {
               "const": "call_mcp_tool"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4625,6 +5347,11 @@
             "type": {
               "const": "list_skills"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4641,6 +5368,11 @@
             "type": {
               "const": "list_plugins"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4656,6 +5388,11 @@
           "properties": {
             "type": {
               "const": "install_plugin"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4682,6 +5419,11 @@
           "properties": {
             "type": {
               "const": "composio_connection"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4717,6 +5459,11 @@
             "type": {
               "const": "inspect_plugin"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -4736,6 +5483,11 @@
           "properties": {
             "type": {
               "const": "uninstall_plugin"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4757,6 +5509,11 @@
             "type": {
               "const": "list_plugin_marketplaces"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4772,6 +5529,11 @@
           "properties": {
             "type": {
               "const": "add_plugin_marketplace"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4793,6 +5555,11 @@
             "type": {
               "const": "remove_plugin_marketplace"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -4813,6 +5580,11 @@
             "type": {
               "const": "refresh_plugin_marketplace"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -4832,6 +5604,11 @@
           "properties": {
             "type": {
               "const": "create_plugin"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4861,6 +5638,11 @@
             "type": {
               "const": "reload_skills"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -4876,6 +5658,11 @@
           "properties": {
             "type": {
               "const": "get_skill"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4896,6 +5683,11 @@
           "properties": {
             "type": {
               "const": "set_skill_enabled"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4920,6 +5712,11 @@
           "properties": {
             "type": {
               "const": "create_skill"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -4947,6 +5744,11 @@
             "type": {
               "const": "install_skill"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -4973,6 +5775,11 @@
             "type": {
               "const": "list_mcp_context"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -4997,6 +5804,11 @@
             "type": {
               "const": "get_history"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5012,6 +5824,11 @@
           "properties": {
             "type": {
               "const": "start_goal"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5050,6 +5867,11 @@
             "type": {
               "const": "mcp_command"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5069,6 +5891,11 @@
           "properties": {
             "type": {
               "const": "get_mcp_context"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5101,6 +5928,11 @@
             "type": {
               "const": "set_mcp_enabled"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5125,6 +5957,11 @@
             "type": {
               "const": "reconnect_mcp_server"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5145,6 +5982,11 @@
             "type": {
               "const": "list_docs"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5160,6 +6002,11 @@
           "properties": {
             "type": {
               "const": "get_doc"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5181,6 +6028,11 @@
             "type": {
               "const": "list_mcp_servers"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5196,6 +6048,11 @@
           "properties": {
             "type": {
               "const": "upsert_mcp_server"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5234,6 +6091,11 @@
             "type": {
               "const": "remove_mcp_server"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5254,6 +6116,11 @@
             "type": {
               "const": "reload_mcp_servers"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5270,6 +6137,11 @@
             "type": {
               "const": "list_permissions"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5285,6 +6157,11 @@
           "properties": {
             "type": {
               "const": "add_permission_rule"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5315,6 +6192,11 @@
             "type": {
               "const": "remove_permission_rule"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5344,6 +6226,11 @@
             "type": {
               "const": "get_memory"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5359,6 +6246,11 @@
           "properties": {
             "type": {
               "const": "add_memory"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5388,6 +6280,11 @@
             "type": {
               "const": "list_hooks"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5403,6 +6300,11 @@
           "properties": {
             "type": {
               "const": "generate_handoff"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5422,6 +6324,11 @@
           "properties": {
             "type": {
               "const": "set_think"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "level": {
               "type": "string",
@@ -5449,6 +6356,11 @@
           "properties": {
             "type": {
               "const": "set_goal"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "text": {
               "type": "string"
@@ -5486,6 +6398,11 @@
             "type": {
               "const": "get_goal"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5500,6 +6417,11 @@
           "properties": {
             "type": {
               "const": "get_plan"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5516,6 +6438,11 @@
             "type": {
               "const": "new_session"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5530,6 +6457,11 @@
           "properties": {
             "type": {
               "const": "fork_session"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "name": {
               "type": "string"
@@ -5549,6 +6481,11 @@
             "type": {
               "const": "resume_goal"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5564,6 +6501,11 @@
             "type": {
               "const": "resume_turn"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5578,6 +6520,11 @@
           "properties": {
             "type": {
               "const": "get_recall"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "before": {
               "type": "integer",
@@ -5604,6 +6551,11 @@
             "type": {
               "const": "name_session"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "name": {
               "type": "string"
             },
@@ -5623,6 +6575,11 @@
             "type": {
               "const": "clear_session"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5637,6 +6594,11 @@
           "properties": {
             "type": {
               "const": "resume_session"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "path": {
               "anyOf": [
@@ -5666,6 +6628,11 @@
             "type": {
               "const": "list_sessions"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5680,6 +6647,11 @@
           "properties": {
             "type": {
               "const": "delete_session"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "path": {
               "type": "string"
@@ -5700,6 +6672,11 @@
             "type": {
               "const": "list_checkpoints"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5714,6 +6691,11 @@
           "properties": {
             "type": {
               "const": "rewind"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "index": {
               "type": "integer",
@@ -5736,6 +6718,11 @@
             "type": {
               "const": "clear_todos"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5751,6 +6738,11 @@
             "type": {
               "const": "list_retained_tasks"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5765,6 +6757,11 @@
           "properties": {
             "type": {
               "const": "resolve_retained_task"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -5796,6 +6793,11 @@
             "type": {
               "const": "compact"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5811,6 +6813,11 @@
             "type": {
               "const": "list_artifacts"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5825,6 +6832,11 @@
           "properties": {
             "type": {
               "const": "stop_artifact"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -5845,6 +6857,11 @@
             "type": {
               "const": "set_config"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "values": {
               "type": "object"
             },
@@ -5864,6 +6881,11 @@
             "type": {
               "const": "get_config"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             },
@@ -5882,6 +6904,11 @@
             "type": {
               "const": "status"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5896,6 +6923,11 @@
           "properties": {
             "type": {
               "const": "shutdown"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -5908,6 +6940,11 @@
           "properties": {
             "type": {
               "const": "list_monitors"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5923,6 +6960,11 @@
           "properties": {
             "type": {
               "const": "stop_monitor"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "id": {
               "type": "string"
@@ -5942,6 +6984,11 @@
           "properties": {
             "type": {
               "const": "get_usage"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -5970,6 +7017,11 @@
             "type": {
               "const": "list_agents"
             },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "request_id": {
               "type": "string"
             }
@@ -5984,6 +7036,11 @@
           "properties": {
             "type": {
               "const": "get_image"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "request_id": {
               "type": "string"
@@ -6004,6 +7061,11 @@
           "properties": {
             "type": {
               "const": "agent_control"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
             "action": {
               "type": "string",
@@ -6026,6 +7088,52 @@
             "type",
             "action",
             "id",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "open_chat"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "cwd"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "close_chat"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
             "request_id"
           ],
           "additionalProperties": false

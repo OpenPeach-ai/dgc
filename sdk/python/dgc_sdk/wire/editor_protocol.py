@@ -705,9 +705,24 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # ---- end v14 ----------------------------------------------------------------------------------
 }
 
-# Names the envelope owns. A payload field with either name would overwrite it on the wire
+# ---- chats: several sessions, each in its own directory, in one backend -------------------------
+# `open_chat` starts one in `cwd` (resolved to its project root as `dgc serve` resolves its own).
+# The reply is `chat_opened`, ready's per-chat half, or a `command_rejected` naming why. From the
+# first open_chat on, every chat-scoped event and command carries the envelope's `chat_id`; an
+# event without one belongs to the default chat. A client that never sends open_chat never sees
+# the field. Advertised as ready.capabilities.chats = {version, max, default}.
+COMMAND_FIELDS["open_chat"] = {"request_id": _S(), "cwd": _S()}
+COMMAND_FIELDS["close_chat"] = {"request_id": _S()}
+EVENT_FIELDS["chat_opened"] = {"request_id": _S(), **{
+    key: field for key, field in EVENT_FIELDS["ready"].items()
+    if key not in ("version", "protocol_version", "capabilities")}}
+EVENT_FIELDS["chat_closed"] = {"request_id": _S(False),
+                                "reason": _f("string", enum=("closed", "handed_over"))}
+
+# Names the envelope owns. A payload field with any of these names would overwrite it on the wire
 # (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.
-RESERVED_FIELD_NAMES = frozenset({"type", "seq"})
+RESERVED_FIELD_NAMES = frozenset({"type", "seq", "chat_id"})
+_MAX_CHAT_ID = 64
 for _specs in (EVENT_FIELDS, COMMAND_FIELDS):
     for _name, _fields in _specs.items():
         _clash = RESERVED_FIELD_NAMES & set(_fields)
@@ -755,12 +770,15 @@ def _message_error(value, specs: dict[str, dict[str, dict]], *, sequence: bool) 
         return f"unknown message type {_shown(name)}"
     if sequence and (not _type_ok(value.get("seq"), "integer") or value["seq"] < 0):
         return "event seq must be a non-negative integer"
-    allowed = {"type", *specs[name]}
+    allowed = {"type", "chat_id", *specs[name]}
     if sequence:
         allowed.add("seq")
     extra = sorted(set(value) - allowed)
     if extra:
         return f"{name} has undeclared field {_shown(extra[0])}"
+    chat = value.get("chat_id")
+    if "chat_id" in value and not (isinstance(chat, str) and 0 < len(chat) <= _MAX_CHAT_ID):
+        return f"{name}.chat_id must be a short non-empty string"
     for key, field in specs[name].items():
         if key not in value:
             if field["required"]:
@@ -806,6 +824,7 @@ def _message_schema(name: str, fields: dict[str, dict], *, sequence: bool) -> di
         properties["seq"] = {"type": "integer", "minimum": 0,
                              "maximum": MAX_SAFE_INTEGER}
         required.append("seq")
+    properties["chat_id"] = {"type": "string", "minLength": 1, "maxLength": _MAX_CHAT_ID}
     for key, field in fields.items():
         properties[key] = _json_type(field)
         if field["required"]:
@@ -894,9 +913,14 @@ function messageError(value: unknown, specs: Record<string, Record<string, Field
   if (sequence && (!Number.isSafeInteger(value.seq) || Number(value.seq) < 0)) {{
     return "event seq must be a non-negative integer";
   }}
-  const allowed = new Set(["type", ...(sequence ? ["seq"] : []), ...Object.keys(specs[name])]);
+  const allowed = new Set(["type", "chat_id", ...(sequence ? ["seq"] : []), ...Object.keys(specs[name])]);
   const extra = Object.keys(value).find((key) => !allowed.has(key));
   if (extra) return `${{name}} has undeclared field ${{shown(extra)}}`;
+  if (Object.prototype.hasOwnProperty.call(value, "chat_id")
+      && !(typeof value.chat_id === "string" && value.chat_id.length > 0
+           && value.chat_id.length <= {_MAX_CHAT_ID})) {{
+    return `${{name}}.chat_id must be a short non-empty string`;
+  }}
   for (const [key, field] of Object.entries(specs[name])) {{
     if (!Object.prototype.hasOwnProperty.call(value, key)) {{
       if (field.required) return `${{name}}.${{key}} is required`;

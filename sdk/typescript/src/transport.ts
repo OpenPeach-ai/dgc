@@ -24,7 +24,7 @@ export type Frame = Record<string, unknown>;
 export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "agent_ended", "agent_message", "agent_started", "agent_step", "agent_updated", "agents", "artifact_ready", "artifacts",
   "ask_request", "ask_resolved",
-  "chat_change", "chat_changes", "checkpoints", "command_rejected", "compacted", "config",
+  "chat_change", "chat_changes", "chat_closed", "chat_opened", "checkpoints", "command_rejected", "compacted", "config",
   "context", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
   "history", "hook_activity", "hook_catalog", "image", "info", "mcp_call_complete",
   "mcp_command_result", "mcp_context", "mcp_context_catalog", "mcp_input_request", "mcp_servers",

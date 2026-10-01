@@ -1739,6 +1739,7 @@ class Backend:
             config.hold_untrusted_mode()
         self.config = config
         self.chat_id = chat_id
+        self._host = host
         if host is None:
             # Standalone: this backend is the whole process and owns its wire.
             self.em = HistoryEmitter(
@@ -1854,7 +1855,41 @@ class Backend:
                           # refuses the whole event with "ready has an undeclared field".
                           "image_spool": True, "image_spool_dir": str(self._image_spool()),
                           "steering_native": not bool(self.config.get("subscription_engine", "")),
-                          "session_policy": self._session_policy_capability()},
+                          "session_policy": self._session_policy_capability(),
+                          **self._chats_capability()},
+            **self._chat_fields())
+        self._after_open()
+        # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
+        # this checkout that it exists.
+        self._announce_peer("idle")
+        self._start_peer_heartbeat()
+        # Publish the complete route state immediately after the ready handshake. ``config``
+        # carries both native and delegated settings so editors render the route that will run.
+        self._emit_config()
+        self._publish_model_capabilities()
+
+    def _chats_capability(self) -> dict:
+        """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
+        process to one project (an SDK session), which open_chat would otherwise walk out of."""
+        if getattr(self, "_host", None) is None or (os.environ.get("DGC_PROJECT_ROOT") or "").strip():
+            return {}
+        return {"chats": {"version": 1, "max": _MAX_CHATS, "default": self.chat_id}}
+
+    def open(self, request_id: str) -> None:
+        """Introduce a chat opened after `ready`: ready's per-chat half, then the same state."""
+        self.em.emit("chat_opened", request_id=request_id, **self._chat_fields())
+        self._after_open()
+        self._emit_config()
+        self._publish_model_capabilities()
+
+    def _after_open(self) -> None:
+        for warning in getattr(self.config, "credential_warnings", ()):
+            self.em.emit("info", message=str(warning)[:1000])
+        self._emit_context()
+
+    def _chat_fields(self) -> dict:
+        """What `ready` says about this chat -- and all `chat_opened` says about a later one."""
+        return dict(
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1873,17 +1908,6 @@ class Backend:
             goal=self._goal_snapshot(),
             session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
-        for warning in getattr(self.config, "credential_warnings", ()):
-            self.em.emit("info", message=str(warning)[:1000])
-        self._emit_context()
-        # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
-        # this checkout that it exists.
-        self._announce_peer("idle")
-        self._start_peer_heartbeat()
-        # Publish the complete route state immediately after the ready handshake. ``config``
-        # carries both native and delegated settings so editors render the route that will run.
-        self._emit_config()
-        self._publish_model_capabilities()
 
     def _publish_model_capabilities(self, *, always: bool = False) -> None:
         """Learn what the selected model honours, off the command thread, and tell the editor.
@@ -5983,6 +6007,10 @@ def _end_line(crash_log, line: str) -> None:
         pass
 
 
+# How many chats one backend holds. Each owns an Agent with its own MCP connections, so this bounds
+# processes and memory too, not just bookkeeping.
+_MAX_CHATS = 16
+
 # Worst last: what Host.close() reports when its chats ended differently.
 _CLOSE_OUTCOMES = ("idle", "landed", "cancelled")
 
@@ -6011,23 +6039,113 @@ class Host:
         self.em = HistoryEmitter(core=self.core)          # the process's own events: no chat
         self.chats: dict[str, Backend] = {}
         self._chat_ids = itertools.count()
+        self._chats_lock = threading.Lock()
+        self._opening: set[str] = set()      # minted, still being built off the stdin thread
+        self._closing: set[str] = set()      # still emitting their last events
+        self._retired_secrets: set[str] = set()
+        self._shutting_down = False
         self._editor_liveness = None
         self._finalizer_wait = ""
         self.default = self.add_chat(config)
 
-    def add_chat(self, config: Config) -> "Backend":
-        chat_id = f"c{next(self._chat_ids)}"
+    def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
+        chat_id = chat_id or f"c{next(self._chat_ids)}"
         chat = Backend(config, host=self, chat_id=chat_id)
         if self._editor_liveness is not None:
             chat._editor_liveness = self._editor_liveness
-        self.chats[chat_id] = chat
+        with self._chats_lock:
+            self.chats[chat_id] = chat
         return chat
 
     def _secret_values(self) -> tuple[str, ...]:
-        values: set[str] = set()
+        # A closed chat's secrets stay redacted: a late event from its last threads, or a later
+        # chat's tool echoing a key it once used, still crosses the same wire.
+        values: set[str] = set(self._retired_secrets)
         for chat in list(self.chats.values()):
             values.update(secret_values(getattr(chat, "config", None)))
         return tuple(sorted(values, key=lambda item: (-len(item), item)))
+
+    def _reject(self, cmd: dict, reason: str, message: str, chat_id: str = "") -> None:
+        fields = {"request_id": str(cmd["request_id"])[:128]} if isinstance(cmd.get("request_id"), str) else {}
+        HistoryEmitter(core=self.core, chat_id=chat_id).emit(
+            "command_rejected", command=str(cmd.get("type") or "")[:128], reason=reason,
+            message=message, **fields)
+
+    def _open_chat(self, cmd: dict) -> None:
+        """Start a chat in another directory. Returns at once: the chat is built on its own thread,
+        because building one connects its MCP servers (seconds each), and the stdin thread is where
+        every chat's Stop and approvals arrive."""
+        request_id = str(cmd.get("request_id") or "")
+        if (os.environ.get("DGC_PROJECT_ROOT") or "").strip():
+            return self._reject(cmd, "pinned", "this backend is pinned to one project "
+                                                 "(DGC_PROJECT_ROOT) and cannot open another")
+        path = Path(str(cmd.get("cwd") or "")).expanduser()
+        if not path.is_absolute() or not path.is_dir():
+            return self._reject(cmd, "invalid_cwd", "cwd must be an existing absolute directory")
+        with self._chats_lock:
+            if len(self.chats) + len(self._opening) >= _MAX_CHATS:
+                full = True
+            else:
+                full, chat_id = False, f"c{next(self._chat_ids)}"
+                self._opening.add(chat_id)
+        if full:
+            return self._reject(cmd, "too_many_chats",
+                                f"one backend holds at most {_MAX_CHATS} chats; close one first")
+        # From here on every chat's events say which chat they belong to: this client asked for more
+        # than one. Under the wire's own lock, so no frame is half on either side of the switch.
+        with self.core._lock:
+            self.core.tag_chats = True
+        threading.Thread(target=self._build_chat, args=(chat_id, path, request_id), daemon=True,
+                         name=f"dgc-open-{chat_id}").start()
+
+    def _build_chat(self, chat_id: str, path: Path, request_id: str) -> None:
+        from .config import find_project_root
+        try:
+            config = Config(project_root=find_project_root(path))
+            config.adopt_runtime_secrets(self.default.config)
+            chat = Backend(config, host=self, chat_id=chat_id)    # connects its MCP servers
+            chat._editor_liveness = self._editor_liveness
+            with self._chats_lock:
+                late = self._shutting_down     # close() took its list: this one is not on it
+                if not late:
+                    self.chats[chat_id] = chat
+            if late:
+                chat.close(grace_s=0.0, process=False)
+                return
+        except Exception as exc:
+            detail = str(exc).strip() or type(exc).__name__
+            self._reject({"type": "open_chat", "request_id": request_id}, "open_failed",
+                         f"couldn't open a chat in {path}: {detail}"[:1000])
+            return
+        finally:
+            with self._chats_lock:
+                self._opening.discard(chat_id)
+        chat.open(request_id)
+
+    def _close_chat(self, cmd: dict) -> None:
+        chat_id = cmd.get("chat_id")
+        with self._chats_lock:
+            chat = self.chats.get(chat_id) if chat_id not in self._closing else None
+            closable = chat is not None and chat is not self.default
+            if closable:
+                self._closing.add(chat_id)
+        if chat is None:
+            return self._reject(cmd, "unknown_chat", "no open chat has that id", str(chat_id or ""))
+        if not closable:
+            return self._reject(cmd, "default_chat", "the first chat stays open for the life of "
+                                                       "the backend", chat_id)
+        request_id = str(cmd.get("request_id") or "")
+
+        def close() -> None:
+            try:
+                chat.close(grace_s=0.0, process=False)     # closing a chat abandons its turn
+            finally:
+                chat.em.emit("chat_closed", reason="closed", request_id=request_id)
+                with self._chats_lock:
+                    self._retired_secrets.update(secret_values(getattr(chat, "config", None)))
+                    self.chats.pop(chat_id, None)
+                    self._closing.discard(chat_id)
+        threading.Thread(target=close, daemon=True, name=f"dgc-close-{chat_id}").start()
 
     def _sanitize(self, event):
         return redact_value(event, self._secret_values())
@@ -6041,7 +6159,22 @@ class Host:
             chat._editor_liveness = liveness
 
     def dispatch(self, cmd: dict) -> None:
-        self.default.dispatch(cmd)
+        """Route one command: to the chat its envelope names, or the default chat."""
+        kind = cmd.get("type")
+        if kind in ("open_chat", "close_chat"):
+            problem = command_error(cmd)
+            if problem:
+                return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+            return self._open_chat(cmd) if kind == "open_chat" else self._close_chat(cmd)
+        if "chat_id" not in cmd:
+            return self.default.dispatch(cmd)
+        chat_id = cmd.get("chat_id")
+        with self._chats_lock:
+            chat = self.chats.get(chat_id) if chat_id not in self._closing else None
+        if chat is None:
+            return self._reject(cmd, "unknown_chat", "no open chat has that id",
+                                chat_id if isinstance(chat_id, str) else "")
+        chat.dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
 
     def _busy(self) -> bool:
         return any(_safe_busy(chat) for chat in list(self.chats.values()))
@@ -6064,7 +6197,9 @@ class Host:
     def close(self, grace_s: float = 0.0) -> str:
         """Close every chat AT ONCE -- each gets the whole grace window, not a turn of it -- then
         the process's own state. Returns the worst outcome: idle, landed, or cancelled."""
-        chats = list(self.chats.values())
+        with self._chats_lock:
+            self._shutting_down = True        # a chat still being built closes itself
+            chats = list(self.chats.values())
         outcomes: list[str] = []
         if len(chats) == 1:
             outcomes.append(chats[0].close(grace_s=grace_s, process=False))

@@ -1425,6 +1425,25 @@ class Config:
         if persist:
             self.save()
 
+    def adopt_runtime_secrets(self, base: "Config") -> None:
+        """Take the runtime credentials the process's first Config was given.
+
+        A launcher's DGC_*_FILE key is read -- and its file deleted -- by the first Config, and a
+        key the editor installs with set_runtime_secret lives only in the Config that received it.
+        A chat opened later builds its own Config from disk and had neither: every request it made
+        went out with no key. Each key keeps the endpoint identity it was given for, so get()
+        still refuses it to any other endpoint.
+        """
+        for key in sorted(getattr(base, "_env_secret_keys", ()) or ()):
+            value = base.data.get(key)
+            if key in self._env_secret_keys or not isinstance(value, str) or not value:
+                continue                    # its own, from an environment still set, wins
+            self.data[key] = value
+            self._env_secret_keys.add(key)
+            identity = getattr(base, "_provider_secret_identity", {}).get(key)
+            if key in _PROVIDER_SECRET_KEYS and identity:
+                self._provider_secret_identity[key] = identity
+
     def set_runtime_secret(self, key: str, value: str) -> None:
         """Install an environment/editor-owned provider key without persisting its value."""
         if key not in _PROVIDER_SECRET_KEYS:
