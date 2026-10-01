@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import io
+import itertools
 import json
 import math
 import re
@@ -631,26 +632,10 @@ class _EditorLiveness:
 
     def working(self) -> str:
         """Name the work that should keep this backend alive, or '' when there is none."""
-        if _safe_busy(self.backend):
-            return "a turn is running"
-        agent = getattr(self.backend, "agent", None)
-        try:
-            monitors = getattr(agent, "monitors", None)
-            if monitors is not None and (monitors.running() or monitors.pending_count()):
-                return "background monitors are live"
-        except Exception:
-            return "monitor state is unreadable"      # fail safe: stay alive rather than guess
-        try:
-            if getattr(agent, "_detached_jobs", None):
-                return "a detached sub-agent is still working"
-        except Exception:
-            return "sub-agent state is unreadable"
-        try:
-            if getattr(agent, "goal", ""):
-                return "a goal is still open"
-        except Exception:
-            return "goal state is unreadable"
-        return ""
+        across_chats = getattr(self.backend, "keepalive_reason", None)   # a Host: any of its chats
+        if callable(across_chats):
+            return across_chats()
+        return _work_keeping_alive(self.backend)
 
     def _expired(self) -> bool:
         with self._lock:
@@ -784,6 +769,30 @@ class _EditorLiveness:
     def describe(self) -> str:
         return (f"no editor traffic for {self.idle_for:.0f}s "
                 f"(gives up after {self.after:.0f}s)")
+
+
+def _work_keeping_alive(backend) -> str:
+    """Name the work that should keep this backend alive, or '' when there is none."""
+    if _safe_busy(backend):
+        return "a turn is running"
+    agent = getattr(backend, "agent", None)
+    try:
+        monitors = getattr(agent, "monitors", None)
+        if monitors is not None and (monitors.running() or monitors.pending_count()):
+            return "background monitors are live"
+    except Exception:
+        return "monitor state is unreadable"      # fail safe: stay alive rather than guess
+    try:
+        if getattr(agent, "_detached_jobs", None):
+            return "a detached sub-agent is still working"
+    except Exception:
+        return "sub-agent state is unreadable"
+    try:
+        if getattr(agent, "goal", ""):
+            return "a goal is still open"
+    except Exception:
+        return "goal state is unreadable"
+    return ""
 
 
 def _safe_busy(backend) -> bool:
@@ -1723,18 +1732,25 @@ class Backend:
                     self.__dict__["_chat_obj"] = chat = fresh
         return chat
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, *, host: "Host | None" = None, chat_id: str = ""):
         from .trust import is_trusted
         self.workspace_trusted = is_trusted(config, config.project_root)
         if not self.workspace_trusted:
             config.hold_untrusted_mode()
         self.config = config
-        self.em = HistoryEmitter(
-            sys.stdout, validator=event_error,
-            sanitizer=lambda event: redact_value(event, secret_values(self.config)))
-        # This chat's view of a registry the process will share: ids stay unique across chats, and
-        # what this chat cancels or answers is only its own.
-        self.pending = PendingRequests().view("")
+        self.chat_id = chat_id
+        if host is None:
+            # Standalone: this backend is the whole process and owns its wire.
+            self.em = HistoryEmitter(
+                sys.stdout, validator=event_error,
+                sanitizer=lambda event: redact_value(event, secret_values(self.config)))
+            registry = PendingRequests()
+        else:
+            # One chat of a Host: its view of the process's one wire and one id space.
+            self.em = HistoryEmitter(core=host.core, chat_id=chat_id)
+            registry = host.pending
+        # What this chat cancels or answers is only its own; ids stay unique across chats.
+        self.pending = registry.view(chat_id)
         self._peer_thread = None
         self._peer_stop = None
         self.ui = HeadlessUI(self.em, self.pending,
@@ -3043,13 +3059,14 @@ class Backend:
             self._emit_context()
         return terminal
 
-    def close(self, grace_s: float = 0.0) -> str:
+    def close(self, grace_s: float = 0.0, *, process: bool = True) -> str:
         try:
             stop = getattr(self, "_peer_stop", None)
             if stop is not None:
                 stop.set()
-            from . import peers as _peers
-            _peers.withdraw()          # a clean exit leaves no note; a crash leaves one to expire
+            if process:     # one chat of a Host leaves the process's note to the Host
+                from . import peers as _peers
+                _peers.withdraw()      # a clean exit leaves no note; a crash leaves one to expire
         except Exception:
             pass
         """Stop foreground work and release pending controller decisions on backend exit.
@@ -5966,6 +5983,113 @@ def _end_line(crash_log, line: str) -> None:
         pass
 
 
+# Worst last: what Host.close() reports when its chats ended differently.
+_CLOSE_OUTCOMES = ("idle", "landed", "cancelled")
+
+
+class Host:
+    """The process half of `dgc serve`: one wire, one request registry, one stdin, its chats.
+
+    Each chat is a Backend with its own config and agent -- its own directory, trust, MCP servers,
+    skills, permission rules and mode, Codex's model. What only the process can own lives here:
+
+    * the Emitter. One `seq` counter per stdout: all three clients drop the connection on a
+      non-increasing seq. Its sanitizer redacts EVERY live chat's secrets, not one config's: the
+      wire is shared, and an event from one chat can carry another's key (a tool printing the
+      environment, an error quoting a request).
+    * PendingRequests. One id space, because the editor answers a card by its bare id; each chat
+      cancels and answers only its own through its view.
+    * the command router, the "is anything still working" answer the liveness watchdog needs, and
+      shutdown, which closes every chat at once and reports the worst outcome among them.
+
+    With one chat -- every client today -- the process behaves exactly as a lone Backend did.
+    """
+
+    def __init__(self, config: Config):
+        self.core = Emitter(sys.stdout, validator=event_error, sanitizer=self._sanitize)
+        self.pending = PendingRequests()
+        self.em = HistoryEmitter(core=self.core)          # the process's own events: no chat
+        self.chats: dict[str, Backend] = {}
+        self._chat_ids = itertools.count()
+        self._editor_liveness = None
+        self._finalizer_wait = ""
+        self.default = self.add_chat(config)
+
+    def add_chat(self, config: Config) -> "Backend":
+        chat_id = f"c{next(self._chat_ids)}"
+        chat = Backend(config, host=self, chat_id=chat_id)
+        if self._editor_liveness is not None:
+            chat._editor_liveness = self._editor_liveness
+        self.chats[chat_id] = chat
+        return chat
+
+    def _secret_values(self) -> tuple[str, ...]:
+        values: set[str] = set()
+        for chat in list(self.chats.values()):
+            values.update(secret_values(getattr(chat, "config", None)))
+        return tuple(sorted(values, key=lambda item: (-len(item), item)))
+
+    def _sanitize(self, event):
+        return redact_value(event, self._secret_values())
+
+    def start(self) -> None:
+        self.default.start()
+
+    def attach_liveness(self, liveness) -> None:
+        self._editor_liveness = liveness
+        for chat in list(self.chats.values()):
+            chat._editor_liveness = liveness
+
+    def dispatch(self, cmd: dict) -> None:
+        self.default.dispatch(cmd)
+
+    def _busy(self) -> bool:
+        return any(_safe_busy(chat) for chat in list(self.chats.values()))
+
+    def keepalive_reason(self) -> str:
+        for chat in list(self.chats.values()):
+            reason = _work_keeping_alive(chat)
+            if reason:
+                return reason
+        return ""
+
+    def stopping(self) -> None:
+        """The process is going down: every chat's turn lands at its next boundary."""
+        for chat in list(self.chats.values()):
+            try:
+                chat.agent.stopping = True
+            except Exception:
+                pass
+
+    def close(self, grace_s: float = 0.0) -> str:
+        """Close every chat AT ONCE -- each gets the whole grace window, not a turn of it -- then
+        the process's own state. Returns the worst outcome: idle, landed, or cancelled."""
+        chats = list(self.chats.values())
+        outcomes: list[str] = []
+        if len(chats) == 1:
+            outcomes.append(chats[0].close(grace_s=grace_s, process=False))
+        else:
+            def close_one(chat) -> None:
+                try:
+                    outcomes.append(chat.close(grace_s=grace_s, process=False))
+                except Exception:
+                    outcomes.append("cancelled")
+            workers = [threading.Thread(target=close_one, args=(chat,), daemon=True,
+                                        name=f"dgc-close-{chat.chat_id}") for chat in chats]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        try:
+            from . import peers as _peers
+            _peers.withdraw()           # a clean exit leaves no note; a crash leaves one to expire
+        except Exception:
+            pass
+        self._finalizer_wait = "; ".join(
+            wait for wait in (getattr(chat, "_finalizer_wait", "") for chat in chats) if wait)
+        return max(outcomes, key=_CLOSE_OUTCOMES.index, default="idle")
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
     # FIRST, before the crash log and before Backend(): MCP servers and code intelligence start
@@ -5981,7 +6105,7 @@ def serve(config: Config) -> None:
             _log_crash(crash_log, f"unhandled exception in thread {args.thread and args.thread.name}",
                        args.exc_value)
         threading.excepthook = _thread_crash
-    backend = Backend(config)
+    host = Host(config)
     # Enough context to tell the three shutdowns apart in a log read days later: the editor asking
     # us to stop, the editor's host dying under us (our stdin closes and we are reparented), and a
     # live host closing the pipe anyway — which is a bug on that side, not ours.
@@ -6008,7 +6132,7 @@ def serve(config: Config) -> None:
         termbg.restore_stop_handlers(stop_handlers)   # a second signal kills us outright
         stopped_by["signum"] = signum
         try:
-            backend.agent.stopping = True             # the turn loop lands at its next boundary
+            host.stopping()                           # every turn lands at its next boundary
         except Exception:
             pass
         if reading["stdin"]:
@@ -6043,13 +6167,13 @@ def serve(config: Config) -> None:
     try:
         # Inside the try on purpose: start() is where the first model metadata and context
         # estimates happen, and a parent that gives up during it must still reach the finally.
-        backend.start()
-        liveness = _EditorLiveness(backend, command_stream, wake=wake_reader)
-        backend._editor_liveness = liveness
+        host.start()
+        liveness = _EditorLiveness(host, command_stream, wake=wake_reader)
+        host.attach_liveness(liveness)
         liveness.start()
         for line, frame_problem in _command_lines(command_stream, pipe_watch):
             if frame_problem:
-                backend.em.emit("error", message=frame_problem)
+                host.em.emit("error", message=frame_problem)
                 continue
             line = line.strip()
             if not line:
@@ -6057,23 +6181,23 @@ def serve(config: Config) -> None:
             try:
                 cmd = strict_json_loads(line)
             except (json.JSONDecodeError, ValueError):
-                backend.em.emit("error", message="invalid JSON command line")
+                host.em.emit("error", message="invalid JSON command line")
                 continue
             if not isinstance(cmd, dict):
-                backend.em.emit("error", message="command must be a JSON object")
+                host.em.emit("error", message="command must be a JSON object")
                 continue
             commands += 1
             liveness.saw_command()
             last_command = str(cmd.get("type", "?"))[:64]   # a log line, not a payload channel
             try:
-                backend.dispatch(cmd)
+                host.dispatch(cmd)
             except _Shutdown:
                 shutdown_requested = True
                 break
             except Exception as e:             # one bad command must NOT kill the whole backend
                 import traceback
                 detail = str(e).strip() or e.__class__.__name__
-                backend.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
+                host.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
                 _log_crash(crash_log, f"command {cmd.get('type', '?')!r} failed", e)
         reading["stdin"] = False               # past this point a signal has nothing to interrupt
@@ -6085,7 +6209,7 @@ def serve(config: Config) -> None:
         end_cause = _liveness_end_cause(liveness)
         _end_line(crash_log, f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
                              f"{commands} commands, last {last_command or 'none'!r}, turn running: "
-                             + ("yes" if _safe_busy(backend) else "no") + f", pipe: {pipe_watch.describe()}")
+                             + ("yes" if _safe_busy(host) else "no") + f", pipe: {pipe_watch.describe()}")
     except (KeyboardInterrupt, BrokenPipeError) as interrupt:
         end_cause = type(interrupt).__name__
         _end_line(crash_log, f"serve loop ended: {end_cause}; pipe: {pipe_watch.describe()}")
@@ -6097,7 +6221,7 @@ def serve(config: Config) -> None:
         _end_line(crash_log,
                   f"serve loop ended: {end_cause}; up {time.monotonic() - started_at:.0f}s, "
                   f"{commands} commands, last {last_command or 'none'!r}, turn running: "
-                  + ("yes" if _safe_busy(backend) else "no") + f", pipe: {pipe_watch.describe()}")
+                  + ("yes" if _safe_busy(host) else "no") + f", pipe: {pipe_watch.describe()}")
     except BaseException as fatal:             # never exit without saying why, in our own log
         _log_crash(crash_log, "serve loop raised", fatal)
         raise
@@ -6121,7 +6245,7 @@ def serve(config: Config) -> None:
             else:
                 cause = f"stdin closed; this platform cannot confirm whether {parent_pid} is alive"
         try:
-            busy = "yes" if backend._busy() else "no"
+            busy = "yes" if host._busy() else "no"
         except Exception:
             busy = "unknown"
         end_cause = cause
@@ -6137,19 +6261,19 @@ def serve(config: Config) -> None:
         # 20s grace plus the joins inside close() overran the very window it was meant to fit.
         stood_down = bool(getattr(liveness, "stood_down", False))
         grace = 0.0 if shutdown_requested else STAND_DOWN_GRACE_S if stood_down else SHUTDOWN_GRACE_S
-        if grace > 0 and _safe_busy(backend):
+        if grace > 0 and _safe_busy(host):
             # If the editor is still there it should hear this from us, not infer it from silence.
             try:
-                backend.em.emit("info", message=(
+                host.em.emit("info", message=(
                     f"DGC's backend is stopping ({end_cause}); it is finishing the current step "
                     f"(up to {grace:.0f}s) and saving the session."))
             except Exception:
                 pass
-        outcome = backend.close(grace_s=grace)
+        outcome = host.close(grace_s=grace)
         # Only now: for the whole grace window the process must keep the handler that makes a
         # second SIGTERM land cleanly instead of killing the turn we are busy saving.
         termbg.restore_stop_handlers(stop_handlers)
-        finalizers = getattr(backend, "_finalizer_wait", "")
+        finalizers = getattr(host, "_finalizer_wait", "")
         _log_crash(crash_log, f"backend closed cleanly (work in flight: {outcome}"
                               + (f"; {finalizers}" if finalizers else "") + ")")
         if crash_log is not None:
