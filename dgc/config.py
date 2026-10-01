@@ -1139,14 +1139,22 @@ class Config:
         auto carried over and the project's deny vanished for any work moved there. A sub-agent's
         clone_for_root() view already shares its parent's rules; this gives the TUI's sessions the
         same. An untrusted source holds the mode instead. Returns whether the source is trusted.
+
+        The project, not the checkout it was made from: a second /worktree, or a /worktree run in
+        a fleet agent, was given the previous checkout's Config, which no trusted folder contains
+        -- the project's rules were dropped, and one Shift+Tab put that session in auto with no
+        deny. The origin is recorded so the agent answers for the project's trust too (see
+        Agent._workspace_trusted).
         """
         from .trust import is_trusted
-        if not is_trusted(source, source.project_root):
+        origin = getattr(source, "_trust_origin", None) or source
+        self._trust_origin = origin
+        if not is_trusted(origin, origin.project_root):
             self.hold_untrusted_mode()
             return False
         if not getattr(self, "_project_permissions_applied", False):
             self._project_permissions_applied = True
-            _add_project_rules(self, source._project_contribution())
+            _add_project_rules(self, origin._project_contribution())
         return True
 
     def _project_contribution(self) -> dict:

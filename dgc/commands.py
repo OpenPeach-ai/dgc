@@ -128,7 +128,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("dashboard", "session roster — open, switch, start, or delete sessions", _T,
                 aliases=("dash", "home")),
     CommandSpec("name", "name this session", frozenset({"tui", "classic", "editor"}),
-                "nameSession", True, usage="name [NAME]"),
+                "nameSession", True, usage="name [NAME]", available_while_running=True),
     CommandSpec("goal", "start, review, pause, resume, or clear the goal", _TCE,
                 "goal", True, usage="goal [--tokens N] [TEXT|STATE]"),
     CommandSpec("set", "tune a scalar setting live", _T, usage="set [KEY [VALUE]]"),

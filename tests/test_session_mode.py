@@ -221,6 +221,11 @@ class SessionModeTest(unittest.TestCase):
         again.load_session(auto)
         self.assertEqual(again.mode, "auto", "the first chat's plan capped the second")
 
+    def test_the_tui_renames_a_session_mid_turn(self):
+        from dgc.commands import resolve_command
+        self.assertTrue(resolve_command("name", "tui").available_while_running,
+                        "/name was refused mid-turn though renaming joins the running turn")
+
     # ---- a new chat ------------------------------------------------------------------------------
 
     def test_a_new_chat_goes_back_to_the_mode_the_reopened_one_replaced(self):

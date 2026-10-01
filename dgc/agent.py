@@ -3448,12 +3448,19 @@ class Agent(GoalLifecycle):
 
     def _workspace_trusted(self) -> bool:
         """Whether the folder the user works in is trusted. A sub-agent runs in its own checkout
-        under ~/.dgc, so it answers for the session that spawned it."""
+        under ~/.dgc, so it answers for the session that spawned it; a TUI worktree or fleet
+        agent works in a checkout of the launch project, so it answers for that project. Asked
+        of the checkout itself, a trusted project's plan approved into auto ran in default with a
+        message telling the user their folder was not trusted."""
         top = self
         while getattr(top, "_parent_agent", None) is not None:
             top = top._parent_agent
         from .trust import is_trusted
-        return is_trusted(top.config, top.config.project_root)
+        config = top.config
+        if is_trusted(config, config.project_root):
+            return True
+        origin = getattr(config, "_trust_origin", None)
+        return origin is not None and origin is not config and is_trusted(origin, origin.project_root)
 
     def _restore_session_mode(self, record: dict) -> None:
         """Reopen a session in the mode it ran in -- mode is per chat, as Codex keeps it per thread.
@@ -7812,7 +7819,7 @@ class Agent(GoalLifecycle):
             target = self.exit_plan(choice)
             if choice in ("acceptEdits", "auto") and target != choice:
                 self.ui.info(f"This folder is not trusted, so the plan runs in {target} mode and each "
-                             f"change is asked for. Trust it from the mode picker to use {choice}.")
+                             f"change is asked for. Trust the folder to use {choice}.")
                 return (f"Plan APPROVED. Plan mode exited; permission mode is now '{target}', not "
                         f"'{choice}': this workspace is not trusted, so each change will be asked "
                         "for. Execute the plan now.")

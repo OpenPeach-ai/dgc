@@ -509,6 +509,32 @@ class ConcurrentConfigTest(unittest.TestCase):
         self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny", "across saves too")
         self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"], "never persisted")
 
+    def test_a_checkout_of_a_checkout_still_carries_the_projects_rules(self):
+        """A second /worktree, or one run inside a fleet agent, was handed the previous checkout's
+        Config, which no trusted folder contains: the project's deny was dropped."""
+        from dgc.trust import mark_trusted
+        source = self._project_with_rules()
+        mark_trusted(source, source.project_root)
+        (self.home / "proj-a").mkdir()
+        (self.home / "proj-b").mkdir()
+        first = self.C.Config(project_root=self.home / "proj-a")
+        self.assertTrue(first.inherit_trust(source))
+        second = self.C.Config(project_root=self.home / "proj-b")
+        self.assertTrue(second.inherit_trust(first), "the second checkout was treated as untrusted")
+        self.assertEqual(self._decide(second, "rm -rf build", mode="auto"), "deny")
+
+    def test_an_agent_in_a_checkout_answers_for_the_projects_trust(self):
+        from dgc.trust import mark_trusted, revoke_trust
+        source = self._project_with_rules()
+        mark_trusted(source, source.project_root)
+        agent = self._plan_agent(self.home / "proj-plan", trusted=False)
+        agent.config.inherit_trust(source)
+        self.assertEqual(agent.exit_plan("auto"), "auto",
+                         "a trusted project's plan ran in default, 'because the folder is not trusted'")
+        agent.set_mode("plan")
+        revoke_trust(source, source.project_root)
+        self.assertEqual(agent.exit_plan("auto"), "default", "and trust revoked from the project holds")
+
     def test_a_checkout_of_an_untrusted_project_is_held(self):
         self.path.write_text(json.dumps({"model": "start", "mode": "auto"}))
         (self.home / "src").mkdir()
