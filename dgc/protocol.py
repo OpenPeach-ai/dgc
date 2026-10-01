@@ -105,37 +105,54 @@ class Emitter:
 
 
 class PendingRequests:
-    """Blocking request registry. register() → (id, Event); the reader calls resolve(id, value)."""
+    """Blocking request registry. register() → (id, Event); the reader calls resolve(id, value).
+
+    ONE per process: the editor answers a card by its bare id, so ids must be unique across every
+    chat the process holds. Each chat works through `view(owner)`, which tags what it registers
+    and cancels, reads or answers only its own. Unscoped, a Stop in one chat expired every other
+    chat's open approval cards, and their turns carried on as if the user had said no.
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._slots: dict[str, list] = {}   # id -> [Event, value, optional response validator]
+        # id -> [Event, value, optional response validator, owner]
+        self._slots: dict[str, list] = {}
         self._n = itertools.count(1)
 
-    def register(self, validator=None) -> tuple[str, threading.Event]:
+    def view(self, owner) -> "PendingView":
+        return PendingView(self, owner)
+
+    @staticmethod
+    def _owned(slot, owner) -> bool:
+        return owner is None or slot[3] == owner
+
+    def register(self, validator=None, owner=None) -> tuple[str, threading.Event]:
         rid = f"r{next(self._n)}"
         ev = threading.Event()
         with self._lock:
-            self._slots[rid] = [ev, None, validator]
+            self._slots[rid] = [ev, None, validator, owner]
         return rid, ev
 
-    def is_open(self, rid) -> bool:
+    def is_open(self, rid, owner=None) -> bool:
         """Whether ``rid`` names a registered request that has no terminal result yet."""
         with self._lock:
             slot = self._slots.get(rid) if isinstance(rid, str) else None
-            return bool(slot) and not slot[0].is_set()
+            return bool(slot) and not slot[0].is_set() and self._owned(slot, owner)
 
-    def value(self, rid: str):
+    def value(self, rid: str, owner=None):
         with self._lock:
-            slot = self._slots.pop(rid, None)
-        return slot[1] if slot else None
+            slot = self._slots.get(rid)
+            if slot is None or not self._owned(slot, owner):
+                return None
+            del self._slots[rid]
+        return slot[1]
 
-    def resolve(self, rid: str, value) -> bool:
+    def resolve(self, rid: str, value, owner=None) -> bool:
         with self._lock:
             slot = self._slots.get(rid)
             # A request has one terminal result. In particular, a late approval must never
             # overwrite a deny/cancel that already released the waiting worker.
-            if not slot or slot[0].is_set():
+            if not slot or slot[0].is_set() or not self._owned(slot, owner):
                 return False
             if slot[2] is not None and not slot[2](value):
                 return False
@@ -143,14 +160,39 @@ class PendingRequests:
             slot[0].set()
             return True
 
-    def cancel_all(self, value=None) -> list[str]:
-        """Resolve every still-pending request once and return the IDs this call cancelled."""
+    def cancel_all(self, value=None, owner=None) -> list[str]:
+        """Resolve every still-pending request -- of ``owner``, or of everyone when None -- once,
+        and return the IDs this call cancelled."""
         with self._lock:
             cancelled = []
             for rid, slot in self._slots.items():
-                if slot[0].is_set():
+                if slot[0].is_set() or not self._owned(slot, owner):
                     continue
                 slot[1] = value
                 slot[0].set()
                 cancelled.append(rid)
             return cancelled
+
+
+class PendingView:
+    """One chat's window onto the process's PendingRequests: the same calls, scoped to its own."""
+
+    __slots__ = ("registry", "owner")
+
+    def __init__(self, registry: PendingRequests, owner):
+        self.registry, self.owner = registry, owner
+
+    def register(self, validator=None) -> tuple[str, threading.Event]:
+        return self.registry.register(validator, owner=self.owner)
+
+    def is_open(self, rid) -> bool:
+        return self.registry.is_open(rid, owner=self.owner)
+
+    def value(self, rid: str):
+        return self.registry.value(rid, owner=self.owner)
+
+    def resolve(self, rid: str, value) -> bool:
+        return self.registry.resolve(rid, value, owner=self.owner)
+
+    def cancel_all(self, value=None) -> list[str]:
+        return self.registry.cancel_all(value, owner=self.owner)

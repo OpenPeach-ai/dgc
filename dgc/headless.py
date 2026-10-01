@@ -1732,7 +1732,9 @@ class Backend:
         self.em = HistoryEmitter(
             sys.stdout, validator=event_error,
             sanitizer=lambda event: redact_value(event, secret_values(self.config)))
-        self.pending = PendingRequests()
+        # This chat's view of a registry the process will share: ids stay unique across chats, and
+        # what this chat cancels or answers is only its own.
+        self.pending = PendingRequests().view("")
         self._peer_thread = None
         self._peer_stop = None
         self.ui = HeadlessUI(self.em, self.pending,
