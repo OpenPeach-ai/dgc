@@ -1646,10 +1646,9 @@ def _one_shot_task_schema(tool: dict) -> dict:
         return tool
     background = dict(props["background"])
     background["description"] = (
-        "True to run it as a parallel track inside this turn: the call returns at once and the "
-        "child works while you do other things. This one-shot `dgc -p` run ends with this turn and "
-        "stops a child still running, so collect its result with wait_tasks before you answer. "
-        "False when your next step needs the answer. Default false.")
+        "True for a parallel track: the call returns at once. This one-shot `dgc -p` run ends with "
+        "this turn and stops a child still running, so collect its result with wait_tasks before "
+        "you answer.")
     props["background"] = background
     params["properties"] = props
     function["parameters"] = params
@@ -2518,7 +2517,7 @@ class Agent(GoalLifecycle):
             self.skills = fresh
             if getattr(self, "ctx", None) is not None:
                 self.ctx.skills = fresh
-        with self._mode_lock:
+        with getattr(self, "_mode_lock", None) or threading.RLock():
             self._mode_prompt_dirty = True
 
     def _skill_catalog(self):
@@ -2965,11 +2964,10 @@ class Agent(GoalLifecycle):
         # `dgc -p` ends with this turn and stops a background child still running: nothing outlives
         # it, so "a part whose result you will not use this turn" is a part whose result is lost.
         if one_shot:
-            background = ("This is a one-shot `dgc -p` run: it ends with this turn and nothing wakes it "
-                          "later. Start a part with `background: true` only to overlap it with other "
-                          "work, and " + ("collect its result with `wait_tasks` before you answer."
-                                          if session_policy() is None else
-                                          "run any part whose result you need in the foreground."))
+            background = ("This one-shot `dgc -p` run ends with this turn: "
+                          + ("wait for any `background: true` part with `wait_tasks` before you answer."
+                             if session_policy() is None else
+                             "run any part whose result you need in the foreground."))
         else:
             background = "A part whose result you will not use this turn takes `background: true`."
         if not self.config.get("ultra_mode", False):

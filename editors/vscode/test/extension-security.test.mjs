@@ -223,8 +223,11 @@ test("first-run dead ends: a queued selection, a restart on a new command path, 
   assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{[\s\S]{0,600}?if \(next !== commandPath\) \{\s*commandPath = next;\s*provider\.commandPathChanged\(\)/,
     "changing the resolved dgc.command restarts the backend (after a running turn ends)");
   const changed = panel.slice(panel.indexOf("commandPathChanged(): void {"), restartAt);
-  assert.match(changed, /if \(this\.turnActive\) \{[\s\S]*this\.pendingCommandRestart = true[\s\S]*return;/,
-    "a turn in flight is never killed by a settings change");
+  assert.match(changed, /if \(this\.processBusy\(\)\) \{[\s\S]*this\.pendingCommandRestart = true[\s\S]*return;/,
+    "a turn in flight -- in this chat or another on its process -- is never killed by a settings change");
+  const busyAt = panel.indexOf("private processBusy(): boolean {");
+  assert.match(panel.slice(busyAt, busyAt + 200), /if \(this\.turnActive\) \{ return true; \}/,
+    "the chat on screen's own turn still counts");
   assert.match(changed, /this\.restart\("setting dgc\.command changed"\)/);
 });
 
