@@ -107,16 +107,32 @@ class TheAccessorWorksOnTheFixtureShapeTest(unittest.TestCase):
     def test_two_backends_do_not_share_one(self) -> None:
         self.assertIsNot(object.__new__(Backend)._chat(), object.__new__(Backend)._chat())
 
-    def test_it_is_still_dead_code(self) -> None:
-        """This step wires nothing. If a caller appears before the step that adds the properties,
-        the step-1 guards stop meaning what they say, so the boundary is worth pinning."""
-        import inspect
-        source = inspect.getsource(Backend)
-        body = source[source.index("def _chat"):]
-        body = body[body.index('"""', body.index('"""') + 3):]     # past the docstring
-        callers = source.count("self._chat()") - body.count("self._chat()")
-        self.assertEqual(callers, 0, "nothing should call _chat() until the properties land")
+    def test_exactly_the_fields_moved_so_far_live_on_the_chat(self) -> None:
+        """Which names are chat-backed, checked by BEHAVIOUR rather than by reading source.
 
+        Its predecessor counted the text `self._chat()` inside Backend's source to prove nothing
+        called the accessor yet, and passed straight through the step that gave it callers -- the
+        properties call it from a module-level closure, where that text never appears. A textual
+        proxy for a behavioural fact. This asserts the fact: a value assigned through Backend
+        either lands on the chat (moved) or in the Backend's own __dict__ (not yet moved).
+
+        Update MOVED as each step lands. If a field moves without being added here, or is added
+        here without moving, this fails and says which.
+        """
+        MOVED = {"agent", "ui"}
+        for name in Chat.__slots__:
+            with self.subTest(field=name):
+                backend = object.__new__(Backend)
+                marker = object()
+                setattr(backend, name, marker)
+                on_chat = getattr(backend._chat(), name, None) is marker
+                in_dict = backend.__dict__.get(name) is marker
+                if name in MOVED:
+                    self.assertTrue(on_chat, f"{name} should be stored on the chat")
+                    self.assertFalse(in_dict, f"{name} must not ALSO sit in Backend.__dict__")
+                else:
+                    self.assertTrue(in_dict, f"{name} has not moved yet and should be a plain attribute")
+                    self.assertFalse(on_chat, f"{name} reached the chat before its step")
 
 if __name__ == "__main__":
     unittest.main()

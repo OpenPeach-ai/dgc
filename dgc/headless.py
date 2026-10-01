@@ -1620,7 +1620,42 @@ class Chat:
     # post-init state too.
 
 
+def _chat_field(name: str) -> property:
+    """A Backend attribute that lives on the Backend's chat, indistinguishable from a plain one.
+
+    The three behaviours a plain attribute has, reproduced exactly, because callers depend on all of
+    them and nothing about a property would preserve them by accident:
+
+      * READ an unassigned one and get AttributeError -- not None. The 20 sites that read
+        `getattr(self, "agent", None)` WITH a default are written against that, and so is
+        `if not hasattr(self, "_queue")` in `_maybe_wake`. The unset `Chat` slot raises it for us;
+        all this does is let it through.
+      * ASSIGN one and read it back as the same object.
+      * DELETE one and have it read as unassigned again.
+
+    The getter deliberately does not catch AttributeError to supply a default. That would be the
+    one-line "fix" that makes every reader see None, turns eleven functions into silent no-ops, and
+    leaves the suite green -- see tests/test_backend_chat_state_contract.py, which fails 25 ways if
+    anyone writes it.
+    """
+    def get(self):
+        return getattr(self._chat(), name)
+
+    def set_(self, value):
+        setattr(self._chat(), name, value)
+
+    def delete(self):
+        delattr(self._chat(), name)
+
+    return property(get, set_, delete, doc=f"Per-chat `{name}`, stored on this backend's Chat.")
+
+
 class Backend:
+    # Step 3: the first two per-chat names. Everything else stays a plain attribute until its own
+    # step, so each move is verified alone.
+    agent = _chat_field("agent")
+    ui = _chat_field("ui")
+
     def _chat(self) -> "Chat":
         """This backend's one chat, created on first use.
 

@@ -73,6 +73,20 @@ class AbsentIsNotNoneTest(unittest.TestCase):
                 self.assertIs(getattr(backend, name), marker, "a property must round-trip")
                 self.assertTrue(hasattr(backend, name))
 
+    def test_deleting_one_makes_it_absent_again_not_none(self) -> None:
+        """`del backend.agent` must restore the unassigned state. A property whose deleter merely
+        stored None would leave `hasattr` true afterwards, and every `getattr(..., None)` reader
+        could no longer tell 'cleared' from 'set to None'. Mutation-found: this behaviour was
+        promised in `_chat_field`'s docstring and nothing pinned it."""
+        backend = object.__new__(Backend)
+        for name in ("agent", "ui"):
+            with self.subTest(attribute=name):
+                setattr(backend, name, object())
+                delattr(backend, name)
+                self.assertFalse(hasattr(backend, name), f"del {name} must make it ABSENT")
+                with self.assertRaises(AttributeError):
+                    getattr(backend, name)
+
     def test_none_is_storable_and_distinct_from_absent(self) -> None:
         """`self._worker = None` is how a turn retires (headless.py:2146). Storing None must make
         the attribute PRESENT, or the retire path starts reading as "never set"."""
