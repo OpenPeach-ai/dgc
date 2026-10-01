@@ -772,3 +772,37 @@ test("closing the chat that started a shared backend keeps it running for the ch
   shared.fire("exit");
   assert.equal(provider.chatHost(second), undefined, "until the process is gone");
 });
+
+// ---- switching to a saved session while this chat works ----------------------------------------------
+
+test("picking a saved session while this chat's turn runs opens it in a chat of its own", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Working" });
+  const working = provider.activeSlotId;
+  provider.confirmedTurnActive = true;                 // a turn is running in this chat
+  provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-old-chat.json");
+  assert.equal(provider.slots.length, 2, "the switch was refused instead of opening the session");
+  assert.notEqual(provider.activeSlotId, working, "the new chat is the one on screen");
+  assert.equal(provider.sessionRestoreCandidate, "20260930-old-chat", "and it opens on that session");
+  assert.ok(!spawned[0].sent.some((c) => c.type === "resume_session"),
+    "the working chat was asked to replace the conversation its turn runs in");
+});
+
+test("picking a saved session in an idle chat opens it right there", () => {
+  const { provider, spawned } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Idle" });
+  provider.confirmedTurnActive = provider.turnActive = false;
+  provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-old-chat.json");
+  assert.equal(provider.slots.length, 1);
+  assert.ok(spawned[0].sent.some((c) => c.type === "resume_session"
+    && c.path === "/proj/.dgc/sessions/20260930-old-chat.json"));
+});
+
+test("a new chat opened on a saved session keeps its folder", () => {
+  const { provider } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "Working" });
+  provider.activeSlot().cwd = "/srv/other-repo";
+  provider.confirmedTurnActive = true;
+  provider.openPastSession(provider.backend, "/srv/other-repo/.dgc/sessions/s1.json");
+  assert.equal(provider.activeSlot().cwd, "/srv/other-repo", "the session belongs to that folder's project");
+});

@@ -636,7 +636,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Start a second (or third, if the ceiling ever rises) chat with its own backend. */
-  private openChatSlot(cwd?: string): void {
+  private openChatSlot(cwd?: string, sessionId = ""): void {
     const ceiling = maxLiveChats();
     if (this.slots.length >= ceiling) {
       // Only reachable when the user set a ceiling themselves.
@@ -654,7 +654,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const fresh: Record<string, unknown> = {};
     for (const field of PER_CHAT_FIELDS) { fresh[field] = this.cloneChatValue(this.pristineChatState[field]); }
     this.applyChatFields(fresh);
-    this.sessionRestoreCandidate = "";               // a new chat resumes nothing
+    this.sessionRestoreCandidate = sessionId;        // a new chat resumes nothing -- unless opened ON a session
+    this.sessionRestoreSaved = true;
     this.sessionRestoreSuppressed = true;            // …and ensureBackend must not re-add one
     this.sessionRestoreStarted = true;
     this.setReadyContext(false);
@@ -4348,6 +4349,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error
   }
 
+  /** Open a saved session from the picker. Into this chat when it is idle; into a chat of its own,
+   *  in this chat's folder, when this chat's turn is running -- opening it HERE would replace the
+   *  conversation that turn belongs to, which the backend refuses ("resume_session is unavailable
+   *  while a turn is running"), so the switch failed and the turn was the only way out. */
+  private openPastSession(be: ChatBackend, sessionPath: string): void {
+    if (this.turnActive || this.confirmedTurnActive) {
+      const id = path.basename(sessionPath).replace(/\.json$/i, "");
+      if (/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+        this.openChatSlot(this.activeSlot().cwd, id);
+        return;
+      }
+    }
+    void this.requestState(
+      be, "session-resume", { type: "resume_session", path: sessionPath }, "session", 5000,
+    ).catch((err: any) => vscode.window.showErrorMessage(
+      err?.message || "DGC could not resume that session."));
+  }
+
   async resume(): Promise<void> {
     const be = this.ensureBackend();
     const listSessions = async (cmd: any): Promise<any[]> => {
@@ -4384,12 +4403,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       });
       qp.onDidAccept(() => {
         const pick = qp.selectedItems[0] as any;
-        if (pick) {
-          void this.requestState(
-            be, "session-resume", { type: "resume_session", path: pick.path }, "session", 5000,
-          ).catch((err: any) => vscode.window.showErrorMessage(
-            err?.message || "DGC could not resume that session."));
-        }
+        if (pick) { this.openPastSession(be, String(pick.path || "")); }
         qp.hide();
       });
       qp.onDidHide(() => { qp.dispose(); resolve(); });
