@@ -6050,6 +6050,7 @@ class Host:
 
     def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
         chat_id = chat_id or f"c{next(self._chat_ids)}"
+        config.on_saved = self._user_state_saved
         chat = Backend(config, host=self, chat_id=chat_id)
         if self._editor_liveness is not None:
             chat._editor_liveness = self._editor_liveness
@@ -6064,6 +6065,58 @@ class Host:
         for chat in list(self.chats.values()):
             values.update(secret_values(getattr(chat, "config", None)))
         return tuple(sorted(values, key=lambda item: (-len(item), item)))
+
+    # What a chat's config saves is mostly the USER's, not the chat's: a permission rule, a trusted
+    # folder, an MCP server, a skill switch. Each chat holds its own Config, so every other open
+    # chat must take such a change at once -- a deny added in one chat bound the others only when
+    # they next happened to save something themselves. A chat's own route and mode are
+    # _SESSION_KEYS, which a refresh never adopts.
+    def _user_state_saved(self, config: Config, keys: set, rules_moved: bool) -> None:
+        with self._chats_lock:
+            others = [chat for chat in self.chats.values() if chat.config is not config]
+        catalogs = keys & {"mcp_servers", "disabled_mcp_servers", "disabled_skills"}
+        for chat in others:
+            try:
+                chat.config.save()       # nothing of its own to write: it adopts what is on disk
+            except Exception:
+                continue
+            if "trusted_dirs" in keys:
+                from .trust import is_trusted
+                chat.workspace_trusted = is_trusted(chat.config, chat.config.project_root)
+            if catalogs:
+                threading.Thread(target=self._refresh_catalogs, args=(chat, catalogs), daemon=True,
+                                 name=f"dgc-refresh-{chat.chat_id}").start()
+
+    @staticmethod
+    def _refresh_catalogs(chat: "Backend", keys: set) -> None:
+        """Bring one chat's MCP servers and skills in line with its refreshed config. Off the stdin
+        thread (a connect takes seconds), and server by server: one that did not change is never
+        restarted under a turn that may be using it."""
+        agent, config = chat.agent, chat.config
+        try:
+            if keys & {"mcp_servers", "disabled_mcp_servers"}:
+                manager = agent.mcp
+                raw = config.get("disabled_mcp_servers", []) or []
+                manager.disabled_names = {name for name in raw if isinstance(name, str)}
+                servers = (config.mcp_runtime_servers() if hasattr(config, "mcp_runtime_servers")
+                           else dict(config.get("mcp_servers", {}) or {}))
+                for name in list(manager.servers):
+                    if name not in servers or name in manager.disabled_names:
+                        manager.disconnect(name)
+                moved = {name: spec for name, spec in servers.items()
+                         if name not in manager.disabled_names
+                         and (name not in manager.servers or manager._runtime_specs.get(name) != spec)}
+                if moved:
+                    manager.connect_all(moved)
+            if "disabled_skills" in keys:
+                fresh = discover_skills(config.project_root,
+                                        disabled_names=config.get("disabled_skills", []))
+                # Rebound, never cleared in place: a turn may be iterating the old dict right now.
+                agent.skills = fresh
+                if getattr(agent, "ctx", None) is not None:
+                    agent.ctx.skills = fresh
+        except Exception:
+            pass                     # the chat keeps what it had; its own reload still works
 
     def _reject(self, cmd: dict, reason: str, message: str, chat_id: str = "") -> None:
         fields = {"request_id": str(cmd["request_id"])[:128]} if isinstance(cmd.get("request_id"), str) else {}
@@ -6103,6 +6156,7 @@ class Host:
         try:
             config = Config(project_root=find_project_root(path))
             config.adopt_runtime_secrets(self.default.config)
+            config.on_saved = self._user_state_saved
             chat = Backend(config, host=self, chat_id=chat_id)    # connects its MCP servers
             chat._editor_liveness = self._editor_liveness
             with self._chats_lock:

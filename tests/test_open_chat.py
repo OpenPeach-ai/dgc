@@ -208,6 +208,80 @@ class OpenChatTest(unittest.TestCase):
         self.assertEqual(self.host.chats[opened["chat_id"]].config.get("api_key"),
                          "sk-launcher-key-abcdef0123", "the new chat would send every request with no key")
 
+    def test_a_deny_added_in_one_chat_binds_every_open_chat_at_once(self):
+        from dgc.permissions import PermissionEngine
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+
+        def decide(chat):
+            rules = {a: list(chat.config.permissions.get(a, [])) for a in ("allow", "ask", "deny")}
+            return PermissionEngine("auto", rules, chat.config.project_root).decide(
+                "bash", {"command": "rm -rf build"})[0]
+        self.assertEqual(decide(other), "allow", "premise: nothing denies it yet")
+        self.host.dispatch({"type": "add_permission_rule", "request_id": "deny", "action": "deny",
+                            "rule": "Bash(rm -rf *)"})
+        self.wait_for(lambda f: f["type"] == "permissions" and f.get("request_id") == "deny")
+        self.assertEqual(decide(other), "deny", "the other chat ran what the user had just denied")
+
+    def test_a_deny_added_in_an_opened_chat_binds_the_default_one(self):
+        from dgc.permissions import PermissionEngine
+        opened = self.open_b()
+        self.host.dispatch({"type": "add_permission_rule", "request_id": "deny-b", "action": "deny",
+                            "rule": "Bash(rm -rf *)", "chat_id": opened["chat_id"]})
+        self.wait_for(lambda f: f["type"] == "permissions" and f.get("request_id") == "deny-b")
+        default = self.host.default.config
+        rules = {a: list(default.permissions.get(a, [])) for a in ("allow", "ask", "deny")}
+        self.assertEqual(PermissionEngine("auto", rules, default.project_root).decide(
+            "bash", {"command": "rm -rf build"})[0], "deny", "a chat opened later never told the others")
+
+    def test_a_trust_grant_in_one_chat_reaches_another_in_that_folder(self):
+        (self.tmp / "a" / ".dgc").mkdir(exist_ok=True)
+        (self.tmp / "a" / ".dgc" / "permissions.json").write_text(json.dumps({"deny": ["Bash(curl *)"]}))
+        self.host.dispatch({"type": "open_chat", "request_id": "same", "cwd": str(self.tmp / "a")})
+        opened = self.wait_for(lambda f: f["type"] == "chat_opened" and f.get("request_id") == "same")
+        sibling = self.host.chats[opened["chat_id"]]
+        self.assertFalse(sibling.workspace_trusted)
+        self.host.dispatch({"type": "set_mode", "request_id": "trust", "mode": "acceptEdits",
+                            "acknowledge_workspace_trust": True})
+        self.wait_for(lambda f: f["type"] == "mode_changed")
+        self.assertTrue(sibling.workspace_trusted, "the same folder, trusted, still asked for trust")
+        self.assertIn("Bash(curl *)", sibling.config.permissions["deny"],
+                      "trusted without the project's own rules")
+
+    def test_an_mcp_server_removed_in_one_chat_stops_in_the_others(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        stopped = []
+
+        class Live:
+            tools = []
+
+            def __init__(self, name):
+                self.name = name
+
+            def stop(self):
+                stopped.append(self.name)
+        specs = {"kept": {"command": "kept-bin", "args": []}, "gone": {"command": "gone-bin", "args": []}}
+        for chat in (self.host.default, other):          # both chats run both servers
+            chat.config.data["mcp_servers"] = {name: dict(spec) for name, spec in specs.items()}
+            chat.config._rebaseline()
+        for name, spec in specs.items():
+            other.agent.mcp.servers[name] = Live(name)
+            other.agent.mcp._runtime_specs[name] = dict(spec)
+        self.host.default.config.set("mcp_servers", {"kept": dict(specs["kept"])})   # the user removes one
+        deadline = time.monotonic() + 5
+        while "gone" in other.agent.mcp.servers and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertNotIn("gone", other.agent.mcp.servers, "a removed server kept running in another chat")
+        self.assertEqual(stopped, ["gone"], "an unchanged server was restarted under a running turn")
+        self.assertIn("kept", other.agent.mcp.servers)
+
+    def test_a_chats_own_model_is_not_a_user_wide_change(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        self.host.default.config.set("model", "another-model")
+        self.assertEqual(other.config.data["model"], "fixture", "one chat's model switch moved another's")
+
     def test_the_envelope_is_valid_only_as_a_short_string(self):
         self.assertIsNone(command_error({"type": "ping", "chat_id": "c1"}))
         self.assertIsNotNone(command_error({"type": "ping", "chat_id": ""}))

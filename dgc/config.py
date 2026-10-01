@@ -1263,6 +1263,13 @@ class Config:
             _write_private_json(USER_CONFIG, payload)
             self._rebaseline()
             self._save_secrets()
+        # After the lock, never inside it: a listener refreshes OTHER Configs, and their save()
+        # takes this same file lock through its own descriptor -- inside, that is a deadlock.
+        notify = getattr(self, "on_saved", None)
+        moved = set(changed) | set(dropped)
+        rules_moved = any(perms.get("added", {}).values()) or any(perms.get("removed", {}).values())
+        if callable(notify) and (moved or rules_moved):
+            notify(self, moved, rules_moved)
 
     def _own_secrets(self) -> dict:
         """What this process would store: each key with the endpoint identity it is bound to.
