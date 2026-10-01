@@ -8,6 +8,7 @@ import json
 import platform
 import re
 import shlex
+import queue
 import threading
 import time
 import uuid
@@ -1852,6 +1853,9 @@ class Agent(GoalLifecycle):
         self.session_root = Path(config.project_root).resolve(strict=False)
         self.session_name = None  # optional user-given name for the current session
         self._session_persist_lock = threading.RLock()
+        # Work other threads hand the thread that holds this session for a turn (see
+        # _as_session_owner): it alone may save the session.
+        self._handed_over: "queue.SimpleQueue" = queue.SimpleQueue()
         self._session_turn_state_lock = threading.Lock()
         self._session_turn_lease = None
         self._session_turn_owner: int | None = None
@@ -4164,6 +4168,52 @@ class Agent(GoalLifecycle):
                 if release is not None:
                     release.release()
 
+    def _as_session_owner(self, operation):
+        """Run `operation` where this agent's session can be saved, and return its result.
+
+        Saving is reserved to the thread holding the session for a turn. A detached child
+        integrates its work on its own thread, after the parent's turn may have moved on -- and
+        when the parent was still in that turn (waiting on the child with wait_tasks, say), the
+        integration's rewind checkpoint could not be saved, so the child's finished work was
+        retained in a worktree instead of reaching the user's files. Here when no turn holds the
+        session, or this thread does; otherwise handed to the turn's own thread, which runs it at
+        its next boundary. A turn that ends first leaves it to this thread.
+        """
+        if self.depth > 0:
+            return operation()
+        with self._session_turn_state_lock:
+            owner = self._session_turn_owner if self._session_turn_lease is not None else None
+        if owner is None or owner == threading.get_ident():
+            return operation()
+        done, box = threading.Event(), {}
+
+        def job():
+            try:
+                box["value"] = operation()
+            except BaseException as exc:         # handed back to the caller's thread
+                box["error"] = exc
+            finally:
+                done.set()
+        self._handed_over.put(job)
+        while not done.wait(0.25):
+            with self._session_turn_state_lock:
+                free = self._session_turn_lease is None
+            if free:
+                self._run_handed_over()           # nobody holds the session now: run it here
+        if "error" in box:
+            raise box["error"]
+        return box.get("value")
+
+    def _run_handed_over(self) -> None:
+        """Run what other threads handed this session's owner; the turn calls it at boundaries."""
+        pending = getattr(self, "_handed_over", None)
+        while pending is not None:
+            try:
+                job = pending.get_nowait()
+            except queue.Empty:
+                return
+            job()
+
     def _record_chat_step(self, runner, prompt):
         if self.depth != 0:
             return runner(prompt)
@@ -4310,6 +4360,7 @@ class Agent(GoalLifecycle):
                     self.messages = repaired
                     self.ui.info("closed an interrupted native tool-call group before saving")
                 self._refresh_system()
+                self._run_handed_over()         # a child that finished during this turn integrates now
                 saved = self._persist()
                 if not saved and self.depth == 0:
                     self._last_turn_error = (self._last_persist_error
@@ -4591,6 +4642,7 @@ class Agent(GoalLifecycle):
                 self._explicit_skill_instructions = {}
                 self._active_skill_names.clear()
                 self._refresh_system()
+                self._run_handed_over()         # a child that finished during this turn integrates now
                 saved = self._persist()
                 if not saved and self.depth == 0:
                     self._last_turn_error = self._last_persist_error or "could not persist this session"
@@ -6079,6 +6131,7 @@ class Agent(GoalLifecycle):
                     f"The turn reached its {budget_tokens:,}-token budget before completion. "
                     f"The work done so far is on disk and in /rewind.")
                 return False
+            self._run_handed_over()             # finished background children integrate here
             steered = self._drain_steer(
                 close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
             if steered:
@@ -8974,8 +9027,8 @@ class Agent(GoalLifecycle):
                 with self._finalizing_lock:
                     self._finalizing[agent_id] = description
                 try:
-                    outcome = self._finalize_subagent(
-                        description, workspace, *execution, cancel=own_cancel, keeper=keeper)
+                    outcome = self._as_session_owner(lambda: self._finalize_subagent(
+                        description, workspace, *execution, cancel=own_cancel, keeper=keeper))
                 finally:
                     with self._finalizing_lock:
                         self._finalizing.pop(agent_id, None)
@@ -9472,6 +9525,8 @@ class Agent(GoalLifecycle):
                          f"waiting on {len(pending)} background sub-task"
                          + ("" if len(pending) == 1 else "s")
                          + f" · {int(budget - max(0.0, left))}s of {budget}s", call_id=call_id)
+            # The child being waited on integrates HERE: this thread holds the session it saves.
+            self._run_handed_over()
             # Not time.sleep: a Stop sets this event, so the turn ends in a quarter second rather
             # than after the whole budget.
             self.cancelled.wait(min(0.25, left))
