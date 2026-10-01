@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## 0.6.10 — 2026-10-01
+## 0.6.10 — 2026-10-02
 
 Pairs with CLI 0.47.0. The vendored copy of the editor protocol gains the commands that open a
 chat in another directory and close one -- `open_chat` and `close_chat` -- with their replies

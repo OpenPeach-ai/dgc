@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.32.0 — 2026-10-01
+## 0.32.0 — 2026-10-02
 
 - Every chat can have its own folder. **Open a chat in another folder** (in the header, and as
   *DGC: Open a Chat in Another Folder…*) opens one in a different project, with that project's
