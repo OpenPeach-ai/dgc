@@ -155,7 +155,7 @@ body {
 .chatbar .chat-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .chatbar .chat-tab.is-active { background: var(--surface2); border-color: var(--line); color: var(--text-strong); font-weight: var(--w-med); }
 .chatbar .chat-tab .chat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chatbar .chat-tab .chat-folder { flex: 0 1 auto; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
+.chatbar .chat-tab .chat-folder { flex: none; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
 /* The dot is the whole point of the rail: it says whether the chat you are NOT looking at is
    working, waiting on you, or done. Shape and text carry it too -- never colour alone. */
 .chatbar .chat-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
