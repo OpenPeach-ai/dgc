@@ -119,7 +119,9 @@ class TheAccessorWorksOnTheFixtureShapeTest(unittest.TestCase):
         Update MOVED as each step lands. If a field moves without being added here, or is added
         here without moving, this fails and says which.
         """
-        MOVED = {"agent", "ui"}
+        MOVED = {"agent", "ui", "_turn_lock", "_worker", "_foreground_worker", "_package_reader",
+                 "_turn_n", "_queue", "_steer_payloads", "_running_turn_kind", "_live_turn",
+                 "_wake_yield"}
         for name in Chat.__slots__:
             with self.subTest(field=name):
                 backend = object.__new__(Backend)
@@ -133,6 +135,94 @@ class TheAccessorWorksOnTheFixtureShapeTest(unittest.TestCase):
                 else:
                     self.assertTrue(in_dict, f"{name} has not moved yet and should be a plain attribute")
                     self.assertFalse(on_chat, f"{name} reached the chat before its step")
+
+
+class ChatCreationIsSingularUnderConcurrencyTest(unittest.TestCase):
+    """Two threads first-touching a fresh Backend must get ONE chat.
+
+    If each built its own, whatever the losing thread wrote -- a queued turn, a worker reference --
+    would vanish with the object it wrote to. Production avoids this today only by an ordering
+    nobody wrote down (`__init__` assigns `self.ui` before any thread exists); P3 creates chats
+    mid-session, where that stops holding.
+
+    The window is widened on purpose: Chat construction is made slow, so an unguarded accessor
+    reliably lets several threads through. A test that only passes because the race is narrow is
+    not testing the lock.
+    """
+
+    def test_every_thread_gets_the_same_chat(self) -> None:
+        import dgc.headless as headless
+        real_chat = headless.Chat
+        built = []
+
+        class SlowChat(real_chat):
+            __slots__ = ()
+
+            def __init__(self):
+                built.append(self)
+                import time
+                time.sleep(0.05)          # widen the window between the check and the store
+
+        headless.Chat = SlowChat
+        try:
+            backend = object.__new__(Backend)
+            seen, barrier = [], threading.Barrier(12)
+
+            def touch():
+                barrier.wait()
+                seen.append(backend._chat())
+
+            threads = [threading.Thread(target=touch) for _ in range(12)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(10)
+        finally:
+            headless.Chat = real_chat
+        self.assertEqual(len(seen), 12)
+        self.assertEqual(len({id(chat) for chat in seen}), 1, "threads were handed different chats")
+        # Several may be CONSTRUCTED -- allocation happens outside the lock so a GC pass during it
+        # cannot run with the lock held -- but exactly one is PUBLISHED, and the rest are discarded
+        # before anything is written to them. The published one is the one everybody holds.
+        self.assertIn(seen[0], built, "the chat everyone holds must be one that was built")
+        self.assertIs(backend._chat(), seen[0], "and it is the one the backend keeps")
+
+
+    def test_code_run_inside_the_creation_lock_can_still_create_another_chat(self) -> None:
+        """The deadlock an adversarial review found in this accessor's first version.
+
+        Python runs arbitrary code on the creating thread while the creation lock is held -- every
+        CALL is an eval-breaker where CPython runs GC finalizers and signal handlers. If that code
+        first-touches a DIFFERENT fresh Backend, it re-enters `_chat()` on the same thread. With a
+        plain Lock that thread blocks forever on a lock it already holds; and because the lock is
+        module-global and never released, every later chat creation in the PROCESS hangs too.
+
+        Run in a SUBPROCESS, deliberately. The first version of this test ran in a thread, and when
+        it was mutation-checked against a plain Lock it did fail -- and then the stuck thread kept
+        the module-global lock forever, so the NEXT test in this file hung until the runner was
+        killed. That is the bug faithfully reproducing itself, and it is also a test freezing the
+        suite on regression, which is the one failure a runner reports as nothing at all. A process
+        boundary means a regression can only kill the probe.
+        """
+        import subprocess
+        probe = (
+            "import threading, sys\n"
+            "sys.path.insert(0, %r)\n"
+            "import dgc.headless as h\n"
+            "with h._CHAT_CREATE_LOCK:\n"                  # where a finalizer would be running
+            "    other = object.__new__(h.Backend)._chat()\n"
+            "assert isinstance(other, h.Chat)\n"
+            "assert isinstance(object.__new__(h.Backend)._chat(), h.Chat)\n"   # still healthy
+            "print('OK')\n"
+        ) % str(PROJECT)
+        try:
+            result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                                    timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail("creating a chat inside the held creation lock deadlocked the process")
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertIn("OK", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

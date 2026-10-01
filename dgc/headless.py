@@ -1620,6 +1620,21 @@ class Chat:
     # post-init state too.
 
 
+# Guards the ONE moment a Backend's chat is created. Module-level because the chat cannot be guarded
+# by a lock that lives on the chat, and Backend's own per-chat lock moves onto the chat.
+#
+# REENTRANT, and that is load-bearing rather than defensive. Python can run arbitrary code on the
+# creating thread while this is held: every CALL is an eval-breaker where CPython runs GC finalizers
+# and signal handlers. If that code first-touches a DIFFERENT fresh Backend, it re-enters `_chat()`
+# on the same thread. With a plain Lock that is a self-deadlock -- and because the lock is
+# module-global and is never released, every later chat creation in the PROCESS hangs too: not one
+# stuck chat, a frozen DGC. An adversarial review reproduced exactly that (faulthandler showed
+# `_chat -> __del__ -> get -> _chat`); the lock-free code it replaced could not hang at all. Nothing
+# in the tree triggers it today, but it fires the moment chats are created mid-session while a
+# finalizer or handler touches a Backend -- which is what per-chat backends P3 does.
+_CHAT_CREATE_LOCK = threading.RLock()
+
+
 def _chat_field(name: str) -> property:
     """A Backend attribute that lives on the Backend's chat, indistinguishable from a plain one.
 
@@ -1655,30 +1670,51 @@ class Backend:
     # step, so each move is verified alone.
     agent = _chat_field("agent")
     ui = _chat_field("ui")
+    # Step 4: the turn unit, moved as ONE step because its members are read together. `_busy()`
+    # reads `_worker` and `_foreground_worker` in one expression under `_turn_lock`; `_start_turn`
+    # budgets `_queue` and `_steer_payloads` as one pool; `_live_turn` is read as a pair with
+    # `_running_turn_kind`. Split any of these across two objects and a reader sees half a turn --
+    # including a snapshot that reports a running turn as finished.
+    _turn_lock = _chat_field("_turn_lock")
+    _worker = _chat_field("_worker")
+    _foreground_worker = _chat_field("_foreground_worker")
+    _package_reader = _chat_field("_package_reader")
+    _turn_n = _chat_field("_turn_n")
+    _queue = _chat_field("_queue")
+    _steer_payloads = _chat_field("_steer_payloads")
+    _running_turn_kind = _chat_field("_running_turn_kind")
+    _live_turn = _chat_field("_live_turn")
+    _wake_yield = _chat_field("_wake_yield")
 
     def _chat(self) -> "Chat":
-        """This backend's one chat, created on first use.
+        """This backend's one chat, created on first use, exactly once.
 
-        Lazy, and reached through `__dict__` rather than an attribute, for one reason each:
+        LAZY, because `Backend` is routinely built with `object.__new__(Backend)` -- 29 test files do
+        it -- and those fixtures assign only the fields they need, so the accessor has to be able to
+        make a chat from nothing.
 
-        LAZY, because `Backend` is routinely built with `object.__new__(Backend)` -- 29 test files
-        do it -- and those fixtures assign only the two or three fields they need. A `Chat` built in
-        `__init__` would simply not exist on such an object, so the accessor has to be able to make
-        one from nothing.
+        THROUGH `__dict__`, because the per-chat names are properties that call this; reading
+        `self._chat_obj` as an attribute would recurse.
 
-        THROUGH `__dict__`, because the per-chat names become properties that call this. Reading
-        `self._chat_obj` as an attribute once `_chat_obj` were itself managed would recurse; going
-        to the instance dict directly cannot.
-
-        Deliberately NOT thread-safe on creation: two threads racing here would each build a Chat
-        and one would win, which is a lost queue. It is safe today because nothing calls it, and
-        the step that gives it callers gives it the turn lock. Until then this is dead code, and
-        saying so is cheaper than a lock that would look load-bearing to the next reader.
+        CREATED UNDER A LOCK, double-checked so the common path takes no lock at all. Without it, two
+        threads first-touching a fresh Backend could each build a Chat, and whatever the losing thread
+        had written -- a queued turn, a worker reference -- would silently vanish with it. Production
+        is safe today only because `Backend.__init__` assigns `self.ui` before any thread exists, so
+        the chat is always made single-threaded. That is an ordering nobody wrote down, and P3 creates
+        chats mid-session, where it stops being true. The lock is module-level because the per-chat
+        turn lock now lives ON the chat and cannot guard its own creation.
         """
         chat = self.__dict__.get("_chat_obj")
         if chat is None:
-            chat = Chat()
-            self.__dict__["_chat_obj"] = chat
+            # Built OUTSIDE the lock, so the allocation -- the CALL most likely to trigger a GC pass
+            # and run a finalizer -- never happens while it is held. The lock then guards only the
+            # publish, and the re-read means a racing or re-entrant creator's chat wins and this one
+            # is simply discarded: nothing has been written to it yet, so nothing is lost.
+            fresh = Chat()
+            with _CHAT_CREATE_LOCK:
+                chat = self.__dict__.get("_chat_obj")
+                if chat is None:
+                    self.__dict__["_chat_obj"] = chat = fresh
         return chat
 
     def __init__(self, config: Config):
