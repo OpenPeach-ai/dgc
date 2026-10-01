@@ -56,6 +56,14 @@ test("open_asks is withheld from a CLI that did not declare it", () => {
   assert.equal(with_[0].open_asks, true, "and a CLI that declared it still gets it");
 });
 
+test("agent_faces is withheld from a CLI that did not declare it", () => {
+  const without = byType(handshakeCommands({}), "set_workspace_roots");
+  assert.equal(without.length, 1, "the handshake command is still sent");
+  assert.equal("agent_faces" in without[0], false, "an older CLI rejects the whole handshake command");
+  const with_ = byType(handshakeCommands({ agent_faces: true }), "set_workspace_roots");
+  assert.equal(with_[0].agent_faces, true);
+});
+
 test("answers is only sent to a CLI that declared open_asks", async () => {
   const answers = [{ ask_id: "q1", question: "Which database?" }];
   const without = byType(await promptCommands({}, { text: "hello", answers }), "prompt");
@@ -121,7 +129,7 @@ test("those commands also pass the CURRENT schema, so the check is not vacuous",
   const schema = JSON.parse(readFileSync(join(repoRoot, "schemas/editor-protocol-v14.schema.json"), "utf8"));
   const validate = new Ajv({ strict: false, allErrors: true }).compile(schema);
   const commands = [
-    ...handshakeCommands({ open_asks: true }),
+    ...handshakeCommands({ open_asks: true, agent_faces: true }),
     ...await promptCommands({ open_asks: true, live_steering: true }, { text: "hello" }),
   ];
   for (const command of commands) {

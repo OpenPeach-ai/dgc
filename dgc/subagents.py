@@ -17,6 +17,7 @@ import threading
 import time
 from typing import Callable
 
+from .editor_protocol import AGENT_FACE_SLOTS
 from .redaction import REDACTED
 
 ACTIVE = ("queued", "running", "waiting")
@@ -108,7 +109,7 @@ class _Record:
                  "state", "waiting_for", "activity", "started_at", "started_mono", "began_mono",
                  "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "background",
                  "message", "turn_id", "restored", "listed", "dirty", "sent_activity",
-                 "sent_tool_calls", "sent_tokens", "order", "log")
+                 "sent_tool_calls", "sent_tokens", "order", "log", "face_slot")
 
     def __init__(self, **fields):
         self.parent_id = None
@@ -132,6 +133,7 @@ class _Record:
         self.sent_tool_calls = 0
         self.sent_tokens = None
         self.log = []
+        self.face_slot = None
         for key, value in fields.items():
             setattr(self, key, value)
         if not isinstance(getattr(self, "log", None), list):
@@ -168,6 +170,8 @@ class _Record:
             item["message"] = self.message
         if self.turn_id:
             item["turn_id"] = self.turn_id
+        if self.face_slot is not None:
+            item["face_slot"] = self.face_slot
         log = [entry for entry in (self.log or []) if isinstance(entry, dict)][:MAX_LOG_EVENTS]
         if log:
             item["log"] = log
@@ -272,6 +276,7 @@ class SubagentRegistry:
         if not agent_id:
             return
         now = time.monotonic()
+        turn_id = str(turn_hint) if isinstance(turn_hint, str) else ""
         with self._publish:
             with self._lock:
                 if agent_id in self._records:
@@ -286,8 +291,8 @@ class SubagentRegistry:
                     started_at=round(time.time(), 3), started_mono=now,
                     began_mono=None if queued else now,
                     isolated=bool(isolated), parallel=bool(parallel),
-                    background=bool(background),
-                    turn_id=str(turn_hint) if isinstance(turn_hint, str) else "",
+                    background=bool(background), turn_id=turn_id,
+                    face_slot=self._face_slot_locked(turn_id),
                     order=self._order)
                 self._order += 1
                 self._transition(record, "queued" if queued else "running")
@@ -298,7 +303,8 @@ class SubagentRegistry:
                 payload = {"id": record.id, "parent_id": record.parent_id, "call_id": record.call_id,
                            "description": record.description, "depth": record.depth,
                            "state": record.state, "started_at": record.started_at,
-                           "isolated": record.isolated, "parallel": record.parallel}
+                           "isolated": record.isolated, "parallel": record.parallel,
+                           "face_slot": record.face_slot}
                 if record.background:
                     payload["background"] = True
                 if record.agent_type:
@@ -308,6 +314,25 @@ class SubagentRegistry:
                 if record.turn_id:
                     payload["turn_id"] = record.turn_id
             self._notify("started", payload)
+
+    def _face_slot_locked(self, turn_id: str) -> int:
+        """The face a starting agent wears: the lowest slot no working (queued/running/waiting) agent
+        of this chat holds, so two at work never share one. Among free slots, one no other agent of
+        the same turn has worn, so a turn's agents that run one after another differ too. With every
+        slot held, the least held. Ended and restored records hold nothing. Called under _lock before
+        the new record is inserted, so two that start at once never get the same slot.
+        """
+        held = [0] * AGENT_FACE_SLOTS
+        worn = [0] * AGENT_FACE_SLOTS
+        for record in self._records.values():
+            slot = record.face_slot
+            if not isinstance(slot, int) or isinstance(slot, bool) or not 0 <= slot < AGENT_FACE_SLOTS:
+                continue
+            if record.state in ACTIVE:
+                held[slot] += 1
+            elif turn_id and record.turn_id == turn_id and not record.restored:
+                worn[slot] += 1
+        return min(range(AGENT_FACE_SLOTS), key=lambda slot: (held[slot], worn[slot], slot))
 
     def _make_room_locked(self) -> None:
         if len(self._records) < MAX_RECORDS:
@@ -531,6 +556,10 @@ class SubagentRegistry:
             for key in ("started_at", "duration_ms", "tokens"):
                 if isinstance(item.get(key), (int, float)) and not isinstance(item[key], bool):
                     fields[key] = _int(item[key])
+            # A session file is untrusted input: a face slot comes back only as a slot.
+            slot = item.get("face_slot")
+            if isinstance(slot, int) and not isinstance(slot, bool) and 0 <= slot < AGENT_FACE_SLOTS:
+                fields["face_slot"] = slot
             raw_log = item.get("log")
             if isinstance(raw_log, list):
                 kept = []

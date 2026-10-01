@@ -4286,6 +4286,11 @@
             },
             "background": {
               "type": "boolean"
+            },
+            "face_slot": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -4935,6 +4940,9 @@
               "type": "boolean"
             },
             "ask_options": {
+              "type": "boolean"
+            },
+            "agent_faces": {
               "type": "boolean"
             }
           },

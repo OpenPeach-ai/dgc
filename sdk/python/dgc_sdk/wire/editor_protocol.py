@@ -36,6 +36,10 @@ IMAGE_UNAVAILABLE_REASONS = ("invalid_ref", "not_found", "changed", "too_large",
 # loop. Backend._AGENT_MESSAGE_WIRE_REASON maps every reason Agent.message_detached can return
 # into this tuple and defaults to "unknown", so a reason added to the Agent later stays harmless.
 AGENT_MESSAGE_REASONS = ("unknown", "starting", "finished", "stopping", "queue_full")
+# v14: how many identity faces a sub-agent can wear. `agent_started.face_slot` and
+# `agents.items[].face_slot` are 0..AGENT_FACE_SLOTS-1 and a client reduces a slot modulo its own
+# face count; there is no enum, so a later CLI can widen the range without failing an older client.
+AGENT_FACE_SLOTS = 8
 
 
 def _f(*kinds: str, required: bool = True, enum: tuple | None = None) -> dict:
@@ -233,8 +237,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # ``options`` turns the open question into a picker WITHOUT making the turn wait for it: the
     # card still sits in the transcript, still folds to a line you can answer later, and the answer
     # still arrives as an ordinary tagged prompt. Only sent to a client that declared
-    # capabilities.ask_options, because a field an older peer has not declared makes it drop the
-    # whole event -- it would show no card at all rather than a card without options.
+    # capabilities.ask_options, because a field an older peer has not declared fails the whole
+    # session (the SDK raises DGCProtocolError; the extension disposes the backend) -- it would
+    # show no card at all, and no chat either.
     "ask_request": {"call_id": _NS(False), "ask_id": _S(), "question": _S(),
                     "context": _S(False), "suggestions": _A(False), "options": _A(False)},
     # How an open question ended -- for every client drawing its card, and for replay.
@@ -454,6 +459,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "isolated": _B(), "parallel": _B(),
         "agent_type": _S(False), "model": _S(False), "turn_id": _S(False),
         "background": _B(False),
+        # The lowest face slot no working agent of this chat held when it started, kept for the
+        # agent's life and saved with the session (0..AGENT_FACE_SLOTS-1). Sent only to a client
+        # that sent set_workspace_roots.agent_faces: an undeclared field fails an older client's
+        # session. agents.items[].face_slot follows the same gate.
+        "face_slot": _I(False),
     },
     "agent_updated": {
         "id": _S(), "state": _f("string", enum=("queued", "running", "waiting")),
@@ -522,8 +532,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # ``ask_options`` is the same promise one step further: this client can draw the OPTIONS on an
     # open question, not just its text box. A client that says open_asks but not ask_options still
     # gets the question, without them.
+    # ``agent_faces``: this client draws the backend's face slots. Sent only to a CLI that
+    # advertised capabilities.agent_faces, for the same reason as open_asks.
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False),
-                            "open_asks": _B(False), "ask_options": _B(False)},
+                            "open_asks": _B(False), "ask_options": _B(False),
+                            "agent_faces": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False), "reason": _S(False),

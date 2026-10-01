@@ -192,6 +192,7 @@ class HeadlessSharedTests(unittest.TestCase):
         capabilities = ready["capabilities"]
         self.assertTrue(capabilities["agents"] and capabilities["image_views"] and capabilities["model_retry"])
         self.assertTrue(capabilities["question_forms"], "kept for one release")
+        self.assertIs(capabilities["agent_faces"], True, "a client only asks for face slots when told it may")
         self.assertNotIn("anthropic_thinking_display", capabilities)
 
 

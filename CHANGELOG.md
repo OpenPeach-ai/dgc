@@ -90,6 +90,15 @@ was simply absent. Blocks headed `## Rule: …` / `## Rules`, or marked `<!-- dg
 kept whole and placed first; if the rules alone do not fit, the ones left out are named so you can
 consolidate the file. A file within the limit is unchanged.
 
+### Sub-agents working at once never wear the same face
+
+The editor gave each sub-agent one of its eight faces by hashing the agent's id, so two running at
+once matched one time in eight, and three at once a third of the time. Each starting agent now gets
+the lowest face no working agent of the chat holds (a turn's later agents take a new one), keeps it
+for life, and keeps it in the saved chat. `dgc serve` sends `face_slot` only to a client that asked
+for it with `set_workspace_roots.agent_faces` (advertised as `capabilities.agent_faces`); every other
+client's frames are unchanged.
+
 ### A message to a sub-agent names the agent
 
 Steering a running sub-agent read "Used tool · message task" in the editor and a bare

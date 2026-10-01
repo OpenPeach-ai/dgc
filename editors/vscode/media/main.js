@@ -6122,8 +6122,14 @@
   let agentPageTick = null;
   // Pack B identity marks in media/agents/. Same file on light and dark (they hold on #141414).
   // Always the still frame: the -animated swirl reads as a colour smear at chip size. The face is
-  // drawn bare, with no ring around it, live or finished (`.is-live` is state only).
+  // drawn bare, with no ring around it, live or finished (`.is-live` is state only). Which face an
+  // agent wears is the CLI's face slot when it sends one (first free, so two at work never match);
+  // otherwise the id's own face.
   const AGENT_MARK_NAMES = ["seafoam", "lagoon", "coral", "violet", "amber", "slate", "lime", "rose"];
+  // The order the CLI's face slots are handed out in: slot 0 is the first face a working agent
+  // gets. Five colour families first; the look-alikes (slate~violet, rose~coral, lagoon~seafoam)
+  // last, so a batch of up to five never puts two of them side by side.
+  const AGENT_FACE_ORDER = [0, 2, 3, 4, 6, 5, 7, 1];
   function cssEscape(value) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
   }
@@ -6131,10 +6137,17 @@
     const match = String(callId || "").match(/^(sub-[0-9a-f]{12})(?::|$)/i);
     return match ? match[1] : "";
   }
+  // The id's own face. Math.imul(h, 33) ≡ h (mod 8), so this is the sum of the id's character
+  // codes mod 8: ids made of the same characters always collide (sid(1) and sid(9) both seafoam).
   function agentMarkIndex(id) {
     let hash = 0;
     for (let i = 0; i < String(id).length; i++) hash = (Math.imul(hash, 33) + String(id).charCodeAt(i)) >>> 0;
     return hash % 8;
+  }
+  function agentFaceIndex(id) {
+    const slot = agentRecords.get(String(id))?.face_slot;
+    if (Number.isSafeInteger(slot) && slot >= 0) return AGENT_FACE_ORDER[slot % AGENT_FACE_ORDER.length];
+    return agentMarkIndex(id);   // no slot: a chat saved before slots, or a CLI that sends none
   }
   function agentMarkMotionOk() {
     return !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -6148,7 +6161,7 @@
   }
   function paintAgentMark(node, id, live) {
     if (!node) return;
-    const index = agentMarkIndex(id);
+    const index = agentFaceIndex(id);
     node.dataset.mark = String(index);
     node.dataset.face = AGENT_MARK_NAMES[index];
     // `is-live` is STATE, not motion. It used to be set only when animation was also allowed, so
@@ -6498,6 +6511,7 @@
     record.description = String(record.description || "");
     record.tool_calls = Number(record.tool_calls || 0);
     if (record.state !== "waiting") delete record.waiting_for;
+    if (!(Number.isSafeInteger(record.face_slot) && record.face_slot >= 0)) delete record.face_slot;
     return record;
   }
 
@@ -6543,6 +6557,8 @@
       if (item && typeof item === "object" && item.id && !agentRecords.has(String(item.id))) {
         const record = agentRecordFrom(item, now);
         const prior = previous.get(String(item.id));
+        // A face never leaves an agent mid-life: a snapshot without its slot keeps the one it had.
+        if (record.face_slot === undefined && Number.isSafeInteger(prior?.face_slot)) record.face_slot = prior.face_slot;
         // Keep the position it already had. Without this every snapshot renumbered every agent in
         // whatever order the backend happened to list them, and the rows moved around mid-turn.
         if (prior && typeof prior.order === "number") record.order = prior.order;

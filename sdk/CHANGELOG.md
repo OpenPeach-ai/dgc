@@ -9,6 +9,10 @@ chat in another directory and close one -- `open_chat` and `close_chat` -- with 
 sends and receives is unchanged. The two events join the TypeScript client's known-event set, so
 it does not discard them as unrecognised.
 
+The vendored protocol also declares the optional `agent_started.face_slot` and
+`set_workspace_roots.agent_faces`. An SDK session never sends `agent_faces`, so it never receives
+`face_slot`.
+
 ## 0.6.9 — 2026-09-28
 
 Pairs with CLI 0.46.0. The vendored copy of the editor protocol gains the `editor_state` command --

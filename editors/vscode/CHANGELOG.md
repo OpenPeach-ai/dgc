@@ -14,6 +14,9 @@
   chat instead of being refused with "unavailable while a turn is running"), and install or remove
   a plugin.
 - A chat comes back in the permission mode it ran in when you reopen it.
+- Sub-agents working at the same time never share a face. The same eight faces, handed out
+  seafoam, coral, violet, amber, lime first so look-alikes are never side by side, and kept
+  through a reload, a chat switch and a restart. Chats saved before this keep their faces.
 - A chat tab keeps its folder name whole; a long chat name gives way first.
 - A message to a running sub-agent reads "Sent message to <what it was asked to do>", with a
   message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear

@@ -45,7 +45,8 @@ class VendoredProtocolTests(unittest.TestCase):
         # what went missing last time rather than passing silently.
         vendored = VENDORED.read_text(encoding="utf-8")
         for name in ("ask_request", "ask_resolved", "ask_skip", "ping",
-                     "spooled_images", "open_asks", "answers"):
+                     "spooled_images", "open_asks", "answers", "face_slot", "agent_faces",
+                     "open_chat", "chat_opened"):
             with self.subTest(name=name):
                 self.assertIn(f'"{name}"', vendored, f"the SDK's protocol copy is missing {name}")
 

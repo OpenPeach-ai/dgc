@@ -3287,6 +3287,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": false
+    },
+    "face_slot": {
+      "types": [
+        "integer"
+      ],
+      "required": false
     }
   },
   "agent_updated": {
@@ -3803,6 +3809,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     },
     "ask_options": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "agent_faces": {
       "types": [
         "boolean"
       ],

@@ -1463,10 +1463,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // that has not declared the field rejects the whole handshake command, which is not a
     // degraded question but no session at all.
     const supportsAskOptions = this.lastReadyEvent?.capabilities?.ask_options === true;
+    // The panel draws the CLI's own face slot for each sub-agent, so two at work never share a
+    // face. Same gate: an undeclared field fails the whole handshake on an older CLI.
+    const supportsAgentFaces = this.lastReadyEvent?.capabilities?.agent_faces === true;
     const command = this.stateCommand(
       "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
                            ...(supportsOpenAsks ? { open_asks: true } : {}),
-                           ...(supportsAskOptions ? { ask_options: true } : {}) });
+                           ...(supportsAskOptions ? { ask_options: true } : {}),
+                           ...(supportsAgentFaces ? { agent_faces: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);

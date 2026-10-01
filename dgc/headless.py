@@ -1860,6 +1860,9 @@ class Backend:
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
                           "ask_options": True,
+                          # The client answers with set_workspace_roots.agent_faces when it draws
+                          # the registry's face slots; only then do agent frames carry face_slot.
+                          "agent_faces": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True,
                           "agents": True, "image_views": True, "model_retry": True,
                           # This CLI accepts `agent_control`: the user may steer or stop ONE
@@ -4393,6 +4396,9 @@ class Backend:
             # questions here" while `ready` advertised the capability as present.
             self.ui._open_asks_enabled = bool(cmd.get("open_asks"))
             self.ui._ask_options_enabled = bool(cmd.get("ask_options"))
+            # On the chat's UI, beside the two above: each chat on a shared `dgc serve` opts in for
+            # itself. Read by _on_subagent and _emit_agents.
+            self.ui._agent_faces_enabled = bool(cmd.get("agent_faces"))
             # v14: ``question_forms`` is still declared and ignored; every v14 client takes one
             # structured request per question batch.
             roots, visible = [], []
@@ -5216,6 +5222,8 @@ class Backend:
                     self._schedule_agents_snapshot()
                 return
             fields = dict(payload)
+            if not self._agent_faces_on():
+                fields.pop("face_slot", None)    # undeclared, it would fail an older client
             if name == "agent_started" and not fields.get("turn_id"):
                 turn_id = getattr(self.ui, "turn_id", "")
                 if isinstance(turn_id, str) and turn_id:
@@ -5345,9 +5353,16 @@ class Backend:
         registry = getattr(getattr(self, "agent", None), "subagents", None)
         if registry is None:
             return
+        faces = self._agent_faces_on()
         registry.snapshot(emit=lambda snap: self.em.emit(
-            "agents", items=snap["items"], total=snap["total"], active=snap["active"],
-            **_request_fields(request_id)))
+            "agents",
+            items=snap["items"] if faces else [{key: value for key, value in item.items()
+                                                if key != "face_slot"} for item in snap["items"]],
+            total=snap["total"], active=snap["active"], **_request_fields(request_id)))
+
+    def _agent_faces_on(self) -> bool:
+        """This chat's client asked for face slots (set_workspace_roots.agent_faces)."""
+        return getattr(getattr(self, "ui", None), "_agent_faces_enabled", False) is True
 
     def _agents_total(self) -> int:
         registry = getattr(getattr(self, "agent", None), "subagents", None)
