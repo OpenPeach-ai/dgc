@@ -29,6 +29,7 @@ class Emitter:
         self.max_event_bytes = int(max_event_bytes or MAX_EVENT_BYTES)
         self._lock = threading.Lock()
         self._seq = itertools.count()
+        self.tag_chats = False     # set once a client that opted in holds more than one chat
 
     def emit(self, type: str, **fields) -> None:
         with self._lock:
@@ -101,6 +102,8 @@ class Emitter:
                    "protocol frame limit. The work continued; only this one message was too "
                    "large to send.")
         fallback = {"type": "error", "seq": obj.get("seq", 0), "message": message}
+        if isinstance(obj.get("chat_id"), str):
+            fallback["chat_id"] = obj["chat_id"]      # the chat it belonged to still gets told
         return fallback
 
 
