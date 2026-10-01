@@ -241,7 +241,9 @@ test("closing the first chat ends its conversation and keeps the process for the
     be.on("event", (ev) => { if (ev.type === "info") asked.push(String(ev.message)); });
     const retired = waitFor(be, "event", (ev) => ev.type === "info" && String(ev.message).includes('"new_session"'));
     be.close("chat closed: First");
-    await retired;
+    // The backend reads this prefix as "retired for good" and stops the chat's background shells
+    // (dgc/headless.py RETIRE_REQUEST_PREFIX); a plain new chat keeps them.
+    assert.match(String((await retired).message), /"request_id":"retire-/);
     assert.ok(be.childPid !== undefined, "closing the first chat ended the other chats too");
     be.close("chat closed: First");
     await new Promise((resolve) => setTimeout(resolve, 100));

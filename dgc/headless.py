@@ -143,6 +143,9 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
 })
 _WAKE_YIELD_TIMEOUT = 10.0
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
+# A new_session whose request id starts with this retires the chat for good: the editor sends it when
+# the tab of a shared process's first chat closes (editors/vscode/src/backend.ts close()).
+RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
@@ -4846,6 +4849,16 @@ class Backend:
                     return
             mode_before = getattr(self.agent, "mode", "")
             self.agent.reset()
+            if str(request_id or "").startswith(RETIRE_REQUEST_PREFIX):
+                # The editor closed this chat's tab while other chats stay on the process. The
+                # process's first chat cannot be closed -- commands without a chat id land on it --
+                # so the editor retires it with a new session instead (backend.ts close()). Its
+                # background shells go with it, as when closing that tab ended its own process; a
+                # plain new chat keeps them, as it always has.
+                owner = str(getattr(getattr(self.agent, "ctx", None), "tool_owner", "") or "")
+                if owner:
+                    from .tools import shutdown_background
+                    shutdown_background(owner)
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, name="",

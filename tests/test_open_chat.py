@@ -520,6 +520,28 @@ class OpenChatTest(unittest.TestCase):
         self.assertTrue(other._package_cancel.is_set(), "a plugin connect in flight kept running")
         self.assertTrue(other.agent.mcp._closed, "a connect still running could add a server after close")
 
+    def test_retiring_the_first_chat_takes_its_background_shells_with_it(self):
+        # The process's first chat cannot be closed while others stay on it, so its tab's close
+        # retires it with a new session (backend.ts close()). Its dev server kept its port until
+        # the window closed; closing that tab used to end its own process, and the shells with it.
+        from dgc import tools as tools_module
+        self.open_b()
+        owner = self.host.default.agent.ctx.tool_owner
+        stopped = []
+        with patch.object(tools_module, "shutdown_background", lambda o: stopped.append(o)):
+            self.host.dispatch({"type": "new_session", "request_id": f"{headless.RETIRE_REQUEST_PREFIX}4242-1"})
+            self.wait_for(lambda f: f["type"] == "session" and f.get("kind") == "new"
+                          and str(f.get("request_id", "")).startswith(headless.RETIRE_REQUEST_PREFIX))
+        self.assertEqual(stopped, [owner])
+
+    def test_a_plain_new_chat_keeps_its_background_shells(self):
+        from dgc import tools as tools_module
+        stopped = []
+        with patch.object(tools_module, "shutdown_background", lambda o: stopped.append(o)):
+            self.host.dispatch({"type": "new_session", "request_id": "plain-new"})
+            self.wait_for(lambda f: f["type"] == "session" and f.get("request_id") == "plain-new")
+        self.assertEqual(stopped, [], "a new chat in the same tab stopped the previous one's dev server")
+
     def test_only_that_owners_background_shells_are_stopped(self):
         from dgc import tools as tools_module
         killed = []
