@@ -96,6 +96,7 @@ function installLayout(window, layout) {
 
 // A ResizeObserver that never fires on its own: `resize(target)` delivers one entry for `target` to
 // every observer watching it, in the order they were created, exactly when the test says so.
+// `resize(target, { borderBoxSize: [{ blockSize: 120 }] })` adds what a real entry reports.
 function installResizeObservers(window) {
   const observers = [];
   window.ResizeObserver = class {
@@ -104,8 +105,8 @@ function installResizeObservers(window) {
     unobserve(target) { this.targets.delete(target); }
     disconnect() { this.targets.clear(); }
   };
-  return (target) => {
-    for (const observer of [...observers]) if (observer.targets.has(target)) observer.callback([{ target }], observer);
+  return (target, entry = {}) => {
+    for (const observer of [...observers]) if (observer.targets.has(target)) observer.callback([{ target, ...entry }], observer);
   };
 }
 

@@ -138,12 +138,19 @@ async function restartAndRepaint(panel) {
 // the bubble's own block or a block containing it. Between blocks: every consecutive pair of
 // transcript blocks, wherever in the DOM the panel put them.
 function measureSpacing() {
+  // A pinned prompt is drawn at the top of the view, not in its own place: every prompt is measured
+  // where it is laid out (0.47 pinned prompt), and pins again once the measurement is done.
+  const unpin = document.createElement("style");
+  unpin.textContent = "#log .turn > .msg.user.turn-head { position: relative !important; }";
+  document.head.appendChild(unpin);
   const log = document.getElementById("log");
   const box = (n) => n.getBoundingClientRect();
   // A closed <details> still lays its body out; checkVisibility() is what knows it is not drawn.
   const drawn = (n) => { const r = box(n); return r.width > 0 && r.height > 0 && n.checkVisibility?.() !== false; };
+  // A turn's box (.turn) only groups a prompt with its turn: a wrapper, not ink. It starts 8px above
+  // its prompt (the prompt's own margin is inside it), so as ink it read 16px under the turn above.
   const ink = [...log.querySelectorAll("*")]
-    .filter((n) => !n.closest(".role") && !n.closest(".steer-note") && drawn(n));
+    .filter((n) => !n.closest(".role") && !n.closest(".steer-note") && !n.classList.contains("turn") && drawn(n));
   const bubbles = [...log.querySelectorAll(".msg.user > .bubble")].filter(drawn).map((bubble) => {
     const b = box(bubble);
     // A steered prompt says what became of it on a line under the bubble. That line belongs to
@@ -171,8 +178,9 @@ function measureSpacing() {
   const older = log.querySelector(".history-older");
   const pad = getComputedStyle(log);
   const columnWidth = log.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
-  return { bubbles, pairs, blockCount: blocks.length, columnWidth,
-    olderWidth: older && drawn(older) ? Math.round(box(older).width) : null };
+  const olderWidth = older && drawn(older) ? Math.round(box(older).width) : null;
+  unpin.remove();
+  return { bubbles, pairs, blockCount: blocks.length, columnWidth, olderWidth };
 }
 const measure = (panel) => panel.page.evaluate(measureSpacing);
 const toBottom = (panel) => panel.page.evaluate(() => { const log = document.getElementById("log"); log.scrollTop = log.scrollHeight; });
@@ -333,7 +341,9 @@ function probeScrolling() {
       log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(height * fraction);
       await frames(2);
       const box = log.getBoundingClientRect();
-      const anchor = document.elementFromPoint(box.left + box.width / 2, box.top + box.height * 0.4)?.closest(".msg, .resume-note, .sys");
+      let anchor = document.elementFromPoint(box.left + box.width / 2, box.top + box.height * 0.4)?.closest(".msg, .resume-note, .sys");
+      // A pinned prompt stays where it is drawn while the page moves under it: watch its turn instead.
+      if (anchor?.classList.contains("turn-head")) anchor = anchor.parentElement.querySelector(":scope > .msg.dgc");
       const top = anchor?.getBoundingClientRect().top;
       await frames(6); await new Promise((done) => setTimeout(done, 60));
       out.push({ fraction, moved: anchor ? Math.round(anchor.getBoundingClientRect().top - top) : 0,
@@ -396,16 +406,19 @@ test("re-measuring after a width change keeps the block being read where it was"
     await panel.settle();
     await panel.page.setViewportSize({ width: 320, height: 900 });
     await panel.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    // Never a turn's prompt: pinned, it stays where it is drawn whatever moves, and the check would
+    // pass however far the page under it jumped (0.47 pinned prompt).
     const before = await panel.page.evaluate(() => {
       const log = document.getElementById("log"), top = log.getBoundingClientRect().top;
-      const blocks = [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg"));
+      const blocks = [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg") && !n.classList.contains("turn-head"));
       const index = blocks.findIndex((n) => n.getBoundingClientRect().bottom > top);
       return { index, top: blocks[index].getBoundingClientRect().top };
     });
     await wait(panel, 400);
     const after = await panel.page.evaluate((index) => {
       const log = document.getElementById("log");
-      return [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg"))[index].getBoundingClientRect().top;
+      return [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg") && !n.classList.contains("turn-head"))[index]
+        .getBoundingClientRect().top;
     }, before.index);
     assert.ok(Math.abs(after - before.top) <= 1, `the block at the top of the view moved ${Math.round(after - before.top)}px when the heights were re-measured`);
   } finally { await panel.page.close(); }
@@ -499,13 +512,22 @@ test("the first prompt of an empty restored chat starts where a fresh chat's doe
   try {
     await restored.events([{ type: "session", kind: "resumed", session_id: "s1" }, { type: "history", items: [], todos: [] },
       { type: "recall", items: [], before: 0, more: false }]);
-    for (const panel of [fresh, restored]) { await panel.prompt(PROMPT1); await panel.settle(); }
+    const ids = [];
+    for (const panel of [fresh, restored]) { ids.push(await panel.prompt(PROMPT1)); await panel.settle(); }
     const offset = (panel) => panel.page.evaluate(() => {
       const log = document.getElementById("log"), prompt = log.querySelector(".msg.user");
       return Math.round(prompt.getBoundingClientRect().top - log.getBoundingClientRect().top - parseFloat(getComputedStyle(log).paddingTop));
     });
     assert.equal(await offset(fresh), 0, "a fresh chat's first prompt sits on the log's padding");
     assert.equal(await offset(restored), 0, "so does the first prompt of an empty restored chat");
+    // And still once its turn starts and it heads that turn's box (0.47 pinned prompt).
+    for (const [i, panel] of [fresh, restored].entries()) {
+      await panel.events([{ type: "prompt_accepted", request_id: ids[i], state: "started" }, ...answeredTurn(`f${i}`, PROMPT1).map((e, k) => (k === 0 ? { ...e, request_id: ids[i] } : e))]);
+      await panel.settle();
+      assert.equal(await panel.page.evaluate(() => !!document.querySelector("#log .turn > .msg.user.turn-head")), true);
+    }
+    assert.equal(await offset(fresh), 0, "boxed, a fresh chat's first prompt still sits on the log's padding");
+    assert.equal(await offset(restored), 0, "and so does an empty restored chat's");
   } finally { await fresh.page.close(); await restored.page.close(); }
 });
 
@@ -525,7 +547,7 @@ test("markers in the transcript take the space between blocks and add none of th
     assertSpacing(m, "compaction and notice");
     // The answer, the marker, the notice, then the next prompt a step further as always.
     const markers = m.pairs.filter((pair) => /compaction|sys/.test(pair.between))
-      .map((pair) => [pair.between.replace(/ hist| settled/g, ""), pair.gap]);
+      .map((pair) => [pair.between.replace(/ hist| settled| turn-head/g, ""), pair.gap]);
     assert.deepEqual(markers, [["msg dgc -> compaction", BETWEEN_BLOCKS], ["compaction -> sys", BETWEEN_BLOCKS],
       ["sys -> msg user", ABOVE_PROMPT]]);
 
@@ -642,7 +664,8 @@ function walkUp(step) {
       const view = log.getBoundingClientRect();
       const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)
         ?.closest("p, li, pre, h2, .bubble, .tool-images, .tool, .text, .thinking, .sys, .resume-note, .msg");
-      if (!anchor || !log.contains(anchor)) { log.scrollTop -= 40; await frames(2); continue; }
+      // A pinned prompt does not move with the page (0.47 pinned prompt): it is never what is read.
+      if (!anchor || !log.contains(anchor) || anchor.closest(".turn-head")) { log.scrollTop -= 40; await frames(2); continue; }
       const top = anchor.getBoundingClientRect().top, from = log.scrollTop;
       log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = from - (step === "half" ? Math.round(log.clientHeight / 2) : step);
       const applied = log.scrollTop - from;
@@ -729,7 +752,7 @@ for (const [way, from, to] of resizes) {
         for (let s = 0; s < 8; s += 1) {
           const view = log.getBoundingClientRect();
           const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)?.closest("p, li, .bubble, .text, .thinking, .msg");
-          if (!anchor) { log.scrollTop -= 40; await frames(1); continue; }
+          if (!anchor || anchor.closest(".turn-head")) { log.scrollTop -= 40; await frames(1); continue; }   // a pinned prompt stays put
           const top = anchor.getBoundingClientRect().top, start = log.scrollTop;
           log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = start - 100;
           const applied = log.scrollTop - start;
@@ -940,7 +963,9 @@ for (const width of WIDTHS) {
 // And opening one is reading it: a turn still streaming below must not pull the reader back to the end
 // (follow-5), until they ask for the end again with the Latest pill.
 const TWELVE = Array.from({ length: 12 }, (_, i) => `Step ${i + 1} of the plan`).join("\n");
-const lastPromptToggle = (panel) => panel.page.locator("#log > .msg.user > .bubble").last().locator(".prompt-fold");
+// A turn's prompt heads its turn's box (0.47 pinned prompt).
+const TURN_PROMPTS = "#log .turn > .msg.user.turn-head > .bubble";
+const lastPromptToggle = (panel) => panel.page.locator(TURN_PROMPTS).last().locator(".prompt-fold");
 for (const width of WIDTHS) {
   for (const state of ["folded", "open"]) {
     test(`${state === "open" ? "an" : "a"} ${state} long prompt keeps the prompt rhythm (${width}px)`, async (t) => {
@@ -949,7 +974,7 @@ for (const width of WIDTHS) {
       try {
         await panel.events([...answeredTurn("t1"), ...answeredTurn("t2", TWELVE), ...answeredTurn("t3", PROMPT2)]);
         await panel.settle();
-        const bubble = panel.page.locator("#log > .msg.user > .bubble").nth(1);
+        const bubble = panel.page.locator(TURN_PROMPTS).nth(1);
         assert.equal(await bubble.getAttribute("data-fold"), "folded");
         if (state === "open") {
           await bubble.locator(".prompt-fold").click();
@@ -967,12 +992,11 @@ for (const width of WIDTHS) {
 test("opening a long prompt during a run keeps the reader on it (follow-5)", async (t) => {
   if (skipOrFail(t)) return;
   const panel = await openPanel(460);
-  // `atEnd`: on the last pixel. `nearEnd`: what main.js itself calls the bottom (atBottom, < 60px).
-  // The Latest pill gives the log back a few px as it hides (a flex item of body, it is squeezed
-  // below its 28px once the transcript overflows), so the click itself is held to the latter.
+  // `atEnd`: on the last pixel -- not main.js's own idea of the bottom (atBottom, < 60px), which hid
+  // the Latest pill taking ~15px back from the log as it went (see the next test).
   const view = () => panel.page.evaluate(() => {
     const log = document.getElementById("log"), gap = log.scrollHeight - log.scrollTop - log.clientHeight;
-    return { top: log.scrollTop, atEnd: gap < 2, nearEnd: gap < 60, pill: !document.getElementById("to-latest").hidden };
+    return { top: log.scrollTop, atEnd: gap < 2, pill: !document.getElementById("to-latest").hidden };
   });
   const stream = (n) => panel.events(Array.from({ length: n }, (_, i) => ({ type: "text_delta", text: `Restarted service ${i + 1} of the stack. ` })));
   try {
@@ -995,10 +1019,45 @@ test("opening a long prompt during a run keeps the reader on it (follow-5)", asy
     await panel.page.click("#to-latest");
     await panel.settle();
     const back = await view();
-    assert.equal(back.nearEnd, true, "Latest goes back to the end");
+    assert.equal(back.atEnd, true, "Latest goes back to the very end");
     assert.equal(back.pill, false);
     await stream(1);
     await panel.settle();
     assert.equal((await view()).atEnd, true, "and the run is followed again");
   } finally { await panel.page.close(); }
 });
+
+// ---- the Latest pill -----------------------------------------------------------------------------
+// The pill is a flex item of body, laid over the transcript's foot by a negative margin as tall as it
+// is. With the default flex-shrink it was squeezed to ~13px once the transcript overflowed: showing it
+// then gave the transcript ~15px, hiding it took them back, and Latest stopped ~15px short of the end
+// until the next event arrived.
+for (const width of WIDTHS) {
+  test(`the Latest pill keeps its own height, so Latest lands on the very end (${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const panel = await openPanel(width);
+    try {
+      await longChat(panel, 8);
+      await panel.settle();
+      const away = await panel.page.evaluate(async () => {
+        const log = document.getElementById("log"), pill = document.getElementById("to-latest");
+        const without = log.clientHeight;
+        log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = Math.round(log.scrollHeight * 0.3);
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 30))));
+        return { shown: !pill.hidden, height: pill.getBoundingClientRect().height, without, with: log.clientHeight,
+          control: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control")) };
+      });
+      assert.equal(away.shown, true, "read back, the pill shows");
+      assert.equal(away.height, away.control, `at its full height (${away.height}px of ${away.control}px)`);
+      assert.equal(away.with, away.without, "and it takes nothing from the transcript, or gives anything to it");
+      await panel.page.click("#to-latest");
+      await panel.settle();
+      const end = await panel.page.evaluate(() => {
+        const log = document.getElementById("log");
+        return { gap: log.scrollHeight - log.scrollTop - log.clientHeight, shown: !document.getElementById("to-latest").hidden };
+      });
+      assert.equal(end.shown, false, "at the end, the pill goes");
+      assert.ok(end.gap < 1, `Latest lands on the last pixel (${end.gap}px short)`);
+    } finally { await panel.page.close(); }
+  });
+}

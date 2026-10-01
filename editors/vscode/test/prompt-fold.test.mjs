@@ -562,6 +562,10 @@ test("the fold's rules sit in their own section, in the order the cascade relies
     assert.match(line, /\} \}$/, `an @media rule on one line: ${line.slice(0, 60)}`);
   }
   assert.equal(/\.bubble::after/.test(section), false, "never a pseudo-element on the bubble (steering-visible)");
-  const outside = mainCss.slice(0, open) + mainCss.slice(close);
+  // The pinned prompt reads the fold, and only to stop pinning a prompt that is open: it never styles
+  // the fold (pinned-prompt.test.mjs holds its section to that). Nothing else may name it.
+  const pinOpen = mainCss.indexOf("/* ---- 0.47 pinned prompt -"), pinClose = mainCss.indexOf("/* ---- end 0.47 pinned prompt -");
+  assert.ok(pinOpen > close && pinClose > pinOpen, "the pinned prompt's section follows this one");
+  const outside = mainCss.slice(0, open) + mainCss.slice(close, pinOpen) + mainCss.slice(pinClose);
   assert.doesNotMatch(outside, /prompt-fold|data-fold\b/, "no rule elsewhere can override the fold");
 });

@@ -1242,6 +1242,7 @@
       }
       const role = entry.node.querySelector(".role");
       if (role) role.textContent = label;
+      entry.node.dataset.promptId = id;
       setSteerState(entry.node, steering ? "pending" : "queued");
       if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
       if (steering) { entry.acknowledged = true; pendingPrompts.set(id, entry); }
@@ -1480,8 +1481,11 @@
   // when something above it changes height.
   function readingAnchor() {
     const top = log.getBoundingClientRect().top;
+    // Never a turn's prompt: pinned, it stays put whatever moves above it, so holding it still would
+    // let the block actually being read jump (0.47 pinned prompt).
     return [...log.querySelectorAll(".msg, .resume-note, .sys, .compaction, .history-older")]
-      .find((node) => !node.parentElement.closest(".msg") && node.getBoundingClientRect().bottom > top) || null;
+      .find((node) => !node.parentElement.closest(".msg") && !node.classList.contains("turn-head")
+        && node.getBoundingClientRect().bottom > top) || null;
   }
   // Change the transcript without moving what is being read: whatever the change did to the height
   // of the blocks above the view, the block at its top stays where it was (#log sets
@@ -1639,6 +1643,113 @@
       .observe(document.querySelector("footer"));
   }
 
+  // ---- 0.47 pinned prompt ----
+  // The prompt you sent stays at the top of the transcript while you read its answer; the next prompt
+  // pushes it off, and scrolling back up hands the pin back -- the Claude Code extension's behaviour,
+  // and its method: pure CSS (main.css, "0.47 pinned prompt"). Each prompt is `position: sticky`
+  // INSIDE its own box (wrapTurn), so the end of that box is what pushes it off, with no scroll
+  // handler. Script only decides what a box holds, keeps a prompt that is too tall for this window
+  // from pinning, takes a click on a prompt back to where it was sent, and keeps keyboard focus out
+  // from under a pinned prompt. Nothing here runs per scroll frame. A long prompt pins folded
+  // ("long prompts" keeps it to five lines); opened, it is read in place and does not pin (CSS).
+  const PIN_GROUND_PX = 28;        // the strip around a pinned bubble: 16px of ground above it, a 12px fade below
+  const PIN_FADE_PX = 12;          // = --sp-3, the fade under the bubble
+  const PIN_SHARE = 0.3;           // a strip taller than this share of the window does not pin
+  const PIN_JUMP_DELAY_MS = 300;   // a single click waits this long for a second one (the reference's 300ms)
+  function fitPin(head, room) {
+    if (head._pinH > 0) head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room);
+  }
+  // Reads no layout: the observer hands over each head's height, kept on the head. The window's height
+  // is the measure, not #log's: a draft growing in the composer must not flip a pin per keystroke.
+  const pinFit = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
+    const room = window.innerHeight * PIN_SHARE;
+    for (const entry of entries) {
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect?.height ?? 0;
+      if (height > 0) entry.target._pinH = height;   // 0: not rendered (agent page, hidden panel); keep the last
+      fitPin(entry.target, room);
+    }
+  }) : null;
+  window.addEventListener("resize", () => {
+    const room = window.innerHeight * PIN_SHARE;
+    for (const head of log.querySelectorAll(".turn > .msg.user.turn-head")) fitPin(head, room);
+  });
+  // Where a head is laid out: the top of its box (it is always the box's first child) plus its own
+  // margin. Its rect says where it is drawn, which while it is pinned is the rest line.
+  function laidOutTop(head) {
+    const box = head.parentElement;
+    if (!box || box.firstElementChild !== head) return head.getBoundingClientRect().top;
+    return box.getBoundingClientRect().top + (parseFloat(getComputedStyle(head).marginTop) || 0);
+  }
+  // Where a pinned head rests: on #log's top padding, where a chat's first prompt sits (Chromium keeps
+  // a sticky edge inside the scroller's padding).
+  function restLine() { return log.getBoundingClientRect().top + (parseFloat(getComputedStyle(log).paddingTop) || 0); }
+  // Drawn below its own place and still over the view. (A turn scrolled wholly past the top leaves its
+  // prompt parked at the end of its box, out of sight: displaced, but covering nothing.)
+  function isPinned(head) {
+    if (!head?.isConnected) return false;
+    const drawn = head.getBoundingClientRect();
+    return drawn.top - laidOutTop(head) > 1 && drawn.bottom > log.getBoundingClientRect().top;
+  }
+  // Back to where a prompt was sent: its own place, on the rest line. A pinned prompt stays where it is
+  // on screen and its answer rewinds under it to the start of the turn. Instant, like the Latest pill,
+  // and a reading gesture like any scroll back: following stops, and the pill offers the end again.
+  function goToPrompt(head) {
+    const delta = laidOutTop(head) - restLine();
+    if (Math.abs(delta) < 2) return false;
+    readingBack(); following = false;
+    log.scrollTop += delta;
+    renderToLatest();
+    return true;
+  }
+  // Focus is never left under a pinned prompt (WCAG 2.2, 2.4.11 Focus Not Obscured): a control in the
+  // same box whose top is under the prompt or its fade is scrolled down out from under it. Only a box's
+  // own prompt can cover it -- the end of a box pushes its prompt off before the next one begins. A
+  // control in the prompt itself is where it should be.
+  function clearOfPin(target) {
+    if (!target?.closest || target.closest(".turn-head")) return;
+    const head = target.closest(".turn")?.querySelector(":scope > .msg.user.turn-head");
+    if (!head || !isPinned(head)) return;
+    const box = target.getBoundingClientRect();
+    // Only what is under the strip. Out of view above it, a control is the browser's to bring in, or was
+    // focused without scrolling, which this must not undo.
+    if (box.bottom <= log.getBoundingClientRect().top) return;
+    const covered = head.getBoundingClientRect().bottom + PIN_FADE_PX - box.top;
+    if (covered > 0) log.scrollTop -= covered;
+  }
+  // A click on a turn's prompt, pinned or not, goes back to where it was sent (the reference does the
+  // same, after the same 300ms). Only a single plain click on the bubble: never one on a link, a chip or
+  // a button, never with a modifier, never the click that clears a selection or that focused the panel,
+  // never a double-click (a word being selected), and never once a selection has been made.
+  let pinJump = 0, pinDown = null;
+  log.addEventListener("pointerdown", () => {
+    const selection = window.getSelection?.();
+    pinDown = { selected: !!selection && !selection.isCollapsed, focused: document.hasFocus?.() !== false };
+  }, { capture: true, passive: true });
+  log.addEventListener("click", (event) => {
+    clearTimeout(pinJump);
+    const down = pinDown;
+    pinDown = null;
+    if (event.button !== 0 || event.detail !== 1 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (down && (down.selected || !down.focused)) return;
+    const bubble = event.target.closest?.(".turn > .msg.user.turn-head > .bubble");
+    if (!bubble || event.target.closest("button, a, input, textarea, select, summary, [role=button], [tabindex]")) return;
+    const head = bubble.parentElement;
+    pinJump = setTimeout(() => {
+      const selection = window.getSelection?.();
+      if ((selection && !selection.isCollapsed) || !head.isConnected) return;
+      goToPrompt(head);
+    }, PIN_JUMP_DELAY_MS);
+  });
+  // Keyboard focus only, decided as the hover labels decide it: a mouse press focuses a button too, and
+  // moving that button would take it out from under the pointer before the click lands. (A control
+  // focused from out of view is the browser's to bring in, after this runs; Chromium centres it.)
+  log.addEventListener("focusin", (event) => {
+    let keyboard = true;
+    try { keyboard = event.target.matches(":focus-visible"); } catch {}
+    if (keyboard) clearOfPin(event.target);
+  });
+  // ---- end 0.47 pinned prompt ----
+
   // ---- turn lifecycle ----
   // Two prompts are "the same" when their opening prose matches; the composer's own bubble may
   // carry attachment chips the backend never echoes, and the backend may expand a template.
@@ -1758,6 +1869,11 @@
   }
   function togglePromptFold(bubble) {
     const open = bubble.dataset.fold !== "open";
+    const row = bubble.parentElement;
+    const head = row?.matches(".turn > .msg.user.turn-head") ? row : null;
+    // A pinned prompt opens in its own place, not grown down over its answer from the top of the view
+    // (0.47 pinned prompt): back to where it was sent first. Open, it does not pin (main.css).
+    if (open && head && isPinned(head)) goToPrompt(head);
     setPromptFold(bubble, open ? "open" : "folded");
     syncPromptLinks(bubble);
     rememberPrompt(bubble, open);
@@ -1765,9 +1881,14 @@
       // Opened, a prompt is being read: a running turn must not scroll() the reader away from it.
       if (!atBottom()) following = false;
     } else {
-      // Folded while read from inside: its top is above the view. Bring it back, 16px clear.
-      const above = bubble.getBoundingClientRect().top - log.getBoundingClientRect().top;
+      // Folded while read from inside: its top is above the view. Bring it back, 16px clear. Read once
+      // folded (the transcript may have got shorter than the view), from where it is laid out: folded, a
+      // turn's prompt pins again, and is drawn on the rest line wherever its own place is.
+      const pinnedBy = head ? head.getBoundingClientRect().top - laidOutTop(head) : 0;
+      const above = bubble.getBoundingClientRect().top - pinnedBy - log.getBoundingClientRect().top;
       if (above < 0) log.scrollTop += above - 16;
+      // A prompt inside a turn whose own prompt is pinned (a steer) comes back below that prompt.
+      if (!head) clearOfPin(row);
     }
     renderToLatest();   // the Latest pill while away; following again once back at the end
   }
@@ -1959,20 +2080,58 @@
     }
     if (restoreFocus) input.focus();
   }
-  function echoPrompt(text) {
+  // The row that heads a turn (0.47 pinned prompt): the one this panel already drew for it, or one
+  // drawn now, or null for a turn with nothing to show.
+  function echoPrompt(text, requestId = "") {
+    // The row drawn for this request -- the composer's, a goal's, an answer to a question, a queued
+    // message put back after a reload -- found by its id whether or not prompt_accepted came first.
+    // It used to be found only as "the last bubble", and only while still pending: turn_start comes
+    // from the backend's worker thread and can beat prompt_accepted, and then the prompt just sent
+    // counted as one still waiting and was moved below its own answer.
+    const own = !replaying && requestId ? sentPromptRow(requestId) : null;
+    if (own) return claimRow(own);
     const parsed = splitPromptMarks(text);
     const body = parsed.text.trim();
-    if (!body && !parsed.attachments.length) return;
+    if (!body && !parsed.attachments.length) return null;
     // The composer renders what the user typed there. A turn begun anywhere else — a slash
     // command, an editor action, a queued follow-up, a retry, the terminal beside us — must
     // still show its prompt, or the transcript reads as answers to questions nobody asked.
-    const last = [...appendTarget.querySelectorAll(".msg.user > .bubble")].at(-1);
-    if (last && sameProse(bubbleProse(last), body)) return;
+    if (!replaying) {
+      // No id: a goal's first turn, /plan /review /init, a custom command, a turn begun elsewhere. Only
+      // a row drawn since the last prompt's box can be this turn's prompt (a box with no prompt in it,
+      // drawn by events that came first, is passed over), and never a queued row: only its own id
+      // claims one of those.
+      const queued = new Set([...queuedPrompts.values()].map((entry) => entry?.node));
+      for (let row = log.lastElementChild; row && !row.matches(".history-pages")
+          && !(row.classList.contains("turn") && row.querySelector(":scope > .turn-head")); row = row.previousElementSibling) {
+        if (row.matches(".msg.user:not(.rejected):not(.unconfirmed)") && !queued.has(row)
+            && sameProse(bubbleProse(row.querySelector(":scope > .bubble")), body)) return claimRow(row);
+      }
+    }
+    // Replay never matches: every saved turn_start is a prompt someone sent, the same words twice
+    // included. (Comparing with the last bubble on the page dropped the second of two.)
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, parsed.text, parsed.attachments);
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
+    return m;
+  }
+  // Top-level only: a row already claimed is inside its turn's box.
+  function sentPromptRow(id) {
+    for (let row = log.lastElementChild; row; row = row.previousElementSibling) {
+      if (row.dataset?.promptId === id && row.matches(".msg.user:not(.rejected):not(.unconfirmed)")) return row;
+    }
+    return null;
+  }
+  // A turn that started proves its prompt was delivered: it is no longer a draft in doubt (persistDraft),
+  // and nothing that arrives for that request later -- a late acknowledgement, a steering update, a
+  // reject -- can relabel, move or reject the prompt heading the turn.
+  function claimRow(row) {
+    for (const [id, entry] of pendingPrompts) {
+      if (entry?.node === row) { pendingPrompts.delete(id); persistDraft(); break; }
+    }
+    return row;
   }
   // A prompt that was queued behind a running turn already has its bubble, drawn when it was sent,
   // below that turn. When its own turn starts, that bubble IS the prompt: echoing the text again
@@ -1986,7 +2145,7 @@
       .filter((other) => other && other.isConnected && other.parentElement === log
         && (other.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
     const first = waiting.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))[0];
-    if (first) first.before(node);
+    if (first) keepingFocus(() => first.before(node));
     const role = node.querySelector(".role");
     if (role && role.textContent.startsWith("you")) role.textContent = "you";
     return node;
@@ -2043,7 +2202,11 @@
     clearInterval(turn.timer);
     clearTimeout(turn.renderTimer);
     turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
+    const box = turn.block.parentElement;
     turn.block.remove();
+    // A box left with no turn in it goes too: its rows are plain rows again, as before it opened. (A
+    // provisional block that joined a prompt's box leaves that box and its prompt as they were.)
+    if (box?.classList.contains("turn") && !box.querySelector(":scope > .msg.dgc")) unwrapTurn(box);
     turn = null;
   }
   function startHintedTurn() {
@@ -2069,11 +2232,13 @@
     t.handoff = hint.handoff;
     renderTurnMeta();
   }
-  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null) {
+  // `requestId`: the id turn_start carries for a prompt someone sent (its row is found by it).
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "") {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
-    let wakeNote = null;
+    // What opens this turn's box (wrapTurn): its prompt row, or the note of a turn nobody typed.
+    let wakeNote = null, head = promptNode;
     // A resumed goal is not something the user just typed. Show it as what it is instead of
     // echoing the objective back into the chat as a fresh prompt. The same holds for a turn the
     // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
@@ -2083,6 +2248,7 @@
         + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
       if (kind === "continue") note.classList.add("continue-note");
       appendTarget.appendChild(note);
+      head = note;
     } else if (kind === "monitor" || kind === "wake") {
       // DGC started this turn because a background monitor printed something, or a detached
       // specialist finished. The label is backend-written, never a "you" bubble.
@@ -2092,9 +2258,9 @@
         + `${icon(kind === "wake" ? "bot" : "activity")}</span>`
         + `<span>${lead} · ${esc(String(prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
-      wakeNote = note;
+      wakeNote = note; head = note;
     } else if (!promptNode) {
-      echoPrompt(prompt);
+      head = echoPrompt(prompt, requestId);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
     block.appendChild(el("div", "role dgc", "DGC"));
@@ -2109,15 +2275,17 @@
     // above the turn, where it happened. The prompts still waiting are the ones that move: back
     // below the running turn, in their order. A turn with no bubble of its own (a queued slash
     // command, echoed above) moves every waiting prompt the same way.
+    // The turn's own prompt is never one of them, even before prompt_accepted has said it started.
     if (!replaying) {
       const anchor = promptNode || block;
       const waiting = [...queuedPrompts.values(), ...pendingPrompts.values()].map((entry) => entry?.node)
-        .filter((node) => node && node !== promptNode && node.isConnected && node.parentElement === log
+        .filter((node) => node && node !== promptNode && node !== head && node.isConnected && node.parentElement === log
           && (promptNode ? (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
             : (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)));
       waiting.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-      for (const node of new Set(waiting)) log.appendChild(node);
+      if (waiting.length) keepingFocus(() => { for (const node of new Set(waiting)) log.appendChild(node); });
     }
+    wrapTurn(head, block);
     // No clock for a replayed turn: the session file does not record when it started, and a
     // fabricated 0s is worse than no number at all.
     const t0 = replaying ? null : Date.now();
@@ -2134,6 +2302,86 @@
       // the "New" pill, like every other event.
       if (following || (kind === "prompt" && !promptNode)) scroll(); else noteNewContent();
     }
+  }
+  // ---- the box a turn goes in (0.47 pinned prompt) ----
+  // A prompt opens a box: its row, then anything the log wrote between that prompt and its turn
+  // starting (where it happened), then the turn's block. The row becomes the box's .turn-head, the
+  // prompt main.css pins. A turn nobody typed -- resumed, continued, a monitor or agent wake, a
+  // handoff, events with no turn_start -- joins the box above it with whatever lies between, so the
+  // prompt it continues stays pinned through it (the reference groups every item that is not a real
+  // prompt into the turn above it, the same way); with no box above, it gets one with nothing to pin.
+  // Live and replayed turns both come through here, so both build the same boxes. A box never holds
+  // another box, never crosses the restored history's container, and never takes in a prompt row
+  // still waiting for its turn. It adds nothing to the layout: a column with #log's own gap.
+  function wrapTurn(head, block) {
+    const parent = block.parentNode;
+    if (!parent) return null;
+    let first = head && head !== block && head.parentNode === parent
+      && (head.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING) ? head : block;
+    const prompt = first !== block && first.matches(".msg.user");
+    let box = null;
+    const place = () => {
+      if (prompt) {
+        // A box drawn between this row and its turn (events that came first) stays above the row.
+        let inner = null;
+        for (let n = first.nextElementSibling; n && n !== block; n = n.nextElementSibling) if (n.classList.contains("turn")) inner = n;
+        if (inner) inner.after(first);
+      } else {
+        for (let n = first.previousElementSibling; n && !n.matches(".history-pages, .history-older, .msg.user:not(.rejected):not(.unconfirmed)"); n = n.previousElementSibling) {
+          if (n.classList.contains("turn")) { box = n; first = n.nextSibling; break; }
+        }
+      }
+      if (!box) { box = el("div", "turn"); parent.insertBefore(box, first); }
+      for (let n = first; n;) { const next = n.nextSibling; box.appendChild(n); if (n === block) break; n = next; }
+    };
+    if (replaying) place(); else keepingFocus(place);
+    if (prompt) {
+      first.classList.add("turn-head");
+      // No longer waiting: what the row said about its wait goes, and live reads as replay does.
+      delete first.dataset.steer;
+      first.querySelector(":scope > .steer-note")?.remove();
+      const role = first.querySelector(":scope > .role");
+      if (role?.textContent.startsWith("you")) role.textContent = "you";
+      pinFit?.observe(first);
+    }
+    return box;
+  }
+  // Moving a node out of the document and back blurs whatever was focused inside it and collapses a
+  // selection that ran through it: both are put back, quietly (no scroll, no hover label).
+  function keepingFocus(move) {
+    const active = log.contains(document.activeElement) ? document.activeElement : null;
+    const selection = window.getSelection?.();
+    const ends = selection?.rangeCount && log.contains(selection.anchorNode) && log.contains(selection.focusNode)
+      ? [selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset] : null;
+    move();
+    if (active?.isConnected && document.activeElement !== active) focusQuietly(active, { preventScroll: true });
+    if (ends && (selection.anchorNode !== ends[0] || selection.anchorOffset !== ends[1]
+        || selection.focusNode !== ends[2] || selection.focusOffset !== ends[3])) {
+      try { selection.setBaseAndExtent(...ends); } catch {}
+    }
+  }
+  function unwrapTurn(box) {
+    const head = box.querySelector(":scope > .msg.user.turn-head");
+    if (head) { head.classList.remove("turn-head", "pin-off"); pinFit?.unobserve(head); }
+    box.replaceWith(...box.childNodes);
+  }
+  // A page of history lands above newer turns, and those may begin with a turn nobody typed: it
+  // continues this page's last prompt, so it joins that box, as one pass over the whole chat would have
+  // drawn it. Layout-neutral: a box's gap is #log's.
+  function joinAcrossPage(lastLanded) {
+    let next = lastLanded?.nextElementSibling;
+    while (next && !next.classList.contains("turn")) next = next.nextElementSibling;
+    if (!next || next.querySelector(":scope > .msg.user.turn-head")) return;
+    let box = null;
+    for (let n = next.previousElementSibling; n && !n.matches(".history-older, .msg.user:not(.rejected):not(.unconfirmed)"); n = n.previousElementSibling) {
+      if (n.classList.contains("turn")) { box = n; break; }
+    }
+    if (!box) return;
+    keepingFocus(() => {
+      while (box.nextSibling !== next) box.appendChild(box.nextSibling);
+      box.append(...next.childNodes);
+      next.remove();
+    });
   }
   // The marker above a wake turn names what woke it. It is drawn from turn_start, which carries
   // only the label, so it said "Woke on monitor" even when the only thing that woke the turn was a
@@ -4116,7 +4364,8 @@
       case "turn_start":
         if (!replaying) { removeRecoveryCards(); liveTurnHint = null; agentsTurnBegin(); }
         startTurn(ev.prompt, ev.kind, ev.turn_id,
-          replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id));
+          replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id),
+          typeof ev.request_id === "string" ? ev.request_id : "");
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         if (!replaying) {
@@ -4945,6 +5194,7 @@
     const selected = attachments.map(({ fromPill, ...rest }) => rest);
     const node = appendGoalPrompt(objective, selected);
     const requestId = `${promptPrefix}-${++promptSequence}`;
+    node.dataset.promptId = requestId;     // which request this row is (echoPrompt finds it by this)
     pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
     const values = key => selected.filter(item => item[key]).map(item => item[key]);
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
@@ -5008,6 +5258,7 @@
     fillUserBubble(bubble, typed, attachments);
     m.appendChild(bubble); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
+    m.dataset.promptId = requestId;        // which request this row is: its turn_start finds it by this
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
     pendingPrompts.set(requestId, { text: pastes.length ? typed : text,
@@ -5859,6 +6110,9 @@
     renderQueued();
     const pending = new Set([...queuedPrompts.values(), ...pendingPrompts.values()].map((e) => e?.node));
     if (turn) dropTurnBlock();
+    // The live turns' boxes first, so the loop below sees the plain rows it always has: the snapshot
+    // replaces their prompts and turns, and keeps the lines and the messages still in doubt.
+    for (const box of [...log.querySelectorAll(":scope > .turn")]) unwrapTurn(box);
     for (const node of [...log.children]) {
       if (node.matches(".msg, .resume-note, .compaction") && !pending.has(node)
           && !node.matches(".rejected, .unconfirmed")) node.remove();
@@ -5994,7 +6248,7 @@
       // DGC keeps it on disk beside the session, so "Show earlier messages" keeps working rather
       // than stopping at the summary with the rest of the conversation sitting unread.
       if (cursor === 0 && recallCursor === 0) older.hidden = true;
-      landed.forEach(settleBlock);
+      landHistory(landed);
       // After the button is gone too: it is above the reader as well, and leaving it out of the
       // measurement moved the page by its height and the gap beneath it.
       log.scrollTop = oldTop + log.scrollHeight - oldHeight;
@@ -6018,22 +6272,28 @@
       recallCursor = Number(ev.before) || 0;
       const rows = Array.isArray(ev.items) ? ev.items : [];
       const frag = document.createDocumentFragment();
+      // Each archived prompt opens a box and pins over the answers that follow it (0.47 pinned prompt),
+      // as wrapTurn boxes a replayed one.
+      let box = null;
       for (const it of rows) {
         if (it.role === "user") {
-          const m = el("div", "msg user hist archived");
+          const m = el("div", "msg user hist archived turn-head");
           m.appendChild(el("div", "role", "you"));
           const parsed = splitPromptMarks(it.text);
           const bubble = el("div", "bubble");
           fillUserBubble(bubble, parsed.text, parsed.attachments);
           m.appendChild(bubble);
-          frag.appendChild(m);
+          box = el("div", "turn");
+          box.appendChild(m);
+          frag.appendChild(box);
+          pinFit?.observe(m);
         } else {
           const m = el("div", "msg dgc hist archived");
           m.appendChild(el("div", "role dgc", "DGC"));
           const text = el("div", "text", md(String(it.text || "")));
           text._markdown = it.text;
           m.appendChild(text);
-          frag.appendChild(m);
+          (box || frag).appendChild(m);
         }
       }
       // The rows and the button's going both happen above what is being read, so both are inside
@@ -6042,9 +6302,20 @@
       const landed = [...frag.children];
       older.after(frag);
       older.hidden = !ev.more;
-      landed.forEach(settleBlock);
+      landHistory(landed);
       log.scrollTop = oldTop + log.scrollHeight - oldHeight;
     };
+    // Rows that just landed above the reader. A newer page that begins with a turn nobody typed
+    // continues this page's last prompt and joins its box (joinAcrossPage); then every row is settled
+    // -- the boxes' rows, not the boxes, so each block is still measured, pinned and skipped off screen
+    // on its own, and each long prompt folded -- before the caller's one measurement keeps the page still.
+    function landHistory(landed) {
+      joinAcrossPage(landed.at(-1));
+      for (const node of landed) {
+        if (node.classList.contains("turn")) [...node.children].forEach(settleBlock);
+        else settleBlock(node);
+      }
+    }
     older.type = "button";
     older.onclick = () => { if (cursor > 0) page(); else askForRecall(); };
     log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
@@ -8170,6 +8441,7 @@
       : opener?.isConnected ? opener : input;
     focusQuietly(target);
     target.scrollIntoView?.({ block: "nearest" });
+    clearOfPin(target);          // "nearest" can leave it under a pinned prompt (0.47 pinned prompt)
   }
   // Stop shows in the viewer exactly while the composer's Send is a Stop. Focus on a Stop that goes
   // away (the turn ended) moves to Close, inside the dialog.
@@ -8201,6 +8473,9 @@
         .find((candidate) => !candidate.disabled && !candidate.closest("[hidden]"));
       (control || node).focus?.();
       node.scrollIntoView?.({ block: "nearest" });
+      // After that scroll, not on focus (which came first): a card taller than the view is aligned
+      // by its top, under a pinned prompt (0.47 pinned prompt).
+      clearOfPin(control || node);
       return true;
     };
     // A docked question takes focus on its highlighted row (the preselected recommendation).
@@ -9085,6 +9360,7 @@
     bubble.appendChild(el("p", "answered-q", esc(ask.question)));
     bubble.appendChild(promptText(text));
     m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    m.dataset.promptId = requestId;
     pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId,
                          answers: [{ ask_id: ask.id, question: ask.question }] });

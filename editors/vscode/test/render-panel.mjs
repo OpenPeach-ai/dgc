@@ -17,6 +17,9 @@
 //   npm run shot -- /tmp/fold.png --long-prompt [--light|--hc|--forced] [--narrow]
 //                                                     a long prompt's fold: rest, -hover, -focus, -open,
 //                                                     -open-scrolled and -images
+//   npm run shot -- /tmp/pin.png --pinned [--light|--hc|--forced] [--narrow]
+//                                                     the pinned prompt: mid-answer, -push, -goal, -folded,
+//                                                     -open, -archived and -tall
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -173,6 +176,152 @@ if (process.argv.includes("--long-prompt")) {
     && report.hover.opacity === "1" && report.focus.opacity === "1" && /prompt-fold/.test(report.focus.focused || "")
     && report.open.fold === "open" && report.openScrolled.fold === "open" && report.openScrolled.latest
     && report.openScrolled.pillFromLogBottom >= 36 && report.images.fold === "folded" && report.images.tiles === 2;
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
+}
+if (process.argv.includes("--pinned")) {
+  // The pinned prompt's faces: <out>.png a prompt pinned mid-answer, -push (the next prompt pushing it
+  // off), -goal (a goal prompt with its rail, pinned through a resumed cycle), -folded (a long prompt
+  // pinned at its five lines), -open (an opened prompt reading down, its Show less stuck at the bottom
+  // while the prompt above is pinned), -archived (an archived prompt pinned over its answer) and -tall
+  // (a prompt with an image too tall for a 500px window: not pinned). Dark Modern by default; --light,
+  // --hc or --forced; --narrow renders 320px. Look for text bleeding through the strip, the fade, the
+  // bubble's alignment. Prints what each face measured; exits non-zero if one is not what it should be.
+  //   npm run shot -- /tmp/pin.png --pinned [--light|--hc|--forced] [--narrow]
+  const { THEMES } = await import("./support/options-scene.mjs");
+  await page.close();
+  const out = process.argv[2] || "/tmp/pin.png";
+  const shot = (suffix) => out.replace(/\.png$/, "") + suffix + ".png";
+  const width = process.argv.includes("--narrow") ? 320 : 460;
+  const theme = process.argv.includes("--light") ? "light-modern" : process.argv.includes("--hc") ? "hc" : "dark-modern";
+  const forced = process.argv.includes("--forced");
+  const PROSE = (n) => `Answer ${n}. ` + "Writes go to a temp file and are renamed into place, so a sleep mid-write leaves the old copy whole. ".repeat(9);
+  const LONG = Array.from({ length: 30 }, (_, i) => `${i + 1}. A requirement from the pasted spec, one per line.`).join("\n");
+  const turn = (id, prompt, answer = PROSE(id), kind = "prompt") => [
+    { type: "turn_start", turn_id: id, prompt, kind }, { type: "text_delta", text: answer },
+    { type: "stream_end", message_id: `${id}:1`, phase: "answer" },
+    { type: "turn_end", turn_id: id, reason: "completed", token_estimate: 0, final_message_id: `${id}:1` }];
+  async function scene(height = 760) {
+    const p = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, forcedColors: forced ? "active" : "none" });
+    await p.setContent(html, { waitUntil: "load" });
+    await p.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }
+      body { background: var(--bg); color: var(--text); }` });
+    await p.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
+    await p.evaluate(([mjs, mdjs]) => {
+      window.__dgcPosts = [];
+      window.acquireVsCodeApi = () => ({ postMessage(m) { window.__dgcPosts.push(m); }, getState: () => undefined, setState() {} });
+      eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+      eval(mjs);
+    }, [mainJs, markdownJs]);
+    const post = (data) => p.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
+    await post({ type: "session_ready", sessionId: "s1" });
+    await post({ type: "event", event: { type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", commands: [],
+      custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" } });
+    const events = async (list) => { for (const event of list) await post({ type: "event", event }); };
+    const settle = () => p.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 200)))));
+    // Scroll the way a reader does, so `index`'s block has `y` px of it above the view.
+    const into = (index, y) => p.evaluate(async ([i, by]) => {
+      const log = document.getElementById("log"), block = [...log.querySelectorAll(".turn > .msg.dgc")][i];
+      log.dispatchEvent(new WheelEvent("wheel"));
+      log.scrollTop += block.getBoundingClientRect().top - log.getBoundingClientRect().top + by;
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    }, [index, y]);
+    // Which prompt is pinned, how far down it rests, and how tall its strip is.
+    const face = () => p.evaluate(() => {
+      const log = document.getElementById("log"), view = log.getBoundingClientRect();
+      const pinned = [...log.querySelectorAll(".turn > .msg.user.turn-head")].filter((h) => {
+        const box = h.parentElement.getBoundingClientRect(), r = h.getBoundingClientRect();
+        return r.top - (box.top + parseFloat(getComputedStyle(h).marginTop)) > 1 && r.bottom > view.top;
+      });
+      const h = pinned[0];
+      return { pinned: pinned.map((n) => n.querySelector(".bubble").textContent.slice(0, 30)),
+        rest: h ? Math.round(h.getBoundingClientRect().top - view.top) : null, height: h ? Math.round(h.getBoundingClientRect().height) : null };
+    });
+    return { p, post, events, settle, into, face };
+  }
+  const report = {};
+  const a = await scene();
+  await a.events([...turn("t0", "Why does settings sync lose a change when the laptop sleeps?"), ...turn("t1", "Make the write atomic, and keep the last good copy."),
+    ...turn("t2", "Now add a test that kills the process mid-write."), ...turn("t3", "Thanks")]);
+  await a.settle();
+  await a.into(1, 180);
+  report.pinned = await a.face();
+  await a.p.mouse.move(1, 1);
+  await a.p.screenshot({ path: out });
+  await a.p.evaluate(async () => {
+    const log = document.getElementById("log"), box = [...log.querySelectorAll(":scope > .turn")][2];
+    log.dispatchEvent(new WheelEvent("wheel"));
+    log.scrollTop += box.getBoundingClientRect().top - log.getBoundingClientRect().top - 44;   // its prompt 52px down
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  });
+  report.push = await a.face();
+  await a.p.screenshot({ path: shot("-push") });
+  await a.p.close();
+
+  const g = await scene();
+  await g.p.evaluate(() => {
+    const input = document.getElementById("input");
+    input.value = "/goal Make settings sync survive a sleep mid-write"; input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  const goalId = await g.p.evaluate(() => window.__dgcPosts.filter((m) => m.type === "startGoal").at(-1)?.requestId);
+  await g.events([{ type: "prompt_accepted", request_id: goalId, state: "started" }, ...turn("g1", "Make settings sync survive a sleep mid-write"),
+    ...turn("g2", "Make settings sync survive a sleep mid-write", PROSE("g2"), "resume"), ...turn("g3", "Thanks")]);
+  await g.settle();
+  await g.into(1, 200);
+  report.goal = await g.face();
+  await g.p.screenshot({ path: shot("-goal") });
+  await g.p.close();
+
+  const f = await scene();
+  await f.events([...turn("f0", "Summarise the spec before you start."), ...turn("f1", LONG), ...turn("f2", "Thanks")]);
+  await f.settle();
+  await f.into(1, 160);
+  await f.p.mouse.move(1, 1);
+  report.folded = await f.face();
+  await f.p.screenshot({ path: shot("-folded") });
+  await f.p.hover(".turn-head:has(.prompt-fold) > .bubble");
+  await f.p.click(".turn-head:has(.prompt-fold) .prompt-fold");
+  await f.p.evaluate(async () => {
+    const log = document.getElementById("log"), head = document.querySelector(".turn-head:has(.prompt-fold)");
+    log.dispatchEvent(new WheelEvent("wheel"));
+    log.scrollTop += head.getBoundingClientRect().top - log.getBoundingClientRect().top - 260;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  });
+  await f.p.mouse.move(1, 1);
+  report.open = { ...(await f.face()), fold: await f.p.evaluate(() => document.querySelector(".turn-head:has(.prompt-fold) > .bubble").dataset.fold) };
+  await f.p.screenshot({ path: shot("-open") });
+  await f.p.close();
+
+  const r = await scene();
+  await r.events([{ type: "history", items: turn("h1", "Live question"), todos: [] }]);
+  await r.events([{ type: "recall", before: 0, more: false, items: [{ role: "user", text: "An archived question about the sync format" },
+    { role: "assistant", text: PROSE("a1") }, { role: "assistant", text: PROSE("a2") }] }]);
+  await r.settle();
+  await r.p.evaluate(async () => {
+    const log = document.getElementById("log"), block = log.querySelector(".msg.dgc.archived");
+    log.dispatchEvent(new WheelEvent("wheel"));
+    log.scrollTop += block.getBoundingClientRect().top - log.getBoundingClientRect().top + 160;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  });
+  report.archived = await r.face();
+  await r.p.screenshot({ path: shot("-archived") });
+  await r.p.close();
+
+  const t = await scene(500);
+  await t.events([...turn("x0", "Earlier question"), ...turn("x1", "📷 What is wrong with this screenshot?"), ...turn("x2", "Thanks")]);
+  await t.settle();
+  await t.into(1, 160);
+  report.tall = { ...(await t.face()), off: await t.p.evaluate(() => [...document.querySelectorAll(".turn-head")][1].classList.contains("pin-off")) };
+  await t.p.screenshot({ path: shot("-tall") });
+  await t.p.close();
+
+  console.log(JSON.stringify({ theme, forced, width, ...report }, null, 1));
+  const rests = (f0) => f0.pinned.length === 1 && Math.abs(f0.rest - 16) <= 1;
+  const ok = rests(report.pinned) && /^Make the write/.test(report.pinned.pinned[0]) && report.push.pinned.length === 1 && report.push.rest < 0
+    && rests(report.goal) && /^Make settings/.test(report.goal.pinned[0]) && rests(report.folded) && /^1\. A requirement/.test(report.folded.pinned[0])
+    && report.open.fold === "open" && rests(report.open) && /^Summarise/.test(report.open.pinned[0])
+    && rests(report.archived) && /^An archived/.test(report.archived.pinned[0]) && report.tall.off && report.tall.pinned.length === 0;
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);
 }

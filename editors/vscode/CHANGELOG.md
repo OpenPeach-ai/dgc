@@ -54,6 +54,19 @@
   show in full, and Run again, Edit and Restore still use the whole message. Opening one while DGC
   is still answering keeps you where you are; **Latest** takes you back to the end. A message you
   opened stays open when you switch chats and come back.
+- The message you sent stays at the top of the chat while you read DGC's answer to it, as in Claude
+  Code. The next message takes its place, and scrolling back up brings the earlier one back. A long
+  message stays there folded to its first five lines; one you opened with **Show more** scrolls
+  with the answer instead. A message too tall to keep there in a short window (one with a
+  screenshot, say) scrolls as before. Turns DGC starts on its own (a monitor or agent waking it, a
+  resumed goal, a continued turn) keep the message they continue at the top. Click a message to go
+  back to where you sent it. Tabbing to something behind it brings that into view below it.
+- A message whose turn started before DGC confirmed receiving it is no longer drawn below its own
+  answer, and a queued message drops its "queued for the next turn" line once its turn starts.
+- A chat opened from its history shows a message you sent twice in a row (such as "continue")
+  twice, as you sent it; only one used to show.
+- **Latest** goes all the way to the end of the chat. It used to stop about 15 pixels short until
+  the next line arrived.
 - Requires CLI 0.47.0; editor protocol v14.
 
 ## 0.31.4 — 2026-09-30

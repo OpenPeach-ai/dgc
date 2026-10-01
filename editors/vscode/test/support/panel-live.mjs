@@ -292,8 +292,9 @@ export async function panelSession({ browser, python, model, name, config = {}, 
   return s;
 }
 
-/** What the transcript shows, in order: users (with their role label), DGC blocks, system lines. */
-export const transcript = (page) => page.evaluate(() => [...document.querySelectorAll("#log .msg.user, #log .msg.dgc, #log > .sys, #log .hist > .sys")]
+/** What the transcript shows, in order: users (with their role label), DGC blocks, system lines --
+ *  a line can sit inside a turn's box (0.47 pinned prompt), between that prompt and its answer. */
+export const transcript = (page) => page.evaluate(() => [...document.querySelectorAll("#log .msg.user, #log .msg.dgc, #log > .sys, #log .hist > .sys, #log .turn > .sys")]
   .map((node) => node.matches(".msg.user")
     ? `${node.querySelector(".role")?.textContent}: ${node.querySelector(".bubble")?.textContent}`
       + ([...node.querySelectorAll("button")].map((b) => ` [${b.textContent}]`).join(""))

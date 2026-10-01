@@ -333,9 +333,11 @@ test("a fold is decided again at a new width, without moving the reader", async 
     await s.settle();
     await s.page.setViewportSize({ width: 300, height: 900 });
     await s.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    // Never a turn's prompt: pinned, it stays where it is drawn whatever moves under it (0.47 pinned
+    // prompt), and the check below would pass however far the page jumped.
     const before = await s.page.evaluate(() => {
       const log = document.getElementById("log"), top = log.getBoundingClientRect().top;
-      const blocks = [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg"));
+      const blocks = [...log.querySelectorAll(".msg")].filter((n) => !n.parentElement.closest(".msg") && !n.classList.contains("turn-head"));
       const index = blocks.findIndex((n) => n.getBoundingClientRect().bottom > top);
       return { index, top: blocks[index].getBoundingClientRect().top };
     });
@@ -345,7 +347,7 @@ test("a fold is decided again at a new width, without moving the reader", async 
     await s.settle(60);
     assert.ok((await foldOf()).every((state) => state === "folded"), `at 300px every one folds (${await foldOf()})`);
     const after = await s.page.evaluate((index) => [...document.getElementById("log").querySelectorAll(".msg")]
-      .filter((n) => !n.parentElement.closest(".msg"))[index].getBoundingClientRect().top, before.index);
+      .filter((n) => !n.parentElement.closest(".msg") && !n.classList.contains("turn-head"))[index].getBoundingClientRect().top, before.index);
     assert.ok(Math.abs(after - before.top) <= 2, `the block being read moved ${Math.round(after - before.top)}px as the folds came`);
     await s.page.setViewportSize({ width: 900, height: 900 });
     await until("none");

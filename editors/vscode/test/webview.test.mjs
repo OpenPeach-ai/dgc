@@ -947,7 +947,8 @@ test("a restored session replays into real turns, pages by turn, and keeps live 
   assert.equal(pages.querySelectorAll(".msg.dgc .thinking.done").length, 7, "every restored turn is closed");
   assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/,
     "the live turn keeps streaming below the restored transcript");
-  assert.match(doc.querySelector("#log > .msg.dgc:not(.hist) .text").textContent, /^Live response/);
+  // In its own box (0.47 pinned prompt), after the history container, never inside it.
+  assert.match(doc.querySelector("#log > .turn > .msg.dgc:not(.hist) .text").textContent, /^Live response/);
   // One block per turn, built by the live builders: real tool cards, escaped output, no prose dump.
   const block = [...pages.querySelectorAll(".msg.dgc")].at(-1);   // the newest restored turn
   assert.equal(pages.querySelectorAll(".history-tool, .nm, .history-tools").length, 0,
@@ -3649,8 +3650,9 @@ test("each queued message is one bubble: its queued bubble becomes its turn's pr
   const second = queueAnother("Then update the changelog");
   const third = queueAnother("Then tag the release");
   const log = h.doc.getElementById("log");
-  const transcript = () => [...log.children]
-    .filter((n) => n.matches(".msg.user, .msg.dgc"))
+  // Every top-level block in order, whether a turn's box holds it (0.47 pinned prompt) or not.
+  const transcript = () => [...log.querySelectorAll(".msg.user, .msg.dgc")]
+    .filter((n) => !n.parentElement.closest(".msg"))
     .map((n) => n.matches(".msg.dgc") ? "DGC"
       : `${n.querySelector(".role").textContent}: ${n.querySelector(".bubble").textContent}`);
   assert.deepEqual(transcript(), ["you: Install the dependencies", "DGC",

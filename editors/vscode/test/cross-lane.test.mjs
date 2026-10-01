@@ -72,7 +72,9 @@ test("300px: a reconnect line and an inline summary each end a tool group; Escap
   const { page, errors } = await openCrossLane(browser, { width: 300, height: 760, scenario: "transcript" });
   try {
     const order = await page.evaluate(() => {
-      const block = document.querySelector("#log .turn:last-of-type") || document.getElementById("log");
+      // The newest turn's box (0.47 pinned prompt). `:last-of-type` goes by tag, not class: any div
+      // after the box -- a line, a waiting prompt -- would make it match nothing.
+      const block = [...document.querySelectorAll("#log .turn")].at(-1) || document.getElementById("log");
       const kinds = [];
       for (const node of block.querySelectorAll(".tool-group, .model-retry, .thought-note")) {
         if (node.classList.contains("agent-owned")) continue;
