@@ -2405,6 +2405,17 @@ def _subcommand_help(name: str) -> int:
     return 0
 
 
+
+def _serve_config() -> Config:
+    """The config `dgc serve` runs on. An SDK app's isolated session runs in the mode the app asked
+    for, as a mode named with `dgc --mode` does: reopening a transcript never lowers it. Published
+    SDK 0.6.9 cannot correct a restored mode after a resume (0.6.10 sends set_mode), so on CLI 0.47.0
+    its sessions ran in whatever lower mode the transcript was saved in."""
+    config = Config()
+    if os.environ.get("DGC_SDK_ISOLATED") == "1":
+        config.mode_explicit = True
+    return config
+
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     # A dgc started from a versioned install marks its version as in use, so an update's
@@ -2495,7 +2506,7 @@ def main(argv: list[str] | None = None) -> int | None:
             # headless JSON backend for editor front-ends — stdout is protocol-only,
             # so this returns before the banner / update-check ever run.
             from .headless import serve
-            serve(Config()); return
+            serve(_serve_config()); return
         if raw_argv[0] == "acp":
             # Agent Client Protocol (JSON-RPC over stdio) for Zed/JetBrains/Neovim/Emacs.
             from .acp import serve as acp_serve

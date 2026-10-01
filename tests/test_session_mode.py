@@ -159,6 +159,41 @@ class SessionModeTest(unittest.TestCase):
         self.assertEqual([e["mode"] for e in changed], ["plan"], events)
 
 
+    def test_a_reopened_chats_mode_change_follows_its_replay(self):
+        # Published SDK 0.6.9 drains a resume's replay until the first event it does not count as
+        # replay. mode_changed was not one, and sent first it put the whole history, agents,
+        # context and goal into the app's first stream(). It comes after them now.
+        from types import SimpleNamespace
+        from dgc import headless
+        path = self.saved_in("plan")
+        backend = object.__new__(headless.Backend)
+        events = []
+        backend.em = SimpleNamespace(emit=lambda event_type, **fields: events.append({"type": event_type, **fields}))
+        backend._busy = lambda: False
+        backend.agent = self.agent()
+        backend.config = backend.agent.config
+        backend.workspace_trusted = True
+        for name, kind in (("_emit_history", "history"), ("_emit_agents", "agents"),
+                           ("_emit_context", "context"), ("_emit_goal", "goal_changed"),
+                           ("_emit_monitors", "monitors")):
+            setattr(backend, name, lambda *args, _kind=kind, **kwargs: events.append({"type": _kind}))
+        backend._dispatch({"type": "resume_session", "path": path.name, "request_id": "r1"})
+        kinds = [event["type"] for event in events]
+        self.assertIn("mode_changed", kinds, events)
+        self.assertEqual(kinds[-1], "mode_changed", kinds)
+
+    def test_an_sdk_apps_session_runs_in_the_mode_the_app_asked_for(self):
+        # SDK 0.6.9 cannot correct a mode a reopen restored (0.6.10 sends set_mode afterwards), so
+        # an isolated SDK session takes its configured mode as named, the way `dgc --mode` does.
+        import os
+        from dgc import cli
+        with patch.dict(os.environ, {"DGC_SDK_ISOLATED": "1"}):
+            self.assertTrue(cli._serve_config().mode_explicit)
+        with patch.dict(os.environ, {}):
+            os.environ.pop("DGC_SDK_ISOLATED", None)
+            self.assertFalse(cli._serve_config().mode_explicit,
+                             "an editor's dgc serve still reopens chats in the mode they ran in")
+
     # ---- never more than the mode it replaces -------------------------------------------------
 
     def test_a_reopened_chat_never_asks_less_than_the_mode_it_replaces(self):

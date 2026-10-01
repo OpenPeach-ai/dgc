@@ -4915,7 +4915,6 @@ class Backend:
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
-                self._emit_mode_if_changed(mode_before)
                 self._emit_history()
                 self._emit_agents()
                 self._emit_context()
@@ -4924,6 +4923,10 @@ class Backend:
                 if note:
                     self.em.emit("info", message=note)
                 self._emit_monitors()
+                # After the replay, not before it: published SDK 0.6.9 drains a resume's replay
+                # until the first event it does not know as one, and mode_changed is new to a
+                # resume -- sent first, the whole history landed in the app's first stream().
+                self._emit_mode_if_changed(mode_before)
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
