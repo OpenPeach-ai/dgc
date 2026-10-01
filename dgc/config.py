@@ -634,6 +634,15 @@ def find_project_root(start: Path | None = None) -> Path:
     return p
 
 
+def _policy_strips_allow() -> bool:
+    """Whether the launching process reviews commands itself (an SDK RuntimePolicy with
+    project_allow=False, or an invalid policy). Stored and workspace allow rules then pre-approve
+    nothing: only the callback's own "always" answers in this session may."""
+    from .permissions import session_policy
+    policy = session_policy()
+    return policy is not None and bool(policy.error or not policy.project_allow)
+
+
 class Config:
     def __init__(self, project_root: Path | None = None):
         self.project_root = project_root or find_project_root()
@@ -935,9 +944,7 @@ class Config:
         # rules pre-approve a command — only its callback's runtime "always" answers may. This is
         # what makes the RuntimePolicy promise hold under inherit_user_state=True, where these
         # rules come from the real ~/.dgc. Ask/deny (which only tighten) are kept.
-        from .permissions import session_policy as _session_policy
-        _policy = _session_policy()
-        if _policy is not None and (_policy.error or not _policy.project_allow):
+        if _policy_strips_allow():
             self.permissions["allow"] = []
         # Project-local permission rules load ONLY once the directory is trusted. Loading them
         # first and asking afterwards meant a cloned repository's `.dgc/permissions.json` was in
@@ -969,7 +976,7 @@ class Config:
     def _rebaseline(self) -> None:
         import copy
         self._baseline_data = copy.deepcopy(self.data)
-        self._baseline_permissions = copy.deepcopy(self.permissions)
+        self._baseline_permissions = copy.deepcopy(self.user_permissions())
 
     def mark_ephemeral(self, *keys: str) -> None:
         """Hold these settings for THIS process only; no save may write them.
@@ -996,7 +1003,7 @@ class Config:
         removed: dict[str, list[str]] = {}
         for action in ("allow", "ask", "deny"):
             was = list(base_perms.get(action, []))
-            now = list(self.permissions.get(action, []))
+            now = list(self.user_permissions().get(action, []))
             added[action] = [r for r in now if r not in was]
             removed[action] = [r for r in was if r not in now]
         return changed, {"added": added, "removed": removed}, dropped
@@ -1021,23 +1028,55 @@ class Config:
             return False
         merged = False
         actions = ("allow", "ask", "deny")
-        from .permissions import session_policy
-        policy = session_policy()
-        if policy is not None and (policy.error or not policy.project_allow):
+        if _policy_strips_allow():
             # The process that launched this session reviews commands itself (the SDK with a
             # RuntimePolicy): rules the workspace brings may narrow what runs, not pre-approve it.
             actions = ("ask", "deny")
+        contributed = self.__dict__.setdefault("_project_rules", {"allow": [], "ask": [], "deny": []})
         for action in actions:
             rules = pp.get(action, [])
             if isinstance(rules, list) and rules:
-                self.permissions[action] += [str(rule) for rule in rules]
+                added = [str(rule) for rule in rules]
+                self.permissions[action] += added
+                contributed[action] += added
                 merged = True
-        # These are workspace rules and are "never persisted back" -- so they must not read as
-        # rules THIS process added, or the next save would write them into the user's own config.
-        if merged and getattr(self, "_baseline_permissions", None) is not None:
-            import copy
-            self._baseline_permissions = copy.deepcopy(self.permissions)
+        # Workspace rules are live for THIS project and never persisted. They are recorded rather
+        # than folded into the baseline, because save() needs them in two places: subtracted from
+        # what it writes, and put back after it rebuilds the live set from disk. See save().
         return merged
+
+    def _project_contribution(self) -> dict:
+        """The trusted project's rules that are still live, forgetting any the user removed.
+
+        The editor lists project and user rules together, so a project rule can be removed like
+        any other. It stays removed for this session (there is nothing to write: it was never in
+        the user's config) and returns with the project's file next session. Without this, save()
+        put it straight back from the record, and removing a project's `allow` did nothing.
+        """
+        recorded = getattr(self, "_project_rules", None) or {}
+        for action, rules in recorded.items():
+            live = list(self.permissions.get(action, []))
+            kept = []
+            for rule in rules:
+                if rule in live:
+                    live.remove(rule)
+                    kept.append(rule)
+            rules[:] = kept
+        return recorded
+
+    def user_permissions(self) -> dict:
+        """The live rules minus what the trusted project contributes: the user's own, which save()
+        may write.
+
+        One occurrence is removed per contributed rule, so a user rule that happens to equal a
+        project rule survives: the live list holds it twice, and only the project's copy goes.
+        """
+        user = {a: list(self.permissions.get(a, [])) for a in ("allow", "ask", "deny")}
+        for action, rules in self._project_contribution().items():
+            for rule in rules:
+                if rule in user.get(action, []):
+                    user[action].remove(rule)
+        return user
 
     def save(self) -> None:
         if not self._persist:
@@ -1056,7 +1095,10 @@ class Config:
                 payload = {k: (DEFAULTS[k] if k in ephemeral and k in DEFAULTS else v)
                            for k, v in self.data.items()
                            if k not in SECRET_KEYS and not (k in ephemeral and k not in DEFAULTS)}
-                payload["permissions"] = self.permissions
+                # NOT self.permissions: on every new install the first save wrote a trusted project's
+                # rules into the global file, and every other project -- untrusted ones included --
+                # then inherited them. A project's `allow` became a global allow.
+                payload["permissions"] = self.user_permissions()
             else:
                 payload = {k: v for k, v in on_disk.items() if k != "permissions"}
                 for key in dropped:
@@ -1084,7 +1126,24 @@ class Config:
                     if (key != "permissions" and key not in changed
                             and key not in ephemeral and key not in self._env_secret_keys):
                         self.data[key] = value
-                self.permissions = {a: list(merged[a]) for a in merged}
+                own_allow = self.user_permissions()["allow"]
+                contributed = {a: list(r) for a, r in self._project_contribution().items()}
+                # In place, never rebound: clone_for_root() hands every running sub-agent THIS dict so
+                # that a rule the user adds mid-run reaches it. Rebinding cut them all off at the
+                # first save, and a deny added afterwards never reached a sub-agent running in auto.
+                for action in ("allow", "ask", "deny"):
+                    self.permissions[action] = list(merged[action])
+                # The disk never holds project rules, so a live set rebuilt from it had silently lost
+                # them: one unrelated save -- changing the model -- and a trusted project's `deny`
+                # stopped applying. Fails OPEN. Put back exactly what the project contributed.
+                for action, rules in contributed.items():
+                    self.permissions[action].extend(rules)
+                if _policy_strips_allow():
+                    # The user's stored allow rules were stripped at load because the launcher
+                    # reviews commands itself. The rebuild from disk re-armed every one of them, and
+                    # the callback's own first "always" answer is a save. Keep what THIS process
+                    # approved, nothing else.
+                    self.permissions["allow"] = own_allow
             _write_private_json(USER_CONFIG, payload)
             self._rebaseline()
         # Environment-provided credentials are ephemeral references. A harmless settings change

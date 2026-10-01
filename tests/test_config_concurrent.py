@@ -107,6 +107,144 @@ class ConcurrentConfigTest(unittest.TestCase):
         self.assertNotIn("Bash(make)", self.disk()["permissions"]["allow"],
                          "a workspace rule was written into the user's config")
 
+    # ---- project rules: live for THEIR project, never persisted, never inherited ---------------
+    #
+    # Both halves of this were broken in shipped 0.46.4, in opposite directions, and the test above
+    # missed both: its fixture always pre-creates config.json (so only the second save() branch ran),
+    # and it checked that the rule was not PERSISTED -- a symptom -- never that it was still IN EFFECT
+    # after the save. Reproduced before fixing:
+    #   first save on a machine : a trusted project's allow AND deny were written into the global
+    #                             config, so ANOTHER, untrusted project then inherited the allow
+    #   every later save        : the project's deny silently left the live engine (fails open)
+
+    def _project_with_rules(self):
+        project = self.home / "proj"
+        (project / ".dgc").mkdir(parents=True, exist_ok=True)
+        (project / ".dgc" / "permissions.json").write_text(
+            json.dumps({"deny": ["Bash(rm -rf *)"], "allow": ["Bash(curl *)"]}))
+        cfg = self.C.Config(project_root=project)
+        cfg._project_permissions_applied = False
+        self.assertTrue(cfg.apply_project_permissions(), "premise: the project rules were applied")
+        return cfg
+
+    def _decide(self, cfg, command, mode="default"):
+        from dgc.permissions import PermissionEngine
+        rules = {a: list(cfg.permissions.get(a, [])) for a in ("allow", "ask", "deny")}
+        return PermissionEngine(mode, rules, cfg.project_root).decide("bash", {"command": command})[0]
+
+    def _check_invariant(self, cfg):
+        cfg.set("model", "an-unrelated-change")        # any save, of anything
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny",
+                         "the project's deny stopped applying after an unrelated save (fails OPEN)")
+        self.assertEqual(self._decide(cfg, "curl https://x"), "allow",
+                         "the project's allow stopped applying after an unrelated save")
+        on_disk = self.disk().get("permissions", {})
+        self.assertNotIn("Bash(rm -rf *)", on_disk.get("deny", []), "project deny leaked into the user's config")
+        self.assertNotIn("Bash(curl *)", on_disk.get("allow", []), "project allow leaked into the user's config")
+        other = self.home / "unrelated"
+        other.mkdir(exist_ok=True)
+        stranger = self.C.Config(project_root=other)
+        self.assertEqual(self._decide(stranger, "curl https://x"), "ask",
+                         "a DIFFERENT project inherited another project's allow")
+        # and it survives a second save too
+        cfg.set("thinking", "high")
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny")
+        self.assertNotIn("Bash(rm -rf *)", self.disk().get("permissions", {}).get("deny", []))
+
+    def test_project_rules_hold_on_an_existing_install(self):
+        self._check_invariant(self._project_with_rules())
+
+    def test_project_rules_hold_on_the_first_save_of_a_new_install(self):
+        self.path.unlink()                              # every new install starts here
+        self._check_invariant(self._project_with_rules())
+
+    def test_a_user_rule_that_matches_a_project_rule_is_still_saved(self):
+        """Subtracting the project's rules must not take the user's own identical rule with it."""
+        cfg = self._project_with_rules()
+        cfg.permissions["deny"].append("Bash(rm -rf *)")   # the user ALSO denies it, globally
+        cfg.set("model", "x")
+        self.assertIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"],
+                      "the user's own rule was dropped because a project shares it")
+
+    def test_the_editor_saves_a_user_rule_that_a_project_also_has(self):
+        """The add command deduped against the LIVE list, where the project's copy already sat, so
+        a deny the user added for every project applied only inside this one."""
+        from types import SimpleNamespace
+        from dgc.headless import Backend
+        cfg = self._project_with_rules()
+        events = []
+        backend = object.__new__(Backend)
+        backend.config = cfg
+        backend.em = SimpleNamespace(emit=lambda kind, **kw: events.append({"type": kind, **kw}))
+        backend._busy = lambda: False
+        backend._dispatch({"type": "add_permission_rule", "request_id": "r1",
+                           "action": "deny", "rule": "Bash(rm -rf *)"})
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        self.assertEqual(self._decide(self.C.Config(project_root=elsewhere), "rm -rf build", mode="auto"),
+                         "deny", "the user's deny was never saved, so other projects run it")
+        listing = [item for item in events[-1]["items"] if item["rule"] == "Bash(rm -rf *)"]
+        self.assertEqual(listing, [{"action": "deny", "rule": "Bash(rm -rf *)"}],
+                         "one rule to the reader, though it is live twice")
+
+    def test_a_project_rule_the_user_removes_stays_removed(self):
+        """The editor lists project rules beside the user's; its remove drops every live copy."""
+        cfg = self._project_with_rules()
+        cfg.permissions["allow"] = [r for r in cfg.permissions["allow"] if r != "Bash(curl *)"]
+        cfg.save()
+        self.assertEqual(self._decide(cfg, "curl https://x"), "ask",
+                         "save() put back a project allow the user had just removed")
+        cfg.set("model", "again")
+        self.assertEqual(self._decide(cfg, "curl https://x"), "ask", "...or at the next save")
+        self.assertEqual(self._decide(cfg, "rm -rf build", mode="auto"), "deny",
+                         "the project's other rules still apply")
+        fresh = self.C.Config(project_root=cfg.project_root)
+        fresh._project_permissions_applied = False
+        fresh.apply_project_permissions()
+        self.assertEqual(self._decide(fresh, "curl https://x"), "allow",
+                         "the removal was this session's; the project's file still says allow")
+
+    def test_removing_a_rule_that_both_hold_removes_it(self):
+        cfg = self._project_with_rules()
+        cfg.permissions["deny"].append("Bash(rm -rf *)")       # the user's own copy as well
+        cfg.save()
+        cfg.permissions["deny"] = [r for r in cfg.permissions["deny"] if r != "Bash(rm -rf *)"]
+        cfg.save()
+        self.assertNotIn("Bash(rm -rf *)", self.disk()["permissions"]["deny"])
+        self.assertEqual(self._decide(cfg, "rm -rf build"), "ask")
+
+    def test_the_sdk_policy_keeps_stored_allow_rules_out_after_a_save(self):
+        """An SDK RuntimePolicy with project_allow=False strips the user's stored allow rules at
+        load: only its callback's own "always" answers may pre-approve. That answer is itself a
+        save, and the rebuild from disk re-armed every stored allow."""
+        self.path.write_text(json.dumps({"model": "start", "permissions":
+                                         {"allow": ["Bash(curl *)"], "ask": [], "deny": []}}))
+        os.environ["DGC_SESSION_POLICY"] = json.dumps({"version": 1, "project_allow": False})
+        self.addCleanup(os.environ.pop, "DGC_SESSION_POLICY", None)
+        work = self.home / "work"
+        work.mkdir()
+        cfg = self.C.Config(project_root=work)
+        self.assertEqual(self._decide(cfg, "curl https://x"), "ask", "premise: stripped at load")
+        cfg.permissions["allow"].append("Bash(ls)")          # the callback answered "always"
+        cfg.save()
+        self.assertEqual(self._decide(cfg, "curl https://x"), "ask",
+                         "a save re-armed an allow rule the session policy had stripped (fails OPEN)")
+        self.assertEqual(self._decide(cfg, "ls"), "allow", "the callback's own answer still holds")
+        self.assertIn("Bash(curl *)", self.disk()["permissions"]["allow"],
+                      "the user's stored rule is left alone on disk")
+
+    def test_a_deny_added_after_a_save_reaches_a_running_subagent(self):
+        """clone_for_root() shares the parent's rules dict with every sub-agent; save() replaced it."""
+        work = self.home / "w"
+        work.mkdir()
+        parent = self.C.Config(project_root=work)
+        child = parent.clone_for_root(self.home / "worktree")
+        parent.set("model", "anything")                       # any save at all, first
+        parent.permissions["deny"].append("Bash(rm -rf *)")   # then the user denies, mid-run
+        parent.save()
+        self.assertEqual(self._decide(child, "rm -rf build", mode="auto"), "deny",
+                         "a sub-agent running in auto never saw the deny the user just added")
+
     # ---- the file itself ----------------------------------------------------------------------
 
     def test_a_missing_config_is_written_whole(self):

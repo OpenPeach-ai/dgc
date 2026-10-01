@@ -6147,8 +6147,11 @@ class TUI:
                 except ValueError as e:
                     self._flash(str(e)); return True
                 rendered = rule.render()
-                if rendered not in cfg.permissions.setdefault(action, []):
-                    cfg.permissions[action].append(rendered)
+                # Against the user's own rules: a trusted project's identical rule is live too.
+                own = getattr(cfg, "user_permissions", None)
+                live = cfg.permissions.setdefault(action, [])
+                if rendered not in (own()[action] if callable(own) else live):
+                    live.append(rendered)
                     cfg.save()
                 self._flash(f"permission {action}: {rendered}")
                 return True

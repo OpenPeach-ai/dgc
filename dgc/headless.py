@@ -2989,10 +2989,12 @@ class Backend:
         # Both terminal listings say so; this is the editor's, and it was showing them plain.
         from .permissions import invalid_rules
         broken = {(action, text) for action, text, _why in invalid_rules(self.config.permissions)}
-        items = [{"action": action, "rule": str(rule)[:1000],
-                  **({"invalid": True} if (action, str(rule)) in broken else {})}
-                 for action in ("deny", "ask", "allow")
-                 for rule in list(self.config.permissions.get(action, []))[:256]]
+        # A user rule equal to a trusted project's is live twice; it is one rule to the reader.
+        live = [(action, str(rule)) for action in ("deny", "ask", "allow")
+                for rule in list(self.config.permissions.get(action, []))[:256]]
+        items = [{"action": action, "rule": rule[:1000],
+                  **({"invalid": True} if (action, rule) in broken else {})}
+                 for action, rule in dict.fromkeys(live)]
         self.em.emit("permissions", request_id=request_id, items=items, total=len(items))
 
     def _emit_memory(self, request_id: str, message: str | None = None) -> None:
@@ -4247,7 +4249,11 @@ class Backend:
                              message=str(exc)[:500], request_id=request_id)
                 return
             rules = self.config.permissions.setdefault(action, [])
-            if t == "add_permission_rule" and rendered not in rules:
+            # Deduped against the user's OWN rules, not the live set: a trusted project's identical
+            # rule is live too, and deduping against it meant the user's copy was never saved -- a
+            # deny the user added "everywhere" then applied only inside that one project.
+            own = getattr(self.config, "user_permissions", None)
+            if t == "add_permission_rule" and rendered not in (own()[action] if callable(own) else rules):
                 rules.append(rendered)
             elif t == "remove_permission_rule":
                 self.config.permissions[action] = [item for item in rules if item != rendered]
