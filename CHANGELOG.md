@@ -105,6 +105,13 @@ and stops a sub-task still running then instead of letting the process kill it m
 the work in its own checkout for `/tasks`. A result a notice already delivered (a wake, or a fold
 between tool calls) counts as read, so `wait_tasks` never hands it over a second time.
 
+### A background sub-task's step keeps its command when your turn ends
+
+The full-screen terminal stopped every running step at the end of a turn, including the step a
+background sub-task was still in the middle of: the command read "Ran" while it ran, and its result
+then arrived in a second block with no command ("$ Ran · 2 lines"). That step now stays running and
+its result lands on it, and a step a hook blocked closes instead of reading "Running".
+
 ### The terminal's spinner never shares a row with what comes after it
 
 `dgc -p` printed a `wait_tasks` result straight after "… esc to stop", on the spinner's own row. A

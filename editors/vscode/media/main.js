@@ -2032,6 +2032,21 @@
   // (`turn_end.final_message_id`). The panel used to guess it from the position of the last
   // `.text` node, which made a gate round's prose the answer and left the block the user had
   // actually read as bare, unclassified text.
+  function showToolProgress(card, ev) {
+    const numeric = Number.isFinite(ev.progress);
+    const hasTotal = numeric && Number.isFinite(ev.total) && ev.total !== 0;
+    setToolOutput(card, String(ev.message || "").slice(0, 500));
+    card.querySelector(".badge").textContent = hasTotal
+      ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
+      : (numeric ? String(ev.progress) : "");
+  }
+  // A background sub-task outlives the turn that started it, and so does the step it is in the
+  // middle of: its result arrives later, on the same card. Stopping that card drew a command still
+  // running as stopped, and the result then made a second card with no command.
+  function outlivesTheTurn(card) {
+    const record = agentRecords.get(agentIdFromCall(card.dataset.callId));
+    return Boolean(record && record.background === true && AGENT_ACTIVE.has(record.state));
+  }
   function endTurn(reason = "completed", finalId) {
     if (!turn) return;
     flushText();
@@ -2040,6 +2055,7 @@
     if (!replaying) undockAskCard("turn_end");
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
+      if (outlivesTheTurn(card)) return;
       setToolStatus(card, "stopped");
       const dot = card.querySelector(".dot");
       if (dot) dot.className = "dot deny";
@@ -4044,6 +4060,9 @@
           // whole run; its arguments count once, when the call first appears.
           turn.chars += toolArgChars(ev.args);
         }
+        // A background child's step can outlive this turn: file it where its later progress and
+        // result look for it, or they land on a second card with no command.
+        if (childId && ev.call_id) childToolBucket(childId)[ev.call_id] = turn._tools[ev.call_id];
         // Remember the path an edit tool was called with, so a result that carries no diff
         // (a brand-new file, a binary write) still reaches the end-of-turn summary.
         turn._paths = turn._paths || Object.create(null);
@@ -4052,17 +4071,17 @@
         break;
       }
       case "tool_progress": {
-        if (agentIdFromCall(ev.call_id) && !turn) break;
+        const childId = agentIdFromCall(ev.call_id);
+        if (childId && !turn) {
+          // A background child's step that outlived its turn still reports progress.
+          const c = ev.call_id ? childToolBucket(childId)[ev.call_id] : null;
+          if (c && c.dataset.status === "running") showToolProgress(c, ev);
+          break;
+        }
         ensureTurn();
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
-        const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
-        const numeric = Number.isFinite(ev.progress);
-        const hasTotal = numeric && Number.isFinite(ev.total) && ev.total !== 0;
-        setToolOutput(c, String(ev.message || "").slice(0, 500));
-        c.querySelector(".badge").textContent = hasTotal
-          ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
-          : (numeric ? String(ev.progress) : "");
+        showToolProgress(turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name })), ev);
         break;
       }
       // Images a step produced go inside that step's card (see the 0.40 images section).

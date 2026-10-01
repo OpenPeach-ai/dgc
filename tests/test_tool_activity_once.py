@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -78,6 +79,113 @@ class TuiStatusLineTests(unittest.TestCase):
         self.assertIn("very_specific_module", self.plain(ui._tool_frags(ui.blocks[-1])))
         # The pane's state still sees a tool in flight.
         self.assertEqual(ui._pane_agent_state(), "USING TOOLS")
+
+
+class ABackgroundChildsStepOutlivesTheTurnTests(unittest.TestCase):
+    """A background sub-task's step that is still running when the parent's turn ends.
+
+    The turn end settled EVERY running block, so a command still running read "Ran", and its result
+    then opened a second block with no command ("$ Ran  · 2 lines"). A real TUI over a real _SubUI.
+    """
+
+    setUp = TuiStatusLineTests.setUp
+    tui = TuiStatusLineTests.tui
+    plain = staticmethod(TuiStatusLineTests.plain)
+
+    def live_child(self, ui, label="Count the lines in README.md"):
+        from dgc.agent import _SubUI
+        child = _SubUI(ui, label, cancel=threading.Event())
+        jobs = dict(getattr(self.agent, "_detached_jobs", None) or {})
+        jobs[child.agent_id] = {"cancel": threading.Event(), "description": label}
+        self.agent._detached_jobs = jobs
+        self.addCleanup(setattr, self.agent, "_detached_jobs", {})
+        return child
+
+    def tool_blocks(self, ui, prefix=""):
+        return [b for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "tool"
+                and str(b.get("call_id") or "").startswith(prefix)]
+
+    def turn_ends(self, ui):
+        ui._settle_running_tools()                 # what the turn worker's finally does
+        ui._turn.clear()
+
+    def test_the_step_keeps_its_command_progress_and_result(self):
+        from dgc.agent import _SubUI
+        ui = self.tui()
+        child = self.live_child(ui)
+        grandchild = _SubUI(child, "nested look")
+        foreground = _SubUI(ui, "a child the turn waited on")     # not in _detached_jobs
+        ui._turn.set()
+        ui._turn_t0 = time.monotonic()
+        child.tool_call("bash", {"command": "sleep 20; wc -l README.md"}, "c1")
+        grandchild.tool_call("grep", {"pattern": "Deploy"}, "g1")
+        foreground.tool_call("read_file", {"path": "a.py"}, "f1")
+        ui.tool_call("bash", {"command": "echo parent"}, "p1")
+        self.turn_ends(ui)
+        step = ui._tool_block_by_call(f"{child.agent_id}:c1")
+        self.assertTrue(step["running"], "the parent's turn end stopped a step still running")
+        self.assertIn("Running sleep 20; wc -l README.md", self.plain(ui._tool_frags(step)))
+        self.assertTrue(ui._tool_block_by_call(f"{child.agent_id}:{grandchild.agent_id}:g1")["running"])
+        self.assertFalse(ui._tool_block_by_call(f"{foreground.agent_id}:f1")["running"],
+                         "a child not running in the background settles with the turn")
+        self.assertFalse(ui._tool_block_by_call("p1")["running"], "the turn's own steps still settle")
+        child.tool_progress("bash", "halfway there", call_id="c1")
+        self.assertIn("halfway there", self.plain(ui._tool_frags(step)),
+                      "progress after the turn reached nothing")
+        child.tool_result("bash", "exit code: 0\n3 README.md", "c1")
+        steps = [b for b in self.tool_blocks(ui, child.agent_id + ":") if b.get("route_name") == "bash"]
+        self.assertEqual(len(steps), 1, "the result opened a second block")
+        text = self.plain(ui._tool_frags(steps[0]))
+        for part in ("Ran sleep 20; wc -l README.md", "3 README.md"):
+            self.assertIn(part, text)
+        self.assertFalse([b for b in self.tool_blocks(ui) if not b.get("summary")],
+                         "a tool block with no command")
+        self.agent._detached_jobs = {}                               # the child has ended
+        ui._settle_running_tools()
+        self.assertFalse(ui._tool_block_by_call(f"{child.agent_id}:{grandchild.agent_id}:g1")["running"],
+                         "what an ended child left open settles at the next turn end")
+
+    def test_a_step_a_hook_blocked_is_closed_not_left_running(self):
+        ui = self.tui()
+        child = self.live_child(ui)
+        ui._turn.set()
+        child.tool_call("bash", {"command": "rm -rf build"}, "c1")
+        child.tool_denied("bash", {"command": "rm -rf build"}, "PreToolUse hook", "c1")
+        step = ui._tool_block_by_call(f"{child.agent_id}:c1")
+        self.assertFalse(step["running"], "a blocked step never gets a result and read Running")
+        self.assertTrue(step["error"])
+        ui.tool_call("bash", {"command": "make"}, "p1")
+        ui.tool_denied("bash", {"command": "make"}, "a denial with no id", None)
+        self.assertTrue(ui._tool_block_by_call("p1")["running"],
+                        "a denial without an id closed some other running block")
+
+    def test_a_parallel_batch_straddling_the_turn_end_keeps_one_block_per_step(self):
+        ui = self.tui()
+        child = self.live_child(ui)
+        ui._turn.set()
+        for n in range(3):
+            child.tool_call("read_file", {"path": f"f{n}.py"}, f"r{n}")
+        self.turn_ends(ui)
+        for n in range(3):
+            child.tool_result("read_file", f"contents {n}", f"r{n}")
+        steps = self.tool_blocks(ui, child.agent_id + ":")
+        self.assertEqual([b["summary"] for b in steps], ["f0.py", "f1.py", "f2.py"])
+        self.assertFalse([b for b in steps if b.get("running")])
+
+    def test_another_turn_ending_meanwhile_leaves_the_step_whole(self):
+        ui = self.tui()
+        child = self.live_child(ui)
+        ui._turn.set()
+        child.tool_call("bash", {"command": "make build"}, "c1")
+        self.turn_ends(ui)
+        ui._turn.set()                                               # the user's next turn
+        ui.tool_call("read_file", {"path": "notes.md"}, "q1")
+        ui.tool_result("read_file", "notes", "q1")
+        self.turn_ends(ui)
+        child.tool_result("bash", "exit code: 0\nbuilt", "c1")
+        steps = self.tool_blocks(ui, child.agent_id + ":")
+        self.assertEqual(len(steps), 1)
+        self.assertIn("built", self.plain(ui._tool_frags(steps[0])))
 
 
 if __name__ == "__main__":

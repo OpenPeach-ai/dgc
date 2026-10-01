@@ -19,6 +19,9 @@
   message mark, instead of "Used tool · message task" with a wrench. The other sub-agent tools wear
   the sub-agent mark.
 - The changes bar shows the turn's own edits in a folder too large for its workspace scan.
+- A background sub-agent's step that is still running when your turn ends keeps its card: it no
+  longer reads "stopped", its progress keeps arriving, and its result lands on it instead of on a
+  second card with no command.
 - The diagram renderer's DOMPurify moves to 3.4.16 (GHSA-p98j-92pf-mc4p, low severity; the
   affected IN_PLACE mode is not one mermaid uses, and the panel's content security policy blocks
   inline event handlers either way).

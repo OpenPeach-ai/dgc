@@ -234,3 +234,39 @@ test("the agent page keeps a FILES note apart from its path and names a folder w
   assert.match(mainCss, /\.agent-file, \.agent-folder \{[^}]*text-align: left/);
   assert.deepEqual(errors, []);
 });
+
+// A background sub-task's step can still be running when the parent's turn ends. The turn end
+// stopped every running card, and the late result then made a second card with no command.
+test("a background child's step outlives the turn that started it: one card, its command, its result", () => {
+  const { doc, event, errors } = view();
+  event({ type: "turn_start", turn_id: "t1", prompt: "count in the background" });
+  event({ type: "tool_call", call_id: "call_0", name: "task", args: { description: "count" }, summary: "count" });
+  event({ type: "agent_started", id: sid(1), parent_id: null, call_id: "call_0", description: "count",
+    depth: 1, state: "running", started_at: 1, isolated: true, parallel: false, background: true });
+  event({ type: "tool_call", call_id: `${sid(1)}:c1`, name: "bash",
+    args: { command: "sleep 20; wc -l README.md" }, summary: "sleep 20; wc -l README.md" });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: null });
+  const cards = () => [...doc.querySelectorAll(`.tool[data-call-id="${sid(1)}:c1"]`)];
+  assert.equal(cards().length, 1);
+  assert.equal(cards()[0].dataset.status, "running", "the parent's turn end stopped a step still running");
+  event({ type: "tool_progress", call_id: `${sid(1)}:c1`, name: "bash", message: "halfway there" });
+  assert.match(cards()[0].textContent, /halfway there/, "progress after the turn was dropped");
+  event({ type: "tool_result", call_id: `${sid(1)}:c1`, name: "bash",
+    output: "exit code: 0\n3 README.md", is_error: false, is_diff: false });
+  assert.equal(cards().length, 1, "the result made a second card");
+  assert.equal(cards()[0].dataset.status, "completed");
+  assert.match(cards()[0].querySelector(".arg").textContent, /sleep 20; wc -l README\.md/);
+  assert.deepEqual(errors, []);
+});
+
+test("a step of a child the turn was waiting on still stops with the turn", () => {
+  const { doc, event, errors } = view();
+  event({ type: "turn_start", turn_id: "t1", prompt: "count" });
+  event({ type: "tool_call", call_id: "call_0", name: "task", args: { description: "count" }, summary: "count" });
+  event({ type: "agent_started", id: sid(1), parent_id: null, call_id: "call_0", description: "count",
+    depth: 1, state: "running", started_at: 1, isolated: true, parallel: false });
+  event({ type: "tool_call", call_id: `${sid(1)}:c1`, name: "bash", args: { command: "make" }, summary: "make" });
+  event({ type: "turn_end", turn_id: "t1", reason: "cancelled", final_message_id: null });
+  assert.equal(doc.querySelector(`.tool[data-call-id="${sid(1)}:c1"]`).dataset.status, "stopped");
+  assert.deepEqual(errors, []);
+});

@@ -4123,14 +4123,33 @@ class TUI:
         self._invalidate()
 
     def _settle_running_tools(self) -> None:
-        """Turn end / cancel: stop any tool block still marked running so its rail doesn't animate forever."""
+        """Turn end / cancel: stop any tool block still marked running so its rail doesn't animate forever.
+
+        Not a step of a background sub-task that is still working: it outlives the turn that started
+        it, and its result arrives later under the same call id. Settled, a command still running
+        read "Ran", and its result opened a second block with no command. Every descendant's call
+        id starts with its child's id; a child that has ended has left `_detached_jobs`, so whatever
+        it left open settles at the next turn end, as before.
+        """
+        jobs = getattr(getattr(self, "agent", None), "_detached_jobs", None)
+        live = tuple(f"{agent_id}:" for agent_id in list(jobs or ()))
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running"):
+                if live and str(blk.get("call_id") or "").startswith(live):
+                    continue                    # a live background child's step: still running
                 blk["running"] = False
 
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         th = style_mod.theme()
+        # A step a PreToolUse hook blocked already has its block and never gets a result: close it,
+        # or it reads "Running" until a turn end settles it -- which, for a background child's
+        # step, is no longer the end of the turn that started it. By id only: a denial without
+        # one is a call that never opened a block.
+        blk = self._live_tool_block(name, call_id) if call_id else None
+        if blk is not None:
+            blk["running"] = False
+            blk["error"] = True
         self._append(self._rich(
             f"[{th.err}]{glyphs.CROSS} {_esc(name)} denied[/] [{th.faint}]{_esc(reason)}[/]"))
 
