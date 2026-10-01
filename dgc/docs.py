@@ -225,6 +225,7 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
 
 ## Session
 - **Ctrl+N** — new session · **/resume** — reopen a past one · **/name** — rename
+- **/new DIR** — an agent in another folder (see *Multiple agents*)
 """.strip()),
 
     ("Slash commands", "the full / command reference", _slash_command_doc()),
@@ -988,11 +989,44 @@ conversation. Kick off a long task on one, spawn another, and keep going.
 - **Dashboard** — every agent with its live state: **●** on screen · **⋮**
   working · **◆** needs you · **○** idle. `Enter` attaches · `x` closes · `p`
   pins · `r` renames. `+ New agent` spawns one; saved sessions are listed to reopen.
+- **/new DIR** — an agent in another folder (below). The dashboard's
+  `+ Agent in another folder…` asks for the folder and does the same.
 - When a **background** agent finishes or needs a decision, the bottom bar shows
   **⧉ N · ◆ need you** — switch to it (Ctrl+O or the dashboard) to answer.
 
 New agents use your current model by default; point one at a different model or
-a cloud key with `/model` / `/connect` for true parallelism.
+a cloud key with `/model` / `/connect` for true parallelism. Every agent this terminal opens
+keeps what the launch was given for the run — an `--api-key-env` key, and `--sandbox` with the
+tools it denies — but not its grants: `--allow-tool` and `--add-dir` stay with the launch project.
+A permission rule or a trusted folder you save in one agent applies to all of them at once.
+
+## Agents in other folders
+
+**/new DIR** opens an agent in another folder, next to the ones you have, the way the editor opens
+a chat in another folder. `~`, quotes and relative paths work; a relative path starts from the
+project of the agent on screen. DGC opens the folder's project — it walks up to the nearest `.git`,
+`DGC.md` or `.dgc` — and the agent brings that project's own trust, permission rules, named agents,
+skills, `DGC.md`, MCP servers and mode with it: nothing of the launch project's. Its chats are
+saved with that project, so `/resume` inside it lists them, and so do `dgc --continue` and the
+editor opened there. Closing it says how to come back: `/new` the folder, then `/resume`.
+
+A folder you have not trusted shows the trust card first — **Trust it and open** or **Cancel** —
+and nothing from it runs until you choose: no agent, no MCP server, no hook, not even git. Trusting
+it covers everything under it, as at launch; for your home directory, `/` or a folder that contains
+your home, **Cancel** is the row Enter picks. Esc builds nothing and writes nothing.
+
+The first agent in a folder works in the folder itself. Another agent in a checkout an agent of
+this terminal already works in gets its own `dgc/fleet-*` worktree, as Ctrl+N does in the launch
+project; in a non-Git folder it shares the folder, and writes are serialized. Agents of this
+terminal that share a folder are told about each other, as two windows are.
+
+`/new`, Ctrl+N and `+ New agent` always mean the project you launched in; `/new .` is the project
+of the agent on screen. `/new DIR` works while a turn runs. A DGC pinned to one project with
+`DGC_PROJECT_ROOT` opens no other folder, and a folder inside DGC's own storage (`~/.dgc`, the
+fleet and task worktrees) is refused. A path that reads as a command — `/new /plan`, or a short
+absolute path the `/` menu completes to a command — needs quotes or a trailing slash:
+`/new "/plan"`. The classic terminal (`dgc --classic`) holds one agent, so there `/new DIR` tells
+you to start DGC in that folder instead.
 
 The launch agent stays in the checkout you selected. Every additional agent in a Git project gets
 an owner-private `dgc/fleet-*` worktree containing the source checkout's exact tracked and
@@ -1487,6 +1521,9 @@ Every conversation is a session, saved as you go.
 
 - **/resume** — reopen a past session (newest first); `dN` deletes one.
 - **/new** (Ctrl+N) — start fresh; DGC auto-titles it from your first prompt.
+- **/new DIR** — in the terminal, an agent in another folder beside this one, with that folder's
+  trust, rules and saved chats (see *Multiple agents*). `/resume` in that agent lists the folder's
+  chats.
 - **/name** — rename the current session, while a turn is running too.
 - **/branch** (`/fork`) — continue in a new chat from here. Everything so far comes with you —
   the conversation, the standing goal, the todos, the recovery points — and the chat you branched
@@ -2751,6 +2788,10 @@ Closing an untouched managed checkout removes it. Changed, committed, uncertain,
 work is retained with its visible branch and path. Reopening that saved conversation validates
 and reattaches to the same checkout. Non-Git projects say when they fall back to serialized
 shared-checkout writes.
+
+The same rule holds in every folder an agent works in: an agent opened with `/new DIR` works in the
+folder itself, and a second one in a checkout an agent already works in gets a `dgc/fleet-*`
+worktree of that folder's project.
 
 `fleet_worktree_root` (empty = `~/.dgc/fleet-worktrees`) must sit outside the source repository.
 

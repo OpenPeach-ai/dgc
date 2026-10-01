@@ -29,6 +29,26 @@ What one chat does no longer reaches into another:
 - Another DGC asking whether a session is free finds it under whichever chat holds it, and a
   takeover ask for any of them is answered.
 
+### The terminal opens agents in other folders
+
+`/new DIR` opens an agent in another folder beside the ones you have, the way the editor opens a
+chat in another folder: that folder's project, with its own trust, permission rules, named agents,
+skills, `DGC.md`, MCP servers and saved chats. `~`, quotes and relative paths work, and the
+dashboard's **+ Agent in another folder…** does the same.
+
+- A folder you have not trusted asks first — **Trust it and open** or **Cancel** — and nothing from
+  it runs before you answer: no agent, MCP server, hook or git command.
+- The first agent in a folder works in it directly. Another one in a checkout an agent already
+  works in gets its own worktree, as Ctrl+N does; agents sharing a non-Git folder are told about
+  each other.
+- `/resume` in that agent lists the folder's chats, and closing it says how to get back to them.
+- A bare `/new`, Ctrl+N and **+ New agent** still open an agent in the project you launched in.
+  `/new DIR` also works while a turn runs.
+- The header's branch follows the agent on screen at once, and a `/files` or `/diff` pane closes
+  when you switch to an agent of another project.
+- The classic terminal answers `/new DIR` by saying where it works, instead of starting a new chat
+  and ignoring the folder.
+
 ### What you can do while a turn runs
 
 - **Rename the chat.** It was refused mid-turn; the turn's own later save keeps the new name.
@@ -58,6 +78,17 @@ choosing a mode afterwards changes your default, as before.
 - The TUI's `/worktree` and fleet agents ran in a checkout without the project's rules while
   keeping a stored `auto`: the project's denies did not apply there. **Fails open.** They take the
   launch project's trust and rules now.
+- A second `/worktree`, or a `/worktree` run in a fleet agent, still lost the project's rules while
+  keeping a stored `auto`. **Fails open.** It keeps them now.
+- Fleet and `/worktree` agents of a trusted project dropped to `default` when a plan was approved
+  into `auto` or a chat reopened in `auto`, saying the folder was not trusted. They answer for the
+  project's trust now, and `/trust` in one of them names the project, not its private checkout.
+- New terminal agents lost the run's `--sandbox`: Ctrl+N after `dgc --sandbox read-only` opened an
+  agent that could write files and run unconfined commands. **Fails open.** Every agent the run
+  opens keeps the sandbox and the tools it denies, and the `--api-key-env` key its requests went
+  out without. The run's `--allow-tool` and `--add-dir` grants stay with the launch project.
+- A permission rule or a trusted folder saved in one terminal agent reaches the others at once,
+  instead of at their next save of something else.
 - Approving a plan into `auto` in an untrusted folder ran it in `auto` with no trust prompt. It runs
   in `default` now, and says why.
 - Opening one untrusted folder reset your global `auto` to `default` everywhere, at the next save of

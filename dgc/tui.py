@@ -296,6 +296,9 @@ class AgentSession:
         agents_binder = getattr(ui, "_bind_session_agents", None)
         if callable(agents_binder):
             agents_binder(self)
+        peers_binder = getattr(ui, "_bind_session_peers", None)
+        if callable(peers_binder):
+            peers_binder(self)
 
     @property
     def name(self) -> str | None:
@@ -314,6 +317,41 @@ def _home_relative(path: str) -> str:
     """images: a stored image's path as a person would type it, with the home directory as ~."""
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if home and home != "/" and path.startswith(home + os.sep) else path
+
+
+def _typed_folder(path) -> str:
+    """A folder as a person would type it again: the home directory as ~, nothing elided."""
+    text = str(path)
+    home = os.path.expanduser("~")
+    if home and home != "/" and text == home:
+        return "~"
+    return style_mod.terminal_safe_text(_home_relative(text))
+
+
+def _short_folder(path) -> str:
+    """A folder for a one-row label: home as ~, and a deep path cut to its last two parts -- the
+    rule the header's location label uses, so one folder reads the same everywhere."""
+    short = _typed_folder(path)
+    parts = [part for part in short.split(os.sep) if part]
+    if len(parts) > 3:
+        short = "…" + os.sep + os.sep.join(parts[-2:])
+    return short
+
+
+def _checkout_key(path) -> str:
+    """Which working tree a folder belongs to: its Git checkout's top, or the folder itself.
+
+    Two agents of this terminal never work in one Git checkout: the second gets an isolated
+    worktree, as Ctrl+N always has. Sharing one, neither model was told about the other (the peer
+    registry skips its own process) and a /rewind in one could restore over the other's edits.
+    """
+    from .scheduler import _canonical_key
+    from . import worktree as _wt
+    try:
+        top = _wt.repo_root(path)
+    except Exception:
+        top = None
+    return _canonical_key(top or path)
 
 
 def _asked_rows(message: dict) -> list[dict]:
@@ -468,6 +506,9 @@ class TUI:
         return session if isinstance(getattr(session, "pastes", None), dict) else None
 
     def __init__(self, config, agent=None):
+        # The run's own Config: what this launch was given (an --api-key-env key, --sandbox) that
+        # every agent it opens must keep. See _session_config.
+        self._launch_config = config
         self._fleet_root = Path(config.project_root).resolve(strict=False)
         self.config = config
         from . import termbg
@@ -476,6 +517,11 @@ class TUI:
         # per-conversation field (agent, blocks, _buf, _turn, _todos, _req, …) is an _active_prop
         # that reads/writes the ACTIVE session, so the rest of the TUI is untouched.
         self._sessions: list[AgentSession] = [AgentSession(config, self, agent=agent)]
+        try:
+            # A rule or a trusted folder saved by one agent reaches every other agent at once.
+            config.on_saved = self._user_state_saved
+        except AttributeError:
+            pass
         self._active_idx = 0
         self._tls = threading.local()      # per-thread: which session a worker thread's turn belongs to
         self._aux_lock = threading.Lock()  # title/suggestion calls serialize across the whole fleet
@@ -497,6 +543,7 @@ class TUI:
         # own drag-select. `mouse: off` remembers the other choice; /select toggles it per session.
         self._mouse_on = self._mouse_from_config(config)
         self._branch_cache = ("", 0.0)     # git branch of the project root, refreshed lazily
+        self._branch_root = None           # ...and the folder that branch was read in
         self._naming = False               # inline "name this new session" prompt is active
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
         self._fleet_pastes: dict[int, str] = {}  # `_pastes` before any session exists (startup only)
@@ -3392,7 +3439,15 @@ class TUI:
             h2.append(f" · ◈ {len(arts)}", style=th.warn)
         header = [h1, h2]
 
-        rows = [{"label": "+ New agent", "desc": "spawn a concurrent agent", "value": ("new", None)}]
+        # "+ New agent" is always the launch project, as Ctrl+N is; once an agent works in another
+        # folder, it says which project that is.
+        launch = getattr(self, "_fleet_root", None)
+        elsewhere = launch is not None and any(
+            self._foreign_home(self._session_home(s)) for s in self._sessions)
+        rows = [{"label": "+ New agent",
+                 "desc": (f"spawn a concurrent agent in {_short_folder(launch)}" if elsewhere
+                          else "spawn a concurrent agent"),
+                 "value": ("new", None)}]
         # live fleet — pinned first, then most-recently-active
         _MARK = {"active": "●", "needs_input": "◆", "running": "⋮", "idle": "○"}
         _DESC = {"active": "on screen", "needs_input": "waiting for you", "running": "working…", "idle": "idle"}
@@ -3405,13 +3460,17 @@ class TUI:
             pin = "⟐ " if s.pinned else ""
             tools = f" · {s._tool_count} tools" if s._tool_count else ""
             tools += self._agents_working_desc(s.agent)
-            workspace = (f" · isolated {s.workspace_branch}" if getattr(s, "workspace_branch", "")
-                         else " · shared checkout")
+            workspace = " · " + self._workspace_label(s)
             rows.append({"label": f"{_MARK.get(st, '○')} {pin}{title}",
                          "desc": _DESC.get(st, "idle") + tools + workspace,
                          "value": ("switch", s), "action": True})
             if s.agent.session_file:
                 open_files.add(str(s.agent.session_file))
+        if not (os.environ.get("DGC_PROJECT_ROOT") or "").strip():
+            # After the live agents, so the first of them stays the row under "+ New agent".
+            rows.append({"label": "+ Agent in another folder…",
+                         "desc": "/new DIR · its own trust, rules and saved chats",
+                         "value": ("folder", None)})
         # saved sessions not currently open in the fleet
         now = time.time()
         fleet_root = getattr(self, "_fleet_root", self.config.project_root)
@@ -3430,6 +3489,8 @@ class TUI:
             elif kind == "switch":
                 if v in self._sessions:
                     self._switch_to(self._sessions.index(v))
+            elif kind == "folder":
+                self._ask_folder_for_new_agent()
             else:                                        # reopen it in its associated isolated workspace
                 self._open_saved_session(v)
 
@@ -3570,6 +3631,12 @@ class TUI:
         if self.agent.session_name:
             title.append(f"  {glyphs.MIDDOT}  "
                          + style_mod.terminal_safe_text(self.agent.session_name), style=th.accent)
+        home = self._session_home()
+        if home is not None and self._foreign_home(home):
+            # A new agent in another folder opens on this card: say which folder. On the title
+            # row, which is drawn in every layout (the tagline is not, when an update is out).
+            title.append(f"  {glyphs.MIDDOT}  {_short_folder(home)}", style=th.muted)
+        title.truncate(max(1, text_w), overflow="ellipsis")   # one row: the menu rows stay exact
         add(title)
         add(Text(""))
         if upd:                                            # ── update available: message + clickable CTA ──
@@ -5242,18 +5309,23 @@ class TUI:
             target=work, name=f"dgc-aux-{sess.id}", daemon=True)
         sess._aux_thread.start()
 
-    def _new_session(self, name: str | None = None, session_path=None) -> AgentSession | None:
+    def _new_session(self, name: str | None = None, session_path=None, *, home=None,
+                     in_place: bool = False, note: str = "") -> AgentSession | None:
         """Spawn/reopen a fleet agent in an automatically isolated Git worktree.
 
         The initial launch session stays in the checkout the user selected. Every additional Git
         session receives an exact tracked/non-ignored-untracked snapshot under the source mutation
         lease. Non-Git projects retain the shared-checkout fallback and say so explicitly.
+
+        `home` is the project the agent belongs to: the launch project unless `/new DIR` named
+        another. The same rule holds in every home -- see _open_folder_agent.
         """
+        home = Path(home).resolve(strict=False) if home is not None else self._fleet_root
         if not session_path:
-            return self._new_session_reserved(name=name, session_path=session_path)
+            return self._new_session_reserved(name=name, home=home, in_place=in_place, note=note)
         from . import sessions as _sess
         try:
-            turn_lease = _sess.session_turn_lock(session_path, self._fleet_root)
+            turn_lease = _sess.session_turn_lock(session_path, home)
             turn_acquired = turn_lease.acquire(blocking=False)
         except (OSError, TypeError, ValueError):
             turn_lease, turn_acquired = None, False
@@ -5261,35 +5333,44 @@ class TUI:
             self._flash("couldn't open session — it has an active turn in another DGC process")
             return None
         try:
-            return self._new_session_reserved(name=name, session_path=session_path)
+            return self._new_session_reserved(name=name, session_path=session_path, home=home,
+                                              note=note)
         finally:
             turn_lease.release()
 
-    def _new_session_reserved(self, name: str | None = None,
-                              session_path=None) -> AgentSession | None:
+    def _new_session_reserved(self, name: str | None = None, session_path=None, *, home=None,
+                              in_place: bool = False, note: str = "") -> AgentSession | None:
         """Build and durably associate a fleet runtime while its saved session is reserved."""
-        from . import sessions as _sess, worktree as _wt
-        from .config import Config as _Config
-        from .scheduler import workspace_mutation_lock
+        from . import sessions as _sess, trust as _trust, worktree as _wt
+        from .scheduler import _canonical_key, workspace_mutation_lock
 
-        source_config = _Config(self._fleet_root)
+        home = Path(home).resolve(strict=False) if home is not None else self._fleet_root
+        foreign = _canonical_key(home) != _canonical_key(self._fleet_root)
+        # In place: the first agent in another folder works in that folder itself, as the launch
+        # agent does in its own. A reopened saved session never does (see _open_folder_agent).
+        in_place = bool(in_place and foreign and not session_path)
+        source_config = self._session_config(home)
+        if foreign and not _trust.is_trusted(source_config, home):
+            # Only a trusted folder ever gets an agent: its hooks and MCP servers run there.
+            self._flash(f"{_short_folder(home)} isn't trusted — /new it again to review it", secs=6.0)
+            return None
         configured = str(source_config.get("fleet_worktree_root", "") or "").strip()
         storage_root = Path(configured).expanduser() if configured else None
         workspace = None
-        kind = "shared"
-        root = self._fleet_root
-        association = _sess.load_workspace(session_path, self._fleet_root) if session_path else None
+        kind = "folder" if in_place else "shared"
+        root = home
+        association = _sess.load_workspace(session_path, home) if session_path else None
         attach_error = ""
 
         if association and association.get("kind") == "managed":
             workspace, attach_error = _wt.FleetWorkspace.attach(
-                self._fleet_root, association, storage_root)
+                home, association, storage_root)
             if workspace is not None:
                 kind, root = "managed", workspace.project_root
         elif association and association.get("kind") == "manual":
             candidate = Path(association.get("worktree", "")).resolve(strict=False)
             candidate_repo = _wt.repo_root(candidate) if candidate.is_dir() else None
-            registered = next((row for row in _wt.list_worktrees(self._fleet_root)
+            registered = next((row for row in _wt.list_worktrees(home)
                                if candidate_repo is not None
                                and Path(row.get("path", "")).resolve(strict=False) == candidate_repo), None)
             if (candidate.is_dir() and candidate_repo is not None and registered
@@ -5299,17 +5380,19 @@ class TUI:
                 attach_error = "saved manual worktree is missing or no longer on the recorded branch"
 
         if kind == "shared":
-            repo = _wt.repo_root(self._fleet_root)
+            repo = _wt.repo_root(home)
             if repo is not None:
-                lease = workspace_mutation_lock(self._fleet_root)
+                lease = workspace_mutation_lock(home)
                 if not lease.acquire(timeout=10.0):
                     detail = lease.last_error or "the source checkout stayed busy for 10 seconds"
                     self._flash(f"couldn't create an isolated agent — {detail}")
                     return None
                 try:
-                    label = name or (Path(session_path).stem if session_path else f"agent-{len(self._sessions) + 1}")
+                    count = len(self._sessions) + 1
+                    label = name or (Path(session_path).stem if session_path else
+                                     (f"{home.name}-agent-{count}" if foreign else f"agent-{count}"))
                     workspace, error = _wt.FleetWorkspace.prepare(
-                        self._fleet_root, label, storage_root)
+                        home, label, storage_root)
                 finally:
                     lease.release()
                 if workspace is None:
@@ -5319,16 +5402,22 @@ class TUI:
             elif attach_error:
                 self._flash(f"{attach_error}; reopening in the shared non-Git project")
 
+        agent = None
         try:
-            session_config = _Config(root)
-            session_config.inherit_trust(source_config)    # a checkout of the launch project
+            if kind == "folder":
+                # The folder's own project: its own trust, rules, named agents and skills. Never
+                # inherited from the launch project, which it is not a checkout of.
+                session_config = source_config
+            else:
+                session_config = self._session_config(root)
+                session_config.inherit_trust(source_config)    # a checkout of the agent's project
             agent = Agent(session_config, self)
             agent._agent_defs_config = source_config
-            agent.session_root = self._fleet_root
+            agent.session_root = home
             if session_path:
                 agent.load_session(session_path)
             else:
-                agent.session_file = _sess.new_path(self._fleet_root)
+                agent.session_file = _sess.new_path(home)
             sess = AgentSession(session_config, self, agent=agent)
             sess.workspace = workspace
             sess.workspace_kind = kind
@@ -5338,17 +5427,17 @@ class TUI:
                                            if kind == "manual" else ""))
             if kind == "managed" and workspace is not None:
                 associated = _sess.save_workspace(
-                    agent.session_file, self._fleet_root, kind="managed",
+                    agent.session_file, home, kind="managed",
                     worktree=workspace.path, branch=workspace.branch,
                     metadata=workspace.metadata_path, **_session_generation_guard(agent))
             elif kind == "manual":
                 associated = _sess.save_workspace(
-                    agent.session_file, self._fleet_root, kind="manual",
+                    agent.session_file, home, kind="manual",
                     worktree=root, branch=sess.workspace_branch,
                     **_session_generation_guard(agent))
             elif session_path:
                 associated = _sess.clear_workspace(
-                    agent.session_file, self._fleet_root, **_session_generation_guard(agent))
+                    agent.session_file, home, **_session_generation_guard(agent))
             else:
                 associated = True
             if not associated:
@@ -5359,6 +5448,11 @@ class TUI:
         except Exception as exc:
             if workspace is not None:
                 workspace.finish("fleet session startup failed")
+            if agent is not None:
+                try:
+                    agent.mcp.stop_all()        # the servers it started go with it
+                except Exception:
+                    pass
             self._flash(f"couldn't start agent — {type(exc).__name__}: {exc}")
             return None
 
@@ -5367,11 +5461,17 @@ class TUI:
         fleet, index = getattr(self, "_sessions", None) or [], getattr(self, "_active_idx", -1)
         previous = fleet[index] if isinstance(index, int) and 0 <= index < len(fleet) else None
         self._sessions.append(sess)
+        self._adopt_user_state(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
-        place = (f"isolated {sess.workspace_branch}" if kind != "shared"
-                 else "non-Git shared checkout · writes serialized")
-        note = f" · prior workspace unavailable: {attach_error}" if attach_error else ""
+        if kind == "folder":
+            place = f"in {_short_folder(home)}"
+        else:
+            place = (f"isolated {sess.workspace_branch}" if kind != "shared"
+                     else "non-Git shared checkout · writes serialized")
+            if foreign:
+                place += f" · {_short_folder(home)}"
+        note = (f" · prior workspace unavailable: {attach_error}" if attach_error else "") + note
         hub = getattr(getattr(previous, "agent", None), "monitors", None)
         running = len(hub.running()) if hub is not None else 0
         warning = ""
@@ -5384,27 +5484,380 @@ class TUI:
                        f"{'' if running == 1 else 's'}: Ctrl+\\ back to it, then /monitors stop")
         flash = (f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
                  f" · {len(self._sessions)} agents{warning} · {place}{note}")
-        if warning:
+        if warning or foreign:
             self._flash(flash, secs=6.0)
         else:
             self._flash(flash)
+        self._announce_peer_soon()
         return sess
 
-    def _open_saved_session(self, path) -> None:
-        sess = self._new_session(session_path=path)
+    # ---- agents in other folders: /new DIR ---------------------------------------------------------
+    # `/new DIR` opens an agent the way `dgc serve` opens a chat in another folder (Host._build_chat):
+    # that folder's project root, config, trust, rules, named agents, skills, MCP servers and saved
+    # chats -- behind the terminal's own trust gate, which has never let a folder it was not told to
+    # trust run anything. Ctrl+N, a bare /new, the welcome card and the dashboard's "+ New agent"
+    # keep meaning the launch project.
+    def _session_home(self, sess=None):
+        """The project a session belongs to -- its conversation, trust, rules and saved chats: its
+        agent's `session_root`. The launch project for the launch agent and for Ctrl+N and
+        /worktree agents; the folder's own project for an agent opened with `/new DIR`."""
+        agent = getattr(self, "agent", None) if sess is None else getattr(sess, "agent", None)
+        home = getattr(agent, "session_root", None) or getattr(self, "_fleet_root", None)
+        return Path(home) if home else None
+
+    def _foreign_home(self, home) -> bool:
+        """Whether `home` is a project other than the one this terminal was launched in."""
+        launch = getattr(self, "_fleet_root", None)
+        if home is None or launch is None:
+            return False
+        from .scheduler import _canonical_key
+        return _canonical_key(home) != _canonical_key(launch)
+
+    def _session_config(self, root):
+        """A Config for an agent this terminal opens in `root`, keeping what THIS RUN was given.
+
+        Built from disk, as a chat of `dgc serve` is, an agent lost the launch's `--api-key-env`
+        key -- every request it made went out with none -- and its `--sandbox`. The run's runtime
+        keys and its restrictions travel: the sandbox and the session's deny and ask rules. Its
+        grants do not: `--allow-tool` and `--add-dir` were given for the launch project, not for
+        every folder opened from it.
+        """
+        from .config import Config as _Config
+        config = _Config(Path(root))
+        launch = getattr(self, "_launch_config", None)
+        if launch is not None and launch is not config:
+            try:
+                config.adopt_runtime_secrets(launch)      # as Host._build_chat does
+            except Exception:
+                pass
+            held = getattr(launch, "_ephemeral_keys", None) or set()
+            data = getattr(launch, "data", None) or {}
+            carried = [key for key in ("sandbox", "sandbox_read_only") if key in held and key in data]
+            for key in carried:
+                config.data[key] = data[key]
+            if carried:
+                config.mark_ephemeral(*carried)         # this run's, never written as the user's
+            rules = getattr(launch, "session_permissions", None) or {}
+            ask, deny = list(rules.get("ask") or []), list(rules.get("deny") or [])
+            if ask or deny:
+                config.session_permissions = {"allow": [], "ask": ask, "deny": deny}
+        config.on_saved = self._user_state_saved
+        return config
+
+    def _fanout_configs(self, *, exclude=None, sessions=None) -> list:
+        """Every live Config of these sessions that answers for the user's rules and trust: each
+        agent's own, the project Config a checkout takes its trust from (`_trust_origin`), and the
+        one its named agents come from. Each once."""
+        seen = {id(exclude)} if exclude is not None else set()
+        found = []
+        pool = sessions if sessions is not None else (getattr(self, "_sessions", None) or ())
+        for sess in list(pool):
+            if getattr(sess, "_closing", False):
+                continue
+            config = getattr(sess, "config", None)
+            for candidate in (config, getattr(config, "_trust_origin", None),
+                              getattr(getattr(sess, "agent", None), "_agent_defs_config", None)):
+                if candidate is None or id(candidate) in seen:
+                    continue
+                seen.add(id(candidate))
+                found.append(candidate)
+        return found
+
+    def _user_state_saved(self, config, keys, rules_moved) -> None:
+        """What one agent saved that is the user's -- a permission rule, a trusted folder -- reaches
+        every other agent of this terminal at once, as it does every chat of `dgc serve`
+        (Host._user_state_saved).
+
+        Each agent holds its own Config, so a deny added in one bound the others only when they next
+        happened to save something themselves. save() with nothing of its own to write adopts what
+        is on disk; a conversation's own mode and model route are never adopted. Rules and trust
+        only: no MCP server is restarted and no skill catalog reloaded from here.
+
+        Config.save() calls this after releasing its lock, on whichever thread saved. Never raises.
+        """
+        try:
+            for other in self._fanout_configs(exclude=config):
+                try:
+                    other.save()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _adopt_user_state(self, sess) -> None:
+        """A new agent read the config before connecting its MCP servers, which takes seconds; a rule
+        another agent saved meanwhile reached only the agents already open. Take what is on disk
+        now, as Host._adopt_user_state does for a chat built late. Never touches its servers."""
+        try:
+            from . import config as _config_mod
+            if not Path(_config_mod.USER_CONFIG).exists():
+                return                      # nothing on disk to adopt, and no first save forced
+            for config in self._fanout_configs(sessions=[sess]):
+                try:
+                    config.save()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _dgc_storage_roots(self) -> list:
+        """Where DGC keeps its own state and checkouts. An agent is never opened in one: a fleet or
+        task checkout belongs to the agent that made it, and ~/.dgc is not a project."""
+        from . import config as _config_mod, worktree as _wt
+        roots = []
+        try:
+            roots.append(Path(_config_mod.USER_HOME).expanduser().resolve(strict=False))
+        except (OSError, RuntimeError):
+            pass
+        config = getattr(self, "config", None) or getattr(self, "_launch_config", None)
+
+        def setting(key: str) -> str:
+            try:
+                return str(config.get(key, "") or "").strip()
+            except Exception:
+                return ""
+
+        fleet = setting("fleet_worktree_root")
+        try:
+            roots.append(_wt._fleet_storage_root(Path(fleet).expanduser() if fleet else None))
+        except (OSError, RuntimeError, ValueError):
+            pass
+        tasks = setting("subagent_worktree_root")
+        if tasks:
+            try:
+                roots.append(Path(tasks).expanduser().resolve(strict=False))
+            except (OSError, RuntimeError, ValueError):
+                pass
+        return roots
+
+    def _resolve_session_dir(self, raw: str):
+        """`/new DIR`'s folder as (the folder, its project root, None), or (None, None, why not).
+
+        `~`, one pair of quotes and a relative path (from the on-screen agent's project) are
+        understood. Nothing here runs anything in the folder: it is resolved and looked at, never
+        entered.
+        """
+        from . import config as _config_mod
+        safe = style_mod.terminal_safe_text
+        if (os.environ.get("DGC_PROJECT_ROOT") or "").strip():
+            # Host's `pinned` rule: find_project_root would quietly hand back the pinned project.
+            return None, None, ("this DGC is pinned to one project (DGC_PROJECT_ROOT) and can't "
+                                "open another folder · /new without a folder still opens another "
+                                "agent here")
+        text = str(raw or "").strip()
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+            text = text[1:-1]
+        if not text or "\x00" in text or len(text) > 4096:
+            return None, None, "/new takes a folder: /new DIR"
+        try:
+            path = Path(text).expanduser()
+        except RuntimeError as exc:                     # an unknown ~user
+            return None, None, f"can't open that folder — {safe(str(exc))}"
+        if not path.is_absolute():
+            path = (self._session_home() or Path(self._fleet_root)) / path
+        try:
+            target = path.resolve(strict=True)
+        except FileNotFoundError:
+            return None, None, ("no such folder — /new takes a folder (/name names this agent): "
+                                f"{_typed_folder(path)}")
+        except (OSError, RuntimeError, ValueError) as exc:
+            return None, None, f"can't open that folder — {safe(str(exc) or type(exc).__name__)}"
+        if not target.is_dir():
+            return None, None, f"that's a file — /new takes a folder: {_typed_folder(target)}"
+        if not os.access(target, os.R_OK | os.X_OK):
+            return None, None, f"can't open that folder — it isn't readable: {_typed_folder(target)}"
+        try:
+            root = _config_mod.find_project_root(target).resolve(strict=False)
+        except (OSError, RuntimeError, ValueError) as exc:
+            return None, None, f"can't open that folder — {safe(str(exc) or type(exc).__name__)}"
+        for storage in self._dgc_storage_roots():
+            if any(place == storage or storage in place.parents for place in (target, root)):
+                return None, None, ("that's inside DGC's own storage — open a project folder "
+                                    f"instead: {_typed_folder(target)}")
+        return target, root, None
+
+    def _new_session_in(self, raw: str):
+        """`/new DIR`: an agent in another folder, the way `dgc serve` opens a chat there.
+
+        A folder whose project is the launch project is Ctrl+N. An untrusted one gets the trust
+        card first, and nothing from it runs until the user trusts it there.
+        """
+        from . import trust as _trust
+        from .scheduler import _canonical_key
+        target, root, problem = self._resolve_session_dir(raw)
+        if problem:
+            # A flash, not a transcript line: this can run mid-turn. The command comes back so a
+            # typo is one edit away rather than retyped.
+            self._flash(problem, secs=6.0)
+            if not self.input_buf.text:
+                from prompt_toolkit.document import Document
+                command = "/new " + str(raw)
+                self.input_buf.set_document(Document(command, len(command)))
+            return None
+        if _canonical_key(root) == _canonical_key(self._fleet_root):
+            return self._new_session()
+        try:
+            probe = self._session_config(root)    # reads config files only: no hook, server or git
+        except Exception as exc:
+            self._flash(f"couldn't open {_short_folder(root)} — {type(exc).__name__}: {exc}",
+                        secs=6.0)
+            return None
+        if _trust.is_trusted(probe, root):
+            return self._open_folder_agent(root)
+        self._confirm_folder_trust(probe, root, target)
+        return None
+
+    def _folder_trust_header(self, root, target, broad: str) -> list:
+        """The trust card's text, laid out for the terminal as it is now.
+
+        The overlay keeps every line to one row, so each sentence is wrapped first and none is cut
+        mid-way; on a short terminal the least needed go first, so both choices always fit."""
+        from . import trust as _trust
+        th = style_mod.theme()
+        safe = style_mod.terminal_safe_text
+        width = int(getattr(self, "_width", 100) or 100)
+        inner = max(20, min(max(46, width - 6), 108, max(20, width - 2) - 4) - 4)
+        height = int(getattr(self, "_height", 30) or 30)
+        # The card's own rows: borders 2, title 1, header rule 1, two choices, footer 2.
+        budget = max(2, min(20, max(4, height - 9)) - 8)
+
+        def wrapped(text, style, limit=3):
+            return [Text(line, style=style) for line in _wrap_cells(safe(text), inner, limit)]
+
+        where = _typed_folder(root)
+        if _cell_len(where) > inner:                    # keep the end of a long path: the folder
+            tail = where
+            while tail and _cell_len("…" + tail) > inner:
+                tail = tail[1:]
+            where = "…" + tail
+        notice = _trust.TRUST_NOTICE
+        groups = [                                      # (priority, lines), in display order
+            (9, wrapped(_trust.TRUST_QUESTION, th.muted)),
+            (9, [Text(where, style=f"bold {th.text_strong}")]),
+        ]
+        if Path(target) != Path(root):
+            groups.append((2, wrapped(f"you typed {_typed_folder(target)} · DGC opens its project "
+                                      "root", th.faint)))
+        groups += [
+            (5, wrapped(f"{notice[0]} {notice[1]}", th.faint)),
+            (3, wrapped(notice[2], th.faint)),
+            (4, wrapped(notice[3], th.faint)),
+        ]
+        if broad:
+            groups.append((8, wrapped(broad, f"bold {th.err}")))
+        if not _trust.in_git_repo(root):
+            groups.append((6, wrapped(_trust.NOT_IN_GIT, th.err, 2)))
+        while sum(len(lines) for _p, lines in groups) > budget:
+            lowest = min(range(len(groups)), key=lambda i: (groups[i][0], -i))
+            if groups[lowest][0] >= 9:
+                break                                   # never the question or the folder
+            groups.pop(lowest)
+        return [line for _p, lines in groups for line in lines]
+
+    def _confirm_folder_trust(self, probe, root, target) -> None:
+        """The terminal's trust gate, in the app: trust this folder and open it, or do nothing.
+
+        Binary, as the launch gate is (trust.confirm_trust, which cannot be reused: it runs an
+        Application of its own). Until Trust is chosen nothing from the folder runs -- no agent, no
+        MCP server, no hook, not even git. Cancel or Esc builds nothing and writes nothing. For a
+        folder whose trust would cover far more than it looks ($HOME, /, a parent of home), Cancel
+        is the row Enter picks.
+        """
+        from . import trust as _trust
+        short = _short_folder(root)
+        broad = _trust.broad_trust_warning(root)
+        trust_row = {"label": f"{glyphs.CHECK}  Trust it and open", "value": "trust"}
+        cancel_row = {"label": f"{glyphs.CROSS}  Cancel", "value": "cancel"}
+        rows = [cancel_row, trust_row] if broad else [trust_row, cancel_row]
+
+        def picked(row) -> None:
+            if row.get("value") != "trust":
+                self._flash(f"not opened · nothing in {short} ran")
+                return
+            try:
+                _trust.mark_trusted(probe, root)      # the realpath, saved; then that folder's rules
+            except Exception as exc:
+                self._flash(f"couldn't record trust for {short} — {exc}", secs=6.0)
+                return
+            self._open_folder_agent(root)
+
+        def rebuild(ov):
+            # Fixed rows -- typed characters never filter which one Enter picks -- and a header
+            # re-laid for the terminal's current size.
+            ov["header"] = self._folder_trust_header(root, target, broad)
+            return rows
+
+        self._open_overlay(rows, on_pick=picked, title="Open a folder",
+                           header=self._folder_trust_header(root, target, broad),
+                           footer="Enter select · Esc cancel", accent=True, rebuild=rebuild)
+
+    def _open_folder_agent(self, root):
+        """Open an agent in a trusted folder: in place when no agent of this terminal works in its
+        checkout, otherwise in an isolated worktree of it -- Ctrl+N's rule, in every folder."""
+        root = Path(root).resolve(strict=False)
+        key = _checkout_key(root)
+        live = list(getattr(self, "_sessions", ()) or ())
+
+        def place(sess) -> Path:
+            return Path(getattr(sess, "workspace_path", None)
+                        or sess.config.project_root).resolve(strict=False)
+
+        occupied = any(_checkout_key(place(sess)) == key for sess in live)
+        note = " · another agent here already works in that checkout" if occupied else ""
+        if not occupied:
+            for sess in live:
+                where = place(sess)
+                if where != root and (root in where.parents or where in root.parents):
+                    note = " · overlaps another agent's folder — writes across it aren't serialized"
+                    break
+        return self._new_session(home=root, in_place=not occupied, note=note)
+
+    def _ask_folder_for_new_agent(self) -> None:
+        """The dashboard's "+ Agent in another folder…": ask for the folder, then `/new` it.
+
+        The composer is the prompt's field, so whatever draft it held is set aside while the folder
+        is typed and given back after; typed into, it became part of the path."""
+        home = self._session_home() or self._fleet_root
+        draft = self.input_buf.document
+        self.input_buf.reset()
+
+        def chosen(text: str) -> None:
+            if draft.text and not self.input_buf.text:
+                self.input_buf.set_document(draft)
+            if text.strip():
+                self._new_session_in(text.strip())
+
+        self._ask_input(f"folder for the new agent (relative to {_short_folder(home)})", chosen)
+
+    def _workspace_label(self, sess) -> str:
+        """Where an agent works, in a few words: `in <folder>` for an agent working in another
+        folder itself, else its isolated branch or the shared checkout -- and the folder, when it is
+        not the launch project."""
+        home = self._session_home(sess)
+        short = _short_folder(home) if home is not None else ""
+        if getattr(sess, "workspace_kind", "") == "folder":
+            return f"in {short}"
+        branch = getattr(sess, "workspace_branch", "") or ""
+        label = f"isolated {branch}" if branch else "shared checkout"
+        if home is not None and self._foreign_home(home):
+            label += f" · {short}"
+        return label
+
+    def _open_saved_session(self, path, home=None) -> None:
+        sess = self._new_session(session_path=path, home=home)
         if sess is None:
             return
         sess.blocks.clear(); sess._buf = ""; sess._think = ""
         self._ft_cache = {}
         self._render_history()
         count = max(0, len(sess.agent.messages) - 1)
-        self._flash(f"opened ({count} messages) · "
-                    + (f"isolated {sess.workspace_branch}" if sess.workspace_branch else "shared checkout"))
+        self._flash(f"opened ({count} messages) · " + self._workspace_label(sess))
 
     def _switch_to(self, idx: int) -> None:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
         if not self._sessions:
             return
+        left_home = self._session_home(self.active)
         if self._input is not None and self._input.get("question_owner") is self.active:
             req = self.active._req
             if req is not None:
@@ -5421,6 +5874,15 @@ class TUI:
         if self.active._req is not None:                 # this agent was waiting on you → show its card
             self._pause_pane("DGC NEEDS INPUT")
             self._show_req_overlay(self.active)
+        arrived_home = self._session_home(self.active)
+        if (left_home is not None and arrived_home is not None
+                and getattr(getattr(self, "_pane", None), "kind", "") in ("files", "diff")):
+            from .scheduler import _canonical_key
+            if _canonical_key(left_home) != _canonical_key(arrived_home):
+                # /files and /diff are bound to the project they were opened in. Left open across
+                # a switch to an agent of another project, Enter put an @path from that project
+                # into this agent's prompt.
+                self._close_pane()
         self._invalidate()
 
     def _finalize_session_workspace(self, sess: AgentSession, reason: str,
@@ -5440,6 +5902,8 @@ class TUI:
                     workspace.retain(reason, [])
                 return None
             from . import sessions as _sess
+            # The project the session is saved under: the launch project, or a folder agent's own.
+            home = Path(getattr(sess.agent, "session_root", None) or self._fleet_root)
 
             def retain_uncertain(detail):
                 error = workspace.retain(detail, []) or ""
@@ -5452,7 +5916,7 @@ class TUI:
 
             try:
                 turn_lease = _sess.session_turn_lock(
-                    sess.agent.session_file, self._fleet_root)
+                    sess.agent.session_file, home)
                 turn_acquired = turn_lease.acquire(blocking=False)
             except (OSError, TypeError, ValueError):
                 turn_lease, turn_acquired = None, False
@@ -5462,7 +5926,7 @@ class TUI:
             try:
                 guard = _session_generation_guard(sess.agent)
                 if guard and not _sess.generation_matches(
-                        sess.agent.session_file, self._fleet_root, **guard):
+                        sess.agent.session_file, home, **guard):
                     return retain_uncertain(
                         f"{reason}: session generation changed in another process")
                 result = workspace.finish(reason)
@@ -5470,14 +5934,14 @@ class TUI:
                 if result.status == "cleaned":
                     if sess.agent.session_file:
                         associated = _sess.clear_workspace(
-                            sess.agent.session_file, self._fleet_root,
+                            sess.agent.session_file, home,
                             **_session_generation_guard(sess.agent))
                         if not associated:
                             self._flash(
                                 "workspace cleaned, but the session association changed elsewhere")
                 elif sess.agent.session_file:
                     associated = _sess.save_workspace(
-                        sess.agent.session_file, self._fleet_root, kind="managed",
+                        sess.agent.session_file, home, kind="managed",
                         worktree=workspace.path, branch=workspace.branch,
                         metadata=workspace.metadata_path,
                         **_session_generation_guard(sess.agent))
@@ -5537,6 +6001,17 @@ class TUI:
                 self._flash(f"closed agent · retained {result.branch} at {result.path}{detail}")
         elif worker and worker.is_alive() and sess.workspace is not None:
             self._flash(f"agent stopping · isolated work stays at {sess.workspace.path}")
+        else:
+            home = self._session_home(sess)
+            if home is not None and self._foreign_home(home):
+                # Its chats are saved with that folder, not with the launch project, so the
+                # dashboard and a /resume here do not list them: say where they are.
+                where = _typed_folder(home)
+                if any(ch.isspace() for ch in where) or "'" in where:
+                    where = '"' + where + '"'
+                self._flash(f"closed agent in {_short_folder(home)} · its chats stay there — "
+                            f"/new {where}, then /resume, reopens one", secs=6.0)
+        self._announce_peer_soon()
         self._invalidate()
 
     def _sandbox_denials(self, *, read_only: bool = False, off: bool = False) -> None:
@@ -5780,7 +6255,10 @@ class TUI:
         elif cmd == "rewind":
             self._open_rewind()
         elif cmd in ("new", "session"):
-            self._prompt_new_session()
+            if rest:
+                self._new_session_in(rest)      # an agent in another folder
+            else:
+                self._prompt_new_session()      # Ctrl+N: the launch project
         elif cmd in ("branch", "fork"):
             # Everything so far carries over; only the file it saves to is new, so the chat
             # this branched from keeps exactly what it had when the branch was taken.
@@ -6160,7 +6638,9 @@ class TUI:
             self._append_md(handle_command(self.agent, rest))
         elif cmd == "trust":
             from .trust import handle_trust_command
-            self._append_md(handle_trust_command(cfg, cfg.project_root, rest))
+            # "here" is this agent's project -- for a fleet or /worktree agent the launch project,
+            # not the checkout under ~/.dgc it works in, which no trusted folder ever covers.
+            self._append_md(handle_trust_command(cfg, self._session_home() or cfg.project_root, rest))
         elif cmd == "permissions":
             perms = getattr(cfg, "permissions", {}) or {}
             spec = rest.strip().split(maxsplit=1)
@@ -6225,15 +6705,15 @@ class TUI:
             sess._aux_cancel.set()
             sess._autotitle_pending = False
             sess.agent.reset()
-            sess.agent.session_file = _sess.new_path(
-                getattr(sess.agent, "session_root", self._fleet_root))
+            home = getattr(sess.agent, "session_root", None) or self._fleet_root
+            sess.agent.session_file = _sess.new_path(home)
             if sess.workspace_kind == "managed" and sess.workspace is not None:
-                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="managed",
+                _sess.save_workspace(sess.agent.session_file, home, kind="managed",
                                      worktree=sess.workspace.path, branch=sess.workspace.branch,
                                      metadata=sess.workspace.metadata_path,
                                      **_session_generation_guard(sess.agent))
             elif sess.workspace_kind == "manual":
-                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="manual",
+                _sess.save_workspace(sess.agent.session_file, home, kind="manual",
                                      worktree=sess.workspace_path, branch=sess.workspace_branch,
                                      **_session_generation_guard(sess.agent))
             sess.blocks.clear()
@@ -6276,15 +6756,18 @@ class TUI:
 
     # ---- command flows that use the picker / input prompts ----
     def _git_branch(self) -> str:
-        """The project root's current branch, refreshed at most every ten seconds; "" outside git."""
-        branch, stamp = getattr(self, "_branch_cache", ("", 0.0))
-        now = time.monotonic()
-        if now - stamp < 10.0:
-            return branch
-        branch = ""
+        """The project root's current branch, refreshed at most every ten seconds; "" outside git.
+
+        The cache is the folder's: switching to an agent in another folder showed the previous
+        folder's branch for up to ten seconds."""
         root = getattr(getattr(self, "config", None), "project_root", None)
         if not root:
             return ""
+        branch, stamp = getattr(self, "_branch_cache", ("", 0.0))
+        now = time.monotonic()
+        if now - stamp < 10.0 and getattr(self, "_branch_root", None) in (None, str(root)):
+            return branch
+        branch = ""
         try:
             from .worktree import _run_git
             res = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root,
@@ -6295,6 +6778,7 @@ class TUI:
         except Exception:
             branch = ""
         self._branch_cache = (branch, now)
+        self._branch_root = str(root)
         return branch
 
     def _location_label(self, *, skip_branch: bool = False) -> str:
@@ -6328,13 +6812,22 @@ class TUI:
         thinking = (str(cfg.get("subscription_effort", "") or "").strip()
                     or "off") if engine else cfg.get("thinking", "off")
         profile = "Ultra" if cfg.get("ultra_mode", False) else "standard"
+        workspace = ("this folder (in place)"
+                     if getattr(self.active, "workspace_kind", "") == "folder"
+                     else getattr(self.active, "workspace_branch", "") or "shared checkout")
         rows = [("model", model), ("host", host), ("mode", self.agent.mode),
                 ("thinking", thinking), ("profile", profile),
                 ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
                 ("directory", str(self.config.project_root)),
                 ("branch", self._git_branch() or "(not a git checkout)"),
-                ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
+                ("workspace", workspace)]
+        home = self._session_home()
+        if home is not None and (Path(home).resolve(strict=False)
+                                 != Path(self.config.project_root).resolve(strict=False)):
+            # A fleet or /worktree agent works in a checkout of its project; this is the project
+            # its trust, rules and saved chats belong to.
+            rows.append(("project", str(home)))
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
             f"  [{th.faint}]{k:<9}[/] [{th.text}]{_esc(str(v))}[/]" for k, v in rows)
 
@@ -6661,17 +7154,22 @@ class TUI:
 
     def _resume_flow(self) -> None:
         from . import sessions
+        # The chats of the project this agent belongs to: the launch project's, or -- in an agent
+        # opened with /new DIR -- that folder's own, which is where its chats are saved.
+        home = self._session_home() or self._fleet_root
+        foreign = self._foreign_home(home)
         items = sessions.listing(
-            self._fleet_root, redact_secrets=secret_values(self.config))
+            home, redact_secrets=secret_values(self.config))
         if not items:
-            self._flash("no saved sessions in this directory"); return
+            self._flash(f"no saved sessions in {_short_folder(home)}" if foreign
+                        else "no saved sessions in this directory"); return
         labels = [f"{sessions.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"
                   for (p, ts, prev, cnt, nm) in items[:30]]
 
         def pick(i):
-            association = sessions.load_workspace(items[i][0], self._fleet_root)
+            association = sessions.load_workspace(items[i][0], home)
             if association:
-                self._open_saved_session(items[i][0])
+                self._open_saved_session(items[i][0], home)
                 return
             n = self.agent.load_session(items[i][0])
             self.blocks.clear(); self._buf = ""; self._think = ""
@@ -6681,11 +7179,12 @@ class TUI:
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
         def dele(i):
-            deleted = sessions.delete(items[i][0], self._fleet_root)
+            deleted = sessions.delete(items[i][0], home)
             self._flash("session deleted" if deleted else
                         "session is active; deletion was not run")
             self._resume_flow()             # re-show the updated list
-        self._show_picker("Resume a session", labels, pick, delete_cb=dele)
+        self._show_picker("Resume a session" + (f" · {_short_folder(home)}" if foreign else ""),
+                          labels, pick, delete_cb=dele)
 
     def _extensions_modal(self, tab: int = 0) -> None:
         """A centered tabbed dialog with Skills + MCP Servers tabs (a tabbed Skills + MCP dialog)."""
@@ -7244,7 +7743,9 @@ class TUI:
     def _tui_worktree(self, rest: str) -> None:
         from . import worktree as wt
         th = style_mod.theme()
-        root = self._fleet_root
+        # The on-screen agent's project: the launch project, or the folder `/new DIR` opened. For
+        # a fleet agent that is still the launch project, never its private checkout.
+        root = Path(self._session_home() or self._fleet_root).resolve(strict=False)
         parts = rest.split()
         if not parts or parts[0] == "list":
             wts = wt.list_worktrees(root)
@@ -7277,7 +7778,6 @@ class TUI:
             return
         # Never chdir the whole process: other fleet workers may still be running. Replace only
         # this slot's runtime with one rooted in the isolated worktree.
-        from .config import Config as _Config
         sess = self.active
         old_agent = sess.agent
         repo = wt.repo_root(root) or root
@@ -7286,7 +7786,7 @@ class TUI:
         except ValueError:
             project_rel = Path(".")
         project_root = wt_path / project_rel
-        new_config = _Config(project_root)
+        new_config = self._session_config(project_root)
         new_config.inherit_trust(old_agent.config)       # a checkout of this session's project
         try:
             new_agent = Agent(new_config, self)
@@ -7300,7 +7800,7 @@ class TUI:
             detail = f"; checkout retained at {wt_path}: {cleanup_error}" if cleanup_error else ""
             self._flash(f"couldn't start agent in {branch}: {type(exc).__name__}: {exc}{detail}")
             return
-        new_agent.session_root = self._fleet_root
+        new_agent.session_root = root
         prior_result = self._finalize_session_workspace(
             sess, "agent switched to a manual worktree")
         sess._aux_generation += 1
@@ -7316,17 +7816,20 @@ class TUI:
         sess._cancel = new_agent.cancelled
         self._bind_session_monitors(sess)
         self._bind_session_agents(sess)
+        self._bind_session_peers(sess)
         from . import sessions as _sess
-        new_agent.session_file = _sess.new_path(self._fleet_root)
+        new_agent.session_file = _sess.new_path(root)
         new_agent.session_name = f"worktree {branch}"
         sess.workspace = None
         sess.workspace_kind = "manual"
         sess.workspace_path = project_root.resolve(strict=False)
         sess.workspace_branch = branch
         sess._workspace_finalized = False
-        _sess.save_workspace(new_agent.session_file, self._fleet_root, kind="manual",
+        _sess.save_workspace(new_agent.session_file, root, kind="manual",
                              worktree=project_root, branch=branch,
                              **_session_generation_guard(new_agent))
+        self._adopt_user_state(sess)
+        self._announce_peer_soon()
         self.blocks.clear(); self._buf = ""
         self._ft_cache = {}
         prior = (f" · retained prior {prior_result.branch}" if prior_result is not None
@@ -8174,20 +8677,116 @@ class TUI:
     # A terminal DGC used to be invisible: only `dgc serve` left a note, so an editor window that
     # found its session locked could not even say who was holding it, let alone ask for it back.
     def _announce_peer(self, status: str = "idle") -> None:
-        """Leave (or refresh) this terminal's note. Best effort; never fails a turn."""
+        """Leave (or refresh) this terminal's note. Best effort; never fails a turn.
+
+        It names every agent, each in its own folder, as `dgc serve`'s note names every chat
+        (Host.announce_peers): a terminal with an agent in another folder used to say only where
+        the agent on screen was, so another DGC in that folder never knew it was there. The
+        top-level fields stay the on-screen agent's, so a DGC that predates the list still reads
+        a true note."""
         try:
             from . import peers as _peers
             agent = self.agent
             root = str(getattr(self.config, "project_root", "") or "")
+            places = []
+            for sess in list(getattr(self, "_sessions", None) or ()):
+                other = getattr(sess, "agent", None)
+                where = str(getattr(getattr(sess, "config", None), "project_root", "") or "")
+                worker = getattr(sess, "_worker_thread", None)
+                places.append({
+                    "session": str(getattr(other, "session_file", "") or ""),
+                    "cwd": where, "project_root": where,
+                    "git_common_dir": (other._git_common_dir()
+                                       if hasattr(other, "_git_common_dir") else ""),
+                    "status": "working" if worker is not None and worker.is_alive() else "idle"})
             _peers.announce(
                 kind="tui",
                 session=str(getattr(agent, "session_file", "") or ""),
                 cwd=root, project_root=root,
                 git_common_dir=(agent._git_common_dir()
                                 if hasattr(agent, "_git_common_dir") else ""),
-                status=status, takeover=True)
+                status=status, takeover=True,
+                sessions=places if len(places) > 1 else None)
         except Exception:
             pass
+
+    def _announce_peer_soon(self) -> None:
+        """Refresh the note now that an agent opened or closed -- off the UI thread, since it asks
+        git where each checkout's repository is. Only once the heartbeat runs (see run)."""
+        if getattr(self, "_peer_thread", None) is None:
+            return
+        threading.Thread(target=lambda: self._announce_peer("working" if self._peer_busy() else "idle"),
+                         name="dgc-peer-announce", daemon=True).start()
+
+    def _bind_session_peers(self, sess: "AgentSession") -> None:
+        """Agents of this terminal in one place see each other, as `dgc serve`'s chats do.
+
+        The peer registry skips its own process's note, so two agents of one terminal sharing a
+        folder were each told they were alone -- the non-Git fallback shares one, and a named
+        /worktree can be opened by two agents. And a session one agent holds is named as held
+        here, not blamed on another window."""
+        agent = getattr(sess, "agent", None)
+        if agent is None:
+            return
+        try:
+            agent._sibling_peers = lambda: self._siblings_of(sess)
+            agent._sibling_holding = lambda path: self._session_open_elsewhere(sess, path)
+        except AttributeError:
+            pass
+
+    def _siblings_of(self, sess: "AgentSession") -> list[dict]:
+        """The other agents of this terminal working in the same checkout, as peer notes, in the
+        shape Host.siblings_of gives them.
+
+        The working tree itself, not the repository: unlike two editor windows, this terminal
+        gives a second agent in a Git checkout a worktree of its own, and an isolated fleet agent
+        told that another agent was "working in this same checkout" would be told something false.
+        What two agents of one terminal can share is a non-Git folder, or a named /worktree both
+        switched to."""
+        try:
+            mine = self._working_tree_key(sess)
+        except Exception:
+            return []
+        found = []
+        for other in list(getattr(self, "_sessions", None) or ()):
+            if other is sess or getattr(other, "_closing", False):
+                continue
+            try:
+                if self._working_tree_key(other) != mine:
+                    continue
+                agent = other.agent
+                found.append({"pid": os.getpid(), "chat": str(getattr(other, "id", "")),
+                              "liveness": "live",
+                              "project_root": str(agent.config.project_root),
+                              "git_common_dir": (agent._git_common_dir()
+                                                 if hasattr(agent, "_git_common_dir") else "")})
+            except Exception:
+                continue
+        return found
+
+    def _working_tree_key(self, sess: "AgentSession") -> str:
+        """_checkout_key of where a session works, remembered per folder: asked at every turn."""
+        place = str(Path(getattr(sess, "workspace_path", None)
+                         or sess.agent.config.project_root).resolve(strict=False))
+        cache = self.__dict__.setdefault("_working_tree_keys", {})
+        key = cache.get(place)
+        if key is None:
+            key = cache[place] = _checkout_key(place)
+        return key
+
+    def _session_open_elsewhere(self, sess: "AgentSession", path: str) -> bool:
+        """Whether another agent of this terminal has this session open."""
+        if not path:
+            return False
+        for other in list(getattr(self, "_sessions", None) or ()):
+            if other is sess:
+                continue
+            try:
+                if str(other.agent.session_file or "") == path:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _peer_busy(self) -> bool:
         for sess in list(getattr(self, "_sessions", ())):
@@ -8205,11 +8804,18 @@ class TUI:
         """
         try:
             from . import peers as _peers
-            session = str(getattr(self.agent, "session_file", "") or "")
-            if session and _peers.pending_release(session) is not None:
-                _peers.answer_release(
-                    granted=False,
-                    reason="it is open in a DGC terminal, which does not hand sessions over")
+            # An ask may name any agent's session, not only the one on screen: the note lists them
+            # all, so an asker can find a session under whichever agent holds it.
+            asked = [str(getattr(getattr(sess, "agent", None), "session_file", "") or "")
+                     for sess in list(getattr(self, "_sessions", None) or ())]
+            if not asked:
+                asked = [str(getattr(self.agent, "session_file", "") or "")]
+            for session in asked:
+                if session and _peers.pending_release(session) is not None:
+                    _peers.answer_release(
+                        granted=False,
+                        reason="it is open in a DGC terminal, which does not hand sessions over")
+                    break
         except Exception:
             pass
 

@@ -1286,6 +1286,18 @@ class CLI:
             else:
                 self.ui.error(getattr(self.agent, "_last_persist_error", "")
                               or "the branch could not be saved")
+        elif cmd == "new" and rest.strip():
+            # `/new DIR` opens an agent in another folder, and only the full-screen terminal holds
+            # more than one agent. Resetting here dropped the conversation and ignored the folder.
+            text = rest.strip()
+            if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+                text = text[1:-1]
+            if text == "~" or text.startswith("~/"):      # quoted, ~ would not be expanded
+                folder = "~" + ("/" + shlex.quote(text[2:]) if text[2:] else "")
+            else:
+                folder = shlex.quote(text)
+            self.ui.error("/new DIR opens an agent in another folder in the full-screen terminal "
+                          f"— here, run: cd {folder} && dgc --classic")
         elif cmd in ("clear", "new"):
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(cfg.project_root)

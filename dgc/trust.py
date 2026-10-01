@@ -16,6 +16,17 @@ import time
 
 from . import __version__, logo as logo_mod, style as style_mod
 
+# What the gate says, shared by the launch screen and the terminal's in-app card for `/new DIR`: two
+# screens asking the same question must not drift into two different promises.
+TRUST_QUESTION = "Do you trust the contents of this directory?"
+TRUST_NOTICE = (
+    "Vibe DGC may run or modify contents in this directory,",
+    "and files here can reach the model as untrusted input.",
+    "Trusting it also loads the project's DGC rules and named agents.",
+    "Your answer is remembered for this folder and everything under it.",
+)
+NOT_IN_GIT = "Not inside a git repository — changes here are not version-controlled."
+
 
 def in_git_repo(path) -> bool:
     p = os.path.realpath(str(path))
@@ -152,26 +163,21 @@ def trust_screen_text(project_root, cols: int, rows: int, secs: float) -> str:
     for ln in logo_mod.shimmer_lines(secs, pad=logo_mod.WIDTH):
         out.append(_center(ln, cols))
     out.append(Text(""))
-    out.append(_center(Text("Do you trust the contents of this directory?", style=th.muted), cols))
+    out.append(_center(Text(TRUST_QUESTION, style=th.muted), cols))
     safe_root = (style_mod.terminal_safe_text(project_root)
                  .replace("\n", r"\n").replace("\t", r"\t"))
     out.append(_center(Text(safe_root,
                             style=f"bold {th.text_strong}"), cols))
     out.append(Text(""))
-    out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
-    out.append(_center(Text("and files here can reach the model as untrusted input.", style=th.faint), cols))
-    out.append(_center(Text("Trusting it also loads the project's DGC rules and named agents.",
-                            style=th.faint), cols))
-    out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
-                            style=th.faint), cols))
+    for line in TRUST_NOTICE:
+        out.append(_center(Text(line, style=th.faint), cols))
     broad = broad_trust_warning(project_root)   # $HOME or / would pre-trust every future clone
     if broad:
         out.append(Text(""))
         out.append(_center(Text(broad, style=f"bold {th.err}"), cols))
     if not in_git_repo(project_root):        # a warning when changes aren't tracked
         out.append(Text(""))
-        out.append(_center(Text("Not inside a git repository — changes here are not version-controlled.",
-                                style=th.err), cols))
+        out.append(_center(Text(NOT_IN_GIT, style=th.err), cols))
     out.append(Text(""))
     opt = Text()
     opt.append("\u276f ", style=th.accent)                      # the selected row: Enter = yes
