@@ -30,6 +30,7 @@ from pathlib import Path
 # stopped in a way that left the file behind. Heartbeats are written far more often than this.
 STALE_AFTER_S = 15 * 60.0
 MAX_PEERS = 64                       # a listing bound, not a limit on how many may run
+MAX_NOTE_SESSIONS = 32               # one process's chats, listed in its note
 # The note is a slow courtesy, but a takeover ask is someone waiting at a keyboard, so one thread
 # serves both: it ticks fast and only re-announces every ANNOUNCE_EVERY ticks. Both frontends read
 # these from here -- two copies of a number that must agree is how most of this file's bugs began.
@@ -146,8 +147,12 @@ def liveness(record: dict, *, now: float | None = None) -> str:
 
 def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str = "",
              git_common_dir: str = "", status: str = "idle",
-             takeover: bool = False) -> Path | None:
-    """Write (or refresh) this process's note. Returns the path, or None if it could not be left."""
+             takeover: bool = False, sessions: list | None = None) -> Path | None:
+    """Write (or refresh) this process's note. Returns the path, or None if it could not be left.
+
+    ``sessions`` lists every chat a backend holds, each in its own folder. The top-level fields
+    stay the first chat's, so a DGC that predates the list still reads a true note.
+    """
     try:
         directory = peers_dir()
         directory.mkdir(parents=True, exist_ok=True)
@@ -171,6 +176,14 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
             "takeover": bool(takeover),
             "heartbeat": time.time(),
         }
+        if sessions:
+            record["sessions"] = [
+                {"session": str(item.get("session") or "")[:128],
+                 "cwd": str(item.get("cwd") or "")[:4096],
+                 "project_root": str(item.get("project_root") or "")[:4096],
+                 "git_common_dir": str(item.get("git_common_dir") or "")[:4096],
+                 "status": str(item.get("status") or "idle")[:32]}
+                for item in sessions[:MAX_NOTE_SESSIONS] if isinstance(item, dict)]
         path = directory / f"{pid}.json"
         tmp = directory / f".{pid}.json.tmp"
         tmp.write_text(json.dumps(record, ensure_ascii=True), encoding="utf-8")
@@ -192,7 +205,18 @@ def withdraw() -> None:
         pass
 
 
+def _places(record: dict) -> list[dict]:
+    """The note itself, then every chat it lists: what each one is working on."""
+    listed = record.get("sessions")
+    extra = [item for item in listed if isinstance(item, dict)] if isinstance(listed, list) else []
+    return [record, *extra[:MAX_NOTE_SESSIONS]]
+
+
 def _same_place(record: dict, project_root: str, git_common_dir: str) -> bool:
+    return any(_one_place(place, project_root, git_common_dir) for place in _places(record))
+
+
+def _one_place(record: dict, project_root: str, git_common_dir: str) -> bool:
     """Whether a peer is working on the same checkout.
 
     The git common directory is the reliable test, because it is shared by every worktree of one
@@ -301,9 +325,12 @@ REFUSED_STILL_CONNECTED = "its editor window is still connected"
 
 
 def _same_session(record: dict, session: str) -> bool:
-    if not session or not record.get("session"):
+    """Whether the note -- or any chat it lists -- holds this session."""
+    if not session:
         return False
-    return os.path.normpath(str(record["session"])) == os.path.normpath(session)
+    return any(place.get("session")
+               and os.path.normpath(str(place["session"])) == os.path.normpath(session)
+               for place in _places(record))
 
 
 def session_holder(session: str, *, now: float | None = None) -> dict | None:

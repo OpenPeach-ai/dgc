@@ -114,6 +114,29 @@ class PeerRegistryTest(unittest.TestCase):
                              project_root="/w2", git_common_dir="/w/.git"))
         self.assertEqual(len(peers.others(project_root="/w", git_common_dir="/w/.git")), 1)
 
+    # ---- one process, several chats -------------------------------------------------------
+
+    def test_a_note_without_chats_keeps_the_old_shape(self):
+        peers.announce(kind="serve", project_root="/w", git_common_dir="/w/.git", session="/s/a.json")
+        note = json.loads((peers.peers_dir() / f"{os.getpid()}.json").read_text())
+        self.assertNotIn("sessions", note, "an older reader must see exactly the note it always did")
+
+    def test_every_chat_a_backend_holds_is_found_by_its_session_and_its_folder(self):
+        self.write(self.note(pid=os.getppid(), proc_start=peers._proc_start(os.getppid()),
+                             session="/w/.dgc/sessions/first.json",
+                             sessions=[{"session": "/w/.dgc/sessions/first.json", "project_root": "/w",
+                                        "git_common_dir": "/w/.git", "cwd": "/w", "status": "idle"},
+                                       {"session": "/other/.dgc/sessions/second.json",
+                                        "project_root": "/other", "git_common_dir": "/other/.git",
+                                        "cwd": "/other", "status": "working"}]))
+        holder = peers.session_holder("/other/.dgc/sessions/second.json")
+        self.assertIsNotNone(holder, "a second chat's session looked free to another DGC")
+        self.assertEqual(holder["pid"], os.getppid())
+        self.assertEqual(len(peers.others(project_root="/other", git_common_dir="/other/.git")), 1,
+                         "a backend with a chat in this checkout is a peer here")
+        self.assertTrue(peers.request_release(holder, "/other/.dgc/sessions/second.json"),
+                        "a takeover ask for the second chat could not even be left")
+
     def test_a_dead_peers_note_is_tidied_away(self):
         path = self.write(self.note(pid=4_000_001, proc_start="1"))
         peers.others(project_root="/w", git_common_dir="/w/.git")

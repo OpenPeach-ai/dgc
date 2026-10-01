@@ -2056,8 +2056,13 @@ class Backend:
         """Leave (or refresh) this backend's note in the peer registry.
 
         Best effort by design: a peer note is a courtesy to the other agents in this checkout, and
-        nothing about a turn should fail because one could not be written.
+        nothing about a turn should fail because one could not be written. One chat of a Host
+        writes the process's note, which lists every chat the process holds.
         """
+        host = getattr(self, "_host", None)
+        if host is not None:
+            host.announce_peers()
+            return
         try:
             from . import peers as _peers
             agent = getattr(self, "agent", None)
@@ -2106,9 +2111,12 @@ class Backend:
         so the asker can tell the person something better than "wait".
         """
         from . import peers as _peers
-        agent = getattr(self, "agent", None)
-        session = str(getattr(agent, "session_file", "") or "")
-        if not session or _peers.pending_release(session) is None:
+        host = getattr(self, "_host", None)
+        chats = list(host.chats.values()) if host is not None else [self]
+        # An ask may name any chat this process holds; the window answering is the same for all.
+        asked = [str(getattr(getattr(chat, "agent", None), "session_file", "") or "")
+                 for chat in chats]
+        if not any(session and _peers.pending_release(session) is not None for session in asked):
             return False
         watch = getattr(self, "_editor_liveness", None)
         if watch is None:
@@ -6189,6 +6197,7 @@ class Host:
             with self._chats_lock:
                 self._opening.discard(chat_id)
         chat.open(request_id)
+        self.announce_peers()
 
     def _close_chat(self, cmd: dict) -> None:
         chat_id = cmd.get("chat_id")
@@ -6214,6 +6223,7 @@ class Host:
                     self._retired_secrets.update(secret_values(getattr(chat, "config", None)))
                     self.chats.pop(chat_id, None)
                     self._closing.discard(chat_id)
+                self.announce_peers()
         threading.Thread(target=close, daemon=True, name=f"dgc-close-{chat_id}").start()
 
     def _sanitize(self, event):
@@ -6296,6 +6306,30 @@ class Host:
             if reason:
                 return reason
         return ""
+
+    def announce_peers(self) -> None:
+        """The process's note: the first chat's fields, and every chat in `sessions`."""
+        try:
+            from . import peers as _peers
+            places = []
+            for chat in list(self.chats.values()):
+                agent = getattr(chat, "agent", None)
+                root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
+                places.append({
+                    "session": str(getattr(agent, "session_file", "") or ""),
+                    "cwd": root, "project_root": root,
+                    "git_common_dir": (agent._git_common_dir() if agent is not None
+                                       and hasattr(agent, "_git_common_dir") else ""),
+                    "status": "working" if _safe_busy(chat) else "idle"})
+            first = places[0] if places else {}
+            _peers.announce(kind="serve", takeover=True, session=first.get("session", ""),
+                            cwd=first.get("cwd", ""), project_root=first.get("project_root", ""),
+                            git_common_dir=first.get("git_common_dir", ""),
+                            status="working" if any(p["status"] == "working" for p in places)
+                            else "idle",
+                            sessions=places if len(places) > 1 else None)
+        except Exception:
+            pass
 
     def stopping(self) -> None:
         """The process is going down: every chat's turn lands at its next boundary."""

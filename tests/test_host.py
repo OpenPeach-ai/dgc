@@ -83,6 +83,14 @@ class HostTest(unittest.TestCase):
         self.assertNotIn("chat_id", frame, "a client that never opted in must never see chat_id")
         self.assertEqual(self.host.default.agent.session_name, "renamed")
 
+    def test_a_one_chat_backend_leaves_exactly_the_old_note(self):
+        from dgc import peers
+        with patch.object(peers, "peers_dir", lambda: self.tmp / "peers"):
+            self.host.announce_peers()
+            note = json.loads((self.tmp / "peers" / f"{os.getpid()}.json").read_text())
+        self.assertNotIn("sessions", note, "a single chat must leave the note every DGC version reads")
+        self.assertEqual(note["project_root"], str(self.tmp / "a"))
+
     def test_each_chat_has_its_own_directory_and_config(self):
         second = self.second_chat()
         self.assertNotEqual(second.config.project_root, self.host.default.config.project_root)

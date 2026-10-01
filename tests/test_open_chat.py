@@ -330,6 +330,27 @@ class OpenChatTest(unittest.TestCase):
             self.wait_for(lambda f: f.get("request_id") == "next")
         self.assertEqual(failures, ["get_goal"])
 
+    def test_the_note_lists_every_chat_and_an_ask_for_any_of_them_is_answered(self):
+        from dgc import peers
+        with patch.object(peers, "peers_dir", lambda: self.tmp / "peers"):
+            opened = self.open_b()
+            other = self.host.chats[opened["chat_id"]]
+            other.agent.session_file = self.tmp / "b" / ".dgc" / "sessions" / "second.json"
+            self.host.announce_peers()
+            note = json.loads((self.tmp / "peers" / f"{os.getpid()}.json").read_text())
+            listed = [Path(item["session"]).name for item in note.get("sessions", [])]
+            self.assertIn("second.json", listed, "the process's note named only its first chat")
+            directory = peers.takeover_dir()
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"{os.getpid()}.ask.json").write_text(json.dumps({
+                "session": str(other.agent.session_file), "asker": 1, "holder": os.getpid(),
+                "at": time.time()}))
+            self.host.default._editor_liveness = None      # cannot tell: it must still ANSWER
+            self.host.default._consider_release()
+            answer = peers.release_answer(os.getpid())
+            self.assertIsNotNone(answer, "an ask for the second chat's session was never answered")
+            self.assertFalse(answer["granted"])
+
     def test_the_envelope_is_valid_only_as_a_short_string(self):
         self.assertIsNone(command_error({"type": "ping", "chat_id": "c1"}))
         self.assertIsNotNone(command_error({"type": "ping", "chat_id": ""}))
