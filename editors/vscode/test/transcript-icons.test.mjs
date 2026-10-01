@@ -54,6 +54,8 @@ const TOOL_ICONS = {
   skill: "sparkle", Skill: "sparkle", add_skill: "sparkle",
   notes: "notebook-pen", monitor: "activity", monitor_stop: "activity",
   artifact: "app-window", update_goal: "target",
+  // Supervising sub-agents: the family's mark, and a message mark for steering one.
+  list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash",
   // MCP, however the engine spells it — including DGC's own broker tools (dgc/agent.py), which
   // are the same route by another name and used to land on the wrench.
   mcp__github__search_issues: "blocks", mcp: "blocks", "linear.create_issue": "blocks",

@@ -823,6 +823,7 @@
     "image": '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
     "image-off": '<line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" x2="6" y1="13.5" y2="21"/><line x1="18" x2="21" y1="12" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/>',
     "list-todo": '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/>',
+    "message-square": '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
     "notebook-pen": '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>',
     "pencil": '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
     "play": '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
@@ -872,6 +873,9 @@
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
+    // Supervising sub-agents. Steering one wears a fixed mark, never the agent's own face: the
+    // row is about the parent talking to it.
+    list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash",
     // DGC's own MCP broker, exposed when a server's catalog is too large to inline (dgc/agent.py).
     // It is the same route as an mcp__server__tool call, so it wears the same mark.
     mcp_call: "blocks", mcp_search: "blocks",
@@ -924,7 +928,15 @@
     task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
     list_tasks: ["Checking sub-agents", "Checked sub-agents"],
     wait_tasks: ["Waiting for a sub-agent", "Waited for a sub-agent"],
+    // The parent steering a child it started; the card's detail is that child, by what it was
+    // asked to do (the backend resolves it from the id): "Sent message to Write the parser".
+    message_task: ["Sending message to", "Sent message to"],
+    close_task: ["Stopping", "Stopped"],
   };
+  // A lone running step names itself in its group's sentence, where the card's detail is not.
+  // These verbs take their object from that detail, so the sentence says them whole — the
+  // CLI's own activity words (dgc/ui.py).
+  const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent" };
   function pluginLogoHtml(name) {
     const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
     const src = match && pluginLogos[match[1]];
@@ -2617,8 +2629,9 @@
     // One running tool DGC has a specific verb for ("Updating plan", "Delegating") keeps it.
     const lone = !past && counts.other === 1
       ? cards.find((card) => !TOOL_BUCKET[canonicalTool(card.dataset.toolName)]) : null;
-    const loneCopy = lone && TOOL_COPY[canonicalTool(lone.dataset.toolName)];
-    const otherPresent = loneCopy ? loneCopy[0].toLowerCase()
+    const loneName = lone && canonicalTool(lone.dataset.toolName);
+    const loneCopy = lone && (LONE_PRESENT[loneName] || TOOL_COPY[loneName]?.[0].toLowerCase());
+    const otherPresent = loneCopy ? loneCopy
       : lone && String(lone.dataset.toolName).startsWith("mcp__") ? "calling an MCP tool"
         : `using ${some(counts.other || 0, "tool", "tools")}`;
     const phrases = [

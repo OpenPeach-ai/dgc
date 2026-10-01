@@ -7580,7 +7580,7 @@ class Agent(GoalLifecycle):
         name, args = call.name, call.arguments
         call_id = call.id
         secrets = self._secret_values()
-        display_args = redact_value(args, secrets)
+        display_args = redact_value(self._with_task_agent(name, args), secrets)
 
         # Both gates run before ANY tool is answered. The control tools below reply and return
         # within the first hundred lines of this method, so a check placed after them is a check
@@ -9147,6 +9147,31 @@ class Agent(GoalLifecycle):
         """
         jobs = getattr(self, "_detached_jobs", None) or {}
         return jobs.get(str(agent_id))
+
+    def _task_description(self, agent_id: str) -> str:
+        """What one of this chat's sub-agents was asked to do -- running, finished, or reopened."""
+        key = str(agent_id or "").strip()
+        if not key:
+            return ""
+        entry = self._detached_handle(key) or (getattr(self, "_finished_jobs", None) or {}).get(key)
+        described = str((entry or {}).get("description") or "")
+        registry = getattr(self, "subagents", None)
+        if not described and registry is not None:
+            described = registry.description(key)    # a chat reopened from disk keeps only this
+        return described
+
+    def _with_task_agent(self, name: str, args):
+        """`args` for DISPLAY, naming the sub-agent a message_task / close_task row is about.
+
+        Codex names the agent a parent steered ("Sent message to <agent>"); the row here was
+        "Used tool · message task" and named no one, and `sub-<hex>` names nothing a reader
+        recognises. It carries what that agent was asked to do, live and again when the chat is
+        reopened. Never the model's own arguments: a copy, for the screen only.
+        """
+        if name not in ("message_task", "close_task") or not isinstance(args, dict):
+            return args
+        described = self._task_description(str(args.get("id") or ""))
+        return {**args, "agent": described} if described else args
 
     def _knows_finished(self, agent_id: str) -> bool:
         """Did THIS conversation run a background child with this id that has already ended?

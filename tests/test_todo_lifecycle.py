@@ -47,6 +47,7 @@ from dgc.editor_protocol import event_error  # noqa: E402
 from dgc.headless import Backend  # noqa: E402
 from dgc.llm import ChatResult, ToolCall  # noqa: E402
 from dgc.tools import MAX_TODO_CHARS, execute  # noqa: E402
+from dgc.trust import is_trusted  # noqa: E402
 
 _REMINDER = "You're stopping but these todos are still open"
 
@@ -105,6 +106,8 @@ class TodoLifecycleTests(unittest.TestCase):
         self.backend._busy = lambda: False
         self.backend._emit_context = lambda *args: None
         self.backend._emit_goal = lambda *args: None
+        # As Backend.__init__ sets it: a reopened chat whose mode is restored reports it with this.
+        self.backend.workspace_trusted = is_trusted(cfg, cfg.project_root)
 
     def update(self, rows):
         return execute("todo", {"todos": rows}, self.agent.ctx)
@@ -793,6 +796,8 @@ class ChecklistProtocolTests(unittest.TestCase):
         self.backend._busy = lambda: False
         self.backend._emit_context = lambda *args: None
         self.backend._emit_goal = lambda *args: None
+        # As Backend.__init__ sets it: a reopened chat whose mode is restored reports it with this.
+        self.backend.workspace_trusted = is_trusted(cfg, cfg.project_root)
 
     def update(self, rows):
         return execute("todo", {"todos": rows}, self.agent.ctx)

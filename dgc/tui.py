@@ -3988,7 +3988,10 @@ class TUI:
                   "code_intel": "Inspect code",
                   "grep": "Search", "glob": "Find", "web_search": "Search",
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
-                  "add_skill": "Install skill", "save_memory": "Remember"}
+                  "add_skill": "Install skill", "save_memory": "Remember",
+                  # The sub-agent supervision tools, in the editor card's own words.
+                  "list_tasks": "Check sub-agents", "wait_tasks": "Wait for a sub-agent",
+                  "message_task": "Message", "close_task": "Stop"}
 
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
@@ -3999,7 +4002,10 @@ class TUI:
                  "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
                  "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering",
-                 "view_image": "Viewing image"}
+                 "view_image": "Viewing image",
+                 "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
+                 # The agent follows as the summary: "Sending message to Write the parser".
+                 "message_task": "Sending message to", "close_task": "Stopping"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
                 "monitor_event": "Monitor event", "subtask_result": "Sub-task result",
@@ -4008,14 +4014,16 @@ class TUI:
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
                 "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
                 "add_skill": "Installed skill", "save_memory": "Remembered",
-                "view_image": "Viewed image"}
+                "view_image": "Viewed image",
+                "list_tasks": "Checked sub-agents", "wait_tasks": "Waited for a sub-agent",
+                "message_task": "Sent message to", "close_task": "Stopped"}
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
         self._backend_activity = None       # the tool label below is the more specific truth
         self._model_wait = None
         self._tool_count += 1
-        summary = _arg_summary(args)
+        summary = _arg_summary(args, name)
         safe_name = style_mod.terminal_safe_text(name)
         # The status line names the step ("Running a command…") and never its argument: the tool
         # block this appends to the transcript already shows the command or path, and printing it
@@ -4626,7 +4634,7 @@ class TUI:
             for ln in style_mod.terminal_safe_text(args["command"]).splitlines()[:6]:
                 header.append(Text("  $ ", style=th.faint).append(ln, style=th.text))
         else:
-            detail = _arg_summary(args)
+            detail = _arg_summary(args, name)
             if detail:
                 header.append(Text("  " + detail, style=th.muted))
         # Show WHAT the edit does before asking whether to allow it. A shell command is its own
@@ -8342,7 +8350,11 @@ class _ClickControl(FormattedTextControl):
         return super().mouse_handler(mouse_event)
 
 
-def _arg_summary(args: dict) -> str:
+def _arg_summary(args: dict, name: str = "") -> str:
+    if name in ("message_task", "close_task") and isinstance(args, dict):
+        # The agent, by what it was asked to do (the agent resolves it into `agent`), else its id.
+        v = style_mod.terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
+        return v[:100] + ("…" if len(v) > 100 else "")
     if isinstance(args, dict) and args.get("via"):   # a vision model looked (dgc/vision.py)
         v = style_mod.terminal_safe_text(f"{args.get('path') or 'image'} · via {args['via']}")
         v = v.replace("\n", " ")

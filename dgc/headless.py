@@ -3584,8 +3584,11 @@ class Backend:
                     args = _history_args(saved)
                     call_id = str(tc.get("id") or "") or None
                     # The summary is read from the whole arguments, as live: a bound must not change it.
+                    # A message to a sub-agent names that agent, as its live row did.
+                    named = getattr(self.agent, "_with_task_agent", None)
+                    shown = named(name, saved) if callable(named) else saved
                     items.append({"type": "tool_call", "call_id": call_id, "name": name,
-                                  "args": args, "summary": arg_summary(name, saved, self._display_root())})
+                                  "args": args, "summary": arg_summary(name, shown, self._display_root())})
                     if call_id:
                         calls[call_id] = name
                         if name == "propose_options":

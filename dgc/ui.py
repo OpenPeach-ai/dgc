@@ -169,6 +169,11 @@ def arg_summary(name: str, args: dict, root=None) -> str:
         from .questions import args_summary
         value = args_summary(args).replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
+    if name in ("message_task", "close_task") and isinstance(args, dict):
+        # WHICH agent: what it was asked to do (Agent._with_task_agent puts it in `agent`), else
+        # its id. Blank, the editor's card read "Used tool · message task": a message to no one.
+        value = str(args.get("agent") or args.get("id") or "").replace("\n", " ")
+        return value[:120] + ("…" if len(value) > 120 else "")
     if name == "view_image" and isinstance(args, dict) and args.get("via"):
         # The card DGC draws when a vision model looked at a prompt's attachments (dgc/vision.py).
         value = f"{args.get('path') or 'image'} · via {args['via']}".replace("\n", " ")
