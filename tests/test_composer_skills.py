@@ -141,6 +141,27 @@ class ComposerTests(SkillFixture):
             tui._open_command_palette()
             self.assertEqual(tui._overlay_rows(), [], text)
 
+    def test_terminal_palette_sends_an_absolute_path_as_a_prompt(self):
+        text = "/home/fungigb10/pregnancy-tracker , this is the directory that runs bearbloom"
+        tui = self.tui(text)
+        prompts, commands = [], []
+        tui._send_composer_text = prompts.append
+        tui._run_command = commands.append
+        tui._open_command_palette()
+        self.assertEqual(tui._overlay_rows(), [])
+        tui._overlay_select()
+        self.assertEqual(prompts, [text])
+        self.assertEqual(commands, [])
+        self.assertEqual(tui.input_buf.text, "")
+
+    def test_terminal_palette_closes_when_the_command_token_becomes_a_path(self):
+        tui = self.tui("/")
+        tui.input_buf.on_text_changed += tui._composer_text_changed
+        tui._open_command_palette()
+        tui.input_buf.insert_text("home/me/project")
+        self.assertIsNone(tui._overlay)
+        self.assertEqual(tui.input_buf.text, "/home/me/project")
+
     def test_terminal_picker_cancel_and_management_action_preserve_draft(self):
         tui = self.tui("Review this /model later", 18)
         tui._open_command_palette()

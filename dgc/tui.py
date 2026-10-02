@@ -647,6 +647,13 @@ class TUI:
                 return
             elif typed.startswith("/") and len(typed) > 1:
                 self.input_buf.reset()
+                if not is_slash_command_text(typed):
+                    # Typing a leading slash opens the command palette before the rest of the
+                    # token exists. Once that token becomes an absolute path, Enter still arrives
+                    # through this overlay callback; send the whole value as the prompt instead
+                    # of handing it to the command runner.
+                    self._send_composer_text(typed)
+                    return
                 self._run_command(typed)
                 if len(typed[1:].split(maxsplit=1)) > 1:
                     # `/usage today` ran to completion: whatever it opened is its result, not a
@@ -703,7 +710,7 @@ class TUI:
     }
 
     def _run_command(self, text: str) -> None:
-        if not text.startswith("/"):
+        if not is_slash_command_text(text):
             return
         parts = text[1:].split(maxsplit=1)
         cmd = parts[0].lower()
@@ -4963,13 +4970,20 @@ class TUI:
                 return {"action": "cancel"}
 
     # --------------------------------------------------------------- the app ---
+    def _composer_text_changed(self, _buffer) -> None:
+        self._draft_changed_at = time.monotonic()
+        text = self.input_buf.text.strip()
+        if (self._overlay is not None and self._overlay.get("composer_palette")
+                and text.startswith("/") and not is_slash_command_text(text)):
+            # `/` opens the command palette immediately. Dismiss it as soon as the first token
+            # becomes an absolute path, so the user keeps typing into an ordinary prompt instead
+            # of seeing a misleading “no matches” command menu.
+            self._close_overlay()
+
     def _build(self) -> None:
         # `/` opens the command palette as an overlay (see the `/` key binding) — no completer.
         self.input_buf = Buffer(multiline=True, auto_suggest=_NextSuggest(self))   # ghost-text next-prompt
-
-        def draft_changed(_buffer) -> None:
-            self._draft_changed_at = time.monotonic()
-        self.input_buf.on_text_changed += draft_changed
+        self.input_buf.on_text_changed += self._composer_text_changed
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
