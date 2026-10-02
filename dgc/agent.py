@@ -1655,6 +1655,46 @@ def _one_shot_task_schema(tool: dict) -> dict:
     return {**tool, "function": function}
 
 
+class _ChatToolResources:
+    """Tool owners outlive a finished sub-task, but never the chat that launched it."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.closed = False
+        self.children = {}
+
+    @staticmethod
+    def stop(owner, hub):
+        from .tools import shutdown_background, shutdown_python_kernels, shutdown_browsers
+        for shutdown in (shutdown_background, shutdown_python_kernels, shutdown_browsers):
+            try:
+                shutdown(owner)
+            except Exception:
+                pass
+        if hub is not None:
+            try:
+                hub.shutdown("shutdown", wait=0.0)
+            except Exception:
+                pass
+
+    def add(self, child):
+        owner, hub = child.ctx.tool_owner, child.monitors
+        with self.lock:
+            closed = self.closed
+            if not closed:
+                self.children[owner] = hub
+        if closed:
+            self.stop(owner, hub)
+        return not closed
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            children, self.children = self.children, {}
+        for owner, hub in children.items():
+            self.stop(owner, hub)
+
+
 class Agent(GoalLifecycle):
     @staticmethod
     def _mcp_client_capabilities(ui) -> dict:
@@ -8788,6 +8828,7 @@ class Agent(GoalLifecycle):
         registry = getattr(self, "subagents", None)
         agent_id = getattr(sub_ui, "agent_id", None)
         sub = None
+        resources = self.__dict__.setdefault("_chat_tool_resources", _ChatToolResources())
         failure = result = start_error = raised = ""
         if registry is not None and agent_id:
             registry.running(agent_id)               # a worker slot was taken (queued -> running)
@@ -8865,6 +8906,8 @@ class Agent(GoalLifecycle):
                 # attributes a child's work (the agents list, viewed images).
                 sub._parent_agent = self
                 sub._parent_call_id = call_id
+                sub._chat_tool_resources = resources
+                resources.add(sub)
                 if getattr(self, "_monitor_turn", False):
                     # Nobody is at the keyboard for a turn DGC started on a monitor event, and that holds
                     # for everything the turn delegates: the child refuses ASK steps and asks no question,
@@ -8883,7 +8926,7 @@ class Agent(GoalLifecycle):
                     # Publish only a FULLY wired child: whatever reads this later expects the cancel
                     # token, registry, checkpoints, client and effort above to be in place.
                     handle["agent"] = sub
-                if own_cancel.is_set() or self.stopping:
+                if own_cancel.is_set() or self.stopping or resources.closed:
                     thrown = "cancelled before the isolated run started"
                 else:
                     outcome = sub.run_turn(task_prompt)
@@ -8909,6 +8952,10 @@ class Agent(GoalLifecycle):
             raised = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            # A tool may finish spawning after close() took its snapshot. Sweep this child's
+            # owner again once its worker lands; never stop a sibling chat's resources.
+            if sub is not None and resources.closed:
+                resources.stop(sub.ctx.tool_owner, sub.monitors)
             if registry is not None and agent_id:
                 why = failure or start_error or raised
                 child_cancel = getattr(sub, "cancelled", None) if sub is not None else None
@@ -9532,6 +9579,14 @@ class Agent(GoalLifecycle):
                     f"wait_tasks with id {agent_id} for its result.")
         return (f"error: this conversation has no background sub-task with the id {agent_id}. "
                 "Call list_tasks for the ids that exist.")
+
+    def close_tool_resources(self) -> None:
+        """Close this chat's tool processes, including completed and still-running sub-tasks."""
+        resources = self.__dict__.setdefault("_chat_tool_resources", _ChatToolResources())
+        resources.close()
+        owner = str(getattr(getattr(self, "ctx", None), "tool_owner", "") or "")
+        if owner:
+            resources.stop(owner, None)
 
     def stop_detached(self, agent_id: str | None = None) -> int:
         """Cancel one detached child, or every detached child. Returns how many were signalled."""

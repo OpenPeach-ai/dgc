@@ -1712,6 +1712,7 @@ class MCPManager:
         A connect still running on another thread stops the server it starts."""
         with self._catalog_state_lock:
             self._closed = True
+        atexit.unregister(self.stop_all)
         self.stop_all()
 
     def disconnect(self, name: str) -> None:

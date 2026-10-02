@@ -26,6 +26,8 @@ What one chat does no longer reaches into another:
   did not change is never restarted under a turn that may be using it.
 - The shared wire redacts every open chat's secrets, the process stays alive while any chat is
   working, and shutting down gives every chat the whole grace window.
+- Closing a chat also stops background shells, Python kernels, browsers and monitors started by
+  its sub-agents, including sub-tasks that have already finished. Other chats keep their processes.
 - Another DGC asking whether a session is free finds it under whichever chat holds it, and a
   takeover ask for any of them is answered.
 

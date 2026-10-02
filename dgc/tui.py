@@ -5961,11 +5961,14 @@ class TUI:
             sess._queue.clear()
         try:
             sess._aux_cancel.set()
+            sess.agent.stopping = True
+            sess.agent.stop_detached()
             sess.agent.cancelled.set()                   # stop its turn if one is running
             sess._req_answer = None
             sess._req_event.set()                        # never strand a worker awaiting approval
             sess.agent.monitors.new_epoch("shutdown")    # its monitors end with it
-            sess.agent.mcp.stop_all()
+            sess.agent.mcp.close()
+            sess.agent.close_tool_resources()
         except Exception:
             pass
         worker = sess._worker_thread

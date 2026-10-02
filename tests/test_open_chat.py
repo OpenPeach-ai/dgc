@@ -542,6 +542,76 @@ class OpenChatTest(unittest.TestCase):
             self.wait_for(lambda f: f["type"] == "session" and f.get("request_id") == "plain-new")
         self.assertEqual(stopped, [], "a new chat in the same tab stopped the previous one's dev server")
 
+    def _child_with_background_shell(self, parent, *, entered=None, release=None):
+        from dgc.agent import Agent, _SubUI
+        from dgc import tools
+        processes = []
+
+        def turn(child, prompt):
+            child.config.data["sandbox"] = "off"
+            result = tools._bash_background("sleep 120", child.ctx)
+            self.assertNotIn("error:", result)
+            with tools._BG_LOCK:
+                entries = [e for e in tools._BG.values() if e["owner"] == child.ctx.tool_owner]
+            processes.extend(e["proc"] for e in entries)
+            self.addCleanup(tools.shutdown_background, child.ctx.tool_owner)
+            if entered is not None:
+                entered.set()
+                release.wait(10)
+            child.ui.on_text("Server started.")
+            child.ui.end_stream()
+            return True
+
+        def run():
+            with patch.object(Agent, "run_turn", turn):
+                parent._execute_prepared_subagent("server", "start", "", None,
+                                                 _SubUI(parent.ui, "server", cancel=parent.cancelled))
+        return run, processes
+
+    def test_closing_a_chat_stops_a_finished_childs_shell_and_keeps_another_chats_shell(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        run, processes = self._child_with_background_shell(other.agent)
+        run()
+        sibling_run, sibling = self._child_with_background_shell(self.host.default.agent)
+        sibling_run()
+        self.assertEqual(len(processes), 1)
+        self.assertIsNone(processes[0].poll(), "a finished sub-task's server must live until chat close")
+        self.host.dispatch({"type": "close_chat", "request_id": "bye", "chat_id": opened["chat_id"]})
+        self.wait_for(lambda f: f["type"] == "chat_closed")
+        self.assertIsNotNone(processes[0].poll(), "the closed chat leaked its child's server")
+        self.assertIsNone(sibling[0].poll(), "closing one chat stopped another chat's child")
+
+    def test_retiring_the_first_chat_stops_its_finished_childs_shell(self):
+        self.open_b()
+        run, processes = self._child_with_background_shell(self.host.default.agent)
+        run()
+        request = headless.RETIRE_REQUEST_PREFIX + "child"
+        self.host.dispatch({"type": "new_session", "request_id": request})
+        self.wait_for(lambda f: f["type"] == "session" and f.get("request_id") == request)
+        self.assertIsNotNone(processes[0].poll())
+        again, next_processes = self._child_with_background_shell(self.host.default.agent)
+        again()
+        self.assertEqual(len(next_processes), 1, "the retired backend must support a new chat")
+        self.assertIsNone(next_processes[0].poll())
+
+    def test_closing_a_chat_stops_a_running_childs_shell(self):
+        opened = self.open_b()
+        other = self.host.chats[opened["chat_id"]]
+        entered, release = threading.Event(), threading.Event()
+        run, processes = self._child_with_background_shell(other.agent, entered=entered, release=release)
+        worker = threading.Thread(target=run)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(10))
+            self.host.dispatch({"type": "close_chat", "request_id": "bye", "chat_id": opened["chat_id"]})
+            self.wait_for(lambda f: f["type"] == "chat_closed")
+            self.assertIsNotNone(processes[0].poll())
+        finally:
+            release.set()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+
     def test_only_that_owners_background_shells_are_stopped(self):
         from dgc import tools as tools_module
         killed = []

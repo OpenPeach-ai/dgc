@@ -3233,14 +3233,7 @@ class Backend:
             # One chat of a shared process: its background shells, Python kernel and browser were
             # killed only at process exit, so closing its tab left a dev server holding its port
             # until every chat in the window had closed.
-            owner = str(getattr(getattr(self.agent, "ctx", None), "tool_owner", "") or "")
-            if owner:
-                from .tools import shutdown_background, shutdown_browsers, shutdown_python_kernels
-                for stop_owned in (shutdown_background, shutdown_python_kernels, shutdown_browsers):
-                    try:
-                        stop_owned(owner)
-                    except Exception:
-                        pass
+            self.agent.close_tool_resources()
         return outcome
 
     def _editor_image_mentions(self, context, images):
@@ -4855,10 +4848,10 @@ class Backend:
                 # so the editor retires it with a new session instead (backend.ts close()). Its
                 # background shells go with it, as when closing that tab ended its own process; a
                 # plain new chat keeps them, as it always has.
-                owner = str(getattr(getattr(self.agent, "ctx", None), "tool_owner", "") or "")
-                if owner:
-                    from .tools import shutdown_background
-                    shutdown_background(owner)
+                self.agent.close_tool_resources()
+                # The default backend stays available for the next tab. Old children retain the
+                # closed group so their late cleanup cannot touch the next chat's resources.
+                self.agent.__dict__.pop("_chat_tool_resources", None)
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, name="",
