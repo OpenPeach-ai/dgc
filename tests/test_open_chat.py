@@ -544,11 +544,13 @@ class OpenChatTest(unittest.TestCase):
 
     def _child_with_background_shell(self, parent, *, entered=None, release=None):
         from dgc.agent import Agent, _SubUI
-        from dgc import tools
+        from dgc import sandbox, tools
         processes = []
 
         def turn(child, prompt):
-            child.config.data["sandbox"] = "off"
+            # This fixture tests process ownership, independently of OS sandbox availability.
+            # The config is boolean: the string "off" is truthy and requests a sandbox.
+            child.config.data["sandbox"] = False
             result = tools._bash_background("sleep 120", child.ctx)
             self.assertNotIn("error:", result)
             with tools._BG_LOCK:
@@ -563,9 +565,12 @@ class OpenChatTest(unittest.TestCase):
             return True
 
         def run():
-            with patch.object(Agent, "run_turn", turn):
-                parent._execute_prepared_subagent("server", "start", "", None,
-                                                 _SubUI(parent.ui, "server", cancel=parent.cancelled))
+            with patch.object(Agent, "run_turn", turn), \
+                    patch.object(sandbox, "_backend", return_value=None):
+                failure, _, start_error = parent._execute_prepared_subagent(
+                    "server", "start", "", None,
+                    _SubUI(parent.ui, "server", cancel=parent.cancelled))
+                self.assertEqual((failure, start_error), ("", ""))
         return run, processes
 
     def test_closing_a_chat_stops_a_finished_childs_shell_and_keeps_another_chats_shell(self):
