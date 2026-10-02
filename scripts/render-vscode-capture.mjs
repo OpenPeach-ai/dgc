@@ -31,7 +31,7 @@ const viewport = { width: 1440, height: 900 };
 const minimumSeconds = 30;
 const targetLongSeconds = 32;
 const maximumFlowMs = 45_000;
-const prompt = "Fix clamp.py with the smallest safe change and verify every regression test.";
+const prompt = "/tmp/clamp-extension-demo-worktree, this is the directory that runs the clamp fixture. Fix clamp.py with the smallest safe change and verify every regression test.";
 
 const options = { keepWork: false, code: defaultCode, outputDir: join(root, "site", "assets") };
 for (let index = 2; index < process.argv.length; index += 1) {

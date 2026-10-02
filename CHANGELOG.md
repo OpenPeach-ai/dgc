@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.47.2 — 2026-10-02
 
 - Absolute paths at the start of a prompt, such as `/home/me/project`, are sent to the model as
   ordinary text instead of being refused as unknown slash commands. This applies in the full-screen

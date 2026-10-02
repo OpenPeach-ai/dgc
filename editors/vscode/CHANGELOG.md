@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.32.1 — 2026-10-02
 
 - A prompt beginning with an absolute path such as `/home/me/project` is sent normally and keeps
   the editor's live file context instead of being treated as an unknown slash command.

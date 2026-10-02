@@ -43,6 +43,7 @@ MAX_RAW_SECONDS = 210.0
 # refuses. Raising the target can only reduce compression; a run already inside it is
 # published exactly as before.
 PROMPT = (
+    "/tmp/clamp-demo-worktree, this is the directory that runs the clamp fixture. "
     "Use exactly four tool calls in this order, then stop: read_file path clamp.py; "
     "read_file path test_clamp.py; edit_file path clamp.py replacing only "
     "return min(lower, max(upper, value)) with return max(lower, min(upper, value)); "
