@@ -4348,9 +4348,12 @@ class Agent(GoalLifecycle):
                     lease, allowed = None, False
                 if allowed:
                     self._session_turn_lease = lease
-                    self._session_turn_owner = owner
+                    self._session_turn_owner = None if shared else owner
                     self._session_turn_depth = 1
                     entered = True
+                    if shared:
+                        joined = True
+                        joiners[owner] = joiners.get(owner, 0) + 1
         if reclaim and not allowed and not entered and lease is not None:
             # DELIBERATELY outside the state lock. Reclaiming waits on another process -- for its
             # answer, then for it to finish the step it is on and save -- and holding the
@@ -4416,6 +4419,11 @@ class Agent(GoalLifecycle):
                 return
             except BaseException as exc:         # handed back to the caller's thread
                 box["error"] = exc
+                # Ctrl+C belongs to the main turn too. Passing it only to the child's thread
+                # swallowed the user's interrupt while the main thread integrated its result.
+                if isinstance(exc, KeyboardInterrupt) and threading.current_thread() is threading.main_thread():
+                    done.set()
+                    raise
             done.set()
         self._handed_over.put(job)
         while not done.wait(0.25):

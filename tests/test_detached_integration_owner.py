@@ -90,6 +90,52 @@ class SessionOwnerTest(unittest.TestCase):
         self.assertEqual(self.agent._as_session_owner(self.saving(record)), "integrated")
         self.assertEqual(record, {"thread": threading.get_ident(), "reserved": True})
 
+    def test_an_interrupt_during_handed_over_work_stops_the_main_turn_and_releases_the_child(self):
+        result = []
+
+        def interrupt():
+            raise KeyboardInterrupt
+
+        def child():
+            try:
+                self.agent._as_session_owner(interrupt)
+            except KeyboardInterrupt:
+                result.append("interrupted")
+
+        with self.agent._session_turn_scope(reentrant=False):
+            worker = threading.Thread(target=child)
+            worker.start()
+            try:
+                job = self.agent._handed_over.get(timeout=5)
+                with self.assertRaises(KeyboardInterrupt):
+                    job()
+            finally:
+                worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(result, ["interrupted"])
+
+    def test_a_metadata_write_just_before_a_turn_does_not_refuse_the_turn(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def rename():
+            with self.agent._session_turn_scope(shared=True) as allowed:
+                if allowed:
+                    entered.set()
+                    release.wait(5)
+
+        worker = threading.Thread(target=rename)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            timer = threading.Timer(0.1, release.set)
+            timer.start()
+            with self.agent._session_turn_scope(reentrant=False) as allowed:
+                self.assertTrue(allowed, "the wake turn was refused by its own chat's rename")
+            timer.join(5)
+        finally:
+            release.set()
+            worker.join(5)
+
     def test_during_a_turn_it_runs_on_the_turns_own_thread(self):
         record, holding, answer = {}, threading.Event(), {}
 

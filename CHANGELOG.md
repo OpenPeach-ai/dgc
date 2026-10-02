@@ -28,6 +28,8 @@ What one chat does no longer reaches into another:
   working, and shutting down gives every chat the whole grace window.
 - Closing a chat also stops background shells, Python kernels, browsers and monitors started by
   its sub-agents, including sub-tasks that have already finished. Other chats keep their processes.
+- Renaming a chat just before a background turn starts no longer refuses that turn. Ctrl+C during
+  a sub-agent's integration stops the terminal's turn as well as the waiting sub-agent.
 - Another DGC asking whether a session is free finds it under whichever chat holds it, and a
   takeover ask for any of them is answered.
 
