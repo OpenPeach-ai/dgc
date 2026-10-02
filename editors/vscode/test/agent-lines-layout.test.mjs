@@ -286,8 +286,8 @@ test("the snapshot after a long history claims cards in settled blocks above the
 
 test("a line that wraps when its agents finish, in a settled turn far above, does not jump when scrolled to", async (t) => {
   if (skipOrFail(t)) return;
-  // One row while all three run ("Check the parser, Check the lexer and Check the printer running") at
-  // 460px; two once their words differ.
+  // One row while all three run; two once their words differ. The host's system font
+  // determines that boundary, so find it before measuring the settled transcript.
   const agents = [[1, "Check the parser"], [2, "Check the lexer"], [3, "Check the printer"]];
   const page = await openAgentLines(browser, { width: 460, height: 700, events: [...background(agents),
     ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((i) => answered(`a${i}`, i))] });
@@ -299,6 +299,10 @@ test("a line that wraps when its agents finish, in a settled turn far above, doe
     // Past the agents' "started working" window: its timer turning the words to "running" during the
     // probe would be a real change of length, not a jump.
     await page.waitForTimeout(2100);
+    for (let width = 480; await rows() > 1 && width <= 700; width += 20) {
+      await page.setViewportSize({ width, height: 700 });
+      await settle(page);
+    }
     await frames(page, 6);
     const before = await rows();
     await sendEvents(page, [

@@ -751,7 +751,12 @@ for (const [way, from, to] of resizes) {
         const out = [];
         for (let s = 0; s < 8; s += 1) {
           const view = log.getBoundingClientRect();
-          const anchor = document.elementFromPoint(view.left + view.width / 2, view.top + view.height / 2)?.closest("p, li, .bubble, .text, .thinking, .msg");
+          // Font metrics change where paragraphs and pinned prompts fall. Sample the
+          // visible text at several heights, retaining the same eight immediate scrolls.
+          const anchor = [0.5, 0.65, 0.8, 0.35, 0.2].map((fraction) =>
+            document.elementFromPoint(view.left + view.width / 2, view.top + view.height * fraction)
+              ?.closest("p, li, .bubble, .text, .thinking, .msg"))
+            .find((node) => node && log.contains(node) && !node.closest(".turn-head"));
           if (!anchor || anchor.closest(".turn-head")) { log.scrollTop -= 40; await frames(1); continue; }   // a pinned prompt stays put
           const top = anchor.getBoundingClientRect().top, start = log.scrollTop;
           log.dispatchEvent(new WheelEvent("wheel")); log.scrollTop = start - 100;
