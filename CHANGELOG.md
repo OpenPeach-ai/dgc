@@ -6,7 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.47.2 — 2026-10-02
 
-- Absolute paths at the start of a prompt, such as `/home/me/project`, are sent to the model as
+- Absolute paths at the start of a prompt, such as `/workspace/project`, are sent to the model as
   ordinary text instead of being refused as unknown slash commands. This applies in the full-screen
   terminal, classic terminal and editor, including prompts sent while a turn is running.
 - Changing the native model or thinking level during a turn now says that it applies from the next

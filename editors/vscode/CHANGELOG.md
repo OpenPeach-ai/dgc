@@ -2,7 +2,7 @@
 
 ## 0.32.1 — 2026-10-02
 
-- A prompt beginning with an absolute path such as `/home/me/project` is sent normally and keeps
+- A prompt beginning with an absolute path such as `/workspace/project` is sent normally and keeps
   the editor's live file context instead of being treated as an unknown slash command.
 - When the chat view narrows, footer controls collapse to their icons: model and reasoning becomes
   a lightning icon, permission mode and context keep their icons, and Settings remains available.
