@@ -523,22 +523,47 @@ test("draft reload retains text, cursor, skills and MCP context only in its work
 test("switching chats restores their own drafts and clears the previous live transcript", () => {
   const { dom, doc, send, errors } = makeDom({ scope: "workspace" });
   const input = doc.getElementById("input");
+  const goalControl = doc.getElementById("btn-goal");
   send({ type: "session_ready", sessionId: "alpha" });
   input.value = "Alpha draft";
   send({ type: "composer_skill", name: "verify" });
+  input.value += " /goal";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(input.value, "Alpha draft ");
+  assert.equal(goalControl.hidden, false, "Goal belongs to alpha's draft");
   send({ type: "event", event: { type: "info", message: "Alpha transcript" } });
   send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
   assert.equal(input.value, "");
   assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.equal(goalControl.hidden, true, "a new chat does not inherit alpha's Goal choice");
   assert.doesNotMatch(doc.getElementById("log").textContent, /Alpha transcript/);
   input.value = "Beta draft";
   send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
-  assert.equal(input.value, "Alpha draft");
+  assert.equal(input.value, "Alpha draft ");
   assert.match(doc.getElementById("attachments").textContent, /verify/);
+  assert.equal(goalControl.hidden, false, "alpha's Goal choice returns with alpha's draft");
   send({ type: "event", event: { type: "session", kind: "resumed", session_id: "beta" } });
   assert.equal(input.value, "Beta draft");
   assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.equal(goalControl.hidden, true, "beta still has its own unarmed draft");
   assert.deepEqual(errors, []);
+});
+
+test("reload restores an armed Goal as draft state without sending it", () => {
+  const first = makeDom({ scope: "workspace" });
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  const input = first.doc.getElementById("input");
+  input.value = "/goal";
+  input.dispatchEvent(new first.dom.window.Event("input", { bubbles: true }));
+  input.value = "Verify the final release";
+  first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
+
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  assert.equal(reopened.doc.getElementById("input").value, "Verify the final release");
+  assert.equal(reopened.doc.getElementById("btn-goal").hidden, false);
+  assert.equal(reopened.posted.some(message => message.type === "startGoal"), false,
+    "restoring a draft must never start its goal");
+  assert.deepEqual([...first.errors, ...reopened.errors], []);
 });
 
 test("reload never automatically resends a message whose delivery was unconfirmed", () => {
@@ -659,12 +684,9 @@ test("goal actions carry selected skills, templates, images and MCP snapshots wi
     send({ type: "session_ready", sessionId: "alpha" });
     const input = doc.getElementById("input");
     if (inline) {
-      // The restored draft ends in `/goal`, so the token picker opens and would take this Enter.
-      // Picking `/goal` from the menu now FILLS the box rather than starting the goal, so dismiss
-      // the menu and let Enter reach submit() -- this test is about the attachments riding along
-      // with a goal, not about the picker.
+      // The restored draft ends in `/goal`; an input event converts it to the pinned Goal choice.
+      // This test checks that every attachment rides through that one-message choice.
       input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-      input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     }
     input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const command = posted.findLast(message => message.type === "startGoal");
@@ -679,8 +701,10 @@ test("goal actions carry selected skills, templates, images and MCP snapshots wi
     assert.equal(savedState().pending.length, 1);
     send({ type: "event", event: { type: "command_rejected", command: "start_goal", request_id: command.requestId,
       message: "Goal selection rejected" } });
-    assert.equal(input.value, original);
-  assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*PNG/);
+    assert.equal(input.value, "Verify the release");
+    assert.equal(doc.getElementById("btn-goal").hidden, false,
+      "the rejected one-message choice returns pinned in the composer");
+    assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*PNG/);
     assert.equal(savedState().pending.length, 0);
     send({ type: "state", state: { goal: { text: "Verify", status: "paused", attachments: {
       skills: ["verify"], templates: ["check"], images: 1, context: 1 } } } });
@@ -1098,23 +1122,29 @@ test("clicking the goal bar expands it; the pencil edits", () => {
   assert.deepEqual(errors, []);
 });
 
-test("the footer goal control is present only while a goal is being pursued", () => {
-  // It used to sit in the footer whatever the state, so a FINISHED goal left its mark on the
-  // composer and an empty one advertised a control for something that did not exist. The goal bar
-  // already hides itself when a goal is met; the footer has to agree with it rather than contradict
-  // it one row below. `/goal` in the command menu is how you set one, so nothing is lost.
-  const { errors, send, doc } = makeDom();
+test("Goal is pinned only while the current draft owns the one-message choice", () => {
+  const { dom, errors, send, doc, posted } = makeDom();
   const control = doc.getElementById("btn-goal");
   const goal = (status, text = "Ship 0.46.0") => send({ type: "event", event: {
     type: "goal_changed", goal: text, status, elapsed_seconds: 5, details: {} } });
 
   assert.equal(control.hidden, true, "absent before anything has been set");
+  const input = doc.getElementById("input");
+  input.value = "/goal";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(input.value, "", "the highlighted slash token is removed from the text line");
+  assert.equal(control.hidden, false, "typing the complete token pins Goal before send");
+  assert.equal(control.dataset.state, "draft");
+  input.value = "Ship 0.46.0";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.findLast((message) => message.type === "startGoal").text, "Ship 0.46.0");
+  assert.equal(control.hidden, true, "sending removes the one-message choice");
   goal("active");
-  assert.equal(control.hidden, false);
-  assert.equal(control.dataset.state, "active");
+  assert.equal(control.hidden, true, "an active goal does not select Goal for the next prompt");
+  assert.equal(control.dataset.state, "none");
   goal("blocked");
-  assert.equal(control.hidden, false, "a blocked goal is still being pursued");
-  assert.equal(control.dataset.state, "blocked");
+  assert.equal(control.hidden, true, "the standing-goal rail owns blocked status too");
+  assert.equal(control.dataset.state, "none");
   goal("completed");
   assert.equal(control.hidden, true, "a finished goal leaves no mark on the composer");
   goal("none", "");
@@ -2613,19 +2643,21 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("pop").textContent, /goal/,
     "the goal action must remain discoverable after an in-progress prompt");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  // Picking `goal` ARMS THE PROMPT -- it does not open a dialog, which would be a second place to
-  // type the objective you were already typing. The marker is a pill so it cannot be half-deleted
-  // into "/goa", and its wire text is "/goal ", so submit() reads it exactly as the hand-typed
-  // form always has.
+  // Picking `goal` arms this prompt without opening a dialog or leaving highlighted slash text in
+  // the objective. The existing Goal control is pinned in the composer until the message is sent.
   assert.equal(doc.getElementById("goal-editor").hidden, true,
     "no dialog -- the prompt IS the objective");
-  assert.equal(input.value, "ship the release safely /goal ",
-    "the marker goes in the draft; a menu must never send an unfinished request");
+  assert.equal(input.value, "ship the release safely ",
+    "the slash token leaves the text line; a menu must never send an unfinished request");
+  assert.equal(doc.getElementById("btn-goal").hidden, false,
+    "the one-message Goal control is pinned before send");
   assert.equal(posted.some((m) => m.type === "startGoal" && m.text === "ship the release safely"), false,
     "selection alone must not commit a standing objective");
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const suffixedGoal = posted.filter((m) => m.type === "startGoal").at(-1);
   assert.equal(suffixedGoal.text, "ship the release safely");
+  assert.equal(doc.getElementById("btn-goal").hidden, true,
+    "the one-message Goal control leaves with the sent prompt");
   assert.equal(posted.some((m) => m.type === "prompt" && /\/goal$/.test(m.text)), false,
     "a trailing goal tag must not leak into ordinary model prompt text");
   assert.equal([...doc.querySelectorAll(".goal-prompt .bubble")].at(-1).textContent,

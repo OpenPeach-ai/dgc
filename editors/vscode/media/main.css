@@ -996,17 +996,12 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 /* With no border of its own, a pill in forced colours needs the one thing that still marks it. */
 @media (forced-colors: active) { .composer-pill { border: 1px solid CanvasText; color: LinkText; } }
 
-/* The footer's Goal control, placed where Codex places it: after the permission mode, before the
-   model. Present only while a goal is being pursued, and coloured by its status --
-   the same vocabulary the goal bar above the composer uses. */
-.goal-control[data-state="active"] { color: var(--accent-text, var(--accent)); }
-.goal-control[data-state="paused"], .goal-control[data-state="blocked"] { color: var(--warn, var(--text)); }
-/* The control REPORTS a goal being pursued; it is not a permanent affordance, so it is absent
-   unless there is one and it costs the footer nothing the rest of the time. (`[hidden]` at the top
-   of this file is !important, which is what makes a `display: inline-flex` button obey it.) When it
-   IS there, the word is what tips a side panel onto a second row, so below 640px the icon carries
-   it alone -- the trade `.agents-word` already makes -- with the name kept on the title and the
-   aria-label. */
+/* Goal is pinned here while it applies to the current draft, then leaves with that message. The
+   standing-goal rail above the composer reports and controls the objective after it starts. */
+.goal-control[data-state="draft"] { color: var(--accent-text, var(--accent)); }
+/* `[hidden]` at the top of this file is !important, which makes the inline-flex button obey its
+   one-message lifetime. The word can tip a narrow footer onto a second row, so below 640px the
+   target icon carries it alone, with the name retained by the title and accessible label. */
 @media (max-width: 640px) {
   .goal-control #goal-control-label { display: none; }
 }

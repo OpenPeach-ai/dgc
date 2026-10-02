@@ -15,6 +15,9 @@
 - Sub-agent work pages are read-only: their composer clearly asks you to return to the chat, keeps
   the draft intact, and cannot accidentally send it to the parent conversation. Images viewed by a
   sub-agent open in the full image viewer from that page, as they do in the main chat.
+- Typing `/goal` immediately removes the highlighted slash text and pins the existing Goal control
+  inside the composer for that draft. The control disappears with the message; progress and
+  lifecycle controls remain in the standing-goal row above the composer.
 
 ## 0.32.0 — 2026-10-02
 

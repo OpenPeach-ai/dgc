@@ -241,24 +241,28 @@ test("a pill-only draft does not render the placeholder over itself", async (t) 
     "is-empty laid the placeholder out as the first inline box, ahead of the pill");
 });
 
-test("picking /goal arms the prompt: what you typed becomes the objective", async (t) => {
+test("typing /goal immediately pins Goal to this draft and removes the inline token", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   // The whole interaction. There is no dialog and there must not be one: a box asking for the
-  // objective is a second place to type the thing you were already typing. The pick leaves a PILL
-  // whose wire text is "/goal ", so `submit()` reads it exactly as the hand-typed form always has.
+  // objective is a second place to type the thing you were already typing. The existing Goal
+  // control is pinned in the footer while this draft owns it; no highlighted `/goal` remains in
+  // the prose the user is writing.
   await freshComposer([]);
   // `window.__posted` accumulates across every test on this shared page, so both counts are read
   // as deltas from here rather than as absolutes.
   const [goalsBefore, promptsBefore] = await page.evaluate(() => [
     window.__posted.filter((m) => m.type === "startGoal").length,
     window.__posted.filter((m) => m.type === "prompt").length]);
-  await page.keyboard.type("finish the build /goa");
-  await page.keyboard.press("Tab");
+  await page.keyboard.type("finish the build /goal");
 
   assert.equal(await page.evaluate(() => document.getElementById("goal-editor").hidden), true,
     "no dialog -- the prompt IS the objective");
-  assert.deepEqual(await pills(), ["goal"], "a pill, not the characters /goal for you to half-delete");
-  assert.equal(await value(), "finish the build /goal ", "and the wire text is unchanged");
+  assert.deepEqual(await pills(), [], "the highlighted slash token leaves the text line");
+  assert.equal(await value(), "finish the build ", "only the objective remains in the editor");
+  assert.equal(await page.locator("#btn-goal").isVisible(), true, "Goal is pinned inside the composer");
+  assert.equal(await page.locator("#btn-goal .codicon-target").count(), 1, "the pinned choice carries the target icon");
+  assert.equal(await page.locator("#pop").evaluate((node) => getComputedStyle(node).display), "none",
+    "the exact token converts without a second Enter or Tab");
   assert.equal(await page.evaluate(() =>
     window.__posted.filter((m) => m.type === "startGoal").length), goalsBefore,
     "picking a menu row must never commit a standing objective on its own");
@@ -270,6 +274,8 @@ test("picking /goal arms the prompt: what you typed becomes the objective", asyn
   assert.equal(await page.evaluate((before) =>
     window.__posted.filter((m) => m.type === "prompt").length - before, promptsBefore), 0,
     "and it is not ALSO sent as an ordinary prompt");
+  assert.equal(await page.locator("#btn-goal").isVisible(), false,
+    "the one-message choice leaves the composer after send");
 });
 
 test("a line break serializes as one newline, and an empty box as nothing", async (t) => {
@@ -718,7 +724,7 @@ test("the slash menu is not squashed by a tall transcript", async (t) => {
 
 test("the slash menu keeps one height however few rows match", async (t) => {
   if (skipReason()) return t.skip(skipReason());
-  // Narrowing "/g" to "/goal" collapsed a four-row list to a single line: the panel jumped under
+  // Narrowing "/g" to "/goa" collapsed a four-row list to a single line: the panel jumped under
   // the cursor as you typed, and the row that was left read as a stray banner.
   await freshComposer([]);
   // Its own command table: a sibling test replaces the shared one, and this test is about how many
@@ -743,8 +749,8 @@ test("the slash menu keeps one height however few rows match", async (t) => {
              height: Math.round(pop.getBoundingClientRect().height) };
   }, q);
   const wide = await heightFor("/g");
-  const narrow = await heightFor("/goal");
-  assert.ok(wide.rows > narrow.rows, `"/g" must match more than "/goal" (${wide.rows} vs ${narrow.rows})`);
+  const narrow = await heightFor("/goa");
+  assert.ok(wide.rows > narrow.rows, `"/g" must match more than "/goa" (${wide.rows} vs ${narrow.rows})`);
   assert.equal(wide.height, narrow.height, "and the menu must be the same height for both");
   assert.ok(narrow.height > 100, `a single match still gets a readable list, not a line (${narrow.height}px)`);
 });

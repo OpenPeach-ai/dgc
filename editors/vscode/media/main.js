@@ -1000,6 +1000,7 @@
   const draftEntries = new Map();
   const pendingImages = new Set();
   let draftSession = "unbound", sessionReady = !draftScope, draftTimer = null, restoringDraft = false;
+  let goalDraftArmed = false;
   // The Tasks row: which chats keep the checklist expanded (keyed by session id; a chat never seen
   // starts collapsed), a Clear waiting for the backend's answer, and whether a backend is up.
   const tasksExpanded = new Set();
@@ -1037,18 +1038,21 @@
       const text = value.text;
       const start = Math.max(0, Math.min(text.length, Number(value.start) || 0));
       const end = Math.max(start, Math.min(text.length, Number(value.end) || start));
-      return { text, attachments: items, start, end, updated: Number(value.updated) || Date.now() };
+      const clean = { text, attachments: items, start, end,
+        updated: Number(value.updated) || Date.now() };
+      if (value.goal === true) clean.goal = true;
+      return clean;
     } catch { return null; }
   }
   function captureDraft() {
     return { text: composerText(), attachments: [...attachments], start: composerSelection()[0],
-      end: composerSelection()[1], updated: Date.now() };
+      end: composerSelection()[1], goal: goalDraftArmed, updated: Date.now() };
   }
   function persistDraft() {
     if (restoringDraft) return;
     clearTimeout(draftTimer); draftTimer = null;
     const current = captureDraft();
-    if (current.text || current.attachments.length) draftEntries.set(draftSession, current);
+    if (current.text || current.attachments.length || current.goal) draftEntries.set(draftSession, current);
     else draftEntries.delete(draftSession);
     const entries = [], pending = [];
     let bytes = 0, omitted = false;
@@ -1069,7 +1073,8 @@
     }
     for (const [id, request] of pendingPrompts) {
       if (request.acknowledged) continue;      // the backend has it; the extension gives it back if lost
-      const draft = cleanDraft({ text: request.text, attachments: request.attachments, start: 0, end: request.text.length });
+      const draft = cleanDraft({ text: request.text, attachments: request.attachments,
+        start: 0, end: request.text.length, goal: request.goal === true });
       const size = draft ? new TextEncoder().encode(JSON.stringify(draft)).length : DRAFT_STORAGE_BYTES + 1;
       if (!draft || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
       pending.push({ id, session: request.session || draftSession, draft }); bytes += size;
@@ -1108,7 +1113,8 @@
     }
     if (source) for (const row of unconfirmedDrafts) if (row.session === source) row.session = session;
     if (source) for (const image of pendingImages) if (image.session === source) image.session = session;
-    const draft = cleanDraft(draftEntries.get(session)) || { text: "", attachments: [], start: 0, end: 0 };
+    const draft = cleanDraft(draftEntries.get(session))
+      || { text: "", attachments: [], start: 0, end: 0, goal: false };
     restoringDraft = true;
     // Another chat gets its own undo history. Assigning a new value does not reliably drop the old
     // chat's steps: going from an empty composer to an empty chat changed nothing, and Ctrl+Z then
@@ -1121,6 +1127,7 @@
       shownPastes.length = 0;
     }
     setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
+    setGoalDraftArmed(draft.goal);
     dropPastedChips();
     setComposerRange(draft.start, draft.end);
     renderAtts(); autosizeComposer();
@@ -1152,6 +1159,7 @@
       if (draft) {
         restoringDraft = true;
         setComposerValue(draft.text); attachments.push(...draft.attachments);
+        setGoalDraftArmed(draft.goal);
         setComposerRange(draft.start, draft.end);
         renderAtts(); autosizeComposer();
         restoringDraft = false;
@@ -1169,6 +1177,7 @@
       button.onclick = () => {
         if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
         setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
+        setGoalDraftArmed(row.draft.goal);
         unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
         node.remove(); renderAtts(); onInput(); persistDraft();
       };
@@ -1199,6 +1208,7 @@
         sysLine("Send or clear the current draft before restoring this message."); return;
       }
       setComposerValue(pending.text); attachments.push(...pending.attachments);
+      setGoalDraftArmed(pending.goal === true);
       unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
       renderAtts(); onInput(); persistDraft(); input.focus();
     };
@@ -1208,7 +1218,7 @@
     else {
       unconfirmedDrafts.push({ id, session: pending.session || draftSession, rejected: confirmed,
         draft: { text: pending.text, attachments: pending.attachments, start: 0,
-          end: pending.text.length, updated: Date.now() } });
+          end: pending.text.length, goal: pending.goal === true, updated: Date.now() } });
       persistDraft();
     }
     if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
@@ -1222,7 +1232,7 @@
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, String(item?.text || "").slice(0, 1_000_000), draft.attachments);
     node.appendChild(bubble);
-    return { text: draft.text, attachments: draft.attachments, node,
+    return { text: draft.text, attachments: draft.attachments, goal: draft.goal === true, node,
              session: typeof item?.session === "string" ? item.session : "" };
   }
   const promptId = (item) => typeof item?.requestId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(item.requestId) ? item.requestId : "";
@@ -5096,49 +5106,33 @@
   $("tasks-clear").onclick = requestTodoClear;
   $("tasks-main").onclick = toggleTasks;
   $("tasks-toggle").onclick = toggleTasks;
-  // Clicking the bar EXPANDS it; the pencil edits. It used to open the editor, which is what the
-  // pencil beside it is for, so the one thing the bar could not do was tell you what had happened
-  // to the goal -- the reason was on a tooltip, where it cannot be read at length or copied.
-  /** The footer's Goal control: where a live goal is visible, and a way back to what it says.
-   *
-   *  It only ever REPORTS. Setting a goal is done by arming a prompt with `/goal` and sending it;
-   *  a control that opened a dialog asking for the objective would be a second place to type the
-   *  thing you were already typing. */
-  function openGoalControl() {
-    goalBarAttention();
+  /** Remove Goal from this draft without changing an already-running standing goal. */
+  function clearGoalDraft() {
+    setGoalDraftArmed(false);
+    persistDraft();
+    input.focus();
   }
 
-  /** Bring the goal bar into view and open its detail, without stealing the composer's caret. */
-  function goalBarAttention() {
-    if (goalBar.hidden) return;
-    toggleGoalDetail(true);
-    focusQuietly($("goal-main"));
-  }
-
-  /** The footer control REPORTS a goal that is being pursued. It is not a permanent affordance.
-   *
-   *  It used to sit there whatever the state, so a finished goal left its mark on the composer and
-   *  an empty one advertised a control for something that did not exist. Codex shows it for the
-   *  goal it is carrying and not otherwise. `/goal` in the command menu is how you set one, so
-   *  nothing is lost by the button being absent -- and the footer keeps its single row.
-   *
-   *  "completed" is the case that made this obvious: the goal BAR already hides itself when a goal
-   *  is met (a finished objective with a play button beside it got resumed once, and started over),
-   *  and the footer must agree with it rather than contradict it one row below. */
+  /** Goal is a one-message choice pinned in the composer footer while the draft owns it. */
   function renderGoalControl() {
     const button = $("btn-goal"), label = $("goal-control-label");
     if (!button) return;
-    const text = String(goalState.text || "");
-    const status = text ? String(goalState.status || "active") : "none";
-    const live = !!text && (status === "active" || status === "paused" || status === "blocked");
-    button.hidden = !live;
-    button.dataset.state = live ? status : "none";
+    button.hidden = !goalDraftArmed;
+    button.dataset.state = goalDraftArmed ? "draft" : "none";
     label.textContent = "Goal";
-    button.title = live ? `${status === "active" ? "Pursuing" : status} goal: ${text}` : "";
-    button.setAttribute("aria-label", live ? `Standing goal, ${status}: ${text.slice(0, 180)}` : "");
+    button.title = goalDraftArmed ? "Goal applies to this prompt · Click to remove" : "";
+    button.setAttribute("aria-label", goalDraftArmed ? "Goal applies to this prompt; remove Goal" : "");
   }
 
-  $("btn-goal").onclick = openGoalControl;
+  function setGoalDraftArmed(armed) {
+    goalDraftArmed = armed === true;
+    renderGoalControl();
+    renderComposerControls();
+  }
+
+  $("btn-goal").onclick = clearGoalDraft;
+  // Clicking the bar expands it; the pencil edits. This keeps progress and lifecycle controls in
+  // the standing-goal rail, separate from the one-message Goal choice in the composer.
   $("goal-main").onclick = toggleGoalDetail;
   $("goal-edit").onclick = openGoalEditor;
   $("goal-review-button").onclick = openGoalReview;
@@ -5201,12 +5195,13 @@
     const node = appendGoalPrompt(objective, selected);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     node.dataset.promptId = requestId;     // which request this row is (echoPrompt finds it by this)
-    pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
+    pendingPrompts.set(requestId, { text: restoreText, attachments: selected, goal: true,
+      node, session: draftSession });
     const values = key => selected.filter(item => item[key]).map(item => item[key]);
     vscode.postMessage({ type: "startGoal", text: objective, requestId,
       skills: values("skill"), templates: values("template"), context: values("resource"),
       images: selected.filter(item => item.img).map(item => item.data) });
-    clearComposer(); attachments.length = 0;
+    setGoalDraftArmed(false); clearComposer(); attachments.length = 0;
     renderAtts(); persistDraft(); scroll();
   }
   function isSlashCommandText(text) {
@@ -5232,18 +5227,29 @@
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
     const templates = attachments.filter((a) => a.template).map((a) => a.template);
-    const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
     const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
       "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
+    if (goalDraftArmed) {
+      if (!text) {
+        sysLine("Type an objective for this Goal.");
+        return;
+      }
+      if (goalStateCommand.includes(text.toLowerCase()) && !attachments.length) {
+        vscode.postMessage({ type: "slashText", text: `/goal ${text}` });
+        setGoalDraftArmed(false); clearComposer(); persistDraft(); return;
+      }
+      submitGoal(text, text); return;
+    }
+    const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
     if (goalPrefix && !goalStateCommand.includes(goalPrefix.toLowerCase())) {
-      submitGoal(goalPrefix); return;
+      submitGoal(goalPrefix, goalPrefix); return;
     }
     if (goalPrefix || text.toLowerCase() === "/goal") {
       vscode.postMessage({ type: "slashText", text });
       clearComposer(); persistDraft(); return;
     }
     const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
-    if (trailingGoal) { submitGoal(trailingGoal); return; }
+    if (trailingGoal) { submitGoal(trailingGoal, trailingGoal); return; }
     const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
       || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
     if (isSlashCommandText(text) && !attachments.length && !workflowPrompt) {
@@ -5432,16 +5438,10 @@
         hidePop(); input.focus(); return;
       }
       if (it.action === "goal") {
-        // Picking `/goal` ARMS THE PROMPT: whatever you type becomes the objective when you press
-        // Enter. That is the whole interaction, and it is what `/goal TEXT` typed by hand has
-        // always done -- `submit()` reads the prefix and the `TEXT /goal` suffix, so this pick only
-        // has to put the marker in the box and get out of the way.
-        //
-        // It is a PILL rather than the characters "/goal ", so it cannot be half-deleted into
-        // "/goa" and one Backspace removes it whole. The pill's wire text IS "/goal ", so nothing
-        // downstream learns the difference. Deliberately NOT a dialog: a box asking for the
-        // objective is a second place to type the thing you were already typing.
-        insertCommandPill(it.label, popStart, popEnd);
+        // Goal is a one-message composer choice. Remove the highlighted slash token immediately,
+        // pin the existing target control in the footer, and leave the caret in this same draft.
+        // The control disappears on send; the standing-goal rail owns later progress and controls.
+        armGoalDraft(popStart, popEnd);
         hidePop(); input.focus(); return;
       }
       if (composerText().slice(0, popStart).trim() || composerText().slice(popEnd).trim()) {
@@ -5460,15 +5460,9 @@
     }
     hidePop(); input.focus();
   }
-  /** Put a picked draft command in the composer as a PILL, the way a skill or a file goes in.
+  /** Put a picked draft command in the composer as one atomic pill.
    *
-   *  `/goal` used to sit in the box as the literal characters "/goal ", which reads as something
-   *  you typed and can half-delete into "/goa". A pill is one object: it carries its own sigil, a
-   *  single Backspace removes it whole, and what the model receives is unchanged -- the pill's wire
-   *  text IS "/goal ", so submit()'s `/goal TEXT` parse never learns the difference.
-   *
-   *  One command per prompt. Picking a second replaces the first rather than stacking, which is
-   *  what the prefix-rewriting in prepareWorkflowDraft did for /plan, /review and /init. */
+   *  One command per prompt. Picking a second replaces the first rather than stacking. */
   function insertCommandPill(label, tokenStart, tokenEnd) {
     const existing = [...input.querySelectorAll('[data-kind="command"]')];
     if (existing.length) {
@@ -5489,6 +5483,14 @@
     // The "/" is the pill's sigil, drawn by CSS like "$" on a skill and "@" on a file, so the
     // label must not carry one too or the pill reads "//goal".
     insertComposerPill(tokenStart, tokenEnd, "command", label.replace(/^\//, ""), label + " ");
+    autosizeComposer();
+    persistDraft();
+  }
+
+  function armGoalDraft(tokenStart, tokenEnd) {
+    editComposer(tokenStart, tokenEnd, "");
+    setComposerRange(tokenStart);
+    setGoalDraftArmed(true);
     autosizeComposer();
     persistDraft();
   }
@@ -5703,6 +5705,13 @@
     popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
     popMode = token[2][0];
     const query = token[2].slice(1).toLowerCase();
+    // Codex turns the complete `/goal` token into a pinned composer choice immediately. Requiring
+    // a second Enter or Tab leaves it as highlighted inline text and gives no visible draft state.
+    // A pasted `/goal pause` still remains a management command because its final token is `pause`.
+    if (popMode === "/" && query === "goal" && token[2].toLowerCase() === "/goal") {
+      armGoalDraft(popStart, popEnd);
+      hidePop(); input.focus(); return;
+    }
     if (popMode === "/" || popMode === "$") {
       const skillItems = skillRows.filter((s) => s && s.enabled !== false).map((s) => ({
         label: "$" + s.name, detail: s.description || "Reusable agent instructions",
