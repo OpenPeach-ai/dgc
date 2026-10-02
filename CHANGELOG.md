@@ -4,6 +4,14 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.47.1 — 2026-10-02
+
+- A new turn waits until the previous session lease has fully released. A rename finishing just
+  before a prompt could otherwise intermittently refuse that prompt as if another process held
+  the session, especially on macOS. The release-to-idle transition is now atomic.
+- This is the first published build of the 0.47 line; the 0.47.0 source tag was held by the
+  release gate when it exposed this race. The multi-chat features below are included.
+
 ## 0.47.0 — 2026-10-02
 
 ### Several chats, several folders, one backend

@@ -12,7 +12,7 @@
   ends only its own chat's turn and approval cards — before, one chat's Stop could expire another
   chat's open approval, and your answer to it was refused as stale. Closing a chat keeps the backend
   for the chats still on it. `dgc.shareBackend` turns sharing off. This extension needs DGC CLI
-  0.47.0 or newer.
+  0.47.1 or newer.
 - While a turn runs you can rename the chat, open a saved session (it opens beside the running
   chat instead of being refused with "unavailable while a turn is running"), and install or remove
   a plugin. Cancel on a plugin's browser sign-in stops that install, not the turn on screen.
@@ -75,7 +75,7 @@
   Closing a chat is logged as that chat closing, with its folder, instead of as "dgc serve exited"
   while the process went on serving the other chats, and a chat that could not open says so
   instead of reading as a backend that failed to start.
-- Requires CLI 0.47.0; editor protocol v14.
+- Requires CLI 0.47.1; editor protocol v14.
 
 ## 0.31.4 — 2026-09-30
 

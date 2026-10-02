@@ -4371,7 +4371,6 @@ class Agent(GoalLifecycle):
         try:
             yield allowed
         finally:
-            release = None
             if entered:
                 with self._session_turn_state_lock:
                     self._session_turn_depth -= 1
@@ -4382,15 +4381,18 @@ class Agent(GoalLifecycle):
                         else:
                             joiners.pop(owner, None)
                     if self._session_turn_depth == 0:
-                        release = self._session_turn_lease
-                        self._session_turn_lease = None
-                        self._session_turn_owner = None
-                        joiners.clear()
+                        # Keep the transition to idle atomic with releasing the underlying
+                        # lease. Otherwise a waiting turn sees no owner, then its nonblocking
+                        # acquire still meets the previous turn's thread/process lock.
+                        try:
+                            self._session_turn_lease.release()
+                        finally:
+                            self._session_turn_lease = None
+                            self._session_turn_owner = None
+                            joiners.clear()
                     elif (not joined and self._session_turn_owner == owner
                           and self._session_turn_depth == sum(joiners.values())):
                         self._session_turn_owner = None     # the turn is over; only joiners remain
-                if release is not None:
-                    release.release()
 
     def _as_session_owner(self, operation):
         """Run `operation` where this agent's session can be saved, and return its result.

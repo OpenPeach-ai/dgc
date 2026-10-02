@@ -115,6 +115,20 @@ class SessionOwnerTest(unittest.TestCase):
         self.assertEqual(result, ["interrupted"])
 
     def test_a_metadata_write_just_before_a_turn_does_not_refuse_the_turn(self):
+        from dgc.scheduler import WorkspaceMutationLock
+        real_release = WorkspaceMutationLock.release
+
+        def slow_release(lease):
+            # Expose the interval between an agent declaring itself idle and the OS/thread
+            # lease actually becoming available. Filesystem scheduling made this intermittent
+            # on macOS; a short delayed release reproduces the same ordering on every host.
+            if lease.label == "session-turn" and threading.current_thread() is not threading.main_thread():
+                threading.Event().wait(0.25)
+            return real_release(lease)
+
+        delayed = patch.object(WorkspaceMutationLock, "release", slow_release)
+        delayed.start()
+        self.addCleanup(delayed.stop)
         entered, release = threading.Event(), threading.Event()
 
         def rename():
