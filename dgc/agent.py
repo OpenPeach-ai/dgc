@@ -3041,7 +3041,11 @@ class Agent(GoalLifecycle):
             "workers), naming its files and symbols. Put those calls LAST in the response: anything "
             "you want done first goes before them and runs first, while a call placed after them "
             "runs the whole batch one child at a time. The batch ends when its foreground parts do, "
-            "so every part goes in that batch or none does. `background: true` returns at once, "
+            "so every part goes in that batch or none does. In an interactive Ultra batch, omit "
+            "`background` to launch each independent part and return control to the lead at once; "
+            "set `background: false` only when the lead's next step needs every result. The lead "
+            "must read new user steering immediately, continue independent work, and call "
+            "`wait_tasks` before testing or answering when it needs those results. A background part "
             + ("runs only until this one-shot run ends with the turn" if one_shot else "runs on after the turn")
             + ", and starts after the foreground ones. Parts that share a file or one investigation "
             "count as one part." + (f" {background}" if one_shot else ""),
@@ -6605,6 +6609,11 @@ class Agent(GoalLifecycle):
 
             native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
+            # An interactive Ultra fan-out should not hold the lead's only turn thread while its
+            # independent children work. Normalize omitted flags before recording the assistant
+            # message, so a restored turn describes what DGC actually ran. Explicit false stays
+            # foreground for work whose result the lead needs immediately.
+            self._normalize_ultra_task_batch(result.tool_calls)
             assistant: dict = {"role": "assistant",
                                "content": _assistant_content_with_thinking(
                                    result, bool(self.config.get("preserve_thinking", False)))}
@@ -9924,6 +9933,27 @@ class Agent(GoalLifecycle):
         if any(call.name == "task" for call in calls[:start]):
             return []                       # a task outside the run would need a second baseline
         return run
+
+    def _normalize_ultra_task_batch(self, calls: list[ToolCall]) -> None:
+        """Detach implicit interactive Ultra fan-outs; preserve every explicit choice.
+
+        A lead that emits two or more independent trailing ``task`` calls has already said those
+        parts do not depend on one another. Blocking its only turn thread inside that whole batch
+        made user steering sit unread until the slowest child finished. A single task remains
+        foreground by default, as does an explicit ``background: false`` task and every one-shot
+        run (which has no later interactive turn for a detached result).
+        """
+        if (self.depth != 0 or self._non_interactive()
+                or not self.config.get("ultra_mode", False)):
+            return
+        run = self._parallel_task_plan(calls)
+        task_indexes = [i for i in run if calls[i].name == "task"]
+        if len(task_indexes) < 2:
+            return
+        for index in task_indexes:
+            arguments = calls[index].arguments
+            if isinstance(arguments, dict) and "background" not in arguments:
+                arguments["background"] = True
 
     def _parallel_task_outputs(self, calls: list[ToolCall],
                                prior_counts: dict | None = None) -> dict[int, _TaskOutcome]:

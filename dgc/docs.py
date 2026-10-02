@@ -1081,7 +1081,10 @@ row in the agents list) for that agent's own page — duration, answer, and file
 and edits do not dump into the parent chat.
 
 `task` accepts `background: true` so the child keeps working after the current turn ends.
-The composer stays free. The agents pill remains while that specialist runs. When it
+An interactive Ultra fan-out defaults its omitted `background` flags to true, so after launching
+two or more independent children the parent remains available for your steering and for other
+independent work. Set `background: false` explicitly when its next model step really needs the
+result; a single task still defaults to foreground. The composer stays free. The agents pill remains while that specialist runs. When it
 lands, DGC starts a wake turn with the child's summary in the editor, and in the terminal while
 wake-ups are on; elsewhere the result reaches the model between tool calls or with your next
 message. Either way you do not sit in a blocked turn polling it, and `wait_tasks` collects it the

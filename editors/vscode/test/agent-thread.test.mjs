@@ -12,6 +12,7 @@ function view(options = {}) {
 }
 
 const sid = (n) => `sub-${String(n).padStart(12, "0")}`;
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 // What a line reads on screen: the sr-only pauses between its clauses are for screen readers.
 const shown = (node) => {
   const copy = node.cloneNode(true);
@@ -130,6 +131,61 @@ test("clicking an agent's name opens the inner page with the child's tools, dura
   $("agent-back").click();
   assert.equal($("agent-page").hidden, true);
   assert.ok(!doc.body.dataset.agentPage);
+  assert.deepEqual(errors, []);
+});
+
+test("an agent page keeps the draft read-only and cannot send it to the parent chat", () => {
+  const { $, doc, event, posted, errors } = view();
+  event({ type: "turn_start", turn_id: "t1", prompt: "delegate" });
+  event({ type: "agent_started", id: sid(1), parent_id: null, call_id: "call_0",
+    description: "Inspect UI", depth: 1, state: "running", started_at: 1, isolated: true, parallel: false });
+  $("input").value = "keep this draft";
+  $("input").dispatchEvent(new doc.defaultView.InputEvent("input", { bubbles: true, inputType: "insertText" }));
+  const before = posted.filter((message) => message.type === "prompt").length;
+
+  doc.querySelector(`.agent-name[data-agent-id="${sid(1)}"]`).click();
+  assert.equal($("input").getAttribute("contenteditable"), "false");
+  assert.equal($("input").getAttribute("aria-disabled"), "true");
+  assert.equal($("input").value, "keep this draft", "opening the page preserves the parent-chat draft");
+  assert.ok($("cbox").classList.contains("agent-page-locked"));
+  assert.equal($("send").disabled, true);
+  assert.equal($("queue-send").hidden, true);
+  assert.equal($("stop-run").hidden, false, "a live parent turn can still be stopped explicitly");
+  $("input").dispatchEvent(new doc.defaultView.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  $("send").click();
+  assert.equal(posted.filter((message) => message.type === "prompt").length, before);
+
+  $("agent-back").click();
+  assert.equal($("input").getAttribute("contenteditable"), "true");
+  assert.equal($("input").getAttribute("aria-disabled"), "false");
+  assert.equal($("input").value, "keep this draft");
+  assert.equal($("send").disabled, false);
+  assert.ok(!$("cbox").classList.contains("agent-page-locked"));
+  assert.deepEqual(errors, []);
+});
+
+test("viewed images cloned onto an agent page open the real image viewer", () => {
+  const { $, doc, event, errors } = view();
+  event({ type: "turn_start", turn_id: "t1", prompt: "inspect" });
+  event({ type: "agent_started", id: sid(1), parent_id: null, call_id: "call_0",
+    description: "Inspect image", depth: 1, state: "running", started_at: 1, isolated: true, parallel: false });
+  const imageCall = `${sid(1)}:image_0`;
+  event({ type: "tool_call", call_id: imageCall, name: "view_image", args: { path: "/tmp/result.png" }, summary: "result.png" });
+  event({ type: "tool_images", call_id: imageCall, caption: "result.png", images: [PNG] });
+
+  doc.querySelector(`.agent-name[data-agent-id="${sid(1)}"]`).click();
+  const card = $("agent-log").querySelector('.tool[data-tool-name="view_image"]');
+  assert.ok(card, "the image step is copied to the agent transcript");
+  card.querySelector(".tool-toggle").click();
+  const chip = card.querySelector(".image-chip");
+  assert.ok(chip, "opening the cloned step rebuilds its image chip");
+  chip.click();
+  const viewer = doc.getElementById("image-viewer");
+  assert.ok(viewer, "the cloned chip opens the same viewer as the main chat");
+  assert.equal(viewer.querySelector(".iv-stage img").getAttribute("src"), PNG);
+  assert.equal(viewer.querySelector("#iv-title").textContent, "result.png");
+  viewer.querySelector(".iv-close").click();
+  assert.equal(doc.activeElement, chip, "closing returns focus to the cloned image chip");
   assert.deepEqual(errors, []);
 });
 

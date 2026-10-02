@@ -375,8 +375,10 @@ TOOL_SCHEMAS = [
                    "change), worker (implements), or a custom .dgc/agents/<name>.md. Omit for worker."},
          "background": {"type": "boolean", "description": "True only when you will not use the "
                         "result this turn -- a parallel track. False when your next step needs the "
-                        "answer. A background child outlives the turn; the result says whether you "
-                        "are woken. Default false."}},
+                        "answer. In an interactive Ultra batch, an omitted value defaults to true "
+                        "so the lead stays available; set false explicitly only when the next model "
+                        "step needs that result. A single task still defaults false. A background "
+                        "child outlives the turn; the result says whether you are woken."}},
         ["description", "prompt"]),
 ]
 

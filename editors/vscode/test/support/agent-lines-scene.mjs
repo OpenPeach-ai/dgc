@@ -31,7 +31,7 @@ const record = (n, description, state, extra = {}) => ({ id: sid(n), parent_id: 
   state, tool_calls: 3, duration_ms: 42000, isolated: true, parallel: true, started_at: n, ...extra });
 
 // Five batches in one finished turn, each its own step: a single agent; three mid-flight; a waiting and
-// a failed member; six (collapsed to two names and "4 more"); one with a 120-character name. Drawn
+// a failed member; six (four on one line, two on the next); one with a 120-character name. Drawn
 // from a history and an agents snapshot, so every word is the record's own and no window is open.
 const BATCHES = [
   [[1, "Count the lines in README.md", "running"]],
@@ -46,7 +46,8 @@ export const LINES_EXPECTED = [
   "Count the lines in README.md running",
   "Durable rules review running · Remote web finished · Paper pip concept running",
   "Check the migrations waiting for your permission · Port the docs failed",
-  "Survey the parser, Survey the lexer and 4 more · 3 running · 2 queued · 1 finished",
+  "Survey the parser, Survey the lexer and 2 more · 2 running · 2 queued",
+  "Survey the docs finished · Survey the CLI running",
   `${LONG_NAME} running`,
 ];
 export function linesScene() {

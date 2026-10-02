@@ -714,6 +714,67 @@ class TheFanOutRunsWhereTheModelPutItTests(HarnessCase):
         self.assertEqual(self.plan("ls", "task"), [])
         self.assertEqual(self.plan("task"), [])
 
+    def test_interactive_ultra_fanout_defaults_to_background_but_explicit_foreground_wins(self):
+        h = self.make(git=True, ultra_mode=True)
+        calls = [
+            ToolCall("a", "task", {"description": "a", "prompt": "A"}),
+            ToolCall("b", "task", {"description": "b", "prompt": "B", "background": False}),
+            ToolCall("todo", "todo", {"items": []}),
+        ]
+        h.agent._normalize_ultra_task_batch(calls)
+        self.assertIs(calls[0].arguments["background"], True,
+                      "an omitted flag releases the lead instead of blocking user steering")
+        self.assertIs(calls[1].arguments["background"], False,
+                      "an explicit dependency remains foreground")
+        self.assertNotIn("background", calls[2].arguments)
+
+        single = [ToolCall("one", "task", {"description": "one", "prompt": "ONE"})]
+        h.agent._normalize_ultra_task_batch(single)
+        self.assertNotIn("background", single[0].arguments, "one task still defaults foreground")
+
+        one_shot = self.make(git=True, ultra_mode=True)
+        one_shot.ui.non_interactive = True
+        batch = [ToolCall(str(i), "task", {"description": str(i), "prompt": str(i)})
+                 for i in range(2)]
+        one_shot.agent._normalize_ultra_task_batch(batch)
+        self.assertTrue(all("background" not in call.arguments for call in batch),
+                        "a one-shot run cannot leave its only turn behind")
+
+    def test_ultra_fanout_reaches_the_next_model_boundary_while_children_are_running(self):
+        h = self.make(git=True, ultra_mode=True)
+        release = threading.Event()
+        saw_steering: list[bool] = []
+        calls = [ToolCall("a", "task", {"description": "a", "prompt": "CHILD-A"}),
+                 ToolCall("b", "task", {"description": "b", "prompt": "CHILD-B"})]
+
+        def parent(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=calls)
+            saw_steering.append(any(m.get("_dgc_steering") for m in messages))
+            release.set()
+            return ChatResult(content="Lead continued while its children worked.")
+
+        def held_child(messages, results, cancel):
+            release.wait(3)
+            return ChatResult(content="child done")
+
+        original_listener = h.agent.subagents.listener
+        steered = threading.Event()
+
+        def steer_on_start(kind, record):
+            original_listener(kind, record)
+            if kind == "started" and not steered.is_set():
+                steered.set()
+                self.assertTrue(h.agent.steer("change the acceptance criteria"))
+
+        h.agent.subagents.listener = steer_on_start
+        started = time.monotonic()
+        h.run("lead", [("CHILD-A", held_child), ("CHILD-B", held_child), ("lead", parent)])
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 2.0, "the lead waited for children instead of reaching its next request")
+        self.assertEqual(saw_steering, [True], "the next lead request did not receive the queued interjection")
+        self.assertTrue(release.is_set())
+
     def test_the_sibling_before_a_fan_out_really_runs_first(self):
         """The property, end to end: parallel children AND the sibling ordered before them.
 
@@ -737,7 +798,8 @@ class TheFanOutRunsWhereTheModelPutItTests(HarnessCase):
     def test_under_ultra_the_pool_really_is_wider_than_the_default(self):
         """Measured concurrency, not a promise. The old inline clamp capped this at 4."""
         h = self.make(git=True, ultra_mode=True)          # no max_parallel_tasks: Ultra's to choose
-        calls = [ToolCall(f"u{n}", "task", {"description": f"u{n}", "prompt": f"CHILD{n} work"})
+        calls = [ToolCall(f"u{n}", "task", {"description": f"u{n}", "prompt": f"CHILD{n} work",
+                                                "background": False})
                  for n in range(6)]
         responses = [(f"CHILD{n}", child(sleep=0.35)) for n in range(6)]
         h.run("wide", [*responses, ("wide", calls_then(calls))])

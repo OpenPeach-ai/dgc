@@ -2,6 +2,8 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const composerPlaceholder = input.dataset.placeholder;
+  let composerLocked = false;
 
   // ---- the composer's five primitives ----------------------------------------------------
   // Everything that touches the draft goes through these, and nothing else reads `input.value`
@@ -5039,7 +5041,8 @@
     // Stop, and Queue and the follow-up hint have nothing to act on. The footer itself stays.
     const docked = askCardDocked();
     const hasDraft = hasComposerInput() && !docked, stop = streaming && !hasDraft;
-    const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
+    const label = composerLocked ? "Return to the chat to send a message"
+      : stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
     // This runs on every keystroke. Replacing a node's children while typing closes Chromium's open
     // typing step, which made each Ctrl+Z take back one character, so write only what changed.
     const icon = stop ? "debug-stop" : "arrow-up";
@@ -5050,11 +5053,14 @@
     if (send.getAttribute("aria-label") !== label) { send.title = label; send.setAttribute("aria-label", label); }
     // Filled (DGC purple) only when the button will actually do something: text to send, or a
     // run to stop. Empty composer leaves it a quiet surface, so the accent stays meaningful.
-    send.classList.toggle("ready", hasDraft || streaming);
-    $("queue-send").hidden = !streaming || !nativeSteering || docked;
-    $("queue-send").disabled = !hasDraft;
-    $("stop-run").hidden = !streaming || !hasDraft;
-    $("followup-hint").hidden = !streaming || docked;
+    send.classList.toggle("ready", !composerLocked && (hasDraft || streaming));
+    send.disabled = composerLocked;
+    $("queue-send").hidden = composerLocked || !streaming || !nativeSteering || docked;
+    $("queue-send").disabled = composerLocked || !hasDraft;
+    // An agent page is read-only, but it must not trap a running turn: keep the dedicated Stop
+    // control available even when the preserved draft is empty and the regular Send/Stop is locked.
+    $("stop-run").hidden = !streaming || (!composerLocked && !hasDraft);
+    $("followup-hint").hidden = composerLocked || !streaming || docked;
     const hint = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
     if ($("followup-hint").textContent !== hint) $("followup-hint").textContent = hint;
   }
@@ -5210,6 +5216,7 @@
   }
 
   function submit(delivery = nativeSteering ? "steer" : "queue") {
+    if (composerLocked) return;
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
@@ -6637,6 +6644,7 @@
   // Pages opened from a nested agent's name, so Back steps back to the parent page; and the control
   // that opened the first page, which gets focus back when the chat returns.
   let agentPageStack = [], agentPageReturnFocus = null;
+  let agentPageImageRecords = [];
   // The agent lines: one per batch of top-level agents started together in #log, and the lines of
   // the open page's nested agents (rebuilt with the page).
   const agentLines = new Set();
@@ -6719,14 +6727,14 @@
     if (img.getAttribute("src") !== src) img.setAttribute("src", src);
   }
   // ---- the lines in the transcript ----
-  // Codex's inline sub-agent line: one quiet line for each batch of top-level agents started
-  // together, where each used to get a full-width row of its own. Faces first, then a sentence in
+  // Codex's inline sub-agent line: compact, stable lines of at most four from each batch of
+  // top-level agents started together, where each used to get a full-width row of its own. Faces first, then a sentence in
   // which only the names are controls, each opening that agent's page: "Durable rules review, Remote
   // web and Paper pip concept started working". The names keep their call order and never move --
   // the founder reported agents "switching their place" when every one had its own row, and Codex
   // keeps an agent where it started. Only the words between the names change: one word per agent,
   // and neighbours that share a word share it, "A and B finished · C running".
-  const AGENT_START_MS = 2000, AGENT_NAMES_SHOWN = 3, AGENT_FACES_SHOWN = 4;
+  const AGENT_START_MS = 2000, AGENT_NAMES_SHOWN = 3, AGENT_LINE_CAP = 4;
   // What splits a batch: only what the model itself wrote -- a visible tool group, prose, its
   // reasoning -- and the user's steering. Everything else that can sit between two spawns exists in
   // one stream and not the other: an approval card live and its recorded decision only on replay,
@@ -6849,12 +6857,16 @@
       }
       const used = new Set();
       for (const run of runs) {
-        const ids = run.map((card) => card.dataset.agentId);
-        const line = ids.map(agentLineOf).find((l) => l && !l.provisional && !used.has(l)) || newAgentLine();
-        used.add(line);
-        line.ids = ids;
-        const group = spawnGroupOf(run[0]);
-        if (group.nextElementSibling !== line.node) { group.after(line.node); repinBlockOf(line.node); }
+        let anchor = spawnGroupOf(run[0]);
+        for (let offset = 0; offset < run.length; offset += AGENT_LINE_CAP) {
+          const cards = run.slice(offset, offset + AGENT_LINE_CAP);
+          const ids = cards.map((card) => card.dataset.agentId);
+          const line = ids.map(agentLineOf).find((l) => l && !l.provisional && !used.has(l)) || newAgentLine();
+          used.add(line);
+          line.ids = ids;
+          if (anchor.nextElementSibling !== line.node) { anchor.after(line.node); repinBlockOf(line.node); }
+          anchor = line.node;
+        }
       }
       for (const line of [...agentLines]) if (!line.provisional && !used.has(line)) dropAgentLine(line);
       pruneProvisionalLines();
@@ -6880,7 +6892,7 @@
     if (agentsHoldClaims || record.parent_id || !AGENT_ACTIVE.has(record.state)
         || agentAnchor(record.id) || agentLineOf(record.id)) return;
     const last = turn ? turn.act.previousElementSibling : log.lastElementChild;
-    let line = [...agentLines].find((l) => l.provisional && l.node === last);
+    let line = [...agentLines].find((l) => l.provisional && l.node === last && l.ids.length < AGENT_LINE_CAP);
     if (!line) {
       line = newAgentLine({ provisional: true });
       if (turn) appendTurnContent(line.node); else log.appendChild(line.node);
@@ -6948,7 +6960,7 @@
     const members = line.ids.map((id) => agentRecords.get(id)).filter(Boolean);
     if (!members.length) { if (!line.page) dropAgentLine(line); return; }
     if (agentLinesExpanded.has(line.ids[0])) line.expanded = true;
-    agentsPlace(line.faces, members.slice(0, AGENT_FACES_SHOWN).map((record) => agentLineFace(line, record)));
+    agentsPlace(line.faces, members.map((record) => agentLineFace(line, record)));
     const words = members.map((record) => agentLineWord(record, now));
     const uniform = words.every((w) => w.word === words[0].word);
     const collapsed = members.length > AGENT_NAMES_SHOWN && !line.expanded;
@@ -7045,14 +7057,30 @@
   function agentAnswerText(record) {
     return String(record.message || "").split("\n").filter((line) => !/^\s*FILES:/i.test(line)).join("\n").trim();
   }
-  function rebindAgentClone(node) {
+  function rebindAgentClone(node, source) {
     if (node.classList.contains("tool")) {
+      // cloneNode copies the painted chips but none of the image records or listeners behind them.
+      // Give this page its own lightweight records so opening a cloned image cannot steal the live
+      // chat card's `record.chip`, and rebuild the row with the same viewer binding as the chat.
+      if (source?._images?.length || source?._imagesOmitted) {
+        node.querySelector(":scope > .body > .tool-images")?.remove();
+        node._images = (source._images || []).map((record) => {
+          const copy = { ...record, owner: node, chip: null };
+          if (copy.state === "loading") copy.state = "pending";
+          if (copy.ref) trackImageRef(copy);
+          agentPageImageRecords.push(copy);
+          return copy;
+        });
+        node._imagesOmitted = source._imagesOmitted || 0;
+        if (node.classList.contains("open")) renderImageRow(node);
+      }
       const toggle = node.querySelector(".tool-toggle");
       if (toggle) {
         toggle.onclick = () => {
           if (node.classList.contains("no-body")) return;
           const open = node.classList.toggle("open");
           toggle.setAttribute("aria-expanded", String(open));
+          if (open) imagesOnCardOpen(node);
         };
       }
     }
@@ -7079,7 +7107,7 @@
     // A nested agent's spawn is drawn on its parent's page as the chat draws its own: a line, its
     // name opening the child's page. Spawns with nothing of the parent's between them share one.
     const pageLine = (childId) => {
-      let line = agentPageLines.find((l) => l.node === into.lastElementChild);
+      let line = agentPageLines.find((l) => l.node === into.lastElementChild && l.ids.length < AGENT_LINE_CAP);
       if (!line) {
         line = newAgentLine({ page: true });
         into.appendChild(line.node);
@@ -7098,7 +7126,7 @@
       if (node.classList.contains("tool") && node.dataset.toolName === "task"
           && innermostAgentId(node.dataset.callId) !== id) continue;
       const clone = node.cloneNode(true);
-      rebindAgentClone(clone);
+      rebindAgentClone(clone, node);
       into.appendChild(clone);
       cloned += 1;
     }
@@ -7223,6 +7251,7 @@
       title.setAttribute("aria-label", name);
     }
     paintAgentPageMeta(id);
+    clearAgentPageImages();
     agentLog.replaceChildren();
     const outcome = agentOutcomeNote(id);
     if (outcome) agentLog.appendChild(outcome);
@@ -7248,6 +7277,29 @@
     hoverTip.retitle(back, label);
     back.setAttribute("aria-label", label);
   }
+  function clearAgentPageImages() {
+    for (const record of agentPageImageRecords) {
+      if (!record.ref) continue;
+      const records = imageRefs.get(record.ref);
+      records?.delete(record);
+      if (records?.size === 0) imageRefs.delete(record.ref);
+    }
+    agentPageImageRecords = [];
+  }
+  function lockAgentComposer(locked) {
+    composerLocked = locked;
+    const box = $("cbox");
+    box?.classList.toggle("agent-page-locked", locked);
+    box?.setAttribute("aria-disabled", String(locked));
+    input.setAttribute("contenteditable", String(!locked));
+    input.setAttribute("aria-disabled", String(locked));
+    input.setAttribute("aria-label", locked ? "Message DGC unavailable while viewing an agent" : "Message DGC");
+    input.dataset.placeholder = locked ? "Return to the chat to send a message" : composerPlaceholder;
+    $("btn-add").disabled = locked;
+    $("btn-cmd").disabled = locked;
+    if (locked) hidePop();
+    renderComposerControls();
+  }
   // `from`: the control that opened the page, which gets focus back when the chat does. `nested`:
   // opened from a nested agent's name on its parent's page, so Back returns to that page. Any other
   // way in (the chat, the agents list) starts over, and Back goes to the chat.
@@ -7272,6 +7324,7 @@
     }
     agentPageId = id;
     document.body.dataset.agentPage = id;
+    lockAgentComposer(true);
     const back = $("agent-back");
     if (back) back.hidden = false;
     const page = $("agent-page");
@@ -7308,11 +7361,13 @@
     agentPageStack = [];
     agentPageReturnFocus = null;
     delete document.body.dataset.agentPage;
+    lockAgentComposer(false);
     const back = $("agent-back"), mark = $("agent-mark"), page = $("agent-page"), agentLog = $("agent-log"), title = $("thread-title");
     if (back) back.hidden = true;
     paintAgentBack();
     if (mark) { mark.hidden = true; mark.removeAttribute("data-mark"); mark.removeAttribute("data-face"); }
     if (page) page.hidden = true;
+    clearAgentPageImages();
     for (const line of agentPageLines) clearTimeout(line.timer);
     agentPageLines = [];
     if (agentLog) agentLog.replaceChildren();

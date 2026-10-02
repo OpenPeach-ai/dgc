@@ -934,7 +934,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   #cbox[data-mode="auto"] #modelabel,
   #cbox[data-mode="auto"] #modeicon { color: LinkText; }
 }
-.cinput { min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
+.cinput { position: relative; min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
 .cinput .pmark { display: none; }
 #cbox[data-mode="auto"] .cinput .pmark { color: #8B7CFF; }
 /* The composer is an editing host, not a form control, so three things it used to get free now
@@ -950,6 +950,14 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
    at the left. Absolute, the caret rests where the text will actually go. */
 #input.is-empty::before { content: attr(data-placeholder); display: inline-block; width: 0;
   white-space: nowrap; overflow: visible; color: var(--faint); pointer-events: none; }
+/* An agent transcript is a read-only page. Keep the chat draft intact behind a clear locked state;
+   Back/Escape restores it exactly, while the separate Stop control remains usable for a live run. */
+#cbox.agent-page-locked .cinput { cursor: not-allowed; }
+#cbox.agent-page-locked .cinput #input { visibility: hidden; }
+#cbox.agent-page-locked .cinput::after { content: "Return to the chat to send a message"; position: absolute;
+  inset: var(--sp-3) var(--sp-3) auto var(--sp-3); color: var(--faint);
+  font: var(--w-reg) var(--t-chat)/1.6 var(--sans); pointer-events: none; }
+#cbox.agent-page-locked #send { cursor: not-allowed; opacity: .55; }
 /* An inline pill. It is an atomic inline box, so the line box has to be taller than the pill or
    two pills on consecutive wrapped lines sit with their borders almost touching -- measured at 1px
    apart, which reads as a collision when you paste several links in a row.
@@ -1633,7 +1641,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   background: var(--agent-wait); }
 .agent-dot[data-state="queued"] { background: transparent; border: 1px solid var(--agent-idle); }
 .agent-dot[data-state="failed"], .agent-dot[data-state="stopped"] { background: var(--del); }
-/* Sub-agents in the transcript: one muted line per batch started together. Faces first, then a
+/* Sub-agents in the transcript: stable lines of at most four per batch. Faces first, then a
    sentence whose names -- only the names -- open each agent's page. Same type and tone as a tool
    group's header. No margin: the line is usually followed by hidden spawn groups, and a steered
    prompt's rule (`.msg.dgc > :not(.role):has(+ .msg.user)`) zeroes only its visible neighbour's

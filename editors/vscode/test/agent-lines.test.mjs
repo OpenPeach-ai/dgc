@@ -1,5 +1,5 @@
-// Sub-agents in the transcript, the way Codex draws them: one quiet line per batch of agents started
-// together. Faces first, then a sentence in which only the names are controls --
+// Sub-agents in the transcript, the way Codex draws them: quiet stable lines, at most four agents
+// from one batch per line. Faces first, then a sentence in which only the names are controls --
 // "Durable rules review, Remote web and Paper pip concept started working" -- whose words change in
 // place while the names stay where they are. Each agent used to get a full-width row of its own.
 //
@@ -202,29 +202,45 @@ test("an agent waiting on you says what for, and the word is the one that stands
 
 test("more than three: two names and 'N more', which reveals every name in place", () => {
   const p = panel();
-  const names = ["A", "B", "C", "D", "E"];
-  p.event({ type: "turn_start", turn_id: "t1", prompt: "five" });
+  const names = ["A", "B", "C", "D"];
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "four" });
   names.forEach((name, i) => spawn(p.event, i + 1, name));
   names.forEach((name, i) => start(p.event, i + 1, name, { parallel: true }));
-  assert.deepEqual(lineText(p.doc), ["A, B and 3 more started working"]);
+  assert.deepEqual(lineText(p.doc), ["A, B and 2 more started working"]);
   const line = lines(p.doc)[0];
-  assert.equal(line.querySelectorAll(".agent-line-faces .agent-mark").length, 4, "at most four faces");
+  assert.equal(line.querySelectorAll(".agent-line-faces .agent-mark").length, 4, "all four faces");
   const more = line.querySelector(".agent-line-more");
   assert.equal(more.tagName, "BUTTON");
-  assert.equal(more.getAttribute("aria-label"), "Show 3 more agents");
+  assert.equal(more.getAttribute("aria-label"), "Show 2 more agents");
   assert.equal(more.hasAttribute("aria-expanded"), false, "one way: it is gone once used");
   end(p.event, 3);
   p.advance(2000);
-  assert.deepEqual(lineText(p.doc), ["A, B and 3 more · 4 running · 1 finished"]);
+  assert.deepEqual(lineText(p.doc), ["A, B and 2 more · 3 running · 1 finished"]);
   assert.deepEqual([...line.querySelectorAll(".agent-line-tail .agent-state")].map((n) => n.textContent),
-    ["4\u00a0running", "1\u00a0finished"], "a count never ends a row without its word");
+    ["3\u00a0running", "1\u00a0finished"], "a count never ends a row without its word");
   more.focus();
   more.click();
-  assert.deepEqual(lineText(p.doc), ["A and B running · C finished · D and E running"]);
+  assert.deepEqual(lineText(p.doc), ["A and B running · C finished · D running"]);
   assert.equal(line.querySelector(".agent-line-more"), null);
   assert.equal(p.doc.activeElement, nameOf(p.doc, 3), "focus moves to the first name it revealed");
   update(p.event, 4, { tool_calls: 3 });
-  assert.deepEqual(lineText(p.doc), ["A and B running · C finished · D and E running"], "and it stays expanded");
+  assert.deepEqual(lineText(p.doc), ["A and B running · C finished · D running"], "and it stays expanded");
+  assert.deepEqual(p.errors, []);
+});
+
+test("eight agents in one fan-out use two stable lines of four with every face visible", () => {
+  const p = panel();
+  const names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "eight" });
+  names.forEach((name, i) => spawn(p.event, i + 1, name));
+  names.forEach((name, i) => start(p.event, i + 1, name, { parallel: true }));
+  const rows = lines(p.doc);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => [...row.querySelectorAll(".agent-mark")].map((mark) => mark.dataset.agentId)),
+    [[1, 2, 3, 4].map(sid), [5, 6, 7, 8].map(sid)]);
+  assert.deepEqual(rows.map((row) => row.dataset.agentIds.split(" ")),
+    [[1, 2, 3, 4].map(sid), [5, 6, 7, 8].map(sid)]);
+  assert.equal(rows[0].nextElementSibling, rows[1], "the second row stays directly below the first");
   assert.deepEqual(p.errors, []);
 });
 

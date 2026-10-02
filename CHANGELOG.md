@@ -13,6 +13,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   model request. A delegated subscription CLI says that the change applies when its next turn
   starts, since the already-running external CLI keeps the settings it launched with. Native model
   handoff coverage also verifies that the new model receives the retained prompt and tool context.
+- An interactive Ultra fan-out returns control to the parent after launching independent sub-agents,
+  so mid-turn steering is read without waiting for the slowest child. An explicit foreground task
+  still waits when the parent's next step depends on its result.
 
 ## 0.47.1 — 2026-10-02
 

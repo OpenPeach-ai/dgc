@@ -9,6 +9,12 @@
   Their full names remain in tooltips and screen-reader labels.
 - A model or thinking change made while DGC is working now says exactly when it applies: the next
   model request for native providers, or the next turn for a delegated subscription CLI.
+- An Ultra fan-out keeps the parent available for mid-turn steering while its independent sub-agents
+  work. Transcript agent summaries use at most four agents per line, so eight agents appear as two
+  stable lines instead of hiding half their identity marks.
+- Sub-agent work pages are read-only: their composer clearly asks you to return to the chat, keeps
+  the draft intact, and cannot accidentally send it to the parent conversation. Images viewed by a
+  sub-agent open in the full image viewer from that page, as they do in the main chat.
 
 ## 0.32.0 — 2026-10-02
 

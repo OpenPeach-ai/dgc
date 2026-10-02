@@ -138,12 +138,12 @@ for (const theme of Object.keys(MINIMUM)) {
           assert.ok(line.contrast >= MINIMUM[theme], `${label}: ${line.contrast.toFixed(2)}:1 in ${theme}`);
           for (const name of line.names) assert.ok(name.contrast >= MINIMUM[theme], `${label}: a name reads ${name.contrast.toFixed(2)}:1`);
         }
-        const [, three, care, six, long] = m.lines;
+        const [, three, care, six, , long] = m.lines;
         assert.equal(care.failed.weight, "500", "the failed word is heavier");
         assert.equal(care.waiting.weight, "500", "and so is the waiting one");
         assert.ok(care.failed.contrast >= MINIMUM[theme], `failed word ${care.failed.contrast.toFixed(2)}:1 in ${theme}`);
         assert.ok(care.waiting.contrast >= MINIMUM[theme], `waiting word ${care.waiting.contrast.toFixed(2)}:1 in ${theme}`);
-        assert.equal(six.faceCentres.length, 4, "at most four faces");
+        assert.equal(six.faceCentres.length, 4, "four faces on the first row of the six-agent batch");
         const longName = long.names[0];
         assert.equal(longName.label, LONG_NAME, "the whole name is in the button, however it is clipped");
         assert.ok(longName.clipped, "a 120-character name is clipped with an ellipsis");
