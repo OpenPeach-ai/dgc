@@ -5203,6 +5203,12 @@
     clearComposer(); attachments.length = 0;
     renderAtts(); persistDraft(); scroll();
   }
+  function isSlashCommandText(text) {
+    if (!text.startsWith("/")) return false;
+    const name = text.slice(1).split(/\s+/, 1)[0] || "";
+    return !name.includes("/");
+  }
+
   function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
@@ -5233,7 +5239,7 @@
     if (trailingGoal) { submitGoal(trailingGoal); return; }
     const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
       || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
-    if (text.startsWith("/") && !attachments.length && !workflowPrompt) {
+    if (isSlashCommandText(text) && !attachments.length && !workflowPrompt) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       // The terminals' `/todo clear` does what the Tasks row's Clear does, pending state and all.
       if (/^\/todo\s+clear$/i.test(text)) {

@@ -288,7 +288,8 @@ class _FakeClient:
     def chat(self, messages, tools=None, reasoning_effort=None, on_text=None, on_thinking=None,
              cancel=None):
         self.calls.append({"effort": reasoning_effort,
-                           "system": str((messages[0] or {}).get("content") or "")})
+                           "system": str((messages[0] or {}).get("content") or ""),
+                           "messages": json.loads(json.dumps(messages, default=str))})
         return self.script(self, len(self.calls), on_text, cancel)
 
     def estimate_input_tokens(self, messages, tools=None):
@@ -372,6 +373,10 @@ class AgentRouteSwitchTests(unittest.TestCase):
         self.assertIsNot(box.get("ok"), False)
         self.assertEqual(len(old.calls), 2)
         self.assertEqual(len(new.calls), 1, "the stuck request was not re-sent on the new model")
+        switched_context = json.dumps(new.calls[0]["messages"])
+        self.assertIn("Read notes.txt please.", switched_context)
+        self.assertIn("Deliveries arrive on Tuesdays.", switched_context,
+                      "the new model did not receive the retained prompt and tool context")
         self.assertIn("done on b", "".join(ui.text))
         self.assertTrue(any("had not started answering" in line for line in ui.infos), ui.infos)
         self.assertFalse(agent.cancelled.is_set(), "a switch is not a Stop")

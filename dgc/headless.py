@@ -4638,7 +4638,9 @@ class Backend:
                 self.em.emit("model_changed", model=model, base_url=self.config.base_url,
                              **_request_fields(request_id))
                 if model and model != previous:
-                    self.em.emit("info", message=f"Switched to {model}")
+                    self.em.emit("info", message=(
+                        f"Model → {model} · applies when the next subscription turn starts"
+                        if self._busy() else f"Switched to {model}"))
                 return
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
@@ -4683,7 +4685,9 @@ class Backend:
             self.em.emit("model_changed", model=shown_model, base_url=self.config.base_url,
                          **_request_fields(request_id))
             if shown_model and shown_model != previous:
-                self.em.emit("info", message=f"Switched to {shown_model}")
+                self.em.emit("info", message=(
+                    f"Model → {shown_model} · applies from the next model request"
+                    if self._busy() else f"Switched to {shown_model}"))
             # A model refresh can change the provider-advertised effective limit even when the
             # configured recommendation happens to be identical. Never leave the editor meter on
             # the prior model's window.
@@ -4746,7 +4750,9 @@ class Backend:
                 shown = effort or "off"
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
-                    self.em.emit("info", message=f"Thinking → {shown}")
+                    self.em.emit("info", message=(
+                        f"Thinking → {shown} · applies when the next subscription turn starts"
+                        if self._busy() else f"Thinking → {shown}"))
             else:
                 if level == "max":
                     self.em.emit(
@@ -4759,7 +4765,9 @@ class Backend:
                 shown = str(self.config.get("thinking", "off") or "off")
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
-                    self.em.emit("info", message=f"Thinking → {shown}")
+                    self.em.emit("info", message=(
+                        f"Thinking → {shown} · applies from the next model request"
+                        if self._busy() else f"Thinking → {shown}"))
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")

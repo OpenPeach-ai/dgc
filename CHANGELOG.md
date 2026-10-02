@@ -4,6 +4,16 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- Absolute paths at the start of a prompt, such as `/home/me/project`, are sent to the model as
+  ordinary text instead of being refused as unknown slash commands. This applies in the full-screen
+  terminal, classic terminal and editor, including prompts sent while a turn is running.
+- Changing the native model or thinking level during a turn now says that it applies from the next
+  model request. A delegated subscription CLI says that the change applies when its next turn
+  starts, since the already-running external CLI keeps the settings it launched with. Native model
+  handoff coverage also verifies that the new model receives the retained prompt and tool context.
+
 ## 0.47.1 — 2026-10-02
 
 - A new turn waits until the previous session lease has fully released. A rename finishing just

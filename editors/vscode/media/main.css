@@ -878,6 +878,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   color: var(--muted); cursor: pointer; font: var(--w-reg) var(--t-sm)/1 var(--sans); }
 .rail-text-action:hover { color: var(--text-strong); }
 #workspace-changes { align-self: flex-end; min-height: 20px; font-size: var(--t-xs); }
+#workspace-changes .codicon { display: none; }
 .change-add { color: var(--good); font-variant-numeric: tabular-nums; }
 .change-del { color: var(--del-text); font-variant-numeric: tabular-nums; }
 #goalbar[data-status="active"] .goal-icon { color: var(--accent-text); }
@@ -1030,6 +1031,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .model-control #effortname { flex: 0 0 auto; }
 .model-control #effortname { color: var(--faint); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 .model-control .model-chevron { color: var(--faint); font-size: var(--t-sm); }
+.model-control .model-icon { display: none; color: var(--text); font-size: var(--t-lg); }
 /* Selected state is the filled pill, nothing under it. An accent underline beneath a tinted
    background reads as a second, heavier element rather than as emphasis. */
 .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
@@ -1167,13 +1169,19 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 
 /* Combined model + reasoning selector. The continuous rail reads as one power scale while every
    stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
+@media (max-width: 420px) {
+  #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
+  .model-control { width: var(--control); max-width: var(--control) !important; padding: 0; }
+  .model-control .model-copy, .model-control .model-chevron { display: none; }
+  .model-control .model-icon { display: inline-block; }
+  .agents-word, .agents-need { display: none; }
+  #workspace-changes .workspace-changes-label { display: none; }
+  #workspace-changes .codicon { display: inline-block; }
+}
+
 @media (max-width: 360px) {
   footer { padding-right: var(--sp-2); padding-left: var(--sp-2); }
   #cfooter { gap: 0; padding-right: var(--sp-1); padding-left: var(--sp-1); }
-
-  #btn-settings, #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
-  .model-control { max-width: 112px !important; }
-  .model-control #modelname { max-width: 72px; }
 }
 
 /* settings and feature-management overlays */
@@ -1668,9 +1676,6 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   animation: agent-flash 1.2s ease-out; }
 @keyframes agent-flash { from { background: var(--accent-soft); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .tool.flash { animation: none; } }
-@media (max-width: 360px) {
-  .agents-word, .agents-need { display: none; }
-}
 @media (forced-colors: active) {
   .agents-dot, .agent-dot { forced-color-adjust: none; background: CanvasText; border: 1px solid CanvasText; }
   .agents-pill[data-state="running"] .agents-dot, .agent-dot[data-state="running"] { background: Highlight; border-color: Highlight; }

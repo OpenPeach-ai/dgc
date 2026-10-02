@@ -28,7 +28,7 @@ from . import style as style_mod
 from . import ui as ui_mod
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs_with_custom, command_specs,
-                       custom_command_names)
+                       custom_command_names, is_slash_command_text)
 from .config import (PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config,
                      normalize_custom_base_url)
 from .llm import LLMError
@@ -1761,7 +1761,7 @@ class CLI:
                             continue
                         line = compose_prompt(prefix, templates=[name], catalog=self.agent.skills,
                                               project_root=self.config.project_root)
-                if line.startswith("/"):
+                if is_slash_command_text(line):
                     self.handle_slash(line)
                 elif line.startswith("#"):
                     self.agent.cancelled.clear()

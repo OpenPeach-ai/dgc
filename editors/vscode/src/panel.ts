@@ -18,6 +18,12 @@ import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 import { settingsDocument } from "./settingsView";
 
+function isSlashCommandText(text: string): boolean {
+  if (!text.startsWith("/")) { return false; }
+  const name = text.slice(1).split(/\s+/, 1)[0] || "";
+  return !name.includes("/");
+}
+
 /** Where the "a goal is being pursued" marker lives, and how long it stays believable. */
 const GOAL_PURSUIT_KEY = "dgc.goalPursuit.v1";
 const GOAL_PURSUIT_MAX_AGE_MS = 15 * 60 * 1000;
@@ -3286,7 +3292,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const attached = Array.isArray(msg.context)
           ? msg.context.filter((item: any) => item && typeof item === "object").slice(0, 64)
           : [];
-        const live = workflow || (text && !text.startsWith("/")) ? this.editorContext() : [];
+        const live = workflow || (text && !isSlashCommandText(text)) ? this.editorContext() : [];
         const requestId = String(msg.requestId || this.nextRequestId("prompt")).slice(0, 128);
         const selections: { skills?: string[]; templates?: string[] } = {};
         for (const key of ["skills", "templates"] as const) {
@@ -5992,7 +5998,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
-  <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
+  <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="monitorsbar" class="rail-item" aria-label="Background monitors" hidden>
       <div class="rail-row">
@@ -6086,7 +6092,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         </section>
       </div>
       <div class="picker">
-        <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
+        <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-zap model-icon" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
         <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
       </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>

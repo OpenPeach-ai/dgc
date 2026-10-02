@@ -133,7 +133,8 @@ class LiveControlTests(unittest.TestCase):
             self.backend.dispatch({"type": "set_model", "route": "native", "model": "vision-model",
                                     "request_id": "model"})
             self.wait("model_changed", request_id="model", model="vision-model")
-            self.wait("info", message="Switched to vision-model")
+            self.wait("info", message=(
+                "Model → vision-model · applies from the next model request"))
             self.assertEqual(self.agent.config.model, "vision-model")
             self.release.set()
             self.wait("turn_end", reason="completed")
@@ -153,7 +154,8 @@ class LiveControlTests(unittest.TestCase):
             self.assertTrue(entered.wait(5))
             self.backend.dispatch({"type": "set_think", "level": "xhigh", "request_id": "think"})
             self.wait("think_changed", request_id="think", think="xhigh")
-            self.wait("info", message="Thinking → xhigh")
+            self.wait("info", message=(
+                "Thinking → xhigh · applies from the next model request"))
             self.assertEqual(self.agent.config.get("thinking"), "xhigh")
             self.release.set()
             self.wait("turn_end", reason="completed")
@@ -161,6 +163,23 @@ class LiveControlTests(unittest.TestCase):
                              for e in self.events))
         self.assertFalse(any(e.get("type") == "command_rejected" and "thinking" in str(e.get("message") or "")
                              for e in self.events))
+
+    def test_subscription_model_and_effort_changes_name_the_next_turn_boundary(self):
+        self.backend.config.data["subscription_engine"] = "claude"
+        self.backend._worker = threading.current_thread()
+        try:
+            self.backend.dispatch({"type": "set_model", "route": "subscription",
+                                   "model": "opus", "request_id": "subscription-model"})
+            self.wait("info", message=(
+                "Model → opus · applies when the next subscription turn starts"))
+            self.backend.dispatch({"type": "set_think", "level": "high",
+                                   "request_id": "subscription-think"})
+            self.wait("info", message=(
+                "Thinking → high · applies when the next subscription turn starts"))
+        finally:
+            self.backend._worker = None
+        self.assertEqual(self.backend.config.get("subscription_model"), "opus")
+        self.assertEqual(self.backend.config.get("subscription_effort"), "high")
 
     def test_a_steered_turn_replays_as_one_finished_turn_with_one_bubble_per_message(self):
         # Before: the saved interjection opened a turn of its own, so the steered turn replayed as

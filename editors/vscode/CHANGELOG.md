@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- A prompt beginning with an absolute path such as `/home/me/project` is sent normally and keeps
+  the editor's live file context instead of being treated as an unknown slash command.
+- When the chat view narrows, footer controls collapse to their icons: model and reasoning becomes
+  a lightning icon, permission mode and context keep their icons, and Settings remains available.
+  Their full names remain in tooltips and screen-reader labels.
+- A model or thinking change made while DGC is working now says exactly when it applies: the next
+  model request for native providers, or the next turn for a delegated subscription CLI.
+
 ## 0.32.0 — 2026-10-02
 
 - Every chat can have its own folder. **Open a chat in another folder** (in the header, and as

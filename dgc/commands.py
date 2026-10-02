@@ -22,6 +22,21 @@ MAX_COMMAND_TEMPLATE_BYTES = 64 * 1_024
 _CUSTOM_COMMAND_FILE = re.compile(r"([a-z0-9][a-z0-9._-]{0,63})\.md\Z")
 
 
+def is_slash_command_text(text: str) -> bool:
+    """Whether submitted text has the shape of a slash command rather than an absolute path.
+
+    Command names are one path-free token. Treating every leading slash as a command makes a
+    perfectly ordinary prompt such as ``/home/me/project is my workspace`` fail as an unknown
+    command. This matches Codex's composer boundary: another slash in the first token means the
+    text is prose/path input. A bare slash keeps its existing command-palette/error behaviour.
+    """
+    value = str(text or "")
+    if not value.startswith("/"):
+        return False
+    name = value[1:].split(maxsplit=1)[0] if len(value) > 1 else ""
+    return "/" not in name
+
+
 @dataclass(frozen=True)
 class CommandSpec:
     """Authoritative metadata for one built-in command and its supported surfaces."""

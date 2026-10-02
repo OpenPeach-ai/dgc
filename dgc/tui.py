@@ -47,7 +47,7 @@ from . import ui as ui_mod
 from .update import cached_update
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
-                       resolve_command)
+                       is_slash_command_text, resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
 from .config import SUBAGENT_WINDOWS, subagent_window_arg as _subagent_window_arg
 from .config import subagent_window_text as _subagent_window_text
@@ -1902,7 +1902,7 @@ class TUI:
 
     def _handle_running_local_command(self, text: str) -> bool:
         """Run explicitly safe local commands before active-turn steering sees the text."""
-        if not text.startswith("/"):
+        if not is_slash_command_text(text):
             return False
         goal_command = text.strip().lower()
         if goal_command in ("/goal", "/goal review", "/goal status"):
@@ -1968,7 +1968,8 @@ class TUI:
         if not self._turn.is_set():
             return False
         sess = self.active if getattr(self, "_sessions", None) else None
-        if not (getattr(sess, "_wake_turn", False) and text[:1] in ("/", "!", "#")
+        local_action = is_slash_command_text(text) or text.startswith(("!", "#"))
+        if not (getattr(sess, "_wake_turn", False) and local_action
                 and not self._runs_while_turn_runs(text)):
             return False
         sess._after_wake_command = text
@@ -1979,7 +1980,7 @@ class TUI:
 
     def _runs_while_turn_runs(self, text: str) -> bool:
         """A slash command that is handled on the spot even while a turn runs."""
-        if not text.startswith("/"):
+        if not is_slash_command_text(text):
             return False
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         if text.strip().lower().startswith("/goal"):
@@ -2005,7 +2006,8 @@ class TUI:
             self._run_after_wake_command(sess)
         if self._turn.is_set():
             sess = self.active if getattr(self, "_sessions", None) else None
-            if getattr(sess, "_after_wake_command", "") and text[:1] not in ("/", "!", "#"):
+            local_action = is_slash_command_text(text) or text.startswith(("!", "#"))
+            if getattr(sess, "_after_wake_command", "") and not local_action:
                 # A prompt sent while a command waits for the wake turn to end belongs after that
                 # command (after /new, in the new chat), not in the chat it is about to leave.
                 if not self._queue_followup(sess, text, shown=False):
@@ -2027,7 +2029,7 @@ class TUI:
         token = composer_token(text, len(text))
         if token and token[0] == "/" and token[2] > 0 and token[1] in ("plan", "review", "init"):
             text = "/" + token[1] + " " + text[:token[2]].rstrip()
-        if text.startswith("/") and self._handle_slash(text):
+        if is_slash_command_text(text) and self._handle_slash(text):
             return "command"
         if text.startswith("#"):
             self._save_memory_direct(text[1:])
