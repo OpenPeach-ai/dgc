@@ -586,18 +586,21 @@
     "@playwright/test": "^1.62.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.84.0",
-    "@vscode/vsce": "3.9.2",
+    "@vscode/vsce": "4.0.0",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
     "highlight.js": "11.12.0",
     "jsdom": "^30.0.1",
     "markdown-it": "15.0.1",
     "mermaid": "^12.0.0",
-    "ovsx": "1.1.1",
+    "ovsx": "1.2.0",
     "typescript": "^5.4.0"
   },
   "overrides": {
-    "lodash-es": "^4.18.1"
+    "lodash-es": "^4.18.1",
+    "ovsx": {
+      "@vscode/vsce": "$@vscode/vsce"
+    }
   },
   "dgcCliVersion": "0.47.2"
 }
