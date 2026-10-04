@@ -105,6 +105,19 @@ class DigestTests(unittest.TestCase):
         with self.assertRaises(RegistryError):
             digest.mark_seen(self.registry, self.now, "main-chat")
 
+    def test_every_open_chat_polls_but_the_digest_is_rebuilt_only_when_something_changed(self):
+        self.complete([self.finding("Unchecked user id", severity="high")])
+        with patch.object(digest, "_build", wraps=digest._build) as built:
+            first = self.build()
+            self.assertEqual(self.build(), first)
+            self.assertEqual(built.call_count, 1, "nothing changed: the cached digest")
+            digest.mark_seen(self.registry, first["until"], "editor-user")
+            self.assertFalse(self.build()["due"], "seeing it changes the answer at once")
+            self.at("2026-10-01T10:30:00.000Z")
+            self.complete([self.finding("Unchecked user id", severity="high"), self.finding("Leak", severity="critical", line=3)])
+            self.assertTrue(self.build()["due"], "a new run is never hidden by the cache")
+            self.assertEqual(built.call_count, 3)
+
     def test_a_reworded_finding_is_neither_new_nor_gone(self):
         """Seen in a real run: the model reworded an unchanged finding after a commit to the same
         file. Its checkpoint identity changed with the title; the issue did not."""
@@ -120,6 +133,16 @@ class DigestTests(unittest.TestCase):
         self.assertEqual((pip["new_total"], pip["gone_after_change"]), (0, 1), "only the SQL finding went away")
         result = digest.outcomes(self.registry, self.job["id"])
         self.assertEqual((result["reported"], result["still_reported"], result["gone_after_change"]), (2, 1, 1))
+
+    def test_a_second_issue_on_a_line_still_reported_is_new_not_a_rewording(self):
+        line = self.finding("Query built from user input", severity="high", evidence="db.execute(q + name)")
+        self.complete([line])
+        digest.mark_seen(self.registry, self.build()["until"], "local-console")
+        self.at("2026-10-01T11:00:00.000Z")
+        second = self.finding("Database errors are swallowed", severity="high", evidence="db.execute(q + name)")
+        self.complete([line, second])
+        [pip] = self.build()["pips"]
+        self.assertEqual([f["title"] for f in pip["new_findings"]], ["Database errors are swallowed"])
 
     def test_findings_that_go_away_after_their_file_changed_are_counted_never_called_fixed(self):
         a = self.finding("Unchecked user id", severity="high", path="api/users.py")

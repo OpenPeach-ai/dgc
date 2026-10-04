@@ -137,12 +137,20 @@ def _title(text, secrets):
 
 
 def _changed_paths(store, run_id):
-    """Paths the run's source changed since its baseline, and whether that list is complete."""
+    """Paths the run's source changed since its baseline, and whether that list is complete.
+
+    Only the pinned comparison is read out of the run manifest, which also holds the worker's
+    whole input: the digest is rebuilt for every open chat, so it never parses all of it."""
+    import sqlite3
     bound = store.db.execute("SELECT length(CAST(manifest AS BLOB)) FROM pip_runs WHERE id=?", (run_id,)).fetchone()
     if bound is None or bound[0] is None or bound[0] > MAX_MANIFEST_BYTES:
         return set(), False
-    manifest = json.loads(store.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run_id,)).fetchone()[0])
-    changes = manifest.get("changes_since_checkpoint")
+    try:
+        raw = store.db.execute("SELECT json_extract(manifest,'$.changes_since_checkpoint') FROM pip_runs WHERE id=?",
+                               (run_id,)).fetchone()[0]
+        changes = json.loads(raw) if isinstance(raw, str) else None
+    except sqlite3.OperationalError:          # an SQLite built without JSON functions
+        changes = json.loads(store.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (run_id,)).fetchone()[0]).get("changes_since_checkpoint")
     if not isinstance(changes, dict) or changes.get("status") != "compared":
         return set(), False
     paths = {item.get("path") for item in changes.get("changes") or () if isinstance(item, dict)}
@@ -150,13 +158,30 @@ def _changed_paths(store, run_id):
 
 
 def issue(finding) -> tuple:
-    """The same issue at the same source lines, however the model worded it this time.
-
-    A checkpoint's identity hashes the title too, so a reworded finding is "new" there and its
-    old wording "not observed". For telling the user what is new and what went away, the place
-    and the quoted source decide: the same path and evidence lines are the same issue.
-    """
+    """Where a finding is and the source it quotes: what stays put when only the wording changes."""
     return finding["path"], " ".join(str(finding["evidence"]).split())
+
+
+def reworded(baseline, current) -> dict:
+    """Current findings that only reword a baseline finding: {current identity: baseline identity}.
+
+    A checkpoint's identity hashes the title too, so a finding the model words differently next
+    time is "new" there and its old wording "not observed". A pair is a rewording when neither
+    identity is in the other report and both quote the same source at the same path. Pairs are
+    one to one, so a second, different issue on a line that is still reported stays new.
+    """
+    current_ids = {f["identity"] for f in current}
+    baseline_ids = {f["identity"] for f in baseline}
+    missing = {}
+    for f in baseline:
+        if f["identity"] not in current_ids:
+            missing.setdefault(issue(f), []).append(f["identity"])
+    pairs = {}
+    for f in current:
+        bucket = missing.get(issue(f)) if f["identity"] not in baseline_ids else None
+        if bucket:
+            pairs[f["identity"]] = bucket.pop(0)
+    return pairs
 
 
 def _baseline(store, checkpoint, cache):
@@ -178,16 +203,49 @@ def _gone(store, checkpoint, baseline_cache):
     baseline = _baseline(store, checkpoint, baseline_cache)
     if baseline is None or checkpoint["counts"].get("not_observed") in (None, 0):
         return [], []
-    current = {issue(item) for item in checkpoint["findings"]}
+    current = {item["identity"] for item in checkpoint["findings"]}
+    kept = set(reworded(baseline, checkpoint["findings"]).values())
     paths, _complete = _changed_paths(store, checkpoint["run_id"])
     after_change, without = [], []
     for item in baseline:
-        if issue(item) not in current:
+        if item["identity"] not in current and item["identity"] not in kept:
             (after_change if item["path"] in paths else without).append(item)
     return after_change, without
 
 
+_CACHE: dict = {}
+CACHE_SECONDS = 600
+
+
+def _fingerprint(registry, now):
+    """Everything a digest depends on that can change, read in a few indexed lookups."""
+    state = _state(registry)
+    return (tuple(state) if state else None, local_day(now),
+            registry.db.execute("SELECT max(finished_at), count(*) FROM pip_runs WHERE finished_at IS NOT NULL").fetchone()[:],
+            registry.db.execute("SELECT max(id) FROM pip_checkpoints").fetchone()[0],
+            registry.db.execute("SELECT max(seq) FROM workspace_events").fetchone()[0])
+
+
 def build(registry, config=None) -> dict:
+    """The digest since the user last looked, reused while nothing it depends on has changed.
+
+    Every open chat asks for it once a minute. Any finished run, checkpoint, review, skip or
+    settings change moves the fingerprint (each writes an activity event), and the cached copy
+    is rebuilt at least every ten minutes regardless.
+    """
+    import copy
+    import time
+    key = str(registry.directory)
+    fingerprint = _fingerprint(registry, _now(registry))
+    cached = _CACHE.get(key)
+    if cached and cached[0] == fingerprint and time.monotonic() - cached[2] < CACHE_SECONDS:
+        return copy.deepcopy(cached[1])
+    value = _build(registry, config)
+    _CACHE[key] = (fingerprint, copy.deepcopy(value), time.monotonic())
+    return value
+
+
+def _build(registry, config=None) -> dict:
     """The digest since the user last looked (at most a week), and whether it is due now."""
     from .pip_checkpoints import _load
     from .pip_overview import pending_reviews
@@ -249,9 +307,9 @@ def build(registry, config=None) -> dict:
             continue
         item = entry(checkpoint["pip_id"])
         floor, alert = _rank(item["min_severity"]), item["alert_severity"]
-        earlier = {issue(f) for f in _baseline(store, checkpoint, baselines) or ()}
+        rewording = reworded(_baseline(store, checkpoint, baselines) or [], checkpoint["findings"])
         for finding in checkpoint["findings"]:
-            if finding["comparison"] != "new" or issue(finding) in earlier:   # reworded is not new
+            if finding["comparison"] != "new" or finding["identity"] in rewording:   # reworded is not new
                 continue
             if _rank(finding["severity"]) < floor:
                 item["below_threshold"] += 1
@@ -351,27 +409,35 @@ def outcomes(registry, pip_id) -> dict:
                                (pip_id, MAX_OUTCOME_CHECKPOINTS + 1)).fetchall()
     truncated = len(rows) > MAX_OUTCOME_CHECKPOINTS
     ids = [row[0] for row in rows[:MAX_OUTCOME_CHECKPOINTS]][::-1]
-    reported, reviews, state = set(), {}, {}       # keyed by issue(): place and quoted source
-    examined = 0
+    reviews, state = {}, {}         # by identity; a rewording carries its earlier identity's record
+    examined, previous = 0, []
     for checkpoint_id in ids:
         try:
             checkpoint = _load(store, checkpoint_id, reviews=True)
         except RegistryError:
             continue
         examined += 1
-        current = {issue(item): item for item in checkpoint["findings"]}
+        findings = checkpoint["findings"]
+        current = {item["identity"] for item in findings}
         compared = checkpoint.get("baseline_checkpoint_id") is not None and checkpoint["counts"].get("not_observed") is not None
+        pairs = reworded(previous, findings) if compared else {}
+        for new, old in pairs.items():
+            if old in state:
+                state[new] = state.pop(old)
+            if old in reviews:
+                reviews.setdefault(new, reviews.pop(old))
         if compared:
             paths, _complete = _changed_paths(store, checkpoint["run_id"])
-            for identity, last in list(state.items()):
+            for identity, last in state.items():
                 if last["state"] == "reported" and identity not in current:
                     last["state"] = "gone_after_change" if last["path"] in paths else "gone"
-        for identity, item in current.items():
-            reported.add(identity)
-            state[identity] = {"state": "reported", "path": item["path"], "severity": item["severity"]}
+        for item in findings:
+            state[item["identity"]] = {"state": "reported", "path": item["path"], "severity": item["severity"]}
             status = item["review"]["status"]
-            if status != "open" or identity not in reviews:
-                reviews[identity] = status
+            if status != "open" or item["identity"] not in reviews:
+                reviews[item["identity"]] = status
+        previous = findings
+    reported = state
     counts = {"reported": len(reported),
               "accepted": sum(status == "accepted" for status in reviews.values()),
               "dismissed": sum(status == "dismissed" for status in reviews.values()),
