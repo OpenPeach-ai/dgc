@@ -90,6 +90,15 @@ class ExecutionTests(unittest.TestCase):
                         fetch_page=lambda url: (url, "text"), search=lambda q, c: "text")
         self.assertEqual(raised.exception.code, "web_read_timeout")
 
+    def test_a_secret_at_the_bound_is_redacted_whole(self):
+        # A configured secret with no recognisable token shape: only an exact match redacts it.
+        secret = "correct-horse-battery-staple-9431"
+        page = "x" * (web.MAX_PAGE_CHARS - 16) + " " + secret
+        with patch("dgc.redaction.secret_values", return_value=[secret]):
+            rows = web.execute(self.config, {"schema_version": 1, "reads": [PLAN["reads"][0]]},
+                               authorize=self.authorize, fetch_page=lambda url: (url, page))
+        self.assertNotIn("correct-horse", rows[0]["text"], "no fragment of the secret survives the cut")
+
     def test_pages_are_bounded(self):
         rows = web.execute(self.config, {"schema_version": 1, "reads": [PLAN["reads"][0]]},
                            authorize=self.authorize, fetch_page=lambda url: (url, "x" * 50_000))

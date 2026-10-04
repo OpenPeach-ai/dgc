@@ -118,7 +118,8 @@ def execute(config, plan, *, authorize, fetch_page=None, search=None, clock=time
                 text = search(read["query"], config)
                 if isinstance(text, str) and text.startswith("error:"):
                     raise ValueError(text[len("error:"):].strip())
-            row["text"] = redact_text(_bounded(text, MAX_PAGE_CHARS), secrets) or "(empty page)"
+            # Redact the whole text first: a secret cut in half by the bound would escape redaction.
+            row["text"] = _bounded(redact_text(str(text or ""), secrets), MAX_PAGE_CHARS) or "(empty page)"
         except (requests.RequestException, ValueError, OSError) as exc:
             row["error"] = _bounded(redact_text(str(exc), secrets), MAX_ERROR_CHARS) or "could not be read"
         row["untrusted"] = True
