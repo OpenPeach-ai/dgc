@@ -225,3 +225,14 @@ test('a GitHub plan this view cannot read blocks acceptance instead of hiding it
  assert.throws(()=>model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'commit_checks'}],token:'x'}));
  assert.equal(model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'failed_runs',limit:10}]}).repository,'a/b');
 });
+
+test('a starter shows its own example of what to read, and its schedule in words', async()=>{
+ const personal=[{id:'market_brief',title:'Market brief',summary:'Before the market opens.',pip_type:'lens',scope:'personal',name:'Market brief',when:'weekdays',default_time:'08:30',params:['time','timezone','web_reads'],web_example:'search: Infosys results\nsearch: <b>x</b>'}];
+ const x=setup({api:41,personal:true,proposal:null});await x.drain({list_pip_starters:()=>({starters:personal})});x.click('#new-pip');await x.drain({list_pip_starters:()=>({starters:personal})});
+ x.click('[data-starter=market_brief]');
+ const box=x.d.querySelector('#starter-web');assert.ok(box);
+ assert.equal(box.getAttribute('placeholder'),'search: Infosys results\nsearch: <b>x</b>','the example, as text');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'30 8 * * 1-5',timezone:'Asia/Kolkata'}),'Weekdays at 08:30 · Asia/Kolkata');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'0 9 * * 1',timezone:'UTC'}),'Mondays at 09:00 · UTC');
+ assert.equal(model.scheduleLabel({type:'cron',cron:'0 9 1 * *',timezone:'UTC'}),'Cron 0 9 1 * * · UTC','anything else stays exact');
+});

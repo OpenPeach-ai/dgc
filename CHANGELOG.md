@@ -42,6 +42,10 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- Five more Personal starters, each reading only the pages and searches you name: Watch a page for
+  changes, Market brief (news with sources before the market opens; it never trades or advises),
+  Weekly research digest, Release watch and News on a topic. A Personal task now sees its own
+  previous result, so a watch says what changed and a digest doesn't repeat itself.
 - `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
   failed and timed-out runs too. `--daily-limit 200k` stops its schedules and triggers for the day
   once it reaches that many tokens; runs you start still run. The limit is your setting, not part

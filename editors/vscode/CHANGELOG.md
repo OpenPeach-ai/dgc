@@ -20,6 +20,9 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- **New** offers five more Personal starters (page watch, market brief, weekly research digest,
+  release watch, news on a topic), each with an example of what to read. Starter schedules read
+  "Weekdays at 08:30" or "Mondays at 09:00" instead of a cron expression.
 - Each Pip's **Job** tab shows its token usage today and over 30 days, with a two-week chart, and
   takes a daily limit for its automatic runs.
 - When a Pip finds something at its alert level or a new review is waiting, the editor says so

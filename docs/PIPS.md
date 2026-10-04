@@ -78,11 +78,21 @@ Personal Pip).
 | Review each commit | Rook, this project | After each new commit to the branch, at most every 5 minutes |
 | Nightly security review | Lock, this project | Daily at 02:00 in your time zone |
 | Morning brief | Personal | Weekdays at 07:30, from up to four pages and searches you name |
+| Watch a page for changes | Personal | Daily at 09:00: what changed on the page since last time |
+| Market brief | Personal | Weekdays at 08:30: news on the companies you name, with sources; never trades or advises |
+| Weekly research digest | Personal | Mondays at 09:00: what is new on your topics, no repeats |
+| Release watch | Personal | Daily at 10:00: new releases of tools you depend on, breaking changes first |
+| News on a topic | Personal | Daily at 08:00: at most five items, each with its source |
+
+The Personal starters read only the pages and searches you name, so they need no
+connected account; all but the morning brief need at least one. Each run sees its own
+previous result, so a watch says what changed and a digest doesn't repeat itself.
 
 Choose one, adjust the branch, time or reads, and choose **Prepare setup card**. The
 card opens in its review straight away; approving it is still your decision. From the
 CLI, `dgc pips starters` lists them and `dgc pips starter commit-review` (or
-`nightly-security`, `morning-brief`) shows the exact job and asks before creating it.
+`nightly-security`, `morning-brief`, `page-watch`, `market-brief`, `research-digest`,
+`release-watch`, `daily-news`) shows the exact job and asks before creating it.
 `--branch`, `--time`, `--timezone`, `--web-page` and `--web-search` change the
 choices; `--yes` approves the job shown without the question.
 

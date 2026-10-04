@@ -82,8 +82,9 @@ The reply is a `pips_result` event that carries the nested request ID:
 `list_pip_starters {request_id}` and `propose_starter_pip {request_id, starter, params}`
 (API 41) are nested controls handled by the chat backend, because a setup card belongs
 to a chat. The first returns `{starters: [...]}`: each has `id`, `title`, `summary`,
-`pip_type`, `scope`, `name`, `when`, `default_time` and the `params` it takes (`branch`,
-`time`, `timezone`, `web_reads`). The second saves one pending setup card for this chat
+`pip_type`, `scope`, `name`, `when` (`commit`, `daily`, `weekdays` or `weekly`),
+`default_time`, the `params` it takes (`branch`, `time`, `timezone`, `web_reads`) and
+`web_example`, an example of what to read (text, or null). The second saves one pending setup card for this chat
 from the starter's fixed job and the checked choices, and returns `{setup}`; it creates
 no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:

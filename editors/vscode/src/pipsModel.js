@@ -73,7 +73,12 @@ export function scheduleLabel(value) {
   if (record(value) && value.type === 'interval' && Number.isInteger(value.minutes) && value.minutes >= 5 && value.minutes <= 10080) return `Every ${value.minutes} minutes`;
   if (record(value) && value.type === 'daily' && typeof value.time === 'string' && typeof value.timezone === 'string') return `Daily at ${value.time} · ${value.timezone}`;
   if(record(value)&&value.type==='once'&&typeof value.at==='string')return `Once at ${value.at}`;
-  if(record(value)&&value.type==='cron'&&typeof value.cron==='string'&&typeof value.timezone==='string')return `Cron ${value.cron} · ${value.timezone}`;
+  if(record(value)&&value.type==='cron'&&typeof value.cron==='string'&&typeof value.timezone==='string'){
+    // The two shapes starters write, in words; anything else stays the exact expression.
+    const m=/^(\d{1,2}) (\d{1,2}) \* \* (1-5|1)$/.exec(value.cron);
+    if(m&&Number(m[1])<60&&Number(m[2])<24)return `${m[3]==='1-5'?'Weekdays':'Mondays'} at ${m[2].padStart(2,'0')}:${m[1].padStart(2,'0')} · ${value.timezone}`;
+    return `Cron ${value.cron} · ${value.timezone}`;
+  }
   return 'Schedule unavailable';
 }
 export function cronExpression(value) {

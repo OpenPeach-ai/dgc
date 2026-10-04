@@ -586,6 +586,12 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Previous result** (API 41). A `personal_task` run pins `manifest.previous_result`
+`{run_id, finished_at, text}`: the Pip's latest succeeded Personal task result, redacted
+with the current secrets and cut to 6,000 characters. The worker shows it as reference
+"for comparison only", so a watch reports what changed and a digest leaves out what it
+already said. A conversation does not get it (its history is the chat).
+
 **Usage and daily limits** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
 today: {day, tokens, runs}, last_30_days: {tokens, runs}, days: [{day, tokens, runs}],
 daily_cap, capped_today}}` over local days. A run's tokens are the input plus output tokens

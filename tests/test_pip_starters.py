@@ -13,10 +13,51 @@ from dgc.workspace_registry import RegistryError
 from tests import test_pips_local as fixtures
 
 
+class PersonalStarterTests(unittest.TestCase):
+    """Five Personal starters built on reviewed web reads: no connected account needed."""
+    NEW = ("page_watch", "market_brief", "research_digest", "release_watch", "daily_news")
+
+    def build(self, starter, **params):
+        return starters.build(starter, {"timezone": "Asia/Kolkata", **params}, project_root="/p", request_key="k")
+
+    def test_each_becomes_an_ordinary_personal_setup_card(self):
+        from dgc.pip_setup import validate_request
+        reads = [{"kind": "search", "query": "Infosys results"}]
+        for starter in self.NEW:
+            with self.subTest(starter=starter):
+                request = validate_request(self.build(starter, web_reads=reads))
+                self.assertEqual((request["scope"], request["work_kind"]), ("personal", "personal_task"))
+                self.assertEqual(request["web_plan"]["reads"], reads)
+                self.assertIn("previous result", request["goal"], "it says what is new, not what it said last time")
+                example = next(row for row in starters.catalog() if row["id"] == starter)["web_example"]
+                self.assertTrue(example, "the form shows an example of what to read")
+
+    def test_a_starter_that_only_reads_the_web_needs_something_to_read(self):
+        for starter in self.NEW:
+            with self.subTest(starter=starter), self.assertRaises(RegistryError) as raised:
+                self.build(starter)
+            self.assertIn("at least one page or search", str(raised.exception))
+        self.build("morning_brief")                     # the brief can start empty and gain apps later
+
+    def test_schedules_say_when_in_plain_terms(self):
+        reads = [{"kind": "search", "query": "x"}]
+        self.assertEqual(self.build("research_digest", web_reads=reads)["schedule"],
+                         {"type": "cron", "cron": "0 9 * * 1", "timezone": "Asia/Kolkata"}, "weekly is Mondays")
+        self.assertEqual(self.build("market_brief", web_reads=reads, time="08:45")["schedule"],
+                         {"type": "cron", "cron": "45 8 * * 1-5", "timezone": "Asia/Kolkata"})
+        self.assertEqual(self.build("page_watch", web_reads=reads)["schedule"]["type"], "daily")
+
+    def test_the_market_brief_never_trades_or_advises(self):
+        goal = starters.STARTERS["market_brief"]["goal"]
+        self.assertIn("no advice to buy, sell or hold", goal)
+        self.assertIn("never trades", starters.STARTERS["market_brief"]["summary"])
+
+
 class CatalogTests(unittest.TestCase):
     def test_the_catalog_is_fixed_and_says_what_each_starter_does(self):
         rows = starters.catalog()
-        self.assertEqual([row["id"] for row in rows], ["commit_review", "nightly_security", "morning_brief"])
+        self.assertEqual([row["id"] for row in rows], ["commit_review", "nightly_security", "morning_brief", "page_watch",
+                                                       "market_brief", "research_digest", "release_watch", "daily_news"])
         for row in rows:
             self.assertTrue(row["title"] and row["summary"] and row["name"])
             self.assertIn(row["scope"], ("project", "personal"))

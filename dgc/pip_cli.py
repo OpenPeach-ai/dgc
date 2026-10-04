@@ -49,8 +49,8 @@ def parser():
     starter.add_argument("--branch", help="project starters: the branch to review (default: the checked-out branch)")
     starter.add_argument("--time", help="scheduled starters: HH:MM, 24-hour clock")
     starter.add_argument("--timezone", help="scheduled starters: IANA zone such as Asia/Kolkata (default: this computer's)")
-    starter.add_argument("--web-page", action="append", metavar="URL", help="morning brief: an exact https page to read (repeat)")
-    starter.add_argument("--web-search", action="append", metavar="QUERY", help="morning brief: a fixed search (repeat)")
+    starter.add_argument("--web-page", action="append", metavar="URL", help="Personal starters: an exact https page to read (repeat)")
+    starter.add_argument("--web-search", action="append", metavar="QUERY", help="Personal starters: a fixed search (repeat)")
     starter.add_argument("--yes", action="store_true", help="approve the displayed job without the question")
     command("execution", "inspect this runner’s bounded execution support and limits")
     command("models", "list models on the configured native connection")
@@ -1327,7 +1327,8 @@ def _starter_command(config, args):
     personal = checked.get("scope") == "personal"
     when = (f"after each new commit to {checked['source_ref']} (at most every 5 minutes)" if checked.get("event_trigger")
             else (f"daily at {checked['schedule']['time']} {checked['schedule']['timezone']}" if checked["schedule"]["type"] == "daily"
-                  else f"weekdays at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
+                  else ("Mondays" if checked["schedule"]["cron"].split()[4] == "1" else "weekdays")
+                  + f" at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
     heading = checked["name"] if checked["name"] == spec["title"] else f"{spec['title']}: {checked['name']}"
     lines = [f"{heading} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
              f"Runs: {when}", f"Job: {checked['goal']}"]
