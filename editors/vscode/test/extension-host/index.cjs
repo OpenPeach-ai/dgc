@@ -635,13 +635,19 @@ async function run() {
 
   // ---- 0.40 options (installed-host checks) ----
   {
-    const turnEnds = () => posted().filter((item) => item.eventType === "turn_end").length;
-    const before = turnEnds();
+    // The test record keeps only the latest 256 messages, so counting turn_end in it stops rising
+    // once it is full (each new one evicts an old one). Look for this turn's end after its own
+    // options_resolved instead.
+    const endedAfterDismissal = () => {
+      const items = posted();
+      const at = items.findIndex((item) => item.eventType === "options_resolved" && item.id === "host-dismiss");
+      return at >= 0 && items.slice(at + 1).some((item) => item.eventType === "turn_end");
+    };
     await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "installed-host question dismissal" });
     await waitFor(() => posted().some((item) =>
       item.type === "event" && item.eventType === "options_request" && item.id === "host-dismiss"));
     await testApi.testOnlyWebviewMessage(testToken, { type: "options_response", id: "host-dismiss", dismissed: true });
-    await waitFor(() => turnEnds() > before);
+    await waitFor(endedAfterDismissal);
     await testApi.testOnlyWebviewMessage(testToken, { type: "options_response", id: "host-dismiss", dismissed: true });
     await new Promise((resolve) => setTimeout(resolve, 200));
     const dismissals = backendCommands(backendLogPath).filter((command) =>
