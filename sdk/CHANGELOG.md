@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## Unreleased
+## 0.7.0 — 2026-10-04
 
 Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips` (TypeScript)
 read and manage the Pips of the session's DGC profile: list, inspect and run Pips, read reports,
