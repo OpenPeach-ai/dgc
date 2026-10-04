@@ -392,30 +392,22 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         ]
         return argv
     if kind == "sandbox-exec":
-        def q(value: Path) -> str:
-            return str(value).replace("\\", "\\\\").replace('"', '\\"')
+        from . import seatbelt
 
         homes: list[Path] = []
         for candidate in (Path.home(), _account_home(), _isolated_state_dir()):
             if candidate is not None and candidate.resolve(strict=False) not in homes:
                 homes.append(candidate.resolve(strict=False))
-        writable_project = "" if read_only else f'(subpath "{q(root)}") '
-        profile = [
-            "(version 1)", "(allow default)", "(deny file-write*)",
-            f'(allow file-write* {writable_project}(subpath "/tmp") (subpath "/private/tmp") '
-            '(literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") '
-            '(literal "/dev/dtracehelper") (subpath "/dev/fd"))',
-        ]
         hidden = [home for home in homes if not _inside(home, root)]
-        for home in hidden:
-            profile.append(f'(deny file-read* (subpath "{q(home)}"))')
+        readable: list[Path] = []
+        reachable: list[Path] = []
         if hidden:
-            profile.append(f'(allow file-read* (subpath "{q(root)}"))')
+            readable.append(root)
             # The same re-exposure as the Linux arm, for the same reason: a task worktree's `.git`
             # is a pointer into the source repository, which the rules above have just hidden.
             shared_git = _worktree_git_common_dir(root)
             if shared_git is not None and shared_git.is_dir() and not _inside(shared_git, root):
-                profile.append(f'(allow file-read* (subpath "{q(shared_git)}"))')
+                readable.append(shared_git)
             # Re-exposing the two directories is not enough to REACH them. bwrap masks the home
             # with a tmpfs, so everything under it is absent and a resolver treats it as "not
             # there"; seatbelt denies it, and a resolver that walks a path component by component
@@ -429,12 +421,9 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             # and never `subpath`, which would re-expose everything underneath and undo the point.
             # Both chains are needed: the checkout's own ancestors AND the shared repository's.
             # Granting only the first still failed, on the second's -- that is the whole bug.
-            for reachable in (root, shared_git):
-                if reachable is not None:
-                    profile.append('(allow file-read-metadata file-test-existence '
-                                   f'(path-ancestors "{q(reachable)}"))')
-        if not network:
-            profile.append("(deny network*)")
-        return [str(executable), "-p", "".join(profile),
-                "/bin/bash", "-o", "pipefail", "-c", command]
+            reachable = [path for path in (root, shared_git) if path is not None]
+        writable = ([] if read_only else [root]) + [Path("/tmp"), Path("/private/tmp")]
+        profile = seatbelt.profile(writable=writable, hidden=hidden, readable=readable,
+                                   reachable=reachable, network=network)
+        return [str(executable), "-p", profile, "/bin/bash", "-o", "pipefail", "-c", command]
     return None

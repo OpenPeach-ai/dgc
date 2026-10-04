@@ -1077,31 +1077,11 @@ class _DarwinRSS:
     """Current child RSS via libproc; no process-listing helper or task port."""
 
     def __init__(self) -> None:
-        import ctypes
-
-        class TaskInfo(ctypes.Structure):
-            # Public proc_taskinfo ABI: six uint64 fields, then twelve int32.
-            _fields_ = [(name, ctypes.c_uint64) for name in (
-                'virtual_size', 'resident_size', 'total_user', 'total_system', 'threads_user', 'threads_system'
-            )] + [(name, ctypes.c_int32) for name in (
-                'policy', 'faults', 'pageins', 'cow_faults', 'messages_sent', 'messages_received',
-                'syscalls_mach', 'syscalls_unix', 'csw', 'threadnum', 'numrunning', 'priority'
-            )]
-
-        # An absolute system-library path avoids find_library's possible helpers.
-        self._library = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
-        self._query = self._library.proc_pidinfo
-        self._query.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
-        self._query.restype = ctypes.c_int
-        self._info = TaskInfo()
+        from .darwin_libproc import Libproc
+        self._libproc = Libproc()
 
     def __call__(self, pid: int) -> int:
-        import ctypes
-        size = ctypes.sizeof(self._info)
-        received = self._query(pid, 4, 0, ctypes.byref(self._info), size)  # PROC_PIDTASKINFO
-        if received != size:
-            raise OSError(ctypes.get_errno(), 'could not sample child RSS')
-        return int(self._info.resident_size)
+        return self._libproc.task_resident(pid)
 
 
 def _wait_pdf_worker(process: subprocess.Popen[bytes], rss: Callable[[int], int] | None) -> None:
