@@ -378,9 +378,12 @@ function parseTokens(text){
 function usageChart(u){
  const days=[],[y,mo,d]=u.today.day.split('-').map(Number),byDay=new Map(u.days.map(e=>[e.day,e.tokens]));
  for(let i=13;i>=0;i--){const t=new Date(Date.UTC(y,mo-1,d-i));days.push({day:t.toISOString().slice(0,10),tokens:byDay.get(t.toISOString().slice(0,10))||0});}
- const max=Math.max(1,...days.map(e=>e.tokens),u.daily_cap||0),w=14,gap=4,h=40;
+ // Scaled to the days themselves: a limit far above them would flatten every bar, so its line is
+ // drawn only when it is near enough to read (the form above says the limit in words).
+ const busiest=Math.max(1,...days.map(e=>e.tokens)),cap=u.daily_cap&&u.daily_cap<=busiest*1.5?u.daily_cap:0;
+ const max=Math.max(busiest,cap),w=14,gap=4,h=40;
  const bars=days.map((e,i)=>{const bh=e.tokens?Math.max(2,Math.round(e.tokens/max*h)):1;return `<rect x="${i*(w+gap)}" y="${h-bh}" width="${w}" height="${bh}" rx="2" class="${e.tokens?'usage-bar':'usage-bar empty'}"><title>${e.day}: ${e.tokens.toLocaleString('en-US')} tokens</title></rect>`;}).join('');
- const capLine=u.daily_cap?`<line x1="0" x2="${14*(w+gap)-gap}" y1="${h-Math.round(u.daily_cap/max*h)}" y2="${h-Math.round(u.daily_cap/max*h)}" class="usage-cap"/>`:'';
+ const capLine=cap?`<line x1="0" x2="${14*(w+gap)-gap}" y1="${h-Math.round(cap/max*h)}" y2="${h-Math.round(cap/max*h)}" class="usage-cap"/>`:'';
  return `<svg class="usage-chart" viewBox="0 0 ${14*(w+gap)-gap} ${h}" preserveAspectRatio="none" role="img" aria-label="Tokens per day for the last 14 days">${bars}${capLine}</svg>`;
 }
 function usageMarkup(){

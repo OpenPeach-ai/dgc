@@ -48,6 +48,13 @@ test('a limit is saved as tokens, a wrong one is refused here, and it can be rem
  assert.equal(x.requests('set_pip_daily_cap')[1].request.daily_tokens,null);
 });
 
+test('the chart is scaled to the days, so a limit far above them leaves the bars readable', async()=>{
+ const x=setup(usage({daily_cap:200000}));await x.open();
+ const tallest=Math.max(...[...x.d.querySelectorAll('.usage-chart rect')].map(r=>Number(r.getAttribute('height'))));
+ assert.equal(tallest,40,'the busiest day fills the chart');
+ assert.equal(x.d.querySelector('.usage-cap'),null,'a limit 16 times the busiest day is not drawn');
+});
+
 test('a Pip at its limit says its schedules wait until tomorrow', async()=>{
  const x=setup(usage({daily_cap:10000,capped_today:true}));await x.open();
  assert.match(x.d.body.textContent,/reached its daily limit: its schedules and triggers wait until tomorrow/);
