@@ -180,11 +180,8 @@ TOOL_SCHEMAS = [
     _fn("use_pips", "Load the Pips tools for this chat. Pips are standing agents that review, test and draft "
         "for this project or the user's personal tasks. Call this before you read Pip status or findings, set up "
         "or change a Pip, run, pause or hand work to one, or draft an email, calendar event or app action "
-        "from a Personal Pip result. Set Pips up only with these tools, as setup cards the user approves: the "
-        "`dgc pips` command refuses changes from your shell. When the user asks for something that recurs (every "
-        "morning, each week, whenever something changes, keep an eye on it) or repeats a task, offer once to make it "
-        "a Pip and prepare a setup card if they agree. Personal Pips can read web pages and searches the user "
-        "approves and their connected apps; no Pip buys, sells, trades or pays.", {}, []),
+        "from a Personal Pip result. When the user wants something done again and again, offer once to make it a Pip.",
+        {}, []),
     _fn("pips_context", "Read bounded Pips reference data for this session workspace, or inspect shared app-connection metadata. "
         "List jobs and latest run IDs, inspect a job definition, page audit findings, Patch/Pulse execution evidence or Quill drafts, read approved context, explicit Pip memory exceptions, human-recorded statements/preferences, this chat's attachments, or page activity. "
         "Send only the chosen action's keys (action is always required; ? means optional): "

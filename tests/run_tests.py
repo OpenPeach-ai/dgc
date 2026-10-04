@@ -11564,7 +11564,8 @@ def test_benchmark_integrity():
         # 0.48.0 is that raise. Pips are on for everyone, and their twelve tools plus guidance
         # measured 13,023 tokens on every request -- double the whole surface -- so they load on
         # demand through `use_pips` instead, which costs 115 (6,561 measured). 6,600 keeps the
-        # same small headroom above it.
+        # same small headroom above it. Offering to make recurring work a Pip costs one sentence on
+        # `use_pips` (6,581); what Pips can and cannot do travels with their tools instead.
         _PROBE_TOKEN_CEILING = 6600
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
