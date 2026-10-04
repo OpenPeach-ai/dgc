@@ -96,6 +96,13 @@ CLI, `dgc pips starters` lists them and `dgc pips starter commit-review` (or
 `--branch`, `--time`, `--timezone`, `--web-page` and `--web-search` change the
 choices; `--yes` approves the job shown without the question.
 
+**From an answer.** Each answer in the chat has **Make this a Pip** (the calendar
+button). It drafts the ask in your composer, "make this a Pip that does it on a
+schedule", with your original request; adjust it and send. Nothing is created until
+you approve the setup card. And when you start a chat with work you have started
+chats with before, the chat may offer once to make it a Pip; say no and it won't ask
+again in that chat.
+
 **From the main chat.** Just ask, for example: "Review committed changes in this
 project every weekday at 9:00 Europe/London, and run once now." The main chat loads
 its Pips tools and prepares a **setup card**. The card shows the project folder,

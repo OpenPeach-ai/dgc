@@ -1051,6 +1051,8 @@
   let customCommandPending = "";
   const attachments = [];
   let pipReferencesSupported = false;
+  // Pips are on and can take a setup card from this chat: an answer offers "Make this a Pip".
+  let pipsOffered = false;
   const pipPicker = { active: false, id: "", query: "", rows: [], cursor: null, workspace: "", loading: false, error: "", emptyLabel:"", timer: null, timeout: null };
   function validPipReference(p) {
     return p && typeof p === "object" && !Array.isArray(p)
@@ -2871,6 +2873,8 @@
         add(act, icon, label).setAttribute("aria-pressed", "false");
       }
       add("branch", "git-branch", "Branch into a new chat from here");
+      // Recurring work belongs in a Pip. This only drafts the ask; nothing is sent or created.
+      if (pipsOffered && String(prompt || "").trim()) add("pip", "calendar", "Make this a Pip that does it on a schedule");
     }
     add("retry", "refresh", "Run this prompt again");
     if (!partial) add("edit", "edit", "Edit this prompt and send it again");
@@ -2890,6 +2894,12 @@
         return;
       }
       if (act === "branch") { vscode.postMessage({ type: "branchChat", prompt: String(prompt || "") }); return; }
+      if (act === "pip") {
+        setComposerText("Make this a Pip that does it on a schedule. Prepare a setup card for me to approve, "
+          + "and ask me how often if that is not clear.\n\nThe task: " + String(prompt || "").trim());
+        setComposerRange(composerText().length); input.focus(); onInput(); scroll();
+        return;
+      }
       if (act === "retry") { resend(prompt); return; }
       if (act === "edit") {
         setComposerText(String(prompt || "")); setComposerRange(composerText().length);
@@ -4414,6 +4424,8 @@
         agentsLive = ev.capabilities?.agents === true;
         imageSpool = ev.capabilities?.image_spool === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
+          && Number(ev.capabilities?.pips_api_version) >= 41;
         clearPipPicker();
         mcpContextSupported = ev.capabilities?.mcp_context === true;
         mcpManagement = ev.capabilities?.mcp_management === true;

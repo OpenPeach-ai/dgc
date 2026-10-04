@@ -4580,3 +4580,31 @@ test('goal budget pause is labelled Paused and keeps the response partial', () =
   assert.equal(doc.getElementById('send').title,'Send message');
   assert.deepEqual(errors,[]);dom.window.close();
 });
+
+test("an answer offers Make this a Pip only when Pips can take it, and only drafts the ask", () => {
+  const turn = (send, caps) => {
+    send({ type: "session_ready", sessionId: "chat-1" });
+    send({ type: "event", event: { type: "ready", session_id: "chat-1", capabilities: caps } });
+    send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Summarise yesterday's sales numbers" } });
+    send({ type: "event", event: { type: "text_delta", text: "Sales were up 4%." } });
+    send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 6 } });
+  };
+  const off = makeDom();
+  turn(off.send, { pips_supported: true, pips_enabled: false, pips_api_version: 41 });
+  assert.equal(off.doc.querySelector(".ract-pip"), null, "Pips off: no offer");
+  const old = makeDom();
+  turn(old.send, { pips_supported: true, pips_enabled: true, pips_api_version: 40 });
+  assert.equal(old.doc.querySelector(".ract-pip"), null, "an older CLI: no offer");
+  const { doc, posted, send, errors } = makeDom();
+  turn(send, { pips_supported: true, pips_enabled: true, pips_api_version: 41 });
+  const button = doc.querySelector(".response-actions .ract-pip");
+  assert.ok(button);
+  assert.equal(button.getAttribute("aria-label"), "Make this a Pip that does it on a schedule");
+  const before = posted.length;
+  button.click();
+  const input = doc.getElementById("input");
+  assert.match(input.value ?? input.textContent, /^Make this a Pip that does it on a schedule\. Prepare a setup card for me to approve/);
+  assert.match(input.value ?? input.textContent, /The task: Summarise yesterday's sales numbers$/);
+  assert.equal(posted.slice(before).filter((m) => m.type === "prompt").length, 0, "nothing is sent until you send it");
+  assert.deepEqual(errors, []);
+});

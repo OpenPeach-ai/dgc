@@ -42,6 +42,10 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- The main chat offers to make recurring work a Pip: when you ask for something that repeats, and
+  when you start a chat with work you have started chats with before (once per chat; it does not
+  ask again if you say no). It also knows that no Pip buys, sells, trades or pays, and that
+  Personal Pips can read pages, searches and connected apps you approve.
 - Windows says plainly that Pips are not available there yet: the editor shows that instead of
   "update the CLI", the main chat offers no Pips tools and `dgc pips` explains, so no Pip is
   created that could never run. The Pips guide has a platform table.

@@ -586,6 +586,15 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Offering a Pip** (API 41). On a chat's first prompt the main chat compares it with how
+the newest 40 chats of the last 30 days in this project began (word overlap of at least
+0.6, at least four significant words, files above 2 MB skipped). Two or more alike add one
+line to the system prompt: offer once to make it a Pip, prepare a setup card only if the
+user agrees. It is guidance, not a gate; no tool appears or disappears on it, and plan mode
+and sub-agents never get it. The `use_pips` description says the same for any recurring
+request, and that no Pip buys, sells, trades or pays. The editor's Make this a Pip only
+drafts the request in the composer.
+
 **Previous result** (API 41). A `personal_task` run pins `manifest.previous_result`
 `{run_id, finished_at, text}`: the Pip's latest succeeded Personal task result, redacted
 with the current secrets and cut to 6,000 characters. The worker shows it as reference

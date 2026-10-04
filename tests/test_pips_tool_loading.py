@@ -151,3 +151,24 @@ class PipsToolLoadingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PipsRepeatHintTests(PipsToolLoadingTests):
+    """A chat that begins with familiar work carries one line offering a Pip; plan mode does not."""
+
+    def test_the_repeat_line_is_in_the_real_system_prompt_only_when_pips_can_be_offered(self):
+        with patch("dgc.pip_repeat.hint", return_value="- REPEAT_HINT_LINE"):
+            self.agent._check_pips_repeat("Summarise the overnight sales numbers and email the team")
+        self.assertIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.config.data["mode"] = "plan"
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.config.data["mode"] = "default"
+        self.config.data["pips_enabled"] = False
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt(), "Pips off: nothing to offer")
+
+    def test_the_loader_tells_the_model_when_to_offer_a_pip_and_what_pips_cannot_do(self):
+        loader = next(t for t in self.agent._tool_schemas() if t["function"]["name"] == "use_pips")
+        text = loader["function"]["description"]
+        self.assertIn("offer once to make it a Pip", text)
+        self.assertIn("no Pip buys, sells, trades or pays", text)
+        self.assertIn("refuses changes from your shell", text)

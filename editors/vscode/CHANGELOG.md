@@ -20,6 +20,8 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- Each answer has **Make this a Pip**: it drafts the request in your composer to turn that task
+  into a Pip on a schedule. Nothing is sent or created until you do.
 - On Windows the Pips view says Pips run on Linux and macOS instead of asking you to update the CLI.
 - **New** offers five more Personal starters (page watch, market brief, weekly research digest,
   release watch, news on a topic), each with an example of what to read. Starter schedules read
