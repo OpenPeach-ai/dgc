@@ -22,6 +22,8 @@ const notices = { info: [], warnings: [], errors: [], quickPick: [] };
 const configuredMaxChats = { value: 0 };
 /** `dgc.shareBackend`; true is the shipped default. */
 const configuredShare = { value: true };
+/** `dgc.notifyWhenWaiting`; undefined means the shipped default (on). */
+const configuredNotify = { value: undefined };
 let quickPickAnswer;
 const statusBar = { text: "", tooltip: "", command: "", show() {}, hide() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
@@ -48,7 +50,8 @@ globalThis.__DGC_TEST_VSCODE = {
     workspaceFolders: [{ uri: { fsPath: scratch, toString: () => `file://${scratch}` } }],
     getConfiguration: () => ({
       get: (key, fallback) => (key === "maxLiveChats" ? configuredMaxChats.value
-        : key === "shareBackend" ? configuredShare.value : fallback),
+        : key === "shareBackend" ? configuredShare.value
+        : key === "notifyWhenWaiting" ? (configuredNotify.value ?? fallback) : fallback),
       inspect: () => undefined,
       async update() {},
     }),
@@ -76,6 +79,7 @@ beforeEach(() => {
   notices.info.length = 0; notices.quickPick.length = 0; quickPickAnswer = undefined;
   configuredMaxChats.value = 0;                    // shipped default: unlimited
   configuredShare.value = true;                    // shipped default: chats share a backend
+  configuredNotify.value = undefined;              // shipped default: notices on
 });
 
 /** A backend that records what it was sent and never spawns anything. */
@@ -1056,4 +1060,139 @@ test("a folder inside the window's own workspace opens without asking", async ()
   mkdirSync(inside, { recursive: true });
   assert.equal((await pickFolder(provider, inside, "cancel")).length, 0, "VS Code already trusts the window's folders");
   assert.equal(provider.slots.length, 2);
+});
+
+// ---- the tab's dot: working, finished and unread, waiting on you, idle -------------------------
+
+test("a chat whose turn ended in the background is not shown working when you come back", () => {
+  // Its turn flags live in its parked fields, which a switch restores. turn_end set only the chip,
+  // so coming back to a finished chat put confirmedTurnActive back to true: the dot kept pulsing.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const first = provider.slots[0].id;
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const background = provider.slots[0];
+  provider.routeEvent(background, { type: "turn_start", turn_id: "t1", kind: "prompt" });
+  assert.equal(background.saved.confirmedTurnActive, true, "premise: the parked chat is working");
+  provider.routeEvent(background, { type: "turn_end", turn_id: "t1", reason: "completed" });
+  let chip = slotsPost(posted).items.find((item) => item.id === first);
+  assert.deepEqual([chip.busy, chip.done], [false, true], "finished, and not read yet");
+  provider.switchToSlot(first);
+  assert.equal(provider.confirmedTurnActive, false, "coming back does not bring the finished turn back to life");
+  assert.equal(provider.turnActive, false);
+  chip = slotsPost(posted).items.find((item) => item.id === first);
+  assert.deepEqual([chip.busy, chip.done], [false, false], "you are reading it now");
+});
+
+test("only a reply that finished while you looked elsewhere is unread", () => {
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const first = provider.slots[0].id;
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const second = provider.activeSlotId;
+  provider.switchToSlot(first);                          // leave Second, which you were reading
+  const chip = (id) => slotsPost(posted).items.find((item) => item.id === id);
+  assert.equal(chip(second).done, false, "a chat you just left is not unread");
+  provider.routeEvent(provider.slotById(second), { type: "turn_start", turn_id: "t2" });
+  assert.deepEqual([chip(second).busy, chip(second).done], [true, false]);
+  provider.routeEvent(provider.slotById(second), { type: "turn_end", turn_id: "t2", reason: "completed" });
+  assert.equal(chip(second).done, true);
+  provider.routeEvent(provider.slotById(second), { type: "turn_start", turn_id: "t3" });
+  assert.equal(chip(second).done, false, "a new turn is working, not finished");
+});
+
+test("a background chat still waiting after you looked in and left keeps its dot", () => {
+  // Decisions raised in the background went to a copy that a switch never restored, so a look in
+  // and out without answering showed the chat as idle while it was still stopped.
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  const first = provider.slots[0].id;
+  provider.openChatSlot();
+  makeLive(provider, { sessionId: "beta", name: "Second" });
+  const second = provider.activeSlotId;
+  provider.routeEvent(provider.slotById(first), { type: "ask_request", ask_id: "a1" });
+  provider.switchToSlot(first);
+  assert.equal(provider.openDecisions.has("a1"), true, "the chat on screen knows what it is waiting on");
+  provider.switchToSlot(second);
+  assert.equal(slotsPost(posted).items.find((item) => item.id === first).needsYou, true);
+});
+
+test("a background chat that needs you says so once, and Open chat goes straight to it", async () => {
+  const win = globalThis.__DGC_TEST_VSCODE.window, original = win.showInformationMessage, shown = [];
+  win.showInformationMessage = async (message, ...buttons) => { shown.push({ message, buttons }); return buttons[0]; };
+  try {
+    const { provider } = harness();
+    makeLive(provider, { sessionId: "alpha", name: "First" });
+    const first = provider.slots[0].id;
+    provider.openChatSlot();
+    makeLive(provider, { sessionId: "beta", name: "Second" });
+    provider.routeEvent(provider.slotById(first), { type: "permission_request", id: "p1" });
+    provider.routeEvent(provider.slotById(first), { type: "options_request", id: "o1" });
+    assert.equal(shown.length, 1, "one notice for one wait, however many decisions it holds");
+    assert.match(shown[0].message, /"First" is waiting for your approval/);
+    assert.deepEqual(shown[0].buttons, ["Open chat"]);
+    await settle();
+    assert.equal(provider.activeSlotId, first, "Open chat shows that chat");
+  } finally { win.showInformationMessage = original; }
+});
+
+test("a new wait after the last one settled is announced again; none when turned off", async () => {
+  const win = globalThis.__DGC_TEST_VSCODE.window, original = win.showInformationMessage, shown = [];
+  win.showInformationMessage = async (message) => { shown.push(message); return undefined; };
+  try {
+    const { provider } = harness();
+    makeLive(provider, { sessionId: "alpha", name: "First" });
+    const first = provider.slots[0].id;
+    provider.openChatSlot();
+    makeLive(provider, { sessionId: "beta", name: "Second" });
+    const background = provider.slotById(first);
+    provider.routeEvent(background, { type: "ask_request", ask_id: "a1" });
+    provider.routeEvent(background, { type: "ask_resolved", ask_id: "a1" });
+    provider.routeEvent(background, { type: "plan_proposal", id: "plan1" });
+    assert.deepEqual(shown.map((m) => /has a (question|plan)/.exec(m)?.[1]), ["question", "plan"]);
+    assert.equal(provider.activeSlotId, provider.slots[1].id, "a notice never switches chats by itself");
+    configuredNotify.value = false;
+    provider.routeEvent(background, { type: "permission_resolved", id: "plan1" });
+    provider.routeEvent(background, { type: "permission_request", id: "p9" });
+    assert.equal(shown.length, 2, "dgc.notifyWhenWaiting turns it off");
+  } finally { win.showInformationMessage = original; }
+});
+
+test("dragging a tab reorders the chats and nothing else", async () => {
+  const { provider, posted } = harness();
+  makeLive(provider, { sessionId: "alpha", name: "First" });
+  provider.openChatSlot(); makeLive(provider, { sessionId: "beta", name: "Second" });
+  provider.openChatSlot(); makeLive(provider, { sessionId: "gamma", name: "Third" });
+  const [a, b, c] = provider.slots.map((slot) => slot.id), active = provider.activeSlotId;
+  await provider.onMessage({ type: "moveChat", slotId: c, toIndex: 0 });
+  assert.deepEqual(provider.slots.map((slot) => slot.id), [c, a, b]);
+  assert.deepEqual(slotsPost(posted).items.map((item) => item.id), [c, a, b], "the rail follows at once");
+  assert.equal(provider.activeSlotId, active, "the chat on screen is unchanged");
+  await provider.onMessage({ type: "moveChat", slotId: a, toIndex: 99 });
+  assert.deepEqual(provider.slots.map((slot) => slot.id), [c, b, a], "past the end is the end");
+  await provider.onMessage({ type: "moveChat", slotId: a, toIndex: -5 });
+  assert.deepEqual(provider.slots.map((slot) => slot.id), [a, c, b], "before the start is the start");
+  await provider.onMessage({ type: "moveChat", slotId: a, toIndex: 2 });
+  for (const bad of [{ slotId: "nope", toIndex: 0 }, { slotId: b, toIndex: "x" }, { slotId: b, toIndex: 1.5 }]) {
+    await provider.onMessage({ type: "moveChat", ...bad });
+    assert.deepEqual(provider.slots.map((slot) => slot.id), [c, b, a], JSON.stringify(bad));
+  }
+});
+
+test("the chat on screen is announced only while the panel is out of sight", () => {
+  const win = globalThis.__DGC_TEST_VSCODE.window, original = win.showInformationMessage, shown = [];
+  win.showInformationMessage = async (message) => { shown.push(message); return undefined; };
+  try {
+    const { provider } = harness();
+    makeLive(provider, { sessionId: "alpha", name: "First" });
+    provider.view = { visible: true };
+    provider.routeEvent(provider.activeSlot(), { type: "permission_request", id: "p1" });
+    assert.equal(shown.length, 0, "you are looking at it");
+    provider.view = { visible: false };
+    provider.routeEvent(provider.activeSlot(), { type: "ask_request", ask_id: "a1" });
+    assert.equal(shown.length, 1);
+    assert.match(shown[0], /"First" has a question for you/);
+  } finally { win.showInformationMessage = original; }
 });

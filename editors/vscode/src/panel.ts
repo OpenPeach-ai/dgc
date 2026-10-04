@@ -349,11 +349,12 @@ interface ChatSlot {
   busy: boolean;
   /** This chat is blocked on a decision only the user can make. */
   needsYou: boolean;
-  /** WHICH decisions, by request id. A chat can be blocked on several at once, so the dot cannot
-   *  be a boolean that the first resolve clears. Mirrors the active chat's `openDecisions`. */
-  openDecisions?: Set<string>;
   /** Display events seen since the user last looked at this chat. */
   unread: number;
+  /** A turn finished here while the user was looking at another chat: its answer is unread. */
+  done?: boolean;
+  /** This wait has already been announced in a notification; cleared when nothing waits. */
+  announced?: boolean;
   /** Set when this background chat's backend died: why. Switching back starts a fresh one and
    *  resumes the session it was on, so a chat you were not watching is not simply gone. */
   lost?: string;
@@ -587,6 +588,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // state a switch erased.
     slot.needsYou = this.openDecisions.size > 0;
     slot.unread = 0;                                 // you were just looking at it
+    slot.done = false;
     return slot;
   }
 
@@ -615,6 +617,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     else this.pipsEditor?.offline();
     incoming.unread = 0;
     incoming.needsYou = this.openDecisions.size > 0;   // still true; you are just looking at it now
+    incoming.announced = false;
     // The window remembers ONE current chat, and it is read whenever a backend starts without
     // suppression — including the replacement after a crash. Leaving it on the chat we just left
     // meant a foreground restart resumed that chat's session here and died on "this session has
@@ -778,6 +781,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.inVisiblePanel(() => this.openChatSlot());
   }
 
+  /** The user dragged a chat's tab to another place in the rail. Order is all that changes. */
+  private moveChatSlot(id: string, toIndex: number): void {
+    const from = this.slots.findIndex((slot) => slot.id === id);
+    if (from < 0 || !Number.isInteger(toIndex)) return;
+    const to = Math.max(0, Math.min(this.slots.length - 1, toIndex));
+    if (to !== from) {
+      const [slot] = this.slots.splice(from, 1);
+      this.slots.splice(to, 0, slot);
+    }
+    this.postChatSlots();
+  }
+
   /** Palette: DGC: Switch Chat. Lists the running chats and what each is doing. */
   async pickChat(): Promise<void> {
     if (this.slots.length < 2) {
@@ -794,7 +809,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const busy = showing ? this.confirmedTurnActive : slot.busy;
       const detail = slot.lost ? `stopped — ${slot.lost}`
         : !showing && slot.needsYou ? "waiting for you"
-        : busy ? "working" : "idle";
+        : busy ? "working" : !showing && slot.done ? "finished · not read yet" : "idle";
       return {
         label: slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat"),
         description: showing ? `$(check) showing · ${detail}` : detail,
@@ -867,6 +882,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         busy: slot.id === this.activeSlotId ? this.confirmedTurnActive : slot.busy,
         needsYou: slot.id === this.activeSlotId ? false : slot.needsYou,
         unread: slot.id === this.activeSlotId ? 0 : slot.unread,
+        done: slot.id === this.activeSlotId ? false : !!slot.done,
         ...(slot.cwd ? { folder: path.basename(slot.cwd) || slot.cwd } : {}),
       })),
     });
@@ -966,12 +982,41 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.postChatSlots();
   }
 
+  /** The parked chat's own set of open decisions: the one a switch restores. */
+  private static parkedDecisions(slot: ChatSlot): Set<string> {
+    const saved = slot.saved || (slot.saved = {});
+    if (!(saved.openDecisions instanceof Set)) { saved.openDecisions = new Set<string>(); }
+    return saved.openDecisions as Set<string>;
+  }
+
   private backgroundEvent(slot: ChatSlot, ev: DgcEvent): void {
     const type = String((ev as any)?.type || "");
+    // A background chat's turn flags live in its parked fields, which a switch puts back. Setting
+    // only the chip left `confirmedTurnActive` true in them after the turn ended, so coming back
+    // to a finished chat showed it working until its next turn.
+    const saved = slot.saved;
     switch (type) {
-      case "turn_start": slot.busy = true; break;
+      case "turn_start":
+        slot.busy = true;
+        slot.done = false;
+        if (saved) {
+          saved.turnActive = saved.confirmedTurnActive = true;
+          saved.monitorTurnActive = (ev as any).kind === "monitor";
+          saved.turnStartedAt = Date.now();
+          saved.liveTurn = { turnId: String((ev as any).turn_id || ""), kind: String((ev as any).kind || "prompt"),
+                             prompt: String((ev as any).prompt || ""), startedAt: Date.now(), handoff: false };
+        }
+        break;
       case "turn_end":
         slot.busy = false;
+        slot.done = true;                            // an answer you have not read yet
+        slot.needsYou = false;
+        slot.announced = false;
+        if (saved) {
+          saved.turnActive = saved.confirmedTurnActive = saved.monitorTurnActive = false;
+          saved.liveTurn = undefined;
+          DgcViewProvider.parkedDecisions(slot).clear();   // nothing can still be waiting
+        }
         // A dgc.command restart waits for every chat on the process, not only the one on screen.
         if (this.pendingCommandRestart) { setTimeout(() => this.runPendingCommandRestart(), 0); }
         break;
@@ -999,18 +1044,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "options_request":
       case "ask_request":
       case "plan_proposal": {
+        // Recorded in the chat's own parked set, so a switch in and out without answering still
+        // knows it is waiting. A separate copy here was never restored.
         const id = DgcViewProvider.decisionId(ev);
-        if (!slot.openDecisions) { slot.openDecisions = new Set<string>(); }
-        if (id) { slot.openDecisions.add(id); }
+        if (id) { DgcViewProvider.parkedDecisions(slot).add(id); }
         slot.needsYou = true;
+        this.announceWaiting(slot, type);
         break;
       }
       case "permission_resolved":
       case "options_resolved":
       case "ask_resolved":
       case "request_expired": {
-        slot.openDecisions?.delete(DgcViewProvider.decisionId(ev));
-        slot.needsYou = !!slot.openDecisions?.size;
+        const open = DgcViewProvider.parkedDecisions(slot);
+        open.delete(DgcViewProvider.decisionId(ev));
+        slot.needsYou = open.size > 0;
+        if (!slot.needsYou) { slot.announced = false; }
         break;
       }
       case "text_delta":
@@ -2750,6 +2799,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           const id = DgcViewProvider.decisionId(ev);
           if (id) { this.openDecisions.add(id); }
         }
+        if (!this.view?.visible) { this.announceWaiting(this.activeSlot(), String(ev.type)); }
         break;
       case "permission_resolved":
       case "options_resolved":
@@ -2762,6 +2812,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "turn_end": {
         this.mcpUrls.clear();
+        this.activeSlot().announced = false;
         const monitorTurn = this.monitorTurnActive;
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.openDecisions.clear();      // nothing can still be waiting once the turn is over
@@ -3028,6 +3079,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else if (choice === SETPATH) {
         void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
+    });
+  }
+
+  /** A chat you are not looking at stopped on something only you can answer: say so once, with a
+   *  button that opens that chat. `dgc.notifyWhenWaiting` turns it off. */
+  private announceWaiting(slot: ChatSlot, type: string): void {
+    if (slot.announced) return;
+    if (!vscode.workspace.getConfiguration("dgc").get<boolean>("notifyWhenWaiting", true)) return;
+    slot.announced = true;
+    const name = slot.id === this.activeSlotId ? this.chatLabel() : (slot.label || "New chat");
+    const what = type === "permission_request" ? "is waiting for your approval"
+      : type === "plan_proposal" ? "has a plan for you to review" : "has a question for you";
+    const open = "Open chat";
+    void Promise.resolve(vscode.window.showInformationMessage(`DGC: "${name}" ${what}.`, open)).then((choice) => {
+      if (choice !== open || !this.slotById(slot.id)) return;
+      this.focus();
+      this.inVisiblePanel(() => this.switchToSlot(slot.id));
     });
   }
 
@@ -3381,6 +3449,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "closeChat": {
         this.closeChatSlot(String(msg.slotId ?? ""));
+        return;
+      }
+      case "moveChat": {
+        this.moveChatSlot(String(msg.slotId ?? ""), Number(msg.toIndex));
+        return;
+      }
+      case "pickChat": {
+        void this.pickChat();
         return;
       }
       case "askSkip": {

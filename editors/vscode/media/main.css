@@ -39,6 +39,7 @@
   --sel:var(--vscode-list-activeSelectionBackground, rgba(255,255,255,.06));
   --ring:rgba(124,92,255,.30);
   --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
+  --warn:#D1902B;
   /* Auto mode and error states share this olive. --err paints borders, fills and dots, where
      the exact colour is what matters. Text uses --err-text: the same hue lifted until it clears
      4.5:1 on every panel surface, because #768A00 reads 3.74:1 on --surface2 and the webview
@@ -138,7 +139,7 @@ body {
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
 /* Pips has its own editor tab; its labelled entry stays outside settings and menus. */
-#phead .pips-nav { flex: none; display: inline-flex; align-items: center; min-height: var(--control-sm); padding: 3px 7px; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
+#phead .pips-nav { flex: none; display: inline-flex; align-items: center; min-height: var(--control-sm); padding: 3px 7px; border: 1px solid var(--border); border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
 #phead .pips-nav:hover { background: var(--surface2); color: var(--text); }
 #phead .pips-nav:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
@@ -157,29 +158,57 @@ body.pips-active #phead .pm { display:inline-flex; flex:1; }
 #phead .chat-add[disabled]:hover { background: transparent; color: var(--faint); }
 #phead #chat-add-folder { margin-left: 0; }
 
-.chatbar { display: flex; gap: var(--sp-1); align-items: stretch; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--line); background: var(--surface); overflow-x: auto; scrollbar-width: none; }
-.chatbar::-webkit-scrollbar { display: none; }
-/* Many chats have to stay usable, so a tab shrinks rather than pushing the rest off: the rail
-   scrolls, and a tab keeps enough width to read a few characters and its state dot. */
-.chatbar .chat-tab { flex: 0 1 auto; min-width: 5.5rem; display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 14rem; border: 1px solid transparent; border-radius: var(--r-sm); padding: 2px var(--sp-2); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
-.chatbar .chat-tab:hover { background: var(--surface2); color: var(--text); }
-.chatbar .chat-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.chatbar .chat-tab.is-active { background: var(--surface2); border-color: var(--line); color: var(--text-strong); font-weight: var(--w-med); }
-.chatbar .chat-tab .chat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chatbar .chat-tab .chat-folder { flex: none; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
-/* The dot is the whole point of the rail: it says whether the chat you are NOT looking at is
-   working, waiting on you, or done. Shape and text carry it too -- never colour alone. */
-.chatbar .chat-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
-.chatbar .chat-tab.is-busy .chat-dot { background: var(--accent); animation: chat-dot-pulse 1.6s ease-in-out infinite; }
-.chatbar .chat-tab.needs-you .chat-dot { background: var(--warn, #d1902b); border-radius: 1px; animation: none; }
-.chatbar .chat-unread { flex: none; min-width: 15px; padding: 0 4px; border-radius: 999px; background: var(--surface3, var(--line)); color: var(--text); font: var(--w-med) 10px/15px var(--sans); text-align: center; font-variant-numeric: tabular-nums; }
-.chatbar .chat-close { flex: none; width: 16px; height: 16px; border: 0; padding: 0; background: transparent; color: var(--faint); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
-.chatbar .chat-close:hover { background: var(--line); color: var(--text); }
-.chatbar .chat-close:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-@keyframes chat-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-@media (prefers-reduced-motion: reduce) {
-  .chatbar .chat-tab.is-busy .chat-dot { animation: none; }
-}
+/* The rail: one tab per chat. Every tab has the same box, active or not, so nothing in it ever
+   changes the rail's height. The strip scrolls sideways when the chats outgrow the panel; its
+   edges fade where tabs are hidden and the chevron lists every chat. Tokens only: an undefined
+   one (it once used --line, which this sheet never defined) silently falls back to the text
+   colour -- the white border round a new chat's tab (chat-tabs-layout.test.mjs). */
+.chatbar { display: flex; align-items: center; gap: var(--sp-1); height: 32px; padding: 0 var(--sp-1) 0 var(--sp-2); border-bottom: 1px solid var(--border); background: var(--surface); }
+.chatbar[hidden] { display: none; }
+body[data-agent-page] .chatbar { display: none; }   /* an agent's page is about that agent, not the chats */
+.chatbar .chat-tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; height: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+.chatbar .chat-tabs::-webkit-scrollbar { display: none; }
+.chatbar.fade-start .chat-tabs { -webkit-mask-image: linear-gradient(to right, transparent, #000 20px); mask-image: linear-gradient(to right, transparent, #000 20px); }
+.chatbar.fade-end .chat-tabs { -webkit-mask-image: linear-gradient(to left, transparent, #000 20px); mask-image: linear-gradient(to left, transparent, #000 20px); }
+.chatbar.fade-start.fade-end .chat-tabs { -webkit-mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent); }
+/* A tab shrinks before the strip scrolls, down to enough to read a few characters and its dot. */
+.chatbar .chat-tabwrap { position: relative; flex: 0 1 11rem; min-width: 5.5rem; height: 24px; display: flex; align-items: center; border-radius: var(--r-sm); color: var(--muted); }
+.chatbar .chat-tabwrap:hover { background: var(--surface2); color: var(--text); }
+/* Selected is a filled pill, never a bar under it (webview.test.mjs). The soft accent reads in both
+   themes; --surface2 is the light theme's white, the strip's own colour. */
+.chatbar .chat-tabwrap.is-active, .chatbar .chat-tabwrap.is-active:hover { background: var(--accent-soft); color: var(--text-strong); }
+.chatbar .chat-tabwrap.is-dragging { opacity: .45; }
+.chatbar .chat-tabwrap.drop-before::before, .chatbar .chat-tabwrap.drop-after::after { content: ""; position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.chatbar .chat-tabwrap.drop-before::before { left: -2px; }
+.chatbar .chat-tabwrap.drop-after::after { right: -2px; }
+.chatbar .chat-tab { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 6px; border: 0; padding: 0 2px 0 var(--sp-2); background: transparent; color: inherit; cursor: pointer; font: var(--w-reg) var(--t-xs)/1 var(--sans); border-radius: var(--r-sm); }
+.chatbar .chat-tabwrap.is-active .chat-tab { font-weight: var(--w-med); }
+.chatbar .chat-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.chatbar .chat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatbar .chat-folder { flex: 0 1 auto; min-width: 0; max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
+/* Close: on hover, on focus and on the tab you are on, as editor tabs do. Always laid out, so a
+   tab never changes width when it appears. */
+.chatbar .chat-close { flex: none; width: 18px; height: 18px; margin-right: 3px; border: 0; padding: 0; background: transparent; color: var(--faint); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; opacity: 0; }
+.chatbar .chat-close .codicon { font-size: 12px; }
+.chatbar .chat-tabwrap:hover .chat-close, .chatbar .chat-tabwrap.is-active .chat-close, .chatbar .chat-close:focus-visible { opacity: 1; }
+.chatbar .chat-close:hover { background: var(--accent-soft); color: var(--text); }
+.chatbar .chat-close:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.chatbar .chat-more { flex: none; display: none; width: 22px; height: 22px; border: 0; padding: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: var(--r-sm); align-items: center; justify-content: center; }
+.chatbar.is-overflowing .chat-more { display: inline-flex; }
+.chatbar .chat-more:hover { background: var(--surface2); color: var(--text); }
+.chatbar .chat-more:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* The dot is the whole point of the rail: what the chat you are NOT looking at is doing.
+   Waiting on you: green, with a ring that breathes. Working: purple, breathing. Finished and not
+   read yet: purple, still. Idle and read: grey. */
+.chatbar .chat-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); opacity: .7; }
+.chatbar .state-busy .chat-dot { background: var(--accent); opacity: 1; animation: chat-dot-breathe 1.8s ease-in-out infinite; }
+.chatbar .state-done .chat-dot { background: var(--accent); opacity: 1; }
+.chatbar .state-waiting .chat-dot { background: var(--good); opacity: 1; box-shadow: 0 0 0 0 var(--good-soft); animation: chat-dot-call 1.6s ease-out infinite; }
+@keyframes chat-dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes chat-dot-call { 0% { box-shadow: 0 0 0 0 rgba(91,203,139,.55); } 70%, 100% { box-shadow: 0 0 0 5px rgba(91,203,139,0); } }
+@media (prefers-reduced-motion: reduce) { .chatbar .state-busy .chat-dot, .chatbar .state-waiting .chat-dot { animation: none; } .chatbar .state-waiting .chat-dot { box-shadow: 0 0 0 2px var(--good-soft); } }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .chatbar .chat-tabwrap.is-active { outline: 1px solid var(--vscode-contrastActiveBorder, var(--border-strong)); outline-offset: -1px; }
+@media (forced-colors: active) { .chatbar .chat-tabwrap.is-active { outline: 1px solid Highlight; outline-offset: -1px; } .chatbar .chat-dot { forced-color-adjust: none; } }
 
 #phead .agent-back { flex: none; width: var(--control-sm); height: var(--control-sm); border: 0; padding: 0; background: transparent; color: var(--text); cursor: pointer; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; }
 #phead .agent-back:hover { background: var(--surface2); }
@@ -212,7 +241,7 @@ body[data-agent-page] #to-latest { display: none; }
   filter:
     drop-shadow(0 0 0.7px rgba(255,255,255,.8))
     drop-shadow(0 1px 2px rgba(0,0,0,.58))
-    drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 88%, transparent));
+    drop-shadow(0 0 4px color-mix(in srgb, var(--mark) 70%, transparent));
 }
 body.vscode-light { --link:#6D49E8; }   /* on light: 5.3:1, and still the brand's hue */
 /* Seti's own light pair, except the three it ships too pale to clear 3:1 on a light ground. */
@@ -230,7 +259,7 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
   filter:
     drop-shadow(0 0 0.6px rgba(255,255,255,.95))
     drop-shadow(0 1px 2px rgba(0,0,0,.32))
-    drop-shadow(0 0 10px color-mix(in srgb, var(--mark) 70%, transparent));
+    drop-shadow(0 0 4px color-mix(in srgb, var(--mark) 55%, transparent));
 }
 .agent-mark:has(img) { background: none; clip-path: none; border-radius: 0; filter: none; }
 .agent-mark img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
@@ -240,8 +269,8 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
    breathe. The still frame is kept deliberately: the -animated swirl reads as a colour smear at
    16px, so the motion is this pulse rather than the artwork. */
 .agent-mark:has(img).is-live {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mark, #7D8CA3) 85%, transparent));
-  animation: agent-mark-breathe 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 60%, transparent));
+  animation: agent-mark-breathe 2.6s ease-in-out infinite;
 }
 /* The artwork moves, not just its glow. This is the /vscode/ hero's own motion, value for value
    (site-src/assets/extension-hero.css, dgc-hero-agent-breathe): the mark rocks from -10deg to
@@ -252,11 +281,13 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
    inline element it silently would not, which is how the settings Refresh icon came to have a
    spin that never spun. No stagger, exactly as on the site: marks that start together move
    together. The reduced-motion block below stops it, and leaves no transform behind to reset. */
+/* Toned down from the site's -10deg..+12deg, .96..1.08 and a 7px glow: in a transcript, beside
+   text being read, that much motion pulled the eye off the words. */
 @keyframes agent-mark-breathe {
-  0%, 100% { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 55%, transparent));
-             transform: rotate(-10deg) scale(.96); opacity: .8; }
-  50%      { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--mark, #7D8CA3) 95%, transparent));
-             transform: rotate(12deg) scale(1.08); opacity: 1; }
+  0%, 100% { filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--mark, #7D8CA3) 45%, transparent));
+             transform: rotate(-4deg) scale(.98); opacity: .9; }
+  50%      { filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--mark, #7D8CA3) 70%, transparent));
+             transform: rotate(4deg) scale(1.03); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-mark:has(img).is-live { animation: none; }
@@ -502,7 +533,7 @@ body.vscode-light, body.vscode-high-contrast-light {
 :is(.md-link, .chip.made-file)[data-file-kind="js"]::before { content: "\e051"; color: var(--fk-yellow); }  /* seti _javascript */
 :is(.md-link, .chip.made-file)[data-file-kind="json"]::before { content: "\e055"; color: var(--fk-yellow); }  /* seti _json */
 :is(.md-link, .chip.made-file)[data-file-kind="doc"]::before { content: "\e060"; color: var(--fk-blue); }  /* seti _markdown */
-:is(.md-link, .chip.made-file)[data-file-kind="config"]::before { content: "\e019"; color: var(--fk-link); }  /* seti _config */
+:is(.md-link, .chip.made-file)[data-file-kind="config"]::before { content: "\e019"; color: var(--link); }  /* seti _config */
 :is(.md-link, .chip.made-file)[data-file-kind="css"]::before { content: "\e01d"; color: var(--fk-blue); }  /* seti _css */
 :is(.md-link, .chip.made-file)[data-file-kind="markup"]::before { content: "\e048"; color: var(--fk-orange); }  /* seti _html_3 */
 :is(.md-link, .chip.made-file)[data-file-kind="shell"]::before { content: "\e089"; color: var(--fk-green); }  /* seti _shell */
@@ -511,7 +542,7 @@ body.vscode-light, body.vscode-high-contrast-light {
 :is(.md-link, .chip.made-file)[data-file-kind="archive"]::before { content: "\e0a9"; color: var(--fk-red); }  /* seti _zip */
 :is(.md-link, .chip.made-file)[data-file-kind="lock"]::before { content: "\e05d"; color: var(--fk-green); }  /* seti _lock */
 :is(.md-link, .chip.made-file)[data-file-kind="go"]::before { content: "\e03a"; color: var(--fk-blue); }  /* seti _go2 */
-:is(.md-link, .chip.made-file)[data-file-kind="rust"]::before { content: "\e082"; color: var(--fk-link); }  /* seti _rust */
+:is(.md-link, .chip.made-file)[data-file-kind="rust"]::before { content: "\e082"; color: var(--link); }  /* seti _rust */
 :is(.md-link, .chip.made-file)[data-file-kind="java"]::before { content: "\e050"; color: var(--fk-red); }  /* seti _java */
 :is(.md-link, .chip.made-file)[data-file-kind="kotlin"]::before { content: "\e058"; color: var(--fk-orange); }  /* seti _kotlin */
 :is(.md-link, .chip.made-file)[data-file-kind="swift"]::before { content: "\e092"; color: var(--fk-orange); }  /* seti _swift */
@@ -1382,7 +1413,7 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
     --fk-blue:CanvasText; --fk-yellow:CanvasText; --fk-orange:CanvasText; --fk-green:CanvasText;
     --fk-violet:CanvasText; --fk-pink:CanvasText; --fk-red:CanvasText; --fk-neutral:CanvasText;
     --accent-hover:Highlight; --lav:LinkText;
-    --accent-soft:transparent; --good:CanvasText; --good-soft:transparent;
+    --accent-soft:transparent; --good:CanvasText; --good-soft:transparent; --warn:CanvasText;
     --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;
     --del:CanvasText; --del-text:CanvasText; --del-soft:transparent;
   }
@@ -1436,6 +1467,10 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
    moved the viewport — scrolling up mid-turn threw you to the top. `settled` is set by the script
    at the same moment it writes the measured `contain-intrinsic-size`. */
 .msg.settled { content-visibility: auto; }
+/* content-visibility clips paint to the block's box, and a working agent's mark sits on its left
+   edge: its glow was sliced off there in a straight line. While an agent works, its block paints
+   in full; it goes back to the fast path when the agent finishes. */
+.msg.settled:has(.agent-mark.is-live) { content-visibility: visible; }
 /* Two lines in the transcript's fonts, never seen: when the host changes those fonts their size
    changes, and the script re-measures the pinned heights that were measured in the old ones. */
 .font-probe { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none;
@@ -1482,7 +1517,7 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .compaction-body {
   margin: var(--sp-1) 0 0; padding: var(--sp-2) var(--sp-3);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); color: var(--text-2);
+  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); color: var(--muted);
   white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
 }
 
@@ -1491,17 +1526,17 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .msg.archived .bubble { filter: saturate(.85); }
 
 /* ---- long prompts -------------------------------------------------------------------------- */
-/* A sent prompt of 7+ lines shows its first 5, fading out, until "Show more". Only the prose folds:
+/* A sent prompt of 4+ lines shows its first 3, fading out, until "Show more", as Claude Code does. Only the prose folds:
    chips, pasted-text chips, image tiles and an answered question stay whole. main.js
    (fitPromptFolds) writes .bubble[data-fold] from the text's real height. The control's words come
    from data-label, so they are never in the prompt's text, a copied selection or the duplicate-echo
    check. @media rules stay on one line: link-contrast.test.mjs reads forced-colors blocks by regex. */
-.user .bubble { --prompt-fold-lines: 5; }   /* = PROMPT_FOLD_LINES in main.js */
+.user .bubble { --prompt-fold-lines: 3; }   /* = PROMPT_FOLD_LINES in main.js */
 .user .bubble[data-fold] { position: relative; min-width: min(9.5em, 100%); }
 .user .bubble[data-fold="folded"] > .prompt-text { max-height: calc(1.62em * var(--prompt-fold-lines)); overflow: hidden;
   margin-inline: -3px; padding-inline: 3px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.4em), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.4em), transparent); }
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent); }
 .user .bubble[data-fold="folded"] > .prompt-text:focus-within { -webkit-mask-image: none; mask-image: none; }
 .prompt-fold { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2) 0 var(--sp-3);
   border: 1px solid var(--border-strong); border-radius: var(--r-full); background: var(--surface2); color: var(--text);
@@ -1946,7 +1981,7 @@ body.ask-docked #tasks-panel { display: none; }
 .open-ask-options { display: flex; flex-direction: column; gap: 4px; margin: var(--sp-2) 0; }
 .oask-opt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; width: 100%; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .oask-opt:hover { background: var(--surface2); border-color: var(--border-strong); }
-.oask-opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.oask-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* One flex item, so no wrap can put the badge on a line without the label it qualifies. */
 .oask-head { min-width: 0; }
 .oask-label { font-weight: var(--w-med); color: var(--text-strong); }

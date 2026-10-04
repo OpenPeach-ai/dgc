@@ -1873,14 +1873,14 @@
     };
   }
   // ---- long prompts fold ----
-  // A sent prompt of 7+ lines shows its first 5 until "Show more" (main.css, "long prompts"). Decided
+  // A sent prompt of 4+ lines shows its first 3 until "Show more" (main.css, "long prompts"). Decided
   // only from the text's real height once it is in the transcript (settleBlock), and again whenever
   // the width or fonts change (repinStaleBlocks). Never from a guess, so a live bubble and the same
   // prompt replayed from history run the same code. Only `.prompt-text` folds: chips, image tiles and
   // an answered question above it always stay whole. The one place the state lives is the bubble's
   // `data-fold` ("folded" | "open", absent when the prompt fits); setPromptFold is its only writer.
-  const PROMPT_FOLD_LINES = 5;    // = --prompt-fold-lines in main.css (prompt-fold.test.mjs pins both)
-  const PROMPT_FOLD_SPARE = 2;    // fold only when 2+ lines would be hidden: 7 lines fold, 6 do not
+  const PROMPT_FOLD_LINES = 3;    // = --prompt-fold-lines in main.css (prompt-fold.test.mjs pins both)
+  const PROMPT_FOLD_SPARE = 1;    // fold once a line would be hidden: 4 lines fold, 3 do not
   // Prompts opened in this panel's life. A chat switch, reconnect or rewind rebuilds the transcript,
   // and a prompt being read must not fold back. Keyed by the chat tab (chat_switched/chat_slots) AND
   // the conversation, so a new chat with no session id yet, or /new in the same tab, starts clean.
@@ -6185,6 +6185,15 @@
   // whole list on every change, so this only ever paints what it was handed.
   let chatSlots = { items: [], max: 2, activeId: "" };
 
+  // What a tab's dot says. Shape, motion and words carry it too, never colour alone:
+  // waiting (green, pulsing ring) > working (purple, pulsing) > finished, unread (purple) > idle (grey).
+  function chatState(item) {
+    return item.needsYou ? ["waiting", "Needs your answer"] : item.busy ? ["busy", "Working"]
+      : item.done ? ["done", "Finished · not read yet"] : ["idle", "Idle"];
+  }
+  let chatDrag = "";            // the chat whose tab is being dragged
+  let chatShownActive = "";     // scroll the active tab into view only when it changes
+
   function renderChatBar(state) {
     chatSlots = state || chatSlots;
     const bar = $("chatbar"), add = $("chat-add");
@@ -6207,62 +6216,155 @@
       }
     }
     // One chat needs no rail: the header already names it.
-    if (items.length < 2) { bar.hidden = true; bar.replaceChildren(); return; }
-    const tabs = items.map((item) => {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "chat-tab"
-        + (item.active ? " is-active" : "")
-        + (item.busy ? " is-busy" : "")
-        + (item.needsYou ? " needs-you" : "");
-      tab.dataset.slot = String(item.id || "");
-      const dot = document.createElement("span");
-      dot.className = "chat-dot";
-      dot.setAttribute("aria-hidden", "true");
-      const name = document.createElement("span");
-      name.className = "chat-name";
-      name.textContent = String(item.label || "New chat");
-      tab.append(dot, name);
-      if (item.folder) {
-        // A chat in another folder says which: two chats named "New chat" in two repos look alike.
-        const where = document.createElement("span");
-        where.className = "chat-folder";
-        where.textContent = String(item.folder);
-        tab.append(where);
-      }
-      // The state is in the accessible name too, not only in the dot's colour.
-      const state = item.needsYou ? "waiting for you" : item.busy ? "working" : "idle";
-      const unread = !item.active && item.unread > 0 ? `, ${item.unread} new` : "";
-      const inFolder = item.folder ? ` in ${String(item.folder)}` : "";
-      tab.title = `${name.textContent}${inFolder} — ${state}${item.active ? " (showing)" : ""}`;
-      tab.setAttribute("aria-label", `Chat ${name.textContent}${inFolder}, ${state}${unread}${item.active ? ", showing" : ""}`);
-      if (item.active) tab.setAttribute("aria-current", "true");
-      if (!item.active && item.unread > 0) {
-        const count = document.createElement("span");
-        count.className = "chat-unread";
-        count.textContent = item.unread > 99 ? "99+" : String(item.unread);
-        count.setAttribute("aria-hidden", "true");
-        tab.append(count);
-      }
-      tab.onclick = () => { if (!item.active) vscode.postMessage({ type: "switchChat", slotId: item.id }); };
-      const close = document.createElement("button");
-      close.type = "button";
-      close.className = "chat-close";
-      close.title = `Close ${name.textContent}`;
-      close.setAttribute("aria-label", `Close chat ${name.textContent}`);
-      const glyph = document.createElement("span");
-      glyph.className = "codicon codicon-close";
-      glyph.setAttribute("aria-hidden", "true");
-      close.append(glyph);
-      close.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "closeChat", slotId: item.id }); };
-      const wrap = document.createElement("span");
-      wrap.style.display = "inline-flex";
-      wrap.style.alignItems = "center";
-      wrap.append(tab, close);
-      return wrap;
-    });
-    bar.replaceChildren(...tabs);
+    if (items.length < 2) { bar.hidden = true; bar.replaceChildren(); chatShownActive = ""; return; }
+    // The host re-sends the whole rail on every change, a background stream about once a frame.
+    // The scroller is kept, so its scroll position survives, and so does keyboard focus.
+    let strip = bar.querySelector(":scope > .chat-tabs"), more = bar.querySelector(":scope > .chat-more");
+    if (!strip) {
+      strip = el("div", "chat-tabs");
+      more = el("button", "chat-more", '<span class="codicon codicon-chevron-down" aria-hidden="true"></span>');
+      more.type = "button";
+      more.onclick = () => vscode.postMessage({ type: "pickChat" });
+      bar.replaceChildren(strip, more);
+      wireChatStrip(strip);
+    }
+    const focusedSlot = document.activeElement?.closest?.("#chatbar .chat-tabwrap")?.dataset.slot || "";
+    const focusedClose = !!document.activeElement?.classList?.contains("chat-close");
+    strip.replaceChildren(...items.map((item, index) => chatTab(item, index, items.length)));
+    more.title = `All chats (${items.length})`;
+    more.setAttribute("aria-label", `All ${items.length} chats`);
     bar.hidden = false;
+    if (focusedSlot) {
+      const wrap = strip.querySelector(`.chat-tabwrap[data-slot="${CSS.escape(focusedSlot)}"]`);
+      wrap?.querySelector(focusedClose ? ".chat-close" : ".chat-tab")?.focus({ preventScroll: true });
+    }
+    // The chevron first: it narrows the strip, so scrolling before it shows left the tab you are on
+    // half under it. Then the fades, which follow the scroll.
+    fitChatStrip(strip);
+    const active = items.find((item) => item.active)?.id || "";
+    if (active && active !== chatShownActive) {
+      chatShownActive = active;
+      strip.querySelector(".chat-tabwrap.is-active")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      fitChatStrip(strip);
+    }
+  }
+
+  function chatTab(item, index, count) {
+    const id = String(item.id || ""), [state, words] = chatState(item);
+    const wrap = el("div", `chat-tabwrap state-${state}${item.active ? " is-active" : ""}`);
+    wrap.dataset.slot = id;
+    wrap.dataset.index = String(index);
+    wrap.draggable = true;
+    const tab = el("button", "chat-tab");
+    tab.type = "button";
+    const dot = el("span", "chat-dot");
+    dot.setAttribute("aria-hidden", "true");
+    const name = el("span", "chat-name");
+    name.textContent = String(item.label || "New chat");
+    tab.append(dot, name);
+    const inFolder = item.folder ? ` in ${String(item.folder)}` : "";
+    if (item.folder) {
+      // A chat in another folder says which: two chats named "New chat" in two repos look alike.
+      const where = el("span", "chat-folder");
+      where.textContent = String(item.folder);
+      tab.append(where);
+    }
+    tab.title = `${name.textContent}${inFolder}\n${item.active ? "Showing" : words}`;
+    tab.setAttribute("aria-label", `Chat ${name.textContent}${inFolder}, ${words.toLowerCase()}${item.active ? ", showing" : ""}, ${index + 1} of ${count}`);
+    if (item.active) tab.setAttribute("aria-current", "true");
+    tab.onclick = () => { if (!item.active) vscode.postMessage({ type: "switchChat", slotId: id }); };
+    tab.onkeydown = (e) => chatTabKey(e, id, index, count);
+    const close = el("button", "chat-close", '<span class="codicon codicon-close" aria-hidden="true"></span>');
+    close.type = "button";
+    close.title = `Close ${name.textContent}`;
+    close.setAttribute("aria-label", `Close chat ${name.textContent}`);
+    close.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "closeChat", slotId: id }); };
+    wrap.append(tab, close);
+    return wrap;
+  }
+
+  // Left/Right walk the tabs, Home/End jump; Alt+Shift+Left/Right moves the focused chat.
+  function chatTabKey(e, id, index, count) {
+    const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    if (step && e.altKey && e.shiftKey) {
+      e.preventDefault();
+      const to = index + step;
+      if (to >= 0 && to < count) vscode.postMessage({ type: "moveChat", slotId: id, toIndex: to });
+      return;
+    }
+    const tabs = [...document.querySelectorAll("#chatbar .chat-tab")];
+    const next = step && !e.altKey && !e.ctrlKey && !e.metaKey ? tabs[index + step]
+      : e.key === "Home" ? tabs[0] : e.key === "End" ? tabs[tabs.length - 1] : null;
+    if (next) { e.preventDefault(); next.focus(); next.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }
+  }
+
+  // Overflow: the strip scrolls (a mouse wheel scrolls it sideways), its edges fade where tabs are
+  // hidden, and the chevron lists every chat. Nothing is ever cut off without a way to reach it.
+  function fitChatStrip(strip) {
+    const over = strip.scrollWidth > strip.clientWidth + 1;
+    const bar = strip.parentElement;
+    bar.classList.toggle("is-overflowing", over);
+    bar.classList.toggle("fade-start", over && strip.scrollLeft > 1);
+    bar.classList.toggle("fade-end", over && strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  }
+
+  function wireChatStrip(strip) {
+    strip.addEventListener("scroll", () => fitChatStrip(strip), { passive: true });
+    strip.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || strip.scrollWidth <= strip.clientWidth) return;
+      e.preventDefault();
+      strip.scrollLeft += e.deltaY;
+    }, { passive: false });
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => fitChatStrip(strip)).observe(strip);
+    const marks = () => strip.querySelectorAll(".drop-before, .drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after"));
+    // Where a drop would land: before or after the tab under the pointer, by its midpoint.
+    const target = (e) => {
+      const wrap = e.target.closest?.(".chat-tabwrap");
+      if (!wrap || wrap.dataset.slot === chatDrag) return null;
+      const box = wrap.getBoundingClientRect();
+      return { wrap, after: e.clientX > box.left + box.width / 2 };
+    };
+    strip.addEventListener("dragstart", (e) => {
+      const wrap = e.target.closest?.(".chat-tabwrap");
+      if (!wrap || !e.dataTransfer) return;
+      chatDrag = wrap.dataset.slot;
+      // A private type only: no text, so a drop on the composer or the transcript inserts nothing.
+      e.dataTransfer.setData("application/x-dgc-chat", chatDrag);
+      e.dataTransfer.effectAllowed = "move";
+      wrap.classList.add("is-dragging");
+      hoverTip.hide();
+    });
+    strip.addEventListener("dragover", (e) => {
+      if (!chatDrag) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      marks();
+      const at = target(e);
+      if (at) at.wrap.classList.add(at.after ? "drop-after" : "drop-before");
+      // Near an edge, the strip scrolls so a tab can be dragged to a place out of view.
+      const box = strip.getBoundingClientRect();
+      if (e.clientX < box.left + 24) strip.scrollLeft -= 12;
+      else if (e.clientX > box.right - 24) strip.scrollLeft += 12;
+    });
+    strip.addEventListener("dragleave", (e) => { if (!strip.contains(e.relatedTarget)) marks(); });
+    strip.addEventListener("drop", (e) => {
+      if (!chatDrag) return;
+      e.preventDefault();
+      const at = target(e), moving = strip.querySelector(`.chat-tabwrap[data-slot="${CSS.escape(chatDrag)}"]`);
+      marks();
+      if (!at || !moving) return;
+      const from = Number(moving.dataset.index);
+      let to = Number(at.wrap.dataset.index) + (at.after ? 1 : 0);
+      if (from < to) to -= 1;
+      if (to === from) return;
+      at.wrap[at.after ? "after" : "before"](moving);      // at once; the host's rail follows
+      vscode.postMessage({ type: "moveChat", slotId: chatDrag, toIndex: to });
+    });
+    strip.addEventListener("dragend", () => {
+      strip.querySelector(".is-dragging")?.classList.remove("is-dragging");
+      marks();
+      chatDrag = "";
+    });
   }
 
   /** Switching chats: everything on screen belongs to the chat being left. The incoming chat's

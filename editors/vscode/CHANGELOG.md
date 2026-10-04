@@ -39,6 +39,21 @@
   applies at the turn's next step without stopping the turn. With no goal, a running turn can
   adopt one.
 - Text follows the editor's font size.
+- A sent prompt shows its first three lines, then **Show more**, so a pinned prompt takes less of
+  the panel (it was five, from seven lines up).
+- Chat tabs, redone. Every tab has the same height and the new chat's tab no longer gets a white
+  border. Drag a tab to reorder your chats, or press Alt+Shift+Left/Right on it. With more chats
+  than fit, tabs shrink first, then the strip scrolls (the mouse wheel scrolls it sideways), the
+  chat on screen stays in view and a chevron lists every chat. The tabs are hidden on an agent's
+  page.
+- A tab's dot says what its chat is doing: purple and pulsing while it works, purple and still
+  when it finished and you have not read it yet, green and pulsing when it needs your answer, grey
+  when it is idle. Coming back to a chat that finished in the background no longer shows it
+  working, and a chat that still waits on you keeps its dot after you look in and leave.
+- When a chat you are not looking at needs your answer (an approval, a question or a plan), DGC
+  says so in a notification once; **Open chat** goes straight to it. `dgc.notifyWhenWaiting`
+  turns it off.
+- A working specialist's mark moves and glows less, and its glow is no longer cut off on the left.
 
 ## 0.32.1 — 2026-10-02
 

@@ -1,4 +1,4 @@
-// A long prompt folds to its first five lines until "Show more".
+// A long prompt folds to its first three lines until "Show more".
 //
 // A sent prompt whose text runs to 7+ lines at the current width shows 5 of them, fading, with a
 // "Show more" pill; open, it reads "Show less". Only the prompt's prose folds -- chips, image tiles
@@ -66,13 +66,13 @@ test("a short prompt is drawn exactly as before", () => {
   assert.deepEqual(p.errors, []);
 });
 
-test("seven lines fold, six do not; one unbroken line folds by its wrapped height", () => {
+test("four lines fold, three do not; one unbroken line folds by its wrapped height", () => {
   const p = panel();                                  // 300px: 40 characters to a line
   const fold = (text) => p.submit(text).dataset.fold ?? "none";
-  assert.equal(fold(lines(6)), "none", "six lines show whole: a Show more never reveals one line");
-  assert.equal(fold(lines(7)), "folded");
-  assert.equal(fold("a".repeat(240)), "none", "one 240-character word wraps to six lines");
-  assert.equal(fold("a".repeat(280)), "folded", "and at 280 to seven");
+  assert.equal(fold(lines(3)), "none", "three lines show whole");
+  assert.equal(fold(lines(4)), "folded", "a fourth line folds, as Claude Code does");
+  assert.equal(fold("a".repeat(120)), "none", "one 120-character word wraps to three lines");
+  assert.equal(fold("a".repeat(160)), "folded", "and at 160 to four");
   assert.equal(fold("QUJD".repeat(750)), "folded", "base64 has no spaces and folds like any prompt");
   assert.deepEqual(p.errors, []);
 });
@@ -434,7 +434,7 @@ test("opening a prompt stops a running turn pulling the reader to the end (follo
 test("a width change re-decides each fold, even in a block the size observer already re-pinned", async () => {
   const p = panel({ clock: true, resizeObservers: true, layout: { width: 900 } });
   const log = p.doc.getElementById("log");
-  const bubble = p.submit("x".repeat(420));            // 4 lines at 900px, 11 at 300px
+  const bubble = p.submit("x".repeat(300));            // 3 lines at 900px, 8 at 300px
   const block = bubble.parentElement;
   const resize = (width) => { p.layout.width = width; p.resize(block); p.resize(log); p.advance(150); };
   assert.equal(bubble.dataset.fold, undefined);
@@ -477,9 +477,9 @@ test("new fonts re-decide a fold too, whichever observer hears of them first", (
   }
   const fontsChanged = () => { for (const line of probe.children) p.resize(line); };
   fontsChanged();                                      // the first fonts seen: nothing to re-measure
-  const bubble = p.submit("a".repeat(240));           // six lines: it fits
+  const bubble = p.submit("a".repeat(120));           // three lines: it fits
   assert.equal(bubble.dataset.fold, undefined);
-  p.layout.char = 8.5; glyphs = 120;                   // wider glyphs: the same words take seven lines
+  p.layout.char = 8.5; glyphs = 120;                   // wider glyphs: the same words take four lines
   fontsChanged();
   // The size observer re-pins the block on screen AFTER the font epoch moved, so its pin claims the
   // new fonts and the pin test offers it no more. The fold must be found by its own record.

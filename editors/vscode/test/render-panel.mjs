@@ -182,7 +182,7 @@ if (process.argv.includes("--long-prompt")) {
 if (process.argv.includes("--pinned")) {
   // The pinned prompt's faces: <out>.png a prompt pinned mid-answer, -push (the next prompt pushing it
   // off), -goal (a goal prompt with its rail, pinned through a resumed cycle), -folded (a long prompt
-  // pinned at its five lines), -open (an opened prompt reading down, its Show less stuck at the bottom
+  // pinned at its three lines), -open (an opened prompt reading down, its Show less stuck at the bottom
   // while the prompt above is pinned), -archived (an archived prompt pinned over its answer) and -tall
   // (a prompt with an image too tall for a 500px window: not pinned). Dark Modern by default; --light,
   // --hc or --forced; --narrow renders 320px. Look for text bleeding through the strip, the fade, the

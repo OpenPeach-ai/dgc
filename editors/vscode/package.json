@@ -535,6 +535,12 @@
           "scope": "window",
           "description": "Show a notification when a DGC turn longer than 20 seconds finishes while the DGC panel is not visible."
         },
+        "dgc.notifyWhenWaiting": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show a notification when a DGC chat you are not looking at needs your answer: an approval, a question or a plan. Open chat goes straight to it."
+        },
         "dgc.linkFavicons": {
           "type": "boolean",
           "default": true,
