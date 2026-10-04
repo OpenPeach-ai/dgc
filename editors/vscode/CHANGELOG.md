@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Pips
+
+- The new Pips view opens beside the chat (the Pips button in the panel header, or **DGC: Open
+  Pips**). Create Project and Personal Pips, review their setups, proposals, findings, handoffs
+  and drafts, and talk to each Pip in its own conversation. Each Pip has its own plush character,
+  whose pose follows its real state.
+- Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and
+  connector draft rows in the main chat open the matching review in the Pips view.
+- Personal Pips: choose a connected account and exact app reads, add reviewed web reads (up to
+  four https pages or searches), and review each email, calendar event or connector action
+  before it is sent or created.
+
+### Chat
+
+- Tool groups start collapsed, during the turn and after a reload, and stay the way you leave
+  them. A failure shows in the group's summary instead of opening it under you.
+- A resolved permission request becomes a compact receipt you can expand to read.
+- A pending question stays visible until you answer it, skip it or collapse it; it no longer
+  folds itself away after 30 seconds.
+- While a goal is running you can edit its objective or budget, or replace it, and the change
+  applies at the turn's next step without stopping the turn. With no goal, a running turn can
+  adopt one.
+- Text follows the editor's font size.
+
 ## 0.32.1 — 2026-10-02
 
 - A prompt beginning with an absolute path such as `/workspace/project` is sent normally and keeps

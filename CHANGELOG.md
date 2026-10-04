@@ -4,6 +4,42 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+### Pips
+
+Pips are standing agents that work beside the main chat, and they are on for everyone. A Project
+Pip reviews, tests or drafts for one project, on a schedule or when commits land; a Personal Pip
+handles your own tasks across projects. Everything consequential is a proposal you review first:
+the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
+
+- `dgc pips` creates, runs, reviews and stops Pips from the terminal; `dgc pips serve` runs the
+  local runner that schedules need.
+- The main chat carries one small `use_pips` tool and loads the Pips tools only when a task needs
+  them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
+  would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
+  out of the main chat.
+- A profile that has never used Pips gets no Pips state: per-turn Pips bookkeeping starts the
+  first time a chat or command uses them.
+- Personal Pips can use reviewed reads from connected apps (Gmail, Google Calendar, Google
+  Drive, Notion and Google Contacts through Composio) and reviewed web reads: up to four exact
+  https pages or fixed searches that DGC reads before each run. They draft emails, calendar
+  events and connector actions; each one is sent or created only after its own exact review.
+  Pips never buy, pay or book anything.
+- Set `pips_enabled` to `false` to turn Pips off.
+
+### Goals
+
+- `/goal` typed while a turn runs in the full-screen terminal now changes the goal at the turn's
+  next step instead of waiting for the turn to end. Replacing a running goal asks first;
+  `/goal budget NUMBER|off` edits the running goal's budget in place; with no goal, the running
+  turn adopts the new one. A change the turn cannot take puts your text back in the composer.
+- `/goal budget NUMBER|off` changes an existing goal's token budget without replacing it.
+- A goal that reaches its token budget now pauses instead of failing; resume it when you are
+  ready.
+- An objective too long for the session is refused before you are asked to replace the current
+  goal with it.
+
 ## 0.47.2 — 2026-10-02
 
 - Absolute paths at the start of a prompt, such as `/workspace/project`, are sent to the model as

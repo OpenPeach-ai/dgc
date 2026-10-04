@@ -1,6 +1,6 @@
 """DGC SDK for embedding the harness in applications and CI.
 
-Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Version 0.6.10 pairs with DGC CLI 0.47.0
+Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Version 0.7.0 pairs with DGC CLI 0.48.0
 (editor protocol v14). Guide and API reference: docs/SDK.md in the DGC repository.
 """
 
