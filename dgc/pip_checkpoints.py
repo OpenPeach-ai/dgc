@@ -18,7 +18,7 @@ from .workspace_registry import RegistryError
 MAX_SNAPSHOT_BYTES = 8192
 MAX_PAYLOAD_BYTES = 65536
 MAX_MANIFEST_BYTES = 131072
-MAX_CHECKPOINTS = 1000
+MAX_CHECKPOINTS = 20000         # one per project audit run, so it matches pips.MAX_RUNS
 MAX_FINDINGS = 16
 MAX_REVIEW_HISTORY = 100
 MAX_SQLITE_INTEGER = 2**63 - 1

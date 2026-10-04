@@ -19,10 +19,11 @@ from tests.test_pips_local import config
                      'Existing export opener requires Linux procfs/POSIX no-follow support.')
 class CapacityTests(unittest.TestCase):
     def setUp(self):
-        # The pressure arithmetic is the same at any ceiling; a 1,000-run ceiling keeps the
+        # The pressure arithmetic is the same at any ceiling; 1,000-row ceilings keep the
         # fixtures to hundreds of rows instead of the shipped 20,000.
-        ceiling = patch('dgc.pips.MAX_RUNS', 1000)
-        ceiling.start(); self.addCleanup(ceiling.stop)
+        for name in ('dgc.pips.MAX_RUNS', 'dgc.pip_checkpoints.MAX_CHECKPOINTS'):
+            ceiling = patch(name, 1000)
+            ceiling.start(); self.addCleanup(ceiling.stop)
         self.temp = tempfile.TemporaryDirectory(prefix='capacity-')
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)

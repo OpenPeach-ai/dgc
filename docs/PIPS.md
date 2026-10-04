@@ -455,8 +455,9 @@ than run unconfined.
   runs, 20,000 Personal runs and replies, and 20,000 chat messages. When a ceiling
   is reached, new work is refused; run records are not deleted yet.
   `dgc pips capacity` shows how close your project runs are.
-- Setup cards, handoffs, audit checkpoints and memory records each have a
-  ceiling of 1,000 per runner. The notification list keeps the newest 500.
+- Audit checkpoints keep up to 20,000 per runner, one per project audit run.
+  Setup cards, handoffs and memory records each have a ceiling of 1,000 per
+  runner. The notification list keeps the newest 500.
 - Personal app reads: one connection, four reads, 20 items per read. Web reads:
   four per Pip.
 - `dgc pips export-run` and `dgc pips capacity` currently need Linux.

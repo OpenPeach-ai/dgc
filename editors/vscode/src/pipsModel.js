@@ -233,7 +233,7 @@ export function runCheckpoint(value,identity){
   return value;
 }
 export function checkpointsPage(value,pip,workspace){
-  if(!record(value)||value.pip_id!==pip||value.workspace_id!==workspace||!Array.isArray(value.checkpoints)||value.checkpoints.length>20||typeof value.has_more!=='boolean'||value.retention_limit!==1000||!(value.next_before_id===null||Number.isSafeInteger(value.next_before_id)&&value.next_before_id>0))throw new Error('Checkpoint history is invalid.');
+  if(!record(value)||value.pip_id!==pip||value.workspace_id!==workspace||!Array.isArray(value.checkpoints)||value.checkpoints.length>20||typeof value.has_more!=='boolean'||value.retention_limit!==20000||!(value.next_before_id===null||Number.isSafeInteger(value.next_before_id)&&value.next_before_id>0))throw new Error('Checkpoint history is invalid.');
   let previous=Infinity;for(const c of value.checkpoints){checkpointMetadata(c,pip,workspace);if(c.id>=previous)throw new Error('Checkpoint history did not advance.');previous=c.id;}
   if((value.has_more&&(value.next_before_id!==value.checkpoints.at(-1)?.id||!value.checkpoints.length))||(!value.has_more&&value.next_before_id!==null))throw new Error('Checkpoint history returned an invalid cursor.');return value;
 }

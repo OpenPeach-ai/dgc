@@ -331,7 +331,7 @@ exporting frees nothing. Per runner:
 | Project runs, including conversation replies | 20,000 |
 | Personal runs and replies | 20,000 |
 | Pip chat messages | 20,000 |
-| Audit checkpoints | 1,000 |
+| Audit checkpoints | 20,000 |
 | Exceptions plus claims and preferences | 1,000 |
 | Session statements | 1,000 |
 | Setup cards | 1,000 (20 pending per workspace) |
