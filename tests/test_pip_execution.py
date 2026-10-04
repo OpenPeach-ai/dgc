@@ -484,6 +484,14 @@ class SeatbeltPolicyTests(unittest.TestCase):
         self.assertEqual(seen['env']['HOME'], str(self.run / 'scratch' / 'home'))
         self.assertFalse((self.run / 'scratch').exists())
 
+    def test_probe_refuses_when_the_controller_git_shim_fails_before_any_sandbox_starts(self):
+        # For example an unaccepted Xcode license: every run would fail at preparation.
+        refused = {'status': 'failed', 'exit_code': 69, 'data': b'You have not agreed to the Xcode license', 'truncated': False}
+        with patch.object(execution, '_capture', return_value=refused) as capture:
+            self.assertFalse(execution._probe_darwin('/usr/bin/sandbox-exec', '/dev/xcode/usr/bin/python3'))
+        self.assertEqual([call.args[0] for call in capture.call_args_list], [['/usr/bin/git', '--version']])
+        self.assertIs(capture.call_args.kwargs['env'], execution._GIT_ENV)
+
     def test_capability_reports_seatbelt_scope_and_limitations_honestly(self):
         execution._PROBE_CACHE.clear()
         with patch.object(execution, '_backend', return_value='seatbelt'), \

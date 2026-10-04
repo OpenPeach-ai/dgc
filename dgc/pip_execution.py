@@ -471,6 +471,12 @@ def _darwin_probe_code(scratch, hidden):
 
 def _probe_darwin(helper, python):
     from .sandbox import _account_home
+    # The controller records every run with /usr/bin/git outside the sandbox. That shim fails
+    # when, for example, the Xcode license has not been accepted; report it here rather than
+    # as a failure in the first run's preparation. The developer folder exists by now, so the
+    # shim cannot open an install prompt.
+    if _capture(["/usr/bin/git", "--version"], maximum=4096, timeout=10, env=_GIT_ENV)["status"] != "passed":
+        return False
     with tempfile.TemporaryDirectory(prefix="dgc-pip-confinement-") as directory:
         run = Path(directory).resolve()
         worktree = run / "worktree"
@@ -824,6 +830,11 @@ def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False, cwd=
             proc.stdout.close()
 
 
+_GIT_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0", "GIT_LITERAL_PATHSPECS": "1", "GIT_ATTR_NOSYSTEM": "1"}
+
+
 def _git(prepared, *args, maximum=4096):
     argv = ["/usr/bin/git", "--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
             "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", "core.attributesFile=/dev/null", "-c", "diff.external=",
@@ -831,10 +842,7 @@ def _git(prepared, *args, maximum=4096):
     if not args or args[0] != "init":
         argv.append("--work-tree=" + str(prepared["worktree"]))
     argv.extend(args)
-    env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1",
-           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
-           "GIT_OPTIONAL_LOCKS": "0", "GIT_LITERAL_PATHSPECS": "1", "GIT_ATTR_NOSYSTEM": "1"}
-    result = _capture(argv, maximum=maximum, timeout=15, env=env)
+    result = _capture(argv, maximum=maximum, timeout=15, env=_GIT_ENV)
     if result["status"] != "passed":
         raise _error("The private Git artifact exceeded its budget or could not be recorded.", "execution_artifact_failed")
     return result["data"]
