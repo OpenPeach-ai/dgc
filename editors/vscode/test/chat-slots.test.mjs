@@ -24,6 +24,8 @@ const configuredMaxChats = { value: 0 };
 const configuredShare = { value: true };
 /** `dgc.notifyWhenWaiting`; undefined means the shipped default (on). */
 const configuredNotify = { value: undefined };
+/** `dgc.notifyPips`; undefined means the shipped default (on). */
+const configuredPipsNotify = { value: undefined };
 let quickPickAnswer;
 const statusBar = { text: "", tooltip: "", command: "", show() {}, hide() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
@@ -51,7 +53,8 @@ globalThis.__DGC_TEST_VSCODE = {
     getConfiguration: () => ({
       get: (key, fallback) => (key === "maxLiveChats" ? configuredMaxChats.value
         : key === "shareBackend" ? configuredShare.value
-        : key === "notifyWhenWaiting" ? (configuredNotify.value ?? fallback) : fallback),
+        : key === "notifyWhenWaiting" ? (configuredNotify.value ?? fallback)
+        : key === "notifyPips" ? (configuredPipsNotify.value ?? fallback) : fallback),
       inspect: () => undefined,
       async update() {},
     }),
@@ -80,6 +83,7 @@ beforeEach(() => {
   configuredMaxChats.value = 0;                    // shipped default: unlimited
   configuredShare.value = true;                    // shipped default: chats share a backend
   configuredNotify.value = undefined;              // shipped default: notices on
+  configuredPipsNotify.value = undefined;
 });
 
 /** A backend that records what it was sent and never spawns anything. */
@@ -1194,5 +1198,34 @@ test("the chat on screen is announced only while the panel is out of sight", () 
     provider.routeEvent(provider.activeSlot(), { type: "ask_request", ask_id: "a1" });
     assert.equal(shown.length, 1);
     assert.match(shown[0], /"First" has a question for you/);
+  } finally { win.showInformationMessage = original; }
+});
+
+test("a Pip alert is said once by the editor, and Open Pips opens Pips", async () => {
+  const win = globalThis.__DGC_TEST_VSCODE.window, original = win.showInformationMessage, shown = [];
+  win.showInformationMessage = async (message, ...buttons) => { shown.push(message); return buttons[0]; };
+  try {
+    const { provider } = harness();
+    makeLive(provider, { sessionId: "alpha", name: "First" });
+    provider.lastReadyEvent = { type: "ready", capabilities: { pips_enabled: true, pips_api_version: 41 } };
+    const stored = new Map();
+    provider.context.globalState = { get: (key) => stored.get(key), update: async (key, value) => { stored.set(key, value); } };
+    const digest = { reason: "alert", headline: "1 new finding from Rook (worst: high)", pending_reviews: 0, pending_setups: 0,
+      pips: [{ alert: true, new_findings: [{ run_id: "run_" + "c".repeat(32), finding_index: 0 }] }] };
+    provider.ensurePipsBridge = () => ({ hostRead: async (type) => { assert.equal(type, "get_pip_digest"); return { digest }; } });
+    let opened = 0; provider.openPips = () => { opened++; };
+    await provider.checkPipsAttention();
+    await provider.checkPipsAttention();
+    await settle();
+    assert.deepEqual(shown, ["DGC Pips: 1 new finding from Rook (worst: high)"], "once");
+    assert.equal(opened, 1, "Open Pips opens the Pips view");
+    configuredPipsNotify.value = false;
+    digest.pips[0].new_findings.push({ run_id: "run_" + "c".repeat(32), finding_index: 1 });
+    await provider.checkPipsAttention();
+    assert.equal(shown.length, 1, "dgc.notifyPips turns it off");
+    configuredPipsNotify.value = undefined;
+    provider.lastReadyEvent = { type: "ready", capabilities: { pips_enabled: true, pips_api_version: 40 } };
+    await provider.checkPipsAttention();
+    assert.equal(shown.length, 1, "an older CLI is never asked");
   } finally { win.showInformationMessage = original; }
 });

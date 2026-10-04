@@ -89,6 +89,12 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`get_pips_desktop_notifications {}` and `set_pips_desktop_notifications {enabled}` (API 41,
+local only) return `{desktop_notifications: {on, available, platform, last}}`; `last` is
+`null` or `{shown, at}`, whether the runner's last desktop notification actually showed.
+The extension host itself sends `get_pip_digest` (request ids `pips-host-…`) once a minute
+for its own notification; those replies never reach a webview.
+
 `get_pips_keep_running {}` and `set_pips_keep_running {enabled}` (API 41, local only)
 return `{keep_running: {platform, supported, reason, on, starts_at_login,
 restarts_after_failure, while_logged_out}}`. The Pips view shows them as one switch beside

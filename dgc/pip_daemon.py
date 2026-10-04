@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import threading
 from datetime import datetime
 
@@ -219,6 +220,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     handlers[sig] = signal.getsignal(sig)
                     signal.signal(sig, lambda *_: event.set())
+            from .pip_desktop import Notifier
+            notifier = Notifier(runtime_config)
             try:
                 while not event.is_set() and not is_runtime_paused(registry):
                     _check_controller(directory)
@@ -235,6 +238,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                         event_tick = EventTick(runtime_config, directory, clock)
                         event_tick.start()
                     pips.start_queued(runtime_config)
+                    _notify(notifier, registry)
                     _check_controller(directory)
                     stopping = event.wait(HEARTBEAT_SECONDS)
                     _check_controller(directory)
@@ -269,6 +273,16 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
         lease.release()
+
+
+def _notify(notifier, registry):
+    """Desktop notifications never stop the runner: a failure is logged and the loop goes on."""
+    try:
+        notifier.tick(registry)
+    except Exception as exc:              # noqa: BLE001 -- a notice must never cost a run
+        if getattr(notifier, "failed", None) != type(exc).__name__:
+            notifier.failed = type(exc).__name__
+            print(f"dgc pips: desktop notification check failed: {type(exc).__name__}", file=sys.stderr, flush=True)
 
 
 def _check_controller(directory):

@@ -9,7 +9,8 @@ and save proposals, setups and handoffs for review. Every mutation needs the hos
 old for it. The CLI advertises Pips API 41, which adds the daily digest, notification
 settings, finding outcomes and reviewed GitHub reads (`changes.github_plan`). See [PIPS.md](PIPS.md).
 
-`get_pips_keep_running` and `set_pips_keep_running` read and set the "keep Pips running"
+`get_pips_desktop_notifications` and `set_pips_desktop_notifications` read and set the
+runner's desktop notifications. `get_pips_keep_running` and `set_pips_keep_running` read and set the "keep Pips running"
 switch (local mutation; it never enables Pips or clears an emergency stop).
 
 `turn_end.reason` and both `RunStatus` types gain `paused`: a run that stops at its goal's token

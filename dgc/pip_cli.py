@@ -439,6 +439,8 @@ def parser():
     command("status", "show runner status as JSON")
     keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
     keep.add_argument("state", nargs="?", choices=("on", "off"))
+    desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
+    desktop.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -738,6 +740,14 @@ def keep_running_text(item) -> str:
 
 
 def _format(value):
+    if set(value) == {"desktop_notifications"}:
+        item = value["desktop_notifications"]
+        return (f"Desktop notifications: {'on' if item['on'] else 'off'}."
+                + ("" if item["available"] else " This computer has no notification tool the runner can use"
+                   " (on Linux, install libnotify's notify-send); the digest and the Pips view still have everything.")
+                + (" The last one did not show: this computer has no notification service running (a server you"
+                   " reach remotely, for example). The editor still tells you while it is open."
+                   if item["last"] and not item["last"]["shown"] else ""))
     if set(value) == {"keep_running"}:
         return keep_running_text(value["keep_running"])
     if set(value) == {"digest"}:          # dgc pips digest; other results carry a hash named digest
@@ -1188,6 +1198,10 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "desktop-notifications":
+        if args.state is None:
+            return control({"type": "get_pips_desktop_notifications"})
+        return control({"type": "set_pips_desktop_notifications", "enabled": args.state == "on"})
     if args.command == "keep-running":
         if args.state is None:
             return control({"type": "get_pips_keep_running"})
@@ -1350,7 +1364,7 @@ def agent_shell_allows(args) -> bool:
         return True
     if args.command == "notify":
         return args.min_severity is None and args.alerts is None
-    if args.command == "keep-running":
+    if args.command in ("keep-running", "desktop-notifications"):
         return args.state is None
     spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
     return bool(spec) and getattr(args, spec[0], None) in spec[1]
@@ -1410,7 +1424,7 @@ def handle_command(config, argv, *, in_chat=False):
             result = _starter_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes"):
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications"):
             result = _digest_command(config, args)
         elif args.command == "capacity":
             if in_chat:

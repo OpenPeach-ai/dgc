@@ -237,3 +237,33 @@ class ServicePathTests(unittest.TestCase):
         os.chmod(self.dir, 0o777)
         with self.assertRaises(RegistryError):
             service._safe_chain(self.dir)
+
+
+class CommandLineTests(unittest.TestCase):
+    """`dgc pips keep-running` goes through the same local control as the Pips view."""
+    from tests import test_pips_local as _fixtures
+    setUp_base = _fixtures.LocalPipsTests.setUp
+
+    def setUp(self):
+        self.setUp_base()
+        self.cfg.data["pips_enabled"] = True
+
+    def cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = pip_cli.handle_command(self.cfg, list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_show_and_turn_on(self):
+        state = {"platform": "linux", "supported": True, "reason": "", "on": False, "starts_at_login": False,
+                 "restarts_after_failure": False, "while_logged_out": False}
+        with patch.object(keep, "status", return_value=state):
+            code, text, err = self.cli("keep-running")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Keep Pips running: off", text)
+        on = {**state, "on": True, "starts_at_login": True, "restarts_after_failure": True}
+        with patch.object(keep, "set_on", return_value=on) as switch:
+            code, text, err = self.cli("keep-running", "on")
+        self.assertEqual(code, 0, err)
+        self.assertIs(switch.call_args.args[0], True)
+        self.assertIn("runs while you are logged in", text)

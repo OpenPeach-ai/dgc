@@ -975,6 +975,16 @@ export function pipsKeepRunning(value) {
   return value;
 }
 
+// The runner's desktop notifications (API 41). `last` is evidence: whether the last one showed.
+export function pipsDesktopNotifications(value) {
+  const fail = () => { throw Error('The desktop notification status is invalid. Refresh the Pips view.'); };
+  if (!record(value) || Object.keys(value).sort().join() !== 'available,last,on,platform' || typeof value.on !== 'boolean'
+    || typeof value.available !== 'boolean' || typeof value.platform !== 'string') fail();
+  if (value.last !== null && (!record(value.last) || Object.keys(value.last).sort().join() !== 'at,shown'
+    || typeof value.last.shown !== 'boolean' || typeof value.last.at !== 'string')) fail();
+  return value;
+}
+
 export function pipOutcomes(value, pip) {
   const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
   if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'

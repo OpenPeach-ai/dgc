@@ -42,6 +42,10 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- The runner shows a desktop notification for a new alert or a review waiting for you, even with
+  the editor closed: once per item, at most one a minute, never a backlog. `dgc pips
+  desktop-notifications off` (or the switch in the Pips view) turns it off; a computer with no
+  notification service says so instead of failing.
 - **Keep Pips running**: `dgc pips keep-running on` (or the switch in the Pips view) starts the
   runner when you log in and after a restart, and restarts it if it fails. Linux uses a systemd
   user service and, where allowed, keeps running while you are logged out; macOS uses a

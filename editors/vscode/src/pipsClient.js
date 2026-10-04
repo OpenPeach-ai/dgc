@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -103,6 +103,31 @@ async function setKeepRunning(enabled){
  catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
  finally{if(token===scope()){S.busy=false;render();}}
 }
+let desktopState={value:null,loading:false,error:'',asked:false};
+async function loadDesktopNotifications(){
+ if(remoteHost||S.apiVersion<41||!usable()||desktopState.loading)return;
+ const token=scope();desktopState={...desktopState,loading:true,asked:true};
+ try{const value=pipsDesktopNotifications((await send('get_pips_desktop_notifications')).desktop_notifications);if(token===scope()){desktopState.value=value;desktopState.error='';}}
+ catch(error){if(token===scope())desktopState.error=errorText(error);}
+ finally{desktopState.loading=false;render();}
+}
+async function setDesktopNotifications(enabled){
+ if(S.busy||!usable())return;const token=scope();S.busy=true;render();
+ try{const value=pipsDesktopNotifications((await send('set_pips_desktop_notifications',{enabled})).desktop_notifications);if(token!==scope())return;desktopState.value=value;desktopState.error='';
+  S.notice=value.on?'Desktop notifications on: the runner tells you about a new alert or review, even with the editor closed.':'Desktop notifications off. The editor still tells you while it is open (dgc.notifyPips).';}
+ catch(error){if(token===scope()){desktopState.error=errorText(error);setError(error);}}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
+function desktopNotificationsMarkup(){
+ if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
+ if(!desktopState.asked&&usable())void loadDesktopNotifications();
+ const d=desktopState.value;
+ if(!d)return desktopState.error?`<p class="muted keep-running-note">${esc(desktopState.error)}</p>`:'';
+ const note=!d.available?'This computer has no notification tool the runner can use. The editor still tells you while it is open.'
+  :d.last&&!d.last.shown?'The last one did not show: this computer has no notification service running (a server you reach remotely, for example). The editor still tells you while it is open.'
+  :'A new alert or review shows as a desktop notification, even with the editor closed.';
+ return `<label class="keep-running"><input type="checkbox" id="desktop-notifications"${d.on?' checked':''}${S.busy||!usable()?' disabled':''}> Desktop notifications</label><p class="muted keep-running-note">${esc(note)}</p>`;
+}
 function keepRunningMarkup(){
  if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
  if(!keepState.asked&&usable())void loadKeepRunning();
@@ -118,8 +143,8 @@ function runnerMarkup() {
   const start=remoteHost?'':`${r&&!r.online&&!paused?button('start-runner','Start runner',S.busy||!usable()):''}${paused?button('resume-runner','Resume runner…',S.busy||!usable()):''}`;
   const counts=r?`<span class="muted">${r.counts.queued} queued · ${r.counts.running} running</span>`:'';
   const controls=`${button('refresh','Refresh',!usable())}${button('stop-all','Stop all Pips…',!usable()||S.busy,'danger')}`;
-  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}${keepRunningMarkup()}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
-  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${keepRunningMarkup()}${r?.error?errorMarkup(r.error.message):''}`;
+  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}${keepRunningMarkup()}${desktopNotificationsMarkup()}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
+  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${keepRunningMarkup()}${desktopNotificationsMarkup()}${r?.error?errorMarkup(r.error.message):''}`;
 }
 function welcome() {
   if(remoteHost&&!S.connected)return `<div class="empty">${avatar('offline')}<h2>Computer disconnected</h2><p class="muted">Reconnect the approved computer to read current Pips and send commands over the encrypted connection.</p>${button('reconnect','Check connection')}</div>`;
@@ -1221,7 +1246,7 @@ function updateDraft(event) {
   if((key==='scheduleType'||key==='handoffTarget'||key==='adaptationMode'||key==='sourceMode'||key==='outcomeSession'||key==='outcomeSourceKind')&&event.type==='change'){render();if(key==='handoffTarget'&&executionPip(S.jobs.find(p=>p.id===draft.handoffTarget)))void loadExecution();}
 }
 document.addEventListener('input',updateDraft);
-document.addEventListener('change',event=>{if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form','github-form'].includes(id))return;event.preventDefault();
   if(!usable()||S.busy||!S.workspace)return;if(archived()&&['revision-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','pip-statement-form','web-reads-form'].includes(id)){setError('Restore this archived Pip to paused before changing it or starting work.');return;}

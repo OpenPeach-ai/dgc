@@ -261,6 +261,20 @@ dgc pips notify PIP_ID --min-severity high --alerts critical
 dgc pips outcomes PIP_ID                             # what became of its findings
 ```
 
+**When you are not looking.** Two notices make sure a new alert or a waiting review
+reaches you once:
+
+- **In the editor.** While VS Code (or Cursor) is open, DGC checks every minute and shows
+  one notification, with **Open Pips**, whether or not the DGC panel is on screen. This is
+  the one to rely on when you work on a remote machine. `dgc.notifyPips` turns it off.
+- **On the desktop.** The runner shows a desktop notification (Notification Center on
+  macOS, `notify-send` on Linux) even with the editor closed. Each alert and review is
+  announced once, at most one a minute, and never as a backlog when you turn it back on.
+  Turn it off in the Pips view's runner controls or with
+  `dgc pips desktop-notifications off`. A computer with no notification service (a
+  server you reach remotely) cannot show them; the switch says so after the first one
+  fails.
+
 **What became of its findings.** A project reviewer's **Job** tab (or
 `dgc pips outcomes`) counts what it reported, what you accepted or dismissed, what
 it still reports, and what went away: after its file changed, or without a change.

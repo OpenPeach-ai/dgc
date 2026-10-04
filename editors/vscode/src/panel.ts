@@ -17,6 +17,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 import { PipsEditor } from "./pipsView";
+import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 
 function isSlashCommandText(text: string): boolean {
@@ -82,6 +83,9 @@ function exitHow(code: number | null, signal?: string | null): string {
 /** One animation frame's worth. Long enough to collapse a streamed response into a few rail
  *  posts, short enough that an unread count still reads as live. */
 const CHAT_SLOTS_COALESCE_MS = 120;
+/** How often the editor checks whether a Pip needs you (pipsAttention.ts). */
+const PIPS_ATTENTION_MS = 60_000;
+const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
 
 interface InterruptedTurnMark {
   scope?: string; id?: string; turnId?: string; at?: number;
@@ -1129,7 +1133,43 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.scheduleWorkspaceChanges(0);
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
+    this.startPipsAttention();
     void this.resumeInterruptedWork(be);
+  }
+
+  private pipsAttentionTimer?: ReturnType<typeof setInterval>;
+  private pipsAttentionBusy = false;
+
+  /** Once a minute, whether the panel is on screen or not: a new Pip alert or review says so once. */
+  private startPipsAttention(): void {
+    if (this.pipsAttentionTimer) return;
+    // Unref'd: the watcher never keeps a process alive on its own (tests, a shutting-down host).
+    this.pipsAttentionTimer = setInterval(() => { void this.checkPipsAttention(); }, PIPS_ATTENTION_MS);
+    (this.pipsAttentionTimer as any).unref?.();
+    (setTimeout(() => { void this.checkPipsAttention(); }, 3_000) as any).unref?.();
+  }
+
+  private async checkPipsAttention(): Promise<void> {
+    if (this.pipsAttentionBusy || !this.sessionReady || !this.backend) return;
+    if (!vscode.workspace.getConfiguration("dgc").get<boolean>("notifyPips", true)) return;
+    const caps = this.lastReadyEvent?.capabilities;
+    if (caps?.pips_enabled !== true || !(Number(caps?.pips_api_version) >= 41)) return;
+    this.pipsAttentionBusy = true;
+    try {
+      const result = await this.ensurePipsBridge().hostRead("get_pip_digest");
+      const notice = pipsAttention(result?.digest, this.context.globalState.get<PipsAttentionState>(PIPS_ATTENTION_KEY));
+      if (!notice) return;
+      await this.context.globalState.update(PIPS_ATTENTION_KEY, notice.state);
+      if (!notice.text) return;
+      const open = "Open Pips";
+      void Promise.resolve(vscode.window.showInformationMessage(notice.text, open)).then((choice) => {
+        if (choice === open) this.openPips();
+      });
+    } catch {
+      // Nothing to say when Pips cannot be read; the bar and the Pips view show the error.
+    } finally {
+      this.pipsAttentionBusy = false;
+    }
   }
 
   /** Post to the webview now, or as soon as it exists — without pulling the panel into focus. */
@@ -6149,6 +6189,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
     // Note first, dispose the channel after: a panel teardown is one of the three things that can
     // end a turn, and it is the one the user never sees.
     this.backendNote("[extension: panel disposed — stopping the backend]");

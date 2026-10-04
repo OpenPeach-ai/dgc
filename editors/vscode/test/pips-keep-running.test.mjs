@@ -70,3 +70,28 @@ test('the extension host passes the switch only to an API 41 CLI', ()=>{
   bridge.receive({type:'pipsRequest',id:'g',request:{type:'get_pips_keep_running'}});bridge.receive({type:'pipsRequest',id:'s',request:{type:'set_pips_keep_running',enabled:true}});
   assert.equal(sent.length,api>=41?2:0,`API ${api}`);}
 });
+
+test('a host read goes to the backend and its reply never reaches a webview', async()=>{
+ const sent=[],posted=[];const {PipsEditor}=load(viewCode,name=>name==='vscode'?{}:require(name));
+ const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));
+ bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:40},{});
+ await assert.rejects(bridge.hostRead('get_pip_digest'));assert.equal(sent.length,0,'an older CLI is never asked');
+ bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:41},{other:1});
+ const reading=bridge.hostRead('get_pip_digest');
+ assert.equal(sent.length,1);assert.equal(sent[0].type,'pips_control');assert.equal(sent[0].request.type,'get_pip_digest');assert.match(sent[0].request.request_id,/^pips-host-/);
+ const before=posted.length;
+ assert.equal(bridge.event({type:'pips_result',request_id:sent[0].request.request_id,command:'get_pip_digest',ok:true,result:{digest:null}}),true);
+ assert.deepEqual(await reading,{digest:null});assert.equal(posted.length,before,'nothing is posted to a webview');
+});
+
+test('the desktop notifications switch says when this computer cannot show them', async()=>{
+ const off=(extra={})=>({on:true,available:true,platform:'linux',last:null,...extra});
+ const x=setup();await x.drain({get_pips_desktop_notifications:()=>({desktop_notifications:off({last:{shown:false,at:'2026-10-05T01:00:00.000Z'}})})});
+ const box=x.d.getElementById('desktop-notifications');assert.ok(box);assert.equal(box.checked,true);
+ assert.match(x.d.body.textContent,/The last one did not show/);
+ box.checked=false;box.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+ const sent=x.requests('set_pips_desktop_notifications')[0];assert.equal(sent.request.enabled,false);
+ x.answer(sent,{desktop_notifications:off({on:false})});await x.drain();
+ assert.match(x.d.body.textContent,/The editor still tells you while it is open/);
+ assert.throws(()=>model.pipsDesktopNotifications(off({last:{shown:'no',at:'x'}})),/invalid/);
+});

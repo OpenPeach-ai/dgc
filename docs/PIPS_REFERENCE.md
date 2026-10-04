@@ -586,6 +586,19 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
+for alert findings in the digest and for pending reviews and setup cards, and shows one
+notification for what is new: the digest headline, or "N reviews waiting". What it has
+announced is kept in registry metadata (`desktop_notifications_seen`, 400 ids per kind), so a
+restart does not repeat it; while the setting is off it still marks what arrives as seen.
+Delivery is `notify-send` (with the session bus at `/run/user/UID/bus` when the service has
+none) or `osascript` with the text as script arguments; failure is never an error and is
+recorded as `last.shown: false`. `get_pips_desktop_notifications` /
+`set_pips_desktop_notifications {enabled}` (local only) return `{on, available, platform,
+last}`. The editor's own notice reads `get_pip_digest` from the extension host every minute
+(`pipsAttention.ts`, remembered in the host's global state) and is turned off by
+`dgc.notifyPips`.
+
 **Keep Pips running** (API 41). `get_pips_keep_running` and `set_pips_keep_running
 {enabled}` (local user only) return `{platform, supported, reason, on, starts_at_login,
 restarts_after_failure, while_logged_out}`. On Linux, on installs the managed user unit
