@@ -224,6 +224,7 @@ def read(args, ctx):
             if definition.get('app_plan') is not None:base['pip']['app_plan']=definition['app_plan']
             if definition.get('web_plan') is not None:base['pip']['web_plan']=definition['web_plan']
             if definition.get('github_plan') is not None:base['pip']['github_plan']=definition['github_plan']
+            if definition.get('computer_plan') is not None:base['pip']['computer_plan']=definition['computer_plan']
             base['pip'].update(_schedule_projection(registry, args['pip_id'], definition))
             if base['pip']['source_policy']['mode'] == 'current_tree':
                 base['pip']['source_notice'] = 'Eligible current-tree source is captured on each manual request. source_ref is dormant; changing the source policy requires human review.'

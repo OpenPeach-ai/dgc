@@ -6,6 +6,7 @@ record is ever signalled. The existing pips-runner lease still owns actual work.
 from __future__ import annotations
 
 import json
+import sys
 import os
 import signal
 import threading
@@ -188,6 +189,18 @@ def _shutdown_owned(registry, runtime_config, record):
         raise failure
 
 
+def _computer_tick(registry, config) -> None:
+    """Pip computers: honour stop requests, carry out the user's decisions, close idle ones.
+
+    A failure here is recorded and never stops the supervisor or other Pips."""
+    from . import pip_computer
+    try:
+        pip_computer.handle_stops(registry)
+        pip_computer.tick(registry, config)
+    except Exception as exc:                      # noqa: BLE001 - isolated by design
+        print(f"[pip computers] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
+
+
 def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     """Foreground heartbeat/queue supervision; Event.wait is injectable for tests."""
     from . import pips
@@ -234,6 +247,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                     if ((event_tick is None or not event_tick.is_alive()) and has_due_trigger(registry)):
                         event_tick = EventTick(runtime_config, directory, clock)
                         event_tick.start()
+                    _computer_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
                     _check_controller(directory)
                     stopping = event.wait(HEARTBEAT_SECONDS)
@@ -256,6 +270,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                     except RegistryError as exc:
                         schedule_failure = exc
                         record["error"] = {"code": exc.code, "message": str(exc)}
+                from . import pip_computer
+                pip_computer.stop_all()          # held writes die with their browser; marked lost next start
                 _shutdown_owned(registry, runtime_config, record)
                 failure = pips.drain_failure(directory)
                 if failure:

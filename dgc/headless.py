@@ -200,7 +200,7 @@ _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under
 RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
-PIPS_API_VERSION = 41
+PIPS_API_VERSION = 42
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.

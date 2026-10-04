@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames",
     "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
     "get_pip_message_draft", "list_pip_message_drafts",
@@ -58,6 +59,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "decide_pip_computer_action", "stop_pip_computer",
     "mark_pip_digest_seen", "set_pip_notify_settings",
     "prepare_pip_connector_draft", "dismiss_pip_connector_draft", "propose_pip_connector_action", "propose_pip_calendar_action", "prepare_pip_calendar_draft", "dismiss_pip_calendar_draft",
     "prepare_pip_message_draft", "dismiss_pip_message_draft",
@@ -162,7 +164,18 @@ API41_READS = frozenset({'get_pip_digest', 'get_pip_notify_settings', 'get_pip_o
 API41_MUTATIONS = frozenset({'mark_pip_digest_seen', 'set_pip_notify_settings'})
 READ_COMMANDS |= API41_READS
 MUTATION_COMMANDS |= API41_MUTATIONS
+# API 42: Pip computers. Decisions release or drop one held browser write; local only.
+API42_READS = frozenset({'get_pip_computer', 'list_pip_computer_actions', 'get_pip_computer_frame', 'list_pip_computer_frames'})
+API42_MUTATIONS = frozenset({'decide_pip_computer_action', 'stop_pip_computer'})
+READ_COMMANDS |= API42_READS
+MUTATION_COMMANDS |= API42_MUTATIONS
 COMMAND_FIELDS = {
+    'get_pip_computer': frozenset({'pip_id'}),
+    'list_pip_computer_actions': frozenset({'pip_id', 'limit'}),
+    'get_pip_computer_frame': frozenset({'run_id', 'frame'}),
+    'list_pip_computer_frames': frozenset({'run_id'}),
+    'decide_pip_computer_action': frozenset({'action_id', 'expected_digest', 'approve'}),
+    'stop_pip_computer': frozenset({'pip_id'}),
     'get_pip_digest': frozenset(),
     'mark_pip_digest_seen': frozenset({'until'}),
     'get_pip_notify_settings': frozenset({'pip_id'}),
@@ -356,7 +369,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API41_READS | API41_MUTATIONS:
+        if command in API42_READS | API42_MUTATIONS:
+            minimum = 42
+        elif command in API41_READS | API41_MUTATIONS:
             minimum = 41
         elif command in API37_READS | API37_MUTATIONS:
             minimum = 37
@@ -414,6 +429,9 @@ class Pips:
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
                 and 'github_plan' in values['changes'] and version < 41):
             raise DGCUnsupportedError('Reviewed GitHub reads require Pips API 41 or newer')
+        if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
+                and 'computer_plan' in values['changes'] and version < 42):
+            raise DGCUnsupportedError('Pip computers require Pips API 42 or newer')
         plan = values.get('changes', {}).get('app_plan') if isinstance(values.get('changes'), dict) else None
         if command == 'propose_pip_update' and isinstance(plan, dict) and plan.get('schema_version') == 3 and version < 39:
             raise DGCUnsupportedError('Additional app searches require Pips API 39 or newer')

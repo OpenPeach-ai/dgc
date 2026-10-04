@@ -234,9 +234,10 @@ class SessionExecutionRecordTests(unittest.TestCase):
         self.registry.db.execute('PRAGMA user_version=16')
         # Exercise the historical interpretation-only transition specifically;
         # the separately tested schema18 adds its own table after this version.
-        from dgc import pip_commit_paths, pip_setup, pip_app_actions, pip_message_drafts, pip_digest
+        from dgc import pip_commit_paths, pip_setup, pip_app_actions, pip_message_drafts, pip_digest, pip_computer
         with patch.object(workspace_registry, 'SCHEMA_VERSION', 17), \
              patch.object(pip_digest, 'SCHEMA', ''), \
+             patch.object(pip_computer, 'SCHEMA', ''), \
              patch.object(session_turn_events, 'SCHEMA', ''), \
              patch.object(pip_memory_statements, 'SCHEMA', ''), \
              patch.object(pip_commit_paths, 'SCHEMA_V22', ''), \

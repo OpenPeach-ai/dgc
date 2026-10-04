@@ -601,6 +601,12 @@ class BoxedBrowser(BrowserSession):
         if held is not None:
             self._fire("Fetch.failRequest", {"requestId": held.request_id, "errorReason": "BlockedByClient"}, held.session_id)
 
+    def screenshot_jpeg(self, quality: int = 60) -> bytes:
+        """A review frame small enough to travel in one Pips reply (about 60 KB)."""
+        import base64
+        result = self.command("Page.captureScreenshot", {"format": "jpeg", "quality": quality}, timeout=30)
+        return base64.b64decode(result.get("data", ""))
+
     def pump(self, seconds: float) -> None:
         """Let the page run (and the gate see its requests) for a while."""
         self._pump(seconds)

@@ -224,7 +224,7 @@ class DigestMigrationTests(unittest.TestCase):
         drop_digest_schema(self.registry.db)
         self.registry.db.execute("PRAGMA user_version=33")
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 34)
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], workspace_registry.SCHEMA_VERSION)
             self.assertEqual(digest.settings(upgraded, pip["id"])["is_default"], True)
             self.assertIsNone(upgraded.db.execute("SELECT 1 FROM pip_digest_state").fetchone())
         with patch.object(workspace_registry, "SCHEMA_VERSION", 33), self.assertRaises(RegistryError):
