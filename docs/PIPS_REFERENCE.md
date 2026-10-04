@@ -317,13 +317,19 @@ events. The notification list is built from those events: reviews waiting for yo
 and failed runs. It keeps the newest 500 across the runner, and marking one read
 changes nothing else.
 
-**Retention ceilings.** Nothing is deleted automatically, and archiving or
+**Run cleanup.** When a run reaches a final state, the runner removes its `source/`
+copy and, for Patch and Pulse, its `worktree/` and `private-git/`; it removes the
+run's `worker-home/` once the run's token usage is in the ledger. `artifacts/` and
+the run record stay. A runner also sweeps up to 200 older finished runs when it
+starts. Links are removed, never followed.
+
+**Retention ceilings.** Run records are not deleted automatically, and archiving or
 exporting frees nothing. Per runner:
 
 | Record | Ceiling |
 | --- | --- |
-| Project runs, including conversation replies (each keeps a source copy) | 1,000 |
-| Personal runs and replies (no source copy) | 20,000 |
+| Project runs, including conversation replies | 20,000 |
+| Personal runs and replies | 20,000 |
 | Pip chat messages | 20,000 |
 | Audit checkpoints | 1,000 |
 | Exceptions plus claims and preferences | 1,000 |

@@ -26,6 +26,9 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   https pages or fixed searches that DGC reads before each run. They draft emails, calendar
   events and connector actions; each one is sent or created only after its own exact review.
   Pips never buy, pay or book anything.
+- A finished run removes its private source copy, worktree and worker home, keeping its report,
+  artifacts and history, so a busy Pip's runs no longer fill the disk. A profile now keeps up to
+  20,000 project runs and 20,000 Personal runs.
 - Set `pips_enabled` to `false` to turn Pips off.
 
 ### Goals

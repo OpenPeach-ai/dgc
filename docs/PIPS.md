@@ -432,10 +432,12 @@ than run unconfined.
   project copy is read-only to the commands; only a 64 MiB temporary folder is
   writable.
 - Up to 100 Pips per project and 256 projects.
-- **Retained history has fixed ceilings and nothing is deleted yet.** A profile
-  keeps up to 1,000 project runs (each keeps a copy of the source it read), 20,000
-  Personal runs and replies, and 20,000 chat messages. When a ceiling is reached,
-  new work is refused, and archiving or exporting does not free space.
+- **Finished runs clean up after themselves.** Once a run finishes, DGC removes its
+  private copy of the source, its private worktree and, after its token usage is
+  recorded, its private home. Reports, findings, artifacts and history stay.
+- **Retained history has fixed ceilings.** A profile keeps up to 20,000 project
+  runs, 20,000 Personal runs and replies, and 20,000 chat messages. When a ceiling
+  is reached, new work is refused; run records are not deleted yet.
   `dgc pips capacity` shows how close your project runs are.
 - Setup cards, handoffs, audit checkpoints and memory records each have a
   ceiling of 1,000 per runner. The notification list keeps the newest 500.

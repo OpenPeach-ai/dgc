@@ -152,8 +152,10 @@ READ_TOOLS = frozenset({"read_file", "glob", "grep", "repo_map", "todo"})
 MAX_FILES = 10000
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
-MAX_RUNS = 1000                # project runs: each keeps a private copy of the source it read
-MAX_PERSONAL_RUNS = 20000      # Personal tasks and replies keep no source copy, only bounded results
+# Retained run records. A finished run's source copies are removed (pip_run_cleanup), so a run
+# costs little more than its bounded record and artifacts.
+MAX_RUNS = 20000               # project runs
+MAX_PERSONAL_RUNS = 20000      # Personal tasks and replies
 MAX_QUEUE = 20
 MAX_WALL_SECONDS = 300
 MAX_WORKER_INPUT_BYTES = 128 * 1024
@@ -1021,7 +1023,7 @@ class PipStore:
                 if personal and kept >= MAX_PERSONAL_RUNS:
                     raise RegistryError("limit", f"This profile keeps at most {MAX_PERSONAL_RUNS:,} Personal Pip runs and replies, and has reached it. No new work was queued.")
                 if not personal and kept >= MAX_RUNS:
-                    raise RegistryError("limit", f"This profile keeps at most {MAX_RUNS:,} project Pip runs, each with a copy of the source it read, and has reached it. No new work was queued; removing old runs is not available yet.")
+                    raise RegistryError("limit", f"This profile keeps at most {MAX_RUNS:,} project Pip runs and has reached it. No new work was queued; removing old run records is not available yet.")
                 if self.db.execute("SELECT count(*) FROM pip_runs WHERE status IN ('queued','running','cancelling')").fetchone()[0] >= MAX_QUEUE:
                     raise RegistryError("limit", "The local run queue is full.")
                 from .workspace_context import ContextStore
@@ -2566,6 +2568,11 @@ def _drain(config, directory):
         with WorkspaceRegistry(directory) as registry:
             store = PipStore(registry)
             store.recover()
+            from .pip_run_cleanup import prune_finished, prune_run
+            try:
+                prune_finished(registry)    # copies left by earlier runs, a bounded batch at a time
+            except Exception:
+                pass                        # disk housekeeping never stops queued work
             while config.get("pips_enabled", False) is True:
                 row = store.claim_next()
                 if row is None:
@@ -2582,6 +2589,12 @@ def _drain(config, directory):
                 finally:
                     with _THREAD_LOCK:
                         _ACTIVE_RUNS.pop(str(directory), None)
+                try:
+                    status = registry.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
+                    if status and status[0] in TERMINAL:
+                        prune_run(registry.directory, row["id"])
+                except Exception:
+                    pass
     finally:
         lease.release()
 
