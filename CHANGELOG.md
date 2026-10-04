@@ -49,6 +49,11 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   https pages or fixed searches that DGC reads before each run. They draft emails, calendar
   events and connector actions; each one is sent or created only after its own exact review.
   Pips never buy, pay or book anything.
+- Patch and Pulse now run on macOS too, confined by Seatbelt (`sandbox-exec`): the copy is
+  read-only, there is no network, homes and DGC state are hidden, and CPU, file-size and open-file
+  limits are hard. Memory, process count and scratch space are sampled about every 50 ms rather
+  than enforced by the kernel, and system folders stay readable; the Pips view states these
+  limits. Linux keeps its stronger bubblewrap confinement.
 - A finished run removes its private source copy, worktree and worker home, keeping its report,
   artifacts and history, so a busy Pip's runs no longer fill the disk. A profile now keeps up to
   20,000 project runs, 20,000 Personal runs and 20,000 audit checkpoints.
