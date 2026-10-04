@@ -14,6 +14,7 @@ import type { UsageLog, UsageTotals } from "./usage.ts";
 import { USAGE_TOTAL_KEYS, costUsd, emptyTotals, reported, usageDelta, usageTotals } from "./usage.ts";
 import { diffWorkspace, snapshotWorkspace, type Snapshot } from "./changes.ts";
 import { resolvePermission, type Policy } from "./policy.ts";
+import { Pips } from "./pips.ts";
 import type { StateLock } from "./state.ts";
 import type {
   AbortSignalLike, AgentInfo, Artifact, Denial, Checkpoint, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
@@ -31,7 +32,7 @@ const TASK_MAP: Record<string, TaskItem["status"]> = {
   done: "completed", completed: "completed", in_progress: "in_progress", progress: "in_progress",
   blocked: "blocked", cancelled: "cancelled", canceled: "cancelled", pending: "pending", todo: "pending",
 };
-const TERMINAL = new Set<RunStatus>(["completed", "cancelled", "failed"]);
+const TERMINAL = new Set<RunStatus>(["completed", "cancelled", "failed", "paused"]);
 const DECISION_EVENTS = new Set(["permission_request", "plan_proposal", "options_request", "mcp_input_request"]);
 const AUDIT_EVENTS = new Set([
   "turn_start", "turn_end", "tool_call", "tool_result", "tool_denied", "permission_request", "error",
@@ -344,6 +345,7 @@ export type SessionInit = {
 type Turn = { id: string; owner: Run | null; requestId: string };
 
 export class Session {
+  readonly pips: Pips;
   sessionId: string;
   sessionPath = "";
   readonly transport: Transport;
@@ -377,6 +379,10 @@ export class Session {
     this.capabilities = mapping(ready.capabilities);
     this.sandbox = init.sandbox;
     this.modelSeen = String(ready.model || init.model || "");
+    this.pips = new Pips(this.capabilities,
+      init.policy !== null || init.sandbox.requirement !== "off" || init.sandbox.active,
+      init.permissionMode === "plan",
+      (payload, response, requestId) => this.request(payload, response, { requestId }), init.isolated);
   }
 
   /** Advanced transport. Prefer {@link run} / {@link stream}. */
@@ -541,12 +547,13 @@ export class Session {
   // ---- control requests -----------------------------------------------------------------------
 
   private async request(command: Frame, responseType: string,
-    options: { timeoutMs?: number; uncorrelatedReply?: boolean } = {}): Promise<Frame> {
+    options: { timeoutMs?: number; uncorrelatedReply?: boolean; requestId?: string } = {}): Promise<Frame> {
     const payload: Frame = { ...command };
-    if (typeof payload.request_id !== "string" || !payload.request_id) payload.request_id = newId("req");
+    if (options.requestId === undefined && (typeof payload.request_id !== "string" || !payload.request_id)) payload.request_id = newId("req");
     const wait = options.timeoutMs === undefined
       ? this.init.requestTimeoutMs : Math.max(options.timeoutMs, this.init.requestTimeoutMs);
-    return this.transport.request(payload, responseType, { timeoutMs: wait, uncorrelatedReply: options.uncorrelatedReply });
+    return this.transport.request(payload, responseType, { timeoutMs: wait, uncorrelatedReply: options.uncorrelatedReply,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}) });
   }
 
   /** Hold the stateDir lock around commands that make DGC save the isolated config. */
@@ -1594,6 +1601,8 @@ class Accumulator {
     if (reason === "error" || reason === "failed") {
       this.status = "failed";
       this.error = this.lastError || "the turn ended with an error";
+    } else if (reason === "paused") {
+      this.status = "paused";
     } else if (reason === "cancelled" || reason === "interrupted") {
       this.status = "cancelled";
     } else {

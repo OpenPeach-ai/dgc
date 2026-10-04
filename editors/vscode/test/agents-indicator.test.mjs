@@ -233,6 +233,28 @@ test("a row opens the agent page; Back and Escape return to the chat", () => {
   assert.deepEqual(errors, []);
 });
 
+test("Escape in Pips does not close the hidden ordinary specialist page", () => {
+  const { $, doc, dom, send, start, errors } = view();
+  start(sid(1));
+  $("agents-pill").click();
+  doc.querySelector("#agents-tree .agent-row").click();
+  assert.equal(doc.body.dataset.agentPage, sid(1));
+  dom.window.DgcPips = {mount: () => ({setVisible() {}})};
+  send({type:"pipsOpen"});
+  const target = doc.createElement("button");
+  $("pips-host").shadowRoot.append(target);
+  let reachedPips = false;
+  target.addEventListener("keydown", () => { reachedPips = true; });
+  target.dispatchEvent(new dom.window.KeyboardEvent("keydown", {key:"Escape", bubbles:true, composed:true, cancelable:true}));
+  assert.equal(reachedPips, true);
+  assert.equal(doc.body.dataset.agentPage, sid(1));
+  $("btn-pips-back").click();
+  doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", {key:"Escape", bubbles:true, cancelable:true}));
+  assert.equal($("agent-page").hidden, true);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("call_0 in two turns jumps to the right card, and a nested card that arrives later enables its row", async () => {
   const { $, doc, event, start, errors } = view();
   event({ type: "turn_start", turn_id: "t1", prompt: "first" });

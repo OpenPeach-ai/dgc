@@ -1,21 +1,4 @@
-// A step is one line until the reader opens it.
-//
-// The group's own folding is settled (tool-group-folding.test.mjs): it is open while the work
-// happens and folds once the model has moved on, with trouble as the exception -- a failed, denied
-// or stopped card keeps its group open, because an error is the one thing nobody should have to
-// expand to find.
-//
-// What was NOT settled is the card inside it. `.tool.has-output .body { display: block }` put four
-// clamped lines of output on screen for every card that had any, open or not. A clean turn hid
-// that behind its folded group, so it never showed up in a screenshot of one; a turn with a single
-// failure did not fold, and then every successful step beside the failure added four more lines of
-// output nobody had asked to see. That is the wall this was reported as ("the tools and command
-// runs still remain opened").
-//
-// Only a real browser can check it: the class is still on the card either way, and jsdom does not
-// cascade, so a DOM assertion cannot tell a shown body from a hidden one -- which is exactly how
-// three tests went on asserting `has-output` while describing behaviour the panel no longer had.
-// These read the computed style.
+// Tool output, including errors, stays hidden until opened by the reader.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -130,16 +113,15 @@ test("a finished step shows one line, not its output", async (t) => {
   await page.close();
 });
 
-test("the step that failed is open, with its error on screen", async (t) => {
+test("the step that failed stays compact until opened", async (t) => {
   if (skipOrFail(t)) return;
   const page = await render(TURN);
   const failed = (await cardStates(page)).find((card) => card.status === "failed");
   assert.ok(failed, "the fixture must contain a failure");
-  assert.equal(failed.open, true);
-  assert.equal(failed.expanded, "true");
-  assert.equal(failed.bodyDisplay, "block",
-    "an error is the one thing a reader must never have to expand to find");
-  assert.ok(failed.bodyHeight > 0);
+  assert.equal(failed.open, false);
+  assert.equal(failed.expanded, "false");
+  assert.equal(failed.bodyDisplay, "none", "error state is on the summary; output is opt-in");
+  assert.equal(failed.bodyHeight, 0);
   await page.close();
 });
 

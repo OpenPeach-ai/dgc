@@ -344,9 +344,13 @@ class LivenessIsNotAUserActionTest(unittest.TestCase):
     def _suppressions(self, command: dict) -> list:
         from dgc.headless import Backend
         seen: list = []
-        fake = SimpleNamespace(_suppress_wakes=lambda on: seen.append(on),
-                               _dispatch=lambda cmd: None)
-        Backend.dispatch.__get__(fake)(command)
+        # Keep Backend's real lazy command lock and inactive Remote follow hook.
+        # A namespace borrowing dispatch predates those methods and cannot model
+        # this seam once editor and Remote commands share the same backend.
+        fake = Backend.__new__(Backend)
+        fake._suppress_wakes = lambda on: seen.append(on)
+        fake._dispatch = lambda cmd: None
+        fake.dispatch(command)
         return seen
 
     def test_a_heartbeat_is_not_treated_as_a_user_action(self):

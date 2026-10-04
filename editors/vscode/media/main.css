@@ -1,3 +1,4 @@
+@import url("./pips/wordmark.css");
 /* DGC panel — Codex's quiet editor hierarchy with a restrained DGC accent. */
 :root {
   /* Host-native surfaces: Cursor/VS Code inject these tokens for the active color theme. The
@@ -60,7 +61,7 @@
   /* Five sizes and four weights, on Codex's steps (11 · 12 · 14 · 16 · 18). The panel had
      grown 13 sizes including half-pixels and seven weights; the eye reads that as noise even
      when no single choice is wrong. Line heights are 1 · 1.2 · 1.45 · 1.6, chosen by role. */
-  --t-xs: 11px; --t-sm: 12px; --t-base: 14px; --t-lg: 16px; --t-xl: 18px;
+  --t-xs: 11px; --t-sm: 12px; --t-base: var(--vscode-font-size,13px); --t-lg: 16px; --t-xl: 18px;
   /* Transcript icons: one box for everything that describes work, matched to the 12px rows it sits
      in — 14px of box against a 12px cap height is the same proportion the reference set uses.
      12px where the slot is smaller (the image pill, the question ring), 20px in the 80px tile. */
@@ -136,6 +137,16 @@ body {
 #phead .thread-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 #phead .pd { flex: 0 1 25%; min-width: 0; border: 0; padding: var(--sp-1) 0; background: transparent; text-align: right; font: var(--w-reg) var(--t-xs)/1 var(--sans); color: var(--faint); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #phead .pd:hover { color: var(--muted); }
+/* Pips has its own editor tab; its labelled entry stays outside settings and menus. */
+#phead .pips-nav { flex: none; display: inline-flex; align-items: center; min-height: var(--control-sm); padding: 3px 7px; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); }
+#phead .pips-nav:hover { background: var(--surface2); color: var(--text); }
+#phead .pips-nav:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+#phead .pips-back { display:inline-flex; align-items:center; gap:4px; border:0; background:transparent; color:var(--muted); padding:4px 6px 4px 0; font-size:var(--t-sm); cursor:pointer; }
+#phead .pips-back:hover { color:var(--text); }
+#pips-host { display:flex; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; width:100%; }
+body.pips-active > :not(#phead):not(#pips-host):not(#announcer):not(script) { display:none !important; }
+body.pips-active #phead :is(.thread-title,.pd,.chat-add,.agent-back,.agent-mark) { display:none !important; }
+body.pips-active #phead .pm { display:inline-flex; flex:1; }
 /* ---- running chats -------------------------------------------------------------------------- */
 /* One live `dgc serve` per chat. The rail appears only once a second chat exists, so a single-chat
    panel carries no extra chrome; the header's + is the only permanent cost. */
@@ -1212,6 +1223,10 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   border: 1px solid var(--border-strong); border-radius: var(--r-md); outline: 0; background: var(--surface);
   color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 #goal-editor-text:focus { border-color: var(--vscode-focusBorder, var(--accent)); }
+#goal-budget-label { display: block; margin-top: var(--sp-3); color: var(--muted); font-size: var(--t-sm); }
+#goal-editor-budget { width: 100%; padding: var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); color: var(--text); font: inherit; }
+#goal-editor-budget:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+#goal-budget-hint { color: var(--muted); font-size: var(--t-xs); }
 .goal-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
 .goal-dialog-actions .act { border-radius: var(--r-md); }
 .goal-budget { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); color: var(--muted); }
@@ -1557,6 +1572,9 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
    stay untouched. Keep the blank lines between sections.
    ================================================================================================== */
 
+/* Pip mention chips are references, distinct from file attachments. */
+.pip-reference-chip { border-color: var(--vscode-textLink-foreground, #a799ec); }
+.pip-reference-chip .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The By-model filter row. A free-text box rather than fixed provider buttons: the categories a
    reader wants -- ollama, vLLM, llama.cpp, a particular host -- are just values in the provider
    and host columns, and a hard-coded list of them goes stale the first time someone runs something
@@ -1649,15 +1667,14 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 /* The sentence wraps in its own column, never under the faces. */
 .agent-line-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .agent-name, .agent-line-more { margin: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; color: inherit;
-  font: inherit; cursor: pointer; text-align: left; text-decoration: underline; text-decoration-thickness: 1px;
-  text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+  font: inherit; cursor: pointer; text-align: left; text-decoration: none; }
 /* A long name is clipped to the column with an ellipsis; its label and title keep all of it.
    Top-aligned, so its text shares the baseline of the words around it (an inline-block that clips
-   has its baseline at its bottom edge), with a pixel below it for the underline. */
+   has its baseline at its bottom edge). */
 .agent-name { display: inline-block; max-width: min(32ch, 100%); vertical-align: top; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; unicode-bidi: isolate; padding-bottom: 1px; margin-bottom: -1px; }
-.agent-line-more { white-space: nowrap; text-decoration-style: dotted; }
-.agent-name:hover, .agent-line-more:hover { color: var(--text); text-decoration-color: currentColor; }
+  white-space: nowrap; unicode-bidi: isolate; }
+.agent-line-more { white-space: nowrap; }
+.agent-name:not(:disabled):hover, .agent-line-more:not(:disabled):hover { color: var(--text); }
 .agent-name:focus-visible, .agent-line-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 /* Waiting and failed need the reader: brighter and heavier. Never --err-text, which is about 3:1 on
    the light themes (see .model-error). The word says the state; colour only adds to it. */
@@ -1688,7 +1705,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   .agents-pill[data-state="waiting"] .agents-need { color: CanvasText; font-weight: var(--w-bold); text-decoration: underline; }
   .tool.flash { outline-color: Highlight; }
   .agent-row[aria-disabled="true"] .agent-desc { color: GrayText; }
-  .agent-name, .agent-line-more { color: LinkText; text-decoration-color: LinkText; }
+  .agent-name, .agent-line-more { color: LinkText; }
   .agent-name:focus-visible, .agent-line-more:focus-visible { outline: 2px solid Highlight; }
   .agent-state[data-state="waiting"], .agent-state[data-state="failed"] { color: CanvasText; font-weight: var(--w-semi); }
 }
@@ -1926,7 +1943,7 @@ body.ask-docked #tasks-panel { display: none; }
   font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
 .open-ask-input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .open-ask-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
-.open-ask-send, .open-ask-skip { padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm);
+.open-ask-send, .open-ask-skip, .open-ask-collapse { padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm);
   font: var(--w-reg) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
 .open-ask-send { border: 0; background: var(--accent); color: var(--on-accent, #fff); }
 .open-ask-skip { border: 1px solid var(--border-strong); background: transparent; color: var(--muted); }
@@ -2086,3 +2103,14 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
   .thought-note, .thought-hint, .thought-static, .reasoning .thought-cut { color: CanvasText; }
 }
 /* ---- end 0.40 thinking ------------------------------------------------------------------------ */
+
+/* Resolved tool permissions keep an inspectable receipt, without a JSON wall. */
+.card.resolved.compact-permission{padding:7px 10px;border:0;background:transparent;margin-block:4px;font-size:12px}
+.card.resolved.compact-permission>.permission-receipt{opacity:1;color:var(--muted)}
+.permission-receipt>summary{cursor:pointer;overflow-wrap:anywhere}
+.permission-receipt>summary:hover{color:var(--text)}
+.permission-receipt>summary:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}
+.permission-evidence{padding:10px 0 0;color:var(--text)}
+
+.open-ask-collapse { margin-right:auto; background:transparent; color:var(--muted); border:0; cursor:pointer; }
+.open-ask-collapse:hover { color:var(--text); }

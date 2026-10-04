@@ -511,6 +511,62 @@
   const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
+  // Pips has its own durable conversations. Hiding the main chat preserves its
+  // live stream, draft, scroll position and session; it never changes that session.
+  let pipsApp = null, pipsOpen = false, pipsViewVisible = true;
+  const pipsListeners = new Set();
+  let pipSetupCards = null;
+  function setupCards() {
+    if (!pipSetupCards && window.DgcPips?.mountSetupCards && document.documentElement.dataset.pipsDocumentId) {
+      pipSetupCards = window.DgcPips.mountSetupCards({
+        document,
+        postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
+        onOpenRun: navigation => { showPips(); pipsApp?.navigate?.(navigation); },
+
+      });
+    }
+    return pipSetupCards;
+  }
+  function showPips() {
+    const host = $("pips-host");
+    if (!host || !window.DgcPips?.mount) return;
+    if (!pipsApp) {
+      const root = host.attachShadow({mode:"open"});
+      pipsApp = window.DgcPips.mount({
+        root, stylesheetUri:host.dataset.styleUri,
+        postMessage:message => vscode.postMessage({...message,documentId:document.documentElement.dataset.pipsDocumentId}),
+        onMessage:listener => { pipsListeners.add(listener); return () => pipsListeners.delete(listener); },
+        getState:() => { const state=vscode.getState(); return state?.pipsScope===document.documentElement.dataset.draftScope ? state.pips : undefined; },
+        setState:state => vscode.setState({...vscode.getState(),pips:state,pipsScope:document.documentElement.dataset.draftScope}),
+        close:closePips,
+        onSetupPrompt:prompt => {
+          // Preparing a message is never sending it or replacing the user's work.
+          if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main chat already has a draft or attachments. Send or save that draft before describing this setup.';
+          if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 10000) return 'The setup prompt is invalid. Nothing was added to the main chat.';
+          setComposerText(prompt); onInput(); persistDraft(); closePips();
+          setComposerRange(composerText().length);
+          input.focus();
+          return true;
+        },
+      });
+    }
+    pipsOpen = true;
+    document.body.classList.add("pips-active");
+    host.hidden = false;
+    $("btn-pips-back").hidden = false;
+    $("btn-pips").setAttribute("aria-pressed","true");
+    pipsApp.setVisible?.(pipsViewVisible && !document.hidden);
+  }
+  function closePips() {
+    pipsOpen = false;
+    pipsApp?.setVisible?.(false);
+    document.body.classList.remove("pips-active");
+    $("pips-host").hidden = true;
+    $("btn-pips-back").hidden = true;
+    $("btn-pips").setAttribute("aria-pressed","false");
+    input.focus();
+  }
+  document.addEventListener("visibilitychange",()=>pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden));
   // The inline ceilings: what fits in the 4 MiB protocol frame once base64 has inflated it.
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
   // What a backend that takes images out of band allows instead. The count limit goes entirely --
@@ -981,6 +1037,23 @@
   // name until that turn starts or the backend answers that command with an error or refusal.
   let customCommandPending = "";
   const attachments = [];
+  let pipReferencesSupported = false;
+  const pipPicker = { active: false, id: "", query: "", rows: [], cursor: null, workspace: "", loading: false, error: "", emptyLabel:"", timer: null, timeout: null };
+  function validPipReference(p) {
+    return p && typeof p === "object" && !Array.isArray(p)
+      && typeof p.pip_id === "string" && /^pip_[a-f0-9]{32}$/.test(p.pip_id) && p.pip_id.length === 36
+      && typeof p.workspace_id === "string" && /^ws_[a-f0-9]{32}$/.test(p.workspace_id) && p.workspace_id.length === 35
+      && typeof p.name === "string" && p.name.length > 0 && [...p.name].length <= 160 && new TextEncoder().encode(p.name).length <= 640
+      && ["core","scout","lens","patch","rook","pulse","lock","quill"].includes(p.pip_type)
+      && ["active","paused","archived"].includes(p.status)
+      && Number.isSafeInteger(p.job_version) && p.job_version >= 1 && p.job_version <= 999999
+      && Number.isSafeInteger(p.lifecycle_revision) && p.lifecycle_revision >= 0;
+  }
+  function clearPipPicker() {
+    clearTimeout(pipPicker.timer); clearTimeout(pipPicker.timeout); Object.assign(pipPicker, {active:false,id:"",query:"",rows:[],cursor:null,workspace:"",loading:false,error:"",emptyLabel:"",timer:null});
+  }
+  function pipReferenceLabel(p) { return `@${p.name.replace(/\s+/g," ")} · Pip v${p.job_version}`; }
+
   let promptSequence = 0;
   const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const pendingPrompts = new Map();
@@ -1020,7 +1093,11 @@
       for (const source of value.attachments) {
         if (!source || typeof source !== "object" || typeof source.label !== "string" || source.label.length > 8192) return null;
         const item = { label: source.label };
-        if (source.skill || source.template) {
+        if (source.pipReference) {
+          if (!validPipReference(source.pipReference) || items.filter(a => a.pipReference).length >= 8
+              || items.some(a => a.pipReference?.pip_id === source.pipReference.pip_id)) return null;
+          item.pipReference = {...source.pipReference}; item.label = pipReferenceLabel(item.pipReference);
+        } else if (source.skill || source.template) {
           const key = source.skill ? "skill" : "template";
           if (typeof source[key] !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(source[key])) return null;
           item[key] = source[key];
@@ -1081,7 +1158,7 @@
     }
     // Which chats keep their checklist open: webview-local, like the drafts, and bounded the same way.
     const tasksOpen = [...tasksExpanded].slice(-32);
-    try { vscode.setState({ version: 1, scope: draftScope, active: draftSession, entries, pending, tasksOpen }); }
+    try { vscode.setState({ ...vscode.getState(), version: 1, scope: draftScope, active: draftSession, entries, pending, tasksOpen }); }
     catch { omitted = true; }
     if (omitted && !draftWarning) {
       draftWarning = true;
@@ -1104,6 +1181,7 @@
     if (session === draftSession && !adoptFrom) return;
     persistDraft();
     const prior = draftSession;
+    clearPipPicker();
     draftSession = session;
     const source = adoptFrom || (prior === "unbound" ? prior : "");
     if (source && tasksExpanded.delete(source)) tasksExpanded.add(session);
@@ -1994,6 +2072,12 @@
     }
   }, true);
   function promptAttachmentChip(item, images, bubble) {
+    if (item.pipReference) {
+      const chip = el("span", "prompt-att chip pip-reference-chip");
+      chip.textContent = pipReferenceLabel(item.pipReference);
+      chip.title = `${item.pipReference.pip_id} · ${item.pipReference.status} · lifecycle ${item.pipReference.lifecycle_revision} · Reference only`;
+      return chip;
+    }
     if (item.img) {
       const record = {
         name: String(item.label || "Image").replace(/^📷\s*/, "") || "Image",
@@ -2175,7 +2259,7 @@
   let hostSessionSeen = false;       // set by the first session_ready: before it no turn is known here
   function noteLiveTurn(msg) {
     liveTurnHint = {
-      id: String(msg.turnId || "").slice(0, 128), kind: ["resume", "continue", "monitor"].includes(msg.kind) ? msg.kind : "prompt",
+      id: String(msg.turnId || "").slice(0, 128), kind: ["resume", "continue", "monitor", "pip_setup"].includes(msg.kind) ? msg.kind : "prompt",
       prompt: String(msg.prompt || ""), handoff: msg.handoff === true,
       startedAt: Number.isFinite(msg.startedAt) && msg.startedAt > 0 ? Math.min(Date.now(), msg.startedAt) : Date.now(),
     };
@@ -2254,7 +2338,17 @@
     // A resumed goal is not something the user just typed. Show it as what it is instead of
     // echoing the objective back into the chat as a fresh prompt. The same holds for a turn the
     // Continue card started after the backend stopped: DGC wrote that instruction, not the user.
-    if (kind === "resume" || kind === "continue") {
+    if (kind === "pip_setup") {
+      const note = el("div", "resume-note pip-approval-note");
+      let receipt;try{receipt=JSON.parse(prompt);}catch{}
+      const kinds=['core','scout','lens','patch','rook','pulse','lock','quill'];
+      if(receipt && kinds.includes(receipt.pip_type) && typeof receipt.name==='string'){
+        const face=el('span','pip-run-avatar');face.setAttribute('aria-hidden','true');
+        if(window.PipConcepts?.plush)face.innerHTML=window.PipConcepts.plush.markup({index:kinds.indexOf(receipt.pip_type),name:receipt.name},'success',`approval-${id.replace(/[^a-z0-9]/gi,'')}`,{paused:true});
+        note.append(face,el('span','pip-approval-name',receipt.name),el('span','pip-approval-status','Setup saved'));
+      }else note.append(el('span','','Pip setup saved'));
+      appendTarget.appendChild(note);head=note;
+    } else if (kind === "resume" || kind === "continue") {
       const note = el("div", replaying ? "resume-note hist" : "resume-note");
       note.innerHTML = `<span class="note-icon" data-icon="play">${icon("play")}</span>`
         + `<span>${kind === "continue" ? "Continued the interrupted turn" : "Resumed the standing goal"}</span>`;
@@ -2524,12 +2618,13 @@
     }
     turn.act.classList.add("done");
     turn.act.removeAttribute("title");
-    const outcome = reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
+    const outcome = reason === "paused" ? "Paused" : reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked";
     // A replayed turn has no clock — the session file never recorded when it began — so it says
     // what happened and stops there rather than printing a fabricated 0s.
     turn.act.textContent = turn.t0 == null ? outcome
       : `${outcome} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     const finished = turn.block;
+    pipSetupCards?.finish(finished);
     turn = null;
     // Repaint the checklist now that no turn is live. The row hides itself only when it renders
     // with every item done AND nothing running, and nothing re-rendered it at the end of a turn --
@@ -3114,7 +3209,7 @@
   function refreshToolGroup(group) {
     if (!group) return;
     const all = [...group.querySelectorAll(":scope > .tool")];
-    const cards = all.filter((card) => !card.classList.contains("agent-owned"));
+    const cards = all.filter((card) => !card.classList.contains("agent-owned") && !card.classList.contains("pip-run-owned"));
     if (!cards.length) {
       if (all.length) group.classList.add("agent-owned");
       if (turn && turn.toolGroup === group) turn.toolGroup = null;
@@ -3144,14 +3239,8 @@
     // is still a command, and saying so is strictly more useful than a shrug.
     setIcon(group.querySelector(":scope > summary > .tg-icon"),
       headerIcon(running.length ? running : executed.length ? executed : cards));
-    // Open a group the FIRST time something in it fails, and never again: this runs on every tool
-    // update, so re-asserting it meant a reader who folded the group had it thrown open under them
-    // a moment later, for as long as one failed card remained. There was no way to put it away.
-    // A hand-fold is a decision and outlives the group's own opinion.
-    if (failures.length && !group.dataset.failureShown) {
-      group.dataset.failureShown = "1";
-      group.open = true;
-    }
+    // Error counts stay visible in the summary. Tool output only expands on
+    // the reader's click; progress and failures never take over their scroll.
   }
   // A DGC delegation from the chat's own model: the step that starts a sub-agent the transcript
   // draws as an agent line. The exact name, not canonicalTool(): Claude's and Codex's own "Task"
@@ -3165,30 +3254,15 @@
     // group the moment its agent starts; a replay draws every call of the step before any result,
     // and without this a [task, bash] step put the bash group above the line after a reload and
     // below it live. The group the spawn left folds when the model moves on, like any other.
-    const spawn = isTopLevelSpawn(card);
+    const spawn = isTopLevelSpawn(card) || (card.dataset.toolName === "run_pip_now" && !agentIdFromCall(card.dataset.callId));
     if (spawn && turn.toolGroup) { (turn.leftGroups ||= []).push(turn.toolGroup); turn.toolGroup = null; }
     if (!turn.toolGroup) {
       turn.toolGroup = appendTurnContent(el("details", "tool-group"));
       turn.toolGroup.innerHTML = `<summary><span class="tg-icon" data-icon="wrench" aria-hidden="true">${icon("wrench")}</span>`
         + '<span class="tool-group-label">Working</span></summary>';
-      // Open, because work you cannot see is work you cannot check. The group collapsed itself
-      // the moment it was created, so a run of twenty commands showed one grey line and the
-      // reader had no idea what had just been done to their project. The summary sentence still
-      // sits in the header when the group is folded by hand.
-      //
-      // A spawn's group starts folded: its header already reads "Delegating <what it was asked to
-      // do>", the card inside would only repeat it, and the agent's own work is on its page.
-      // refreshToolGroup still opens it the first time the delegation fails or is refused.
-      turn.toolGroup.open = !spawn;
-      // Capture the element. Reading it back through `turn` fires after a rewind or a turn change
-      // has already cleared turn.toolGroup, and the listener then throws on null -- which took out
-      // nineteen tests across agents, reloads, steering replay and the image viewer.
-      const group = turn.toolGroup;
-      group.addEventListener("toggle", () => {
-        // Folding by hand settles it. Without this the next failure in the same group -- or any
-        // later refresh -- would reopen it, which is how the section became impossible to close.
-        if (!group.open) group.dataset.failureShown = "1";
-      });
+      // Start compact during live work and replay. Opening this native details
+      // control is the reader's choice and survives later tool updates.
+      turn.toolGroup.open = false;
     }
     turn.toolGroup.appendChild(card);
     refreshToolGroup(turn.toolGroup);
@@ -3424,6 +3498,18 @@
     if (decision === "once") return "Allowed once";
     if (decision === "always") return rule ? `Always allowed · ${rule}` : "Always allowed";
     return note ? `Denied · note for the model: ${note}` : "Denied";
+  }
+  function compactPermissionCard(card, name) {
+    if (!card?.classList.contains("resolved") || card.classList.contains("compact-permission")) return;
+    const decision = card.querySelector(".decision")?.textContent || "Recorded decision";
+    const details = el("details", "permission-receipt"), summary = el("summary");
+    summary.textContent = `${name || "Tool"} · ${decision.length > 120 ? decision.slice(0, 119) + "…" : decision}`;
+    const evidence = el("div", "permission-evidence");
+    while (card.firstChild) evidence.appendChild(card.firstChild);
+    details.append(summary, evidence); card.appendChild(details);
+    card.classList.add("compact-permission");
+    // The resolved action controls remain disabled. Reading its receipt is not.
+    card.removeAttribute("aria-disabled");
   }
   // A plan review keeps its feedback only when planning goes on (the backend drops it on approval).
   function planDecision(decision, feedback) {
@@ -3898,11 +3984,23 @@
     }
   }
 
+  let goalEditPending = false;
+  function setGoalEditPending(pending) {
+    goalEditPending = pending;
+    $("goal-editor-text").disabled = pending;
+    $("goal-editor-budget").disabled = pending;
+    $("goal-editor-save").disabled = pending;
+    $("goal-editor-save").textContent = pending ? "Applying after current request…" : "Save";
+    $("goal-editor-cancel").textContent = pending ? "Close" : "Cancel";
+  }
   function openGoalEditor() {
     if (!goalState.text) return;
     const editor = $("goal-editor-text");
-    editor.value = goalState.text;
-    $("goal-editor-save").disabled = false;
+    if (!goalEditPending) {
+      editor.value = goalState.text;
+      $("goal-editor-budget").value = goalState.token_budget ? String(goalState.token_budget) : "";
+    }
+    setGoalEditPending(goalEditPending);
     $("goal-editor").hidden = false;
     editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
   }
@@ -3911,12 +4009,17 @@
     if (restoreFocus && !goalBar.hidden) focusQuietly($("goal-main"));
   }
   function saveGoalEditor() {
+    if (goalEditPending) return;
     const text = $("goal-editor-text").value.trim();
     if (!text) return;
-    // The budget field is gone from this dialog -- it is not something you set while rewording an
-    // objective, and `/goal budget` still sets it. Send back whatever is already on the goal, so
-    // editing the words never silently clears a budget somebody set elsewhere.
-    const budget = Number(goalState.token_budget || 0);
+    const rawBudget = $("goal-editor-budget").value.trim();
+    const budget = rawBudget === "" ? 0 : Number(rawBudget);
+    if (!Number.isSafeInteger(budget) || budget < 0 || budget > 1e12) {
+      $("goal-editor-budget").setCustomValidity("Enter a whole number from 0 to 1,000,000,000,000, or leave blank for no limit.");
+      $("goal-editor-budget").reportValidity();
+      return;
+    }
+    $("goal-editor-budget").setCustomValidity("");
     $("goal-editor-save").disabled = true;
     vscode.postMessage({ type: "updateGoal", text,
                          tokenBudget: Number.isSafeInteger(budget) && budget > 0 ? budget : 0 });
@@ -4296,6 +4399,8 @@
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         agentsLive = ev.capabilities?.agents === true;
         imageSpool = ev.capabilities?.image_spool === true;
+        pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        clearPipPicker();
         mcpContextSupported = ev.capabilities?.mcp_context === true;
         mcpManagement = ev.capabilities?.mcp_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
@@ -4382,7 +4487,7 @@
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
-          setSending(true); if (queuedCount > 0 && ev.kind !== "monitor") { queuedCount--; renderQueued(); }
+          setSending(true); if (queuedCount > 0 && ev.kind !== "monitor" && ev.kind !== "pip_setup") { queuedCount--; renderQueued(); }
           // A queued prompt leaves the queue when its own turn starts, matched by the request id the
           // backend carries on turn_start. Never by position: a queued custom slash command, a goal
           // cycle or a continuation has no id of the user's, and popping the head for one of those
@@ -4576,9 +4681,6 @@
         const blocked = ev.is_error
           && String(ev.output || "").startsWith("error: repeated tool call blocked");
         setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : "completed"));
-        if (ev.is_error) {
-          c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
-        }
         if (ev.is_diff && ev.diff) {
           c.classList.add("no-body");           // the diff below is this step's detail
           const rendered = renderDiff(ev.diff); c.after(rendered);
@@ -4592,6 +4694,8 @@
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
+          setupCards()?.toolResult(c, ev);
+          if (c.classList.contains("pip-run-owned")) refreshToolGroup(c.closest(".tool-group"));
         }
         // The open page of the agent this delegation started: its outcome note reads this result,
         // which arrives after the agent's own end.
@@ -4607,7 +4711,6 @@
         c.querySelector(".dot").className = "dot deny";
         setToolStatus(c, "denied");
         setToolOutput(c, String(ev.reason || "Permission denied"));
-        c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         break;
       }
       case "permission_decision": {
@@ -4618,6 +4721,7 @@
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
         resolveCard(c, String(ev.message || "Recorded decision"));
+        compactPermissionCard(c, ev.name);
         break;
       }
       case "permission_request": {
@@ -4638,6 +4742,7 @@
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
           if (!resolveCard(c, permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
+          compactPermissionCard(c, ev.name);
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
             rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
             reason: b.dataset.d === "deny" && note ? note : undefined });
@@ -4990,7 +5095,12 @@
           if (card.dataset.requestId === String(ev.id)) resolveCard(card, ev.message || (ev.decision === "once" ? "Allowed once" : "Denied"));
         });
         if (!replaying) sysLine(ev.message, ev.decision === "no"); break;
+      case "prompt_pips": receivePromptPips(ev); break;
       case "command_rejected":
+        if (ev.command === "list_prompt_pips") {
+          if (pipPicker.active && ev.request_id === pipPicker.id) { pipPicker.loading=false; pipPicker.error=String(ev.message || "Pip references are unavailable."); renderPipPicker(); }
+          break;
+        }
         // A refused Clear says why beside the checklist, not in the transcript.
         if (ev.command === "clear_todos") { settleTodoClear(ev.message || "DGC could not clear the checklist."); break; }
         // A refused answer re-enables its docked question with the reason, instead of a stuck "Sending…".
@@ -5033,7 +5143,7 @@
         break;
       case "model_retry": onModelRetry(ev); break;
       case "turn_end":
-        speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
+        speak(ev.reason === "paused" ? "DGC goal paused" : ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
         if (!replaying) { setSending(false); liveTurnHint = null; agentsTurnEnd(); }
         break;
@@ -5175,7 +5285,7 @@
     const m = el("div", "msg user goal-prompt");
     m.appendChild(el("div", "role", "goal"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, objective, attachments);
+    fillUserBubble(bubble, objective.replace(/^--tokens\s+\d{1,13}\s+/, ""), attachments);
     m.appendChild(bubble);
     // Settled like every other prompt: pinned, skippable off screen, and its fold decided and
     // re-decided with the width. It was the one user bubble that never was.
@@ -5183,6 +5293,7 @@
     return m;
   }
   function submitGoal(objective, restoreText = composerText()) {
+    if (attachments.some(a => a.pipReference)) { sysLine("Pip references are supported in chat messages. Remove the reference before starting a standing goal.", true); persistDraft(); return; }
     if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
       sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
     }
@@ -5222,26 +5333,35 @@
       ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
       : typed;
     if (!text && !attachments.length) return;
+    const references = attachments.filter(a => a.pipReference);
+    if (references.length && (!pipReferencesSupported || !text || references.some(a => !validPipReference(a.pipReference)))) {
+      sysLine(!pipReferencesSupported ? "Update or reconnect DGC to send Pip references. Your draft is saved." : !text ? "Write a message to send with the Pip reference." : "Remove and select the invalid Pip reference again.", true); persistDraft(); return;
+    }
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
     const templates = attachments.filter((a) => a.template).map((a) => a.template);
+    if(references.length && (goalDraftArmed || /^\/goal(?:\s|$)/i.test(text)||/\s\/goal$/i.test(text))) {sysLine("Pip references are supported in chat messages. Remove the reference before using a goal command.",true);persistDraft();return;}
     const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
       "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
+    const goalManagement = value => goalStateCommand.includes(value.toLowerCase()) || /^budget(?:\s|$)/i.test(value);
     if (goalDraftArmed) {
-      if (!text) {
+      // Restoring a cancelled goal re-arms the composer. A freshly typed /goal
+      // prefix is still command syntax, not part of its objective.
+      const goalText = text.replace(/^\/goal(?:\s+|$)/i, "").trim();
+      if (!goalText) {
         sysLine("Type an objective for this Goal.");
         return;
       }
-      if (goalStateCommand.includes(text.toLowerCase()) && !attachments.length) {
-        vscode.postMessage({ type: "slashText", text: `/goal ${text}` });
+      if (goalManagement(goalText)) {
+        vscode.postMessage({ type: "slashText", text: `/goal ${goalText}` });
         setGoalDraftArmed(false); clearComposer(); persistDraft(); return;
       }
-      submitGoal(text, text); return;
+      submitGoal(goalText, text); return;
     }
     const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
-    if (goalPrefix && !goalStateCommand.includes(goalPrefix.toLowerCase())) {
+    if (goalPrefix && !goalManagement(goalPrefix)) {
       submitGoal(goalPrefix, goalPrefix); return;
     }
     if (goalPrefix || text.toLowerCase() === "/goal") {
@@ -5288,6 +5408,7 @@
       attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
+      ...(references.length ? {pip_references: references.map(a => ({pip_id:a.pipReference.pip_id,expected_version:a.pipReference.job_version,expected_lifecycle_revision:a.pipReference.lifecycle_revision}))} : {}),
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });
     clearComposer(); attachments.length = 0; dropPastedChips(); renderAtts(); persistDraft(); setSending(true); scroll();
@@ -5345,10 +5466,10 @@
         atts.appendChild(imageAttachmentChip(a, drop));
         return;
       }
-      const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}${a.pasted ? " pasted-chip" : ""}`);
+      const chip = el("span", `chip${a.pipReference ? " pip-reference-chip" : ""}${a.skill || a.template ? " invocation-chip" : ""}${a.pasted ? " pasted-chip" : ""}`);
       const label = el("span", "chip-label"), remove = el("button", "x", "\u00d7");
       label.textContent = a.pasted ? `Pasted text · ${a.chars.toLocaleString()} chars` : a.label;
-      label.title = label.textContent; remove.type = "button"; remove.title = "Remove this attachment";
+      label.title = a.pipReference ? `${a.pipReference.pip_id} · ${a.pipReference.status} · lifecycle ${a.pipReference.lifecycle_revision} · Reference only; no work starts` : label.textContent; remove.type = "button"; remove.title = "Remove this attachment";
       remove.setAttribute("aria-label", `Remove attachment ${label.textContent}`);
       // (No pill to take with it: pillShowing() suppresses a chip for as long as a pill stands for
       // the same selection, so a chip and its pill are never both on screen. Measured in Chromium
@@ -5384,7 +5505,7 @@
 
   // ---- @file / slash popover ----
   let popAwaitingFiles = false;   // an "@" opened before the workspace file list had arrived
-  function hidePop() { pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
+  function hidePop() { clearPipPicker(); pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
@@ -5394,9 +5515,44 @@
     // is a rendering change only.
     const rowIcon = (it) => (it.skill ? "codicon-package"
       : it.template ? "codicon-symbol-snippet" : "codicon-terminal");
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
+  }
+  function renderPipPicker() {
+    if (!pipPicker.active) return;
+    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.status} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
+    if (pipPicker.loading) items.push({label:"Loading Pips…",disabled:true});
+    else if (pipPicker.error) items.push({label:pipPicker.error,disabled:true},{label:"Retry Pip list",pipRetry:true});
+    else if (pipPicker.cursor && pipPicker.rows.length < 100) items.push({label:"Load more Pips",pipMore:true});
+    else if (!items.length) items.push({label:pipPicker.emptyLabel||"No matching Pips in this chat’s workspace",disabled:true});
+    if(pipPicker.rows.length>=100)items.push({label:"Showing 100 Pips. Refine your search.",disabled:true});
+    popMode="pip";showPop(items);
+  }
+  function requestPromptPips(query, more=false) {
+    clearTimeout(pipPicker.timer);clearTimeout(pipPicker.timeout);
+    if (!pipReferencesSupported || !sessionReady) { pipPicker.id="";pipPicker.loading=false;pipPicker.error="Reconnect to use Pip references."; renderPipPicker(); return; }
+    if (new TextEncoder().encode(query).length>128) { pipPicker.id="";pipPicker.error="Use a shorter Pip search (128 bytes).";pipPicker.loading=false;renderPipPicker();return; }
+    const after=more?pipPicker.cursor:null;
+    if(!more)Object.assign(pipPicker,{rows:[],cursor:null,workspace:"",emptyLabel:""});
+    Object.assign(pipPicker,{query,loading:true,error:"",id:`pip-ref-${promptPrefix}-${++promptSequence}`});renderPipPicker();
+    const id=pipPicker.id;
+    pipPicker.timer=setTimeout(()=>{if(pipPicker.active&&pipPicker.id===id){vscode.postMessage({type:"list_prompt_pips",query,limit:20,...(after?{after}:{}),request_id:id});pipPicker.timeout=setTimeout(()=>{if(pipPicker.active&&pipPicker.id===id&&pipPicker.loading){pipPicker.id="";pipPicker.loading=false;pipPicker.error="The computer did not answer. Retry when connected.";renderPipPicker();}},10000);}},120);
+  }
+  function receivePromptPips(ev) {
+    if(!pipPicker.active || ev.request_id!==pipPicker.id) return;
+    clearTimeout(pipPicker.timeout);pipPicker.loading=false;
+    if(ev.workspace_id===""&&Array.isArray(ev.pips)&&!ev.pips.length&&ev.next_cursor===null&&!pipPicker.workspace){pipPicker.rows=[];pipPicker.cursor=null;pipPicker.emptyLabel="No Pips are registered for this chat’s workspace.";renderPipPicker();return;}
+    const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:ev.workspace_id})):null;
+    if(!rows||rows.length>20||!rows.every(validPipReference)||new Set(rows.map(p=>p.pip_id)).size!==rows.length
+      ||typeof ev.workspace_id!=="string"||!/^ws_[a-f0-9]{32}$/.test(ev.workspace_id)||ev.workspace_id.length!==35
+      ||(pipPicker.workspace&&pipPicker.workspace!==ev.workspace_id)
+      ||!(ev.next_cursor===null||typeof ev.next_cursor==="string"&&ev.next_cursor.length>0&&ev.next_cursor.length<=256&&!/[\u0000-\u001f\u007f]/.test(ev.next_cursor))) {
+      pipPicker.error="The computer returned invalid Pip references. Refresh the list.";renderPipPicker();return;
+    }
+    pipPicker.workspace=ev.workspace_id;pipPicker.cursor=ev.next_cursor;
+    for(const p of rows)if(!pipPicker.rows.some(old=>old.pip_id===p.pip_id))pipPicker.rows.push(p);
+    renderPipPicker();
   }
   function movePop(d) {
     if (!popMode) return;
@@ -5412,7 +5568,16 @@
     scheduleDraftSave();
   }
   function choosePop(i) {
-    const it = popItems[i]; if (!it) return;
+    const it = popItems[i]; if (!it || it.disabled) return;
+    if(it.pipPicker){clearPipPicker();pipPicker.active=true;replacePopToken("@");requestPromptPips("");return;}
+    if(it.pipMore||it.pipRetry){requestPromptPips(pipPicker.query,!!it.pipMore);return;}
+    if(it.pipReference){
+      if(!validPipReference(it.pipReference)||!pipReferencesSupported)return;
+      if(attachments.some(a=>a.pipReference?.pip_id===it.pipReference.pip_id)){sysLine("This Pip is already referenced.");return;}
+      if(attachments.filter(a=>a.pipReference).length>=8){sysLine("Reference at most eight Pips in one message.",true);return;}
+      if(!canAttach())return;
+      attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});renderAtts();replacePopToken();hidePop();input.focus();return;
+    }
     if (it.skill || it.template) {
       const kind = it.skill ? "skill" : "template";
       if (!attachInvocation(kind, it.skill || it.template)) return;
@@ -5540,7 +5705,11 @@
     new ResizeObserver(() => { if (input.clientWidth !== composerSizedWidth) autosizeComposer(); })
       .observe(input.parentElement || input);
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) autosizeComposer(); });
+  document.body.classList.toggle("motion-paused", document.hidden);
+  document.addEventListener("visibilitychange", () => {
+    document.body.classList.toggle("motion-paused", document.hidden);
+    if (!document.hidden) autosizeComposer();
+  });
   window.addEventListener("focus", autosizeComposer);
 
   // ---- composer edits that Cmd/Ctrl+Z can take back ----
@@ -5701,10 +5870,13 @@
     const upto = v.slice(0, caret);
     const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
     if (!token || composerSelection()[0] !== composerSelection()[1] || input.matches(":disabled")) return hidePop();
-    popStart = caret - token[2].length;
+    const nextStart = caret - token[2].length;
+    if(pipPicker.active && (token[2][0]!=="@"||nextStart!==popStart))clearPipPicker();
+    popStart = nextStart;
     popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
     popMode = token[2][0];
     const query = token[2].slice(1).toLowerCase();
+    if(pipPicker.active){if(query!==pipPicker.query)requestPromptPips(query);else renderPipPicker();return;}
     // Codex turns the complete `/goal` token into a pinned composer choice immediately. Requiring
     // a second Enter or Tab leaves it as highlighted inline text and gives no visible draft state.
     // A pasted `/goal pause` still remains a management command because its final token is `pause`.
@@ -5736,7 +5908,9 @@
       // so the list arrived and nothing reopened. You typed "@", saw nothing, and only got the
       // picker by typing another character.
       if (files.length === 0) { popAwaitingFiles = true; vscode.postMessage({ type: "reqFiles" }); }
-      showPop(files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
+      const candidates=files.filter((f) => f.label.toLowerCase().includes(query)).slice(0,30);
+      if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This chat’s workspace · no work starts",pipPicker:true});
+      showPop(candidates);
     } else hidePop();
   }
   input.addEventListener("input", onInput);
@@ -5945,6 +6119,8 @@
     items.push({ id: "plan", icon: "checklist", label: "Plan mode",
                  hint: curMode === "plan" ? "turn off" : "turn on",
                  run: () => setMode(curMode === "plan" ? "default" : "plan") });
+    items.push({ id: "pips", icon: "beaker", label: "Pips",
+                 hint: "your Pips and conversations", run: () => vscode.postMessage({ type: "openPips" }) });
     items.push({ id: "memory", icon: "bookmark", label: "Memory",
                  hint: "what DGC remembers",
                  run: () => vscode.postMessage({ type: "slash", action: "memory" }) });
@@ -6078,6 +6254,7 @@
   /** Switching chats: everything on screen belongs to the chat being left. The incoming chat's
    *  backend sends its own history snapshot right behind this, so nothing is reconstructed here. */
   function clearForChatSwitch() {
+    pipReferencesSupported=false;hidePop();
     discardTurn();
     log.innerHTML = "";
     queuedCount = 0; queuedPrompts.clear(); renderQueued();
@@ -6107,6 +6284,8 @@
     hideAgentsMenu(e);
   });
 
+  $("btn-pips").onclick = () => vscode.postMessage({ type: "openPips" });
+  $("btn-pips-back").onclick = closePips;
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
 
   // ---- replay ----
@@ -6209,6 +6388,7 @@
   }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
+    if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
@@ -6371,6 +6551,15 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
+    if (msg.type === "pipsOpen") { showPips(); return; }
+    if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
+      pipSetupCards?.receive(msg);
+      if (msg.type === "pipsVisibility") {
+        pipsViewVisible = msg.visible === true;
+        pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden);
+      } else for (const listener of pipsListeners) listener(msg);
+      return;
+    }
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "chat_slots") { promptChat = String(msg.activeId || promptChat); renderChatBar(msg); }
     else if (msg.type === "chat_switched") {
@@ -6449,6 +6638,7 @@
     }
     else if (msg.type === "turn_active") noteLiveTurn(msg);
     else if (msg.type === "cleared") {
+      pipReferencesSupported=false;hidePop();
       // DGC: Restart Backend. The backend holding the queued messages is going away and the new one
       // replays the chat: they are given back as not sent, as Stop gives them back.
       discardTurn(); log.innerHTML = ""; setSending(false);
@@ -6465,15 +6655,17 @@
     else if (msg.type === "prompts_unsent") adoptUnsentPrompts(msg.items);
     else if (msg.type === "prompt_rejected") { rejectPrompt(msg.requestId); if (!turn) setSending(false); }
     else if (msg.type === "goal_start_state") {
+      if (msg.state === "cancelled") { setSending(!!turn); }
       if (msg.state === "error") {
-        setSending(false);
+        setSending(!!turn);
         sysLine(String(msg.error || "DGC could not start the goal."), true);
       }
     }
     else if (msg.type === "goal_edit_state") {
-      if (msg.state === "saved") closeGoalEditor();
+      if (msg.state === "pending") setGoalEditPending(true);
+      else if (msg.state === "saved") { setGoalEditPending(false); closeGoalEditor(); }
       else if (msg.state === "error") {
-        $("goal-editor-save").disabled = false;
+        setGoalEditPending(false);
         sysLine(String(msg.error || "DGC could not update the goal."), true);
       }
     }
@@ -6586,6 +6778,7 @@
   // Hook dispatchers the handlers above call. Each 0.40 lane fills in only its own section below;
   // the dispatchers keep the order agents, images, reconnecting, options.
   function sessionResetHooks(kind) {
+    pipSetupCards?.reset();
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
   }
   function backendExitHooks(msg) {
@@ -6594,30 +6787,10 @@
   // Anything drawn at turn level between tool rounds (text, a model-retry line, an inline thought
   // note, a withheld-thinking row, a collapsed reasoning group, an image row with no step) ends the
   // open tool group, so the next tool card starts a new group below it rather than joining one above.
-  // A tool group stops being the LIVE one when the model moves on -- to prose, to a decision
-  // card, to the end of the turn. Codex folds each finished run to one muted line, so its
-  // transcript reads as a sequence of steps instead of a wall of cards, and the founder asked for
-  // the same (2026-09-24).
-  //
-  // The group stays OPEN while it works. That is the part the previous decision was protecting:
-  // it used to collapse the moment it was created, so a run of twenty commands showed one grey
-  // line and the reader could not see what was being done to their project. Folding only once
-  // there is nothing left to watch keeps both -- you see the work happen, and you are not left
-  // scrolling past it afterwards. The summary sentence the header already prints is what remains.
-  //
-  // A group that failed, was denied, or was stopped stays open. An error is the one thing you
-  // must never have to expand to find.
-  //
-  // A replayed turn is built in a detached fragment, so "connected" is not the test there: without
-  // this a reloaded chat left every group open, a wall of cards the live turn had folded away.
-  function retireToolGroup(group) {
-    if (!group || (!group.isConnected && !replaying)) return;
-    const cards = [...group.querySelectorAll(":scope > .tool")];
-    if (!cards.length) return;
-    const unsettled = cards.some((card) => card.dataset.status === "running");
-    const trouble = cards.some((card) => ["failed", "denied", "stopped"].includes(card.dataset.status));
-    if (!unsettled && !trouble) group.open = false;
-  }
+  // Retiring changes ownership, never the user's expansion choice. Groups
+  // start collapsed, and remain in the state the reader selected.
+  function retireToolGroup(group) { /* No automatic expansion or folding. */ }
+
   function releaseToolGroup() {
     if (!turn) return;
     retireToolGroup(turn.toolGroup);
@@ -7978,7 +8151,7 @@
   hideAgentsMenu = agentsChain(hideAgentsMenu, agentsHideMenu);
   $("agent-back")?.addEventListener("click", () => closeAgentPage());
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !agentPageId) return;
+    if (pipsOpen || event.key !== "Escape" || !agentPageId) return;
     if (agentsMenuOpen()) return;
     event.preventDefault();
     event.stopPropagation();
@@ -9408,10 +9581,8 @@
   }
   // ---- an open question ------------------------------------------------------------------------
   // The turn did not stop for this, so the card lives in the transcript rather than docking over
-  // the composer the way the picker does. After a while unanswered it folds to a single line you
-  // can click to bring it back -- the behaviour Codex has, minus the part where the question then
-  // evaporates with no record that it was ever asked.
-  const ASK_FOLD_MS = 30000;
+  // the composer the way the picker does. Pending decisions remain visible until the reader
+  // answers, skips, or explicitly collapses the question.
   const openAsks = new Map();
 
   function sendOpenAsk(ask) {
@@ -9446,7 +9617,6 @@
     ask.row.dataset.state = "open";
     ask.input.disabled = false;
     ask.input.focus();
-    clearTimeout(ask.timer);            // it was answered once; do not fold it out from under you
     const said = String(message || "").trim();
     let why = ask.row.querySelector(".open-ask-why");
     if (!why) {
@@ -9464,12 +9634,10 @@
   function foldAsk(ask) {
     if (ask.row.dataset.state !== "open") return;
     ask.row.dataset.state = "folded";
-    clearTimeout(ask.timer);
   }
 
   function unfoldAsk(ask) {
     ask.row.dataset.state = "open";
-    clearTimeout(ask.timer);            // it was brought back on purpose; do not fold it again
     ask.input.focus();
   }
 
@@ -9481,9 +9649,8 @@
     row.dataset.state = "open";
     row.dataset.askId = id;
 
-    // The folded line is all that survives after 30s, so it has to say enough to be worth
-    // reopening: a question with choices says how many, or the chip is indistinguishable from
-    // every other unanswered question in the transcript.
+    // Only the reader folds an unanswered question. Keep its choices discoverable
+    // when deliberately collapsed; elapsed time must never hide a pending decision.
     const optionCount = Array.isArray(ev.options) ? ev.options.length : 0;
     const foldedLabel = optionCount
       ? `Answer question \u00b7 ${optionCount} option${optionCount === 1 ? "" : "s"}`
@@ -9501,7 +9668,7 @@
     input.placeholder = "Answer, or skip";
     input.setAttribute("aria-label", String(ev.question || "Answer the question"));
 
-    const ask = { id, question: String(ev.question || ""), row, input, timer: 0 };
+    const ask = { id, question: String(ev.question || ""), row, input };
 
     const chips = el("div", "open-ask-chips");
     for (const suggestion of (Array.isArray(ev.suggestions) ? ev.suggestions : []).slice(0, 4)) {
@@ -9548,7 +9715,10 @@
     send.type = "button"; send.onclick = () => sendOpenAsk(ask);
     const skip = el("button", "open-ask-skip", "Skip");
     skip.type = "button"; skip.onclick = () => skipOpenAsk(ask);
-    actions.append(skip, send);
+    const collapse = el("button", "open-ask-collapse", "Collapse");
+    collapse.type = "button"; collapse.setAttribute("aria-label", "Collapse question");
+    collapse.onclick = () => { foldAsk(ask); folded.focus(); };
+    actions.append(collapse, skip, send);
     body.appendChild(actions);
 
     input.onkeydown = (event) => {
@@ -9556,29 +9726,16 @@
       if (event.key === "Escape") { event.preventDefault(); foldAsk(ask); }
     };
     folded.onclick = () => unfoldAsk(ask);
-    // ANY interaction stops it folding under you, not just typing. Typing was the only thing that
-    // cancelled this timer, so a user reading several option descriptions -- which is most of a
-    // minute when each has a line of explanation -- had the body go `display: none` with the
-    // pointer over the option they were about to click. Reading is as much a commitment as typing,
-    // and pointing at the card is the only evidence of reading there is. This is what Codex does
-    // too: any keypress or paste snoozes its picker's timer before anything else is processed.
-    const snooze = () => clearTimeout(ask.timer);
-    input.oninput = snooze;
-    body.addEventListener("pointerenter", snooze);
-    body.addEventListener("pointermove", snooze);
-    body.addEventListener("focusin", snooze);
 
     row.append(folded, body);
     openAsks.set(id, ask);
     turn.block.appendChild(row);
-    ask.timer = setTimeout(() => foldAsk(ask), ASK_FOLD_MS);
     scroll();
   }
 
   function settleOpenAsk(ev) {
     const ask = openAsks.get(String(ev.ask_id || ""));
     if (!ask) return;
-    clearTimeout(ask.timer);
     openAsks.delete(ask.id);
     // An answered question already shows as the user's own bubble, quoted, so the card goes. The
     // other outcomes leave one quiet line: a question that was asked and not answered is part of

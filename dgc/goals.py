@@ -30,6 +30,18 @@ def parse_start(text: str) -> tuple[str, int | None]:
     return match[2].strip(), int(match[1])
 
 
+
+def change_terminal_budget(agent, text: str) -> str:
+    """Change only an existing goal's budget; never replace or resume the goal."""
+    match = re.fullmatch(r"budget\s+(off|none|0|[1-9][0-9]{0,12})", text.strip(), re.I)
+    budget = (int(match[1]) if match and match[1].isdigit() else 0)
+    if not match or budget > 10**12 or not agent.goal:
+        raise ValueError("Use /goal budget NUMBER|off with an existing goal.")
+    if not agent.set_goal(agent.goal, status=agent.goal_status, token_budget=budget):
+        raise ValueError(agent._last_persist_error or "Goal budget was not saved.")
+    return f"goal token budget → {budget:,}" if budget else "goal token budget removed"
+
+
 def _count(value, maximum=10**12) -> int:
     return min(maximum, max(0, value)) if isinstance(value, int) and not isinstance(value, bool) else 0
 
@@ -351,6 +363,111 @@ class GoalLifecycle:
         if callable(notify):
             notify(self.goal, self.goal_status)
 
+    def queue_goal_replacement(self, text: str, *, expected_goal_id: str,
+                               request_id: str, token_budget=None, inputs=None, on_queued=None,
+                               replace: bool = True) -> bool:
+        """Stage one human replacement for the native goal owner's next boundary.
+
+        With replace=False this is an edit: identity, inputs and accounting survive.
+        The UI thread never edits persisted goal state or resets request accounting.
+        A cancellation/finalization returns the unapplied request to the frontend.
+        """
+        clean = self._safe_text(text).strip()
+        if (not clean or len(clean) > self.goal_max_chars() or not request_id
+                or len(request_id) > 128 or (token_budget is not None and
+                    (type(token_budget) is not int or not 0 <= token_budget <= 10**12))):
+            self._last_persist_error = "Enter a valid goal objective and token budget."
+            return False
+        from .goal_inputs import normalize_inputs
+        try:
+            selected = normalize_inputs(self._safe_value(inputs or {}))
+        except (TypeError, ValueError) as exc:
+            self._last_persist_error = str(exc)
+            return False
+        with self._steer_lock:
+            eligible = getattr(self, "_goal_running", False) or (replace and getattr(self, "_goal_accepts_start", False))
+            if (not eligible or not self._accepting_steer
+                    or self.cancelled.is_set() or getattr(self, "_queued_goal_replacement", None)
+                    or self.config.get("subscription_engine", "")):
+                self._last_persist_error = "This turn cannot accept a goal replacement yet. Your draft is retained."
+                return False
+            if expected_goal_id != (self._goal_details["id"] if self.goal else ""):
+                self._last_persist_error = "The standing goal changed. Review it again before replacing it."
+                return False
+            self._queued_goal_replacement = dict(text=clean, expected_goal_id=expected_goal_id,
+                request_id=request_id, token_budget=token_budget,
+                inputs=copy.deepcopy(selected if replace else self._goal_details.get("inputs", {})), replace=replace)
+            if on_queued is not None:
+                on_queued()  # acknowledgement precedes consumption under the same lock
+        return True
+
+    def take_goal_replacement(self):
+        with self._steer_lock:
+            value = getattr(self, "_queued_goal_replacement", None)
+            self._queued_goal_replacement = None
+            return value
+
+    def _apply_goal_replacement(self) -> bool:
+        """Called by the owner after the previous request/tools have settled."""
+        # Caller holds _steer_lock; it is deliberately non-reentrant.
+        if self.cancelled.is_set():
+            return False
+        value = getattr(self, "_queued_goal_replacement", None)
+        self._queued_goal_replacement = None
+        if value is None:
+            return False
+        ok = False
+        error = "The standing goal changed. Review the replacement again."
+        if value["expected_goal_id"] == (self._goal_details["id"] if self.goal else ""):
+            # Resolve selected inputs before persisting anything. Failed file/skill reads
+            # preserve the existing goal and return the complete draft to the frontend.
+            from .goal_inputs import prepare_inputs
+            previous_intents = (set(self._active_tool_intents), set(self._active_skill_names),
+                                copy.deepcopy(self._explicit_skill_instructions))
+            message = None
+            was_running = getattr(self, "_goal_running", False)
+            try:
+                prepared, context, images = prepare_inputs(value["text"], value["inputs"], self)
+                from .workflows import STEERING_PREFIX, STEERING_SUFFIX
+                text = self._safe_text(context + prepared)
+                # Validate the complete skill contribution before committing the replacement.
+                self._activate_tool_intents(text)
+                self._activate_skill_intents(text)
+                verb = ("replaced" if self.goal else "set") if value["replace"] else "edited"
+                content = STEERING_PREFIX + f"The user {verb} the standing goal. Follow the updated objective:\n" + text + STEERING_SUFFIX
+                message = {"role": "user", "content": (
+                    [{"type": "text", "text": content}, *({"type": "image_url", "image_url": {"url": image}} for image in images)]
+                    if images else content), "_dgc_steering": [value["text"]]}
+                if not value["replace"]:
+                    message["_dgc_goal_edit"] = True
+                self.messages.append(message)
+                # Adopt an ordinary native turn only on its owner thread. set_goal starts
+                # the clock and persists the steering+goal atomically; rollback restores dormancy.
+                self._goal_running = True
+                ok = self.set_goal(value["text"], replace=value["replace"],
+                    token_budget=value["token_budget"], inputs=value["inputs"])
+                error = self._last_persist_error or "The replacement could not be saved."
+            except (ValueError, TypeError, OSError) as exc:
+                error = self._safe_text(str(exc))
+            if ok:
+                # Old in-flight usage belongs to the old goal, including at cycle finish.
+                if value["replace"]:
+                    with self._usage_lock:
+                        self._goal_cycle_token_start = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
+                self._goal_progress = Progress()
+                self._pending_goal_report = None
+            else:
+                self._goal_running = was_running
+                if message is not None and self.messages and self.messages[-1] is message:
+                    self.messages.pop()
+                (self._active_tool_intents, self._active_skill_names,
+                 self._explicit_skill_instructions) = previous_intents
+                self._refresh_system()
+        notify = getattr(self.ui, "goal_replacement_result" if value["replace"] else "goal_edit_result", None)
+        if callable(notify):
+            notify(value["request_id"], value["text"], ok, "" if ok else error)
+        return ok
+
     def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
                  replace: bool = False, inputs: dict | None = None) -> bool:
         clean = self._safe_text(text).strip()
@@ -515,38 +632,58 @@ class GoalLifecycle:
         Each step retains its existing tool/time/convergence gates. Three consecutive cycles with
         no distinct tool work block continuation; terminal reports are applied only after success.
         """
-        if not self.goal or self.goal_status != "active" or self.depth:
+        active = bool(self.goal and self.goal_status == "active")
+        if self.depth or (external and not active):
             return step(prompt)
         result = False
         self._goal_owner = threading.get_ident()
         self._requested_goal_action = ""
-        self._goal_active_since = time.time()
-        self._goal_running = True
+        self._goal_running = active
+        self._goal_accepts_start = not external and not getattr(self, "_monitor_turn", False)
+        if active:
+            self._goal_active_since = time.time()
+        # The first ordinary step runs unchanged unless a human goal is adopted at a
+        # boundary. Its completed result then enters the same durable cycle accounting.
+        ordinary_first_step = not active
+        step_started = False
         def finish(status, outcome, **fields):
+            pause = getattr(self, "_last_turn_pause", "")
+            message = self.messages[-1] if step_started and self.messages else None
+            if (status == "paused" and pause and isinstance(message, dict)
+                    and message.get("role") in ("assistant", "tool")):
+                message["_dgc_goal_pause"] = pause
             if self.update_goal(status, **fields):
                 return outcome
             self._last_turn_error = self._last_persist_error or "The goal transition could not be saved"
             self.ui.error(self._last_turn_error)
             return {**outcome, "ok": False, "error": self._last_turn_error} if isinstance(outcome, dict) else False
         try:
-            self._notify_goal()
-            while self.goal_status == "active" and not self.cancelled.is_set():
+            if active:
+                self._notify_goal()
+            while ordinary_first_step or (self.goal_status == "active" and not self.cancelled.is_set()):
+                ordinary = ordinary_first_step
+                ordinary_first_step = False
                 details = self._goal_details
-                if details["token_budget"] and (details["tokens_used"] >= details["token_budget"]
+                if not ordinary and details["token_budget"] and (details["tokens_used"] >= details["token_budget"]
                                                 or not details["usage_known"]):
                     reason = "Review or remove the goal token budget before resuming"
-                    outcome = {"ok": False, "text": "", "error": reason} if external else False
+                    self._last_turn_pause = reason
+                    self.ui.info(reason)
+                    outcome = {"ok": True, "paused": True, "text": ""} if external else True
                     return finish("paused", outcome, reason=reason)
                 self._pending_goal_report = None
                 self._active_goal_request = request(self.goal) if external else None
-                self._goal_progress = Progress()
+                self._goal_progress = Progress() if self._goal_running else None
                 with self._usage_lock:
                     before_tokens = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
                 self._goal_cycle_token_start = before_tokens
                 with self._steer_lock:
                     self._accepting_steer = not external
                 self._end_turn_after_batch = ""
+                step_started = True
                 result = step(prompt)
+                if not self._goal_running:
+                    return result  # no goal was adopted: retain ordinary turn semantics
                 # The user closed a question this cycle needed: another cycle would only ask again.
                 dismissed = getattr(self, "_end_turn_after_batch", "") == "dismissed"
                 self._end_turn_after_batch = ""
@@ -560,7 +697,7 @@ class GoalLifecycle:
                         self._goal_details["usage_known"] = False
                 with self._usage_lock:
                     after_tokens = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
-                self._goal_details["tokens_used"] += max(0, after_tokens - before_tokens)
+                self._goal_details["tokens_used"] += max(0, after_tokens - self._goal_cycle_token_start)
                 if self.cancelled.is_set() or not ok:
                     reason = self._cancel_reason() if self.cancelled.is_set() else (
                         self._last_turn_error or (result.get("error") if isinstance(result, dict) else "")
@@ -571,6 +708,8 @@ class GoalLifecycle:
                             return {**result, "ok": False} if isinstance(result, dict) else False
                         return result
                     return finish("paused", result, reason=reason)
+                if getattr(self, "_last_turn_pause", ""):
+                    return finish("paused", result, reason=self._last_turn_pause)
                 if dismissed:
                     return finish("paused", result, reason=QUESTION_DISMISSED_REASON)
                 if report and report["status"] == "completed":
@@ -594,6 +733,7 @@ class GoalLifecycle:
                 if budget and (not details["usage_known"] or details["tokens_used"] >= budget):
                     reason = ("The goal token budget was reached" if details["usage_known"] else
                               "This model route did not report usage, so its goal token budget cannot be enforced")
+                    self._last_turn_pause = reason
                     self.ui.info(reason)
                     return finish("paused", result, reason=reason)
                 if not self._persist():
@@ -621,6 +761,8 @@ class GoalLifecycle:
                 self.update_goal("paused", reason="Goal execution was interrupted")
             raise
         finally:
+            had_goal = self._goal_running
+            self._goal_accepts_start = False
             self._stop_goal_clock()
             self._goal_running = False
             self._goal_owner = None
@@ -628,7 +770,8 @@ class GoalLifecycle:
             self._pending_goal_report = None
             self._goal_progress = None
             self._requested_goal_action = ""
-            self._notify_goal()
+            if had_goal:
+                self._notify_goal()
 
     def goal_budget_exhausted(self) -> bool:
         budget = self._goal_details["token_budget"]

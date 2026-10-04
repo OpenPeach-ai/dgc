@@ -50,7 +50,7 @@ function dom() {
   return { ...view, hooks, clear, event };
 }
 
-test("main.js and main.css carry one marked section per lane, in order, at the end", () => {
+test("main.js and main.css carry one marked section per lane in order", () => {
   for (const [source, open, close] of [
     [mainJs, (lane) => `// ---- 0.40 ${lane} -`, (lane) => `// ---- end 0.40 ${lane} -`],
     [mainCss, (lane) => `/* ---- 0.40 ${lane} -`, (lane) => `/* ---- end 0.40 ${lane} -`],
@@ -67,8 +67,9 @@ test("main.js and main.css carry one marked section per lane, in order, at the e
   assert.ok(mainJs.lastIndexOf("window.addEventListener(\"message\"") < agents, "sections sit after the message listener");
   assert.ok(mainJs.indexOf("loadDraftState();", agents) > mainJs.indexOf("// ---- end 0.40 thinking -"),
     "and before loadDraftState");
-  assert.match(mainCss.slice(mainCss.indexOf("/* ---- 0.40 agents -")), /^\/\* ---- 0\.40 agents[\s\S]*end 0\.40 thinking -+ \*\/\n$/,
-    "nothing follows the thinking section");
+  // Later feature styles may follow the lane block. Its boundaries stay unique
+  // and ordered; an EOF requirement prevented legitimate Pip/approval styling.
+  for (const lane of LANES) assert.equal(mainCss.split(`/* ---- end 0.40 ${lane} -`).length, 2);
 });
 
 test("REPLAYABLE is the backend's replayable fragment list", () => {

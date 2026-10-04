@@ -118,6 +118,18 @@ class AttachTests(unittest.TestCase):
         self.assertEqual(clock.strip_turn_clock(attached), "fix the failing test")
         self.assertEqual(display_prompt(attached), "fix the failing test")
 
+    def test_history_removes_clock_even_when_a_generated_peer_note_follows_it(self):
+        from dgc.peers import model_line
+        for peers in ([{"liveness":"live"}], [{"liveness":"unknown"}],
+                      [{"liveness":"live"}, {"liveness":"unknown"}]):
+            text = clock.attach_turn_clock("Keep my exact request", self.now)
+            text += "\n\n" + model_line(peers)
+            self.assertEqual(display_prompt(text), "Keep my exact request")
+        for text in ("Explain <dgc-peers>my example</dgc-peers>",
+                     "Keep this\n\n<dgc-peers>arbitrary user content</dgc-peers>",
+                     "Explain " + model_line([{"liveness":"live"}]) + " in detail"):
+            self.assertEqual(display_prompt(text), text)
+
     def test_re_sending_a_recovered_prompt_replaces_the_clock_instead_of_stacking_it(self):
         first = clock.attach_turn_clock("ship it", self.now)
         second = clock.attach_turn_clock(first, self.now.replace(day=21, hour=9, minute=5))

@@ -76,3 +76,13 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
    `.github/workflows/publish-dgc-sdk.yml`, which is the only way a release is built: it tests the
    wheel, publishes to PyPI with Trusted Publishing, and attaches the same bytes to the GitHub
    release without taking the Latest badge from the CLI.
+
+## Local Pips controls (lab)
+
+See [PIPS.md](PIPS.md) for the explicit inherited-controller API, per-request approval, independent-runner policy limits and API 8/9 capability gates.
+
+API 24 adds optional per-message `chat_options` to `send_pip_message`, with an
+integer `context_size` from 2048 to 32768 and `thinking` set to `off`, `low`,
+`medium`, `high` or `xhigh`. Both fields are required when the object is present.
+Messages without it retain their API 8 compatibility. These choices affect one
+read-only reply; they do not change a job's permissions or scheduled runs.

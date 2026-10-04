@@ -63,6 +63,10 @@ def _format_editor_context(resources) -> str:
 
 
 def _strip_editor_context(text: str) -> str:
-    while text.startswith("<editor-context-json ") and "</editor-context-json>\n\n" in text:
-        text = text.split("</editor-context-json>\n\n", 1)[1]
+    while True:
+        kind = next((name for name in ("editor-context-json", "pip-references-json")
+                     if text.startswith("<" + name + " ") and "</" + name + ">\n\n" in text), None)
+        if kind is None:
+            break
+        text = text.split("</" + kind + ">\n\n", 1)[1]
     return text

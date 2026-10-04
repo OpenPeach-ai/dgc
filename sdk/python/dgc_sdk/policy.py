@@ -31,7 +31,10 @@ _DISPLAY = {
     "bash_kill": "BashKill", "python": "Python", "monitor": "Monitor", "monitor_stop": "MonitorStop",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "browser": "Browser", "todo": "Todo", "notes": "Notes", "skill": "Skill",
-    "add_skill": "AddSkill", "save_memory": "SaveMemory", "mcp_search": "MCPSearch",
+    "add_skill": "AddSkill", "save_memory": "SaveMemory", "pips_context": "PipsContext",
+    "pips_setup": "PipsSetup", "pips_propose": "PipsPropose", "pips_adapt": "PipsAdapt", "run_pip_now": "PipsRun",
+    "handoff_to_pip": "PipsHandoff", "mcp_search": "MCPSearch",
+    "pause_pip": "PipsPause", "resume_pip": "PipsResume", "attach_pip_to_session": "PipsAttach",
     "mcp_call": "MCPCall", "present_plan": "PresentPlan", "present_document": "PresentDocument",
     "propose_options": "ProposeOptions", "ask_user": "AskUser", "artifact": "Artifact", "task": "Task",
 }

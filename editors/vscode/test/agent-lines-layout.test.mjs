@@ -1,6 +1,6 @@
 // Sub-agent lines are a layout fact as much as a sentence, so only a real browser can check them:
 // the faces centred on the sentence's first line, a name's text on the baseline of the words around
-// it, a long name clipped with its underline whole, wrapped text kept in its own column, a focus ring
+// it, a long name clipped without an underline, wrapped text kept in its own column, a focus ring
 // on every control, readable words in every theme, system colours in forced-colours mode, and faces
 // that stop moving for a reader who asked for less motion. And the reader's place: an agent's line
 // changing in a turn above them must neither move the page nor claim there is something "New".
@@ -68,7 +68,7 @@ function measure(contrastSource) {
         const base = baseline(n);
         const style = getComputedStyle(n);
         return { clipped: n.scrollWidth > n.clientWidth, label: n.textContent, bottom: box.bottom, base,
-          underline: parseFloat(style.textUnderlineOffset) + parseFloat(style.textDecorationThickness || "1"),
+          decoration: style.textDecorationLine,
           right: box.right, colour: style.color, contrast: contrast(n) };
       });
       const word = (state) => { const n = line.querySelector(`.agent-state[data-state="${state}"]`);
@@ -147,8 +147,12 @@ for (const theme of Object.keys(MINIMUM)) {
         const longName = long.names[0];
         assert.equal(longName.label, LONG_NAME, "the whole name is in the button, however it is clipped");
         assert.ok(longName.clipped, "a 120-character name is clipped with an ellipsis");
-        assert.ok(longName.bottom - longName.base >= longName.underline - 0.01,
-          `its underline is not clipped (${(longName.bottom - longName.base).toFixed(2)}px below the baseline, needs ${longName.underline})`);
+        assert.equal(longName.decoration, "none", "agent names use hover/focus, not underlines");
+        const link=page.locator("#log .agent-line .agent-name").first();
+        await link.hover();
+        const hover=await link.evaluate(n=>({colour:getComputedStyle(n).color,expected:(()=>{const p=document.createElement("span");p.style.color="var(--text)";document.body.append(p);const c=getComputedStyle(p).color;p.remove();return c;})(),decoration:getComputedStyle(n).textDecorationLine}));
+        assert.equal(hover.decoration,"none");
+        assert.equal(hover.colour,hover.expected,"hover uses the normal foreground colour");
         if (width === 300) assert.ok(three.rows > 1, "at 300px a three-agent sentence wraps (so the column check means something)");
         // The keyboard reaches every name and "N more", with a ring that shows.
         for (const facts of [await tabTo(page, "#log .agent-line .agent-name"),

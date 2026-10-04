@@ -1,0 +1,49 @@
+/* Shared Pips wordmark. Hosts without gradient text support retain readable solid ink. */
+.pips-wordmark {
+  --pips-ink:#A78BFA;
+  --pips-flow:#C7B6FF;
+  --pips-light:#E5DAFF;
+  display:inline-block;
+  color:var(--pips-ink);
+  font-weight:600;
+  letter-spacing:-.015em;
+}
+body.vscode-light .pips-wordmark {
+  --pips-ink:#5430B8;
+  --pips-flow:#6747DF;
+  --pips-light:#7542B8;
+}
+@supports ((background-clip:text) or (-webkit-background-clip:text)) {
+  .pips-wordmark {
+    background-image:linear-gradient(110deg,var(--pips-ink) 0%,var(--pips-flow) 30%,var(--pips-light) 50%,var(--pips-flow) 70%,var(--pips-ink) 100%);
+    background-size:260% 100%;
+    background-position:0% 50%;
+    background-clip:text;
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+    animation:pips-wordmark-flow 8s ease-in-out infinite alternate;
+  }
+}
+@keyframes pips-wordmark-flow {
+  from { background-position:0% 50%; }
+  to { background-position:100% 50%; }
+}
+body.motion-paused .pips-wordmark { animation-play-state:paused; }
+@media (prefers-reduced-motion:reduce) {
+  .pips-wordmark { animation:none; background-image:none; -webkit-text-fill-color:currentColor; }
+}
+body.vscode-high-contrast .pips-wordmark,
+body.vscode-high-contrast-light .pips-wordmark {
+  animation:none;
+  background-image:none;
+  color:var(--vscode-foreground,CanvasText);
+  -webkit-text-fill-color:currentColor;
+}
+@media (forced-colors:active) {
+  .pips-wordmark {
+    animation:none;
+    background-image:none;
+    color:CanvasText;
+    -webkit-text-fill-color:currentColor;
+  }
+}

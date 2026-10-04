@@ -267,8 +267,8 @@ class SkillExecutionTests(SkillFixture):
         agent = self.agent()
         self.skill.path.write_text("long instruction " * 1000)
         with patch.object(agent, "context_size", return_value=2000), patch("dgc.llm.LLMClient.chat", side_effect=AssertionError("No model may start")) as chat:
-            with self.assertRaises(ValueError):
-                agent.run_turn("$fixture Inspect behavior")
+            self.assertFalse(agent.run_turn("$fixture Inspect behavior"))
+            self.assertTrue(agent._last_turn_error)
             chat.assert_not_called()
         self.assertFalse(agent._accepting_steer)
         self.assertFalse(agent._explicit_skill_instructions)
@@ -291,10 +291,11 @@ class SkillExecutionTests(SkillFixture):
         completer = ClassicSlashCompleter(self.root, agent.config)
         self.assertNotIn("$fixture", [row.text for row in completer.get_completions(Document("$fi", 3), None)])
         with patch("dgc.llm.LLMClient.chat", side_effect=AssertionError("Must not call the model")):
-            with self.assertRaisesRegex(ValueError, "disabled"):
-                agent.run_turn("$fixture\n\nInspect")
-        with self.assertRaisesRegex(ValueError, "disabled"):
-            agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+            self.assertFalse(agent.run_turn("$fixture\n\nInspect"))
+            self.assertIn("disabled", agent._last_turn_error)
+        result = agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+        self.assertFalse(result["ok"])
+        self.assertIn("disabled", result["error"])
         from dgc.tools import skill_tool
         self.assertIn("disabled", skill_tool({"name": "fixture"}, agent.ctx))
         set_skill_enabled(agent.config, "fixture", True)
@@ -307,8 +308,9 @@ class SkillExecutionTests(SkillFixture):
         agent.run_external_turn("$fixture\n\nInspect", lambda text: observed.append(text) or {"ok": True, "text": "done", "rc": 0})
         self.assertIn("Updated orchid instructions", observed[0])
         self.skill.path.unlink()
-        with self.assertRaisesRegex(ValueError, "no longer installed"):
-            agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+        result = agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+        self.assertFalse(result["ok"])
+        self.assertIn("no longer installed", result["error"])
 
 
 class PortableSkillTests(SkillFixture):

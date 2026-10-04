@@ -187,7 +187,7 @@ class UI:
         return label
 
     def turn_complete(self, elapsed: float, cancelled: bool = False,
-                      failed: bool = False) -> None:
+                      failed: bool = False, paused: bool = False) -> None:
         """A clear end-of-turn delimiter so the user knows the model is done and it's
         their turn — not still working, not waiting on a follow-up."""
         self.stop_working()
@@ -196,7 +196,7 @@ class UI:
             self._streamed = False
         if not sys.stdout.isatty():              # scripts / pipes don't want a UX marker
             return
-        verb = "stopped" if cancelled else ("failed" if failed else "done")
+        verb = "stopped" if cancelled else ("failed" if failed else "paused" if paused else "done")
         parts = [f"{elapsed:.0f}s"]
         if self._tool_count:
             parts.append(f"{self._tool_count} tool" + ("" if self._tool_count == 1 else "s"))
@@ -1038,7 +1038,13 @@ class CLI:
         elif cmd == "goal":
             action = rest.strip()
             low = action.lower()
-            if low in ("clear", "off", "none", "remove", "delete"):
+            if low.split(None, 1)[:1] == ["budget"]:
+                from .goals import change_terminal_budget
+                try:
+                    self.ui.info(change_terminal_budget(self.agent, action))
+                except ValueError as exc:
+                    self.ui.error(str(exc))
+            elif low in ("clear", "off", "none", "remove", "delete"):
                 if self.agent.set_goal(""):
                     self.ui.info("standing goal cleared")
                 else:
@@ -1074,9 +1080,23 @@ class CLI:
                 else:
                     self.ui.info("no standing goal — /goal <objective> to start one")
             elif action:
-                from .goal_inputs import start_terminal_goal
+                from .goal_inputs import start_terminal_goal, terminal_goal_review
                 try:
-                    notices = start_terminal_goal(action, self.agent)
+                    review = terminal_goal_review(self.agent, action)
+                    if review["current"]["text"] and review["current"]["status"] != "completed":
+                        self.ui.info("Replace the unfinished goal?\nCurrent: "
+                                     + terminal_safe_text(review["current"]["text"])
+                                     + "\nNew: " + terminal_safe_text(review["objective"])
+                                     + "\nReplacement resets usage and the token budget. New budget: "
+                                     + (f'{review["budget"]:,}' if review["budget"] else "none"))
+                        try:
+                            accepted = input("  replace goal? [y/N] › ").strip().lower() in ("y", "yes")
+                        except (EOFError, KeyboardInterrupt):
+                            accepted = False
+                        if not accepted:
+                            self.ui.info("kept the current goal; the replacement remains in prompt history")
+                            return True
+                    notices = start_terminal_goal(action, self.agent, expected_review=review)
                 except ValueError as exc:
                     self.ui.error(str(exc)); return True
                 for notice in notices:
@@ -1194,6 +1214,14 @@ class CLI:
                 self.console.print(terminal_safe_text(redact_text(output, secret_values(cfg))), markup=False, highlight=False)
             except (OSError, ValueError) as exc:
                 self.ui.error(str(exc))
+        elif cmd == "pips":
+            from .pip_cli import handle_command
+            try:
+                result = handle_command(cfg, shlex.split(rest), in_chat=True)
+                if result == 0:
+                    self.agent._refresh_system()
+            except ValueError as exc:
+                self.ui.error(str(exc))
         elif cmd == "mcp":
             from .mcp_management import manage_mcp
             from .mcp_context import stage_context
@@ -1226,7 +1254,9 @@ class CLI:
             elif not sk.enabled:
                 self.ui.error(f"Skill ${sk.name} is disabled. Use /skills enable {sk.name} first.")
             else:
-                self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
+                from .session_turn_events import foreground_turn
+                with foreground_turn("foreground_prompt"):
+                    self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "status":
             self.banner()
         elif cmd == "usage":
@@ -1459,7 +1489,9 @@ class CLI:
             if cmd in custom:
                 rendered = render_command(custom[cmd], rest, self.config.project_root)
                 if rendered:
-                    self.agent.run_turn(rendered)
+                    from .session_turn_events import foreground_turn
+                    with foreground_turn("foreground_prompt"):
+                        self.agent.run_turn(rendered)
             else:
                 self.console.print(
                     f"[dim]unknown command /{_markup_literal(cmd)} — try /help[/dim]")
@@ -1785,9 +1817,12 @@ class CLI:
         agent loop. _run_turn_live cleared stale state before exposing the interruptible turn, so
         neither path resets cancellation — an Esc that lands while the worker starts must hold."""
         engine = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        from .session_turn_events import foreground_turn
         if engine:
-            return self._run_delegated_turn(engine, text)
-        return self.agent.run_turn(text, reset_cancel=False)
+            with foreground_turn("vendor"):
+                return self._run_delegated_turn(engine, text)
+        with foreground_turn("foreground_prompt"):
+            return self.agent.run_turn(text, reset_cancel=False)
 
     def _run_delegated_turn(self, engine_key: str, prompt: str) -> bool:
         """The classic REPL's delegated turn. The vendor CLI's stream renders through the same
@@ -1893,7 +1928,7 @@ class CLI:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             done.wait()
             self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set(),
-                                  failed=outcome["failed"])
+                                  failed=outcome["failed"], paused=bool(getattr(self.agent, "_last_turn_pause", "")))
             return
 
         import select as _sel
@@ -1971,7 +2006,7 @@ class CLI:
             self.ui._live = None
         done.wait()
         self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set(),
-                              failed=outcome["failed"])
+                              failed=outcome["failed"], paused=bool(getattr(self.agent, "_last_turn_pause", "")))
 
 
 def run_doctor(config: Config) -> int:
@@ -2333,6 +2368,7 @@ def run_help() -> None:
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
     c.print("  dgc mcp                 manage servers, resources, prompts and connections")
+    c.print("  dgc pips                local manual jobs  (enable · create · run · report · context · serve)")
     c.print("  dgc serve · dgc acp     editor back-ends (JSON over stdio · Agent Client Protocol)")
     c.print("  dgc bug                 where to report a bug")
     c.print("  dgc <command> --help    usage for any of the above")
@@ -2384,6 +2420,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "bug": "dgc bug                            where to report a bug or request a feature",
     "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
     "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME|installed",
+    "pips": "dgc pips enable|workspaces|workspace|list|create|show|run|runs|report|cancel|pause|resume-job|archive|restore|propose|accept|reject|versions|context|session-outcome|memory|notifications|activity|serve|status|stop|resume  (dgc pips COMMAND --help)",
     "mcp": "dgc mcp ...                        manage MCP servers, resources, prompts and connections",
 }
 
@@ -2426,6 +2463,12 @@ def main(argv: list[str] | None = None) -> int | None:
         # Every subcommand honours the universal help reflex BEFORE anything can run. Six of
         # eleven used to execute instead — `dgc update --help` piped a remote installer into bash.
         if any(value in ("--help", "-h") for value in raw_argv[1:]) and raw_argv[0] not in ("export-training", "protocol"):
+            if raw_argv[0] == "pips":
+                from .pip_cli import parser as pips_parser
+                try:
+                    pips_parser().parse_args(raw_argv[1:])
+                except SystemExit as exc:
+                    return int(exc.code or 0)
             return _subcommand_help(raw_argv[0])
         if raw_argv[0] == "mcp":
             from .mcp_management import manage_mcp, USAGE
@@ -2511,6 +2554,9 @@ def main(argv: list[str] | None = None) -> int | None:
             # Agent Client Protocol (JSON-RPC over stdio) for Zed/JetBrains/Neovim/Emacs.
             from .acp import serve as acp_serve
             acp_serve(); return
+        if raw_argv[0] == "pips":
+            from .pip_daemon import handle_command
+            return handle_command(Config(), raw_argv[1:])
         if raw_argv[0] == "protocol":
             # Contract discovery/validation is intentionally side-effect-free: no Config, update
             # check, model endpoint, session, or user-state access.
@@ -2529,7 +2575,7 @@ def main(argv: list[str] | None = None) -> int | None:
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
         epilog="commands: setup · doctor · help · update · export · export-training · usage · protocol · skills · plugin · mcp · "
-               "serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
+               "pips · serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,
@@ -3029,6 +3075,9 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     cli.ui.non_interactive = True
     cli.ui.permission_mode = str(getattr(cli.agent, "mode", "") or "")
     started = time.time()
+    prior_messages = getattr(cli.agent, "messages", []) or []
+    prior_count = len(prior_messages)
+    prior_tail = prior_messages[-1] if prior_messages else None
 
     def session_id() -> str:
         sf = getattr(cli.agent, "session_file", None)
@@ -3036,21 +3085,29 @@ def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
     if json_mode:
         cli.ui.em.emit("turn_start", turn_id="t1", prompt=prompt, session_id=session_id())
     if engine_key:
-        ok = _run_subscription_oneshot(
-            config, cli.agent, engine_key, cli.expand_mentions(prompt),
-            bool(args.cont or args.resume is not None),
-            model_override=args.model, effort_override=args.think) == 0
+        from .session_turn_events import foreground_turn
+        with foreground_turn("vendor"):
+            ok = _run_subscription_oneshot(
+                config, cli.agent, engine_key, cli.expand_mentions(prompt),
+                bool(args.cont or args.resume is not None),
+                model_override=args.model, effort_override=args.think) == 0
     else:
         if config.data.get("mode") == "auto" and not json_mode:
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
-        ok = cli.agent.run_turn(cli.expand_mentions(prompt)) is not False
+        from .session_turn_events import foreground_turn
+        with foreground_turn("foreground_continue" if args.cont else "foreground_prompt"):
+            ok = cli.agent.run_turn(cli.expand_mentions(prompt)) is not False
         if not json_mode:
             cli.ui.stop_working()   # -p never calls turn_complete(): a turn can end on a live spinner
         cli.ui.end_stream()
         if not json_mode:
             print()
         _end_one_shot_children(cli.agent)
-    text = _last_assistant_text(cli.agent)
+    current_messages = getattr(cli.agent, "messages", []) or []
+    unchanged = len(current_messages) == prior_count and (not current_messages or current_messages[-1] is prior_tail)
+    # A preflight refusal on a resumed session has no new answer. Never export
+    # the previous turn's assistant text as this failed request's result.
+    text = "" if not ok and unchanged else _last_assistant_text(cli.agent)
     if args.output:
         from pathlib import Path
         target = Path(args.output).expanduser()

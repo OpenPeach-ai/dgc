@@ -1,0 +1,290 @@
+{
+  "type": "object",
+  "required": [
+    "start_datetime"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Summary (title) of the event."
+    },
+    "location": {
+      "type": "string",
+      "description": "Geographic location of the event as free-form text."
+    },
+    "timezone": {
+      "type": "string",
+      "description": "IANA timezone name from the timezone database (e.g., 'America/New_York', 'Europe/London', 'Asia/Jerusalem', 'UTC'). Required if datetime is naive. For recurring events, start and end must include a timeZone. If not provided, UTC is used. If datetime includes timezone info (Z or offset), this field is optional and defaults to UTC. IMPORTANT: Must be a valid IANA timezone identifier. Values like 'EST', 'PST', 'ISRAEL TIME', or other abbreviations are NOT valid IANA timezone names."
+    },
+    "attendees": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      "description": "List of attendees. Each attendee can be either: (1) A string email address (e.g., 'user@example.com'), or (2) An object with 'email' (required), 'optional' (boolean, default false), 'displayName' (string), 'comment' (string), 'additionalGuests' (integer), and 'resource' (boolean). To mark an attendee as optional (not required), use object format: {'email': 'user@example.com', 'optional': true}. IMPORTANT: Only valid email addresses are accepted. Plain names cannot be used."
+    },
+    "eventType": {
+      "enum": [
+        "birthday",
+        "default",
+        "focusTime",
+        "outOfOffice",
+        "workingLocation"
+      ],
+      "type": "string",
+      "default": "default",
+      "description": "Type of the event, immutable post-creation. 'workingLocation' (REQUIRES Google Workspace Enterprise). Note: 'fromGmail' events cannot be created via API."
+    },
+    "recurrence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of RRULE, EXRULE, RDATE, EXDATE lines for recurring events. Supported frequencies: DAILY, WEEKLY, MONTHLY, YEARLY. For recurring events, start.timeZone and end.timeZone must be present. UNTIL values follow RFC 5545: date-only (YYYYMMDD) for all-day events, or UTC datetime with Z suffix (YYYYMMDDTHHMMSSZ) for timed events. UNTIL values with time but missing Z suffix are auto-corrected. Provide an empty list to remove recurrence so the event becomes non-recurring."
+    },
+    "visibility": {
+      "enum": [
+        "default",
+        "public",
+        "private",
+        "confidential"
+      ],
+      "type": "string",
+      "default": "default",
+      "description": "Event visibility: 'default', 'public', 'private', or 'confidential'."
+    },
+    "calendar_id": {
+      "type": "string",
+      "default": "primary",
+      "examples": [
+        "primary",
+        "abcdefghijklmnopqrstuvwxyz@group.calendar.google.com"
+      ],
+      "description": "Calendar identifier. Use 'primary' (recommended) for the user's main calendar. Alternatively, use a calendar ID from the user's accessible calendar list. Calendar IDs look like email addresses (e.g., 'xyz@group.calendar.google.com' for shared calendars). Important: Arbitrary email addresses will NOT work - the calendar must exist in the user's calendar list with appropriate access permissions. Use GOOGLECALENDAR_LIST_CALENDARS to retrieve valid calendar IDs."
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the event. Can contain HTML. Optional. Must be omitted for 'birthday' event type."
+    },
+    "end_datetime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2})?(\\.\\d+)?(Z|[+-]\\d{1,2}(:?\\d{2})?)?$",
+      "description": "Event end time in ISO 8601 format: YYYY-MM-DDTHH:MM:SS. When provided, this parameter takes precedence over event_duration_hour and event_duration_minutes. If not provided, the end time is calculated using start_datetime + duration. Must be after start_datetime. Explicit timezone information (Z or an offset) is preserved; offset-less values are interpreted in `timezone`, or UTC when it is omitted."
+    },
+    "send_updates": {
+      "enum": [
+        "all",
+        "externalOnly",
+        "none"
+      ],
+      "type": "string",
+      "description": "Options for who should receive notifications about event changes."
+    },
+    "transparency": {
+      "enum": [
+        "opaque",
+        "transparent"
+      ],
+      "type": "string",
+      "default": "opaque",
+      "description": "'opaque' (busy) or 'transparent' (available)."
+    },
+    "start_datetime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2})?(\\.\\d+)?(Z|[+-]\\d{1,2}(:?\\d{2})?)?$",
+      "description": "REQUIRED. Event start time in ISO 8601 format: YYYY-MM-DDTHH:MM:SS. IMPORTANT: Natural language expressions like 'tomorrow', 'next Monday', '2pm tomorrow' are NOT supported and will be rejected. You must provide the exact date and time in ISO format. Explicit timezone information (Z or an offset) is preserved; offset-less values are interpreted in `timezone`, or UTC when it is omitted. Examples: '2025-01-16T13:00:00', '2025-01-16T13:00:00Z', '2025-01-16T13:00:00-05:00'."
+    },
+    "guestsCanModify": {
+      "type": "boolean",
+      "description": "If True, guests can modify the event."
+    },
+    "exclude_organizer": {
+      "type": "boolean",
+      "default": false,
+      "description": "If True, the organizer will NOT be added as an attendee. Default is False (organizer is included)."
+    },
+    "birthdayProperties": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "birthday",
+            "anniversary",
+            "other"
+          ],
+          "type": "string",
+          "default": "birthday",
+          "description": "Type of birthday event: 'birthday', 'anniversary', or 'other'. Defaults to 'birthday'."
+        },
+        "contact": {
+          "type": "string",
+          "description": "Contact ID in format 'people/c12345' from Google People API. REQUIRED when type is 'anniversary' or 'other'. MUST BE OMITTED when type is 'birthday' (the API forbids contact field for type='birthday')."
+        },
+        "customTypeName": {
+          "type": "string",
+          "description": "Custom type name when type is 'other'. Requires valid contact field."
+        }
+      },
+      "description": "Properties for birthday events.",
+      "additionalProperties": false
+    },
+    "create_meeting_room": {
+      "type": "boolean",
+      "default": true,
+      "description": "Defaults to True. When True, for CREATE operations creates a Google Meet link; for UPDATE operations preserves existing conference data if present, or adds a new Meet link if none exists. Google Workspace accounts will successfully receive a Meet link. Personal Gmail accounts and other unsupported accounts will gracefully fallback to creating an event without a Meet link when conference creation fails. Set to False to skip Meet link operations (won't create new or modify existing conference data). The fallback ensures event creation succeeds even when conference features are unavailable due to account limitations."
+    },
+    "event_duration_hour": {
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "description": "Number of hours for the event duration. Supports multi-day events (e.g., 240 hours = 10 days). For durations under 1 hour, use event_duration_minutes instead. Ignored if end_datetime is provided."
+    },
+    "extended_properties": {
+      "type": "object",
+      "description": "Extended properties of the event for storing custom metadata. Contains 'private' (visible only on this calendar) and/or 'shared' (visible to all attendees) dictionaries mapping string keys to string values. Example: {'private': {'key1': 'value1'}, 'shared': {'key2': 'value2'}}",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "focusTimeProperties": {
+      "type": "object",
+      "properties": {
+        "chatStatus": {
+          "enum": [
+            "active",
+            "doNotDisturb"
+          ],
+          "type": "string",
+          "description": "Chat status during focus time: 'active' or 'doNotDisturb'."
+        },
+        "declineMessage": {
+          "type": "string",
+          "description": "Message to include in declined meeting invitations. Only used when autoDeclineMode is set."
+        },
+        "autoDeclineMode": {
+          "enum": [
+            "declineNone",
+            "declineAllConflictingInvitations",
+            "declineOnlyNewConflictingInvitations"
+          ],
+          "type": "string",
+          "description": "Auto decline mode: 'declineNone' (no invitations declined), 'declineAllConflictingInvitations' (all conflicting invitations declined), or 'declineOnlyNewConflictingInvitations' (only new conflicting invitations declined)."
+        }
+      },
+      "description": "Properties for focusTime events. REQUIRES Google Workspace Enterprise account with Focus Time feature enabled.",
+      "additionalProperties": false
+    },
+    "guestsCanInviteOthers": {
+      "type": "boolean",
+      "description": "Whether attendees other than the organizer can invite others to the event."
+    },
+    "outOfOfficeProperties": {
+      "type": "object",
+      "properties": {
+        "declineMessage": {
+          "type": "string",
+          "description": "Message to include in declined meeting invitations. Only used when autoDeclineMode is set."
+        },
+        "autoDeclineMode": {
+          "enum": [
+            "declineNone",
+            "declineAllConflictingInvitations",
+            "declineOnlyNewConflictingInvitations"
+          ],
+          "type": "string",
+          "description": "Auto decline mode: 'declineNone' (no invitations declined), 'declineAllConflictingInvitations' (all conflicting invitations declined), or 'declineOnlyNewConflictingInvitations' (only new conflicting invitations declined). RECURRING EVENT RESTRICTION: For recurring out-of-office events, ONLY 'declineOnlyNewConflictingInvitations' is allowed. Cannot use 'declineAllConflictingInvitations' for recurring OOO (Google Calendar prevents retroactively declining existing meetings). REQUIRES Google Workspace (paid business subscription, e.g., Business Starter at $6/user/month). Personal Gmail accounts cannot use this feature."
+        }
+      },
+      "description": "Properties for outOfOffice events.",
+      "additionalProperties": false
+    },
+    "event_duration_minutes": {
+      "type": "integer",
+      "default": 30,
+      "maximum": 59,
+      "minimum": 0,
+      "description": "Duration in minutes (0-59 ONLY). NEVER use 60+ minutes - use event_duration_hour=1 instead. Maximum value is 59. Combined duration (hours + minutes) must be greater than 0. Ignored if end_datetime is provided."
+    },
+    "guestsCanSeeOtherGuests": {
+      "type": "boolean",
+      "description": "Whether attendees other than the organizer can see who the event's attendees are."
+    },
+    "workingLocationProperties": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "homeOffice",
+            "officeLocation",
+            "customLocation"
+          ],
+          "type": "string",
+          "description": "Type of working location ('homeOffice' | 'officeLocation' | 'customLocation')."
+        },
+        "homeOffice": {
+          "type": "object",
+          "properties": {},
+          "description": "Empty object marker for home office working location.\n\nThis is used to indicate the user is working from home.\nGoogle Calendar API accepts an empty object for this field.",
+          "additionalProperties": false
+        },
+        "customLocation": {
+          "type": "object",
+          "required": [
+            "label"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Label for a custom working location (e.g., 'Client site')."
+            }
+          },
+          "description": "Custom working location with a display label.",
+          "additionalProperties": false
+        },
+        "officeLocation": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Office name displayed in Calendar clients (e.g., building name)."
+            },
+            "deskId": {
+              "type": "string",
+              "description": "Optional desk identifier."
+            },
+            "floorId": {
+              "type": "string",
+              "description": "Optional floor identifier."
+            },
+            "buildingId": {
+              "type": "string",
+              "description": "Optional building identifier from org Resources."
+            },
+            "floorSectionId": {
+              "type": "string",
+              "description": "Optional floor section identifier."
+            }
+          },
+          "description": "Office-based working location details.",
+          "additionalProperties": false
+        }
+      },
+      "description": "Properties for workingLocation events. REQUIRES Google Workspace Enterprise.\n\nConstraints discovered from testing:\n- Must set transparency='transparent' and visibility='public'\n- Description must be omitted\n- Depending on 'type', include one of 'homeOffice', 'officeLocation', or 'customLocation'",
+      "additionalProperties": false
+    }
+  }
+}

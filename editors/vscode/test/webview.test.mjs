@@ -1083,7 +1083,7 @@ test("goal review exposes saved evidence, bounded editing, and keyboard focus", 
   doc.getElementById("goal-edit").click();
   // The budget field is gone from this dialog: it is not something you set while rewording an
   // objective, and the pencil is now the only way in (clicking the bar expands it instead).
-  assert.equal(doc.getElementById("goal-editor-budget"), null);
+  assert.equal(doc.getElementById("goal-editor-budget").value, "2000");
   assert.equal(doc.getElementById("goal-editor-text").maxLength, 4000);
   doc.getElementById("goal-editor-save").focus();
   doc.getElementById("goal-editor-save").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
@@ -1439,7 +1439,7 @@ test("a tool batch shows the work while it runs, bounded, with the rest one clic
   const group = doc.querySelector(".tool-group");
   assert.equal(group.querySelector("summary").textContent, "Running a command",
     "the header summarises; the card holds the command");
-  assert.equal(group.open, true, "work you cannot see is work you cannot check");
+  assert.equal(group.open, false, "running tools start compact; details remain available");
   const first = group.querySelector(".tool");
   assert.match(first.querySelector(".arg").textContent, /app\.ts/, "the target is on screen");
   assert.ok(first.classList.contains("has-output"), "and what it returned is on the card, ready to open");
@@ -1449,7 +1449,7 @@ test("a tool batch shows the work while it runs, bounded, with the rest one clic
   assert.equal(first.classList.contains("open"), true);
   assert.equal(first.querySelector(".tool-toggle").getAttribute("aria-expanded"), "true");
   event({ type: "tool_result", call_id: "two", name: "Bash", is_error: true, output: "test failed" });
-  assert.equal(group.open, true, "errors must remain visible");
+  assert.equal(group.open, false, "error summary is visible without opening output");
   // The sentence a colleague would say, kept: it is the group's header whether open or folded.
   assert.match(group.querySelector("summary").textContent, /Read 1 file and ran 1 command/);
   assert.match(group.querySelector("summary").textContent, /1 issue/);
@@ -2729,10 +2729,29 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.equal(doc.getElementById("goal-editor").hidden, false);
   assert.equal(doc.getElementById("goal-editor-text").value, "ship the release");
   doc.getElementById("goal-editor-text").value = "ship the verified release";
+  doc.getElementById("goal-editor-budget").value = "8000";
   doc.getElementById("goal-editor-save").click();
   assert.equal(posted.filter((m) => m.type === "updateGoal").at(-1).text, "ship the verified release");
+  assert.equal(posted.filter((m) => m.type === "updateGoal").at(-1).tokenBudget, 8000);
+  send({ type: "goal_edit_state", state: "pending" });
+  assert.equal(doc.getElementById("goal-editor-text").disabled, true);
+  assert.equal(doc.getElementById("goal-editor-budget").disabled, true);
+  assert.match(doc.getElementById("goal-editor-save").textContent, /current request/);
+  assert.equal(doc.getElementById("goal-editor-cancel").textContent, "Close");
+  send({ type: "goal_edit_state", state: "error", error: "Turn cancelled" });
+  assert.equal(doc.getElementById("goal-editor-text").disabled, false);
+  assert.equal(doc.getElementById("goal-editor-text").value, "ship the verified release");
   send({ type: "goal_edit_state", state: "saved" });
   assert.equal(doc.getElementById("goal-editor").hidden, true);
+  send({type:"event",event:{type:"history",items:[
+    {type:"turn_start",turn_id:"edit-history",prompt:"Original goal"},
+    {role:"goal_edit",text:"Goal updated. Continuing with the revised objective."},
+    {type:"text_delta",text:"Updated answer"},
+    {type:"stream_end",phase:"answer"},
+    {type:"turn_end",reason:"completed"}
+  ]}});
+  assert.equal(doc.querySelectorAll(".history-pages .msg.user").length, 1);
+  assert.ok([...doc.querySelectorAll(".history-pages .sys")].some(n=>n.textContent==="Goal updated. Continuing with the revised objective."));
   doc.getElementById("goal-clear").click();
   assert.equal(posted.filter((m) => m.type === "clearGoal").length, 1);
   send({ type: "chat_changes", total: 2, additions: 7, deletions: 3, files: [
@@ -3045,7 +3064,10 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
       `button #${button.id || "(dynamic)"} needs an accessible name`);
   }
   for (const control of doc.querySelectorAll("input, select, textarea")) {
-    assert.ok(control.getAttribute("aria-label") || control.closest("label"),
+    const labelledBy=(control.getAttribute("aria-labelledby")||"").split(/\s+/).filter(Boolean);
+    const linkedLabel=[...doc.querySelectorAll("label")].some(label=>control.id&&label.htmlFor===control.id&&label.textContent.trim());
+    assert.ok(control.getAttribute("aria-label") || control.closest("label") || linkedLabel ||
+      labelledBy.length&&labelledBy.every(id=>doc.getElementById(id)?.textContent.trim()),
       `control #${control.id || "(dynamic)"} needs a label`);
   }
 
@@ -4455,6 +4477,39 @@ test("with wake-ups off, the monitors row says events are waiting for your next 
   assert.deepEqual(errors, []);
 });
 
+test("Pips is a labelled chat-header control and Settings remains a separate command",()=>{
+ const {dom,doc,posted,errors}=makeDom();
+ const pips=doc.querySelector('#phead #btn-pips');assert.ok(pips);assert.equal(pips.textContent.trim(),'Pips');assert.equal(pips.getAttribute('aria-label'),'Open Pips');
+ const count=posted.length;pips.click();doc.querySelector('#btn-settings').click();
+ assert.deepEqual(posted.slice(count).map(m=>m.type),['openPips','openSettings']);assert.equal(doc.querySelector('#surface').hidden,true);assert.equal(doc.querySelector('#settings'),null);assert.deepEqual(errors,[]);dom.window.close();
+});
+
+test("Pips mounts once inside the main panel without replacing its chat or draft",()=>{
+ const x=makeDom({scope:'pips-test-scope',clock:true});const {dom,doc,send,errors}=x;
+ doc.documentElement.dataset.pipsDocumentId='this-document';
+ const log=doc.getElementById('log'),input=doc.getElementById('input');
+ log.appendChild(doc.createTextNode('Existing chat remains intact'));
+ input.value='Unsent main chat draft';input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ const mounts=[],visibility=[],received=[];
+ dom.window.DgcPips={mount:options=>{mounts.push(options);options.onMessage(m=>received.push(m));return{setVisible:value=>visibility.push(value)};}};
+ send({type:'pipsOpen'});send({type:'pipsOpen'});
+ assert.equal(mounts.length,1);assert.equal(mounts[0].root,doc.getElementById('pips-host').shadowRoot);
+ mounts[0].postMessage({type:'pipsRequest',documentId:'stale-document',id:'request-1',request:{type:'list_pips'}});
+ assert.equal(x.posted.at(-1).documentId,'this-document','the main document owns the control client identity');
+ assert.equal(doc.body.classList.contains('pips-active'),true);assert.equal(doc.getElementById('pips-host').hidden,false);
+ assert.equal(doc.getElementById('log'),log);assert.equal(input.value,'Unsent main chat draft');
+ mounts[0].setState({selected:'pip-a',draft:'Pip draft'});x.advance(500);
+ assert.equal(x.savedState().pips.draft,'Pip draft','main draft persistence must preserve Pip state');
+ send({type:'pipsReply',id:'reply-1',ok:true,result:{}});assert.equal(received.length,1);
+ send({type:'pipsVisibility',visible:false});assert.equal(visibility.at(-1),false);
+ doc.getElementById('btn-pips-back').click();
+ assert.equal(doc.getElementById('pips-host').hidden,true);assert.equal(doc.body.classList.contains('pips-active'),false);
+ assert.equal(doc.getElementById('log'),log);assert.equal(log.textContent,'Existing chat remains intact');
+ assert.equal(input.value,'Unsent main chat draft');assert.equal(doc.activeElement,input);
+ send({type:'pipsReply',id:'reply-2',ok:true,result:{}});assert.equal(received.length,2,'hidden Pip conversations may receive their own replies');
+ assert.deepEqual(errors,[]);dom.window.close();
+});
+
 test("at the chat limit the folder button is off too, not only +", () => {
   const { doc, send, errors } = makeDom();
   const items = [{ id: "a", label: "One", active: true }, { id: "b", label: "Two" }];
@@ -4466,4 +4521,61 @@ test("at the chat limit the folder button is off too, not only +", () => {
   send({ type: "chat_slots", items, max: 0, activeId: "a" });
   assert.equal(folder.disabled, false, "with no limit it is on");
   assert.deepEqual(errors, []);
+});
+test('goal budget commands reach goal management rather than creating a new objective',()=>{
+ for(const value of ['/goal budget 5000','/goal budget off','/goal budget invalid']){
+  const {dom,doc,posted}=makeDom();const input=doc.getElementById('input');input.value=value;input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.ok(posted.some(v=>v.type==='slashText'&&v.text===value));assert.equal(posted.some(v=>v.type==='startGoal'),false);assert.equal(doc.querySelector('.goal-prompt'),null);dom.window.close();
+ }
+});
+test('a rejected new goal retains the active turn stop control',()=>{
+ const {dom,doc,send}=makeDom();send({type:'event',event:{type:'turn_start',prompt:'Current work'}});send({type:'goal_start_state',state:'error',error:'Finish or stop the current turn.'});assert.equal(doc.getElementById('send').title,'Stop generation');dom.window.close();
+});
+
+test('budgeted goal echo claims its original row in either acknowledgement order', () => {
+  for (const acceptedFirst of [true, false]) {
+    const { dom, doc, posted, send, errors } = makeDom();
+    doc.getElementById('input').value = '/goal --tokens 9000 Prepare a weekly plan';
+    doc.getElementById('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));
+    const request = posted.findLast(m => m.type === 'startGoal');
+    const accepted = {type:'prompt_accepted',request_id:request.requestId,state:'started'};
+    const started = {type:'turn_start',request_id:request.requestId,turn_id:'goal-budget',prompt:'Prepare a weekly plan',kind:'prompt'};
+    for (const event of acceptedFirst ? [accepted,started] : [started,accepted]) send({type:'event',event});
+    assert.equal(doc.querySelectorAll('.msg.user').length, 1);
+    assert.equal(doc.querySelectorAll('.goal-prompt').length, 1);
+    assert.equal(doc.querySelector('.goal-prompt .bubble').textContent, 'Prepare a weekly plan');
+    assert.deepEqual(errors, []);
+    dom.window.close();
+  }
+});
+
+test('armed goal composer still parses a newly typed goal prefix and budget controls', () => {
+  for (const [text, type, expected] of [
+    ['/goal --tokens 1 New objective', 'startGoal', '--tokens 1 New objective'],
+    ['/goal budget 9000', 'slashText', '/goal budget 9000'],
+    ['budget off', 'slashText', '/goal budget off'],
+  ]) {
+    const { dom, doc, posted, errors } = makeDom();
+    const input = doc.getElementById('input');
+    input.value = 'Old draft /goal';
+    input.dispatchEvent(new dom.window.Event('input', {bubbles:true}));
+    assert.equal(doc.getElementById('btn-goal').hidden, false);
+    input.value = text;
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:'Enter',bubbles:true}));
+    assert.equal(posted.findLast(m => m.type === type)?.text, expected);
+    assert.deepEqual(errors, []);
+    dom.window.close();
+  }
+});
+
+test('goal budget pause is labelled Paused and keeps the response partial', () => {
+  const { dom, doc, send, errors } = makeDom();
+  const event = value => send({type:'event',event:value});
+  event({type:'turn_start',turn_id:'budget-stop',prompt:'Prepare a plan',kind:'prompt'});
+  event({type:'text_delta',text:'I have compared two approaches.'});
+  event({type:'turn_end',turn_id:'budget-stop',reason:'paused',token_estimate:100});
+  assert.match(doc.querySelector('.thinking.done').textContent,/Paused/);
+  assert.doesNotMatch(doc.querySelector('.thinking.done').textContent,/Failed|Worked/);
+  assert.equal(doc.querySelectorAll('.answer.partial').length,1);
+  assert.equal(doc.getElementById('send').title,'Send message');
+  assert.deepEqual(errors,[]);dom.window.close();
 });

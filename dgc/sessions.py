@@ -253,9 +253,21 @@ def resolve_path(project_root, path, *, must_exist: bool = False) -> Path:
         raise ValueError(f"session path is outside this project: {p}") from e
     if p.suffix != ".json":
         raise ValueError("session path must name a .json session file")
+    # A reviewed move retires this identity in its old bucket. This guard also
+    # stops legacy writers without generation CAS from recreating a second chat.
+    if os.path.lexists(directory / ".session-migrations" / p.stem / "retired"):
+        raise ValueError("session was moved to another workspace directory; resume it from the reviewed destination")
     if must_exist and not p.is_file():
         raise FileNotFoundError(f"no such session: {p.name}")
     return p
+
+
+def migrate_workspace_session(config, session_id, *, workspace_id, source_root,
+                              expected_revision=None, dry_run=True, registry=None):
+    """Preview/apply one explicit, identity-checked move of private session history."""
+    from .session_migration import migrate_workspace_session as migrate
+    return migrate(config, session_id, workspace_id=workspace_id, source_root=source_root,
+                   expected_revision=expected_revision, dry_run=dry_run, registry=registry)
 
 
 def metrics_path(session_file, project_root) -> Path:
@@ -404,6 +416,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None,
+         workspace_identity: dict | None = None,
          mode: str | None = None, plan_return_mode: str | None = None) -> bool:
     saved = False
     try:
@@ -419,6 +432,11 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         data = {"schema_version": SCHEMA_VERSION, "id": path.stem,
                 "project": str(Path(project_root).resolve()),
                 "updated": time.time(), "messages": messages}
+        if workspace_identity is not None:
+            # These are descriptive copies of the private registry's association, not a grant.
+            # Resume and protocol consumers must consult that registry, never trust this JSON.
+            from .workspace_sessions import clean_identity
+            data.update(clean_identity(workspace_identity))
         if name:
             data["name"] = name
         if mode in ("default", "acceptEdits", "plan", "auto"):
@@ -518,6 +536,12 @@ def _load_data(path, project_root) -> dict:
     with _lock_for(p):
         _reclaim_stale_temporary(p)
         data = json.loads(p.read_text())
+    return validate_record(data, p, project_root)
+
+
+def validate_record(data, path: Path, project_root) -> dict:
+    """Validate an already bounded/read transcript with the ordinary resume semantics."""
+    p = Path(path)
     if (not isinstance(data, dict) or not isinstance(data.get("messages", []), list)
             or any(not isinstance(message, dict) for message in data.get("messages", []))):
         raise ValueError(f"invalid session file: {p.name}")

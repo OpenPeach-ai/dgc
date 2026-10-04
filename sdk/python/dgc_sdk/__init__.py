@@ -9,6 +9,7 @@ from ._version import PROTOCOL, REQUIRES_CLI, __version__
 from .audit import redact, redact_text
 from .client import AsyncDGC, AsyncRunHandle, AsyncSession, DGC
 from .policy import RuntimePolicy
+from .pips import AsyncPips, Pips, PipReadCommand, PipMutationCommand
 from .retry import RetryPolicy
 from .usage import Pricing, cost_usd
 from .errors import (
@@ -27,6 +28,7 @@ from .types import (
 )
 
 __all__ = [
+    "AsyncPips", "Pips", "PipReadCommand", "PipMutationCommand",
     "PROTOCOL", "REQUIRES_CLI", "__version__",
     "AgentInfo", "Artifact", "AsyncDGC", "AsyncRunHandle", "AsyncSession", "Checkpoint", "DGC",
     "Denial", "Pricing", "RetryPolicy", "RuntimePolicy", "cost_usd", "redact", "redact_text",

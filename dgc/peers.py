@@ -288,6 +288,17 @@ def model_line(peers: list[dict]) -> str:
             "choosing for them.</dgc-peers>")
 
 
+
+def strip_model_line(text: str) -> str:
+    """Remove only the generated trailing peer note from human-facing history."""
+    import re
+    count = r"(?:[1-9][0-9]* other DGC agents?(?: and [1-9][0-9]* that may still be running)?|[1-9][0-9]* that may still be running)"
+    # Keep the template coupled to the actual producer; arbitrary user XML stays visible.
+    sample = model_line([{"liveness": "live"}])
+    suffix = sample.split("1 other DGC agent", 1)[1]
+    return re.sub(r"\n\n<dgc-peers>" + count + re.escape(suffix) + r"\s*\Z", "", text)
+
+
 def user_line(peers: list[dict]) -> str:
     """One line for the person. Empty when nothing is worth saying."""
     live = [p for p in peers if p.get("liveness") == "live"]

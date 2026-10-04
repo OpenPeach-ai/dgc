@@ -1,0 +1,2400 @@
+{
+  "GOOGLECONTACTS_SEARCH_CONTACTS": {
+    "toolkit": "GOOGLECONTACTS",
+    "tool_slug": "GOOGLECONTACTS_SEARCH_CONTACTS",
+    "description": "Searches the authenticated user's contacts for matches against the provided query. The query matches against names, nicknames, email addresses, phone numbers, and organizations. Use this action when you need to find specific contacts in the user's Google Contacts by name, email, phone, or organization. Clients should send a warmup request with an empty query before searching to update the cache. Results are limited to contacts from the CONTACT source.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "examples": [
+            "John Doe",
+            "john@example.com",
+            "+1 555-123-4567"
+          ],
+          "description": "The plain-text query for the request. The query matches against a contact's names, nickNames, emailAddresses, phoneNumbers, and organizations fields. To search without a query (for cache warming), provide an empty string."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "CONTACT",
+              "PROFILE"
+            ],
+            "type": "string",
+            "description": "Source types that can be requested in the sources parameter."
+          },
+          "description": "Optional list of source types to return. If not specified or empty, all sources are returned. Supported values: CONTACT (user's saved contacts), PROFILE (user's profile data)."
+        },
+        "page_size": {
+          "type": "integer",
+          "default": 25,
+          "maximum": 100,
+          "minimum": 0,
+          "description": "The number of results to return. Valid range is 0-100. If set to 0 or not specified, defaults to 10 results. Values greater than 30 are capped to 30 by the API."
+        },
+        "read_mask": {
+          "type": "string",
+          "default": "names,emailAddresses,phoneNumbers",
+          "examples": [
+            "names,emailAddresses,phoneNumbers",
+            "names,organizations",
+            "names,emailAddresses,phoneNumbers,addresses"
+          ],
+          "description": "A field mask to restrict which fields are returned for each contact. Provide a comma-separated list of field names (e.g., 'names,emailAddresses,phoneNumbers'). Invalid fields are silently ignored. Common fields: names, emailAddresses, phoneNumbers, organizations, addresses, birthdays."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "$defs": {
+        "Url": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "formattedType": {
+              "type": "string"
+            }
+          }
+        },
+        "Name": {
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "givenName": {
+              "type": "string"
+            },
+            "familyName": {
+              "type": "string"
+            },
+            "middleName": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "honorificPrefix": {
+              "type": "string"
+            },
+            "honorificSuffix": {
+              "type": "string"
+            },
+            "unstructuredName": {
+              "type": "string"
+            },
+            "displayNameLastFirst": {
+              "type": "string"
+            }
+          }
+        },
+        "Event": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "$ref": "#/$defs/DateValue"
+            },
+            "type": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "formattedType": {
+              "type": "string"
+            }
+          }
+        },
+        "Photo": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "default": {
+              "type": "boolean"
+            }
+          }
+        },
+        "Skill": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "Gender": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "formattedValue": {
+              "type": "string"
+            }
+          }
+        },
+        "Locale": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "Person": {
+          "type": "object",
+          "properties": {
+            "etag": {
+              "type": "string"
+            },
+            "urls": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Url"
+              }
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Name"
+              }
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Event"
+              }
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Skill"
+              }
+            },
+            "genders": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Gender"
+              }
+            },
+            "locales": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Locale"
+              }
+            },
+            "metadata": {
+              "$ref": "#/$defs/PersonMetadata"
+            },
+            "photoUrl": {
+              "$ref": "#/$defs/Photo"
+            },
+            "addresses": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Address"
+              }
+            },
+            "birthdays": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Birthday"
+              }
+            },
+            "interests": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Interest"
+              }
+            },
+            "nicknames": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Nickname"
+              }
+            },
+            "relations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Relation"
+              }
+            },
+            "timeZones": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TimeZone"
+              }
+            },
+            "biographies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Biography"
+              }
+            },
+            "occupations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Occupation"
+              }
+            },
+            "phoneNumbers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PhoneNumber"
+              }
+            },
+            "resourceName": {
+              "type": "string"
+            },
+            "organizations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Organization"
+              }
+            },
+            "emailAddresses": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EmailAddress"
+              }
+            }
+          }
+        },
+        "Source": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        },
+        "Address": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            },
+            "country": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "postalCode": {
+              "type": "string"
+            },
+            "countryCode": {
+              "type": "string"
+            },
+            "formattedType": {
+              "type": "string"
+            },
+            "streetAddress": {
+              "type": "string"
+            },
+            "formattedValue": {
+              "type": "string"
+            },
+            "extendedAddress": {
+              "type": "string"
+            }
+          }
+        },
+        "Birthday": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "$ref": "#/$defs/DateValue"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "birthdaysText": {
+              "type": "string"
+            }
+          }
+        },
+        "Interest": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "Nickname": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "Relation": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "person": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "formattedType": {
+              "type": "string"
+            }
+          }
+        },
+        "TimeZone": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "Biography": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "contentType": {
+              "type": "string"
+            }
+          }
+        },
+        "DateValue": {
+          "type": "object",
+          "properties": {
+            "day": {
+              "type": "integer"
+            },
+            "year": {
+              "type": "integer"
+            },
+            "month": {
+              "type": "integer"
+            }
+          }
+        },
+        "Occupation": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            }
+          }
+        },
+        "PhoneNumber": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "canonicalForm": {
+              "type": "string"
+            },
+            "formattedType": {
+              "type": "string"
+            }
+          }
+        },
+        "EmailAddress": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "formattedType": {
+              "type": "string"
+            }
+          }
+        },
+        "Organization": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "endDate": {
+              "$ref": "#/$defs/DateValue"
+            },
+            "metadata": {
+              "$ref": "#/$defs/FieldMetadata"
+            },
+            "startDate": {
+              "$ref": "#/$defs/DateValue"
+            },
+            "department": {
+              "type": "string"
+            },
+            "primaryText": {
+              "type": "string"
+            },
+            "formattedType": {
+              "type": "string"
+            },
+            "secondaryText": {
+              "type": "string"
+            }
+          }
+        },
+        "SearchResult": {
+          "type": "object",
+          "properties": {
+            "person": {
+              "$ref": "#/$defs/Person"
+            }
+          }
+        },
+        "FieldMetadata": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/Source"
+            },
+            "primary": {
+              "type": "boolean"
+            },
+            "sourcePrimary": {
+              "type": "boolean"
+            }
+          }
+        },
+        "PersonMetadata": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/Source"
+            },
+            "previousResourceNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "linkedPeopleResourceNames": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "SearchContactsResponse": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SearchResult"
+              }
+            },
+            "nextPageToken": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data",
+        "successful"
+      ],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SearchContactsResponse"
+        },
+        "error": {
+          "type": "string"
+        },
+        "successful": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "GOOGLEDRIVE_FIND_FILE": {
+    "toolkit": "GOOGLEDRIVE",
+    "tool_slug": "GOOGLEDRIVE_FIND_FILE",
+    "description": "The comprehensive Google Drive search tool that handles all file and folder discovery needs. Use this for any file finding task - from simple name searches to complex queries with date filters, MIME types, permissions, custom properties, folder scoping, and more. Searches across My Drive and shared drives with full metadata support. Examples: - Find PDFs: q=\"mimeType = 'application/pdf'\" - Find recent files: q=\"modifiedTime > '2024-01-01T00:00:00'\" - Search by name: q=\"name contains 'report'\" - Files in folder: folderId=\"abc123\" or q=\"'FOLDER_ID' in parents\"",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "examples": [
+            "name = 'Budget 2024'",
+            "name = 'Valentine's Day'",
+            "name contains 'Jan'26 Schedule'",
+            "name contains 'report'",
+            "mimeType = 'application/pdf'",
+            "mimeType = 'application/vnd.google-apps.folder'",
+            "'FOLDER_ID' in parents",
+            "modifiedTime > '2024-01-01T00:00:00'",
+            "modifiedTime > '2024-10-01T14:30:00' and modifiedTime < '2024-10-01T18:00:00'",
+            "createdTime > '2024-10-02T00:00:00' and createdTime < '2024-10-02T23:59:59'",
+            "sharedWithMe = true",
+            "sharedWithMe = true and name contains 'report'",
+            "sharedWithMe = true and mimeType = 'application/pdf'",
+            "starred = true and mimeType = 'application/pdf'",
+            "trashed = false",
+            "'user@example.com' in owners",
+            "'user@example.com' in writers",
+            "fullText contains 'quarterly results'",
+            "name contains 'report' and not name contains 'draft'",
+            "(mimeType contains 'image/' or mimeType contains 'video/')",
+            "name contains 'invoice' and modifiedTime > '2024-01-01T00:00:00' and trashed = false"
+          ],
+          "description": "Query string to filter file results. Accepts both simple text searches and full Google Drive query syntax.\n\n        **Simple Text Search:** Bare text (e.g., \"SAM RFP\") is auto-converted to fullText search. Bare email addresses are auto-converted to owner search.\n\n        **Full Query Syntax:** 'field operator value' combined with 'and', 'or', 'not'\n\n        **Operators:** =, !=, <, >, <=, >=, contains, in\n\n        **Common Fields:**\n        - `name` - File name (exact match with = or partial match with contains)\n        - `fullText` - File content search\n        - `mimeType` - File type (e.g., 'application/pdf', 'application/vnd.google-apps.folder')\n        - `modifiedTime`, `createdTime` - Dates (RFC 3339: '2024-01-01T00:00:00')\n        - `parents` - Folder IDs containing the file\n        - `owners`, `writers` - User email addresses (MUST use 'in' operator, NOT colon syntax)\n        - `properties`, `appProperties` - Custom metadata\n\n        **Boolean Filter Fields (sharedWithMe, trashed, starred):**\n        These fields require explicit `= true` or `= false` syntax:\n        - `sharedWithMe = true` - Find files shared with you by others\n        - `sharedWithMe = false` - Find files NOT shared with you (your own files)\n        - `trashed = true` - Find files in trash\n        - `trashed = false` - Exclude trashed files from results\n        - `starred = true` - Find starred/favorited files\n        - `starred = false` - Find non-starred files\n\n        Combine with other conditions using 'and':\n        - \"sharedWithMe = true and name contains 'report'\" - Find shared files with 'report' in name\n        - \"sharedWithMe = true and mimeType = 'application/pdf'\" - Find shared PDF files\n        - \"starred = true and modifiedTime > '2024-01-01T00:00:00'\" - Find recently modified starred files\n\n        **Query Complexity Limits:**\n        Queries with many OR clauses (typically >5-10) may fail with 'The query is too complex' error.\n\n        **Name Field Usage:**\n        Wildcards (*) are NOT supported. Use 'contains' operator for partial matching.\n\n        **User Email Searches:**\n        - CORRECT: \"'user@example.com' in owners\" or \"'user@example.com' in writers\" or \"'user@example.com' in readers\"\n        - INCORRECT: \"owner:user@example.com\" (colon syntax is NOT supported and will cause errors)\n        - Always use the 'in' operator with quoted email addresses for user-based searches\n\n        **Special Syntax:**\n        - Dates: RFC 3339 format (time zone defaults to UTC)\n        - Apostrophes/quotes in values: Automatically escaped. You can write \"name = 'Jan'26'\" or \"name = 'Valentine's Day'\" without manual escaping.\n        - Grouping: Use parentheses for OR: \"(mimeType contains 'image/' or mimeType contains 'video/')\"\n        - Custom properties: \"properties has { key='department' and value='sales' }\"\n\n        **IMPORTANT - Root Folder ('My Drive'):**\n        'My Drive' is NOT a searchable folder name. To work with the root folder, use the 'root' alias: folder_id='root' or \"'root' in parents\" in your query.\n        "
+        },
+        "fields": {
+          "type": "string",
+          "examples": [
+            "*",
+            "files(id,name,mimeType)",
+            "id,name,mimeType",
+            "nextPageToken,files(id,name,mimeType)",
+            "files(id,name,modifiedTime,size,webViewLink)",
+            "nextPageToken,files(id,name,parents,permissions)"
+          ],
+          "description": "Selector specifying which fields to include in a partial response. Use '*' for all fields.\n\n**Default Behavior (Recommended for Discovery):**\nWhen omitted, returns essential file discovery fields: id, name, mimeType, size, modifiedTime, createdTime, parents, webViewLink, trashed, starred. This lightweight default is optimized for file search/discovery use cases without verbose permission or capability metadata.\n\n**Format:** For file fields, use 'files(field1,field2,...)' format. For example: 'files(id,name,mimeType)'.\nTop-level response fields (kind, nextPageToken, incompleteSearch) can be used directly.\n\n**Note:** Bare field names like 'id,name,mimeType' will be automatically wrapped in 'files()' for convenience.\nThe 'editors' field is not valid in Drive API v3; use 'permissions' instead for access control information."
+        },
+        "spaces": {
+          "type": "string",
+          "default": "drive",
+          "examples": [
+            "drive",
+            "appDataFolder",
+            "photos",
+            "drive,appDataFolder"
+          ],
+          "description": "A comma-separated list of spaces to query. Supported values are 'drive', 'appDataFolder' and 'photos'."
+        },
+        "corpora": {
+          "enum": [
+            "user",
+            "drive",
+            "domain",
+            "allDrives"
+          ],
+          "type": "string",
+          "default": "allDrives",
+          "examples": [
+            "user",
+            "domain",
+            "drive",
+            "allDrives"
+          ],
+          "description": "Specifies which collections of files to search. Defaults to 'allDrives' (searches My Drive + all accessible shared drives).\n\n        **Values:**\n        - `user` - Search only user's personal My Drive\n        - `domain` - Search all files shared within Google Workspace domain\n        - `drive` - Search specific shared drive (requires 'driveId' parameter and 'includeItemsFromAllDrives' must be true)\n        - `allDrives` - Search My Drive + all accessible shared drives (DEFAULT, requires 'includeItemsFromAllDrives' to be true)\n\n        **When to Use:**\n        - Personal files only: Use 'user'\n        - Organization-wide: Use 'domain'\n        - Specific shared drive: Use 'drive' with 'driveId'\n        - Maximum coverage: Use 'allDrives' (auto-enables supportsAllDrives and includeItemsFromAllDrives)\n        "
+        },
+        "driveId": {
+          "type": "string",
+          "description": "ID of the shared drive to search. When provided, 'corpora' will automatically be set to 'drive' (mutually exclusive with corpora='allDrives'). Required if 'corpora' is 'drive'."
+        },
+        "orderBy": {
+          "type": "string",
+          "examples": [
+            "modifiedTime desc",
+            "createdTime",
+            "name",
+            "name_natural",
+            "viewedByMeTime desc",
+            "quotaBytesUsed desc",
+            "folder,modifiedTime desc,name",
+            "starred desc,name",
+            "recency desc"
+          ],
+          "description": "Comma-separated sort keys. Ascending by default; add 'desc' for descending. Cannot be used when query (q) contains fullText search terms.\n\n        **Valid Keys:**\n        - `createdTime`, `modifiedTime`, `modifiedByMeTime` - Dates\n        - `viewedByMeTime`, `sharedWithMeTime` - Activity dates\n        - `name`, `name_natural` - File name (natural: file1, file2, file10)\n        - `folder` - Folder hierarchy\n        - `quotaBytesUsed` - Storage size (NOTE: 'size' is NOT valid, use 'quotaBytesUsed')\n        - `starred` - Starred status\n        - `recency` - Recent activity (combines view time and modification time for relevance-based sorting)\n\n        **Important:** 'size' is NOT a valid sort key. Use 'quotaBytesUsed' to sort by file size.\n\n        **Restriction:** Sorting is not supported when the query contains fullText searches (e.g., \"fullText contains 'keyword'\"). Omit orderBy when using fullText queries.\n        "
+        },
+        "pageSize": {
+          "type": "integer",
+          "default": 100,
+          "maximum": 1000,
+          "minimum": 1,
+          "examples": [
+            10,
+            50,
+            100,
+            500,
+            1000
+          ],
+          "description": "The maximum number of files to return per page."
+        },
+        "folder_id": {
+          "type": "string",
+          "examples": [
+            "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+            "root"
+          ],
+          "description": "ID of a specific folder to search within. This automatically adds \"'folder_id' in parents\" to the query. Can be combined with the 'q' parameter to further filter results within the folder. Use 'root' to search within the user's root folder (My Drive). Note: 'My Drive' is not a searchable folder name - use 'root' alias instead."
+        },
+        "pageToken": {
+          "type": "string",
+          "description": "The token for continuing a previous list request on the next page. IMPORTANT: This must be the exact opaque string from a previous response's 'nextPageToken' field - do not modify, truncate, URL-encode, or construct tokens manually. Invalid or corrupted tokens will result in API errors."
+        },
+        "include_labels": {
+          "type": "string",
+          "examples": [
+            "label_abc123",
+            "label_xyz789,label_def456",
+            "priority_label,status_label,department_label"
+          ],
+          "description": "A comma-separated list of label IDs to include in the `labelInfo` part of the response for each file. Empty strings are automatically treated as omitted."
+        },
+        "pagetoken_dropped": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether the page token was dropped from the request."
+        },
+        "supportsAllDrives": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the requesting application supports both My Drives and shared drives. If 'includeItemsFromAllDrives' is true, this must also be true."
+        },
+        "original_email_query": {
+          "type": "string",
+          "description": "The original email query before transformation."
+        },
+        "editors_field_removed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether the editors field was removed from the request."
+        },
+        "email_query_transformed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether an email query was transformed into a search filter."
+        },
+        "orderby_size_transformed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether the orderBy size value was transformed."
+        },
+        "original_bare_text_query": {
+          "type": "string",
+          "description": "The original bare text query before transformation."
+        },
+        "includeItemsFromAllDrives": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether both My Drive and shared drive items should be included in results. Must be true when corpora is 'drive' or 'allDrives'. If true, 'supportsAllDrives' should also be true."
+        },
+        "emailaddress_field_removed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether the email address field was removed from the request."
+        },
+        "original_invalid_pagetoken": {
+          "type": "string",
+          "description": "The original invalid page token that was dropped."
+        },
+        "bare_text_query_transformed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Indicates whether a bare text query was transformed into a search filter."
+        },
+        "include_permissions_for_view": {
+          "type": "string",
+          "examples": [
+            "published"
+          ],
+          "description": "Specifies which additional view's permissions to include in the response. Must be either omitted entirely or set to 'published'. Empty strings are automatically treated as omitted."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "$defs": {
+        "GoogleDriveFile": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "default": "drive#file"
+            },
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "type": "string"
+            },
+            "owners": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GoogleDriveUser"
+              }
+            },
+            "shared": {
+              "type": "boolean"
+            },
+            "spaces": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "driveId": {
+              "type": "string"
+            },
+            "parents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "starred": {
+              "type": "boolean"
+            },
+            "trashed": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            },
+            "iconLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "mimeType": {
+              "type": "string"
+            },
+            "labelInfo": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "ownedByMe": {
+              "type": "boolean"
+            },
+            "link_label": {
+              "type": "string"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "viewedByMe": {
+              "type": "boolean"
+            },
+            "createdTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": {
+              "type": "string"
+            },
+            "display_url": {
+              "type": "string"
+            },
+            "exportLinks": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1
+              }
+            },
+            "md5Checksum": {
+              "type": "string"
+            },
+            "permissions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GoogleDrivePermissionDetails"
+              }
+            },
+            "resourceKey": {
+              "type": "string"
+            },
+            "sharingUser": {
+              "$ref": "#/$defs/GoogleDriveUser"
+            },
+            "teamDriveId": {
+              "type": "string"
+            },
+            "trashedTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "webViewLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "capabilities": {
+              "$ref": "#/$defs/GoogleDriveFileCapabilities"
+            },
+            "contentHints": {
+              "$ref": "#/$defs/GoogleDriveFileContentHints"
+            },
+            "hasThumbnail": {
+              "type": "boolean"
+            },
+            "modifiedByMe": {
+              "type": "boolean"
+            },
+            "modifiedTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "trashingUser": {
+              "$ref": "#/$defs/GoogleDriveUser"
+            },
+            "appProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "fileExtension": {
+              "type": "string"
+            },
+            "permissionIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "thumbnailLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "folderColorRgb": {
+              "type": "string"
+            },
+            "headRevisionId": {
+              "type": "string"
+            },
+            "quotaBytesUsed": {
+              "type": "string"
+            },
+            "viewedByMeTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "webContentLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "isAppAuthorized": {
+              "type": "boolean"
+            },
+            "shortcutDetails": {
+              "$ref": "#/$defs/GoogleDriveShortcutDetails"
+            },
+            "writersCanShare": {
+              "type": "boolean"
+            },
+            "modifiedByMeTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "originalFilename": {
+              "type": "string"
+            },
+            "sharedWithMeTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "thumbnailVersion": {
+              "type": "string"
+            },
+            "explicitlyTrashed": {
+              "type": "boolean"
+            },
+            "fullFileExtension": {
+              "type": "string"
+            },
+            "lastModifyingUser": {
+              "$ref": "#/$defs/GoogleDriveUser"
+            },
+            "linkShareMetadata": {
+              "$ref": "#/$defs/GoogleDriveLinkShareMetadata"
+            },
+            "imageMediaMetadata": {
+              "$ref": "#/$defs/GoogleDriveFileImageMediaMetadata"
+            },
+            "videoMediaMetadata": {
+              "$ref": "#/$defs/GoogleDriveFileVideoMediaMetadata"
+            },
+            "contentRestrictions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GoogleDriveContentRestriction"
+              }
+            },
+            "securityUpdateEnabled": {
+              "type": "boolean"
+            },
+            "viewersCanCopyContent": {
+              "type": "boolean"
+            },
+            "securityUpdateEligible": {
+              "type": "boolean"
+            },
+            "hasAugmentedPermissions": {
+              "type": "boolean"
+            },
+            "copyRequiresWriterPermission": {
+              "type": "boolean"
+            }
+          }
+        },
+        "GoogleDriveUser": {
+          "type": "object",
+          "properties": {
+            "me": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "default": "drive#user"
+            },
+            "photoLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "emailAddress": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            }
+          }
+        },
+        "FindFileResponse": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "default": "drive#fileList"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GoogleDriveFile"
+              }
+            },
+            "nextPageToken": {
+              "type": "string"
+            },
+            "incompleteSearch": {
+              "type": "boolean"
+            },
+            "composio_execution_message": {
+              "type": "string"
+            }
+          }
+        },
+        "GoogleDriveShortcutDetails": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string"
+            },
+            "targetMimeType": {
+              "type": "string"
+            },
+            "targetResourceKey": {
+              "type": "string"
+            }
+          }
+        },
+        "GoogleDriveFileCapabilities": {
+          "type": "object",
+          "properties": {
+            "canCopy": {
+              "type": "boolean"
+            },
+            "canEdit": {
+              "type": "boolean"
+            },
+            "canShare": {
+              "type": "boolean"
+            },
+            "canTrash": {
+              "type": "boolean"
+            },
+            "canDelete": {
+              "type": "boolean"
+            },
+            "canRename": {
+              "type": "boolean"
+            },
+            "canComment": {
+              "type": "boolean"
+            },
+            "canUntrash": {
+              "type": "boolean"
+            },
+            "canDownload": {
+              "type": "boolean"
+            },
+            "canReadLabels": {
+              "type": "boolean"
+            },
+            "canAddChildren": {
+              "type": "boolean"
+            },
+            "canListChildren": {
+              "type": "boolean"
+            },
+            "canModifyLabels": {
+              "type": "boolean"
+            },
+            "canModifyContent": {
+              "type": "boolean"
+            },
+            "canReadRevisions": {
+              "type": "boolean"
+            },
+            "canRemoveChildren": {
+              "type": "boolean"
+            },
+            "canAcceptOwnership": {
+              "type": "boolean"
+            },
+            "canAddMyDriveParent": {
+              "type": "boolean"
+            },
+            "canMoveItemIntoDrive": {
+              "type": "boolean"
+            },
+            "canMoveItemOutOfDrive": {
+              "type": "boolean"
+            },
+            "canMoveItemWithinDrive": {
+              "type": "boolean"
+            },
+            "canRemoveMyDriveParent": {
+              "type": "boolean"
+            },
+            "canMoveItemIntoTeamDrive": {
+              "type": "boolean"
+            },
+            "canMoveChildrenOutOfDrive": {
+              "type": "boolean"
+            },
+            "canMoveChildrenWithinDrive": {
+              "type": "boolean"
+            },
+            "canModifyContentRestriction": {
+              "type": "boolean"
+            },
+            "canRemoveContentRestriction": {
+              "type": "boolean"
+            },
+            "canEnableInheritedPermissions": {
+              "type": "boolean"
+            },
+            "canChangeSecurityUpdateEnabled": {
+              "type": "boolean"
+            },
+            "canChangeViewersCanCopyContent": {
+              "type": "boolean"
+            },
+            "canDisableInheritedPermissions": {
+              "type": "boolean"
+            },
+            "canChangeItemDownloadRestriction": {
+              "type": "boolean"
+            },
+            "canModifyOwnerContentRestriction": {
+              "type": "boolean"
+            },
+            "canModifyEditorContentRestriction": {
+              "type": "boolean"
+            },
+            "canChangeCopyRequiresWriterPermission": {
+              "type": "boolean"
+            }
+          }
+        },
+        "GoogleDriveFileContentHints": {
+          "type": "object",
+          "properties": {
+            "thumbnail": {
+              "$ref": "#/$defs/GoogleDriveFileContentHintsThumbnail"
+            },
+            "indexableText": {
+              "type": "string"
+            }
+          }
+        },
+        "GoogleDriveLinkShareMetadata": {
+          "type": "object",
+          "properties": {
+            "securityUpdateEnabled": {
+              "type": "boolean"
+            },
+            "securityUpdateEligible": {
+              "type": "boolean"
+            }
+          }
+        },
+        "GoogleDrivePermissionDetails": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "default": "drive#permission"
+            },
+            "role": {
+              "enum": [
+                "owner",
+                "organizer",
+                "fileOrganizer",
+                "writer",
+                "commenter",
+                "reader"
+              ],
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "user",
+                "group",
+                "domain",
+                "anyone"
+              ],
+              "type": "string"
+            },
+            "domain": {
+              "type": "string"
+            },
+            "deleted": {
+              "type": "boolean"
+            },
+            "photoLink": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "emailAddress": {
+              "type": "string"
+            },
+            "pendingOwner": {
+              "type": "boolean"
+            },
+            "expirationTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "permissionDetails": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "allowFileDiscovery": {
+              "type": "boolean"
+            }
+          }
+        },
+        "GoogleDriveContentRestriction": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "readOnly": {
+              "type": "boolean"
+            },
+            "restrictingUser": {
+              "$ref": "#/$defs/GoogleDriveUser"
+            },
+            "restrictionTime": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "GoogleDriveFileImageMediaMetadata": {
+          "type": "object",
+          "properties": {
+            "lens": {
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            },
+            "flash": {
+              "type": "boolean"
+            },
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "sensor": {
+              "type": "string"
+            },
+            "aperture": {
+              "type": "number"
+            },
+            "isoSpeed": {
+              "type": "integer"
+            },
+            "location": {
+              "$ref": "#/$defs/GoogleDriveFileImageMediaMetadataLocation"
+            },
+            "rotation": {
+              "type": "integer"
+            },
+            "cameraMake": {
+              "type": "string"
+            },
+            "colorSpace": {
+              "type": "string"
+            },
+            "cameraModel": {
+              "type": "string"
+            },
+            "focalLength": {
+              "type": "number"
+            },
+            "exposureBias": {
+              "type": "number"
+            },
+            "exposureMode": {
+              "type": "string"
+            },
+            "exposureTime": {
+              "type": "number"
+            },
+            "meteringMode": {
+              "type": "string"
+            },
+            "whiteBalance": {
+              "type": "string"
+            },
+            "subjectDistance": {
+              "type": "number"
+            },
+            "maxApertureValue": {
+              "type": "number"
+            }
+          }
+        },
+        "GoogleDriveFileVideoMediaMetadata": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "durationMillis": {
+              "type": "string"
+            }
+          }
+        },
+        "GoogleDriveFileContentHintsThumbnail": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "string"
+            },
+            "mimeType": {
+              "type": "string"
+            }
+          }
+        },
+        "GoogleDriveFileImageMediaMetadataLocation": {
+          "type": "object",
+          "properties": {
+            "altitude": {
+              "type": "number"
+            },
+            "latitude": {
+              "type": "number"
+            },
+            "longitude": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "required": [
+        "data",
+        "successful"
+      ],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/FindFileResponse"
+        },
+        "error": {
+          "type": "string"
+        },
+        "successful": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "NOTION_SEARCH_NOTION_PAGE": {
+    "toolkit": "NOTION",
+    "tool_slug": "NOTION_SEARCH_NOTION_PAGE",
+    "description": "Searches Notion pages and databases by title. Use specific search terms to find items by title (primary approach). KNOWN LIMITATIONS: (1) Search indexing is not immediate - recently shared items may not appear. (2) Search is not exhaustive - results may be incomplete. (3) Database pages return all custom properties with full nested structures, which can create large responses for databases with many properties - use filter_properties to reduce response size. FALLBACK STRATEGY: If a specific title search returns empty results despite knowing items exist, try an empty query to list all accessible items and filter client-side.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "default": "",
+          "description": "Text to search for in page and database titles. Use specific search terms to find items by title (primary approach). Note: Notion's search has known limitations - indexing is not immediate and recently shared items may not appear. If a specific query returns empty results, try an empty query as a fallback to list all accessible items and filter client-side."
+        },
+        "direction": {
+          "type": "string",
+          "examples": [
+            "ascending",
+            "descending"
+          ],
+          "description": "Specifies the sort direction for the results. Required if `timestamp` is provided. Valid values are `ascending` or `descending`."
+        },
+        "page_size": {
+          "type": "integer",
+          "default": 25,
+          "maximum": 100,
+          "minimum": 1,
+          "description": "The number of items to include in the response. Must be an integer between 1 and 100, inclusive. Defaults to 25."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "The timestamp field to sort the results by. Currently, the only supported value is `last_edited_time`. If provided, `direction` must also be specified."
+        },
+        "filter_value": {
+          "enum": [
+            "page",
+            "database"
+          ],
+          "type": "string",
+          "default": "page",
+          "examples": [
+            "page",
+            "database"
+          ],
+          "description": "Filters results by object type: 'page' or 'database'. Note: When searching databases, Notion's search may not find recently shared or newly created databases due to indexing delays. If specific database searches return empty results, try an empty query with filter_value='database' as a fallback to list all accessible databases."
+        },
+        "start_cursor": {
+          "type": "string",
+          "description": "An opaque cursor value from a previous response's `next_cursor` field. Must be exactly as returned by the API - do not pass page IDs, database IDs, or any other identifiers. If `None`, empty, or invalid, results start from the beginning."
+        },
+        "filter_property": {
+          "type": "string",
+          "default": "object",
+          "examples": [
+            "object"
+          ],
+          "description": "The property to filter the search results by. Currently, the only supported value is `object`, which filters by the type specified in `filter_value`. Defaults to `object`."
+        },
+        "filter_properties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of property names to include in the response for page results. When specified, only these properties will be returned in each page's 'properties' object, reducing response size. Useful for database pages with many custom properties. If not specified, all properties are returned. Note: This filter is applied client-side after receiving the API response."
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "$defs": {
+        "Page": {
+          "type": "object",
+          "required": [
+            "object",
+            "id",
+            "created_time",
+            "created_by",
+            "last_edited_time",
+            "last_edited_by",
+            "archived",
+            "in_trash",
+            "properties",
+            "parent",
+            "url"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "icon": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FileObject"
+                },
+                {
+                  "$ref": "#/$defs/EmojiObject"
+                },
+                {
+                  "$ref": "#/$defs/CustomEmojiObject"
+                }
+              ]
+            },
+            "cover": {
+              "$ref": "#/$defs/FileObject"
+            },
+            "object": {
+              "type": "string",
+              "const": "page"
+            },
+            "parent": {
+              "$ref": "#/$defs/Parent"
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "in_trash": {
+              "type": "boolean"
+            },
+            "is_locked": {
+              "type": "boolean"
+            },
+            "created_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PagePropertyValue"
+              }
+            },
+            "public_url": {
+              "type": "string"
+            },
+            "created_time": {
+              "type": "string"
+            },
+            "last_edited_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "last_edited_time": {
+              "type": "string"
+            }
+          }
+        },
+        "Parent": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "page_id",
+                "workspace",
+                "block_id",
+                "database_id",
+                "data_source_id"
+              ],
+              "type": "string"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "block_id": {
+              "type": "string"
+            },
+            "workspace": {
+              "type": "boolean"
+            },
+            "database_id": {
+              "type": "string"
+            },
+            "data_source_id": {
+              "type": "string"
+            }
+          }
+        },
+        "BotInfo": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "$ref": "#/$defs/BotOwner"
+            },
+            "workspace_id": {
+              "type": "string"
+            },
+            "workspace_name": {
+              "type": "string"
+            },
+            "workspace_limits": {
+              "$ref": "#/$defs/WorkspaceLimits"
+            }
+          }
+        },
+        "BotOwner": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "workspace",
+                "user"
+              ],
+              "type": "string"
+            },
+            "user": {
+              "$ref": "#/$defs/BotOwnerUser"
+            },
+            "workspace": {
+              "type": "boolean"
+            }
+          }
+        },
+        "Database": {
+          "type": "object",
+          "required": [
+            "object",
+            "id",
+            "created_time",
+            "last_edited_time",
+            "created_by",
+            "last_edited_by",
+            "in_trash",
+            "parent",
+            "properties",
+            "url"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "icon": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FileObject"
+                },
+                {
+                  "$ref": "#/$defs/EmojiObject"
+                },
+                {
+                  "$ref": "#/$defs/CustomEmojiObject"
+                }
+              ]
+            },
+            "cover": {
+              "$ref": "#/$defs/FileObject"
+            },
+            "title": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RichText"
+              }
+            },
+            "object": {
+              "type": "string",
+              "const": "database"
+            },
+            "parent": {
+              "$ref": "#/$defs/Parent"
+            },
+            "archived": {
+              "type": "boolean",
+              "default": false
+            },
+            "in_trash": {
+              "type": "boolean"
+            },
+            "is_inline": {
+              "type": "boolean"
+            },
+            "created_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/DatabaseProperty"
+              }
+            },
+            "public_url": {
+              "type": "string"
+            },
+            "description": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RichText"
+              }
+            },
+            "created_time": {
+              "type": "string"
+            },
+            "last_edited_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "last_edited_time": {
+              "type": "string"
+            }
+          }
+        },
+        "FileFile": {
+          "type": "object",
+          "required": [
+            "url",
+            "expiry_time"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "expiry_time": {
+              "type": "string"
+            }
+          }
+        },
+        "RichText": {
+          "type": "object",
+          "required": [
+            "type",
+            "plain_text",
+            "annotations"
+          ],
+          "properties": {
+            "href": {
+              "type": "string"
+            },
+            "text": {
+              "$ref": "#/$defs/RichTextText"
+            },
+            "type": {
+              "enum": [
+                "text",
+                "mention",
+                "equation"
+              ],
+              "type": "string"
+            },
+            "mention": {
+              "$ref": "#/$defs/MentionObject"
+            },
+            "equation": {
+              "$ref": "#/$defs/RichTextEquation"
+            },
+            "plain_text": {
+              "type": "string"
+            },
+            "annotations": {
+              "$ref": "#/$defs/Annotations"
+            }
+          }
+        },
+        "DataSource": {
+          "type": "object",
+          "required": [
+            "object",
+            "id",
+            "properties"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "icon": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FileObject"
+                },
+                {
+                  "$ref": "#/$defs/EmojiObject"
+                },
+                {
+                  "$ref": "#/$defs/CustomEmojiObject"
+                }
+              ]
+            },
+            "title": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RichText"
+              }
+            },
+            "object": {
+              "type": "string",
+              "const": "data_source"
+            },
+            "parent": {
+              "$ref": "#/$defs/Parent"
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "in_trash": {
+              "type": "boolean"
+            },
+            "created_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/DataSourceProperty"
+              }
+            },
+            "description": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RichText"
+              }
+            },
+            "created_time": {
+              "type": "string"
+            },
+            "last_edited_by": {
+              "$ref": "#/$defs/PartialUser"
+            },
+            "database_parent": {
+              "$ref": "#/$defs/Parent"
+            },
+            "last_edited_time": {
+              "type": "string"
+            }
+          }
+        },
+        "FileObject": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/FileFile"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "file",
+                "file_upload",
+                "external",
+                "custom_emoji"
+              ],
+              "type": "string"
+            },
+            "external": {
+              "$ref": "#/$defs/ExternalFile"
+            },
+            "file_upload": {
+              "$ref": "#/$defs/FileUpload"
+            },
+            "custom_emoji": {
+              "$ref": "#/$defs/CustomEmojiInfo"
+            }
+          }
+        },
+        "FileUpload": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "LinkObject": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        },
+        "PersonInfo": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            }
+          }
+        },
+        "Annotations": {
+          "type": "object",
+          "required": [
+            "bold",
+            "italic",
+            "strikethrough",
+            "underline",
+            "code",
+            "color"
+          ],
+          "properties": {
+            "bold": {
+              "type": "boolean"
+            },
+            "code": {
+              "type": "boolean"
+            },
+            "color": {
+              "type": "string"
+            },
+            "italic": {
+              "type": "boolean"
+            },
+            "underline": {
+              "type": "boolean"
+            },
+            "strikethrough": {
+              "type": "boolean"
+            }
+          }
+        },
+        "EmojiObject": {
+          "type": "object",
+          "required": [
+            "type",
+            "emoji"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "emoji"
+            },
+            "emoji": {
+              "type": "string"
+            }
+          }
+        },
+        "PageMention": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "PartialUser": {
+          "type": "object",
+          "required": [
+            "object",
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "bot": {
+              "$ref": "#/$defs/BotInfo"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "person",
+                "bot"
+              ],
+              "type": "string"
+            },
+            "object": {
+              "type": "string",
+              "const": "user"
+            },
+            "person": {
+              "$ref": "#/$defs/PersonInfo"
+            },
+            "avatar_url": {
+              "type": "string"
+            }
+          }
+        },
+        "UserMention": {
+          "type": "object",
+          "required": [
+            "object",
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "object": {
+              "type": "string",
+              "const": "user"
+            }
+          }
+        },
+        "BotOwnerUser": {
+          "type": "object",
+          "required": [
+            "object",
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "person"
+            },
+            "object": {
+              "type": "string",
+              "const": "user"
+            },
+            "person": {
+              "$ref": "#/$defs/PersonInfo"
+            },
+            "avatar_url": {
+              "type": "string"
+            }
+          }
+        },
+        "ExternalFile": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          }
+        },
+        "RichTextText": {
+          "type": "object",
+          "required": [
+            "content"
+          ],
+          "properties": {
+            "link": {
+              "$ref": "#/$defs/LinkObject"
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        },
+        "MentionObject": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "date": {
+              "$ref": "#/$defs/DateMentionValue"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMention"
+            },
+            "type": {
+              "enum": [
+                "user",
+                "page",
+                "database",
+                "date",
+                "link_preview",
+                "template_mention"
+              ],
+              "type": "string"
+            },
+            "user": {
+              "$ref": "#/$defs/UserMention"
+            },
+            "database": {
+              "$ref": "#/$defs/DatabaseMention"
+            },
+            "link_preview": {
+              "$ref": "#/$defs/LinkPreviewMention"
+            },
+            "template_mention": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TemplateMentionDate"
+                },
+                {
+                  "$ref": "#/$defs/TemplateMentionUser"
+                }
+              ]
+            }
+          }
+        },
+        "CustomEmojiInfo": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "DatabaseMention": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "WorkspaceLimits": {
+          "type": "object",
+          "properties": {
+            "max_file_upload_size_in_bytes": {
+              "type": "integer"
+            }
+          }
+        },
+        "DatabaseProperty": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "DateMentionValue": {
+          "type": "object",
+          "required": [
+            "start"
+          ],
+          "properties": {
+            "end": {
+              "type": "string"
+            },
+            "start": {
+              "type": "string"
+            },
+            "time_zone": {
+              "type": "string"
+            }
+          }
+        },
+        "RichTextEquation": {
+          "type": "object",
+          "required": [
+            "expression"
+          ],
+          "properties": {
+            "expression": {
+              "type": "string"
+            }
+          }
+        },
+        "CustomEmojiObject": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "custom_emoji"
+            },
+            "custom_emoji": {
+              "$ref": "#/$defs/CustomEmojiInfo"
+            }
+          }
+        },
+        "PagePropertyValue": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "DataSourceProperty": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "LinkPreviewMention": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          }
+        },
+        "TemplateMentionDate": {
+          "type": "object",
+          "required": [
+            "type",
+            "template_mention_date"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "template_mention_date"
+            },
+            "template_mention_date": {
+              "enum": [
+                "today",
+                "now"
+              ],
+              "type": "string"
+            }
+          }
+        },
+        "TemplateMentionUser": {
+          "type": "object",
+          "required": [
+            "type",
+            "template_mention_user"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "template_mention_user"
+            },
+            "template_mention_user": {
+              "type": "string",
+              "const": "me"
+            }
+          }
+        },
+        "PageOrDatabaseMarker": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "SearchNotionPageResponse": {
+          "type": "object",
+          "required": [
+            "object",
+            "results",
+            "has_more"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "page_or_database"
+            },
+            "object": {
+              "type": "string",
+              "const": "list"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Page"
+                  },
+                  {
+                    "$ref": "#/$defs/DataSource"
+                  },
+                  {
+                    "$ref": "#/$defs/Database"
+                  }
+                ]
+              }
+            },
+            "has_more": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "next_cursor": {
+              "type": "string"
+            },
+            "page_or_database": {
+              "$ref": "#/$defs/PageOrDatabaseMarker"
+            },
+            "composio_execution_message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data",
+        "successful"
+      ],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SearchNotionPageResponse"
+        },
+        "error": {
+          "type": "string"
+        },
+        "successful": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

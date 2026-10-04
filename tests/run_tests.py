@@ -11542,7 +11542,9 @@ def test_benchmark_integrity():
         _bundled_skill_names = {entry.name for entry in _bundled_skills_dir.iterdir()
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
-                           "present_plan", "propose_options", "ask_user", "python", "update_goal"}
+                           "present_plan", "propose_options", "ask_user", "python", "update_goal",
+                           "pips_context", "pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip",
+                           "pause_pip", "resume_pip", "attach_pip_to_session"}  # Opt-in Pips stay off in the default probe.
         # Measured at 6,402 on 0.46.0 (6,383 before it; 6,376 on 0.45.0; 6,222 before `show_file`,
         # whose Environment line's timezone is 7 of them). The ceiling is a bloat gate, not a
         # target -- it earned its keep on 0.44.0, where `show_file`'s first description cost 206
@@ -14569,7 +14571,9 @@ def test_context_notes():
         agent._note_tool_result("bash", {"command": "pytest -q tests/test_retry.py"},
                                 "exit code: 1\nE   assert 1 == 2")
         agent._note_tool_result("edit_file", {"path": "src/app.py"}, "--- a/src/app.py\n+++ b")
-        agent._note_tool_result("bash", {"command": "pytest -q"}, "12 passed in 0.4s")
+        # Actual Bash results carry the controller's exit prefix. Success prose
+        # alone is not an observed process outcome.
+        agent._note_tool_result("bash", {"command": "pytest -q"}, "exit code: 0\n12 passed in 0.4s")
         agent._note_tool_result("read_file", {"path": "src/app.py"}, "error: unreadable")
         store = agent.notes()
         kinds = sorted((r["kind"], r["tool"]) for r in store.recent(10))

@@ -108,6 +108,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
           "Exporting your DGC sessions as scrubbed fine-tuning JSONL — see the terminal.");
       }
     }),
+    vscode.commands.registerCommand("dgc.openPips", () => provider.openPips()),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc.command")) {

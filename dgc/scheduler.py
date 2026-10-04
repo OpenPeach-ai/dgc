@@ -45,6 +45,18 @@ def _lock_path(key: str) -> Path:
     return _lock_directory() / f"workspace-{digest}.lock"
 
 
+def _pips_lock_path(key: str, directory: Path) -> Path:
+    """Pips' runner-state key chooses its private lock root, including DGC_HOME."""
+    from .workspace_registry import RegistryError, _private_directory
+    try:
+        _private_directory(directory.parent)
+        _private_directory(directory)
+    except RegistryError as exc:
+        raise OSError(errno.EACCES, "Pips lease directory is not safe") from exc
+    digest = hashlib.sha256(key.encode("utf-8", errors="surrogatepass")).hexdigest()
+    return directory / f"workspace-{digest}.lock"
+
+
 def _open_lock_file(path: Path) -> int:
     flags = os.O_RDWR | os.O_CREAT
     flags |= getattr(os, "O_CLOEXEC", 0)
@@ -113,9 +125,10 @@ class WorkspaceMutationLock:
     allows a background reader thread to release a lease acquired by its launching thread.
     """
 
-    def __init__(self, key: str, label: str = "workspace"):
+    def __init__(self, key: str, label: str = "workspace", *, lock_directory: Path | None = None):
         self.key = key
         self.label = label
+        self._lock_directory = lock_directory
         self.path: Path | None = None
         self._local = threading.Lock()
         self._state = threading.Lock()
@@ -152,7 +165,8 @@ class WorkspaceMutationLock:
 
         fd: int | None = None
         try:
-            self.path = _lock_path(self.key)
+            self.path = (_pips_lock_path(self.key, self._lock_directory)
+                         if self._lock_directory is not None else _lock_path(self.key))
             fd = _open_lock_file(self.path)
             while True:
                 if _try_os_lock(fd):
@@ -224,7 +238,8 @@ def named_process_lock(namespace: str, key: str) -> WorkspaceMutationLock:
     with _guard:
         lock = _named_locks.get(compound)
         if lock is None:
-            lock = WorkspaceMutationLock(compound, label=namespace)
+            lock_directory = Path(key) / "locks" if namespace in ("pips-supervisor", "pips-runner") else None
+            lock = WorkspaceMutationLock(compound, label=namespace, lock_directory=lock_directory)
             _named_locks[compound] = lock
         return lock
 

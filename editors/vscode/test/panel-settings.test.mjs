@@ -279,6 +279,7 @@ test("goal startup sends one validated-payload command and older backends reject
   assert.deepEqual(commands[0].images, payload.images);
   assert.deepEqual(commands[0].context, [...payload.context, { type: "active_file", path: "app.ts" }]);
   assert.equal(h.commands.length, 0, "no separate goal mutation can precede input validation");
+  h.provider.turnActive = false; // The previous accepted turn has finished.
   h.provider.goalInputs = false;
   await h.provider.startGoal("Verify release", payload);
   assert.equal(commands.length, 1);
@@ -2119,6 +2120,111 @@ test("settings gear reveals only the editor, and ready restores the selected pag
   assert.ok(commands.some(c => c.type === "list_mcp_servers"));
 });
 
+test("Pips opens the main panel and correlates controls without creating an editor tab", async()=>{
+ const {provider}=catalogHarness([]);const messages=[],commands=[];
+ const backend={send:m=>{commands.push(m);return true;}};
+ provider.ensureBackend=()=>backend;
+ provider.post=m=>messages.push(m);
+ provider.inVisiblePanel=action=>action();
+ provider.sessionReady=true;provider.backend=backend;
+ provider.lastReadyEvent={capabilities:{pips_supported:true,pips_api_version:9,pips_enabled:true}};
+ provider.openPips();provider.openPips();
+ assert.equal(messages.filter(m=>m.type==='pipsOpen').length,2);
+ assert.equal(provider.pipsEditor.panel,undefined);
+ await provider.onMessage({type:'pipsRequest',documentId:provider.pipsDocumentId,generation:provider.pipsEditor.generation,id:'client-1',request:{type:'list_pips'}});
+ assert.equal(commands.at(-1).type,'pips_control');
+ const request=commands.at(-1).request;
+ assert.notEqual(request.request_id,'client-1');
+ provider.pipsEditor.event({type:'pips_result',command:'list_pips',request_id:request.request_id,ok:true,result:{pips:[]}});
+ assert.equal(messages.at(-1).type,'pipsReply');assert.equal(messages.at(-1).id,'client-1');
+ provider.pipsEditor.dispose();
+});
+
+function pipsDocumentHarness() {
+ const vs=globalThis.__DGC_TEST_VSCODE,savedUri=vs.Uri;
+ vs.Uri={joinPath:(...parts)=>({fsPath:parts.map(String).join('/')}),file:value=>({fsPath:value})};
+ const {provider}=catalogHarness([]),commands=[],messages=[];
+ const backend={ready:true,send:message=>{commands.push(message);return true;}};
+ provider.ensureBackend=()=>backend;provider.backend=backend;provider.sessionReady=true;
+ provider.lastReadyEvent={capabilities:{pips_supported:true,pips_api_version:9,pips_enabled:true}};
+ provider.post=message=>messages.push(message);provider.inVisiblePanel=action=>action();
+ provider.html=()=>'<html><body>Mounted DGC</body></html>';
+ const makeView=viewType=>{
+  let receive;
+  return {viewType,visible:true,show(){},onDidChangeVisibility(){},onDidDispose(){},
+   webview:{options:{},html:'',onDidReceiveMessage(listener){receive=listener;}},
+   message(value){receive(value);}};
+ };
+ const first=makeView('dgc.chat');provider.resolveWebviewView(first);provider.openPips();
+ return {provider,commands,messages,first,makeView,
+  request:(id='view-1',documentId=provider.pipsDocumentId)=>({type:'pipsRequest',documentId,generation:provider.pipsEditor.generation,id,request:{type:'list_pips'}}),
+  dispose(){provider.pipsEditor?.dispose();vs.Uri=savedUri;}};
+}
+
+for(const boundary of ['same document replacement','sidebar adoption']) {
+ test(`Pips discards prior document replies at ${boundary}, even with a reused client ID`,async()=>{
+  const h=pipsDocumentHarness();
+  try {
+   await h.provider.onMessage(h.request());const old=h.commands.at(-1).request;
+   const generation=h.provider.pipsEditor.generation;
+   h.provider.resolveWebviewView(boundary==='sidebar adoption'?h.makeView('dgc.chatSecondary'):h.first);
+   assert.ok(h.provider.pipsEditor.generation>generation,'new webview document invalidates the bridge generation');
+   await h.provider.onMessage(h.request());const current=h.commands.at(-1).request;
+   assert.notEqual(old.request_id,current.request_id);
+   const before=h.messages.filter(m=>m.type==='pipsReply').length;
+   h.provider.pipsEditor.event({type:'pips_result',command:'list_pips',request_id:old.request_id,ok:true,result:{pips:[{id:'stale'}]}});
+   assert.equal(h.messages.filter(m=>m.type==='pipsReply').length,before,'the old document cannot satisfy a new document request');
+   h.provider.pipsEditor.event({type:'pips_result',command:'list_pips',request_id:current.request_id,ok:true,result:{pips:[{id:'current'}]}});
+   assert.deepEqual(h.messages.at(-1),{type:'pipsReply',id:'view-1',ok:true,result:{pips:[{id:'current'}]},error:undefined});
+  } finally {h.dispose();}
+ });
+}
+
+test('Pips rejects queued messages carrying the old document nonce after a same-view replacement',async()=>{
+ const h=pipsDocumentHarness();
+ try {
+  const oldDocument=h.provider.pipsDocumentId;
+  assert.equal(typeof oldDocument,'string');assert.ok(oldDocument.length>=16);
+  h.provider.resolveWebviewView(h.first);assert.notEqual(h.provider.pipsDocumentId,oldDocument);
+  const count=h.commands.length;
+  for(const message of [h.request('old-request',oldDocument),{type:'pipsReconnect',documentId:oldDocument},{type:'pipsReady',documentId:oldDocument},h.request('missing-document',null)]) {
+   await h.provider.onMessage(message);
+  }
+  assert.equal(h.commands.length,count,'stale documents must not enqueue a backend control');
+  await h.provider.onMessage(h.request('fresh-request'));
+  assert.equal(h.commands.length,count+1);assert.equal(h.commands.at(-1).type,'pips_control');
+ } finally {h.dispose();}
+});
+
+test('the abandoned twin cannot send controls into the adopted main panel',()=>{
+ const h=pipsDocumentHarness();
+ try {
+  const next=h.makeView('dgc.chatSecondary');h.provider.resolveWebviewView(next);
+  const accepted=[];h.provider.onMessage=async message=>accepted.push(message);
+  h.first.message({type:'pipsRequest',documentId:h.provider.pipsDocumentId,id:'old-twin',request:{type:'pause_pip',pip_id:'pip-old'}});
+  assert.deepEqual(accepted,[],'message source view must match, even if it has a current-looking document ID');
+  next.message({type:'pipsReady',documentId:h.provider.pipsDocumentId});
+  assert.equal(accepted.length,1);
+ } finally {h.dispose();}
+});
+
+test('Pips controls stay on their originating chat channel and reject stale view generations',async()=>{
+ const h=pipsDocumentHarness();
+ try {
+  const old=h.request('old');await h.provider.onMessage(old);const oldWire=h.commands.at(-1).request;
+  const secondary=[];const channel={send:command=>{secondary.push({...command,chat_id:'chat-other'});return true;}};
+  h.provider.backend=channel;h.provider.ensureBackend=()=>channel;
+  h.provider.pipsEditor.ready(h.provider.lastReadyEvent.capabilities,channel);
+  await h.provider.onMessage({...old,id:'late-ui'});assert.equal(secondary.length,0);
+  assert.match(h.messages.at(-1).error.message,/earlier chat connection/);
+  await h.provider.onMessage(h.request('current'));assert.equal(secondary.length,1);
+  assert.equal(secondary[0].chat_id,'chat-other');assert.equal(secondary[0].request.chat_id,undefined);
+  const replies=h.messages.filter(m=>m.type==='pipsReply').length;
+  h.provider.pipsEditor.event({type:'pips_result',command:'list_pips',request_id:oldWire.request_id,ok:true,result:{pips:[{id:'old'}]}});
+  assert.equal(h.messages.filter(m=>m.type==='pipsReply').length,replies);
+ }finally{h.dispose();}
+});
+
 test("editor usage preserves its request id and MCP switches do not open chat surfaces", async () => {
   const {provider} = catalogHarness([]);
   const commands = [], messages = [];
@@ -2270,6 +2376,26 @@ test('saved connector tokens are not replayed to a release CLI during startup',a
  assert.match(h.rawSecrets.get('dgc.mcp.zapier'),/private-token/);
 });
 
+test("Pip references are capability-gated and forwarded as exact pins with draft recovery", async () => {
+ const h=harness(),sent=[],posted=[];h.provider.post=m=>posted.push(m);h.provider.ensureBackend=()=>h.provider.backend;h.provider.backend.send=m=>(sent.push(m),true);h.provider.editorContext=()=>[];h.provider.spoolImages=async()=>undefined;
+ const pin={pip_id:'pip_'+'a'.repeat(32),expected_version:2,expected_lifecycle_revision:4};
+ const message={type:'prompt',text:'Explain this Pip',requestId:'pip-ref-prompt',pip_references:[pin],restore:{text:'Explain this Pip',attachments:[{label:'Pip',pipReference:{pip_id:pin.pip_id}}]}};
+ await h.provider.onMessage(message);assert.equal(sent.length,0);assert.ok(posted.some(m=>m.type==='prompt_rejected'&&m.requestId===message.requestId));
+ h.provider.lastReadyEvent.capabilities.pip_references=1;await h.provider.onMessage(message);assert.deepEqual(sent[0].pip_references,[pin]);assert.deepEqual(h.provider.unstartedPrompts.get(message.requestId).draft,message.restore);
+ for(const refs of [[pin,pin],[{...pin,workspace_id:'other'}],[{...pin,pip_id:pin.pip_id+'\n'}],[{...pin,expected_lifecycle_revision:-1}]])await h.provider.onMessage({...message,pip_references:refs});assert.equal(sent.length,1);
+});
+test("Pip search refuses caller scope and drops stale session replies", async () => {
+ const h=harness(),sent=[],posted=[];h.provider.post=m=>posted.push(m);h.provider.ensureBackend=()=>h.provider.backend;h.provider.backend.send=m=>(sent.push(m),true);h.provider.lastReadyEvent.capabilities.pip_references=1;
+ h.provider.currentSessionId='chat-a';await h.provider.onMessage({type:'list_prompt_pips',request_id:'ref-a',query:'Rook',limit:20});assert.equal(sent[0].type,'list_prompt_pips');
+ h.provider.currentSessionId='chat-b';h.provider.onEvent({type:'prompt_pips',request_id:'ref-a',workspace_id:'ws-a',pips:[],next_cursor:null});assert.equal(posted.length,0);
+ await h.provider.onMessage({type:'list_prompt_pips',request_id:'ref-b',workspace_id:'other'});assert.equal(sent.length,1);assert.equal(posted.at(-1).event.command,'list_prompt_pips');
+ await h.provider.onMessage({type:'list_prompt_pips',request_id:'ref-c',limit:20});h.provider.onEvent({type:'prompt_pips',request_id:'ref-c',workspace_id:'ws-a',pips:[],next_cursor:null});assert.equal(posted.at(-1).event.type,'prompt_pips');
+});
+test("Pip reference prompt cannot cross a session change while images spool", async () => {
+ const h=harness(),sent=[],posted=[];h.provider.post=m=>posted.push(m);h.provider.ensureBackend=()=>h.provider.backend;h.provider.backend.send=m=>(sent.push(m),true);h.provider.lastReadyEvent.capabilities.pip_references=1;
+ let finish;h.provider.spoolImages=()=>new Promise(r=>{finish=r;});h.provider.currentSessionId='a';const pending=h.provider.onMessage({type:'prompt',text:'Inspect',requestId:'pin-await',pip_references:[{pip_id:'pip_'+'a'.repeat(32),expected_version:1,expected_lifecycle_revision:0}]});h.provider.currentSessionId='b';finish(undefined);await pending;assert.equal(sent.length,0);assert.ok(posted.some(m=>m.type==='prompt_rejected'));
+});
+
 // A `session` frame is where a chat's identity changes. The handler CLEARS the chat change set,
 // because the previous chat's files must not be attributed to this one, and `onEvent`'s refresh
 // list re-asks the backend what the NEW chat changed. Both halves are load-bearing and only the
@@ -2302,7 +2428,15 @@ function sessionSwitchHarness() {
     lastReadyEvent: { capabilities: { workspace_inspection: true, chat_inspection: true } } });
   provider.chatChanges = [{ id: "stale", root: scratch, folder: "fixture", path: "old.ts",
                            displayPath: "old.ts", additions: 1, deletions: 0 }];
-  return { provider, posted, asked };
+  // Capture the scheduling boundary, then await the real refresh. A fixed 60 ms
+  // wait races its filesystem realpath calls when browser tests run in parallel.
+  const scheduled = [];
+  provider.scheduleWorkspaceChanges = delay => scheduled.push(delay);
+  return { provider, posted, asked, async flushChanges() {
+    assert.ok(scheduled.length > 0, "the session event must schedule a refresh");
+    scheduled.length = 0;
+    await provider.refreshWorkspaceChanges();
+  } };
 }
 
 test("a resumed chat asks what IT changed, instead of keeping the previous chat's empty set", async () => {
@@ -2315,7 +2449,7 @@ test("a resumed chat asks what IT changed, instead of keeping the previous chat'
   assert.ok(h.posted.some(message => message.type === "chat_changes"
     && message.sessionId === "second-chat" && message.files.length === 0),
     "the webview is told the set is empty for the new chat");
-  await new Promise(resolve => setTimeout(resolve, 60));
+  await h.flushChanges();
   assert.ok(h.asked.includes("get_chat_changes"),
     "clearing without re-asking is the bug: the transcript's restored file rows then resolve "
     + "against an empty set and report the file is no longer in the change set");
@@ -2323,6 +2457,59 @@ test("a resumed chat asks what IT changed, instead of keeping the previous chat'
   // that the question is asked, so the set matches the chat the user is looking at.
   const fresh = sessionSwitchHarness();
   fresh.provider.onEvent({ type: "session", kind: "new", session_id: "third-chat" });
-  await new Promise(resolve => setTimeout(resolve, 60));
+  await fresh.flushChanges();
   assert.ok(fresh.asked.includes("get_chat_changes"));
+});
+test('replacing an unfinished goal needs review, preserves cancellation, and pins its identity',async()=>{
+ const h=harness(),posted=[],commands=[];h.provider.post=v=>posted.push(v);h.provider.editorContext=()=>[];h.provider.goalInputs=true;h.provider.backend.send=v=>{commands.push(v);return true;};h.provider.lastReadyEvent={capabilities:{goal_replace_guard:true}};
+ h.provider.state.goal={id:'a'.repeat(32),text:'Keep original work',status:'paused',elapsed_seconds:12};
+ await h.provider.startGoal('Replacement',{requestId:'cancel'});assert.equal(commands.length,0);assert.equal(h.provider.state.goal.text,'Keep original work');assert.ok(posted.some(v=>v.type==='prompt_rejected'&&v.requestId==='cancel'));assert.ok(posted.some(v=>v.type==='goal_start_state'&&v.state==='cancelled'));
+ notices.warningResponses.push('Replace goal');await h.provider.startGoal('Replacement',{requestId:'replace'});assert.equal(commands.length,1);assert.equal(commands[0].expected_goal_id,'a'.repeat(32));assert.equal(commands[0].text,'Replacement');
+});
+test('running turn rejects goal replacement without pretending to stop it',async()=>{
+ const h=harness(),posted=[],commands=[];h.provider.post=v=>posted.push(v);h.provider.turnActive=true;h.provider.backend.send=v=>{commands.push(v);return true;};await h.provider.startGoal('Replace',{requestId:'busy'});assert.equal(commands.length,0);assert.equal(h.provider.turnActive,true);assert.ok(posted.some(v=>v.type==='prompt_rejected'&&v.requestId==='busy'));assert.match(posted.find(v=>v.type==='goal_start_state').error,/current turn/);
+});
+test('native active goal replacement reviews then steers without stopping the foreground turn',async()=>{
+ const h=harness(),posted=[],commands=[];h.provider.post=v=>posted.push(v);h.provider.editorContext=()=>[];h.provider.goalInputs=true;h.provider.turnActive=true;h.provider.backend.send=v=>{commands.push(v);return true;};h.provider.lastReadyEvent={capabilities:{goal_replace_guard:true,live_goal_replace:true}};
+ h.provider.state.goal={id:'a'.repeat(32),text:'Original work',status:'active',token_budget:500,elapsed_seconds:12};
+ await h.provider.startGoal('New work',{requestId:'cancel-live'});assert.equal(commands.length,0);assert.equal(h.provider.turnActive,true);assert.ok(posted.some(v=>v.type==='goal_start_state'&&v.state==='cancelled'));
+ notices.warningResponses.push('Replace goal');await h.provider.startGoal('--tokens 1000 New work',{requestId:'live'});
+ assert.equal(commands.length,1);assert.equal(commands[0].type,'start_goal');assert.equal(commands[0].expected_goal_id,'a'.repeat(32));assert.equal(commands[0].token_budget,1000);assert.equal(commands[0].text,'New work');assert.equal(h.provider.turnActive,true);assert.equal(commands.some(v=>v.type==='cancel'),false);
+});
+
+test('live goal edit waits for correlated commit without cancellation or a second turn', async()=>{
+ const h=harness(),posted=[],commands=[];h.provider.post=v=>posted.push(v);
+ h.provider.turnActive=true;h.provider.lastReadyEvent={capabilities:{live_goal_edit:true}};
+ h.provider.state.goal={id:'a'.repeat(32),text:'Original',status:'active'};
+ h.provider.backend.send=v=>{commands.push(v);return true;};
+ await h.provider.updateGoal('Edited',3000);
+ assert.equal(commands.length,1);assert.equal(commands[0].type,'set_goal');
+ assert.equal(commands[0].expected_goal_id,'a'.repeat(32));assert.equal(commands[0].token_budget,3000);
+ assert.equal(h.provider.turnActive,true);assert.equal(posted.at(-1).state,'pending');
+ await h.provider.updateGoal('Duplicate',8000);assert.equal(commands.length,1);
+ // Reject a different request: it must not close the pending editor.
+ h.provider.onEvent({type:'command_rejected',command:'set_goal',request_id:'other',message:'other'});
+ assert.equal(h.provider.pendingGoalEdit,commands[0].request_id);
+ h.provider.onEvent({type:'command_rejected',command:'set_goal',request_id:commands[0].request_id,message:'The turn ended'});
+ assert.equal(h.provider.pendingGoalEdit,undefined);assert.equal(posted.at(-1).state,'error');
+ assert.equal(posted.some(v=>v.type==='goal_edit_state'&&v.state==='saved'),false);
+});
+test('live goal edit reports a failed send and retains the editor draft',async()=>{
+ const h=harness(),posted=[];h.provider.post=v=>posted.push(v);h.provider.turnActive=true;
+ h.provider.lastReadyEvent={capabilities:{live_goal_edit:true}};
+ h.provider.backend.send=()=>false;await h.provider.updateGoal('Edited',1000);
+ assert.equal(h.provider.pendingGoalEdit,undefined);assert.equal(posted.at(-1).state,'error');
+});
+
+test('a first goal can steer an ordinary active turn on a capable native backend',async()=>{
+ const h=harness(),posted=[],commands=[];h.provider.post=v=>posted.push(v);h.provider.editorContext=()=>[];
+ h.provider.goalInputs=true;h.provider.turnActive=true;h.provider.state.goal={text:'',status:'none',elapsed_seconds:0};
+ h.provider.lastReadyEvent={capabilities:{goal_replace_guard:true,live_goal_start:true}};
+ h.provider.backend.send=v=>{commands.push(v);return true;};
+ await h.provider.startGoal('--tokens 2000 Finish this objective',{requestId:'first-live'});
+ assert.equal(commands.length,1);assert.equal(commands[0].type,'start_goal');
+ assert.equal(commands[0].expected_goal_id,'');assert.equal(commands[0].token_budget,2000);
+ assert.equal(commands[0].text,'Finish this objective');assert.equal(h.provider.turnActive,true);
+ assert.equal(notices.warnings.length,0);assert.equal(commands.some(v=>v.type==='cancel'),false);
+ assert.ok(posted.some(v=>v.type==='goal_start_state'&&v.state==='submitted'));
 });

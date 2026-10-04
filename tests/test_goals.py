@@ -44,12 +44,215 @@ class GoalTests(unittest.TestCase):
         self.agent = Agent(config, self.ui)
         self.addCleanup(self.agent.mcp.stop_all)
 
+    def test_budget_recovery_keeps_usage_identity_and_paused_state(self):
+        self.assertTrue(self.agent.set_goal("finish review", token_budget=100))
+        self.agent._goal_details.update(tokens_used=120, usage_known=True, cycles=2)
+        self.assertTrue(self.agent.set_goal("finish review", status="paused"))
+        goal_id=self.agent._goal_details["id"]
+        self.assertTrue(self.agent.set_goal("finish review", status="paused", token_budget=1000))
+        self.assertEqual(self.agent.goal_status,"paused")
+        self.assertEqual(self.agent._goal_details["tokens_used"],120)
+        self.assertEqual(self.agent._goal_details["cycles"],2)
+        self.assertEqual(self.agent._goal_details["id"],goal_id)
+        self.assertTrue(self.agent.set_goal("finish review", status="paused", token_budget=0))
+        self.assertEqual(self.agent._goal_details["tokens_used"],120)
+        self.assertEqual(self.agent._goal_details["token_budget"],0)
+
     def test_no_goal_means_one_turn(self):
         calls = []
         self.agent._run_turn = lambda text: calls.append(text) or True
         self.assertTrue(self.agent.run_turn("ordinary request"))
         self.assertEqual(calls, ["ordinary request"])
         self.assertEqual(self.agent.goal_status, "none")
+
+    def test_terminal_budget_routes_preserve_identity_status_usage_and_do_not_start_turn(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from dgc.cli import CLI
+        from dgc.tui import TUI
+        for handler, output in ((CLI.handle_slash, "classic"), (TUI._handle_slash, "tui")):
+            with self.subTest(surface=output):
+                self.agent.set_goal("Finish the original work", status="paused", replace=True)
+                self.agent._goal_details["tokens_used"] = 123
+                before = self.agent.goal_snapshot()
+                ui = QuietUI()
+                terminal = SimpleNamespace(agent=self.agent, config=self.agent.config,
+                    ui=ui, _flash=ui.info, error=ui.error,
+                    _run_turn_live=Mock(), _submit=Mock(), _invalidate=Mock())
+                handler(terminal, "/goal budget 9000")
+                after = self.agent.goal_snapshot()
+                self.assertEqual(after["id"], before["id"])
+                self.assertEqual(after["text"], before["text"])
+                self.assertEqual(after["status"], "paused")
+                self.assertEqual(after["tokens_used"], 123)
+                self.assertEqual(after["token_budget"], 9000)
+                handler(terminal, "/goal budget off")
+                self.assertEqual(self.agent.goal_snapshot()["token_budget"], 0)
+                stable = self.agent.goal_snapshot()
+                for invalid in ("budget", "budget -1", "budget 01", "budget 1000000000001", "budget nope"):
+                    handler(terminal, "/goal " + invalid)
+                    self.assertEqual(self.agent.goal_snapshot(), stable)
+                self.assertEqual(len([e for e in ui.events if e[0] == "error"]), 5)
+                terminal._run_turn_live.assert_not_called()
+                terminal._submit.assert_not_called()
+
+    def test_budget_command_without_goal_does_not_create_one(self):
+        from dgc.goals import change_terminal_budget
+        with self.assertRaisesRegex(ValueError, "existing goal"):
+            change_terminal_budget(self.agent, "budget 5000")
+        self.assertFalse(self.agent.goal)
+
+    def goal_terminal(self):
+        from types import SimpleNamespace, MethodType
+        from unittest.mock import Mock
+        from prompt_toolkit.buffer import Buffer
+        from dgc.tui import TUI
+        terminal = SimpleNamespace(agent=self.agent, config=self.agent.config,
+            ui=QuietUI(), _flash=Mock(), error=Mock(), info=Mock(),
+            _run_turn_live=Mock(), _submit=Mock(), _invalidate=Mock(),
+            input_buf=Buffer(), _overlay=None)
+        terminal._open_overlay = MethodType(TUI._open_overlay, terminal)
+        terminal._close_overlay = MethodType(TUI._close_overlay, terminal)
+        return terminal
+
+    def test_cli_replacement_defaults_to_cancel_and_keeps_staged_inputs(self):
+        from dgc.cli import CLI
+        self.agent.set_goal("Original work", status="paused", token_budget=300, replace=True)
+        self.agent._draft_mcp_context = [{"text": "unsent context"}]
+        before = self.agent.goal_snapshot()
+        for reply in ("", "n", EOFError(), KeyboardInterrupt()):
+            terminal = self.goal_terminal()
+            kwargs = {"side_effect": reply} if isinstance(reply, BaseException) else {"return_value": reply}
+            with patch("builtins.input", **kwargs):
+                CLI.handle_slash(terminal, "/goal --tokens 99 Replacement")
+            self.assertEqual(self.agent.goal_snapshot(), before)
+            self.assertEqual(self.agent._draft_mcp_context, [{"text": "unsent context"}])
+            terminal._run_turn_live.assert_not_called()
+
+    def test_cli_replacement_accepts_once_and_resets_budget_usage(self):
+        from dgc.cli import CLI
+        self.agent.set_goal("Original", status="paused", token_budget=300, replace=True)
+        self.agent._goal_details["tokens_used"] = 100
+        before = self.agent.goal_snapshot()
+        terminal = self.goal_terminal()
+        with patch("builtins.input", return_value="yes"):
+            CLI.handle_slash(terminal, "/goal --tokens 99 Replacement")
+        after = self.agent.goal_snapshot()
+        self.assertNotEqual(after["id"], before["id"])
+        self.assertEqual((after["text"], after["token_budget"], after["tokens_used"]), ("Replacement", 99, 0))
+        terminal._run_turn_live.assert_called_once_with("Replacement", [])
+
+    def test_cli_review_cannot_overwrite_a_goal_changed_during_input(self):
+        from dgc.cli import CLI
+        self.agent.set_goal("Original", status="paused", replace=True)
+        terminal = self.goal_terminal()
+        def approve(_prompt):
+            self.agent.set_goal("Changed elsewhere", status="paused", replace=True)
+            return "yes"
+        with patch("builtins.input", side_effect=approve):
+            CLI.handle_slash(terminal, "/goal Replacement")
+        self.assertEqual(self.agent.goal, "Changed elsewhere")
+        terminal._run_turn_live.assert_not_called()
+        self.assertTrue(any("changed during review" in str(e) for e in terminal.ui.events))
+
+    def test_tui_replacement_cancel_and_escape_restore_full_command(self):
+        from dgc.tui import TUI
+        self.agent.set_goal("Original", status="paused", replace=True)
+        before = self.agent.goal_snapshot()
+        for cancel_row in (False, True):
+            terminal = self.goal_terminal()
+            TUI._handle_slash(terminal, "/goal --tokens 99 Replacement")
+            overlay = terminal._overlay
+            self.assertEqual(overlay["rows"][0]["value"], "cancel")
+            terminal._close_overlay()
+            if cancel_row:
+                overlay["on_pick"](overlay["rows"][0])
+            self.assertEqual(terminal.input_buf.text, "/goal --tokens 99 Replacement")
+            self.assertEqual(self.agent.goal_snapshot(), before)
+            terminal._submit.assert_not_called()
+
+    def test_tui_review_accepts_and_refuses_replayed_approval(self):
+        from dgc.tui import TUI
+        self.agent.set_goal("Original", status="blocked", replace=True)
+        terminal = self.goal_terminal()
+        TUI._handle_slash(terminal, "/goal Replacement")
+        overlay = terminal._overlay
+        terminal._close_overlay()
+        overlay["on_pick"](overlay["rows"][1])
+        self.assertEqual(self.agent.goal, "Replacement")
+        self.assertEqual(terminal.input_buf.text, "")
+        terminal._submit.assert_called_once_with("Replacement", expand_mentions=False)
+        after = self.agent.goal_snapshot()
+        overlay["on_pick"](overlay["rows"][1])
+        self.assertEqual(self.agent.goal_snapshot(), after)
+        terminal._submit.assert_called_once()
+        self.assertIn("changed during review", str(terminal.error.call_args))
+
+    def test_tui_review_is_bound_to_session_and_budget(self):
+        from dgc.tui import TUI
+        for change in ("session", "budget"):
+            self.agent.set_goal("Original", status="paused", replace=True)
+            terminal = self.goal_terminal()
+            TUI._handle_slash(terminal, "/goal Replacement")
+            overlay = terminal._overlay
+            terminal._close_overlay()
+            if change == "session":
+                terminal.agent = object()
+            else:
+                self.agent.set_goal(self.agent.goal, status="paused", token_budget=99)
+            overlay["on_pick"](overlay["rows"][1])
+            terminal._submit.assert_not_called()
+            self.assertEqual(self.agent.goal, "Original")
+            self.assertEqual(terminal.input_buf.text, "/goal Replacement")
+
+    def test_tui_full_review_retains_original_approval_and_draft(self):
+        from dgc.tui import TUI
+        from unittest.mock import Mock
+        self.agent.set_goal("Original \n" + "long goal " * 100, status="paused", replace=True)
+        terminal = self.goal_terminal()
+        terminal._open_reader = Mock()
+        TUI._handle_slash(terminal, "/goal Replacement")
+        overlay = terminal._overlay
+        terminal._close_overlay()
+        overlay["on_pick"](overlay["rows"][2])
+        body = terminal._open_reader.call_args.args[0]
+        self.assertIn(("long goal " * 100).rstrip(), body)
+        self.assertIn("    Replacement", body)
+        back = terminal._open_reader.call_args.kwargs["back"]
+        self.agent.set_goal("Changed elsewhere", status="paused", replace=True)
+        back()
+        restored = terminal._overlay
+        terminal._close_overlay()
+        restored["on_pick"](restored["rows"][1])
+        self.assertEqual(self.agent.goal, "Changed elsewhere")
+        terminal._submit.assert_not_called()
+        self.assertEqual(terminal.input_buf.text, "/goal Replacement")
+
+    def test_classic_pause_delimiter_and_error_precedence(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from rich.console import Console
+        from dgc.cli import UI
+        for cancelled, failed, expected in ((False, False, "paused"), (True, False, "stopped"), (False, True, "failed")):
+            output = io.StringIO()
+            ui = SimpleNamespace(stop_working=Mock(), _streamed=False, _tool_count=0,
+                                 console=Console(file=output, force_terminal=False))
+            with patch("sys.stdout.isatty", return_value=True):
+                UI.turn_complete(ui, 2, cancelled=cancelled, failed=failed, paused=True)
+            self.assertIn(expected + " · 2s", output.getvalue())
+
+    def test_completed_goal_and_first_goal_start_without_review(self):
+        from dgc.cli import CLI
+        from dgc.tui import TUI
+        for handler in (CLI.handle_slash, TUI._handle_slash):
+            for state in ("none", "completed"):
+                self.agent.set_goal("" if state == "none" else "Finished", status="completed", replace=True)
+                terminal = self.goal_terminal()
+                with patch("builtins.input", side_effect=AssertionError("unexpected confirmation")):
+                    handler(terminal, "/goal Next job")
+                self.assertEqual(self.agent.goal, "Next job")
+                self.assertIsNone(terminal._overlay)
 
     def test_chat_changes_persist_across_native_subscription_resume_and_reset(self):
         state_dir = tempfile.TemporaryDirectory(prefix="dgc-chat-state-")
@@ -246,6 +449,41 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(self.agent.goal_status, "paused")
         self.assertFalse(self.agent.goal_snapshot()["usage_known"])
         self.assertIn("did not report usage", self.agent.goal_snapshot()["reason"])
+        self.assertFalse(self.agent._last_turn_error)
+        self.assertTrue(self.agent._last_turn_pause)
+        self.assertFalse(any(e[0] == "error" for e in self.agent.ui.events))
+
+    def test_native_budget_stop_is_not_a_completed_session_event_and_pause_does_not_leak(self):
+        from dgc import session_turn_events
+        self.agent.set_goal("Finish this task", token_budget=1)
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="Planning the next step")) as chat, \
+             patch.object(session_turn_events, "complete_for_agent") as complete:
+            self.assertTrue(self.agent.run_turn("start"))
+            self.assertEqual(chat.call_count, 1)
+            self.assertEqual(self.agent.goal_status, "paused")
+            self.assertFalse(complete.call_args.kwargs["completed"])
+        self.agent.set_goal("")
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="Hello")):
+            self.assertTrue(self.agent.run_turn("Say hello only"))
+        self.assertFalse(self.agent._last_turn_pause)
+
+    def test_budget_pause_does_not_hide_a_persistence_failure(self):
+        self.agent.set_goal("Finish task", token_budget=1)
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="Next step")), \
+             patch.object(self.agent, "_persist", return_value=False):
+            self.assertFalse(self.agent.run_turn("start"))
+        self.assertTrue(self.agent._last_turn_error)
+        self.assertTrue(any(e[0] == "error" for e in self.agent.ui.events))
+
+    def test_resuming_exhausted_budget_pauses_without_calling_model_or_error(self):
+        self.agent.set_goal("Finish task", token_budget=1)
+        self.agent._goal_details["tokens_used"] = 1
+        with patch.object(self.agent.client, "chat") as chat:
+            self.assertTrue(self.agent.run_turn("resume"))
+        chat.assert_not_called()
+        self.assertEqual(self.agent.goal_status, "paused")
+        self.assertTrue(self.agent._last_turn_pause)
+        self.assertFalse(self.agent._last_turn_error)
 
     def test_report_filter_handles_every_split_without_control_text(self):
         req = request("goal")

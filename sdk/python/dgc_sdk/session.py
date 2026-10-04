@@ -36,6 +36,7 @@ from .types import (
     TaskStatus, ToolRecord, ToolSpec, VerificationResult,
 )
 from .usage import USAGE_TOTAL_KEYS, cost_usd, reported, usage_delta, usage_totals
+from .pips import Pips
 
 log = logging.getLogger("dgc_sdk")
 
@@ -53,7 +54,7 @@ _TASK_MAP = {
     "cancelled": "cancelled", "canceled": "cancelled",
     "pending": "pending", "todo": "pending",
 }
-_TERMINAL = frozenset({"completed", "cancelled", "failed"})
+_TERMINAL = frozenset({"completed", "cancelled", "failed", "paused"})
 _DECISION_EVENTS = frozenset({
     "permission_request", "plan_proposal", "options_request", "mcp_input_request",
 })
@@ -595,6 +596,7 @@ class Session:
         self.capabilities = dict(ready.get("capabilities") or {})
         #: Whether this session's shell commands run inside the OS sandbox.
         self.sandbox: SandboxStatus = sandbox if sandbox is not None else SandboxStatus()
+        self.pips = Pips(self)
 
     @property
     def raw(self) -> DGCClient:
@@ -1133,7 +1135,8 @@ class Session:
 
     def _request(self, command: Mapping[str, Any], response_type: str,
                  timeout: float | None = None, *,
-                 uncorrelated_reply: bool = False) -> dict[str, Any]:
+                 uncorrelated_reply: bool = False,
+                 request_id: str | None = None) -> dict[str, Any]:
         """Send one correlated command and wait for its answer (or its rejection).
 
         A run pump reading the pipe at the same time skips this request's events, so the answer
@@ -1142,7 +1145,7 @@ class Session:
         :class:`DGCTimeoutError`.
         """
         payload = dict(command)
-        rid = payload.get("request_id")
+        rid = request_id if request_id is not None else payload.get("request_id")
         if not isinstance(rid, str) or not rid:
             rid = _new_id("req")
             payload["request_id"] = rid
@@ -1150,8 +1153,9 @@ class Session:
         with self._lock:
             self._outstanding.add(rid)
         try:
+            correlation = {"request_id": rid} if request_id is not None else {}
             return self._client.request(payload, response_type, timeout=wait,
-                                        uncorrelated_reply=uncorrelated_reply)
+                                        uncorrelated_reply=uncorrelated_reply, **correlation)
         except DGCClientError as exc:
             raise public_error(exc) from exc
         finally:
@@ -2139,6 +2143,8 @@ class _Accumulator:
         if reason in ("error", "failed"):
             self.status = "failed"
             self.error = self.last_error or "the turn ended with an error"
+        elif reason == "paused":
+            self.status = "paused"
         elif reason in ("cancelled", "interrupted"):
             self.status = "cancelled"
         else:

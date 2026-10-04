@@ -103,7 +103,12 @@ async function screenshotStep(panel, count, { callId = "c1", open = true } = {})
     { type: "tool_images", call_id: callId, caption: "browser screenshot", images: Array(count).fill(png),
       items: Array.from({ length: count }, (_, i) => itemFor(i + 1)) },
   ]);
-  if (open) await panel.page.evaluate((id) => document.querySelector(`.tool[data-call-id="${id}"] .tool-toggle`).click(), callId);
+  if (open) await panel.page.evaluate((id) => {
+    const card = document.querySelector(`.tool[data-call-id="${id}"]`);
+    const group = card.closest('details.tool-group');
+    if (group && !group.open) group.querySelector('summary').click();
+    if (!card.classList.contains('open')) card.querySelector('.tool-toggle').click();
+  }, callId);
   await panel.settle();
   return png;
 }

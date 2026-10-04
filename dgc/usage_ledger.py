@@ -35,7 +35,7 @@ RETENTION_DAYS = 400
 RANGES = ("today", "7d", "30d", "month", "all")
 RANGE_LABELS = {"today": "Today", "7d": "Last 7 days", "30d": "Last 30 days",
                 "month": "This month", "all": "All time"}
-SOURCES = ("main", "subagent", "fallback", "compaction", "other")
+SOURCES = ("main", "subagent", "fallback", "compaction", "pip", "other")
 _RANGE_ALIASES = {
     "": "7d", "today": "today", "day": "today", "1d": "today",
     "7d": "7d", "7": "7d", "week": "7d", "7days": "7d",
@@ -316,6 +316,10 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     Day boundaries are this machine's local midnights, so "today" and each bar in a day strip
     match the user's clock. A range with no data still lists its days, with zeros.
     """
+    pip_error = ""
+    if path is None:
+        from .pip_usage import sync_completed
+        pip_error = sync_completed()
     range_name = normalize_range(range_name)
     stamp = time.time() if now is None else float(now)
     report = empty_report(range_name, now=stamp)
@@ -359,6 +363,8 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     except Exception as exc:
         _fail(exc)
         return empty_report(range_name, now=stamp, error=_last_error)
+    if pip_error:
+        report["error"] = pip_error
     report["totals"] = {"input_tokens": int(total[0]), "output_tokens": int(total[1]),
                         "cached_input_tokens": int(total[2]), "requests": int(total[3]),
                         "unmetered_requests": int(total[4])}

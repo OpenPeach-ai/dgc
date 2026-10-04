@@ -16,6 +16,7 @@ import {
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
+import { PipsEditor } from "./pipsView";
 import { settingsDocument } from "./settingsView";
 
 function isSlashCommandText(text: string): boolean {
@@ -38,6 +39,18 @@ const UNASSISTED_EXITS_KEY = "dgc.unassistedExits.v1";
 /** Messages the backend accepted as queued and has not started, kept across hosts: a window reload
  *  kills the backend that held them, and the next host hands them back to the webview as not sent. */
 const QUEUED_PROMPTS_KEY = "dgc.queuedPrompts.v1";
+function checkedPromptPipReferences(value: any): any[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new Error("Choose between one and eight Pip references.");
+  const ids = new Set<string>();
+  return value.map((p: any) => {
+    if (!p || typeof p !== "object" || Array.isArray(p) || Object.keys(p).sort().join(",") !== "expected_lifecycle_revision,expected_version,pip_id"
+        || typeof p.pip_id !== "string" || p.pip_id.length !== 36 || !/^pip_[a-f0-9]{32}$/.test(p.pip_id)
+        || ids.has(p.pip_id) || !Number.isSafeInteger(p.expected_version) || p.expected_version < 1 || p.expected_version > 999999
+        || !Number.isSafeInteger(p.expected_lifecycle_revision) || p.expected_lifecycle_revision < 0) throw new Error("Remove and select the invalid Pip reference again.");
+    ids.add(p.pip_id); return {...p};
+  });
+}
+
 const QUEUED_PROMPTS_LIMIT = 17;                     // the webview's own bound on unanswered prompts
 const QUEUED_PROMPT_DRAFT_CHARS = 256 * 1024;        // a bigger restore draft is kept as its text only
 type QueuedPrompt = {
@@ -370,7 +383,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private state = { model: "", mode: "default", think: "off", ultra: false,
                     baseUrl: "", workspaceTrusted: false,
                     subscriptionEngine: "",
-                    goal: { text: "", status: "none", elapsed_seconds: 0 } };
+                    goal: { text: "", status: "none", elapsed_seconds: 0 } as { text: string; status: string; elapsed_seconds: number; id?: string } };
   private _installPrompted = false;
   private _updatePrompted = false;
   /** Survives restart() on purpose. A successful update restarts the backend, which clears the
@@ -392,6 +405,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private behaviorState = { showReasoning: true, thinkingInline: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, McpBrowserRequest>();
   private settingsEditor?: vscode.WebviewPanel;
+  private pipsEditor?: PipsEditor;
+  private pipsDocumentId = randomBytes(16).toString("hex");
   private pendingSignIn?: McpBrowserRequest;
   private pendingSignInServer = "";
   /** The sign-in the browser was opened for: its request id and the chat that asked. Cancel needs
@@ -414,6 +429,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private mcpContext = false;
   private mcpManagement = false;
   private goalInputs = false;
+  private pendingGoalEdit?: string;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   // The running turn was started by the backend on a background monitor event. It yields to any
@@ -595,6 +611,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     incoming.saved = undefined;
     this.activeSlotId = incoming.id;
     this.applyChatFields(saved);
+    if (this.sessionReady && this.backend) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
+    else this.pipsEditor?.offline();
     incoming.unread = 0;
     incoming.needsYou = this.openDecisions.size > 0;   // still true; you are just looking at it now
     // The window remembers ONE current chat, and it is read whenever a backend starts without
@@ -705,6 +723,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const fresh: Record<string, unknown> = {};
     for (const field of PER_CHAT_FIELDS) { fresh[field] = this.cloneChatValue(this.pristineChatState[field]); }
     this.applyChatFields(fresh);
+    this.pipsEditor?.offline();
     this.sessionRestoreCandidate = sessionId;        // a new chat resumes nothing -- unless opened ON a session
     this.sessionRestoreSaved = true;
     this.sessionRestoreSuppressed = true;            // …and ensureBackend must not re-add one
@@ -1060,6 +1079,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     this.scheduleWorkspaceChanges(0);
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
+    this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
     void this.resumeInterruptedWork(be);
   }
 
@@ -1311,10 +1331,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       tokenBudget = Number(match[1]); objective = match[2].trim();
     }
     if (!objective) { reject("Enter a goal objective."); return; }
+    const liveGoalReplace = this.lastReadyEvent?.capabilities?.live_goal_replace === true
+      || this.lastReadyEvent?.capabilities?.live_goal_start === true;
+    if (this.turnActive && !this.monitorTurnActive && !liveGoalReplace) {
+      reject("Finish or stop the current turn before replacing its goal. Your draft is retained."); return;
+    }
     const be = this.ensureBackend();
+    const prior = this.state.goal;
+    const session = this.currentSessionId;
+    const epoch = this.processEpoch;
+    if (prior.text && prior.status !== "completed" && prior.status !== "none") {
+      const choice = await vscode.window.showWarningMessage("Replace the current goal?", {
+        modal: true,
+        detail: `Current objective: ${prior.text}\n\nNew objective: ${objective}\n\nReplacing starts a new goal and resets its usage and token budget. Cancel keeps the current goal and your draft.`,
+      }, "Replace goal");
+      if (choice !== "Replace goal") {
+        this.post({type: "prompt_rejected", requestId});
+        this.post({type: "goal_start_state", state: "cancelled"}); return;
+      }
+      if (session !== this.currentSessionId || epoch !== this.processEpoch || (this.turnActive && !liveGoalReplace) ||
+          ["id", "text", "status", "token_budget"].some(key => (this.state.goal as any)[key] !== (prior as any)[key])) {
+        reject("The chat or goal changed while you reviewed it. Review the current goal before replacing it."); return;
+      }
+    }
+    const expectedGoalId = prior.text ? String((prior as any).id || "") : "";
+    const guardedGoal = this.lastReadyEvent?.capabilities?.goal_replace_guard === true;
+    if (guardedGoal && prior.text && !/^[a-f0-9]{32}$/.test(expectedGoalId)) {
+      reject("Refresh the current goal before replacing it. Its saved identity is unavailable."); return;
+    }
     const attached = Array.isArray(payload.context) ? payload.context.filter((item: any) => item && typeof item === "object") : [];
     if (this.goalInputs) {
       const accepted = be.send({ type: "start_goal", text: objective, request_id: requestId,
+        ...(guardedGoal ? {expected_goal_id: expectedGoalId} : {}),
         skills: payload.skills, templates: payload.templates, images: payload.images,
         context: [...attached, ...this.editorContext()].slice(0, 64),
         ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}) });
@@ -1350,6 +1398,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async updateGoal(text: string, tokenBudget?: number): Promise<void> {
     const objective = String(text || "").trim();
     if (!objective) { return; }
+    if (tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget < 0 || tokenBudget > 1e12)) {
+      this.post({ type: "goal_edit_state", state: "error", error: "Enter a valid non-negative whole-number token budget." }); return;
+    }
+    if (this.pendingGoalEdit) { return; }
+    if (this.turnActive && !this.monitorTurnActive && this.lastReadyEvent?.capabilities?.live_goal_edit === true) {
+      const requestId = this.nextRequestId("goal-edit");
+      this.pendingGoalEdit = requestId;
+      this.post({ type: "goal_edit_state", state: "pending" });
+      // No short response timeout: this edit belongs to the running turn's next boundary.
+      // Its correlated commit/refusal (or backend exit) settles the editor without restarting.
+      try {
+        const accepted = this.ensureBackend().send({ type: "set_goal", request_id: requestId,
+          expected_goal_id: String(this.state.goal.id || ""), text: objective, status: "active",
+          ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}) });
+        if (!accepted) { this.settleGoalEdit("DGC did not accept the edit. Your draft is retained."); }
+      } catch (err: any) {
+        this.settleGoalEdit(err?.message || "DGC could not send the edit. Your draft is retained.");
+      }
+      return;
+    }
     const resume = this.state.goal.status === "active";
     const status = this.state.goal.status || "paused";
     const be = this.ensureBackend();
@@ -1365,6 +1433,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "goal_edit_state", state: "error",
                   error: err?.message || "DGC could not update the goal." });
     }
+  }
+
+  private settleGoalEdit(error?: string): void {
+    if (!this.pendingGoalEdit) { return; }
+    this.pendingGoalEdit = undefined;
+    this.post({ type: "goal_edit_state", state: error ? "error" : "saved", ...(error ? {error} : {}) });
   }
 
   private async pauseGoal(): Promise<void> {
@@ -2384,6 +2458,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private onEvent(ev: DgcEvent): void {
+    const refEvent: any = ev;
+    if (this.pendingGoalEdit) {
+      if (["ready", "session"].includes(ev.type)) {
+        this.settleGoalEdit("The session changed before the goal edit was confirmed. Check the current goal before trying again.");
+      } else if (refEvent.request_id === this.pendingGoalEdit) {
+        if (ev.type === "goal_changed") { this.settleGoalEdit(); }
+        else if (["command_rejected", "error"].includes(ev.type)) {
+          this.settleGoalEdit(String(refEvent.message || "The goal edit could not be applied."));
+          return;
+        }
+      }
+    }
+
+    if (refEvent.type === "prompt_pips" || refEvent.type === "command_rejected" && refEvent.command === "list_prompt_pips") {
+      const owner = this.promptPipRequests.get(refEvent.request_id); this.promptPipRequests.delete(refEvent.request_id);
+      if (owner && owner.backend === this.backend && owner.session === this.currentSessionId && owner.generation === this.sessionHandshakeGeneration) this.post({type:"event",event:ev});
+      return;
+    }
+    if (this.pipsEditor?.event(ev)) return;
+    if (["pips_result", "pips_status"].includes(ev.type)) return;
     // The request handlers project summaries and open text documents. Raw roots and file bodies
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
@@ -2943,7 +3037,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!started || !vscode.workspace.getConfiguration("dgc").get<boolean>("notifyOnTurnEnd", false)) return;
     const seconds = Math.round((Date.now() - started) / 1000);
     if (seconds < 20 || this.view?.visible) return;
-    const verb = reason === "cancelled" ? "stopped" : reason === "error" ? "failed" : "finished";
+    const verb = reason === "paused" ? "paused" : reason === "cancelled" ? "stopped" : reason === "error" ? "failed" : "finished";
     void vscode.window.showInformationMessage(`DGC ${verb} after ${seconds}s`, "Show").then((choice) => {
       if (choice === "Show") this.view?.show?.(true);
     });
@@ -2984,6 +3078,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private post(msg: any): void {
+    if (["backend_exit", "cleared"].includes(msg?.type)) {
+      this.settleGoalEdit("The backend stopped before confirming the goal edit. Check the saved goal before trying again.");
+    }
+    if (["backend_exit", "cleared"].includes(msg?.type)) this.pipsEditor?.offline();
     // A settings-side MCP write reports its progress to the settings tab, not into the chat. The
     // counter alone could not say WHICH webview started the command, and it is held across a
     // request that may take three minutes -- so a /mcp the user typed in chat during that window
@@ -3096,10 +3194,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.view = view;
     this.viewType = view.viewType || "dgc.chat";
     this.webviewReady = false;
+    // A replaced/adopted webview is a new control client. Retire all old reply
+    // correlations and reject queued commands from the previous document.
+    this.pipsDocumentId = randomBytes(16).toString("hex");
+    this.pipsEditor?.attach(message => this.post(message));
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media"),
-        vscode.Uri.joinPath(this.context.extensionUri, "dist")],
+        vscode.Uri.joinPath(this.context.extensionUri, "dist"),
+        vscode.Uri.file(join(homedir(), ".dgc", "plugins", "logos"))],
     };
     view.webview.html = this.html(view.webview);
     // VS Code keeps both copies alive (retainContextWhenHidden), and it does not resolve a view a
@@ -3110,6 +3213,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.adoptedViews.add(view);
       view.onDidChangeVisibility(() => {
         if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
+        if (this.view === view && this.pipsEditor) this.post({ type: "pipsVisibility", visible: view.visible });
       });
       view.onDidDispose(() => {
         // The user unchecked the view: the renderer is gone, the WINDOW is not, and closing the
@@ -3120,6 +3224,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         for (const be of this.liveBackends()) { be.editorState("host", "closed"); }
       });
       view.webview.onDidReceiveMessage((msg) => {
+        if (this.view !== view) return;
         if (msg?.type === "editorAlive") { this.rendererAlive(); return; }
         if (this.testOnlyWebviewReply(msg)) return;
         void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
@@ -3227,9 +3332,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.inVisiblePanel(() => this.slash(action));
   }
 
+  private promptPipRequests = new Map<string, {backend: ChatBackend; session: string; generation: number}>();
   private async onMessage(msg: any): Promise<void> {
     const be = this.ensureBackend();
     switch (msg.type) {
+      case "list_prompt_pips": {
+        const id = typeof msg.request_id === "string" ? msg.request_id : "";
+        const fail = (message: string) => this.post({type:"event",event:{type:"command_rejected",command:"list_prompt_pips",request_id:id,message}});
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || /[\r\n]/.test(id)) return;
+        if (this.lastReadyEvent?.capabilities?.pip_references !== 1) { fail("Update or reconnect DGC to use Pip references."); return; }
+        if (Object.keys(msg).some(k => !["type","request_id","query","after","limit"].includes(k))
+          || msg.query !== undefined && (typeof msg.query !== "string" || Buffer.byteLength(msg.query,"utf8") > 128)
+          || msg.after !== undefined && (typeof msg.after !== "string" || !msg.after || msg.after.length > 256 || /[\u0000-\u001f\u007f]/.test(msg.after))
+          || msg.limit !== undefined && (!Number.isSafeInteger(msg.limit) || msg.limit < 1 || msg.limit > 20)) { fail("Invalid Pip reference search."); return; }
+        if (this.promptPipRequests.size >= 32) this.promptPipRequests.delete(this.promptPipRequests.keys().next().value!);
+        this.promptPipRequests.set(id,{backend:be,session:this.currentSessionId,generation:this.sessionHandshakeGeneration});
+        if (!be.send({...msg} as any)) { this.promptPipRequests.delete(id);fail("DGC could not search this chat’s Pips."); }
+        return;
+      }
+      case "pipsReady":
+      case "pipsReconnect":
+      case "pipsRequest":
+        if (msg.documentId !== this.pipsDocumentId) return;
+        this.ensurePipsBridge().receive(msg);
+        return;
       case "webviewReady": {
         this.webviewReady = true;
         this.repaintFromBackend();
@@ -3267,6 +3393,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "prompt": {
         let text = String(msg.text ?? "");
+        let pipReferences: any[] | undefined;
+        if (msg.pip_references !== undefined) {
+          try {
+            if (this.lastReadyEvent?.capabilities?.pip_references !== 1) throw new Error("Update or reconnect DGC to send Pip references. Your draft is saved.");
+            pipReferences = checkedPromptPipReferences(msg.pip_references);
+            if (!text.trim()) throw new Error("Write a message to send with the Pip reference.");
+          } catch (error: any) { this.post({type:"event",event:{type:"error",message:error.message}});this.post({type:"prompt_rejected",requestId:msg.requestId});return; }
+        }
+        const referenceSession = this.currentSessionId, referenceGeneration = this.sessionHandshakeGeneration;
         const answers = (Array.isArray(msg.answers) ? msg.answers : [])
           .filter((a: any) => a && typeof a === "object" && typeof a.ask_id === "string")
           .slice(0, 4)
@@ -3310,10 +3445,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // editor's 2 MiB total and its 4-image count limit in the first place. A backend that does
         // not offer the capability is sent base64 exactly as before.
         const spooled = await this.spoolImages(msg.images);
+        if (pipReferences && (this.backend !== be || this.currentSessionId !== referenceSession || this.sessionHandshakeGeneration !== referenceGeneration)) {
+          this.post({type:"prompt_rejected",requestId:msg.requestId});return;
+        }
         const accepted = be.send({ type: "prompt", text,
                                    images: spooled ? undefined : msg.images,
                                    ...(spooled ? { spooled_images: spooled } : {}),
                                    request_id: requestId,
+                                   ...(pipReferences ? {pip_references:pipReferences} : {}),
                                    context: [...attached, ...live].slice(0, 64), ...selections,
                                    ...(this.lastReadyEvent?.capabilities?.live_steering
                                      ? { delivery: msg.delivery === "queue" ? "queue" : "steer" } : {}),
@@ -3477,6 +3616,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "setContextSize":
         await this.setContextSize(Number(msg.size));
         break;
+      case "openPips": this.openPips(); return;
       case "openSettings":
         // The header gear. It opens the standalone Settings tab beside the chat.
         this.openSettings(typeof msg.section === "string" ? msg.section : "general");
@@ -3531,6 +3671,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "requestSkills":
         be.send({ type: "list_skills", request_id: this.nextRequestId("composer-skills") });
+        break;
+      case "requestPlugins":
+        this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
+        break;
+      case "installPlugin":
+        this.openEditorSettings("plugins");
+        break;
+      case "openPluginBrowser":
+        this.openEditorSettings("plugins");
         break;
       case "skillsReload":
         be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
@@ -4251,6 +4400,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "subagent": this.openSettings("agents"); break;
       case "usage": this.openSettings("usage"); break;
       case "settings": this.openSettings(); break;
+      case "pips": this.openPips(); break;
       case "securitySettings": this.openSettings("security"); break;
       case "bug": void this.openSafeExternal("https://github.com/OpenPeach-ai/dgc/issues"); break;
       case "viewPlan": this.ensureBackend().send(
@@ -4336,6 +4486,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (!rest || ["review", "status"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "get_goal" }));
         this.post({ type: "open_goal_review" });
+      }
+      else if (/^budget(?:\s|$)/i.test(rest)) {
+        const match = /^budget\s+(off|none|0|[1-9]\d{0,12})$/i.exec(rest);
+        const budget = match && !["off", "none"].includes(match[1].toLowerCase()) ? Number(match[1]) : 0;
+        if (!match || budget > 1e12 || !this.state.goal.text) {
+          this.post({ type: "event", event: { type: "error", message: "Use /goal budget NUMBER|off with an existing goal." } });
+        } else { await this.updateGoal(this.state.goal.text, budget); }
       }
       else if (["clear", "off", "none", "remove", "delete"].includes(low)) {
         await this.clearGoal();
@@ -4990,7 +5147,29 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // ---- in-webview settings page --------------------------------------------
+  // ---- Pips in the main DGC panel ------------------------------------------
+  private ensurePipsBridge(): PipsEditor {
+    if (!this.pipsEditor) {
+      this.pipsEditor = new PipsEditor(this.context.extensionUri,
+      (message, owner) => {
+        // OpenedChat stamps its own chat_id on the outer envelope. Never send a
+        // Pip control through whichever chat happened to become active later.
+        const be = owner as ChatBackend | undefined;
+        return !!be && this.sessionReady && this.backend === be && be.send(message);
+      }, () => {
+        this.ensureBackend();
+        if (this.sessionReady) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
+      }, true);
+      this.pipsEditor.attach(message => this.post(message));
+    }
+    if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
+    return this.pipsEditor;
+  }
+  openPips(): void {
+    this.ensurePipsBridge();
+    this.inVisiblePanel(() => this.post({ type: "pipsOpen" }));
+  }
+
   openSettings(section = "general", usageRange?: string): void {
     const name = section === "extensions" ? "plugins" : section;
     this.openEditorSettings(name, usageRange);
@@ -5902,6 +6081,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshDirty = false;
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
+    this.pipsEditor?.dispose();
     // A chat parked in the background still holds a live `dgc serve`. Closing the window must take
     // every one of them with it, or a child outlives the editor that owns it. Chats opened on a
     // process go first: closing one is a command to its process, and a process already stopped
@@ -5927,6 +6107,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
+    const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
+    const pipSetupStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pip-setup-cards.css"));
+    const pipsStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.css"));
     // Mermaid is fetched by the webview only when a diagram is actually rendered, so its ~5MB is
     // never parsed by a panel that shows none. The URI travels as data, not as a script tag.
     const mermaid = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "mermaid.js"));
@@ -5940,15 +6123,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data: blob: https:;`;
     const favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) ? "on" : "off";
     const draftScope = this.draftScope();
-    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}"><head>
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}"><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
+<link rel="stylesheet" href="${pipSetupStyle}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
-<header id="phead"><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
+<header id="phead"><button type="button" id="btn-pips-back" class="pips-back" title="Back to DGC chat" aria-label="Back to DGC chat" hidden><span class="codicon codicon-chevron-left" aria-hidden="true"></span>Chat</button><button type="button" id="agent-back" class="agent-back" hidden title="Back to chat" aria-label="Back to chat"><span class="codicon codicon-chevron-left" aria-hidden="true"></span></button><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><span id="agent-mark" class="agent-mark" hidden aria-hidden="true"></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button><button type="button" id="btn-pips" class="pips-nav" title="Open Pips" aria-label="Open Pips" aria-pressed="false"><span class="pips-wordmark">Pips</span></button><button type="button" id="chat-add" class="chat-add" title="Open a second chat" aria-label="Open a second chat"><span class="codicon codicon-add" aria-hidden="true"></span></button><button type="button" id="chat-add-folder" class="chat-add" title="Open a chat in another folder" aria-label="Open a chat in another folder"><span class="codicon codicon-folder-opened" aria-hidden="true"></span></button></header>
+<section id="pips-host" data-style-uri="${pipsStyle}" aria-label="DGC Pips" hidden></section>
 <nav id="chatbar" class="chatbar" hidden aria-label="Running chats"></nav>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <section id="agent-page" hidden>
@@ -5985,6 +6170,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <h2 id="goal-editor-title">Edit goal</h2>
     <label class="sr-only" for="goal-editor-text">Goal</label>
     <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="4000"></textarea>
+    <label id="goal-budget-label" for="goal-editor-budget">Token budget</label>
+    <input id="goal-editor-budget" aria-labelledby="goal-budget-label" type="number" min="0" max="1000000000000" step="1" aria-describedby="goal-budget-hint" placeholder="No limit" />
+    <p id="goal-budget-hint">Total reported tokens for this goal. Leave blank to remove the limit. Paused goals stay paused until you resume.</p>
     <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act" title="Close without changing the objective">Cancel</button><button type="button" id="goal-editor-save" class="act primary" title="Save the objective and start pursuing it">Save</button></div>
   </div>
 </div>
@@ -6104,6 +6292,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>
+<script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }

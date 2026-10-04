@@ -67,6 +67,11 @@ async function main() {
     platform: "browser", target: "chrome108", outfile: "dist/settings.js",
     minify: production, sourcemap: false,
   });
+  await esbuild.build({
+    entryPoints: ["src/pipsClient.js"], bundle: true, format: "iife",
+    platform: "browser", target: "chrome108", outfile: "dist/pips.js",
+    minify: production, sourcemap: false,
+  });
   const ctx = await esbuild.context({
     entryPoints: ["src/extension.ts"],
     bundle: true,

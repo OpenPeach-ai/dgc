@@ -670,6 +670,8 @@ class AsyncSession:
 
     def __init__(self, sync: Session):
         self._sync = sync
+        from .pips import AsyncPips
+        self.pips = AsyncPips(sync.pips)
 
     @property
     def session_id(self) -> str:

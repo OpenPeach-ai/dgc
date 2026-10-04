@@ -25,3 +25,18 @@ test("replayed decisions are settled, escape notes, and leave denied commands ma
   assert.equal(s.posted.some(m => m.type === "permission_response"), false);
   assert.deepEqual(s.errors, []);
 });
+
+test("a resolved live permission becomes a folded receipt without re-running the action",()=>{
+ const s=makeDom(),event=value=>s.send({type:'event',event:value});
+ event({type:'turn_start',turn_id:'one',prompt:'Inspect'});
+ event({type:'permission_request',id:'permission1',name:'read_file',args:{path:'example.txt'},summary:'Read example'});
+ const card=s.doc.querySelector('.card[data-request-id="permission1"]');assert.ok(card);assert.equal(card.querySelector('details'),null);
+ card.querySelector('[data-d="once"]').click();
+ const receipt=card.querySelector('.permission-receipt');assert.ok(receipt);assert.equal(receipt.open,false);
+ assert.match(receipt.querySelector('summary').textContent,/read_file.*Allowed once/);
+ assert.equal(s.posted.filter(m=>m.type==='permission_response').length,1);
+ receipt.open=true;receipt.open=false;
+ assert.equal(s.posted.filter(m=>m.type==='permission_response').length,1);
+ assert.ok([...card.querySelectorAll('button,textarea')].every(c=>c.disabled));
+ assert.deepEqual(s.errors,[]);
+});

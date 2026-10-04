@@ -186,6 +186,9 @@ def stream_recovery_notice(message) -> dict | None:
 def display_prompt(text: str) -> str:
     """Render the user's command for human history; never used to construct execution inputs."""
     from .clock import strip_turn_clock
+    from .peers import strip_model_line
+    # Peer context is appended after the clock. Remove that generated suffix first.
+    text = strip_model_line(text)
     text = strip_turn_clock(text)           # DGC's per-turn clock line, not something anyone typed
     if text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX):
         text = text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]

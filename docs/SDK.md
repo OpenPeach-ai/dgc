@@ -25,6 +25,31 @@ application attribute the model-token spend your provider bills you.
 
 ## Install
 
+### Local Pips controls (unreleased lab build)
+
+The lab SDK adds `Pips` (`session.pips`) and `AsyncPips` (`async_session.pips`).
+These controls require an already enabled, explicitly authorized local Pips profile;
+they do not turn Pips on or bypass its review flow. They are not present in the
+published SDK version listed above. See [the lab Pips contract](../sdk/PIPS.md)
+for capability versions, limits and complete command fields.
+
+| Public API | Purpose |
+| --- | --- |
+| `PipReadCommand` | Closed type of supported read commands. |
+| `PipMutationCommand` | Closed type of supported mutation commands. |
+| `Pips.read(command, params=None)` / `AsyncPips.read(command, params=None)` | Return a bounded control result after checking backend capabilities. |
+| `Pips.mutate(command, params, *, approved=False)` / `AsyncPips.mutate(command, params, *, approved=False)` | Require the host's explicit `approved=True` decision for each call and retry; all backend scope, revision and approval checks still apply. |
+| `Pips.list(workspace_id)` / `AsyncPips.list(workspace_id)` | List the selected workspace's Pip definitions. |
+| `Pips.get_run(run_id)` / `AsyncPips.get_run(run_id)` | Read a stored run result. |
+
+Async methods are awaited. Isolated SDK profiles, active runtime policies and
+sandboxed sessions refuse these independent-runner controls; plan mode also refuses
+mutations. Never expose `mutate` directly as an unattended model tool. In API16,
+archive/restore require a job version, lifecycle revision, request key and reason;
+restoring leaves the Pip paused and preserves its evidence.
+
+### Published packages
+
 ```bash
 python3 -m pip install dgc-sdk==0.6.10
 ```

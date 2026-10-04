@@ -18,6 +18,137 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "prompt_pips"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            },
+            "pips": {
+              "type": "array"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "workspace_id",
+            "pips",
+            "next_cursor"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pips_result"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "result": {
+              "type": "object"
+            },
+            "error": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "command",
+            "ok"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pips_status"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "api_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "restart_required": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "enabled",
+            "api_version",
+            "restart_required",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chat_changes"
             },
             "seq": {
@@ -335,7 +466,8 @@
                 "resume",
                 "continue",
                 "monitor",
-                "wake"
+                "wake",
+                "pip_setup"
               ]
             },
             "request_id": {
@@ -374,7 +506,8 @@
               "enum": [
                 "completed",
                 "cancelled",
-                "error"
+                "error",
+                "paused"
               ]
             },
             "token_estimate": {
@@ -1363,6 +1496,9 @@
               "maxLength": 64
             },
             "id": {
+              "type": "string"
+            },
+            "message": {
               "type": "string"
             }
           },
@@ -4710,6 +4846,112 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "list_prompt_pips"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "after": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pips_control"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pips_enable"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pips_runtime"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "start",
+                "resume"
+              ]
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "action",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "get_chat_changes"
             },
             "chat_id": {
@@ -4856,6 +5098,9 @@
                   "type": "array"
                 }
               ]
+            },
+            "pip_references": {
+              "type": "array"
             },
             "spooled_images": {
               "anyOf": [
@@ -5849,6 +6094,9 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "expected_goal_id": {
+              "type": "string"
+            },
             "skills": {
               "type": "array"
             },
@@ -6369,6 +6617,9 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            },
+            "expected_goal_id": {
+              "type": "string"
             },
             "text": {
               "type": "string"

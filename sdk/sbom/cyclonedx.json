@@ -3,7 +3,7 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-01T16:12:45Z",
+    "timestamp": "2026-10-03T08:13:36Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
@@ -25,7 +25,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f9fac1d5244b7b13cac80b8feee7b63e71c99fc543fdfe435aa06802199f1ffd"
+          "content": "1b65ad498a88c0cdbaea94372f9d1a6077645ce0f87d1b85f4b72d98296a3ac3"
         }
       ]
     },
@@ -80,7 +80,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c87c1bbf4cc3fe8dfe89c25ee8b6c74045c14607a996dc42ab22020a8a2975cd"
+          "content": "947498ba29b6366507b643d6f00943c979ce0a6d680cb067a91a58b6f818feb1"
         }
       ]
     },
@@ -97,12 +97,23 @@
     },
     {
       "type": "file",
+      "name": "sdk/python/dgc_sdk/pips.py",
+      "version": "0.6.10",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "18c12e3fbb1e5a56d287ba9ff67d1158b6cac2c50c5beb0ab9bccc393928c184"
+        }
+      ]
+    },
+    {
+      "type": "file",
       "name": "sdk/python/dgc_sdk/policy.py",
       "version": "0.6.10",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "2ba6644a42784372dd82c90dcd7c89c991a7e61ffc45f04bc7faa1849b4b1211"
+          "content": "f7d584c4dbfb5194997f8b34c19e4b89e3c5ce242d94d7712753399066ead70c"
         }
       ]
     },
@@ -157,7 +168,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "bf14f09a620c9052c2812c154b3342131ce22556a36e12dc35cb3d98dea86adf"
+          "content": "9cf9484591dd4a418d3f4c047be0aee2f1ab8e46afa64bec63a8e981ad4e7e2f"
         }
       ]
     },
@@ -223,7 +234,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "468b285059ebd50c6ad064be9a7e8f2d73ddeb85472c13d52e824248a92115ba"
+          "content": "9777aadaae84167649fb4648160e28d5538806c14c3e1a63eef6f8519e3b6811"
         }
       ]
     },
@@ -289,7 +300,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "968414bf7368f76720d0e87bc4490c5ee9f3920b06d790c62a1fe62e1c04329b"
+          "content": "d7b9550ddcf0797dd87828b5f4764803d3341f52311a6a8902b5693277d6f46d"
         }
       ]
     },
@@ -306,12 +317,23 @@
     },
     {
       "type": "file",
+      "name": "sdk/typescript/src/pips.ts",
+      "version": "0.6.10",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7bae971c1b5a090e1260513b9226d436a2fd794a244214b5d1eda510dfd8ef9d"
+        }
+      ]
+    },
+    {
+      "type": "file",
       "name": "sdk/typescript/src/policy.ts",
       "version": "0.6.10",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "097e41083dde96135dc7af935215893ed6e1ce14cd159774ce6ec05682756af0"
+          "content": "f8a14cfbd60b977ea68df30d488987a3a53365c5b14e7283047f0b423efa91b2"
         }
       ]
     },
@@ -344,7 +366,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4e97c8db804b25e33e33b96ede694f57ee049f0091998f0455e5ca9fa9b1ca8d"
+          "content": "088a5e65366c8414dec3101c37459221176d03c57bbb63201d0876f71d136ceb"
         }
       ]
     },
@@ -377,7 +399,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "73ab033fb2748999320ceb7f4fee9d6c082a8c3e7ca8e5cde5509ffd35c93c5f"
+          "content": "6ed59f481cc802cf668b39f4c58e1e173c4dcaa570d658404fadb5d2b85ab035"
         }
       ]
     },
@@ -509,7 +531,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "317a8c2a4d94a9adfa4833e4ed26a1daf4f10eedf6fb8cab4fbed49f97321945"
+          "content": "811d65f3570983bea91647dac1f000857dcb320723f5d4d03b2dc286d8d043bd"
         }
       ]
     },

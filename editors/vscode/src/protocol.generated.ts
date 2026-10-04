@@ -7,13 +7,104 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "plugin_catalog" | "composio_connection" | "plugin_preview" | "plugin_marketplaces" | "plugin_operation" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step" | "agent_message" | "chat_opened" | "chat_closed";
-export type DgcCommandType = "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "editor_state" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "list_plugins" | "install_plugin" | "composio_connection" | "inspect_plugin" | "uninstall_plugin" | "list_plugin_marketplaces" | "add_plugin_marketplace" | "remove_plugin_marketplace" | "refresh_plugin_marketplace" | "create_plugin" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "get_usage" | "list_agents" | "get_image" | "agent_control" | "open_chat" | "close_chat";
+export type DgcEventType = "prompt_pips" | "pips_result" | "pips_status" | "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "plugin_catalog" | "composio_connection" | "plugin_preview" | "plugin_marketplaces" | "plugin_operation" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step" | "agent_message" | "chat_opened" | "chat_closed";
+export type DgcCommandType = "list_prompt_pips" | "pips_control" | "pips_enable" | "pips_runtime" | "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "editor_state" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "list_plugins" | "install_plugin" | "composio_connection" | "inspect_plugin" | "uninstall_plugin" | "list_plugin_marketplaces" | "add_plugin_marketplace" | "remove_plugin_marketplace" | "refresh_plugin_marketplace" | "create_plugin" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "get_usage" | "list_agents" | "get_image" | "agent_control" | "open_chat" | "close_chat";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
 
 type FieldSpec = { types: string[]; required: boolean; enum?: unknown[] };
 const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
+  "prompt_pips": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "workspace_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "pips": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "next_cursor": {
+      "types": [
+        "null",
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "pips_result": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "command": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "ok": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "result": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "error": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "pips_status": {
+    "enabled": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "api_version": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "restart_required": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "message": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "chat_changes": {
     "roots": {
       "types": [
@@ -307,7 +398,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "resume",
         "continue",
         "monitor",
-        "wake"
+        "wake",
+        "pip_setup"
       ]
     },
     "request_id": {
@@ -332,7 +424,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "enum": [
         "completed",
         "cancelled",
-        "error"
+        "error",
+        "paused"
       ]
     },
     "token_estimate": {
@@ -1067,6 +1160,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    },
+    "message": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "permission_request": {
@@ -3638,6 +3737,72 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
   }
 };
 const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
+  "list_prompt_pips": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "query": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "after": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "limit": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
+  "pips_control": {
+    "request": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    }
+  },
+  "pips_enable": {
+    "enabled": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "pips_runtime": {
+    "action": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "start",
+        "resume"
+      ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
   "get_chat_changes": {
     "request_id": {
       "types": [
@@ -3730,6 +3895,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "answers": {
       "types": [
         "null",
+        "array"
+      ],
+      "required": false
+    },
+    "pip_references": {
+      "types": [
         "array"
       ],
       "required": false
@@ -4408,6 +4579,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "expected_goal_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "skills": {
       "types": [
         "array"
@@ -4744,6 +4921,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     }
   },
   "set_goal": {
+    "expected_goal_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "text": {
       "types": [
         "string"

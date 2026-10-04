@@ -25,7 +25,7 @@ export type SandboxStatus = {
 /** A run's state. (0.5.2 listed a "blocked" status that was never produced; see `denials`.) */
 export type RunStatus =
   | "queued" | "running" | "waiting_for_approval"
-  | "completed" | "cancelled" | "failed";
+  | "completed" | "cancelled" | "failed" | "paused";
 
 export type PermissionRequest = {
   id: string;

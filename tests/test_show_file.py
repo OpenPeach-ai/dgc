@@ -155,11 +155,30 @@ class ProtocolShape(unittest.TestCase):
         self.assertNotIn("files", EVENTS["tool_result"])
 
     def test_the_capability_is_advertised(self):
-        import inspect
+        from unittest.mock import Mock, patch
         from dgc import headless
-        source = inspect.getsource(headless.Backend.start)
-        self.assertIn('"produced_files": True', source,
-                      "a panel that cannot render chips must be able to tell it will not get them")
+        backend = headless.Backend.__new__(headless.Backend)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            backend.config = SimpleNamespace(model="fixture", base_url="http://unused.invalid",
+                project_root=root, get=lambda _key, default=None: default, credential_warnings=())
+            backend.agent = SimpleNamespace(mode="default", session_file=None, session_name="", skills={},
+                client=SimpleNamespace(tools_supported=True, family="fixture", capability_snapshot=lambda: {}))
+            backend.workspace_trusted = True
+            backend._image_spool = lambda: root / "spool"
+            backend._session_policy_capability = lambda: {}
+            backend._goal_snapshot = lambda: {}
+            backend._context_window_size = lambda: 8192
+            backend.em = Mock()
+            for name in ("_emit_context", "_announce_peer", "_start_peer_heartbeat", "_emit_config",
+                         "_publish_model_capabilities"):
+                setattr(backend, name, Mock())
+            with patch.object(headless, "custom_command_names", return_value=[]):
+                backend.start()
+            event = backend.em.emit.call_args_list[0]
+            self.assertEqual(event.args, ("ready",))
+            self.assertIs(event.kwargs["capabilities"]["produced_files"], True,
+                          "a panel must learn file-chip support from the actual ready handshake")
 
 
 if __name__ == "__main__":

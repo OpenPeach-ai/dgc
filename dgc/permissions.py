@@ -32,6 +32,16 @@ MODE_DESCRIPTIONS = {
 
 # internal tool name -> display name used in rules
 DISPLAY = {
+    "pips_context": "PipsContext",
+    "pips_propose": "PipsPropose",
+    "pips_setup": "PipsSetup",
+    "pips_adapt": "PipsAdapt",
+    "run_pip_now": "PipsRun",
+    "handoff_to_pip": "PipsHandoff",
+    "draft_pip_email": "PipsEmailDraft",
+    "draft_pip_calendar_event": "PipsCalendarDraft",
+    "draft_pip_connector_action": "PipsConnectorDraft",
+    "pause_pip": "PipsPause", "resume_pip": "PipsResume", "attach_pip_to_session": "PipsAttach",
     "read_file": "Read", "view_image": "ViewImage", "show_file": "ShowFile",
     "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
@@ -49,6 +59,16 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 
 # which argument a rule's pattern is matched against
 RULE_ARG = {
+    "pips_context": "action",
+    "pips_propose": "pip_id",
+    "pips_setup": "target_root",
+    "pips_adapt": "pip_id",
+    "run_pip_now": "pip_id",
+    "handoff_to_pip": "target_pip_id",
+    "draft_pip_email": "source_run_id",
+    "draft_pip_calendar_event": "source_run_id",
+    "draft_pip_connector_action": "source_run_id",
+    "pause_pip": "pip_id", "resume_pip": "pip_id", "attach_pip_to_session": "pip_id",
     "bash": "command", "monitor": "command", "python": "code", "read_file": "path", "view_image": "path",
     "show_file": "path",
     "write_file": "path",
@@ -80,7 +100,7 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # `close_task` is in STOP_TOOLS below instead -- monitor_stop's exact case.
                    # NEITHER may join DISPLAY, for the reason above: no rule can name them, and
                    # `deny: Task` stays the off switch (with no children, neither is offered).
-                   "message_task"}
+                   "message_task", "pips_context"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.
@@ -527,9 +547,16 @@ class PermissionEngine:
 
         if self.mode == "auto":
             return ALLOW, "auto mode"
+        # These tools save a pending proposal only. Activation still requires
+        # the user's durable review of that exact proposal. Keep this after
+        # plan-mode rejection and explicit deny/ask/allow rules.
+        if policy_tool in ("pips_setup", "pips_propose"):
+            return ALLOW, "draft only; durable Pip review required before activation"
         if self.mode == "acceptEdits":
             if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"
+            if policy_tool in ("pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session"):
+                return ASK, "acceptEdits: Pip changes and background work need approval"
             return ASK, f"acceptEdits auto-approves file edits; {policy_tool} still needs approval"
         # default
         if policy_tool in READ_ONLY_TOOLS:

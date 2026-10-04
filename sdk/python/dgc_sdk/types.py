@@ -9,7 +9,7 @@ PermissionMode = Literal["default", "acceptEdits", "plan", "auto"]
 UnhandledPolicy = Literal["deny", "callback"]
 SandboxRequirement = Literal["required", "preferred", "off"]
 RunStatus = Literal[
-    "queued", "running", "waiting_for_approval", "completed", "cancelled", "failed",
+    "queued", "running", "waiting_for_approval", "completed", "cancelled", "failed", "paused",
 ]
 PermissionAction = Literal["once", "always", "deny"]
 PlanAction = Literal["auto", "acceptEdits", "default", "reject"]

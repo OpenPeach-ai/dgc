@@ -15,6 +15,7 @@ import math
 import re
 import sys
 import signal
+import sqlite3
 import threading
 import os
 import queue
@@ -66,6 +67,57 @@ _AGENT_MESSAGE_WIRE_REASON = {
     "unknown": "unknown", "unavailable": "unknown", "starting": "starting",
     "finished": "finished", "stopping": "stopping", "queue_full": "queue_full"}
 _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
+_MAX_PIPS_REQUEST_BYTES = 32768
+_MAX_PIPS_PENDING = 16
+
+
+def _bounded_pips_command(cmd):
+    """Bound and detach editor data before handing it to an asynchronous worker."""
+    from .workspace_registry import RegistryError
+    request = cmd["request"] if cmd["type"] == "pips_control" else cmd
+    pending, count, chars = [(request, 0)], 0, 0
+    while pending:
+        value, depth = pending.pop()
+        count += 1
+        if count > 256 or depth > 8:
+            raise RegistryError("invalid_request", "Pips requests must be small, shallow JSON objects.")
+        if isinstance(value, str):
+            chars += len(value)
+            if chars > _MAX_PIPS_REQUEST_BYTES:
+                raise RegistryError("invalid_request", "Pips requests must fit within 16 KiB.")
+        elif isinstance(value, dict):
+            if len(value) > 64 or any(not isinstance(key, str) for key in value):
+                raise RegistryError("invalid_request", "Pips request objects contain unsupported fields.")
+            pending.extend((item, depth + 1) for pair in value.items() for item in pair)
+        elif isinstance(value, list):
+            if len(value) > 64:
+                raise RegistryError("invalid_request", "Pips request lists are too large.")
+            pending.extend((item, depth + 1) for item in value)
+        elif type(value) in (int, float):
+            if not -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER or (type(value) is float and not math.isfinite(value)):
+                raise RegistryError("invalid_request", "Pips request numbers must be finite safe numbers.")
+        elif value is not None and type(value) is not bool:
+            raise RegistryError("invalid_request", "Pips requests must contain only JSON data.")
+    try:
+        chunks, length = [], 0
+        for chunk in json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False).iterencode(request):
+            length += len(chunk.encode("utf-8"))
+            if length > _MAX_PIPS_REQUEST_BYTES:
+                raise RegistryError("invalid_request", "Pips requests must fit within 16 KiB.")
+            chunks.append(chunk)
+        detached = json.loads("".join(chunks))
+    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
+        if isinstance(exc, RegistryError):
+            raise
+        raise RegistryError("invalid_request", "Pips requests must contain valid bounded JSON.") from exc
+    if cmd["type"] == "pips_control":
+        if not isinstance(detached.get("type"), str):
+            raise RegistryError("invalid_request", "The Pip control type must be text.")
+        request_id = detached.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
+            raise RegistryError("invalid_request", "Pip request_id must contain 1-128 characters.")
+        return {"type": "pips_control", "request": detached}
+    return detached
 
 
 def _wake_reached_the_model(agent, prompt: str) -> bool:
@@ -159,7 +211,8 @@ _BUSY_MUTATIONS = {
     # request; the next model round in this turn (or the next prompt) uses the new one. A request
     # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
-    "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
+    "delete_session", "rewind", "compact", "set_workspace_roots",
+    # set_goal validates live edits in its handler; other live state changes are refused.
     # set_skill_enabled is absent: a skill switch only changes what the next prompt may load.
     # name_session is absent: a rename joins the running turn's own session reservation and is
     # saved under the same lock as that turn's saves (Agent.name_session).
@@ -174,6 +227,7 @@ _BUSY_MUTATIONS = {
     # beside the turn -- Codex draws the same line.
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
+    "pips_enable", "pips_runtime", "list_prompt_pips",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
@@ -295,10 +349,13 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
     return values, None
 
 
-def _turn_payload_bytes(text, images, context, kind="prompt") -> int:
+def _turn_payload_bytes(text, images, context, kind="prompt", pip_references=None) -> int:
     """Approximate the retained decoded queue payload with exact UTF-8 JSON bytes."""
     try:
-        return len(json.dumps([text, images, context], ensure_ascii=False,
+        payload = [text, images, context]
+        if pip_references:
+            payload.append(pip_references)
+        return len(json.dumps(payload, ensure_ascii=False,
                               separators=(",", ":")).encode("utf-8"))
     except (TypeError, ValueError, UnicodeError):
         return _MAX_QUEUED_TURN_BYTES + 1
@@ -925,6 +982,16 @@ def _options_resolved_item(record, call_id, *, allow_empty: bool = False) -> dic
     return item
 
 
+def permission_request_fields(name: str, args: dict, call_id, preview_root) -> dict:
+    """A ``permission_request`` event's fields (bar its id): what the editor, or a phone watching
+    a terminal session, shows on the card."""
+    preview = edit_preview(name, args, preview_root) if preview_root else ""
+    return dict(call_id=call_id, name=name, args=args,
+                command=(args.get("command") if name in ("bash", "monitor") else None),
+                summary=arg_summary(name, args, preview_root), diff=preview or None,
+                suggested_rule=str(rule_for(name, args)), choices=["once", "always", "deny"])
+
+
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
 
@@ -1253,6 +1320,28 @@ class HeadlessUI:
         if hook:
             hook(request_id)
 
+    def goal_replacement_result(self, request_id, text, ok, error):
+        if ok:
+            remember = getattr(self.em, "remember_steering", None)
+            if callable(remember):
+                remember(text)
+        self.em.emit("steering_update", request_id=request_id,
+                     state="applied" if ok else "returned",
+                     **({"message": error} if error else {}))
+
+    def goal_edit_result(self, request_id, text, ok, error):
+        if ok:
+            remember = getattr(self.em, "remember_goal_edit", None)
+            if callable(remember):
+                remember()
+            self.em.emit("info", message="Goal updated. Continuing with the revised objective.")
+            hook = getattr(self, "_goal_hook", None)
+            if callable(hook):
+                hook(request_id)
+        else:
+            self.em.emit("command_rejected", command="set_goal", request_id=request_id,
+                         reason="goal_edit_not_applied", message=error)
+
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._close_reasoning_fallback()
@@ -1492,14 +1581,9 @@ class HeadlessUI:
 
     def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
-        preview = edit_preview(name, args, self.preview_root) if self.preview_root else ""
         try:
-            self._announce_request(rid, "permission_request", dict(
-                call_id=call_id, name=name, args=args,
-                command=(args.get("command") if name in ("bash", "monitor") else None),
-                summary=arg_summary(name, args, getattr(self, "preview_root", None)), diff=preview or None,
-                suggested_rule=str(rule_for(name, args)),
-                choices=["once", "always", "deny"]))
+            self._announce_request(rid, "permission_request",
+                                   permission_request_fields(name, args, call_id, getattr(self, "preview_root", None)))
             payload = self._await(rid, ev, recheck=recheck, human=True) or {}
         finally:
             self._settle_request(rid)
@@ -1812,12 +1896,16 @@ class Backend:
         self._package_reader: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
-        # ordered (prompt, images, typed context[, kind[, request_id]]). The request id is kept so a
+        # ordered (prompt, images, typed context[, kind[, request_id[, resolved Pip references]]]).
+        # The request id is kept so a
         # prompt that never ran can be handed back to the editor that sent it (see close()).
         self._queue: list[tuple] = []
         self._goal_auto_resumes = 0   # consecutive automatic goal restarts after a failed turn
         self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
+        self._pips_command_lock = threading.Lock()
+        self._pips_commands: list[dict] = []
+        self._pips_control_thread = None
         # Background monitors. The flag is what exposes the `monitor` tool: only this backend (and
         # the TUI) can deliver events and start a turn on one. `dgc -p --output-format json` shares
         # HeadlessUI but never runs this constructor, so it never offers the tool.
@@ -1857,9 +1945,9 @@ class Backend:
         return {"version": 1, "digest": policy.digest if policy is not None else "",
                 "error": policy.error if policy is not None else "", "sandbox": backend or ""}
 
-    def start(self) -> None:
-        self.em.emit(
-            "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
+    def _ready_payload(self) -> dict:
+        """The validated backend handshake: everything `ready` says."""
+        return dict(version=__version__, protocol_version=PROTOCOL_VERSION,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
                           "goal_state": True, "goal_runner": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
@@ -1869,7 +1957,7 @@ class Backend:
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "plugin_management": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
-                          "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
+                          "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
                           # The client answers with set_workspace_roots.ask_options when it can
@@ -1895,6 +1983,14 @@ class Backend:
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
                           "editor_state": True,
+                          "pips_supported": True, "pips_api_version": 39,
+                          "pips_setup_notifications": 1,
+                          "pip_references": 1,
+                          "pips_enabled": self.config.get("pips_enabled", False) is True,
+                          # Additive capability data keeps strict older SDK ready-event
+                          # validators working. IDs are private registry references,
+                          # never paths or ownership claims from a transcript.
+                          "workspace_identity": self._workspace_identity_meta(),
                           # Both the flag and where to write, inside capabilities: a new TOP-LEVEL
                           # field on `ready` is fatal to a client that has not opted in -- the SDK
                           # refuses the whole event with "ready has an undeclared field".
@@ -1903,15 +1999,6 @@ class Backend:
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability()},
             **self._chat_fields())
-        self._after_open()
-        # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
-        # this checkout that it exists.
-        self._announce_peer("idle")
-        self._start_peer_heartbeat()
-        # Publish the complete route state immediately after the ready handshake. ``config``
-        # carries both native and delegated settings so editors render the route that will run.
-        self._emit_config()
-        self._publish_model_capabilities()
 
     def _chats_capability(self) -> dict:
         """ready.capabilities.chats: offered only by a Host, and never when DGC_PROJECT_ROOT pins the
@@ -1953,6 +2040,18 @@ class Backend:
             goal=self._goal_snapshot(),
             session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
+
+    def start(self) -> None:
+        self.em.emit("ready", **self._ready_payload())
+        self._after_open()
+        # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
+        # this checkout that it exists.
+        self._announce_peer("idle")
+        self._start_peer_heartbeat()
+        # Publish the complete route state immediately after the ready handshake. ``config``
+        # carries both native and delegated settings so editors render the route that will run.
+        self._emit_config()
+        self._publish_model_capabilities()
 
     def _publish_model_capabilities(self, *, always: bool = False) -> None:
         """Learn what the selected model honours, off the command thread, and tell the editor.
@@ -2039,7 +2138,7 @@ class Backend:
         return lock
 
     def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
-                    request_id="", kind: str = "prompt") -> tuple[str, int]:
+                    request_id="", kind: str = "prompt", pip_references=None) -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         if kind in ("prompt", "continue"):
             self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
@@ -2048,26 +2147,31 @@ class Backend:
             if hub is not None:
                 hub.policy.note_user_prompt()   # a person is here: wake-ups start counting again
         lock = self._turn_state_lock()
+        payload = (text, images, context, kind, request_id or "")
+        if pip_references:
+            payload += (pip_references,)
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
-            if (getattr(self, "_worker", None) is not None
+            if (kind != "pip_setup" and getattr(self, "_worker", None) is not None
                     and getattr(self, "_running_turn_kind", "") == "monitor"
                     and len(self._queue) < _MAX_QUEUED_TURNS):
                 # A turn DGC started on a monitor event yields to the person: their message is
                 # queued first, and the wake turn stops at its next boundary so it runs promptly.
-                self._queue.append((text, images, context, kind, request_id or ""))
+                self._queue.append(payload)
                 self._wake_yield = True
                 self.agent.cancelled.set()
-                return "queued", len(self._queue)
+                return "queued", self._queued_prompt_count()
             if getattr(self, "_worker", None) is not None:
                 steers = getattr(self, "_steer_payloads", {})
-                pending_bytes = sum(_turn_payload_bytes(*item[:3])
-                                    for item in [*self._queue, *steers.values()])
+                pending_bytes = sum(_turn_payload_bytes(*item[:3], pip_references=item[5] if len(item)>5 else None)
+                                    for item in self._queue)
+                pending_bytes += sum(_turn_payload_bytes(*item[:3], pip_references=item[3] if len(item)>3 else None)
+                                     for item in steers.values())
                 if (len(self._queue) + len(steers) >= _MAX_QUEUED_TURNS
-                        or pending_bytes + _turn_payload_bytes(text, images, context)
+                        or pending_bytes + _turn_payload_bytes(text, images, context, pip_references=pip_references)
                         > _MAX_QUEUED_TURN_BYTES):
-                    return "full", len(self._queue)
+                    return "full", self._queued_prompt_count()
                 config = getattr(self, "config", getattr(self.agent, "config", None))
                 config_get = getattr(config, "get", None)
                 engine = config_get("subscription_engine", "") if callable(config_get) else ""
@@ -2075,23 +2179,42 @@ class Backend:
                     import uuid
                     identity = request_id or str(uuid.uuid4())
                     if identity in steers:
-                        return "duplicate", len(self._queue)
-                    model_text = _format_editor_context(redact_value(context, secret_values(config))) + text
+                        return "duplicate", self._queued_prompt_count()
+                    from .pip_references import format_references
+                    model_text = (_format_editor_context(redact_value(context, secret_values(config)))
+                                  + format_references(redact_value(pip_references, secret_values(config))) + text)
                     steers[identity] = (text, images, context)
+                    if pip_references:
+                        steers[identity] += (pip_references,)
                     self._steer_payloads = steers
-                    if self.agent.steer(model_text, images=images, request_id=identity):
+                    steering_options = {}
+                    if kind == "pip_setup":
+                        from .pip_setup_notification import decode
+                        notice = decode(text)
+                        steers[identity] = (text, images, context, None, notice)
+                        steering_options = {"origin": "pip_setup", "pip_setup_notice": notice}
+                    if self.agent.steer(model_text, images=images, request_id=identity, **steering_options):
                         # Publish acceptance before the worker can acknowledge consumption.
-                        self.em.emit("prompt_accepted", request_id=identity, state="steered")
-                        return "steered", len(self._queue)
+                        if kind != "pip_setup":
+                            self.em.emit("prompt_accepted", request_id=identity, state="steered")
+                        return "steered", self._queued_prompt_count()
                     steers.pop(identity, None)
-                self._queue.append((text, images, context, kind, request_id or ""))
-                return "queued", len(self._queue)
-            self._queue.append((text, images, context, kind, request_id or ""))
+                if kind == "pip_setup":
+                    self._queue.append(payload)
+                else:
+                    position = next((i for i, queued in enumerate(self._queue)
+                                     if len(queued) > 3 and queued[3] == "pip_setup"), len(self._queue))
+                    self._queue.insert(position, payload)
+                return "queued", self._queued_prompt_count()
+            self._queue.append(payload)
             worker = threading.Thread(target=self._run_turn_queue, daemon=True,
                                       name="dgc-headless-turns")
             self._worker = worker
             worker.start()
             return "started", 0
+
+    def _queued_prompt_count(self):
+        return sum(1 for item in self._queue if len(item) < 4 or item[3] != "pip_setup")
 
     def _announce_peer(self, status: str = "idle") -> None:
         """Leave (or refresh) this backend's note in the peer registry.
@@ -2199,12 +2322,23 @@ class Backend:
         with self._turn_state_lock():
             payload = getattr(self, "_steer_payloads", {}).pop(request_id, None)
             if payload is not None:
+                if len(payload) > 4 and isinstance(payload[4], dict):
+                    return  # controller receipt, never a user steering bubble
                 remember = getattr(self.em, "remember_steering", None)
                 if callable(remember):
                     remember(payload[0])
                 self.em.emit("steering_update", request_id=request_id, state="applied")
 
     def _finish_steering(self, cancelled: bool, failed: bool) -> None:
+        goal_take = getattr(self.agent, "take_goal_replacement", None)
+        pending_goal = goal_take() if callable(goal_take) else None
+        if isinstance(pending_goal, dict):
+            if pending_goal.get("replace", True):
+                self.em.emit("steering_update", request_id=pending_goal["request_id"], state="returned",
+                             message="The goal replacement was not applied. Your draft has been preserved.")
+            else:
+                self.ui.goal_edit_result(pending_goal["request_id"], pending_goal["text"], False,
+                    "The turn ended before the goal edit was applied. Your draft is retained.")
         take = getattr(self.agent, "take_deferred_inputs", None)
         if callable(take):
             take()
@@ -2215,15 +2349,21 @@ class Backend:
             pending = getattr(self, "_steer_payloads", {})
             for identity, payload in list(pending.items()):
                 pending.pop(identity, None)
+                if len(payload) > 4 and isinstance(payload[4], dict):
+                    if not cancelled and not failed:
+                        retained.append((*payload[:3], "pip_setup", ""))
+                    continue
                 if cancelled or failed:
                     self.em.emit("steering_update", request_id=identity, state="returned",
                                  message="This follow-up was not applied. Your message has been preserved.")
                 else:
-                    retained.append((*payload[:3], "prompt", identity))
+                    retained.append((*payload[:3], "prompt", identity,
+                                     *([payload[3]] if len(payload)>3 else [])))
                     self.em.emit("steering_update", request_id=identity, state="queued")
             self._queue[:0] = retained
+            self._queue.sort(key=lambda item: len(item) > 3 and item[3] == "pip_setup")
             if retained:
-                self.em.emit("queued", count=len(self._queue), text="")
+                self.em.emit("queued", count=self._queued_prompt_count(), text="")
 
     def _run_subscription_turn(self, engine_key: str, prompt: str) -> bool:
         """Delegate one editor turn while preserving the native headless event contract."""
@@ -2270,6 +2410,7 @@ class Backend:
                     text, images, context = item[0], item[1], item[2]
                     turn_kind = item[3] if len(item) > 3 else "prompt"
                     turn_request = item[4] if len(item) > 4 and isinstance(item[4], str) else ""
+                    pip_references = item[5] if len(item) > 5 else None
                     notification = None
                     agent_notice = None
                     if turn_kind == "monitor":
@@ -2284,6 +2425,7 @@ class Backend:
                         if agent_notice is None:
                             continue
                     self._running_turn_kind = turn_kind
+                    self._running_pip_setup_text = text if turn_kind == "pip_setup" else None
                     self._wake_yield = False
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
@@ -2300,11 +2442,13 @@ class Backend:
                 active_config = getattr(
                     self, "config", getattr(getattr(self, "agent", None), "config", None))
                 safe_context = redact_value(context, secret_values(active_config))
-                model_text = _format_editor_context(safe_context) + text
+                from .pip_references import format_references
+                model_text = (_format_editor_context(safe_context)
+                              + format_references(redact_value(pip_references, secret_values(active_config))) + text)
                 from .workflows import display_prompt
                 shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
-                if (turn_kind not in ("continue", "monitor", "wake")
+                if (turn_kind not in ("continue", "monitor", "wake", "pip_setup")
                         and not getattr(self.agent, "session_name", None)
                         and callable(name_session)):
                     title = _prompt_thread_title(shown_prompt)
@@ -2320,6 +2464,11 @@ class Backend:
                 # from its restorable queue rather than guessing by position (a queued custom slash
                 # command has no id and must not consume a user's queued prompt).
                 wake_label = ""
+                setup_notice = None
+                if turn_kind == "pip_setup":
+                    from .pip_setup_notification import decode
+                    setup_notice = decode(text)
+                    shown_prompt = json.dumps(setup_notice, ensure_ascii=False)
                 if agent_notice is not None:
                     wake_label = str(agent_notice.get("description") or agent_notice.get("id") or "agent")
                     shown_prompt = wake_label
@@ -2342,17 +2491,28 @@ class Backend:
                         outcome = self.agent.run_monitor_turn(notification, reset_cancel=False)
                     elif agent_notice is not None:
                         wake_prompt = _agent_wake_prompt(agent_notice)
-                        outcome = self.agent.run_turn(wake_prompt, reset_cancel=False)
+                        from .session_turn_events import foreground_turn
+                        with foreground_turn("agent_wake"):
+                            outcome = self.agent.run_turn(wake_prompt, reset_cancel=False)
                         _note_agent_wake_delivered(self.agent, agent_notice, wake_prompt)
+                    elif setup_notice is not None:
+                        outcome = self.agent.run_turn(model_text, reset_cancel=False, pip_setup_notice=setup_notice)
                     elif engine_key and images:
                         self.agent._pending_images = None
                         self.ui.error(
                             "subscription CLI delegation does not yet support DGC image attachments")
                         outcome = False
                     else:
-                        outcome = (self._run_subscription_turn(engine_key, model_text)
-                                   if engine_key else
-                                   self.agent.run_turn(model_text, reset_cancel=False))
+                        if engine_key:
+                            from .session_turn_events import foreground_turn
+                            with foreground_turn("vendor"):
+                                outcome = self._run_subscription_turn(engine_key, model_text)
+                        else:
+                            from .session_turn_events import foreground_turn
+                            # Automatic goal resumes are not new user turns.
+                            origin = {"prompt": "foreground_prompt", "continue": "foreground_continue"}.get(turn_kind, "goal_resume")
+                            with foreground_turn(origin):
+                                outcome = self.agent.run_turn(model_text, reset_cancel=False)
                     failed = outcome is False
                 except Exception as e:             # a model/endpoint failure must NOT kill the turn silently
                     failed = True                  # (unreachable base_url, model not pulled, HTTP error, …)
@@ -2389,6 +2549,7 @@ class Backend:
                     self._maybe_auto_resume_goal(failed, cancelled)
                 with self._turn_state_lock():
                     self._running_turn_kind = ""
+                    self._running_pip_setup_text = None
                     self._live_turn = None
                     idle = not self._queue
                     if idle and self._worker is current:
@@ -2414,7 +2575,7 @@ class Backend:
                     # lets the editor offer to continue it once the backend is back.
                     shutting_down = getattr(self.agent, "stopping", False) is True
                     reason = ("error" if shutting_down else "cancelled") if cancelled else (
-                        "error" if failed else "completed")
+                        "error" if failed else "paused" if getattr(self.agent, "_last_turn_pause", "") else "completed")
                     # An open question deliberately SURVIVES the turn that asked it. It used to be
                     # expired right here, which closed the card the moment the model stopped
                     # talking -- and a user still reading three options watched them collapse into
@@ -2439,6 +2600,7 @@ class Backend:
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
             with self._turn_state_lock():
                 self._running_turn_kind = ""
+                self._running_pip_setup_text = None
                 self._live_turn = None
                 if self._worker is current:
                     self._worker = None
@@ -3143,6 +3305,35 @@ class Backend:
             self._emit_context()
         return terminal
 
+    def _dispatch_guard(self):
+        """One command at a time: Pips controls run on their own worker thread and take this lock
+        for the moments they change shared state. Created on first use, like the turn-state lock,
+        so a partially built Backend still works."""
+        return self.__dict__.setdefault("_dispatch_lock", threading.RLock())
+
+    def _workspace_identity_meta(self) -> dict:
+        """This chat's private workspace identity for the handshake, once Pips are on."""
+        if self.config.get("pips_enabled", False) is not True:
+            return {}
+        session_file = getattr(self.agent, "session_file", None)
+        stem = session_file.stem if session_file else ""
+        if not stem:
+            return {}
+        root = getattr(self.agent, "session_root", None)
+        if not isinstance(root, (str, Path)):
+            root = self.config.project_root
+        try:
+            from .workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry() as registry:
+                fields = registry.associate_session(stem, root)
+            # Revalidate against the private binding after directory repairs.
+            # A recreated old path must not inherit a cached workspace identity.
+            return dict(fields)
+        except (OSError, ValueError, sqlite3.Error):
+            # A registry problem must not break the chat. Pips controls report their own
+            # structured failure; never invent a workspace ID or substitute a filesystem path.
+            return {}
+
     def close(self, grace_s: float = 0.0, *, process: bool = True) -> str:
         try:
             stop = getattr(self, "_peer_stop", None)
@@ -3162,6 +3353,14 @@ class Backend:
         cancel. The wait is bounded because the next backend is already starting and must not find
         this session held. Returns a short word for the log: idle, landed, or cancelled.
         """
+        # A tab can close while the host and its other chats keep running. Pending
+        # local controls belong to this tab; never apply them after it has gone.
+        with self.__dict__.setdefault("_pips_command_lock", threading.Lock()):
+            self._pips_closing = True
+            abandoned = self.__dict__.get("_pips_commands", [])
+            self._pips_commands = []
+        for command in abandoned:
+            self._pips_failure(command, "chat_closed", "This chat closed before its Pip control could run.")
         inspection = getattr(self, "_editor_inspection", None)
         if inspection is not None:
             inspection.close()
@@ -3201,7 +3400,8 @@ class Backend:
                     break
             self._queue.clear()
             workers = [getattr(self, "_worker", None),
-                       getattr(self, "_foreground_worker", None)]
+                       getattr(self, "_foreground_worker", None),
+                       getattr(self, "_pips_control_thread", None)]
         self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
         for worker in workers:
             if isinstance(worker, threading.Thread) and worker is not threading.current_thread():
@@ -3496,8 +3696,12 @@ class Backend:
             # same class of lie as calling a shutdown the user's own stop.
             finished = bool(turn["final"]) and not turn["interrupted"]
             finished = self._history_turn_finished(turn, finished)
+            pause = turn.get("goal_pause")
+            if pause:
+                finished = False
+                items.append({"type": "info", "message": pause})
             items.append({"type": "turn_end", "turn_id": turn["id"],
-                          "reason": "completed" if finished else "cancelled",
+                          "reason": "paused" if pause else "completed" if finished else "cancelled",
                           "token_estimate": 0,
                           "final_message_id": turn["final"] if finished else None})
             turn = None
@@ -3569,6 +3773,20 @@ class Backend:
             # via turn_start kind=resume; replaying history has to say the same thing, or
             # reopening a resumed session shows a prompt nobody sent. It is also a turn boundary:
             # without it an unattended goal's whole run collapses into one enormous turn.
+            if role == "user" and isinstance(content, str) and 'I approved Pip setup setup_' in content:
+                from .pip_setup_notification import legacy_notice
+                notice = legacy_notice(content, getattr(getattr(self.agent, 'session_file', None), 'stem', ''), self.config.project_root)
+                if notice is not None:
+                    open_turn(json.dumps(notice, ensure_ascii=False), "pip_setup")
+                    continue
+            if role == "user" and isinstance(m.get("_dgc_pip_setup"), dict):
+                from .pip_setup_notification import valid_notice
+                notice = valid_notice(m["_dgc_pip_setup"])
+                if notice is not None:
+                    if m.get("_dgc_pip_setup_inline") is True:
+                        continue  # saved proposal row already shows the decision in this turn
+                    open_turn(json.dumps(notice, ensure_ascii=False), "pip_setup")
+                    continue
             if role == "user" and isinstance(content, str) and TURN_CONTINUE_MARKER in content:
                 open_turn("Continued the interrupted turn", "continue")
                 continue
@@ -3581,7 +3799,10 @@ class Backend:
                 # turn of their own. Opening one here closed the steered turn with no answer, so it
                 # replayed as "Stopped", and every folded message shared a single bubble.
                 ensure_turn()
-                items.extend({"role": "steering", "text": text} for text in steering)
+                if m.get("_dgc_goal_edit") is True:
+                    items.append({"role": "goal_edit", "text": "Goal updated. Continuing with the revised objective."})
+                else:
+                    items.extend({"role": "steering", "text": text} for text in steering)
                 continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",
@@ -3688,6 +3909,10 @@ class Backend:
                     # still establishes that the operation never ran. Do not invent an approval.
                     items.append({"type": "tool_denied", "call_id": call_id or None,
                                   "name": name, "args": {}, "reason": output})
+            pause = m.get("_dgc_goal_pause")
+            if (turn is not None and isinstance(pause, str) and 0 < len(pause) <= 256
+                    and role in ("assistant", "tool")):
+                turn["goal_pause"] = pause
         live_start = None
         if isinstance(live_turn, dict) and turn is not None and turn["at"] > live_after:
             live_start, live_id = items[turn["item"]], str(live_turn.get("id") or "") or turn["id"]
@@ -3747,10 +3972,132 @@ class Backend:
         if quiet:
             self._suppress_wakes(True)
         try:
-            self._dispatch(cmd)
+            with self._dispatch_guard():
+                self._dispatch(cmd)
         finally:
             if quiet:
                 self._suppress_wakes(False)
+
+    def _pips_failure(self, cmd, code, message):
+        from .redaction import redact_text
+        message = redact_text(str(message), secret_values(self.config))[:1500]
+        if cmd.get("type") == "pips_enable":
+            self.em.emit("command_rejected", command="pips_enable", reason=code, message=message,
+                         **_request_fields(cmd.get("request_id")))
+            return
+        request = cmd.get("request", {}) if cmd.get("type") == "pips_control" else cmd
+        request_id = request.get("request_id", "") if isinstance(request, dict) else ""
+        command = request.get("type", "") if isinstance(request, dict) else ""
+        self.em.emit("pips_result", request_id=request_id[:128] if isinstance(request_id, str) else "",
+                     command=command[:128] if isinstance(command, str) else "", ok=False,
+                     error={"code": code, "message": message})
+
+    def _queue_pips_command(self, cmd):
+        from .workspace_registry import RegistryError
+        if self._pips_policy_refusal(cmd):
+            return
+        try:
+            detached = _bounded_pips_command(cmd)
+        except RegistryError as exc:
+            self._pips_failure(cmd, exc.code, str(exc))
+            return
+        # Separate from chat's foreground worker: jobs never mutate its Agent.
+        lock = self.__dict__.setdefault("_pips_command_lock", threading.Lock())
+        with lock:
+            if getattr(self, "_pips_closing", False):
+                self._pips_failure(detached, "chat_closed", "This chat closed before its Pip control could run.")
+                return
+            pending = self.__dict__.setdefault("_pips_commands", [])
+            if len(pending) >= _MAX_PIPS_PENDING:
+                self._pips_failure(detached, "busy", "Too many pending Pip controls; wait and retry.")
+                return
+            pending.append(detached)
+            if getattr(self, "_pips_control_thread", None) is not None:
+                return
+            thread = threading.Thread(target=self._drain_pips_commands, daemon=True, name="dgc-editor-pips")
+            self._pips_control_thread = thread
+            try:
+                thread.start()
+            except Exception:
+                self._pips_control_thread = None
+                pending.pop()
+                self._pips_failure(detached, "runner_error", "The local Pip control worker could not start.")
+
+    def _drain_pips_commands(self):
+        while True:
+            with self._pips_command_lock:
+                if not self._pips_commands:
+                    self._pips_control_thread = None
+                    return
+                cmd = self._pips_commands.pop(0)
+            try:
+                self._perform_pips_command(cmd)
+            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                self._pips_failure(cmd, getattr(exc, "code", "runner_error"), str(exc))
+            except Exception:
+                self._pips_failure(cmd, "runner_error", "The local Pip control failed; inspect the backend output and retry.")
+
+    def _pips_policy_refusal(self, cmd):
+        if getattr(self, "_pips_closing", False):
+            self._pips_failure(cmd, "chat_closed", "This chat closed before its Pip control could run.")
+            return True
+        from .pip_access import restricted, MESSAGE
+        if restricted(self.config):
+            self._pips_failure(cmd, "session_policy", MESSAGE)
+            return True
+        return False
+
+    def _perform_pips_command(self, cmd):
+        # Check again at execution: settings/policy can change while queued.
+        if self._pips_policy_refusal(cmd):
+            return
+        from .workspace_registry import WorkspaceRegistry
+        if cmd["type"] == "pips_enable":
+            from .pip_daemon import is_runtime_paused, stop_all
+            enabled = cmd["enabled"]
+            if enabled:
+                with WorkspaceRegistry() as registry:
+                    paused = is_runtime_paused(registry)
+            else:
+                # Persistent stop comes first, so other processes with stale
+                # enabled Config objects cannot keep claiming jobs.
+                stop_all(self.config, "editor-user")
+                paused = True
+            with self._dispatch_guard():
+                previous = self.config.get("pips_enabled", False) is True
+                try:
+                    self.config.set("pips_enabled", enabled)
+                except Exception:
+                    self.config.set("pips_enabled", previous, persist=False)
+                    raise
+            message = ("Pips enabled. Resume the local runner to clear the stop; jobs stay paused." if paused
+                       else "Pips enabled. Jobs run only when you request a run.") if enabled else (
+                       "Pips disabled. All jobs are paused and active runs are stopping.")
+            self.em.emit("pips_status", enabled=enabled, api_version=27, restart_required=paused,
+                         message=message, **_request_fields(cmd.get("request_id")))
+            return
+        # Snapshot settings under the existing editor mutation lock; slow SQLite
+        # or supervisor startup work runs after releasing it.
+        with self._dispatch_guard():
+            config = self.config.clone_for_root(self.config.project_root)
+        if cmd["type"] == "pips_runtime":
+            from .pip_runtime import start_runtime
+            runner = start_runtime(config, resume=cmd["action"] == "resume")
+            self.em.emit("pips_result", request_id=cmd["request_id"], command="pips_runtime",
+                         ok=True, result={"runner": runner})
+        else:
+            if cmd["request"].get("type") == "notify_pip_setup":
+                from .pip_setup_notification import notify
+                value = notify(self, config, cmd["request"])
+                self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
+                             command="notify_pip_setup", ok=True, result=value)
+                return
+            from .pips import handle_control
+            if cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff"):
+                from .pip_runtime import require_supervisor
+                require_supervisor(config)
+            response = handle_control(config, cmd["request"], "editor-user", start_worker=False)
+            self.em.emit("pips_result", **{key: value for key, value in response.items() if key != "type"})
 
     def _display_root(self):
         """The directory tool paths are shown relative to: this chat's project."""
@@ -3940,7 +4287,11 @@ class Backend:
             safe_command = redact_value(
                 str(cmd.get("type") or ""), secret_values(getattr(self, "config", None)))
             self.em.emit("command_rejected", command=safe_command[:128],
-                         reason="invalid_command", message=f"invalid command: {problem}")
+                         reason="invalid_command", message=f"invalid command: {problem}",
+                         **(_request_fields(cmd.get("request_id")) if
+                            (cmd.get("type") == "list_prompt_pips" or
+                             (cmd.get("type") == "prompt" and "pip_references" in cmd)) and
+                            isinstance(cmd.get("request_id"), str) and 0 < len(cmd["request_id"]) <= 128 else {}))
             return
         t = cmd.get("type")
         request_id = None
@@ -3957,6 +4308,25 @@ class Backend:
                          **_request_fields(request_id))
             return
 
+        if t in ("pips_control", "pips_enable", "pips_runtime"):
+            self._queue_pips_command(cmd)
+            return
+
+        if t == "list_prompt_pips":
+            from .pip_references import discover
+            from .workspace_registry import RegistryError
+            try:
+                session = getattr(self.agent, "session_file", None)
+                result = discover(self.config, session.stem if session else "",
+                                  **{key: cmd[key] for key in ("query", "after", "limit") if key in cmd})
+                self.em.emit("prompt_pips", request_id=request_id, **result)
+            except (RegistryError, OSError) as exc:
+                self.em.emit("command_rejected", command=t, reason=getattr(exc, "code", "pip_reference_unavailable"),
+                             message=(str(exc) if isinstance(exc, RegistryError) else
+                                      "The local Pip reference snapshot is unavailable."),
+                             **_request_fields(request_id))
+            return
+
         if t == "composio_connection":
             # Compatibility reply for an old webview. No fixed provider schema or
             # setup RPC is supported; app authorization belongs in Composio.
@@ -3967,24 +4337,38 @@ class Backend:
             # Validate and persist the whole prepared request while no other foreground work can
             # take the turn slot. A rejected selection must not replace the standing goal.
             with self._turn_state_lock():
-                if self._busy():
-                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                                 message="Finish or stop the current turn before starting a goal.",
-                                 **_request_fields(request_id))
-                    return
                 text = cmd["text"].strip()
                 inputs = {key: cmd[key] for key in ("skills", "templates", "images", "context") if key in cmd}
-                # A goal keeps its attached images, the ones attached by @-mention included.
                 pasted = inputs.get("images") if isinstance(inputs.get("images"), list) else []
                 mentioned = self._editor_image_mentions(inputs.get("context"), pasted)
                 if mentioned is not None and mentioned.images:
                     inputs["images"] = [*pasted, *mentioned.images]
+                if self._busy():
+                    queued = self.agent.queue_goal_replacement(cmd["text"],
+                        expected_goal_id=cmd.get("expected_goal_id", ""), request_id=request_id or "",
+                        token_budget=cmd.get("token_budget"),
+                        inputs=inputs,
+                        on_queued=lambda: self.em.emit("prompt_accepted", request_id=request_id, state="steered"))
+                    if not queued:
+                        self.em.emit("command_rejected", command=t, reason="goal_not_queued",
+                                     message=self.agent._last_persist_error,
+                                     **_request_fields(request_id))
+                    return
+                if "expected_goal_id" in cmd:
+                    current_id = self.agent.goal_snapshot().get("id", "") if self.agent.goal else ""
+                    if cmd["expected_goal_id"] != current_id:
+                        self.em.emit("command_rejected", command=t, reason="goal_changed",
+                                     message="The standing goal changed. Review it before replacing it.",
+                                     **_request_fields(request_id))
+                        return
                 if not text or not self.agent.set_goal(text, replace=True, token_budget=cmd.get("token_budget"), inputs=inputs):
                     self.em.emit("command_rejected", command=t, reason="invalid_goal",
                                  message=self.agent._last_persist_error or "Enter a goal objective.",
                                  **_request_fields(request_id))
                     return
-                state, _ = self._start_turn(text)
+                # Match the optimistic goal row even when --tokens was stripped by the host.
+                # Worker turn_start can arrive before prompt_accepted.
+                state, _ = self._start_turn(text, request_id=request_id)
                 if state != "started":
                     self.agent.update_goal("paused", reason="The first turn could not start")
                     self.em.emit("command_rejected", command=t, reason="turn_in_progress",
@@ -4008,6 +4392,21 @@ class Backend:
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))
+            pip_references = None
+            if "pip_references" in cmd:
+                from .pip_references import resolve
+                from .workspace_registry import RegistryError
+                try:
+                    if cmd.get("answers") or not text.strip():
+                        raise RegistryError("invalid_pip_references", "Write a chat message for the selected Pips. Question replies cannot carry Pip references.")
+                    session = getattr(self.agent, "session_file", None)
+                    pip_references = resolve(self.config, session.stem if session else "", cmd["pip_references"])
+                except (RegistryError, OSError) as exc:
+                    self.em.emit("command_rejected", command=t, reason=getattr(exc, "code", "pip_reference_unavailable"),
+                                 message=(str(exc) if isinstance(exc, RegistryError) else
+                                          "The local Pip reference snapshot is unavailable."),
+                                 **_request_fields(request_id))
+                    return
             # A prompt that says which questions it answers is an answer, not a new instruction.
             # The tag is required: a follow-up typed while a question happens to be open is an
             # ordinary message, and recording it as an answer would corrupt the transcript in a
@@ -4136,11 +4535,13 @@ class Backend:
                     activate_workflow(workflow, self.agent)
                     self.em.emit("mode_changed", mode=self.agent.mode,
                                  workspace_trusted=self.workspace_trusted)
-                    state, count = self._start_turn(text, images, context)
+                    state, count = self._start_turn(text, images, context,
+                        **({"pip_references": pip_references} if pip_references else {}))
             else:
                 # The request id travels with a queued prompt so close() can hand it back if the
                 # backend stops before it runs; the delivery mode only when the editor chose one.
                 state, count = self._start_turn(text, images, context,
+                    **({"pip_references": pip_references} if pip_references else {}),
                     **({"request_id": request_id} if request_id else {}),
                     **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
@@ -4769,21 +5170,36 @@ class Backend:
                         f"Thinking → {shown} · applies from the next model request"
                         if self._busy() else f"Thinking → {shown}"))
         elif t == "set_goal":
-            status = str(cmd.get("status") or "active")
-            text = str(cmd.get("text") or "")
-            if status == "none":
-                ok = self.agent.set_goal("")
-            elif text:
-                ok = self.agent.set_goal(
-                    text, status, token_budget=cmd.get("token_budget"), replace=bool(cmd.get("replace")))
-            else:
-                ok = self.agent.update_goal(status)
-            if not ok:
-                message = getattr(self.agent, "_last_persist_error", "")
-                self.em.emit("error", message=message or "no standing goal to update",
-                             **_request_fields(request_id))
-                return
-            self._emit_goal(request_id)
+            with self._turn_state_lock():
+                status = str(cmd.get("status") or "active")
+                text = str(cmd.get("text") or "")
+                if "expected_goal_id" in cmd and cmd["expected_goal_id"] != self._goal_snapshot().get("id", ""):
+                    self.em.emit("command_rejected", command=t, reason="goal_changed",
+                                 message="The standing goal changed. Review it before editing.", **_request_fields(request_id))
+                    return
+                if self._busy():
+                    queue = getattr(self.agent, "queue_goal_replacement", None)
+                    ok = (status == "active" and bool(text.strip()) and not cmd.get("replace")
+                          and callable(queue) and queue(text, expected_goal_id=cmd.get("expected_goal_id", ""),
+                              request_id=request_id or "", token_budget=cmd.get("token_budget"), replace=False))
+                    if not ok:
+                        self.em.emit("command_rejected", command=t, reason="goal_edit_not_queued",
+                                     message="This turn cannot accept that goal edit. Your draft is retained.",
+                                     **_request_fields(request_id))
+                    return
+                if status == "none":
+                    ok = self.agent.set_goal("")
+                elif text:
+                    ok = self.agent.set_goal(
+                        text, status, token_budget=cmd.get("token_budget"), replace=bool(cmd.get("replace")))
+                else:
+                    ok = self.agent.update_goal(status)
+                if not ok:
+                    message = getattr(self.agent, "_last_persist_error", "")
+                    self.em.emit("error", message=message or "no standing goal to update",
+                                 **_request_fields(request_id))
+                    return
+                self._emit_goal(request_id)
         elif t == "get_goal":
             self._emit_goal(request_id)
         elif t == "get_plan":
@@ -6376,7 +6792,12 @@ class Host:
             pass                     # the chat keeps what it had; its own reload still works
 
     def _reject(self, cmd: dict, reason: str, message: str, chat_id: str = "") -> None:
-        fields = {"request_id": str(cmd["request_id"])[:128]} if isinstance(cmd.get("request_id"), str) else {}
+        request_id = cmd.get("request_id")
+        if cmd.get("type") == "pips_control" and isinstance(cmd.get("request"), dict):
+            # Pip controls carry their correlation id inside the closed request
+            # envelope. Even a stale/closed chat must answer that same request.
+            request_id = cmd["request"].get("request_id")
+        fields = {"request_id": request_id[:128]} if isinstance(request_id, str) else {}
         HistoryEmitter(core=self.core, chat_id=chat_id).emit(
             "command_rejected", command=str(cmd.get("type") or "")[:128], reason=reason,
             message=message, **fields)

@@ -113,7 +113,7 @@ test("custom tool runs in the host process", async () => {
   );
   const dgc = new DGC({
     stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local",
-    runtime: [process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
+    runtime: [process.env.DGC_TEST_PYTHON || process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
   });
   try {
     const session = await dgc.session({
@@ -172,7 +172,7 @@ test("outputSchema is validated on the harness", async () => {
   writeFileSync(join(work, "README.md"), "empty cart checkout\n");
   const dgc = new DGC({
     stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local",
-    runtime: [process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
+    runtime: [process.env.DGC_TEST_PYTHON || process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
   });
   try {
     const session = await dgc.session({ cwd: work, permissions: { mode: "auto", unhandled: "deny" } });
@@ -197,7 +197,7 @@ test("outputSchema is validated on the harness", async () => {
 });
 
 function runtime() {
-  return [process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"];
+  return [process.env.DGC_TEST_PYTHON || process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"];
 }
 
 test("usage is queryable by department", async () => {
@@ -330,7 +330,7 @@ import { basename, delimiter } from "node:path";
 import net from "node:net";
 import { mock } from "node:test";
 
-const PY = process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python");
+const PY = process.env.DGC_TEST_PYTHON || process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python");
 const SRC = join(ROOT, "sdk", "typescript", "src");
 
 function named(name) {
@@ -541,7 +541,7 @@ if mode == "silent":
     time.sleep(120)
     sys.exit(0)
 if mode == "unknown-first":
-    emit("remote_status", state="on")
+    emit("fixture_future_status", state="on")
 emit("ready", version="9.9.9", protocol_version=PROTOCOL, capabilities=caps, model="fixture",
      mode="default", think="off", base_url="http://127.0.0.1:1/v1", workspace_trusted=False,
      commands=[], custom_commands=[], goal={"text": "", "status": "none"}, context_size=32768,
@@ -577,7 +577,7 @@ for raw in child.stdout:
     event = json.loads(raw)
     out(event)
     if event.get("type") in ("ready", "turn_start", "stream_end"):
-        out({"type": "remote_status", "state": "on", "url": "https://example.invalid/x"})
+        out({"type": "fixture_future_status", "state": "on", "url": "https://example.invalid/x"})
 sys.exit(child.wait())
 `;
 
@@ -996,8 +996,8 @@ test("errors: unknown event types are skipped, not fatal or reported", async () 
     const result = await handle.result();
     assert.equal(result.status, "completed", result.error);
     assert.match(result.finalText.toLowerCase(), /checkout/);
-    assert.ok(!kinds.includes("remote_status"));
-    assert.ok((session.transport.ignoredEventTypes?.remote_status || 0) >= 2);
+    assert.ok(!kinds.includes("fixture_future_status"));
+    assert.ok((session.transport.ignoredEventTypes?.fixture_future_status || 0) >= 2);
   });
 });
 

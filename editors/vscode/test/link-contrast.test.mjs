@@ -9,6 +9,7 @@
 // 2.6:1 on the light one. So the link tone follows the theme, and this file holds both ends.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { contrastRatio, mainCss } from "./support/webview-dom.mjs";
 
 const AA = 4.5;
@@ -73,6 +74,25 @@ test("forced-colors hands links back to the system", () => {
     "in high contrast the user's own LinkText wins over any hex we picked");
 });
 
+// Moving gradient text must remain legible at every sampled interpolation, including hover.
+const wordmark = readFileSync(new URL('../media/pips/wordmark.css',import.meta.url),'utf8');
+function wordmarkStops(light) {
+  const block=wordmark.match(light ? /body\.vscode-light \.pips-wordmark\s*\{([^}]*)\}/ : /^\.pips-wordmark\s*\{([^}]*)\}/m)?.[1] || '';
+  const stops=['ink','flow','light'].map(name=>block.match(new RegExp(`--pips-${name}:\\s*(#[0-9a-f]{6})`,'i'))?.[1]);
+  assert.ok(stops.every(Boolean),'wordmark needs three explicit theme colours');return stops;
+}
+for(const [theme,backgrounds] of [['dark',[...Object.values(DARK),'#303033']],['light',[...Object.values(LIGHT),'#EDEDF0']]]) {
+  test(`Pips gradient stays readable throughout its ${theme} animation`,()=>{
+    const stops=wordmarkStops(theme==='light');
+    for(let i=0;i<stops.length-1;i++) {
+      const rgb=h=>h.slice(1).match(/../g).map(c=>parseInt(c,16));const a=rgb(stops[i]),b=rgb(stops[i+1]);
+      for(let step=0;step<=100;step++) {
+        const color='#'+a.map((c,j)=>Math.round(c+(b[j]-c)*step/100).toString(16).padStart(2,'0')).join('');
+        for(const bg of backgrounds)assert.ok(contrastRatio(color,bg)>=AA,`${theme} Pips ${color} on ${bg} fails at ${step}%`);
+      }
+    }
+  });
+}
 
 // Auto mode is announced by colouring the composer's own mode control instead of ringing the whole
 // box. That label is TEXT on the composer surface, so it owes 4.5:1 -- and the obvious colour to

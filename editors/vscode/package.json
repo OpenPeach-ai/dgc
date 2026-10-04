@@ -258,6 +258,12 @@
         "command": "dgc.updateExtension",
         "title": "Check for Extension Updates",
         "category": "DGC"
+      },
+      {
+        "command": "dgc.openPips",
+        "title": "Open Pips",
+        "category": "DGC",
+        "icon": "$(beaker)"
       }
     ],
     "menus": {
@@ -281,6 +287,11 @@
           "command": "dgc.settings",
           "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@3"
+        },
+        {
+          "command": "dgc.openPips",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
+          "group": "navigation@2.5"
         }
       ],
       "editor/context": [

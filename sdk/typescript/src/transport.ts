@@ -32,6 +32,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "monitor_ended", "monitor_event", "monitor_started", "monitors", "options_request",
   "options_resolved", "permission_decision", "permission_request", "permission_resolved",
   "permissions", "plan_proposal", "prompt_accepted", "queued", "ready", "recall",
+  "pips_result", "pips_status", "prompt_pips",
   "request_expired", "retained_tasks", "rewound", "rule_added", "saved_plan", "session",
   "session_named", "sessions", "skill_catalog", "skill_detail", "skill_package", "status",
   "steering_update", "stream_end", "text_delta", "think_changed", "thinking_delta",
@@ -343,8 +344,10 @@ export class Transport {
    * without a request_id (commands acknowledged by a broadcast, such as clear_todos -> todos).
    */
   request(command: Frame, responseType: string,
-    options: { timeoutMs?: number | null; uncorrelatedReply?: boolean } = {}): Promise<Frame> {
-    const requestId = typeof command.request_id === "string" ? command.request_id : undefined;
+    options: { timeoutMs?: number | null; uncorrelatedReply?: boolean; requestId?: string } = {}): Promise<Frame> {
+    // Correlation can live inside a strict nested command (Pips), independently
+    // of the payload. Do not add an undeclared outer request_id to that command.
+    const requestId = options.requestId ?? (typeof command.request_id === "string" ? command.request_id : undefined);
     const commandType = typeof command.type === "string" ? command.type : "";
     const failedPrefix = `Command '${commandType}' failed`;
     const answers = (frame: Frame): boolean => {

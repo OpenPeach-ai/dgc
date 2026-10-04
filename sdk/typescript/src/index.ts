@@ -10,6 +10,8 @@ export type {
 } from "./types.ts";
 export { DGC } from "./client.ts";
 export { RunHandle, Session } from "./session.ts";
+export { Pips, type PipReadCommand, type PipMutationCommand, type PipReadParams, type PipMutationParams,
+  type PipResult, type PipJson, type PipChatOptions, type PipCalendarEvent } from "./pips.ts";
 export { defineTool, type ToolSpec } from "./tools.ts";
 export { assertSupported, extractJson, validate } from "./schema.ts";
 export {

@@ -162,6 +162,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 "subagent", available_while_running=True),
     CommandSpec("skills", "browse and manage installed skills", _TCE, "skills", True,
                 usage="skills [ACTION…]", aliases=("extensions", "ext"), available_while_running=True),
+    CommandSpec("pips", "manage local manual Pips, reports and workspace context", frozenset({"classic"}),
+                accepts_args=True, usage="pips [ACTION…]"),
     CommandSpec("skill", "invoke an installed skill", frozenset({"classic", "editor"}),
                 "skill", True, usage="skill NAME [ARGS]"),
     CommandSpec("memory", "show or add project/user memory",

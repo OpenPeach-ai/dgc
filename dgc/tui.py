@@ -3285,6 +3285,68 @@ class TUI:
                            title="Rewind to (restores code + conversation)",
                            footer="↑↓ move · Enter select · Esc cancel")
 
+    def _review_terminal_goal(self, text: str) -> None:
+        from rich.text import Text
+        from .goal_inputs import start_terminal_goal, terminal_goal_review
+        agent = self.agent
+        draft = "/goal " + text
+
+        def refused(exc):
+            if not self.input_buf.text:
+                self.input_buf.insert_text(draft)
+            self.error(str(exc))
+            self._flash("goal not set · your text is back in the composer", secs=6)
+
+        try:
+            review = terminal_goal_review(agent, text)
+        except ValueError as exc:
+            refused(exc)
+            return
+
+        def start():
+            try:
+                if self.agent is not agent:
+                    raise ValueError("The session changed during review. Review the replacement again.")
+                notices = start_terminal_goal(text, agent, expected_review=review)
+            except ValueError as exc:
+                refused(exc)
+                return
+            if self.input_buf.text == draft:
+                self.input_buf.reset()
+            for notice in notices:
+                self.info(notice)
+            self._submit(agent.goal, expand_mentions=False)
+
+        if not review["current"]["text"] or review["current"]["status"] == "completed":
+            start()
+            return
+        # The overlay saves this as its composer draft. Both Cancel and Escape restore it.
+        if not self.input_buf.text:
+            self.input_buf.insert_text(draft)
+        rows = [{"label": "Cancel — keep the current goal", "value": "cancel"},
+                {"label": "Replace goal", "value": "replace"},
+                {"label": "Read both objectives in full", "value": "review"}]
+        header = [Text("Replace the unfinished goal?", style="bold"),
+                  Text("Current: " + style_mod.terminal_safe_text(review["current"]["text"])),
+                  Text("New: " + style_mod.terminal_safe_text(review["objective"])),
+                  Text("Replacement resets usage and the token budget. New budget: "
+                       + (f'{review["budget"]:,}' if review["budget"] else "none"))]
+        def picked(row):
+            if row["value"] == "replace":
+                start()
+            elif row["value"] == "review":
+                def literal(value):
+                    return "\n".join("    " + line for line in str(value).splitlines())
+                self._open_reader("# Current goal\n\n" + literal(review["current"]["text"])
+                                  + "\n\n# Proposed goal\n\n" + literal(review["objective"])
+                                  + "\n\n" + header[-1].plain,
+                                  footer="↑↓ scroll · Esc back to replacement review", back=show)
+
+        def show():
+            self._open_overlay(rows, header=header, footer="Enter select · Esc cancel",
+                               rebuild=lambda ov: rows, on_pick=picked)
+        show()
+
     def _confirm_rewind(self, idx: int) -> None:
         from rich.text import Text
         th = style_mod.theme()
@@ -6289,12 +6351,18 @@ class TUI:
                            or "the branch could not be saved")
         elif cmd == "name":
             if rest:
-                if self._name_session(self.active, rest):
+                if self._name_session(self._cur_session(), rest):
                     self._flash(f"session named: {rest}")
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "goal":
-            if rest.lower() in ("clear", "off", "none", "remove", "delete"):
+            if rest.lower().split(None, 1)[:1] == ["budget"]:
+                from .goals import change_terminal_budget
+                try:
+                    self._flash(change_terminal_budget(self.agent, rest))
+                except ValueError as exc:
+                    self.error(str(exc))
+            elif rest.lower() in ("clear", "off", "none", "remove", "delete"):
                 self._flash("standing goal cleared" if self.agent.set_goal("") else
                             (getattr(self.agent, "_last_persist_error", "")
                              or "goal update was not saved"))
@@ -6317,21 +6385,7 @@ class TUI:
                 else:
                     self._flash(self.agent._last_persist_error or "no standing goal to resume")
             elif rest and rest.lower() not in ("review", "status"):
-                from .goal_inputs import start_terminal_goal
-                try:
-                    notices = start_terminal_goal(rest, self.agent)
-                except ValueError as exc:
-                    # The composer was cleared before this ran, so a refused goal used to destroy
-                    # what the user wrote and leave a flash that expires in two seconds. Give the
-                    # objective back and put the reason somewhere it can be read.
-                    if rest and not self.input_buf.text:
-                        self.input_buf.insert_text(rest)
-                    self.error(str(exc))
-                    self._flash("goal not set \u00b7 your text is back in the composer", secs=6)
-                    return True
-                for notice in notices:
-                    self.info(notice)
-                self._submit(self.agent.goal, expand_mentions=False)
+                TUI._review_terminal_goal(self, rest)
             else:
                 g = getattr(self.agent, "goal", "")
                 if g:
@@ -8518,10 +8572,13 @@ class TUI:
                     self.agent._pending_images = None
                     model_text = text
                 _se = str(self.config.get("subscription_engine", "")).strip().lower()
+                from .session_turn_events import foreground_turn
                 if _se:
-                    succeeded = self._run_delegated_turn(_se, model_text)
+                    with foreground_turn("vendor"):
+                        succeeded = self._run_delegated_turn(_se, model_text)
                 else:
-                    succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
+                    with foreground_turn("foreground_prompt"):
+                        succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
@@ -8549,7 +8606,8 @@ class TUI:
                 el = time.monotonic() - self._turn_t0
                 th = style_mod.theme()
                 verb = ("stopped" if self._cancel.is_set() else
-                        ("done" if succeeded else "failed"))
+                        "failed" if not succeeded else
+                        "paused" if getattr(sess.agent, "_last_turn_pause", "") else "done")
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))

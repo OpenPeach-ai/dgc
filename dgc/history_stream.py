@@ -80,6 +80,10 @@ class HistoryEmitter:
         with self.history_lock:
             self._remember({"role": "steering", "text": str(text)[:50_000]})
 
+    def remember_goal_edit(self):
+        with self.history_lock:
+            self._remember({"role": "goal_edit", "text": "Goal updated. Continuing with the revised objective."})
+
     def emit(self, type: str, **fields) -> None:
         with self.history_lock:
             if self.chat_id and getattr(self.core, "tag_chats", False):

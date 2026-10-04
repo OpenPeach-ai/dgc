@@ -352,8 +352,8 @@ test("the step around a spawn: earlier tools stay above, later ones open a group
   const sequence = () => [...turnBlock.children].filter((n) => !n.matches(".role, .thinking")).map((n) =>
     n.matches(".agent-line") ? "line"
       : `${n.classList.contains("agent-owned") ? "hidden" : "group"}:${[...n.querySelectorAll(":scope > .tool")].map((c) => c.dataset.toolName).join(",")}:${n.open ? "open" : "folded"}`);
-  assert.deepEqual(sequence(), ["group:read_file:open", "hidden:task:folded", "line", "group:bash:open"],
-    "nothing folds mid-step");
+  assert.deepEqual(sequence(), ["group:read_file:folded", "hidden:task:folded", "line", "group:bash:folded"],
+    "every group starts compact without changing step order");
   p.event({ type: "text_delta", text: "Done." });
   assert.deepEqual(sequence().slice(0, 4), ["group:read_file:folded", "hidden:task:folded", "line", "group:bash:folded"],
     "both fold when the model moves on");
@@ -675,7 +675,7 @@ test("the stylesheet and the script carry the line, and nothing of the chip", ()
   assert.match(rule(".agent-line-faces .agent-mark"), /width: 16px; height: 16px/);
   assert.doesNotMatch(mainCss, /\.agent-state[^{]*\{[^}]*--err-text/, "--err-text is about 3:1 on light themes");
   const forced = agents.slice(agents.indexOf("@media (forced-colors: active)"));
-  assert.match(forced, /\.agent-name, \.agent-line-more \{ color: LinkText; text-decoration-color: LinkText; \}/);
+  assert.match(forced, /\.agent-name, \.agent-line-more \{ color: LinkText; \}/);
   assert.match(forced, /\.agent-state\[data-state="waiting"\], \.agent-state\[data-state="failed"\] \{ color: CanvasText;/);
   // No ring around a face, and one breathing animation.
   assert.doesNotMatch(mainCss, /\.agent-mark[^{]*\{[^}]*(?:box-shadow|outline)/);

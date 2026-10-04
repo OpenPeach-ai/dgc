@@ -58,7 +58,28 @@ def input_summary(inputs: dict) -> dict:
             "images": len(inputs.get("images", [])), "context": len(inputs.get("context", []))}
 
 
-def start_terminal_goal(text: str, agent) -> list[str]:
+def terminal_goal_review(agent, text: str) -> dict:
+    """Capture the decision being reviewed, excluding the ticking elapsed clock."""
+    from .goals import parse_start
+    objective, budget = parse_start(text)
+    current = agent.goal_snapshot()
+    return {"session": str(agent.session_file or ""),
+            "current": {key: current.get(key) for key in ("id", "text", "status", "token_budget")},
+            "objective": objective, "budget": budget}
+
+
+def start_terminal_goal(text: str, agent, *, expected_review: dict | None = None) -> list[str]:
+    # The terminal review can remain open while another session is selected. Compare inside
+    # the same reservation used for persistence; never apply approval to a different goal.
+    with agent._session_turn_scope() as reserved:
+        if not reserved:
+            raise ValueError("Stop the active turn before replacing its goal.")
+        if expected_review is not None and terminal_goal_review(agent, text) != expected_review:
+            raise ValueError("The session or goal changed during review. Review the replacement again.")
+        return _start_terminal_goal(text, agent)
+
+
+def _start_terminal_goal(text: str, agent) -> list[str]:
     """Prepare terminal selections without expanding file contents into the goal objective."""
     from .attachments import expand_attachments
     from .commands import discover_commands

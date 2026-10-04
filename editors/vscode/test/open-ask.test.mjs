@@ -1,7 +1,7 @@
 // A question the turn did not stop for.
 //
 // The picker docks over the composer and the turn waits. This one is a row in the transcript
-// while work carries on behind it, and it folds to a single clickable line if you do not answer.
+// while work carries on behind it. Only the reader can fold it to a single clickable line.
 //
 // The behaviours that matter are the ones that protect the transcript: an answer must say which
 // question it answers, and a question must never vanish without a record that it was asked.
@@ -93,8 +93,7 @@ test("Skip tells the backend, so the model is told to decide", () => {
 test("it folds to one clickable line, and comes back", () => {
   const p = panel();
   const row = askOpened(p);
-  // Fold by hand rather than waiting out the timer: the timer's duration is a product decision,
-  // and a test that sleeps for it is the flake we spent a night removing.
+  // Escape is a deliberate reader action. No wall-clock wait is involved.
   row.querySelector(".open-ask-input")
      .dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(row.dataset.state, "folded");
@@ -139,8 +138,7 @@ test("folding is styled, not achieved by deleting the card", () => {
   const css = mainCss;
   assert.match(css, /\.open-ask\[data-state="folded"\] \.open-ask-body/, "folded hides the body");
   assert.match(css, /\.open-ask\[data-state="open"\] \.open-ask-folded/, "open hides the one-liner");
-  // The timer is a product constant; pin it so a change is deliberate.
-  assert.match(mainJs, /ASK_FOLD_MS = 30000/);
+  assert.doesNotMatch(mainJs, /ASK_FOLD_MS/);
 });
 
 // --- what the transcript keeps of an answer -------------------------------------------------------
@@ -228,26 +226,22 @@ test("a refusal for some other prompt leaves the card alone", () => {
 // and neither noticed a pointer: a 30-second fold that ONLY typing cancelled, and turn end, where
 // the backend expired the ask and this file replaced the whole row with a one-line "Not answered".
 
-test("pointing at the card stops it folding under you", () => {
-  const p = panel();
-  const row = askOpened(p, { options: [{ label: "A (Recommended)", description: "the small one" },
+test("pending questions stay open through timers and turn completion; only the reader folds", () => {
+  const p = panel(), timers = [];
+  // Drive callbacks directly, without sleeps or depending on the real clock.
+  p.dom.window.setTimeout = callback => { timers.push(callback); return timers.length; };
+  const row = askOpened(p, { options: [{ label: "A", description: "the small one" },
                                        { label: "B", description: "a new board" }] });
-  const body = row.querySelector(".open-ask-body");
-  assert.ok(body, "the body is what a reader points at");
-  // The fold is a timer; the test drives the listeners rather than sleeping 30 seconds.
-  const snoozes = [];
-  for (const kind of ["pointerenter", "pointermove", "focusin"]) {
-    const event = new p.dom.window.Event(kind, { bubbles: true });
-    body.dispatchEvent(event);
-    snoozes.push(kind);
-  }
-  assert.deepEqual(snoozes, ["pointerenter", "pointermove", "focusin"]);
-  assert.match(mainJs, /const snooze = \(\) => clearTimeout\(ask\.timer\)/,
-               "one snooze, wired to reading as well as typing");
-  for (const kind of ["pointerenter", "pointermove", "focusin", "input"]) {
-    assert.ok(mainJs.includes(`"${kind}", snooze`) || mainJs.includes(`${kind} = snooze`),
-              `${kind} must snooze the fold timer`);
-  }
+  p.event({ type: "turn_end", turn_id: "t1", reason: "completed" });
+  for (const callback of timers.slice()) callback();
+  assert.equal(row.dataset.state, "open");
+  assert.equal(row.querySelectorAll(".oask-opt").length, 2);
+  row.querySelector(".open-ask-collapse").click();
+  assert.equal(row.dataset.state, "folded");
+  assert.equal(p.doc.activeElement, row.querySelector(".open-ask-folded"));
+  row.querySelector(".open-ask-folded").click();
+  assert.equal(row.dataset.state, "open");
+  assert.equal(p.doc.activeElement, row.querySelector(".open-ask-input"));
 });
 
 test("an unanswered question keeps its options on screen, not just its title", () => {

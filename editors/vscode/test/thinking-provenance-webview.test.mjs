@@ -351,4 +351,3 @@ test("20,000 one-token deltas into one block stay linear", () => {
   assert.equal(doc.querySelector(".reasoning").textContent.length, 20000);
   assert.ok(took < 1000, `took ${Math.round(took)}ms`);
 });
-

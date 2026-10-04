@@ -504,6 +504,18 @@ class TheCardOutlivesTheTurnTest(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in a.ui.resolved], [],
                          "and no client was told to close the card")
 
+    def test_pip_approval_notification_preserves_the_open_question(self) -> None:
+        a = self.live()
+        self.asking(a, "How should I fix the failed runs?")
+        a.run_turn("Build the project")
+        before = dict(a._open_asks())
+        a._chat = lambda *args, **kwargs: __import__("dgc.llm", fromlist=["ChatResult"]).ChatResult(content="Setup noted", tool_calls=[])
+        notice = {"setup_id":"setup_"+"a"*32,"pip_id":"pip_"+"b"*32,"name":"Daily review","pip_type":"rook","run_id":None}
+        a.run_turn("Controller approval receipt", pip_setup_notice=notice)
+        self.assertEqual(a._open_asks(), before)
+        self.assertEqual(a.ui.resolved, [])
+        self.assertTrue(any(m.get("_dgc_pip_setup") == notice for m in a.messages))
+
     def test_the_next_thing_the_user_says_is_what_closes_it(self) -> None:
         a = self.live()
         self.asking(a)

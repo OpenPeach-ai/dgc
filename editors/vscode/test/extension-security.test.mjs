@@ -1,6 +1,6 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -17,6 +17,7 @@ const closeListeners = [];
 let inspectedCommand;
 
 globalThis.__DGC_EXTENSION_SECURITY_VSCODE = {
+  ExtensionMode: { Production: 1, Development: 2, Test: 3 },
   window: {
     registerWebviewViewProvider: () => ({ dispose() {} }),
     showWarningMessage: async (message) => { warnings.push(String(message)); },
@@ -136,6 +137,30 @@ test("CLI terminal actions ignore workspace executables and pass argv without sh
     "a workspace-only executable override must fall back to the extension default");
   // Close the update terminals so their status watchers stop.
   for (const terminal of terminals) for (const listener of [...closeListeners]) listener(terminal);
+});
+
+test("development lab terminal actions use the isolated wrapper and cannot update ordinary installs", () => {
+  const extensionPath=join(scratch,"lab","dgc","editors","vscode");
+  mkdirSync(extensionPath,{recursive:true});
+  const wrapper=join(scratch,"lab","dgc-core-review");
+  writeFileSync(wrapper,"#!/bin/sh\nexit 0\n",{mode:0o700});
+  const old=process.env.DGC_PIPS_LAB_COMMAND;process.env.DGC_PIPS_LAB_COMMAND=wrapper;
+  try {
+    extension.activate({...context,extensionMode:2,extensionUri:{fsPath:extensionPath}});
+    registered.get("dgc.updateCli")();registered.get("dgc.updateExtension")();
+    assert.equal(terminals.length,0);
+    registered.get("dgc.openNotes")();
+    assert.deepEqual(terminals[0].options.shellArgs.slice(-2),[wrapper,"notes"]);
+    assert.equal(warnings.length,0);
+  } finally { if(old===undefined)delete process.env.DGC_PIPS_LAB_COMMAND;else process.env.DGC_PIPS_LAB_COMMAND=old; }
+});
+
+test("installed production extension ignores a lab override when launching terminal commands", () => {
+  const old=process.env.DGC_PIPS_LAB_COMMAND;process.env.DGC_PIPS_LAB_COMMAND="/untrusted/not-the-lab";
+  try {
+    extension.activate({...context,extensionMode:1});registered.get("dgc.exportTraining")();
+    assert.deepEqual(terminals[0].options.shellArgs.slice(-2),["/opt/DGC CLI/dgc;literal","export-training"]);
+  } finally { if(old===undefined)delete process.env.DGC_PIPS_LAB_COMMAND;else process.env.DGC_PIPS_LAB_COMMAND=old; }
 });
 
 test("activation does not construct an agent provider in an untrusted workspace", () => {

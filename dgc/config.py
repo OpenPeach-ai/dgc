@@ -422,6 +422,7 @@ DEFAULTS: dict = {
                                                 #   local endpoint (load + large prefill), 300 remote; 0 = off
     "model_idle_timeout_s": 300,                # seconds without a token mid-stream before it is a stall
                                                 #   (partial output is continued, not discarded); 0 = off
+    "pips_enabled": False,                     # Pips: personal and project agents in this chat
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
     "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load
@@ -624,12 +625,16 @@ def find_project_root(start: Path | None = None) -> Path:
     p = Path(start or os.getcwd()).resolve()
     if os.environ.get("DGC_SDK_ISOLATED") == "1":
         return p
+    # Redirecting user state does not turn the account's original ~/.dgc into
+    # a project marker. Otherwise a non-Git child directory silently widens to
+    # the account home whenever DGC_HOME points at a separate private instance.
+    global_dgc_dirs = {USER_HOME.resolve(), (Path.home() / ".dgc").resolve()}
     for d in (p, *p.parents):
         dgc_dir = d / ".dgc"
         # a project's own .dgc counts, but NOT the global ~/.dgc config dir — otherwise every
         # folder under $HOME resolves its project root all the way up to $HOME.
         if (d / ".git").exists() or (d / "DGC.md").exists() or \
-           (dgc_dir.is_dir() and dgc_dir != USER_HOME):
+           (dgc_dir.is_dir() and dgc_dir.resolve() not in global_dgc_dirs):
             return d
     return p
 

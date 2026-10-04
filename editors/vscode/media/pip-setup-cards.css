@@ -1,0 +1,48 @@
+/* Native main-chat review cards. Colors follow the existing DGC panel tokens. */
+.pip-setup-card{margin:8px 0;border:1px solid var(--border,#35353a);border-radius:12px;background:var(--surface,#202022);font-size:12px;overflow:hidden;min-width:0}
+.pip-setup-summary{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 12px;list-style:none}
+.pip-setup-summary::-webkit-details-marker{display:none}.pip-setup-summary:after{content:'›';font-size:18px;color:var(--muted,#a3a3ad)}
+.pip-setup-card[open]>.pip-setup-summary:after{transform:rotate(90deg)}
+.pip-setup-avatar{display:block;width:34px;height:34px;flex:none}.pip-setup-avatar .dgc-plush{width:34px;height:34px}
+.pip-setup-title{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}.pip-setup-title strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}.pip-setup-title>span{font-size:11px;color:var(--muted,#a3a3ad)}
+.pip-setup-state{font-size:10px;color:var(--link,#ad97f3);text-transform:capitalize;white-space:nowrap}
+.pip-setup-body{padding:0 12px 12px;overflow-wrap:anywhere}.pip-setup-goal{font-size:13px;line-height:1.55;margin:6px 0 12px}
+.pip-setup-facts{margin:0 0 12px}.pip-setup-fact{display:grid;grid-template-columns:80px minmax(0,1fr);gap:10px;margin:5px 0}.pip-setup-fact dt{color:var(--muted,#a3a3ad)}.pip-setup-fact dd{margin:0}
+.pip-setup-notice,.pip-setup-receipt{font-size:11px;line-height:1.5;color:var(--muted,#a3a3ad);margin:8px 0}.pip-setup-reason summary{cursor:pointer;color:var(--muted,#a3a3ad)}
+.pip-setup-actions{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 9px}.pip-setup-card button,.pip-setup-card select{font:inherit;border-radius:6px;border:1px solid var(--border,#45454a);padding:6px 9px;cursor:pointer;background:transparent;color:inherit;max-width:100%}
+.pip-setup-card .pip-setup-primary{background:#6747df;color:#fff;border-color:#6747df}.pip-setup-card button:disabled{opacity:.5;cursor:default}.pip-setup-card button:focus-visible,.pip-setup-card summary:focus-visible,.pip-setup-card select:focus-visible,.pip-setup-card input:focus-visible{outline:2px solid #987ce9;outline-offset:2px}
+.pip-setup-card .pip-setup-refresh{font-size:10px;padding:3px 0;margin-top:9px;border:0;color:var(--muted,#a3a3ad)}
+.pip-setup-error{color:var(--vscode-errorForeground,#f48771);font-size:12px}.pip-setup-model{margin:12px 0}.pip-setup-model label{display:flex;flex-direction:column;gap:6px}.pip-setup-model select{background:var(--vscode-dropdown-background,#252526);color:var(--vscode-dropdown-foreground,#eee)}
+.pip-setup-pending{margin-top:10px}.tool .body:has(>.pip-setup-card){max-height:none;padding:0;overflow:visible}
+@media(max-width:340px){.pip-setup-state{max-width:62px;white-space:normal}.pip-setup-fact{grid-template-columns:68px minmax(0,1fr)}}
+
+.pip-setup-quick-actions{display:flex;align-items:center;gap:6px;flex:none}.pip-setup-summary:after{display:none}.pip-setup-summary .pip-setup-review{border-color:transparent;color:var(--muted,#a3a3ad)}
+@media(max-width:520px){.pip-setup-summary{flex-wrap:wrap;gap:7px}.pip-setup-quick-actions{flex-basis:100%;padding-left:44px}.pip-setup-summary .pip-setup-state{margin-left:auto}}
+
+.pip-setup-card{background:linear-gradient(130deg,#9575de0b,transparent 65%),var(--surface);border-color:var(--border);box-shadow:none}
+.pip-setup-summary{padding:12px;gap:10px}.pip-setup-title strong{letter-spacing:-.015em}.pip-setup-state{border:1px solid #9475d630;border-radius:20px;padding:3px 7px;text-transform:none}
+.pip-setup-card[open]>.pip-setup-summary{border-bottom:1px solid var(--border)}.pip-setup-body{padding-top:10px}.pip-setup-facts{border:1px solid var(--border);border-radius:8px;padding:8px 10px}.pip-setup-fact{font-size:11px;line-height:1.6}
+/* Pip runs follow specialist-agent lines: face, linked name, current state.
+   Details live on the run page, not in a second card under the answer. */
+.pip-run-line{display:flex;align-items:center;gap:6px;min-width:0;margin:0;padding:var(--sp-1,4px) 0;color:var(--muted);font:var(--w-reg,400) var(--t-sm,12px)/1.45 var(--sans);user-select:none}
+.pip-run-avatar,.pip-run-avatar .dgc-plush{display:block;width:16px;height:16px;flex:none}
+.pip-run-open{flex:0 1 auto;min-width:0}.pip-run-title{font:inherit}
+.pip-run-state{flex:none;font:inherit;color:var(--muted)}
+.pip-run-line[data-state=failed] .pip-run-state{color:var(--text);font-weight:var(--w-med,500)}
+.pip-run-open:disabled{cursor:default;text-decoration:none}
+.pip-run-detail{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.pip-run-refresh{font:inherit;border:0;background:transparent;color:var(--link);cursor:pointer;padding:0}
+.pip-run-refresh:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:2px}
+.pip-run-owned{display:none!important}
+@media(max-width:300px){.pip-run-line{flex-wrap:wrap}.pip-run-open{max-width:calc(100% - 24px)}}
+
+/* One approval, one compact row. Expand only when the user asks to review. */
+.pip-setup-card{margin:5px 0;border-radius:8px}.pip-setup-summary{flex-wrap:nowrap;gap:6px;padding:7px 8px;min-height:36px}
+.pip-setup-avatar,.pip-setup-avatar .dgc-plush{width:20px;height:20px}.pip-setup-title strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pip-setup-title>span{display:none}
+.pip-setup-state{font-size:9px;border:0;padding:0;max-width:none;margin:0!important}.pip-setup-quick-actions{flex-basis:auto;padding:0;gap:2px}.pip-setup-quick-actions button{font-size:10px;padding:3px 5px;border-radius:5px;min-height:24px}
+.tool:has(>.body>.pip-setup-card)>.head{display:none}.pip-setup-moved{display:none!important}
+.pip-approval-note{display:flex;align-items:center;gap:8px;font-size:11px;padding:8px 0}.pip-approval-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pip-approval-status{color:var(--muted);font-size:10px;flex:none}
+.pip-setup-card:not([open])>.pip-setup-summary:after{display:none}
+@media(max-width:300px){.pip-setup-summary{gap:4px;padding:6px}.pip-setup-state{display:none}.pip-setup-quick-actions button{padding:3px 4px;font-size:9px}}
+/* Moving the only result out must not leave an empty “Used 1 tool” disclosure. */
+.tool-group:has(>.pip-setup-moved):not(:has(>:not(summary,.pip-setup-moved))){display:none}

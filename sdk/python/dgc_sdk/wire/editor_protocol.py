@@ -63,6 +63,12 @@ _NA = lambda required=True: _f("null", "array", required=required)
 # still declared and type-checked; undeclared fields fail closed so a mismatched or compromised
 # backend cannot smuggle arbitrary data into the editor webview.
 EVENT_FIELDS: dict[str, dict[str, dict]] = {
+    "prompt_pips": {"request_id": _S(), "workspace_id": _S(), "pips": _A(), "next_cursor": _NS()},
+    # Local editor Pips controls. Only sent in response to a capability-gated command.
+    "pips_result": {"request_id": _S(), "command": _S(), "ok": _B(),
+                    "result": _O(False), "error": _O(False)},
+    "pips_status": {"enabled": _B(), "api_version": _I(), "restart_required": _B(),
+                    "message": _S(), "request_id": _S(False)},
     "chat_changes": {"roots": _A(), "session_id": _S(), "request_id": _S()},
     "chat_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
                     "session_id": _S(), "request_id": _S()},
@@ -93,7 +99,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # something while the session was idle; ``prompt`` is then a short label, never user text.
     "turn_start": {"turn_id": _S(), "prompt": _S(),
                    "kind": _f("string", required=False,
-                              enum=("prompt", "resume", "continue", "monitor", "wake")),
+                              enum=("prompt", "resume", "continue", "monitor", "wake", "pip_setup")),
                    "request_id": _S(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule: the last ``stream_end`` of the turn
@@ -101,7 +107,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # phase was absent; else null. Reported for every reason, not just "completed": a stopped turn
     # still has an answer block, and the panel decides what chrome a partial one earns.
     "turn_end": {
-        "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error")),
+        "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error", "paused")),
         "token_estimate": _I(),
         "final_message_id": _NS(False),
     },
@@ -213,7 +219,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "origin": _f("string", required=False, enum=("agent", "subagent", "engine")),
         "agent": _S(False), "engine": _S(False),
     },
-    "request_expired": {"id": _S()},
+    "request_expired": {"id": _S(), "message": _S(False)},
     "permission_request": {
         "id": _S(), "call_id": _NS(False), "name": _S(), "args": _O(),
         "command": _NS(False), "suggested_rule": _S(), "choices": _A(),
@@ -507,6 +513,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
+    "list_prompt_pips": {"request_id": _S(), "query": _S(False), "after": _S(False), "limit": _I(False)},
+    # The nested request uses the existing bounded Pip control API. Authorization,
+    # its per-command field allowlist and 16KiB limit are checked by the backend.
+    "pips_control": {"request": _O()},
+    "pips_enable": {"enabled": _B(), "request_id": _S(False)},
+    "pips_runtime": {"action": _f("string", enum=("start", "resume")), "request_id": _S()},
     "get_chat_changes": {"request_id": _S()},
     "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},
@@ -515,7 +527,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # it a message steered while a question is open is just a message -- a follow-up on another
     # subject must never be recorded as an answer.
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
-               "answers": _NA(False),
+               "answers": _NA(False), "pip_references": _A(False),
                # Images handed over as files in the backend's spool rather than inlined as base64.
                # Only sent by a client that saw capabilities.image_spool, so an older backend is
                # never offered a field it would reject as undeclared.
@@ -606,7 +618,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "install_skill": {"request_id": _S(), "source": _S(), "scope": _S(False), "allow_external": _B(False)},
     "list_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S()},
     "get_history": {"request_id": _S()},
-    "start_goal": {"request_id": _S(), "text": _S(), "token_budget": _I(False),
+    "start_goal": {"request_id": _S(), "text": _S(), "token_budget": _I(False), "expected_goal_id": _S(False),
                    "skills": _A(False), "templates": _A(False), "images": _A(False), "context": _A(False)},
     "mcp_command": {"request_id": _S(), "arguments": _S()},
     "get_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S(), "identifier": _S(), "arguments": _O(False)},
@@ -641,6 +653,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
     },
     "set_goal": {
+        "expected_goal_id": _S(False),
         "text": _S(False),
         "status": _f("string", required=False,
                      enum=("none", "active", "paused", "completed", "blocked")),

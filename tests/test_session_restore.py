@@ -49,6 +49,19 @@ class SessionRestoreTests(unittest.TestCase):
         self.backend._emit_goal = lambda: None
         self.agent.run_turn = lambda *args, **kwargs: self.fail("restoration must not invoke a model")
 
+    def test_saved_budget_pause_replays_as_paused_and_does_not_claim_a_final_answer(self):
+        self.agent.messages.extend([
+            {"role":"user", "content":"Compare two approaches"},
+            {"role":"assistant", "content":"First approach", "_dgc_goal_pause":"Goal token budget reached"},
+        ])
+        self.agent._persist()
+        self.backend.dispatch({"type":"resume_session", "path":self.agent.session_file.name})
+        items=next(e["items"] for e in self.events if e["type"]=="history")
+        end=next(i for i in items if i["type"]=="turn_end")
+        self.assertEqual(end["reason"],"paused")
+        self.assertIsNone(end["final_message_id"])
+        self.assertTrue(any(i.get("message")=="Goal token budget reached" for i in items))
+
     def test_resume_restores_history_pauses_goals_and_clears_previous_chat_context(self):
         self.agent.messages.append({"role": "user", "content": "Original request"})
         self.assertTrue(self.agent.set_goal("Finish saved work"))
@@ -288,7 +301,7 @@ class SessionRestoreTests(unittest.TestCase):
     def test_start_goal_validates_before_replacing_state_or_starting_a_worker(self):
         self.assertTrue(self.agent.set_goal("Original"))
         started = []
-        self.backend._start_turn = lambda *args: started.append(args) or ("started", 0)
+        self.backend._start_turn = lambda *args, **kw: started.append((args, kw)) or ("started", 0)
         for inputs in ({"skills": ["missing-fixture"]}, {"images": ["https://invalid/image.png"]},
                        {"context": [{"type": "mcp_context", "server": "docs", "uri": "docs://huge", "text": "x" * 64000}]}):
             self.backend.dispatch({"type": "start_goal", "text": "Replacement", "request_id": "goal-1", **inputs})
@@ -300,12 +313,32 @@ class SessionRestoreTests(unittest.TestCase):
         self.assertIsNone(command_error(command))
         self.backend.dispatch(command)
         self.assertEqual(self.events[-1], {"type": "prompt_accepted", "request_id": "goal-2", "state": "started"})
-        self.assertEqual(started, [("Replacement",)], "inputs are applied once by the shared Agent turn boundary")
+        self.assertEqual(started, [(("Replacement",), {"request_id": "goal-2"})], "inputs are applied once; the worker echo keeps the composer identity")
         self.assertEqual(self.agent.goal_snapshot()["attachments"]["context"], 1)
         self.backend._busy = lambda: True
         self.backend.dispatch({"type": "start_goal", "text": "Busy replacement", "request_id": "goal-3"})
         self.assertEqual(self.agent.goal, "Replacement")
         self.assertEqual(len(started), 1)
+
+    def test_goal_replacement_guard_refuses_stale_identity_without_mutating(self):
+        self.assertTrue(self.agent.set_goal("Original",replace=True))
+        original=self.agent.goal_snapshot()
+        started=[]
+        self.backend._start_turn=lambda *args, **kw:started.append((args, kw)) or ("started",0)
+        command={"type":"start_goal","text":"Replacement","request_id":"replace-guard","expected_goal_id":"f"*32}
+        self.assertIsNone(command_error(command))
+        self.backend.dispatch(command)
+        self.assertEqual(self.events[-1]["reason"],"goal_changed")
+        self.assertEqual(self.agent.goal_snapshot(),original)
+        self.assertEqual(started,[])
+        command["expected_goal_id"]=original["id"]
+        self.backend.dispatch(command)
+        self.assertEqual(self.agent.goal,"Replacement")
+        self.assertNotEqual(self.agent.goal_snapshot()["id"],original["id"])
+        self.assertEqual(started,[(("Replacement",), {"request_id":"replace-guard"})])
+        self.backend.dispatch(command)
+        self.assertEqual(self.events[-1]["reason"],"goal_changed")
+        self.assertEqual(len(started),1)
 
     def test_corrupt_saved_goal_inputs_are_flagged_and_cannot_silently_resume(self):
         from dgc.goals import clean_details
@@ -332,12 +365,13 @@ class SessionRestoreTests(unittest.TestCase):
         source = self.root / "spec.txt"
         source.write_text("Original specification; $missing-skill stays reference data.")
         (self.root / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        from prompt_toolkit.buffer import Buffer
         started, notices = [], []
         terminal = types.SimpleNamespace(agent=self.agent, config=self.agent.config,
             ui=types.SimpleNamespace(info=notices.append, error=notices.append),
             _run_turn_live=lambda text, queue: started.append((text, {})),
             _submit=lambda text, **kwargs: started.append((text, kwargs)),
-            _flash=notices.append, info=notices.append, _invalidate=lambda: None)
+            _flash=notices.append, info=notices.append, _invalidate=lambda: None, input_buf=Buffer())
         for surface, command in ((CLI.handle_slash, "/goal Check @spec.txt @image.png $goal-check /goal-template"),
                                  (TUI._handle_slash, "/goal /goal-template Check @spec.txt @image.png $goal-check")):
             self.assertTrue(self.agent.set_goal(""))

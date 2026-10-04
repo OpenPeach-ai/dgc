@@ -55,12 +55,14 @@ FAKE_SERVE = textwrap.dedent('''
         sys.stderr.flush()
         sys.exit(3)
     if mode == "unknown-first":
-        emit("remote_status", state="on")
+        emit("fixture_future_status", state="on")
     READY
     if mode == "unknown":
-        emit("remote_status", state="on", detail="paired")
-        emit("remote_pairing", code="123-456")
+        emit("fixture_future_status", state="on", detail="paired")
+        emit("fixture_future_pairing", code="123-456")
         emit("info", message="after unknown")
+    if mode == "malformed-known":
+        emit("info", message="known event", detail="undeclared known-event field")
     for line in sys.stdin:
         cmd = json.loads(line)
         kind, rid = cmd.get("type"), cmd.get("request_id")
@@ -87,7 +89,7 @@ FAKE_SERVE = textwrap.dedent('''
 ''').replace("READY", READY)
 
 # Wraps the real `dgc serve` and adds event types this SDK has never heard of, the way a newer
-# CLI adds remote_status within protocol v14.
+# CLI adds a new status event within protocol v14.
 INJECT_UNKNOWN = textwrap.dedent('''
     import json, subprocess, sys
     child = subprocess.Popen([sys.executable, "-m", "dgc", "serve"], stdout=subprocess.PIPE)
@@ -104,7 +106,7 @@ INJECT_UNKNOWN = textwrap.dedent('''
         event = json.loads(raw)
         out(event)
         if event.get("type") in ("ready", "turn_start", "stream_end"):
-            out({"type": "remote_status", "state": "on", "url": "https://example.invalid/x"})
+            out({"type": "fixture_future_status", "state": "on", "url": "https://example.invalid/x"})
     sys.exit(child.wait())
 ''')
 
@@ -286,7 +288,7 @@ class ProtocolTests(_Base):
             event = client.next_event(timeout=5)
             self.assertEqual(event["type"], "info")
             self.assertEqual(event["message"], "after unknown")
-            self.assertEqual(client.ignored_event_types, {"remote_status": 1, "remote_pairing": 1})
+            self.assertEqual(client.ignored_event_types, {"fixture_future_status": 1, "fixture_future_pairing": 1})
             reply = client.request({"type": "list_sessions", "request_id": "r-1"}, "sessions",
                                    timeout=5)
             self.assertEqual(reply["request_id"], "r-1")
@@ -299,6 +301,17 @@ class ProtocolTests(_Base):
             client.start()
         client.close()
 
+    def test_malformed_known_event_remains_a_protocol_error(self):
+        client = self._wire("malformed-known")
+        try:
+            with self.assertRaisesRegex(wire.DGCProtocolError, "info"):
+                client.start()
+                client.next_event(timeout=5)  # ready, if the reader has not yet reached the error
+                client.next_event(timeout=5)
+            self.assertEqual(client.ignored_event_types, {})
+        finally:
+            client.close()
+
     def test_session_survives_a_cli_that_adds_event_types(self):
         wrapper = self.tmp / "inject_unknown.py"
         wrapper.write_text(INJECT_UNKNOWN, encoding="utf-8")
@@ -309,7 +322,7 @@ class ProtocolTests(_Base):
             skipped = session.raw.ignored_event_types
         self.assertEqual(result.status, "completed", result)
         self.assertIn("checkout", result.final_text.lower())
-        self.assertGreaterEqual(skipped.get("remote_status", 0), 2)
+        self.assertGreaterEqual(skipped.get("fixture_future_status", 0), 2)
 
     def test_protocol_mismatch_raises_the_sdk_protocol_error(self):
         for offered, advice in ((13, "dgc update"), (15, "pip install -U dgc-sdk")):

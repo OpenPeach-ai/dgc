@@ -588,7 +588,7 @@ setInterval(() => {}, 1000);`);
   const unknown = executable("unknown-event-backend", `
 ${protocolFixture()}
 send(ready);
-send({ type: "remote_status", enabled: true, state: "connecting" });
+send({ type: "future_fixture_event", enabled: true, state: "connecting" });
 send({ type: "info", message: "still-connected" });
 setInterval(() => {}, 1000);`);
   const unknownBackend = new DgcBackend(scratch, unknown);
@@ -596,12 +596,15 @@ setInterval(() => {}, 1000);`);
   unknownBackend.on("event", (event) => notices.push(event));
   const kept = waitFor(unknownBackend, "event", (event) => event.type === "info" && event.message === "still-connected");
   unknownBackend.start();
-  await kept;
-  const skipped = notices.filter((event) => event.type === "error" && /remote_status/.test(event.message || ""));
-  assert.equal(skipped.length, 1);
-  assert.equal(skipped[0].fatal, false);
-  assert.equal(unknownBackend.ready, true);
-  unknownBackend.dispose();
+  try {
+    await kept;
+    const skipped = notices.filter((event) => event.type === "error" && /future_fixture_event/.test(event.message || ""));
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].fatal, false);
+    assert.equal(unknownBackend.ready, true);
+  } finally {
+    unknownBackend.dispose();
+  }
 
   // The bug the event_index name exists to prevent: a per-monitor counter written into the frame's
   // own seq (it restarts at 1) reads as a duplicate frame, and the backend is shut down for it.
