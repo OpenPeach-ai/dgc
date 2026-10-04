@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 from dgc import pip_calendar_actions as cal,pip_app_actions as actions,pip_app_access as apps,pips
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
+from dgc import workspace_registry
 from tests import test_pip_app_actions as fixtures
 
 EVENT={'summary':'Quiet reading','description':'Read <one> chapter & make notes.',
@@ -100,7 +101,7 @@ class CalendarActionTests(unittest.TestCase):
         saved=self.propose(kind='gmail_send',message=self.message,request_key='legacy');before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_app_actions')]
         self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('PRAGMA user_version=27')
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0],32)
+            self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)
             self.assertEqual([tuple(r) for r in upgraded.db.execute('SELECT * FROM pip_app_actions')],before)
         import dgc.workspace_registry as registry
         with patch.object(registry,'SCHEMA_VERSION',27),self.assertRaisesRegex(RegistryError,'compatible DGC version'):

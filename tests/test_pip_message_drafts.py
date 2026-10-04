@@ -7,6 +7,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 from dgc import pip_message_drafts as drafts,pip_chat,pips,pip_email_tool as tool
+from dgc import workspace_registry
 from dgc.workspace_registry import WorkspaceRegistry,RegistryError
 from tests import test_pip_app_actions as fixtures
 from tests import test_pip_personal_handoff_tool as tool_fixtures
@@ -55,7 +56,7 @@ class MessageDraftTests(unittest.TestCase):
         self.assertEqual(self.store.db.execute('PRAGMA user_version').fetchone()[0],26)
         self.assertIsNone(self.store.db.execute("SELECT name FROM sqlite_master WHERE name='pip_message_drafts'").fetchone())
         with WorkspaceRegistry(self.registry.directory) as registry:
-            self.assertEqual(registry.db.execute('PRAGMA user_version').fetchone()[0],32)
+            self.assertEqual(registry.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)
             self.assertEqual([tuple(r) for r in registry.db.execute('SELECT * FROM pip_runs ORDER BY id')],before)
         with patch.object(schema,'SCHEMA_VERSION',26):
             with self.assertRaisesRegex(RegistryError,'compatible DGC version'):WorkspaceRegistry(self.registry.directory)

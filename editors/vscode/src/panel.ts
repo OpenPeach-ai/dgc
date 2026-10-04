@@ -1402,7 +1402,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "goal_edit_state", state: "error", error: "Enter a valid non-negative whole-number token budget." }); return;
     }
     if (this.pendingGoalEdit) { return; }
-    if (this.turnActive && !this.monitorTurnActive && this.lastReadyEvent?.capabilities?.live_goal_edit === true) {
+    const liveEdit = this.lastReadyEvent?.capabilities?.live_goal_edit === true;
+    if (this.turnActive && !this.monitorTurnActive && liveEdit) {
       const requestId = this.nextRequestId("goal-edit");
       this.pendingGoalEdit = requestId;
       this.post({ type: "goal_edit_state", state: "pending" });
@@ -1410,7 +1411,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // Its correlated commit/refusal (or backend exit) settles the editor without restarting.
       try {
         const accepted = this.ensureBackend().send({ type: "set_goal", request_id: requestId,
-          expected_goal_id: String(this.state.goal.id || ""), text: objective, status: "active",
+          ...(liveEdit ? { expected_goal_id: String(this.state.goal.id || "") } : {}), text: objective, status: "active",
           ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}) });
         if (!accepted) { this.settleGoalEdit("DGC did not accept the edit. Your draft is retained."); }
       } catch (err: any) {

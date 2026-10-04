@@ -422,7 +422,7 @@ DEFAULTS: dict = {
                                                 #   local endpoint (load + large prefill), 300 remote; 0 = off
     "model_idle_timeout_s": 300,                # seconds without a token mid-stream before it is a stall
                                                 #   (partial output is continued, not discarded); 0 = off
-    "pips_enabled": False,                     # Pips: personal and project agents in this chat
+    "pips_enabled": True,                      # Pips: personal and project agents beside the chat
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
     "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load

@@ -199,6 +199,8 @@ _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under
 # the tab of a shared process's first chat closes (editors/vscode/src/backend.ts close()).
 RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+# The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
+PIPS_API_VERSION = 39
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.
@@ -1983,7 +1985,7 @@ class Backend:
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
                           "editor_state": True,
-                          "pips_supported": True, "pips_api_version": 39,
+                          "pips_supported": True, "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
                           "pips_enabled": self.config.get("pips_enabled", False) is True,
@@ -4073,7 +4075,7 @@ class Backend:
             message = ("Pips enabled. Resume the local runner to clear the stop; jobs stay paused." if paused
                        else "Pips enabled. Jobs run only when you request a run.") if enabled else (
                        "Pips disabled. All jobs are paused and active runs are stopping.")
-            self.em.emit("pips_status", enabled=enabled, api_version=27, restart_required=paused,
+            self.em.emit("pips_status", enabled=enabled, api_version=PIPS_API_VERSION, restart_required=paused,
                          message=message, **_request_fields(cmd.get("request_id")))
             return
         # Snapshot settings under the existing editor mutation lock; slow SQLite
@@ -4334,6 +4336,10 @@ class Backend:
                          status="error", message="Manage app connections in Composio For You → Connect Apps.")
             return
         if t == "start_goal":
+            # A monitor wake turn yields to a goal like any other mutation; only real work keeps
+            # the turn and takes the live path below. Outside the lock: the yield waits for idle.
+            if self._busy():
+                self._yield_wake_turn()
             # Validate and persist the whole prepared request while no other foreground work can
             # take the turn slot. A rejected selection must not replace the standing goal.
             with self._turn_state_lock():
@@ -5170,6 +5176,8 @@ class Backend:
                         f"Thinking → {shown} · applies from the next model request"
                         if self._busy() else f"Thinking → {shown}"))
         elif t == "set_goal":
+            if self._busy():
+                self._yield_wake_turn()     # as start_goal: a wake turn yields, real work stays live
             with self._turn_state_lock():
                 status = str(cmd.get("status") or "active")
                 text = str(cmd.get("text") or "")

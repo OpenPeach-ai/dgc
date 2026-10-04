@@ -62,6 +62,11 @@ def terminal_goal_review(agent, text: str) -> dict:
     """Capture the decision being reviewed, excluding the ticking elapsed clock."""
     from .goals import parse_start
     objective, budget = parse_start(text)
+    # Refuse an objective the session cannot hold before asking anyone to review replacing a goal
+    # with it: the review would end in the same refusal.
+    too_long = agent.objective_size_error(objective)
+    if too_long:
+        raise ValueError(too_long)
     current = agent.goal_snapshot()
     return {"session": str(agent.session_file or ""),
             "current": {key: current.get(key) for key in ("id", "text", "status", "token_budget")},

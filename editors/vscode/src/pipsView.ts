@@ -98,7 +98,7 @@ export class PipsEditor implements vscode.Disposable {
     if (message?.type !== 'pipsRequest' || typeof message.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(message.id)) return;
     const fail = (text: string) => this.post({ type: 'pipsReply', id: message.id, ok: false, error: { message: text } });
     if (this.requireGeneration && message.generation !== this.generation) { fail('This Pip view belongs to an earlier chat connection. Refresh before trying again.'); return; }
-    if (!this.state.connected || !this.state.supported) { fail('The local Pips backend is unavailable. Update the DGC CLI, then reconnect.'); return; }
+    if (!this.state.connected || !this.state.supported) { fail('The local Pips backend is unavailable. Update the DGC CLI to Pips API v9 or later, then reconnect.'); return; }
     for (const [id, item] of this.pending) if (Date.now() - item.at > 60000) this.pending.delete(id);
     if (this.pending.size >= 64) { fail('Too many requests are pending. Reconnect before trying again.'); return; }
     const request = message.request;

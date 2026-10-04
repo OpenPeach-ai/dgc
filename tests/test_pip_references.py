@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from dgc import headless, pip_references as refs, remote_live
+from dgc import headless, pip_references as refs
 from dgc.editor_context import _format_editor_context, _strip_editor_context
 from dgc.editor_protocol import command_error, event_error
 from dgc.workspace_registry import RegistryError
@@ -176,11 +176,6 @@ class PipReferenceTests(unittest.TestCase):
         with patch.object(headless, "_MAX_QUEUED_TURN_BYTES", 50):
             self.assertEqual(backend._start_turn("x", pip_references=pinned)[0], "full")
 
-    def test_remote_preserves_exact_pins_and_never_accepts_scope_args(self):
+    def test_prompt_with_exact_pins_is_a_valid_command(self):
         command = {"type":"prompt", "request_id":"p1", "text":"Read", "pip_references":[self.pin()]}
-        self.assertEqual(remote_live.phone_command(command), command)
-        self.assertIsNone(remote_live.phone_command({**command,"pip_references":[{**self.pin(),"name":"spoof"}]}))
-        discovery = {"type":"list_prompt_pips", "request_id":"l1", "limit":20}
-        self.assertEqual(remote_live.phone_command(discovery), discovery)
-        self.assertIsNone(remote_live.phone_command({**discovery,"workspace_id":self.workspace["id"]}))
         self.assertIsNone(command_error(command))

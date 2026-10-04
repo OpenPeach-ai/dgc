@@ -32,6 +32,7 @@ MODE_DESCRIPTIONS = {
 
 # internal tool name -> display name used in rules
 DISPLAY = {
+    "use_pips": "UsePips",
     "pips_context": "PipsContext",
     "pips_propose": "PipsPropose",
     "pips_setup": "PipsSetup",
@@ -100,7 +101,7 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # `close_task` is in STOP_TOOLS below instead -- monitor_stop's exact case.
                    # NEITHER may join DISPLAY, for the reason above: no rule can name them, and
                    # `deny: Task` stays the off switch (with no children, neither is offered).
-                   "message_task", "pips_context"}
+                   "message_task", "pips_context", "use_pips"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.

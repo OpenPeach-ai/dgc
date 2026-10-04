@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from dgc import pip_connector_drafts as connector,pip_connector_actions as adapter,pip_message_drafts as drafts,pip_chat,pips
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
+from dgc import workspace_registry
 from tests import test_pip_connector_actions as fixtures
 
 class ConnectorDraftTests(unittest.TestCase):
@@ -79,7 +80,7 @@ class ConnectorDraftTests(unittest.TestCase):
         before=self.store.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0]
         self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=30')
         with WorkspaceRegistry(self.registry.directory) as registry:
-            self.assertEqual(registry.db.execute('PRAGMA user_version').fetchone()[0],32);self.assertEqual(registry.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0],before)
+            self.assertEqual(registry.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION);self.assertEqual(registry.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0],before)
     def test_native_worker_discovers_and_drafts_without_an_mcp_process(self):
         import os
         from dgc.llm import LLMClient,ChatResult,ToolCall

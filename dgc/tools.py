@@ -177,6 +177,10 @@ TOOL_SCHEMAS = [
          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "reason", "request_key"]),
+    _fn("use_pips", "Load the Pips tools for this chat. Pips are standing agents that review, test and draft "
+        "for this project or the user's personal tasks. Call this before you read Pip status or findings, set up "
+        "or change a Pip, run, pause or hand work to one, or draft an email, calendar event or app action "
+        "from a Personal Pip result.", {}, []),
     _fn("pips_context", "Read bounded Pips reference data for this session workspace, or inspect shared app-connection metadata. "
         "List jobs and latest run IDs, inspect a job definition, page audit findings, Patch/Pulse execution evidence or Quill drafts, read approved context, explicit Pip memory exceptions, human-recorded statements/preferences, this chat's attachments, or page activity. "
         "Send only the chosen action's keys (action is always required; ? means optional): "

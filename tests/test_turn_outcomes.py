@@ -46,13 +46,16 @@ class TurnOutcomeTests(unittest.TestCase):
         return ChatResult(content="Unfinished partial response", finish_reason="cancelled")
 
     def test_deadline_before_and_during_generation_never_succeeds(self):
-        def expire_before_request():
-            self.now += 2
-            return False
-        with patch.object(self.agent, "goal_budget_exhausted", side_effect=expire_before_request), \
-                patch.object(self.agent.client, "chat") as chat:
+        # The turn's clock starts at 0 and has already passed its one-second budget by the
+        # time the loop looks at it: the deadline must stop the turn before any request.
+        started = iter([self.now])
+        clock = patch("dgc.agent.time", types.SimpleNamespace(
+            monotonic=lambda: next(started, self.now + 2)))
+        with clock, patch.object(self.agent.client, "chat") as chat:
             self.assertFalse(self.agent.run_turn("Inspect the fixture"))
             chat.assert_not_called()
+            self.assertIn("time limit", self.agent._last_turn_error)
+        self.now += 2
         with patch.object(self.agent.client, "chat", side_effect=self.deadline) as chat:
             self.assertFalse(self.agent.run_turn("Inspect again"))
             self.assertEqual(chat.call_count, 1)

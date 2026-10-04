@@ -4240,7 +4240,7 @@ def unit_tests(tmp: Path):
         "_tool_count": 0,
         "start_working": lambda self: None,
         "stop_working": lambda self: None,
-        "turn_complete": lambda self, elapsed, cancelled, failed=False: None,
+        "turn_complete": lambda self, elapsed, cancelled, failed=False, paused=False: None,
     })()
     _old_stdio = sys.stdin, sys.stdout
     _non_tty = type("NonTTY", (), {"isatty": lambda self: False})()
@@ -11543,8 +11543,10 @@ def test_benchmark_integrity():
                                 if (entry / "SKILL.md").is_file()}
         _probe_withheld = {"bash_output", "bash_kill", "monitor", "monitor_stop", "notes",
                            "present_plan", "propose_options", "ask_user", "python", "update_goal",
+                           # Pips are on, but their tools load through use_pips: only it ships.
                            "pips_context", "pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip",
-                           "pause_pip", "resume_pip", "attach_pip_to_session"}  # Opt-in Pips stay off in the default probe.
+                           "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
+                           "pause_pip", "resume_pip", "attach_pip_to_session"}
         # Measured at 6,402 on 0.46.0 (6,383 before it; 6,376 on 0.45.0; 6,222 before `show_file`,
         # whose Environment line's timezone is 7 of them). The ceiling is a bloat gate, not a
         # target -- it earned its keep on 0.44.0, where `show_file`'s first description cost 206
@@ -11558,12 +11560,17 @@ def test_benchmark_integrity():
         # first, in the sub-agent section and again in the batch rule, and trimming that to once
         # gave back 42 of the 61 it originally cost. 6,450 restores roughly the headroom 0.45.0
         # had; the next tool still arrives with a one-line description or its own raise.
-        _PROBE_TOKEN_CEILING = 6450
+        #
+        # 0.48.0 is that raise. Pips are on for everyone, and their twelve tools plus guidance
+        # measured 13,023 tokens on every request -- double the whole surface -- so they load on
+        # demand through `use_pips` instead, which costs 115 (6,561 measured). 6,600 keeps the
+        # same small headroom above it.
+        _PROBE_TOKEN_CEILING = 6600
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
               and set(_prompt_probe.get("active_skills") or []) == _bundled_skill_names
-              and len(_prompt_probe.get("tools", [])) == 23
+              and len(_prompt_probe.get("tools", [])) == 24
               and ({tool.get("name") for tool in _prompt_probe.get("tools", [])}
                    == {t["function"]["name"] for t in _options_tool_schemas} - _probe_withheld)
               and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING

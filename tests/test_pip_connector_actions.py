@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from dgc import pip_connector_actions as adapter, pip_app_actions as actions, pip_app_access as apps, pips
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
+from dgc import workspace_registry
 from tests import test_pip_personal_handoffs as fixtures
 from tests.test_app_connectors import spec
 
@@ -163,7 +164,7 @@ class ConnectorActionTests(unittest.TestCase):
         saved=self.propose();self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=29')
         before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_app_actions')]
         with WorkspaceRegistry(self.registry.directory) as reg:
-            self.assertEqual(reg.db.execute('PRAGMA user_version').fetchone()[0],32)
+            self.assertEqual(reg.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)
             self.assertEqual([tuple(r) for r in reg.db.execute('SELECT * FROM pip_app_actions')],before)
         with patch('dgc.workspace_registry.SCHEMA_VERSION',29),self.assertRaises(RegistryError):WorkspaceRegistry(self.registry.directory)
     def test_concurrent_reviews_share_one_claim(self):

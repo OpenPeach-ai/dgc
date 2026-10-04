@@ -468,16 +468,23 @@ class GoalLifecycle:
             notify(value["request_id"], value["text"], ok, "" if ok else error)
         return ok
 
-    def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
-                 replace: bool = False, inputs: dict | None = None) -> bool:
+    def objective_size_error(self, text: str) -> str:
+        """Why this objective cannot be a goal in this session, or "" when it fits."""
         clean = self._safe_text(text).strip()
         limit = self.goal_max_chars()
-        if len(clean) > limit:
-            self._last_persist_error = (
-                f"That objective is {len(clean):,} characters; this session can hold {limit:,} "
+        if len(clean) <= limit:
+            return ""
+        return (f"That objective is {len(clean):,} characters; this session can hold {limit:,} "
                 "(the goal is stated in full once per context, and this context is "
                 f"{self.context_size():,} tokens). Shorten it to the aim itself, or send the "
                 "detail as an ordinary prompt and set a short goal alongside it.")
+
+    def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
+                 replace: bool = False, inputs: dict | None = None) -> bool:
+        clean = self._safe_text(text).strip()
+        too_long = self.objective_size_error(clean)
+        if too_long:
+            self._last_persist_error = too_long
             return False
         self._goal_stated = False           # a new objective must be stated in full again
         if getattr(self, "_goal_running", False) and self._goal_owner != threading.get_ident():
