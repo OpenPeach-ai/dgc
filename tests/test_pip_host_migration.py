@@ -10,6 +10,7 @@ from unittest.mock import patch
 from tests import test_host as host_fixture
 from dgc import headless
 from dgc.workspace_registry import WorkspaceRegistry
+from tests.pip_test_profile import pips_in_use
 
 
 class PipHostMigrationTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class PipHostMigrationTests(unittest.TestCase):
     second_chat = host_fixture.HostTest.second_chat
 
     def setUp(self):
+        pips_in_use(self)
         host_fixture.HostTest.setUp(self)
         env = patch.dict(os.environ, {"DGC_HOME": str(self.tmp / 'pip-private')})
         env.start()
@@ -100,7 +102,7 @@ class PipHostMigrationTests(unittest.TestCase):
         self.assertEqual(calls, ['open', 'peer', 'heartbeat', 'config', 'model'])
         ready = self.frames()[0]
         caps = ready['capabilities']
-        self.assertEqual(caps['pips_api_version'], 39)
+        self.assertEqual(caps['pips_api_version'], 40)
         self.assertTrue(caps['agent_control'] and caps['editor_state'])
         self.assertEqual(caps['chats']['default'], self.a.chat_id)
 

@@ -1,4 +1,4 @@
-/* DGC plush renderer. Original approved artwork, alpha-prepared derivative.
+/* DGC plush renderer: the eight Pips from one transparent WebP atlas.
  * All eight states use one local atlas and SVG eye overlays. No graphics contexts,
  * remote asset requests, per-avatar timers or network capabilities.
  */
@@ -12,7 +12,7 @@ const crops=[[65,88,352,350],[468,74,342,356],[866,74,322,356],[1256,94,362,340]
  [48,462,374,392],[461,495,348,355],[856,482,356,370],[1244,502,390,350]];
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const script=globalThis.document?.currentScript?.src;
-const asset=script?new URL('../media/pips/plush-bodies.png',script).href:'../media/pips/plush-bodies.png';
+const asset=script?new URL('../media/pips/plush-bodies.webp',script).href:'../media/pips/plush-bodies.webp';
 const styles=`
 .dgc-plush{display:inline-block;position:relative;width:100%;height:100%;vertical-align:middle;isolation:isolate}
 .dgc-plush-rig{display:block;width:100%;height:100%;overflow:hidden;transform-origin:50% 80%;animation:dgc-plush-breathe 6.7s ease-in-out var(--plush-delay) infinite}

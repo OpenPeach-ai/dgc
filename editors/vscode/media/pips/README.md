@@ -1,20 +1,26 @@
-# DGC Pip characters
+# Pip characters
 
-`orb.js` is the selected character renderer from the isolated lab's `characters/orb-study/`, with the subsequent user-approved eye-only expressions, light color families, mesh body and edge glow. It preserves eight identities and distinct silhouettes. The earlier `paper.js` stays here as archived artwork; it is no longer imported by the Pips client.
+`plush.js` draws the eight Pips (Core, Scout, Lens, Patch, Rook, Pulse, Lock and Quill,
+indices 0–7) from one transparent atlas, `plush-bodies.webp` (1660×948). Eyes are SVG
+paths drawn over the atlas; Lens's eyes are clipped inside its glasses. There is no
+WebGL, canvas, remote asset or per-character timer.
 
-The renderer has no dependencies or DOM work during import. It registers `globalThis.PipConcepts.orb` with:
+The renderer has no dependencies and does no DOM work on import. It registers
+`globalThis.PipConcepts.plush` with:
 
-- `styles`: one shared, namespaced CSS string.
-- `markup({index, name}, state='idle', uid='orb', {includeStyles=true, paused=false})`: decorative markup. Mount `styles` once and use `includeStyles:false` for lists.
+- `styles`: one namespaced CSS string. Mount it once and pass `includeStyles: false` for lists.
+- `markup({index, name}, state = 'idle', uid = 'plush', {includeStyles = true, paused = false})`:
+  decorative markup for one character.
+- `mount(root)`: pauses animation while the document is hidden; returns a cleanup function.
 
-Indices 0–7 are Core, Scout, Lens, Patch, Rook, Pulse, Lock and Quill. States are idle, listening, thinking, working, waiting_approval, success, failure and offline. Invalid indices/states throw instead of displaying a different Pip. Each instance requires a unique UID matching `[A-Za-z][A-Za-z0-9_-]{0,120}`. Names are escaped. All SVG definitions use that instance prefix; eye gradients use user-space coordinates so vertical strokes stay visible.
+States are `idle`, `listening`, `thinking`, `working`, `waiting_approval`, `success`,
+`failure` and `offline`. An unknown index or state throws rather than showing a different
+Pip. Each instance needs a unique UID matching `[A-Za-z][A-Za-z0-9_-]{0,120}`; names are
+escaped. Reduced motion stops all animation, as do `data-paused="true"`, an ancestor with
+`data-pip-motion="paused"`, `.motion-paused` and `.motion-offscreen`.
 
-The root `.dgc-orb` fills its wrapper's width with a 1:1 aspect ratio. Every internal selector and keyframe is namespaced. Reduced motion disables loops. Pause is supported through root `data-paused="true"`, ancestor `data-pip-motion="paused"`, `.motion-paused`, or `.motion-offscreen`. The editor supplies an IntersectionObserver and shared visibility state. CSS drives body, blink and gaze motion; `mount(root)` drives the WebGL mesh and returns a cleanup function. The mesh uses a shared rendering loop, stops while hidden/paused, and has a CSS fallback. State changes replace face markup; this dependency-free adapter does not import the study's React/Motion path-morph runtime.
+A character never grants tools or permissions. The editor picks the identity from the
+backend's catalog and the pose from the real run, runner or review state, and always writes
+the status as text as well.
 
-Remote uses a byte-for-byte copy of this canonical file and extracts `styles` to one static stylesheet. Resync copies after changing the renderer; do not maintain separate geometry or palette definitions in each product surface.
-
-`test/pips-editor.test.mjs` verifies the selected asset hash, all 64 identity/state combinations, escaped names, unique SVG IDs, zero-width-safe eye gradients, scoped CSS, and the main Pips UI's truthful state/motion behavior. The archived Paper pals hash remains covered separately.
-
-The base gradient component was supplied by the user; its upstream license has not been independently verified. Eye path construction is adapted from AIMO's MIT-licensed source; retain `AIMO-LICENSE`. The mesh shader is adapted from Paper Shaders under Apache-2.0; retain `PAPER-SHADERS-LICENSE`. This does not grant rights to AIMO commercial assets. Further provenance is in `characters/orb-study/NOTES.md` in the isolated lab.
-
-A character never grants tools or permissions. The editor selects identity from the trusted backend catalog and derives pose from actual run/runner/review state; text remains authoritative without motion.
+`wordmark.css` styles the Pips wordmark in the panel header.

@@ -14,10 +14,12 @@ from unittest.mock import patch
 from dgc import sessions, session_turn_events as events
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry, _execute_schema
 from tests.test_pips_local import config
+from tests.pip_test_profile import pips_in_use
 
 
 class SessionTurnEventTests(unittest.TestCase):
     def setUp(self):
+        pips_in_use(self)
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.root = self.base / 'source'; self.root.mkdir()

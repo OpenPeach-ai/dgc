@@ -11,10 +11,12 @@ from dgc import sessions, workspace_sessions as identities
 from dgc.agent import Agent
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests.test_pips_local import config
+from tests.pip_test_profile import pips_in_use
 
 
 class WorkspaceSessionTests(unittest.TestCase):
     def setUp(self):
+        pips_in_use(self)
         temporary = tempfile.TemporaryDirectory(prefix="dgc-workspace-session-")
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name)

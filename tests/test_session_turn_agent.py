@@ -8,12 +8,14 @@ from dgc import sessions, workspace_sessions, session_turn_events as events
 from dgc.llm import ChatResult
 from dgc.workspace_registry import WorkspaceRegistry, _execute_schema
 from tests import test_pip_proposal_tool as fixture
+from tests.pip_test_profile import pips_in_use
 
 
 class SessionTurnAgentTests(unittest.TestCase):
     agent = fixture.PipProposalToolTests.agent
 
     def setUp(self):
+        pips_in_use(self)
         fixture.PipProposalToolTests.setUp(self)
         self.cfg.data.update(auto_compact=False, verify_before_done=False, verify_command='',
                              auto_title=False, max_turns=3)

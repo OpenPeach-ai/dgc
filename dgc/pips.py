@@ -1806,8 +1806,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             role_instructions = selected_type.instructions
             if personal:
                 base_instructions = ("You are a personal DGC Pip. Help with the approved goal using the supplied conversation and reference data. "
-                    "You have no file, project, browser, command or external-action tools. The controller may supply approved app reads as reference data. "
+                    "You have no file, project, browser, command or external-action tools. The controller may supply approved app reads and web reads as reference data. "
                     "Only describe email or calendar records if they are present in the supplied references. Never claim to have completed an external action. "
+                    "You cannot book, buy, pay, reserve or sign up for anything. When a task asks for that, gather the details from the references "
+                    "(what, where, when, price, links) and say plainly what the user needs to do to complete it. "
                     "Explain when a requested task needs a connection or reviewed capability that is unavailable. "
                     "Return the useful result directly and concisely. Do not narrate internal policy flags, handoff schemas, "
                     "validation, or actions nobody requested. Mention unavailable access only when it prevents the requested work. "
