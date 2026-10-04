@@ -57,6 +57,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_notifications", "mark_pip_notification_read",
     "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories",
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
+    "get_pips_keep_running", "set_pips_keep_running",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -107,6 +108,7 @@ _COMMAND_ARGS = {
     "get_pip_notify_settings": {"pip_id"},
     "set_pip_notify_settings": {"pip_id", "min_severity", "alert_severity", "expected_revision"},
     "get_pip_outcomes": {"pip_id"},
+    "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -2813,7 +2815,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -2957,6 +2959,16 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         expected_revision=request.get("expected_revision"), actor=actor)}
                 else:
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
+            elif command in ("get_pips_keep_running", "set_pips_keep_running"):
+                from . import pip_keep_running
+                from .pip_daemon import runner_status
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Keeping Pips running is set on this computer only.")
+                if command == "get_pips_keep_running":
+                    result = {"keep_running": pip_keep_running.status()}
+                else:
+                    result = {"keep_running": pip_keep_running.set_on(
+                        request.get("enabled"), runner_online=bool(runner_status(registry).get("online")))}
             elif command in STATEMENT_COMMANDS:
                 from . import pip_memory_statements
                 if command == "get_pip_statement_anchor":

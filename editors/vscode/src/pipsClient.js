@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -87,14 +87,39 @@ function contextEntries(entries,archivable=false) {
   if(entries.some(e=>e.provenance?.source==='session_execution'))return entries.map(e=>e.provenance?.source==='session_execution'?`<article class="entry"><span class="badge">Recorded command outcome</span><h3>${esc(e.title)}</h3>${commandContextSummary(e)}${commandContextDetails(e)}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`:contextEntries([e],archivable)).join('');
   return entries.length ? entries.map(e=>`<article class="entry"><span class="badge">${e.kind==='session_outcome'?'Reviewed session statement':e.kind==='execution'?'Reviewed execution receipt':e.kind==='finding'?'Model assessment':esc(e.kind)}</span><h3>${esc(e.title)}</h3><div class="goal">${esc(e.kind==='session_outcome'?e.provenance.proposal.statement:e.content)}</div><p class="muted">${e.kind==='session_outcome'?SESSION_STATEMENT_NOTICE.trim():e.kind==='execution'?`Historical runner receipt · accepted review v${e.provenance.review_revision}. Later reviews may differ; this does not describe current source health or prove correctness.`:e.kind==='finding'?'Source excerpt checked; the conclusion is not independently verified.':'Recorded by a user.'} ${e.kind==='command'?'Reference only; this grants no permission to execute.':''}</p>${e.kind==='finding'&&e.provenance.schema_version===2?`<dl class="meta">${pinnedSourceMarkup(e.provenance)}</dl>${pinnedSourceNotice(e.provenance)}`:''}${e.kind==='session_outcome'?sessionStatementDetails(e.provenance.proposal,e.provenance.proposal_digest):''}${e.provenance?.run_id?`<small>Run ${esc(e.provenance.run_id)} · job v${esc(e.provenance.job_version)} · ${esc(e.provenance.model)}</small>`:''}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`).join('') : '<p class="muted">No active context records.</p>';
 }
+// Keep Pips running (API 41): one switch that starts the runner at login and after a restart.
+let keepState={value:null,loading:false,error:'',asked:false};
+async function loadKeepRunning(){
+ if(remoteHost||S.apiVersion<41||!usable()||keepState.loading)return;
+ const token=scope();keepState={...keepState,loading:true,asked:true};
+ try{const value=pipsKeepRunning((await send('get_pips_keep_running')).keep_running);if(token===scope()){keepState.value=value;keepState.error='';}}
+ catch(error){if(token===scope())keepState.error=errorText(error);}
+ finally{keepState.loading=false;render();}
+}
+async function setKeepRunning(enabled){
+ if(S.busy||!usable())return;const token=scope();S.busy=true;render();
+ try{const value=pipsKeepRunning((await send('set_pips_keep_running',{enabled})).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
+  S.notice=value.on?(value.while_logged_out?'Pips keep running: the runner starts when you log in, restarts if it fails, and runs while you are logged out.':'Pips keep running: the runner starts when you log in and restarts if it fails.'):'Pips no longer start on their own. The runner running now keeps going until you stop it.';}
+ catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
+ finally{if(token===scope()){S.busy=false;render();}}
+}
+function keepRunningMarkup(){
+ if(remoteHost||S.apiVersion<41||!S.connected||!S.enabled)return '';
+ if(!keepState.asked&&usable())void loadKeepRunning();
+ const k=keepState.value;
+ if(!k)return keepState.error?`<p class="muted keep-running-note">${esc(keepState.error)}</p>`:'';
+ if(!k.supported)return `<p class="muted keep-running-note">${esc(k.reason)}</p>`;
+ const note=k.on?(k.while_logged_out?'Starts when you log in and after a restart, restarts if it fails, and runs while you are logged out.':'Starts when you log in and after a restart, and restarts if it fails.'):'Off: Pips run only while a runner you started is running. Turn this on so a schedule still runs after a restart.';
+ return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>`;
+}
 function runnerMarkup() {
   const r=S.runner,paused=r?.paused;
   const state=`<span class="runner-status"><i class="status-dot${r?.online?' online':''}" aria-hidden="true"></i>${!S.connected?'Local DGC disconnected':!S.enabled?'Pips disabled':r?`Runner ${esc(r.status)}${paused?' · globally stopped':''}`:'Runner status unavailable'}</span>`;
   const start=remoteHost?'':`${r&&!r.online&&!paused?button('start-runner','Start runner',S.busy||!usable()):''}${paused?button('resume-runner','Resume runner…',S.busy||!usable()):''}`;
   const counts=r?`<span class="muted">${r.counts.queued} queued · ${r.counts.running} running</span>`:'';
   const controls=`${button('refresh','Refresh',!usable())}${button('stop-all','Stop all Pips…',!usable()||S.busy,'danger')}`;
-  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
-  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${r?.error?errorMarkup(r.error.message):''}`;
+  if(embedded)return `<div class="runner compact-runner">${state}${start}<details class="runner-controls" data-details="runner-controls"><summary id="runner-controls-toggle">Controls</summary><div class="runner-menu">${counts}${keepRunningMarkup()}<div class="actions">${controls}</div><p class="muted">Stop pauses all Pips across local workspaces and cancels active runs. Resume the runner, then resume individual Pips.</p>${remoteHost?'<p class="muted">Start or resume the supervisor on the computer with <code>dgc pips resume</code> and <code>dgc pips serve</code>. Remote cannot enable Pips or change its runner configuration.</p>':button('disable','Disable local Pips…',S.busy||!usable())}</div></details></div>${r?.error?errorMarkup(r.error.message):''}`;
+  return `<div class="runner">${state}${counts}<div class="actions">${start}${controls}</div></div>${keepRunningMarkup()}${r?.error?errorMarkup(r.error.message):''}`;
 }
 function welcome() {
   if(remoteHost&&!S.connected)return `<div class="empty">${avatar('offline')}<h2>Computer disconnected</h2><p class="muted">Reconnect the approved computer to read current Pips and send commands over the encrypted connection.</p>${button('reconnect','Check connection')}</div>`;
@@ -1196,7 +1221,7 @@ function updateDraft(event) {
   if((key==='scheduleType'||key==='handoffTarget'||key==='adaptationMode'||key==='sourceMode'||key==='outcomeSession'||key==='outcomeSourceKind')&&event.type==='change'){render();if(key==='handoffTarget'&&executionPip(S.jobs.find(p=>p.id===draft.handoffTarget)))void loadExecution();}
 }
 document.addEventListener('input',updateDraft);
-document.addEventListener('change',event=>{if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
+document.addEventListener('change',event=>{if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
   const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form','github-form'].includes(id))return;event.preventDefault();
   if(!usable()||S.busy||!S.workspace)return;if(archived()&&['revision-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','pip-statement-form','web-reads-form'].includes(id)){setError('Restore this archived Pip to paused before changing it or starting work.');return;}

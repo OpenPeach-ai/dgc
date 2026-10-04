@@ -124,13 +124,22 @@ dgc pips setup accept SETUP_ID --expected-digest DIGEST
 
 A Pip's work runs in the **runner**, a local process separate from your chats.
 Without it, runs and Pip replies wait in the queue and schedules don't fire.
-Start it in one of three ways:
+
+**Keep Pips running** (in the Pips view's runner controls, or `dgc pips keep-running on`)
+is the one switch most people want. The runner then starts when you log in and after a
+restart, and is restarted if it fails, so a morning schedule still runs after a reboot.
+On Linux it also keeps running while you are logged out, where the system allows it
+(systemd "lingering"); `dgc pips keep-running` says whether yours does. Turning it off
+stops the runner starting on its own; the runner running now keeps going until you stop
+it. It never turns Pips on and never clears an emergency stop.
+
+Otherwise:
 
 - **Start runner** in the Pips view. The runner keeps going when the editor
   closes, until you log out, restart or stop all Pips.
 - `dgc pips serve` in a terminal you leave open. Ctrl+C stops it; queued work
   stays queued.
-- On Linux, as a systemd user service:
+- On Linux, the systemd user service behind the switch, step by step:
 
   ```sh
   dgc pips service preview    # show the exact unit first
@@ -151,9 +160,9 @@ The runner does one run at a time.
 Personal tasks. Patch fixes and Pulse commands need either Linux with working
 bubblewrap (`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`) or macOS with
 `sandbox-exec` and Xcode or the Command Line Tools (`xcode-select --install`).
-`dgc pips execution` shows whether this runner passed its confinement check. The
-background service is Linux only; on macOS use **Start runner** or `dgc pips serve`.
-Windows can't run Pips work yet.
+`dgc pips execution` shows whether this runner passed its confinement check.
+**Keep Pips running** uses a systemd user service on Linux and a LaunchAgent on macOS
+(it runs while you are logged in). Windows can't run Pips work yet.
 
 **macOS is weaker than Linux, and says so.** On macOS commands run under Seatbelt
 rather than in a private namespace. The project copy is still read-only, the network

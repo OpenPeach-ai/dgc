@@ -61,8 +61,11 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(before, list(self.base.rglob("*")))
         self.assertEqual(self.calls, [])
         self.assertNotIn("--enable", self.spec["argv"])
-        self.assertEqual(self.spec["argv"][-2:], ["pips", "serve"])
-        self.assertIn("Restart=no\n", self.spec["content"])
+        self.assertEqual(self.spec["argv"][-3:], ["pips", "serve", "--service"])
+        # Restarted after a failure; `serve --service` exits 0 when Pips are off, stopped or already
+        # running, so those never loop (pip_keep_running).
+        self.assertIn("Restart=on-failure\nRestartSec=30\n", self.spec["content"])
+        self.assertTrue(self.spec["content"].startswith("# DGC Pips managed user service, format 2\n"))
         self.assertIn("KillMode=mixed\n", self.spec["content"])
 
     def test_scoped_name_stable_and_canonical(self):
@@ -189,8 +192,17 @@ class ServiceTests(unittest.TestCase):
         self.assertCode("unsafe_service_path", service.preview, self.home, **self.options)
 
     def test_group_writable_directories_and_executables_refused(self):
+        import grp
+        import pwd
         self.home.chmod(0o770)
-        self.assertCode("unsafe_service_path", service.preview, self.home, **self.options)
+        me = pwd.getpwuid(os.getuid())
+        # Writable by a group someone else is in: refused.
+        with patch("grp.getgrgid", return_value=grp.struct_group((me.pw_name, "x", me.pw_gid, ["someone-else"]))):
+            self.assertCode("unsafe_service_path", service.preview, self.home, **self.options)
+        # A group of one (Ubuntu's private groups): nobody else can write, so it is accepted.
+        with patch("grp.getgrgid", return_value=grp.struct_group((me.pw_name, "x", me.pw_gid, []))), \
+                patch("pwd.getpwall", return_value=[me]):
+            service.preview(self.home, **self.options)
         self.home.chmod(0o700)
         executable = self.base / "python"; executable.write_text("x"); executable.chmod(0o777)
         self.assertCode("invalid_service_python", service.preview, self.home, python_executable=executable, **self.options)
@@ -244,9 +256,10 @@ class ServiceTests(unittest.TestCase):
         (self.home / ".dgc" / "config.json").write_text('{"pips_enabled": false}')
         os.chmod(self.home / ".dgc" / "config.json", 0o600)
         process = subprocess.run(self.spec["argv"], cwd=self.home, capture_output=True, timeout=15)
-        self.assertNotEqual(process.returncode, 0)
+        # A clean exit, not a failure: under Restart=on-failure a disabled profile must not loop.
+        self.assertEqual(process.returncode, 0, process.stderr)
         output = (process.stdout + process.stderr).decode()
-        self.assertIn("Pips are disabled", output)
+        self.assertIn("not started: Pips are disabled", output)
         self.assertNotIn("untrusted imported", output)
         self.assertFalse((self.home / ".dgc" / "pips").exists())
 

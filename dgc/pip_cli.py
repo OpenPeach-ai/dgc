@@ -433,7 +433,12 @@ def parser():
         item.add_argument("--unit-directory", help="explicit owner-private service directory; use preview to review the exact unit first")
     serve = command("serve", "run the foreground supervisor; keep this terminal open")
     serve.add_argument("--enable", action="store_true")
+    # Started by the user service or LaunchAgent: Pips off, stopped or already running is a clean
+    # exit (status 0), so the service manager does not restart it every few seconds.
+    serve.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     command("status", "show runner status as JSON")
+    keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
+    keep.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
     stop.add_argument("--yes", action="store_true", help="confirm the global emergency stop without a prompt")
     command("resume", "locally clear emergency stop; jobs stay paused")
@@ -721,7 +726,20 @@ def _request(args):
     return request
 
 
+def keep_running_text(item) -> str:
+    """One plain sentence for the keep-running switch, shared by the CLI and its tests."""
+    if not item["supported"]:
+        return item["reason"]
+    if not item["on"]:
+        return "Keep Pips running: off. Start the runner when you need it (Pips view, or dgc pips serve)."
+    where = (" It also keeps running while you are logged out." if item["while_logged_out"]
+             else " It runs while you are logged in." if item["platform"] == "linux" else "")
+    return "Keep Pips running: on. The runner starts when you log in and restarts if it fails." + where
+
+
 def _format(value):
+    if set(value) == {"keep_running"}:
+        return keep_running_text(value["keep_running"])
     if set(value) == {"digest"}:          # dgc pips digest; other results carry a hash named digest
         return format_digest(value["digest"])
     if "settings" in value and "min_severity" in value["settings"]:
@@ -1170,6 +1188,10 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "keep-running":
+        if args.state is None:
+            return control({"type": "get_pips_keep_running"})
+        return control({"type": "set_pips_keep_running", "enabled": args.state == "on"})
     if args.command == "outcomes":
         return control({"type": "get_pip_outcomes", "pip_id": args.pip_id})
     if args.command == "notify":
@@ -1328,6 +1350,8 @@ def agent_shell_allows(args) -> bool:
         return True
     if args.command == "notify":
         return args.min_severity is None and args.alerts is None
+    if args.command == "keep-running":
+        return args.state is None
     spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
     return bool(spec) and getattr(args, spec[0], None) in spec[1]
 
@@ -1355,8 +1379,15 @@ def handle_command(config, argv, *, in_chat=False):
         elif args.command == "serve":
             if in_chat:
                 raise RegistryError("separate_terminal", "Keep the supervisor separate from chat: run dgc pips serve in another terminal.")
-            print("Starting the foreground Pips supervisor. Keep this terminal open; Ctrl+C stops its work.", file=sys.stderr, flush=True)
-            result = pip_daemon.serve(config, enable=args.enable)
+            if not args.service:
+                print("Starting the foreground Pips supervisor. Keep this terminal open; Ctrl+C stops its work.", file=sys.stderr, flush=True)
+            try:
+                result = pip_daemon.serve(config, enable=args.enable)
+            except RegistryError as exc:
+                if not args.service or exc.code not in ("runner_running", "disabled", "runtime_paused"):
+                    raise
+                print(f"dgc pips serve: not started: {exc}", file=sys.stderr)
+                return 0
         elif args.command == "stop":
             if not args.yes:
                 if not sys.stdin.isatty():

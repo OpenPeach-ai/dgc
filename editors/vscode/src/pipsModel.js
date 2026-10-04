@@ -964,6 +964,17 @@ export function pipNotifySettings(value, pip) {
     throw Error('Notification settings are invalid or belong to another Pip.');
   return value;
 }
+// Keep Pips running (API 41): the switch's state. Exact keys, since the panel words it.
+export function pipsKeepRunning(value) {
+  const keys = ['on', 'platform', 'reason', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'];
+  if (!record(value) || Object.keys(value).sort().join() !== keys.join() || typeof value.platform !== 'string'
+    || typeof value.reason !== 'string' || value.reason.length > 400
+    || !['on', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'].every((key) => typeof value[key] === 'boolean')
+    || (!value.supported && (value.on || !value.reason)))
+    throw Error('The keep-running status is invalid. Refresh the Pips view.');
+  return value;
+}
+
 export function pipOutcomes(value, pip) {
   const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
   if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'

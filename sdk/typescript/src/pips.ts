@@ -15,6 +15,7 @@ export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  get_pips_keep_running: Record<string, never>;
   get_pip_digest: Record<string, never>;
   get_pip_notify_settings: { pip_id: string };
   get_pip_outcomes: { pip_id: string };
@@ -70,6 +71,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  set_pips_keep_running: { enabled: boolean };
   mark_pip_digest_seen: { until: string };
   set_pip_notify_settings: { pip_id: string; min_severity: PipSeverity; alert_severity: PipSeverity | null; expected_revision: number };
   prepare_pip_calendar_draft: { draft_id: string; expected_digest: string; server: string; connection_digest: string; account: string; schema_digest: string; event: PipCalendarEvent };
@@ -122,6 +124,8 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  get_pips_keep_running: [],
+  set_pips_keep_running: ["enabled"],
   get_pip_digest: [],
   mark_pip_digest_seen: ["until"],
   get_pip_notify_settings: ["pip_id"],
@@ -389,8 +393,8 @@ const API37_MUTATIONS = new Set(["prepare_pip_connector_draft","dismiss_pip_conn
 for (const command of API37_READS) READS.add(command);
 for (const command of API37_MUTATIONS) MUTATIONS.add(command);
 // API 41: the daily digest, per-Pip notification settings and finding outcomes (display state only).
-const API41_READS = new Set(["get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes"]);
-const API41_MUTATIONS = new Set(["mark_pip_digest_seen", "set_pip_notify_settings"]);
+const API41_READS = new Set(["get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes"]);
+const API41_MUTATIONS = new Set(["set_pips_keep_running", "mark_pip_digest_seen", "set_pip_notify_settings"]);
 for (const command of API41_READS) READS.add(command);
 for (const command of API41_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

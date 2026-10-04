@@ -586,6 +586,21 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Keep Pips running** (API 41). `get_pips_keep_running` and `set_pips_keep_running
+{enabled}` (local user only) return `{platform, supported, reason, on, starts_at_login,
+restarts_after_failure, while_logged_out}`. On Linux, on installs the managed user unit
+(format 2: `Restart=on-failure`, `RestartSec=30`; an earlier DGC unit for the same home is
+replaced, any other differing unit is refused), enables it, starts it unless a runner is
+already online, and asks `loginctl enable-linger` when lingering is off. On macOS, on writes
+`~/Library/LaunchAgents/com.vibedgc.pips.<home hash>.plist` (`RunAtLoad`,
+`KeepAlive: {SuccessfulExit: false}`, `ThrottleInterval` 30), enables it and bootstraps it
+into the GUI domain; an unchanged loaded agent is never reloaded, so a running runner is
+not interrupted. Off disables (Linux) or disables and removes the agent (macOS) and never
+stops the runner. Both start `pips serve --service`, which exits 0 when Pips are off,
+emergency-stopped or already running, so neither manager restarts it in a loop. Writable
+parents of the unit directory are refused unless the group is the user's own with no other
+member (OpenSSH's rule, so Ubuntu's 775 `~/.config` is accepted).
+
 **Digest and notification settings** (API 41). `pip_notify_settings` holds one row
 per Pip that has left the defaults (`min_severity` medium, `alert_severity` high or
 null for no alerts, never below `min_severity`); only `editor-user` and

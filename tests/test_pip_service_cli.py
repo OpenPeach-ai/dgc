@@ -29,9 +29,9 @@ class PipServiceCliTests(unittest.TestCase):
         with patch('subprocess.Popen', side_effect=AssertionError('Preview must not launch anything')):
             result = self.value('service', 'preview', '--unit-directory', str(self.base / 'staged-units'))
         self.assertEqual(result['dgc_home'], str(self.home))
-        self.assertEqual(result['argv'][-2:], ['pips', 'serve'])
+        self.assertEqual(result['argv'][-3:], ['pips', 'serve', '--service'])
         self.assertNotIn('--enable', result['argv'])
-        self.assertIn('Restart=no', result['content'])
+        self.assertIn('Restart=on-failure', result['content'])
         self.assertFalse((self.base / 'staged-units').exists())
         self.assertEqual(list(self.home.rglob('*')), before)
 

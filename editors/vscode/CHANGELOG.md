@@ -20,6 +20,8 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- **Keep Pips running** in the runner controls: one switch so the runner starts when you log in
+  and after a restart, and restarts if it fails (Linux and macOS).
 - On macOS, Patch and Pulse run under Seatbelt; their reviews state how that confinement is
   weaker than Linux's (sampled memory and process limits, readable system folders).
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and

@@ -42,6 +42,13 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- **Keep Pips running**: `dgc pips keep-running on` (or the switch in the Pips view) starts the
+  runner when you log in and after a restart, and restarts it if it fails. Linux uses a systemd
+  user service and, where allowed, keeps running while you are logged out; macOS uses a
+  LaunchAgent. Off stops it starting on its own and never stops the runner running now. The
+  service unit now restarts on failure; `pips serve --service` exits cleanly when Pips are off,
+  stopped or already running, so it never loops. A group-writable `~/.config` whose group is only
+  you (Ubuntu's default) no longer blocks the service.
 - A chat can no longer approve its own Pips by running `dgc pips` in its shell (the CLI acts as you,
   and auto mode approves every shell command). In a chat's shell the CLI only reads and can make
   the emergency stop; changes are refused and the chat prepares a setup card for you instead.

@@ -154,7 +154,7 @@ job with `create_pip` and a reviewed update.
 | 38 | `attendees`, `repeat` and `send_invitations` in a calendar `event` |
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
-| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`; `changes.github_plan` |
+| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`; `changes.github_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -382,6 +382,8 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `get_pip_notify_settings` | R | `pip_id` |
 | `set_pip_notify_settings` | M | `pip_id`, `min_severity`, `alert_severity` (or null), `expected_revision` |
 | `get_pip_outcomes` | R | `pip_id` |
+| `get_pips_keep_running` | R | none |
+| `set_pips_keep_running` | M | `enabled` (bool) |
 
 The digest is what the Pips bar and `dgc pips digest` show: what the profile's Pips did
 since the user last looked, and whether it is due. Marking it seen hides it for the user

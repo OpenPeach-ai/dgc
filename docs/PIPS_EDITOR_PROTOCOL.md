@@ -89,6 +89,11 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`get_pips_keep_running {}` and `set_pips_keep_running {enabled}` (API 41, local only)
+return `{keep_running: {platform, supported, reason, on, starts_at_login,
+restarts_after_failure, while_logged_out}}`. The Pips view shows them as one switch beside
+the runner, and only the reason when `supported` is false.
+
 The digest controls (API 41) are local only (`editor-user`):
 `get_pip_digest {}` returns `{digest}`, or `{digest: null}` when the profile has never
 used Pips (no registry is created). `mark_pip_digest_seen {until}` takes the digest's

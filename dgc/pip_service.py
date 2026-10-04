@@ -20,6 +20,8 @@ import time
 from .workspace_registry import RegistryError
 
 MAX_UNIT_BYTES = 16384
+_HEADER = "# DGC Pips managed user service, format "
+FORMAT = 2
 MAX_COMMAND_OUTPUT = 16384
 COMMAND_TIMEOUT = 15.0
 _BOOTSTRAP = "import os, sys; sys.path.insert(0, sys.argv.pop(1)); os.chdir(os.environ['DGC_HOME']); from dgc.cli import main; raise SystemExit(main())"
@@ -44,6 +46,20 @@ def _path(value, label):
         _error("invalid_service_path", f"{label} must be an absolute path without control characters or traversal.")
 
 
+def _only_mine(gid):
+    """True when group ``gid`` is this user's own group with no other member."""
+    import grp
+    import pwd
+    try:
+        me = pwd.getpwuid(os.getuid())
+        group = grp.getgrgid(gid)
+    except KeyError:
+        return False
+    if gid != me.pw_gid or any(member != me.pw_name for member in group.gr_mem):
+        return False
+    return not any(entry.pw_gid == gid and entry.pw_uid != me.pw_uid for entry in pwd.getpwall())
+
+
 def _safe_chain(path, *, missing=False):
     """No symlinks, unowned writable parents, or non-directory path ancestors."""
     for item in (Path(path.anchor), *reversed(path.parents), path):
@@ -59,7 +75,10 @@ def _safe_chain(path, *, missing=False):
             _error("unsafe_service_path", "Service paths must be owned by this user or the system.")
         # System-owned sticky /tmp is permitted for isolated verification fixtures.
         if info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
-            _error("unsafe_service_path", "Service directory paths must not be writable by another user.")
+            # Group-writable is fine when the group is only you: Ubuntu gives each user a private
+            # group and a 002 umask, so ~/.config is often 775 (OpenSSH's StrictModes rule).
+            if info.st_mode & 0o002 or not (info.st_uid == os.getuid() and _only_mine(info.st_gid)):
+                _error("unsafe_service_path", "Service directory paths must not be writable by another user.")
 
 
 def _private_state(home):
@@ -133,14 +152,16 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
     name = "dgc-pips-" + key + ".service"
     env = ["HOME=" + str(home), "DGC_HOME=" + str(home), "PATH=/usr/bin:/bin", "LANG=C.UTF-8",
            "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1"]
-    argv = ["/usr/bin/env", "-i", *env, str(python), "-I", "-B", "-c", _BOOTSTRAP, str(source), "pips", "serve"]
-    content = ("# DGC Pips managed user service, format 1\n"
+    argv = ["/usr/bin/env", "-i", *env, str(python), "-I", "-B", "-c", _BOOTSTRAP, str(source), "pips", "serve", "--service"]
+    # Format 2 restarts the runner when it fails. `serve --service` exits 0 when Pips are off,
+    # stopped or already running, so those never loop.
+    content = (_HEADER + str(FORMAT) + "\n"
                "# DGC_HOME sha256: " + hashlib.sha256(os.fsencode(home)).hexdigest() + "\n"
                "[Unit]\nDescription=DGC Pips local supervisor\n\n[Service]\nType=exec\n"
                "WorkingDirectory=/\n"
                "ExecStart=" + " ".join(_quote(part) for part in argv) + "\n"
                "UMask=0077\nNoNewPrivileges=yes\nKillMode=mixed\nTimeoutStopSec=90\n"
-               "Restart=no\nStandardOutput=journal\nStandardError=journal\n\n"
+               "Restart=on-failure\nRestartSec=30\nStandardOutput=journal\nStandardError=journal\n\n"
                "[Install]\nWantedBy=default.target\n")
     if len(content.encode("utf-8")) > MAX_UNIT_BYTES:
         _error("service_limit", "The generated service unit exceeds its size limit.")
@@ -171,7 +192,19 @@ def _read_unit(path):
     return value
 
 
-def _check_file(spec, *, required=True):
+def _older_ours(value, spec):
+    """An earlier format of this same managed unit (same DGC home), which DGC may replace."""
+    lines = value.decode("utf-8", errors="replace").split("\n", 2)
+    if len(lines) < 2 or not lines[0].startswith(_HEADER):
+        return False
+    try:
+        version = int(lines[0][len(_HEADER):])
+    except ValueError:
+        return False
+    return 0 < version < FORMAT and lines[1] == spec["content"].split("\n", 2)[1]
+
+
+def _check_file(spec, *, required=True, upgrade=False):
     path = Path(spec["unit_path"])
     if (path.parent / (path.name + ".d")).exists() or (path.parent / (path.name + ".d")).is_symlink():
         _error("service_conflict", "This service has overrides. Remove or review them before using DGC service management.")
@@ -181,6 +214,8 @@ def _check_file(spec, *, required=True):
             _error("service_not_installed", "Install the reviewed service unit before controlling it.")
         return False
     if value != spec["content"].encode():
+        if upgrade and _older_ours(value, spec):
+            return "older"
         _error("service_conflict", "The existing service unit differs from this preview. Review it explicitly; DGC will not overwrite or control it.")
     return True
 
@@ -299,10 +334,14 @@ def _publish(spec):
                 staged.unlink()
 
 
-def install(dgc_home=None, **options):
+def install(dgc_home=None, *, upgrade=False, **options):
+    """Write the unit; with ``upgrade``, replace an earlier format of this same managed unit."""
     spec = preview(dgc_home, **options)
     with _lock(spec, create=True):
-        present = _check_file(spec, required=False)
+        present = _check_file(spec, required=False, upgrade=upgrade)
+        if present == "older":
+            Path(spec["unit_path"]).unlink()
+            present = False
         if not present:
             _publish(spec)
         try:
