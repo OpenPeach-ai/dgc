@@ -28,6 +28,15 @@ class PersonalSDKTests(unittest.TestCase):
         with self.assertRaises(DGCConfigError):current.pips.mutate('propose_pip_update',params)
         self.assertEqual(current.pips.mutate('propose_pip_update',params,approved=True)['request']['changes'],{'app_plan':None})
 
+    def test_github_reads_require_api41_and_human_approval(self):
+        plan={'schema_version':1,'repository':'OpenPeach-ai/dgc','reads':[{'kind':'commit_checks'}]}
+        params={'pip_id':'pip_saved','expected_version':1,'changes':{'github_plan':plan},'reason':'Read CI'}
+        wire=Wire();old=session(wire,caps={**CAPS,'pips_api_version':40})
+        with self.assertRaisesRegex(DGCUnsupportedError,'API 41'):old.pips.mutate('propose_pip_update',params,approved=True)
+        self.assertEqual(wire.calls,[])
+        current=session(wire,caps={**CAPS,'pips_api_version':41})
+        self.assertEqual(current.pips.mutate('propose_pip_update',params,approved=True)['request']['changes'],{'github_plan':plan})
+
     def test_account_discovery_api29_is_read_only_and_has_no_implicit_approval(self):
         wire=Wire();old=session(wire,caps={**CAPS,'pips_api_version':28})
         with self.assertRaisesRegex(DGCUnsupportedError,'API 29'):old.pips.read('list_pip_accounts',{'server':'composio'})

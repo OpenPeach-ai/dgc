@@ -801,3 +801,27 @@ test('API38 calendar guests and series reject old runtime without dispatch',asyn
  const old=fixture({...caps,pips_api_version:37});await assert.rejects(old.session.pips.mutate('propose_pip_calendar_action',args,{approved:true}),/API 38/);assert.equal(old.calls.length,0);
  const current=fixture({...caps,pips_api_version:38});await assert.rejects(current.session.pips.mutate('propose_pip_calendar_action',args),/approved/);assert.deepEqual((await current.session.pips.mutate('propose_pip_calendar_action',args,{approved:true})).request.event,event);
 });
+
+test('API41 GitHub reads gate before transport and still need the host approval', async () => {
+  const github_plan = { schema_version: 1, repository: 'OpenPeach-ai/dgc', reads: [{ kind: 'commit_checks' }] };
+  const params = { pip_id: 'pip_saved', expected_version: 1, reason: 'Human review', changes: { github_plan } };
+  const old = fixture({ ...caps, pips_api_version: 40 });
+  await assert.rejects(old.session.pips.mutate('propose_pip_update', params, { approved: true }), /API 41/);
+  assert.equal(old.calls.length, 0);
+  const current = fixture({ ...caps, pips_api_version: 41 });
+  await assert.rejects(current.session.pips.mutate('propose_pip_update', params), DGCConfigError);
+  await current.session.pips.mutate('propose_pip_update', params, { approved: true });
+  assert.deepEqual(current.calls[0].payload.request.changes, { github_plan });
+});
+
+test('API41 digest and notification settings are local reads and approved mutations', async () => {
+  const old = fixture({ ...caps, pips_api_version: 40 });
+  await assert.rejects(old.session.pips.read('get_pip_digest', {}), /API 41/);
+  assert.equal(old.calls.length, 0);
+  const current = fixture({ ...caps, pips_api_version: 41 });
+  await current.session.pips.read('get_pip_digest', {});
+  const settings = { pip_id: 'pip_saved', min_severity: 'high', alert_severity: null, expected_revision: 0 };
+  await assert.rejects(current.session.pips.mutate('set_pip_notify_settings', settings), DGCConfigError);
+  await current.session.pips.mutate('set_pip_notify_settings', settings, { approved: true });
+  assert.deepEqual(current.calls.map((c) => c.payload.request.type), ['get_pip_digest', 'set_pip_notify_settings']);
+});

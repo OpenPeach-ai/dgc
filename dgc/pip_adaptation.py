@@ -191,7 +191,8 @@ def adapt(store, pip_id, expected_version, changes, reason, *, origin_session_id
         if store.db.execute("SELECT count(*) FROM pip_adaptations").fetchone()[0] >= MAX_RECORDS:
             raise RegistryError("limit", "The 10,000-record adaptation archive is full. Archive management is not implemented; no metadata changed.")
         merged = {key: changes.get(key, job[key]) for key in ("name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy")}
-        checked = _definition(**merged, pip_type=job["pip_type"], event_trigger=job.get("event_trigger"), source_policy=job.get('source_policy', 'committed_only'))
+        checked = _definition(**merged, pip_type=job["pip_type"], event_trigger=job.get("event_trigger"), source_policy=job.get('source_policy', 'committed_only'),
+                              github_plan=job.get("github_plan"))
         if not any(checked[key] != job[key] for key in changes):
             raise RegistryError("no_change", "The requested metadata already matches the job. No new version was created.")
         now, next_version = store.registry.clock(), expected_version + 1

@@ -265,7 +265,7 @@ def _path_current(registry, pip_id):
         raise _bad('This Pip has no reviewed committed-path trigger.')
     from .pips import _definition as canonical_definition
     if canonical_definition(**{key:definition.get(key) for key in ('name','goal','source_ref','schedule','pip_type','model_choice',
-            'adaptation_policy','event_trigger','source_policy','verification_plan')}) != definition:
+            'adaptation_policy','event_trigger','source_policy','verification_plan','github_plan')}) != definition:
         raise _bad('The path observer requires its exact canonical reviewed definition.')
     source_ref = _ref(definition.get('source_ref'))
     bindings = registry.db.execute("""SELECT

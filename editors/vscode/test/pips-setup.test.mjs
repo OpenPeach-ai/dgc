@@ -199,3 +199,29 @@ test('an audit Pip saves its notification threshold directly and shows what beca
 });
 
 test('extension host gates the digest and notification controls at API 41',()=>{for(const api of [40,41]){const posted=[],sent=[],vscode={};const {PipsEditor}=load(viewCode,name=>name==='vscode'?vscode:require(name));const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});for(const [type,extra] of [['get_pip_digest',{}],['mark_pip_digest_seen',{until:'2026-10-04T09:00:00.000Z'}],['get_pip_notify_settings',{pip_id:pipId}],['set_pip_notify_settings',{pip_id:pipId,min_severity:'high',alert_severity:null,expected_revision:0}],['get_pip_outcomes',{pip_id:pipId}]])bridge.receive({type:'pipsRequest',id:type,request:{type,...extra}});assert.equal(sent.length,api===41?5:0);if(api===40)assert.match(posted.at(-1).error.message,/API 41/);}});
+
+test('a project reviewer reviews exact GitHub reads; the model never picks them',async()=>{
+ const p=job(),reads={get_pip_notify_settings:()=>({settings:{pip_id:p.id,min_severity:'medium',alert_severity:'high',revision:0,is_default:true}}),get_pip_outcomes:()=>({outcomes:{pip_id:p.id,name:p.name,pip_type:'rook',history_truncated:false,reported:0,accepted:0,dismissed:0,still_reported:0,gone_after_change:0,gone_without_change:0,checkpoints_examined:0}})};
+ const old=setup({api:40,proposal:null,jobs:[p]});await old.drain();old.click('[data-job]');await old.drain();old.click('[data-tab=job]');await old.drain();assert.equal(old.d.querySelector('#github-form'),null);
+ const x=setup({api:41,proposal:null,jobs:[p]});await x.drain(reads);x.click('[data-job]');await x.drain(reads);x.click('[data-tab=job]');await x.drain(reads);
+ assert.match(x.d.querySelector('#github-form').textContent,/No GitHub reads approved/);
+ x.input('#githubRepo','not a repository');x.d.querySelector('#githubIssues').checked=true;x.d.querySelector('#githubIssues').dispatchEvent(new x.w.Event('input',{bubbles:true}));x.d.querySelector('#githubIssues').dispatchEvent(new x.w.Event('change',{bubbles:true}));x.submit('#github-form');await flush();
+ assert.equal(x.requests('propose_pip_update').length,0,'an invalid repository is refused here');
+ x.input('#githubRepo','OpenPeach-ai/dgc');x.input('#githubLabels','bug, security');for(const id of ['githubChecks']){const box=x.d.querySelector('#'+id);box.checked=true;box.dispatchEvent(new x.w.Event('input',{bubbles:true}));box.dispatchEvent(new x.w.Event('change',{bubbles:true}));}
+ x.submit('#github-form');
+ const sent=x.requests('propose_pip_update')[0];assert.ok(sent,'proposed');
+ const plan={schema_version:1,repository:'OpenPeach-ai/dgc',reads:[{kind:'open_issues',limit:20,labels:['bug','security']},{kind:'commit_checks'}]};
+ assert.deepEqual(JSON.parse(JSON.stringify(sent.request.changes)),{github_plan:plan});
+ const proposal={id:'proposal_'+'5'.repeat(32),pip_id:p.id,expected_version:1,definition:{...p,github_plan:plan},actor:'editor-user',reason:'Review these exact GitHub reads for this Pip.',status:'proposed',approval_status:'pending',expires_at:'2099-10-09T00:00:00Z'};
+ x.answer(sent,{proposal});await x.drain(reads);
+ const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog,'the proposal opens for review');
+ assert.match(dialog.textContent,/GitHub reads/);assert.match(dialog.textContent,/OpenPeach-ai\/dgc/);assert.match(dialog.textContent,/labelled bug, security/);assert.match(dialog.textContent,/CI checks for the commit the run reviews/);
+ assert.equal(x.requests('accept_pip_update').length,0,'nothing is accepted without the review');
+});
+
+test('a GitHub plan this view cannot read blocks acceptance instead of hiding it',()=>{
+ assert.throws(()=>model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'write_comment'}]}));
+ assert.throws(()=>model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'open_issues',limit:21}]}));
+ assert.throws(()=>model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'commit_checks'}],token:'x'}));
+ assert.equal(model.githubReadPlan({schema_version:1,repository:'a/b',reads:[{kind:'failed_runs',limit:10}]}).repository,'a/b');
+});

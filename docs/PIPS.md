@@ -354,6 +354,35 @@ proposal. The others ask in the default mode, and plan mode denies them.
 
 None of these are instructions or permissions; Pips receive them as reference.
 
+## GitHub reads for project reviewers
+
+A project reviewer (Scout, Lens, Rook, Lock) or Quill can read a few things from
+GitHub before each run: open issues (optionally with given labels), open pull
+requests, the CI checks for the exact commit the run reviews, and recent failed
+workflow runs. They help a reviewer link a finding to a known issue, notice a
+failing check on the commit it reviews, or (for Quill) draft notes from open pull
+requests.
+
+DGC makes the reads, with your own GitHub login: the `gh` CLI's, or `GH_TOKEN` /
+`GITHUB_TOKEN`. Without one, public repositories still work. The reads are GET
+requests only, so nothing can comment, label, merge or push, whatever your login
+allows. The model never chooses what to read, and the credential never reaches it.
+Adding or changing the reads is a job change you review.
+
+In the Pips view, open the Pip's **Job** tab and fill in **GitHub reads**. From the
+CLI:
+
+```sh
+dgc pips propose PIP_ID --expected-version 2 --github-issues --github-labels bug \
+  --github-checks --reason "Use issues and CI as context"
+dgc pips propose PIP_ID --expected-version 3 --no-github-reads --reason "Stop reading GitHub"
+```
+
+`--github-repo OWNER/NAME` names the repository; by default it is the project's
+GitHub `origin`. The review shows the repository and each read. An issue or a
+failing check is context for the model, not evidence: every finding still needs
+exact source lines.
+
 ## Personal Pips: apps and the web
 
 ### App reads

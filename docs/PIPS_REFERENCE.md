@@ -511,6 +511,19 @@ check.
   `pip_event_trigger_skipped` with that reason. Manual, chat, handoff and setup runs
   always run.
 
+**GitHub reads** (API 41). `github_plan` is
+`{schema_version: 1, repository: "owner/name", reads: [...]}` with one to four reads, each
+kind at most once: `open_issues` (`limit` 1–20, default 20; optional `labels`, one to five,
+no commas), `open_pulls` (`limit` 1–20), `commit_checks` (check runs and commit statuses for
+the run's pinned commit) and `failed_runs` (`limit` 1–10). It is allowed on project Scout,
+Lens, Rook, Lock and Quill jobs, is pinned on audit and draft runs, and is read by the
+controller before the worker starts: GET requests to `api.github.com` only, no redirects,
+1 MiB per answer, 60 seconds in all, authorized again before each read. The credential is
+`GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`; it is added to the redaction list and never
+reaches the worker. Each read gives the worker at most 8,000 characters of JSON, dropping
+whole items rather than cutting text; a failed read is reported with its error. The run
+records `pip_run_github_reads` with each read's kind and item count or error, not the text.
+
 **Digest and notification settings** (API 41). `pip_notify_settings` holds one row
 per Pip that has left the defaults (`min_severity` medium, `alert_severity` high or
 null for no alerts, never below `min_severity`); only `editor-user` and
@@ -756,4 +769,4 @@ Clients check it before using a newer control.
 | 38 | Calendar guests, invitations and finite series |
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
-| 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes |
+| 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |

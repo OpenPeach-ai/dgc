@@ -103,7 +103,7 @@ def current_branch(root) -> str:
     """The checked-out branch, or HEAD when detached or unknown."""
     try:
         out = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "symbolic-ref", "--quiet", "--short", "HEAD"],
-                             cwd=str(root), capture_output=True, text=True, timeout=5)
+                             cwd=str(root), capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return "HEAD"
     name = out.stdout.strip()

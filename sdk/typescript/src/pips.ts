@@ -13,7 +13,11 @@ export type PipResult = Record<string, PipJson>;
 /** One read-only reply's inference choices; does not change the job or permissions. Requires API24; contexts above32768 require API25. */
 export type PipChatOptions = { context_size: number; thinking: "off" | "low" | "medium" | "high" | "xhigh" };
 export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind: "pip_run"; run_id: string };
+export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipReadParams = {
+  get_pip_digest: Record<string, never>;
+  get_pip_notify_settings: { pip_id: string };
+  get_pip_outcomes: { pip_id: string };
   get_pip_connector_draft: { draft_id: string };
   list_pip_connector_drafts: { pip_id: string; before_id?: string; limit?: number };
   get_pip_calendar_draft: { draft_id: string };
@@ -66,6 +70,8 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  mark_pip_digest_seen: { until: string };
+  set_pip_notify_settings: { pip_id: string; min_severity: PipSeverity; alert_severity: PipSeverity | null; expected_revision: number };
   prepare_pip_calendar_draft: { draft_id: string; expected_digest: string; server: string; connection_digest: string; account: string; schema_digest: string; event: PipCalendarEvent };
   prepare_pip_connector_draft: { draft_id: string; expected_digest: string; call?: { tool: string; arguments: Record<string, unknown> } };
   dismiss_pip_connector_draft: { draft_id: string; expected_digest: string };
@@ -116,6 +122,11 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  get_pip_digest: [],
+  mark_pip_digest_seen: ["until"],
+  get_pip_notify_settings: ["pip_id"],
+  set_pip_notify_settings: ["pip_id", "min_severity", "alert_severity", "expected_revision"],
+  get_pip_outcomes: ["pip_id"],
   get_pip_connector_draft: ["draft_id"],
   list_pip_connector_drafts: ["pip_id", "before_id", "limit"],
   prepare_pip_connector_draft: ["draft_id", "expected_digest", "call"],
@@ -377,6 +388,11 @@ const API37_READS = new Set(["get_pip_connector_draft","list_pip_connector_draft
 const API37_MUTATIONS = new Set(["prepare_pip_connector_draft","dismiss_pip_connector_draft"]);
 for (const command of API37_READS) READS.add(command);
 for (const command of API37_MUTATIONS) MUTATIONS.add(command);
+// API 41: the daily digest, per-Pip notification settings and finding outcomes (display state only).
+const API41_READS = new Set(["get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes"]);
+const API41_MUTATIONS = new Set(["mark_pip_digest_seen", "set_pip_notify_settings"]);
+for (const command of API41_READS) READS.add(command);
+for (const command of API41_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);
 const API36_MUTATIONS = new Set(["propose_pip_connector_action"]);
 for (const command of API36_READS) READS.add(command);
@@ -463,7 +479,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -486,6 +502,10 @@ export class Pips {
     if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
       && Object.hasOwn(values.changes, "web_plan") && (this.caps.pips_api_version as number) < 40) {
       throw new DGCUnsupportedError("Reviewed personal web reads require Pips API 40 or newer");
+    }
+    if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
+      && Object.hasOwn(values.changes, "github_plan") && (this.caps.pips_api_version as number) < 41) {
+      throw new DGCUnsupportedError("Reviewed GitHub reads require Pips API 41 or newer");
     }
     const calendarPlan = (values.changes as Record<string, unknown> | undefined)?.app_plan as Record<string, unknown> | undefined;
     if (command === "propose_pip_update" && calendarPlan?.schema_version === 3 && (this.caps.pips_api_version as number) < 39) {

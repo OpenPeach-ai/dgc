@@ -397,7 +397,7 @@ def validate_parent(registry, row, manifest):
     definition = _load(original['definition'], 24576)
     from .pips import _definition
     canonical = _definition(**{key:definition.get(key) for key in ('name','goal','source_ref','schedule','pip_type',
-        'model_choice','adaptation_policy','event_trigger','source_policy','verification_plan')})
+        'model_choice','adaptation_policy','event_trigger','source_policy','verification_plan','github_plan')})
     if (canonical != definition or definition['policy'] != 'read_only' or definition['trigger'] != 'event'
             or definition['schedule'] is not None or definition['event_trigger'] != checked['policy']
             or saved['job'] != {key:definition[key] for key in _JOB_FIELDS}): _fail()

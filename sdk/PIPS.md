@@ -118,10 +118,9 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. The current backend is API 41. API 41 adds starter
-Pips, the daily digest, notification settings and finding outcomes for the Pips view and
-the CLI. The SDK does not wrap them: a host can create the same jobs with `create_pip`
-and a reviewed update, and the digest is a reading of records the SDK already exposes.
+needs a newer API, before sending it. The current backend is API 41. Starter Pips (also
+API 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
+job with `create_pip` and a reviewed update.
 
 | API | Commands or parameters |
 | --- | --- |
@@ -155,6 +154,7 @@ and a reviewed update, and the digest is a reading of records the SDK already ex
 | 38 | `attendees`, `repeat` and `send_invitations` in a calendar `event` |
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
+| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`; `changes.github_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -219,7 +219,8 @@ returns the original receipt without applying it again.
 
 `changes` may contain `name`, `goal`, `source_ref`, `model_choice`, `schedule`,
 `event_trigger`, `adaptation_policy`, `source_policy`, `verification_plan`,
-`app_plan` and `web_plan`. A proposal changes nothing until it is accepted, and
+`app_plan`, `web_plan` and `github_plan` (project reviewers and Quill: one repository and
+up to four read-only reads that DGC makes before each run with the user's GitHub login). A proposal changes nothing until it is accepted, and
 accepting checks the expected version again. The shapes of each field are in
 [PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md#schedules-and-event-triggers).
 
@@ -371,6 +372,21 @@ receipt is a process outcome, not proof that tests ran or passed.
 
 Notifications are references to a review or a failed run. Marking one read
 approves, rejects or starts nothing. Open the referenced record before acting.
+
+### Digest, notification settings and outcomes (API 41)
+
+| Command | | Fields |
+| --- | --- | --- |
+| `get_pip_digest` | R | none |
+| `mark_pip_digest_seen` | M | `until` (the digest's own `until`) |
+| `get_pip_notify_settings` | R | `pip_id` |
+| `set_pip_notify_settings` | M | `pip_id`, `min_severity`, `alert_severity` (or null), `expected_revision` |
+| `get_pip_outcomes` | R | `pip_id` |
+
+The digest is what the Pips bar and `dgc pips digest` show: what the profile's Pips did
+since the user last looked, and whether it is due. Marking it seen hides it for the user
+everywhere, so a host should do that only when the user has seen it. Notification
+settings are display preferences outside the reviewed job; changing them grants nothing.
 
 ### Personal Pips: connections, reads and external actions
 

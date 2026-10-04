@@ -240,7 +240,7 @@ def _definition(store, request, workspace_id):
         if pip.get('event_trigger') is not None or pip['source_policy'] != {'mode': 'personal' if personal else 'committed_only'}:
             _fail('This Pip uses event triggers or current-tree source. Review those separately before using conversational calendar setup.', 'unsupported_setup')
         extra = {**extra, **{key: pip[key] for key in ('model_choice', 'adaptation_policy', 'source_policy')}, 'app_plan': request.get('app_plan',pip.get('app_plan')),
-                 'web_plan': request.get('web_plan',pip.get('web_plan'))}
+                 'web_plan': request.get('web_plan',pip.get('web_plan')), 'github_plan': pip.get('github_plan')}
     if 'model_choice' in request:
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
@@ -287,7 +287,7 @@ def _load(registry, setup_id, workspace_id):
             raise ValueError()
         from .pips import _definition as build_definition
         definition = body['definition']
-        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan', 'web_plan')})
+        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan', 'web_plan', 'github_plan')})
         if checked != definition or any(definition[k] != request[k] for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type')):
             raise ValueError()
         if 'model_choice' in request and definition['model_choice'] != request['model_choice']:

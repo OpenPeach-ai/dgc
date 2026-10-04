@@ -256,6 +256,14 @@ def parser():
     web.add_argument("--no-web-reads", action="store_true", help="Personal Pips: propose removing all web reads")
     propose.add_argument("--web-search", action="append", default=None, metavar="QUERY",
                          help="Personal Pips: a fixed search DGC runs before each run (repeat; counts toward the four)")
+    github = propose.add_argument_group("GitHub reads (project reviewers and Quill; read-only, with your gh login or GH_TOKEN)")
+    github.add_argument("--github-repo", metavar="OWNER/NAME", help="the repository to read (default: this project's GitHub origin)")
+    github.add_argument("--github-issues", type=int, nargs="?", const=20, metavar="N", help="read up to N open issues (default 20)")
+    github.add_argument("--github-labels", metavar="A,B", help="only issues with these labels (up to five)")
+    github.add_argument("--github-pulls", type=int, nargs="?", const=20, metavar="N", help="read up to N open pull requests")
+    github.add_argument("--github-checks", action="store_true", help="read CI checks for the commit each run reviews")
+    github.add_argument("--github-failed-runs", type=int, nargs="?", const=10, metavar="N", help="read up to N recent failed workflow runs")
+    github.add_argument("--no-github-reads", action="store_true", help="propose removing all GitHub reads")
     plan = command("verification-plan", "propose exact Pulse commands for separate review; no model, network or source writes")
     job(plan); plan.add_argument("--expected-version", type=int, required=True)
     payload = plan.add_mutually_exclusive_group(required=True)
@@ -685,8 +693,28 @@ def _request(args):
             changes["web_plan"] = validate_web_plan({"schema_version": 1, "reads": [
                 *({"kind": "page", "url": url} for url in args.web_page or ()),
                 *({"kind": "search", "query": query} for query in args.web_search or ())]})
+        github_reads = [read for read in (
+            {"kind": "open_issues", "limit": args.github_issues,
+             **({"labels": [x.strip() for x in args.github_labels.split(",") if x.strip()]} if args.github_labels else {})}
+            if args.github_issues is not None else None,
+            {"kind": "open_pulls", "limit": args.github_pulls} if args.github_pulls is not None else None,
+            {"kind": "commit_checks"} if args.github_checks else None,
+            {"kind": "failed_runs", "limit": args.github_failed_runs} if args.github_failed_runs is not None else None) if read]
+        if args.no_github_reads and (github_reads or args.github_repo):
+            raise RegistryError("invalid_request", "Use --no-github-reads alone, or list the reads to keep.")
+        if args.github_labels and args.github_issues is None:
+            raise RegistryError("invalid_request", "--github-labels filters --github-issues.")
+        if args.no_github_reads:
+            changes["github_plan"] = None
+        elif github_reads:
+            # The complete reviewed set replaces the current one: list every read to keep.
+            from .pip_github_reads import repository_from_remote, validate as validate_github_plan
+            repository = args.github_repo or repository_from_remote(Path.cwd())
+            if not repository:
+                raise RegistryError("invalid_request", "This project has no GitHub origin. Name the repository with --github-repo OWNER/NAME.")
+            changes["github_plan"] = validate_github_plan({"schema_version": 1, "repository": repository, "reads": github_reads})
         if not changes:
-            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref or web reads for the proposed change.")
+            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref, web reads or GitHub reads for the proposed change.")
         request["changes"] = changes
         if args.reason:
             request["reason"] = args.reason
@@ -928,7 +956,13 @@ def _format(value):
                          for item in value["types"])
     if "proposal" in value:
         item = value["proposal"]
+        github = item["definition"].get("github_plan")
+        if github:
+            from .pip_github_reads import label as github_label
+            github = [f'GitHub reads from {github["repository"]} before each run (read-only, with your GitHub login):',
+                      *("  " + github_label(read) for read in github["reads"])]
         return "\n".join(["Saved for review; no change is active.", json.dumps(item["definition"], ensure_ascii=False, indent=2),
+                          *(github or ()),
                           "Reason: " + item["reason"], "Review expires: " + item.get("expires_at", "Not recorded"),
                           f'Accept: dgc pips accept {item["pip_id"]} {item["id"]} --expected-version {item["expected_version"]}',
                           f'Reject: dgc pips reject {item["pip_id"]} {item["id"]} --expected-version {item["expected_version"]}'])

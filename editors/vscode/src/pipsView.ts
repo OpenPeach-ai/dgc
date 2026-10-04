@@ -144,6 +144,7 @@ export class PipsEditor implements vscode.Disposable {
     if (['list_pip_notifications', 'mark_pip_notification_read'].includes(request.type) && this.apiVersion < 13) { fail('Update the computer to Pips API 13 for notifications.'); return; }
     if ((request.type === 'list_workspace_sessions' || request.type.includes('workspace_session_outcome')) && this.apiVersion < 12) { fail('Update the computer to Pips API 12 for reviewed session statements.'); return; }
     const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
+    if (request.type === 'propose_pip_update' && Object.prototype.hasOwnProperty.call(request.changes || {}, 'github_plan') && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for GitHub reads.'); return; }
     if(['list_pip_starters','propose_starter_pip'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for starter Pips.'); return; }
     if(['get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes'].includes(request.type) && this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) for the Pips digest and notification settings.'); return; }
     if(request.type==='notify_pip_setup'&&!this.backgroundSetup){fail('Setup is saved. Reload the window to get background approval notifications.');return;}

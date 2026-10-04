@@ -996,3 +996,30 @@ export function pipDigest(value) {
   }
   return value;
 }
+
+// Reviewed GitHub reads for project reviewers and Quill (Pips API 41): one repository, up to four
+// fixed read kinds. Mirrors dgc/pip_github_reads.validate exactly; anything else is refused whole.
+const GITHUB_LIMITS={open_issues:20,open_pulls:20,failed_runs:10};
+export function githubReadPlan(value){
+ const fail=()=>{throw Error('The GitHub reads are not supported. Refresh this review.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='reads,repository,schema_version'||value.schema_version!==1
+   ||typeof value.repository!=='string'||!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(value.repository)
+   ||['.','..'].includes(value.repository.split('/')[1])||!Array.isArray(value.reads)||!value.reads.length||value.reads.length>4)fail();
+ const seen=new Set();
+ for(const read of value.reads){
+  if(!record(read)||!['open_issues','open_pulls','commit_checks','failed_runs'].includes(read.kind)||seen.has(read.kind))fail();
+  seen.add(read.kind);
+  const keys=['kind',...(read.kind in GITHUB_LIMITS?['limit']:[]),...(read.kind==='open_issues'&&Object.hasOwn(read,'labels')?['labels']:[])];
+  if(Object.keys(read).sort().join()!==keys.sort().join())fail();
+  if(read.kind in GITHUB_LIMITS&&(!Number.isSafeInteger(read.limit)||read.limit<1||read.limit>GITHUB_LIMITS[read.kind]))fail();
+  if(Object.hasOwn(read,'labels')&&(!Array.isArray(read.labels)||!read.labels.length||read.labels.length>5||new Set(read.labels).size!==read.labels.length
+    ||!read.labels.every(l=>typeof l==='string'&&l.length>=1&&l.length<=50&&l===l.trim()&&!l.includes(',')&&!/[\x00-\x1f\x7f]/.test(l))))fail();
+ }
+ return value;
+}
+export function githubReadLabel(read){
+ if(read.kind==='open_issues')return `Up to ${read.limit} open issues${read.labels?` labelled ${read.labels.join(', ')}`:''}`;
+ if(read.kind==='open_pulls')return `Up to ${read.limit} open pull requests`;
+ if(read.kind==='commit_checks')return 'CI checks for the commit the run reviews';
+ return `Up to ${read.limit} recent failed workflow runs`;
+}

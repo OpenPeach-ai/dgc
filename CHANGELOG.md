@@ -33,6 +33,11 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   the same commit, job, model and workspace context could only repeat it. Manual runs always run.
 - `dgc pips outcomes PIP` shows what became of a Pip's findings: accepted, dismissed, still
   reported, or gone after their file changed.
+- Project reviewers and Quill can read from GitHub before each run: open issues, open pull
+  requests, the CI checks for the commit under review, and recent failed workflow runs. DGC makes
+  the reads with your own `gh` login or `GH_TOKEN`, GET only; the model never picks a read and
+  never sees the credential. Add them with `dgc pips propose --github-issues --github-checks …`
+  or in the Pips view; like every job change, they wait for your review.
 - The main chat carries one small `use_pips` tool and loads the Pips tools only when a task needs
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them

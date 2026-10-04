@@ -152,7 +152,7 @@ def _definition(registry, pip_id, workspace_id, version):
         from .pip_overview import _json_object
         definition = _json_object(raw, MAX_DEFINITION_BYTES)
         from .pips import _definition as validate
-        checked = validate(**{k:definition.get(k) for k in ('name','goal','source_ref','schedule','pip_type','model_choice','adaptation_policy','event_trigger','source_policy')})
+        checked = validate(**{k:definition.get(k) for k in ('name','goal','source_ref','schedule','pip_type','model_choice','adaptation_policy','event_trigger','source_policy','github_plan')})
         if checked != definition: _fail()
         digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
     except (ValueError, UnicodeError, RecursionError, TypeError):

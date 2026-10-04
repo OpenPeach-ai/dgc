@@ -95,7 +95,9 @@ used Pips (no registry is created). `mark_pip_digest_seen {until}` takes the dig
 own `until` and never moves backwards. `get_pip_notify_settings {pip_id}` and
 `set_pip_notify_settings {pip_id, min_severity, alert_severity, expected_revision}`
 read and change one Pip's display settings without a job review.
-`get_pip_outcomes {pip_id}` returns `{outcomes}` counts. The main chat's Pips bar polls
+`get_pip_outcomes {pip_id}` returns `{outcomes}` counts. `propose_pip_update` accepts
+`changes.github_plan` from API 41; the extension refuses to send it to an older backend
+and shows the plan in the proposal review. The main chat's Pips bar polls
 `get_pip_digest` every minute while connected and after each turn; see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md#schedules-and-event-triggers) for what a
 digest contains and when it is due.

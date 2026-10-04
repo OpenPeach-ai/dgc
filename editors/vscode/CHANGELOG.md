@@ -17,6 +17,9 @@
   finding at a Pip's alert level brings it back straight away.
 - A project reviewer's **Job** tab has **Notifications** (which findings reach the digest, which
   alert) and **What became of its findings**.
+- A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
+  workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
+  **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and
   connector draft rows in the main chat open the matching review in the Pips view.
 - Personal Pips: choose a connected account and exact app reads, add reviewed web reads (up to
