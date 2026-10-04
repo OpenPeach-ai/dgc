@@ -180,7 +180,8 @@ TOOL_SCHEMAS = [
     _fn("use_pips", "Load the Pips tools for this chat. Pips are standing agents that review, test and draft "
         "for this project or the user's personal tasks. Call this before you read Pip status or findings, set up "
         "or change a Pip, run, pause or hand work to one, or draft an email, calendar event or app action "
-        "from a Personal Pip result.", {}, []),
+        "from a Personal Pip result. Set Pips up only with these tools, as setup cards the user approves: the "
+        "`dgc pips` command refuses changes from your shell.", {}, []),
     _fn("pips_context", "Read bounded Pips reference data for this session workspace, or inspect shared app-connection metadata. "
         "List jobs and latest run IDs, inspect a job definition, page audit findings, Patch/Pulse execution evidence or Quill drafts, read approved context, explicit Pip memory exceptions, human-recorded statements/preferences, this chat's attachments, or page activity. "
         "Send only the chosen action's keys (action is always required; ? means optional): "
@@ -1946,7 +1947,8 @@ def bash(args: dict, ctx) -> str:
     popen_kw = dict(cwd=str(ctx.project_root), stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                    env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+                    env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
+                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
     observer = None
     receipt = getattr(ctx, 'configured_verifier_receipt', None)
     if receipt is not None:
@@ -2132,9 +2134,11 @@ def direct_bash(command: str, ctx) -> str:
     if not acquire_cancellable(lease, cancelled):
         return (f"error: {lease.last_error}" if lease.last_error else
                 "error: command cancelled while waiting for the workspace write lease")
+    typed = _USER_TYPED.set(True)
     try:
         return bash({"command": command}, ctx)
     finally:
+        _USER_TYPED.reset(typed)
         lease.release()
 
 
@@ -2167,7 +2171,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
-                        env=sandbox.process_env(ctx.config) if sandbox_requested else sandbox.tool_env())
+                        env=(sandbox.process_env(ctx.config, agent=not _USER_TYPED.get()) if sandbox_requested
+                         else sandbox.tool_env(agent=not _USER_TYPED.get())))
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:
@@ -2581,6 +2586,9 @@ _BROWSERS_LOCK = _threading.Lock()
 # each call (in the thread that runs it), so an executor never has to be told its call id.
 _PENDING_IMAGES: dict = {}
 _IMAGE_CALL: contextvars.ContextVar = contextvars.ContextVar("dgc_tool_call", default="")
+# True only while direct_bash runs a command the user typed (`!cmd`). A context variable, so nothing
+# in a tool call's arguments can set it: the model's own shells always carry sandbox.AGENT_SHELL.
+_USER_TYPED: contextvars.ContextVar = contextvars.ContextVar("dgc_user_typed_shell", default=False)
 MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
 
 

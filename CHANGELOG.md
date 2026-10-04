@@ -42,6 +42,9 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- A chat can no longer approve its own Pips by running `dgc pips` in its shell (the CLI acts as you,
+  and auto mode approves every shell command). In a chat's shell the CLI only reads and can make
+  the emergency stop; changes are refused and the chat prepares a setup card for you instead.
 - A profile that has never used Pips gets no Pips state: per-turn Pips bookkeeping starts the
   first time a chat or command uses them.
 - Personal Pips can use reviewed reads from connected apps (Gmail, Google Calendar, Google

@@ -32,6 +32,15 @@ No main-chat tool, scheduler, trigger or Pip worker can accept one. Personal Pip
 external actions, connections and setup reviews are available only to the local
 user's own controllers.
 
+The `dgc pips` CLI acts as the local user, so a chat that ran it in its shell (in auto
+mode, without asking) could approve its own Pips. Every shell DGC runs for the model
+(`bash`, `python`, monitors, hooks) carries `DGC_AGENT_SHELL=1`; a command you type
+yourself (`!cmd`, `/pips`) does not. With the marker, `dgc pips` allows only reading
+commands and the emergency stop, never marks the digest seen, and refuses the rest
+with exit status 2. This is a guard against a chat taking the wrong path, not a
+security boundary: an unsandboxed shell runs as you and could edit the registry
+directly, like any other process of yours.
+
 ### An independent runner
 
 Pip work runs in a separate supervisor process, not inside a chat. Because it can't

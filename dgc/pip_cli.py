@@ -1300,6 +1300,38 @@ def _starter_command(config, args):
             "next": "Schedules and triggers run while the local runner is running: dgc pips serve."}
 
 
+# What a DGC chat's own shell may run (sandbox.AGENT_SHELL): reading, and the emergency stop.
+# Everything else changes Pips, which is the user's decision; the chat prepares it as a setup card
+# or proposal (pips_setup, pips_propose) for the user to approve.
+_AGENT_SHELL_READS = {"starters", "digest", "outcomes", "execution", "models", "connections", "accounts",
+                      "inspect-connection", "types", "workspaces", "list", "show", "messages", "runs",
+                      "report", "capacity", "export-run", "checkpoints", "adaptations", "approvals",
+                      "versions", "activity", "status", "stop"}
+_AGENT_SHELL_READ_ACTIONS = {
+    "email-draft": ("email_action", {"list", "show"}), "calendar-draft": ("calendar_action", {"list", "show"}),
+    "connector-draft": ("connector_draft_action", {"list", "show"}),
+    "app-action": ("app_action", {"inspect", "show", "list"}), "workspace": ("workspace_action", {"show", "sessions"}),
+    "setup": ("setup_action", {"list", "show"}), "handoff": ("handoff_action", {"review", "list"}),
+    "context": ("context_action", {"list"}), "session-execution": ("execution_action", {"list", "show"}),
+    "memory": ("memory_action", {"source", "list", "statements"}), "notifications": ("notification_action", {"list"}),
+    "session-outcome": ("outcome_action", {"inspect", "review", "list"}), "service": ("service_action", {"preview", "status"}),
+}
+AGENT_SHELL_REFUSAL = ("This ran in a DGC chat's own shell, and changing Pips is your decision, so it was refused. "
+                       "The chat can prepare it as a setup card or proposal for you to approve (pips_setup, "
+                       "pips_propose), or you can run this command in your own terminal. Reading Pips and the "
+                       "emergency stop still work here.")
+
+
+def agent_shell_allows(args) -> bool:
+    """True when a parsed `dgc pips` command only reads (or is the emergency stop)."""
+    if args.command in _AGENT_SHELL_READS:
+        return True
+    if args.command == "notify":
+        return args.min_severity is None and args.alerts is None
+    spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
+    return bool(spec) and getattr(args, spec[0], None) in spec[1]
+
+
 def handle_command(config, argv, *, in_chat=False):
     try:
         args = parser().parse_args(argv or ["list"])
@@ -1307,7 +1339,15 @@ def handle_command(config, argv, *, in_chat=False):
         return int(exc.code or 0)
     from . import pip_daemon, pips
     from .redaction import redact_value, secret_values
+    from .sandbox import AGENT_SHELL
     from .style import terminal_safe_text
+    # A command the user typed in DGC (`/pips`, in_chat) is theirs; one from the chat's shell is not.
+    if not in_chat and os.environ.get(AGENT_SHELL) == "1":
+        if not agent_shell_allows(args):
+            print("dgc pips: " + AGENT_SHELL_REFUSAL, file=sys.stderr)
+            return 2
+        if args.command == "digest":
+            args.keep = True                 # the chat reading the digest never marks it seen for you
     try:
         if args.command == "enable":
             config.set("pips_enabled", True)

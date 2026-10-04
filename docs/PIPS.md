@@ -469,6 +469,9 @@ show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
   dependencies or picks its own commands.
 - **Approve themselves.** No Pip, and not the main chat, can accept a setup,
   proposal, handoff or external action. Only you can, in the Pips view or the CLI.
+  When the chat runs `dgc pips` in its own shell, the CLI only reads (and can make
+  the emergency stop); anything that changes a Pip is refused there, and the chat
+  prepares it as a setup card for you instead.
 - **Act outside their reviewed reads.** Project Pips read only their approved
   source. Personal Pips see only the app and web reads you approved.
 - **Send, create or call without you.** Every email, event and connector call is a
