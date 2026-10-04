@@ -439,6 +439,9 @@ def parser():
     command("status", "show runner status as JSON")
     keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
     keep.add_argument("state", nargs="?", choices=("on", "off"))
+    spend = command("usage", "what a Pip's runs cost in tokens, today and over 30 days; set or remove its daily limit")
+    spend.add_argument("pip_id")
+    spend.add_argument("--daily-limit", metavar="TOKENS|off", help="stop its schedules and triggers for the day once its runs reach this many tokens")
     desktop = command("desktop-notifications", "the runner's desktop notifications for new alerts and reviews: show, or turn on or off")
     desktop.add_argument("state", nargs="?", choices=("on", "off"))
     stop = command("stop", "emergency stop: pause all jobs and cancel their work")
@@ -739,7 +742,23 @@ def keep_running_text(item) -> str:
     return "Keep Pips running: on. The runner starts when you log in and restarts if it fails." + where
 
 
+def usage_text(item) -> str:
+    """A Pip's token spend in plain words, shared by the CLI and its tests."""
+    today, month = item["today"], item["last_30_days"]
+    runs = lambda n: f"{n} run{'' if n == 1 else 's'}"
+    text = (f"Today: {today['tokens']:,} tokens ({runs(today['runs'])}). "
+            f"Last 30 days: {month['tokens']:,} tokens ({runs(month['runs'])}).")
+    if item["daily_cap"] is None:
+        return text + " No daily limit."
+    text += f" Daily limit for automatic runs: {item['daily_cap']:,} tokens."
+    if item["capped_today"]:
+        text += " Reached today: its schedules and triggers wait until tomorrow; runs you start still run."
+    return text
+
+
 def _format(value):
+    if set(value) == {"usage"} and isinstance(value["usage"], dict) and "last_30_days" in value["usage"]:
+        return usage_text(value["usage"])
     if set(value) == {"desktop_notifications"}:
         item = value["desktop_notifications"]
         return (f"Desktop notifications: {'on' if item['on'] else 'off'}."
@@ -1198,6 +1217,18 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "usage":
+        if args.daily_limit is None:
+            return control({"type": "get_pip_usage", "pip_id": args.pip_id})
+        raw = args.daily_limit.strip().lower().replace(",", "").replace("_", "")
+        if raw in ("off", "none"):
+            limit = None
+        else:
+            try:
+                limit = int(float(raw[:-1]) * 1000) if raw.endswith("k") else int(float(raw[:-1]) * 1_000_000) if raw.endswith("m") else int(raw)
+            except ValueError:
+                raise RegistryError("invalid_request", "Give the daily limit in tokens, for example 200000, 200k or 1.5m, or off.") from None
+        return control({"type": "set_pip_daily_cap", "pip_id": args.pip_id, "daily_tokens": limit})
     if args.command == "desktop-notifications":
         if args.state is None:
             return control({"type": "get_pips_desktop_notifications"})
@@ -1366,6 +1397,8 @@ def agent_shell_allows(args) -> bool:
         return args.min_severity is None and args.alerts is None
     if args.command in ("keep-running", "desktop-notifications"):
         return args.state is None
+    if args.command == "usage":
+        return args.daily_limit is None
     spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
     return bool(spec) and getattr(args, spec[0], None) in spec[1]
 
@@ -1424,7 +1457,7 @@ def handle_command(config, argv, *, in_chat=False):
             result = _starter_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications"):
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage"):
             result = _digest_command(config, args)
         elif args.command == "capacity":
             if in_chat:

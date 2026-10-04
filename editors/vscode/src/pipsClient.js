@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -327,6 +327,45 @@ function githubProposalMarkup(proposal){
  const list=v=>v?`${esc(v.repository)}<ul class="web-reads">${v.reads.map(r=>`<li>${esc(githubReadLabel(r))}</li>`).join('')}</ul>`:'None';
  return `<h3>GitHub reads</h3><dl class="meta"><dt>Current</dt><dd>${list(current)}</dd><dt>Proposed</dt><dd>${list(proposed)}</dd></dl><p class="muted">Read-only, with your own GitHub login. DGC makes these reads before each run; the model never chooses what to read.</p>`;
 }
+// Usage and the daily limit (API 41): what this Pip's runs cost, and a limit on automatic runs.
+let usageState={pip:'',value:null,loading:false,error:''};
+async function loadUsage(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||usageState.loading&&usageState.pip===pip)return;
+ const token=scope();usageState={pip,value:null,loading:true,error:''};
+ try{const value=pipUsage((await send('get_pip_usage',{pip_id:pip})).usage,pip);if(token!==scope()||S.selected!==pip)return;usageState.value=value;draft.usageLimit=value.daily_cap===null?'':String(value.daily_cap);}
+ catch(error){if(token===scope()&&S.selected===pip)usageState.error=errorText(error);}
+ finally{if(token===scope()&&S.selected===pip){usageState.loading=false;render();}}
+}
+// "200k", "1.5m", "250,000" or empty (no limit). Null for empty; undefined when it is not a number.
+function parseTokens(text){
+ const raw=String(text||'').trim().toLowerCase().replace(/[,_\s]/g,'');
+ if(!raw)return null;
+ const m=/^(\d+(?:\.\d+)?)([km]?)$/.exec(raw);if(!m)return undefined;
+ return Math.round(Number(m[1])*(m[2]==='k'?1000:m[2]==='m'?1000000:1));
+}
+function usageChart(u){
+ const days=[],[y,mo,d]=u.today.day.split('-').map(Number),byDay=new Map(u.days.map(e=>[e.day,e.tokens]));
+ for(let i=13;i>=0;i--){const t=new Date(Date.UTC(y,mo-1,d-i));days.push({day:t.toISOString().slice(0,10),tokens:byDay.get(t.toISOString().slice(0,10))||0});}
+ const max=Math.max(1,...days.map(e=>e.tokens),u.daily_cap||0),w=14,gap=4,h=40;
+ const bars=days.map((e,i)=>{const bh=e.tokens?Math.max(2,Math.round(e.tokens/max*h)):1;return `<rect x="${i*(w+gap)}" y="${h-bh}" width="${w}" height="${bh}" rx="2" class="${e.tokens?'usage-bar':'usage-bar empty'}"><title>${e.day}: ${e.tokens.toLocaleString('en-US')} tokens</title></rect>`;}).join('');
+ const capLine=u.daily_cap?`<line x1="0" x2="${14*(w+gap)-gap}" y1="${h-Math.round(u.daily_cap/max*h)}" y2="${h-Math.round(u.daily_cap/max*h)}" class="usage-cap"/>`:'';
+ return `<svg class="usage-chart" viewBox="0 0 ${14*(w+gap)-gap} ${h}" preserveAspectRatio="none" role="img" aria-label="Tokens per day for the last 14 days">${bars}${capLine}</svg>`;
+}
+function usageMarkup(){
+ if(S.apiVersion<41||!S.pip)return '';
+ if(usageState.pip!==S.selected){void loadUsage();return '<section class="section"><h2>Usage</h2><p class="muted">Loading…</p></section>';}
+ const u=usageState.value,off=S.busy||!usable()||!u;
+ if(!u)return `<section class="section"><h2>Usage</h2>${errorMarkup(usageState.error)||'<p class="muted">Loading…</p>'}</section>`;
+ const n=v=>v.toLocaleString('en-US'),runs=v=>`${v} run${v===1?'':'s'}`;
+ return `<form id="usage-form" class="section form"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${u.capped_today?'<p class="notice">It reached its daily limit: its schedules and triggers wait until tomorrow. Runs you start still run.</p>':''}${errorMarkup(usageState.error)}<label for="usageLimit">Daily limit for automatic runs, in tokens</label><input id="usageLimit" data-draft="usageLimit" inputmode="numeric" autocomplete="off" placeholder="No limit (for example 200k)" value="${esc(draft.usageLimit||'')}"${off?' disabled':''}><p class="muted">Once its runs today reach the limit, its schedules and triggers are skipped until tomorrow. Runs you start, chat replies and handoffs you approve still run. This is your setting, not part of the job, so it needs no review.</p><div class="actions"><button type="submit"${off?' disabled':''}>Save limit</button>${u.daily_cap!==null?button('remove-usage-limit','Remove limit',off):''}</div></form>`;
+}
+function saveUsageLimit(limit){
+ const u=usageState.value,pip=S.selected;if(S.apiVersion<41||!u||u.pip_id!==pip)return;
+ if(limit===undefined||limit!==null&&(limit<1000||limit>1000000000)){usageState.error='Give a daily limit from 1,000 to 1,000,000,000 tokens, for example 200k, or leave it empty for no limit.';render();return;}
+ usageState.error='';
+ void mutate({type:'set_pip_daily_cap',pip_id:pip,daily_tokens:limit},result=>{const value=pipUsage(result.usage,pip);if(value.daily_cap!==limit)throw Error('The saved limit differs from your choice. Refresh this Pip.');usageState.value=value;draft.usageLimit=limit===null?'':String(limit);S.notice=limit===null?'Daily limit removed.':`Daily limit saved: ${limit.toLocaleString('en-US')} tokens for automatic runs. The job itself did not change.`;});
+}
+document.addEventListener('submit',event=>{if(event.target.id!=='usage-form')return;event.preventDefault();if(S.busy||!usable())return;saveUsageLimit(parseTokens(draft.usageLimit));});
 function notifyMarkup(){
  if(S.apiVersion<41||!auditPip())return '';
  if(notifyState.pip!==S.selected){void loadNotify();return '<section class="section"><h2>Notifications</h2><p class="muted">Loading…</p></section>';}
@@ -395,7 +434,7 @@ function reviewLifecycle(restore){
 }
 function jobSettingsMarkup(){
   if(archived())return `<section class="section"><h2>Archived job</h2><p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} · ${esc(modelLabel(S.pip.model_choice))}</p>${lifecycleMarkup()}</section>`;
-  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${notifyMarkup()}`;
+  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${githubReadsMarkup()}${usageMarkup()}${notifyMarkup()}`;
 }
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
 function jobMarkup(p) {
@@ -1468,6 +1507,7 @@ document.addEventListener('click',event=>{
       if(personalPip()&&S.pip.app_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{app_plan:null},reason:'Remove this personal Pip’s app-read access.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
     case 'setup-in-chat':if(S.apiVersion>=23&&!archived()){setupEditing=true;S.create=true;S.overview=false;S.createStep='describe';draft.setupTask=`Change the setup for ${S.pip.name}: `;render();$('setupTask')?.focus();}break;
     case 'refresh-setups':void loadSetups();break;
+    case 'remove-usage-limit':saveUsageLimit(null);break;
     case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
     case 'back-types':rememberCreationDraft();S.createStep='type';render();[...document.querySelectorAll('[data-pip-type]')].find(b=>b.dataset.pipType===S.createType)?.focus();break;
     case 'cancel-create':rememberCreationDraft();S.create=false;S.overview=!S.selected;render();break;

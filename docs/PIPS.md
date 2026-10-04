@@ -281,6 +281,24 @@ it still reports, and what went away: after its file changed, or without a chang
 "Gone after its file changed" suggests a fix; it doesn't prove one, because the
 run simply stopped reporting it.
 
+## Usage and daily limits
+
+Every Pip's **Job** tab shows what its runs cost in tokens, today and over the last 30
+days, with a chart of the last two weeks. `dgc pips usage PIP` says the same in the
+terminal. It counts every model request a run made, including a run that failed or ran
+out of time.
+
+To keep a scheduled Pip from running up a bill, give it a **daily limit**:
+
+```sh
+dgc pips usage PIP --daily-limit 200k     # or 1.5m, 250000; off removes it
+```
+
+Once its runs today reach the limit, its schedules and event triggers are skipped until
+the next day, and the skip says why. A run you start yourself, a chat reply and a handoff
+you approve still run. The limit is your setting, not part of the job: it needs no review
+and no model can change it.
+
 ## Reviewing what Pips propose
 
 Every consequential change waits for you. You can review in the Pips view or with

@@ -20,6 +20,8 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- Each Pip's **Job** tab shows its token usage today and over 30 days, with a two-week chart, and
+  takes a daily limit for its automatic runs.
 - When a Pip finds something at its alert level or a new review is waiting, the editor says so
   once with **Open Pips**, even when the DGC panel is not on screen (`dgc.notifyPips`). The
   runner controls also switch the runner's desktop notifications on or off.

@@ -89,6 +89,10 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`get_pip_usage {pip_id}` and `set_pip_daily_cap {pip_id, daily_tokens}` (API 41, local
+only) return `{usage: {pip_id, today, last_30_days, days, daily_cap, capped_today}}`; the
+Job tab draws it as Usage with the limit field.
+
 `get_pips_desktop_notifications {}` and `set_pips_desktop_notifications {enabled}` (API 41,
 local only) return `{desktop_notifications: {on, available, platform, last}}`; `last` is
 `null` or `{shown, at}`, whether the runner's last desktop notification actually showed.

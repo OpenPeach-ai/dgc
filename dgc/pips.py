@@ -59,6 +59,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
+    "get_pip_usage", "set_pip_daily_cap",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -111,6 +112,7 @@ _COMMAND_ARGS = {
     "get_pip_outcomes": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
+    "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -768,6 +770,11 @@ class PipStore:
 
     def enqueue(self, pip_id, idempotency_key, actor, config, *, schedule_occurrence=None, conversation_request=None, handoff=None, event_occurrence=None, _audit_preparation=None, main_chat_request=None, pulse_request=None, _model_preparation=None):
         _require_runner_platform()
+        if schedule_occurrence is not None or event_occurrence is not None:
+            # The user's daily limit stops automatic runs only; anything they start still runs.
+            from .pip_spend import over_daily_cap
+            if over_daily_cap(self.registry, pip_id):
+                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this automatic run was skipped. Raise or remove the limit in its Job tab.")
         key = _text(idempotency_key, "idempotency_key", 128)
         pulse_request = _pulse_request(pulse_request, actor, key)
         if pulse_request is not None and any(value is not None for value in
@@ -2961,6 +2968,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         expected_revision=request.get("expected_revision"), actor=actor)}
                 else:
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
+            elif command in ("get_pip_usage", "set_pip_daily_cap"):
+                from . import pip_spend
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Pip usage and limits are on this computer only.")
+                result = {"usage": pip_spend.usage(registry, pip_id) if command == "get_pip_usage"
+                          else pip_spend.set_cap(registry, pip_id, request.get("daily_tokens"), actor)}
             elif command in ("get_pips_desktop_notifications", "set_pips_desktop_notifications"):
                 from . import pip_desktop
                 if actor not in ("editor-user", "local-console"):

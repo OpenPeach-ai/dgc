@@ -586,6 +586,18 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Usage and daily limits** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
+today: {day, tokens, runs}, last_30_days: {tokens, runs}, days: [{day, tokens, runs}],
+daily_cap, capped_today}}` over local days. A run's tokens are the input plus output tokens
+the runner imported for it (`pip_usage_imports` in the usage ledger now keeps each run's
+totals, all of its requests); a run not imported yet counts its result's `usage`.
+`set_pip_daily_cap {pip_id, daily_tokens}` (local only; 1,000 to 1,000,000,000, or null)
+is kept in registry metadata, outside the job definition, and records
+`pip_daily_cap_changed`. While today's tokens are at or over the limit, `enqueue` refuses
+schedule and event occurrences with `daily_cap_reached`, which the scheduler and the
+trigger controller record as an ordinary skip; manual, chat, handoff and main-chat runs are
+not limited.
+
 **Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
 for alert findings in the digest and for pending reviews and setup cards, and shows one
 notification for what is new: the digest headline, or "N reviews waiting". What it has

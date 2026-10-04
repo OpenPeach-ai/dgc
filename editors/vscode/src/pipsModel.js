@@ -975,6 +975,20 @@ export function pipsKeepRunning(value) {
   return value;
 }
 
+// A Pip's token usage and daily limit (API 41): exact shapes, since the Job tab draws them.
+export function pipUsage(value, pip) {
+  const fail = () => { throw Error("This Pip's usage is invalid. Refresh this Pip."); };
+  const count = (n) => Number.isSafeInteger(n) && n >= 0;
+  const day = (d) => typeof d === 'string' && /^\d{4}-\d\d-\d\d$/.test(d);
+  const entry = (e) => record(e) && Object.keys(e).sort().join() === 'day,runs,tokens' && day(e.day) && count(e.runs) && count(e.tokens);
+  if (!record(value) || Object.keys(value).sort().join() !== 'capped_today,daily_cap,days,last_30_days,pip_id,today' || value.pip_id !== pip
+    || !entry(value.today) || !record(value.last_30_days) || Object.keys(value.last_30_days).sort().join() !== 'runs,tokens'
+    || !count(value.last_30_days.runs) || !count(value.last_30_days.tokens) || !Array.isArray(value.days) || value.days.length > 31
+    || !value.days.every(entry) || !(value.daily_cap === null || (Number.isSafeInteger(value.daily_cap) && value.daily_cap >= 1000))
+    || typeof value.capped_today !== 'boolean' || (value.daily_cap === null && value.capped_today)) fail();
+  return value;
+}
+
 // The runner's desktop notifications (API 41). `last` is evidence: whether the last one showed.
 export function pipsDesktopNotifications(value) {
   const fail = () => { throw Error('The desktop notification status is invalid. Refresh the Pips view.'); };

@@ -42,6 +42,10 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
+  failed and timed-out runs too. `--daily-limit 200k` stops its schedules and triggers for the day
+  once it reaches that many tokens; runs you start still run. The limit is your setting, not part
+  of the job.
 - The runner shows a desktop notification for a new alert or a review waiting for you, even with
   the editor closed: once per item, at most one a minute, never a backlog. `dgc pips
   desktop-notifications off` (or the switch in the Pips view) turns it off; a computer with no
