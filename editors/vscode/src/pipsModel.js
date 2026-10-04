@@ -864,6 +864,29 @@ export function archivalResult(value,request,workspace){
 const setupKeys='created_at,digest,expected_lifecycle_revision,expected_version,expires_at,goal,id,name,next_run_at,permissions,pip_id,pip_type,project_root,reason,receipt,run_now,run_now_policy,runner_notice,schedule,scope_notice,source_policy,source_ref,status,work_kind,workspace_id';
 const setupText=(v,max=4096)=>typeof v==='string'&&v.trim().length>0&&new TextEncoder().encode(v).length<=max&&!/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(v)&&Array.from(v).every(c=>c.length!==1||c.charCodeAt(0)<0xd800||c.charCodeAt(0)>0xdfff);
 const setupTime=v=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)$/.test(v)&&Number.isFinite(Date.parse(v));
+// Reviewed web reads (Pips API 40): exact public https pages and fixed searches that DGC reads
+// before a Personal Pip runs. Mirrors dgc/pip_web_reads.validate; anything else is refused whole.
+export function webReadPlan(value){
+ const fail=()=>{throw Error('The web reads are not supported. Refresh this review.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='reads,schema_version'||value.schema_version!==1||!Array.isArray(value.reads)||!value.reads.length||value.reads.length>4)fail();
+ const seen=new Set();
+ for(const read of value.reads){
+  if(!record(read))fail();
+  const keys=Object.keys(read).sort().join();
+  if(keys==='kind,url'&&read.kind==='page'){
+   const url=read.url;let parsed;
+   if(typeof url!=='string'||!url.length||url.length>2048||url!==url.trim()||/[\x00-\x20\x7f]/.test(url))fail();
+   try{parsed=new URL(url);}catch{fail();}
+   const host=parsed.hostname.replace(/\.$/,'').toLowerCase();
+   if(parsed.protocol!=='https:'||!host||parsed.username||parsed.password||host==='localhost'||host.endsWith('.localhost')||/^[0-9.]+$/.test(host)||host.includes(':')||host.startsWith('['))fail();
+  }else if(keys==='kind,query'&&read.kind==='search'){
+   const q=read.query;if(typeof q!=='string'||!q.trim().length||q.length>300||q!==q.trim()||/[\x00-\x1f\x7f]/.test(q))fail();
+  }else fail();
+  const key=JSON.stringify([read.kind,read.url??read.query]);if(seen.has(key))fail();seen.add(key);
+ }return value;
+}
+export function webReadLabel(read){return read.kind==='page'?'Page · '+read.url:'Search · '+read.query;}
+
 export function appReadPlan(value){
  const fail=()=>{throw Error('The app-read permissions are not supported. Refresh this review.');};
  if(!record(value)||Object.keys(value).sort().join()!=='calls,connection_digest,schema_version,server'||![1,2,3].includes(value.schema_version)||!/^[-\w.]{1,80}$/.test(value.server)||!/^([a-f0-9]{64})$/.test(value.connection_digest)||!Array.isArray(value.calls)||!value.calls.length||value.calls.length>4||new TextEncoder().encode(JSON.stringify(value)).length>8192)fail();
@@ -877,9 +900,10 @@ export function appReadPlan(value){
 
 export function pipSetup(value,workspace,id=null) {
  const fail=()=>{throw Error('This setup is invalid or belongs to another project. Refresh before reviewing it.');};
- if(!record(value)||Object.keys(value).filter(k=>!['model_choice','verification_plan','app_plan'].includes(k)).sort().join()!==setupKeys||value.workspace_id!==workspace||!/^setup_[a-f0-9]{32}$/.test(value.id)||id!==null&&value.id!==id||!/^[a-f0-9]{64}$/.test(value.digest)||!setupText(value.project_root,16384)||!(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value.project_root))||!setupText(value.name,480)||!setupText(value.goal,16000)||!setupText(value.reason,4000)||!setupText(value.scope_notice,4000)||!setupText(value.runner_notice,2000)||!setupText(value.source_ref,800)||!['scout','lens','rook','lock','quill','pulse'].includes(value.pip_type)||value.work_kind!==(value.source_policy==='personal'?'personal_task':value.pip_type==='pulse'?(value.verification_plan?.action?.network==='loopback_http_v1'?'app_smoke_test':'command_verification'):value.pip_type==='quill'?'documentation_draft':'source_review')||value.permissions!==(value.pip_type==='pulse'&&value.source_policy!=='personal'?'review_required':'read_only')||!['committed_only','personal'].includes(value.source_policy)||typeof value.run_now!=='boolean'||!['pending','accepted','rejected','expired'].includes(value.status)||!setupTime(value.created_at)||!setupTime(value.expires_at)||Date.parse(value.expires_at)<=Date.parse(value.created_at)||!(value.next_run_at===null||setupTime(value.next_run_at))||!(value.run_now?setupText(value.run_now_policy,2000):value.run_now_policy===null))fail();
+ if(!record(value)||Object.keys(value).filter(k=>!['model_choice','verification_plan','app_plan','web_plan'].includes(k)).sort().join()!==setupKeys||value.workspace_id!==workspace||!/^setup_[a-f0-9]{32}$/.test(value.id)||id!==null&&value.id!==id||!/^[a-f0-9]{64}$/.test(value.digest)||!setupText(value.project_root,16384)||!(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value.project_root))||!setupText(value.name,480)||!setupText(value.goal,16000)||!setupText(value.reason,4000)||!setupText(value.scope_notice,4000)||!setupText(value.runner_notice,2000)||!setupText(value.source_ref,800)||!['scout','lens','rook','lock','quill','pulse'].includes(value.pip_type)||value.work_kind!==(value.source_policy==='personal'?'personal_task':value.pip_type==='pulse'?(value.verification_plan?.action?.network==='loopback_http_v1'?'app_smoke_test':'command_verification'):value.pip_type==='quill'?'documentation_draft':'source_review')||value.permissions!==(value.pip_type==='pulse'&&value.source_policy!=='personal'?'review_required':'read_only')||!['committed_only','personal'].includes(value.source_policy)||typeof value.run_now!=='boolean'||!['pending','accepted','rejected','expired'].includes(value.status)||!setupTime(value.created_at)||!setupTime(value.expires_at)||Date.parse(value.expires_at)<=Date.parse(value.created_at)||!(value.next_run_at===null||setupTime(value.next_run_at))||!(value.run_now?setupText(value.run_now_policy,2000):value.run_now_policy===null))fail();
  if(value.pip_type==='pulse'&&value.source_policy!=='personal'){if(!pulsePlan(value.verification_plan))fail();}else if(Object.hasOwn(value,'verification_plan'))fail();
  if(Object.hasOwn(value,'app_plan')){if(value.source_policy!=='personal')fail();appReadPlan(value.app_plan);}
+ if(Object.hasOwn(value,'web_plan')){if(value.source_policy!=='personal')fail();webReadPlan(value.web_plan);}
  if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')))fail();}
  const existing=value.pip_id!==null;
  if(existing?!/^pip_[a-f0-9]{32}$/.test(value.pip_id)||!Number.isSafeInteger(value.expected_version)||value.expected_version<1||!Number.isSafeInteger(value.expected_lifecycle_revision)||value.expected_lifecycle_revision<0:value.expected_version!==null||value.expected_lifecycle_revision!==null)fail();

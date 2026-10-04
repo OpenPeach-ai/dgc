@@ -11616,7 +11616,7 @@ def test_benchmark_integrity():
                 _unguarded_names = {tool.get("name") for tool in _PS.run_probe().get("tools", [])}
         check("benchmark probe never offers questions",
               _PS._QuietUI.non_interactive is True
-              and len(_guarded_probe.get("tools", [])) == 23
+              and len(_guarded_probe.get("tools", [])) == 24
               and "propose_options" not in {tool.get("name") for tool in _guarded_probe.get("tools", [])}
               and "propose_options" in _unguarded_names
               and 0 < _guarded_probe.get("estimated_wire_tokens", 0) < _PROBE_TOKEN_CEILING,
@@ -14864,7 +14864,7 @@ def test_goal_refusal_keeps_the_text():
         ui._submit = lambda *a, **k: errors.append("SUBMITTED")     # must not run the turn
         ui._handle_slash("/goal " + objective)
         check("the refused objective is returned to the composer, not destroyed",
-              ui.input_buf.text.strip() == objective.strip())
+              ui.input_buf.text.strip() == ("/goal " + objective).strip())   # sent again, it is a goal again
         check("the reason is written where it can still be read, and no turn starts",
               errors and f"{agent.goal_max_chars():,}" in errors[0] and "SUBMITTED" not in errors
               and any("your text is back" in f for f in flashes), (errors[:1], flashes))

@@ -483,6 +483,10 @@ export class Pips {
       && Object.hasOwn(values.changes, "app_plan") && (this.caps.pips_api_version as number) < 28) {
       throw new DGCUnsupportedError("Reviewed personal app reads require Pips API 28 or newer");
     }
+    if (command === "propose_pip_update" && values.changes && typeof values.changes === "object"
+      && Object.hasOwn(values.changes, "web_plan") && (this.caps.pips_api_version as number) < 40) {
+      throw new DGCUnsupportedError("Reviewed personal web reads require Pips API 40 or newer");
+    }
     const calendarPlan = (values.changes as Record<string, unknown> | undefined)?.app_plan as Record<string, unknown> | undefined;
     if (command === "propose_pip_update" && calendarPlan?.schema_version === 3 && (this.caps.pips_api_version as number) < 39) {
       throw new DGCUnsupportedError("Additional app searches require Pips API 39 or newer");

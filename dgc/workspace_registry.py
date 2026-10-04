@@ -142,6 +142,16 @@ def state_directory() -> Path:
     return USER_HOME / "pips"
 
 
+def in_use() -> bool:
+    """Has this profile used Pips? Pips are on for everyone, but per-turn bookkeeping (session
+    association, turn records, verifier receipts) waits until a Pip exists. Checking only that
+    the registry file exists creates nothing and costs one stat."""
+    try:
+        return (state_directory() / "registry.sqlite3").is_file()
+    except OSError:
+        return False
+
+
 def _private_directory(path: Path) -> None:
     if path.is_symlink():
         raise RegistryError("unsafe_state", "Pips state must not be a symbolic link.")

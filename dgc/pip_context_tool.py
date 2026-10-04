@@ -222,6 +222,7 @@ def read(args, ctx):
             from .pip_sources import validate_policy as source_policy
             base['pip']['source_policy'] = source_policy(definition.get('source_policy', 'committed_only'))
             if definition.get('app_plan') is not None:base['pip']['app_plan']=definition['app_plan']
+            if definition.get('web_plan') is not None:base['pip']['web_plan']=definition['web_plan']
             base['pip'].update(_schedule_projection(registry, args['pip_id'], definition))
             if base['pip']['source_policy']['mode'] == 'current_tree':
                 base['pip']['source_notice'] = 'Eligible current-tree source is captured on each manual request. source_ref is dormant; changing the source policy requires human review.'
@@ -253,7 +254,7 @@ def read(args, ctx):
                 coalesce(length(CAST(result AS BLOB)),0),coalesce(length(CAST(error AS BLOB)),0)
                 FROM pip_runs WHERE id=? AND workspace_id=?""", (args["run_id"], workspace_id)).fetchone()
             if bounds is None:
-                raise RegistryError("not_found", "Run not found in this workspace.")
+                raise RegistryError("not_found", "Run not found in this project's Pips. A Personal Pip's run needs scope=personal.")
             if any(size > maximum for size, maximum in zip(bounds, (65536, 131072, 8192))):
                 raise RegistryError("stored_data_limit", "Stored run exceeds the bounded read contract.")
             row = registry.db.execute("SELECT * FROM pip_runs WHERE id=? AND workspace_id=?",

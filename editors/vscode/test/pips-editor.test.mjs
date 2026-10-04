@@ -1183,6 +1183,22 @@ test('account picker requires explicit identity and saves a proposal, never gran
  assert.equal(x.d.querySelector('#app-account').value,'');assert.equal(x.d.querySelector('#review-root img'),null);assert.equal(x.d.querySelectorAll('#app-account option').length,3);x.click('#review-confirm');assert.match(x.d.querySelector('#app-picker-error').textContent,/Choose a connected account/);assert.equal(x.requests('propose_pip_update').length,0);
  choose(x,'#app-account','1');x.input('#app-query','is:unread');x.click('#review-confirm');const request=x.requests('propose_pip_update').at(-1).request;assert.equal(request.changes.app_plan.calls[0].account,'ca_home');assert.equal(request.changes.app_plan.calls[0].arguments.query,'is:unread');assert.equal(x.requests('accept_pip_update').length,0);
 });
+test('web reads are typed as exact pages and searches, saved for review and never granted directly',async()=>{
+ const personal={...ws,kind:'personal'},pip=job('a',{source_policy:{mode:'personal'},app_plan:null,web_plan:null,pip_type:'rook'});
+ const x=setup({workspaceValue:personal,apiVersion:40,jobs:[pip],runs:[],conversation:true});await x.drain();x.click('[data-tab=job]');await x.drain();
+ assert.match(x.d.body.textContent,/No web reads approved/);
+ x.input('#webReads','http://plain.example.com/');x.submit('#web-reads-form');await x.drain();
+ assert.equal(x.requests('propose_pip_update').length,0,'an http page is refused in the editor');
+ x.input('#webReads','https://status.example.com/today\nsearch: weather in Pune today');x.submit('#web-reads-form');
+ const request=x.requests('propose_pip_update').at(-1).request;
+ assert.deepEqual(JSON.parse(JSON.stringify(request.changes)),{web_plan:{schema_version:1,reads:[{kind:'page',url:'https://status.example.com/today'},{kind:'search',query:'weather in Pune today'}]}});
+ assert.equal(x.requests('accept_pip_update').length,0);
+});
+test('web reads stay read-only on an older CLI and an approved plan is listed by label',async()=>{
+ const plan={schema_version:1,reads:[{kind:'page',url:'https://status.example.com/today'}]};
+ const old=setup({workspaceValue:{...ws,kind:'personal'},apiVersion:39,jobs:[job('a',{source_policy:{mode:'personal'},web_plan:plan,pip_type:'rook'})],runs:[],conversation:true});await old.drain();old.click('[data-tab=job]');await old.drain();
+ assert.equal(old.d.querySelector('#web-reads-form'),null);assert.match(old.d.body.textContent,/Pips API 40/);assert.match(old.d.body.textContent,/Page · https:\/\/status\.example\.com\/today/);
+});
 test('cancelled account discovery cannot reopen a dialog or change another Pip',async()=>{
  const x=setup({workspaceValue:{...ws,kind:'personal'},apiVersion:29,jobs:[job('a',{source_policy:{mode:'personal'},pip_type:'rook'})],runs:[],conversation:true});await x.drain();x.click('[data-tab=job]');x.click('#choose-app-access');const pending=x.requests('list_pip_connections').at(-1);x.click('#review-cancel');x.answer(pending,{connections:[{name:'composio',provider:'Composio',enabled:true,pip_read_adapter:true}]});await x.drain();assert.equal(x.d.querySelector('[role=dialog]'),null);assert.equal(x.requests('list_pip_accounts').length,0);
 });

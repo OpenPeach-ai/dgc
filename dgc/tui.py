@@ -12,6 +12,7 @@ the composer via a cross-thread request + event.
 from __future__ import annotations
 
 import asyncio
+import collections
 import io
 import os
 import json
@@ -719,7 +720,7 @@ class TUI:
         # (/rewind, /compact…) ran anyway when picked from the menu. The palette gets the same
         # routing as the composer: a monitor wake turn yields, /todo clear clears now.
         if self._turn.is_set():
-            if self._yield_wake_turn_for(text) or self._run_mid_turn_form(text):
+            if self._yield_wake_turn_for(text) or self._run_mid_turn_form(text) or self._live_goal(text):
                 return
             spec = resolve_command(cmd, "tui")
             if spec is not None and not spec.available_while_running:
@@ -1767,6 +1768,10 @@ class TUI:
                     serviced = self._service_monitors()
                 except Exception:
                     serviced = False
+                try:
+                    serviced = self._service_goal_results() or serviced
+                except Exception:
+                    pass
                 if serviced or self._needs_pulse(tick):
                     app.invalidate()
 
@@ -1923,6 +1928,8 @@ class TUI:
             else:
                 self._flash("stop the current turn before changing its goal")
             return True
+        if self._live_goal(text):
+            return True
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         spec = resolve_command(name, "tui")
         if spec is None:
@@ -1953,6 +1960,121 @@ class TUI:
         self._todos = []
         self._flash("todo list cleared")
         self._invalidate()
+        return True
+
+    #: `/goal` words that keep their own meaning during a turn (review, stop) or wait for it.
+    _GOAL_WORDS = frozenset({"review", "status", "pause", "clear", "off", "none", "remove", "delete",
+                             "resume"})
+
+    def _live_goal(self, text: str) -> bool:
+        """`/goal …` typed while this chat's turn runs: change the goal at the turn's next step.
+
+        The editor's live edit, replacement and first-goal adoption, from the terminal. The agent
+        owns the change: it applies at the next model or tool boundary without stopping the turn,
+        or hands the draft back (goal_replacement_result / goal_edit_result). False when `text`
+        is not a live goal command, so the caller's ordinary routing decides.
+        """
+        stripped = text.strip()
+        if not stripped.lower().startswith("/goal "):
+            return False
+        rest = stripped[len("/goal "):].strip()
+        word = rest.lower().split(None, 1)[0] if rest else ""
+        if not rest or word in self._GOAL_WORDS:
+            return False
+        agent = self.agent
+        if word == "budget":
+            match = re.fullmatch(r"budget\s+(off|none|0|[1-9][0-9]{0,12})", rest, re.I)
+            if not match or not getattr(agent, "_goal_running", False):
+                self._flash("/goal budget NUMBER|off changes the goal this turn is running", secs=4)
+                return True
+            budget = int(match[1]) if match[1].isdigit() else 0
+            self._queue_live_goal(stripped, agent.goal, budget, replace=False)
+            return True
+        from .goals import parse_start
+        try:
+            objective, budget = parse_start(rest)
+            too_long = agent.objective_size_error(objective)
+            if too_long:
+                raise ValueError(too_long)
+        except ValueError as exc:
+            self._return_goal_draft(stripped, str(exc))
+            return True
+        current = agent.goal_snapshot() if agent.goal else {}
+        expected = str(current.get("id") or "")
+        if not current.get("text") or current.get("status") == "completed":
+            self._queue_live_goal(stripped, objective, budget, replace=True, expected=expected)
+            return True
+        from rich.text import Text
+        rows = [{"label": "Cancel — keep the current goal", "value": "cancel"},
+                {"label": "Replace goal at the next step", "value": "replace"}]
+        header = [Text("Replace the goal this turn is working on?", style="bold"),
+                  Text("Current: " + style_mod.terminal_safe_text(str(current.get("text") or ""))),
+                  Text("New: " + style_mod.terminal_safe_text(objective)),
+                  Text("The turn keeps running; the new goal takes over at its next step with its own "
+                       "budget: " + (f"{budget:,} tokens" if budget else "none") + ".")]
+
+        def picked(row):
+            if row["value"] == "replace":
+                self._queue_live_goal(stripped, objective, budget, replace=True, expected=expected)
+        self._open_overlay(rows, header=header, footer="Enter select · Esc cancel",
+                           rebuild=lambda ov: rows, on_pick=picked)
+        return True
+
+    def _queue_live_goal(self, draft: str, objective: str, budget, *, replace: bool,
+                         expected: str | None = None) -> None:
+        import uuid
+        agent = self.agent
+        request_id = "tui-goal-" + uuid.uuid4().hex[:16]
+        if expected is None:
+            expected = str(agent.goal_snapshot().get("id") or "") if agent.goal else ""
+        drafts = self.__dict__.setdefault("_live_goal_drafts", {})
+        drafts[request_id] = draft
+        queued = agent.queue_goal_replacement(objective, expected_goal_id=expected,
+                                              request_id=request_id, token_budget=budget,
+                                              replace=replace)
+        if not queued:
+            drafts.pop(request_id, None)
+            self._return_goal_draft(draft, getattr(agent, "_last_persist_error", "")
+                                    or "This turn cannot take a goal change now.")
+            return
+        if self.input_buf.text.strip() == draft:
+            self.input_buf.reset()
+        self.blocks.append({"kind": "user", "text": draft, "tag": "goal · applies at the next step"})
+        self._invalidate()
+
+    def _return_goal_draft(self, draft: str, reason: str) -> None:
+        """A goal change that did not happen: its text goes back where it can be sent again."""
+        if not self.input_buf.text:
+            self.input_buf.insert_text(draft)
+        self.error(reason)
+        self._flash("goal not changed · your text is back in the composer", secs=6)
+
+    def goal_replacement_result(self, request_id, text, ok, error) -> None:
+        """Agent owner thread: a queued replacement or first goal was applied or handed back."""
+        self.__dict__.setdefault("_goal_results", collections.deque()).append(
+            ("replace", request_id, text, ok, error))
+        self._invalidate()
+
+    def goal_edit_result(self, request_id, text, ok, error) -> None:
+        """Agent owner thread: a queued live edit (the token budget) was applied or handed back."""
+        self.__dict__.setdefault("_goal_results", collections.deque()).append(
+            ("edit", request_id, text, ok, error))
+        self._invalidate()
+
+    def _service_goal_results(self) -> bool:
+        """UI loop: show live goal outcomes; a refused change puts its text back in the composer."""
+        results = self.__dict__.get("_goal_results")
+        if not results:
+            return False
+        drafts = self.__dict__.setdefault("_live_goal_drafts", {})
+        while results:
+            kind, request_id, text, ok, error = results.popleft()
+            draft = drafts.pop(request_id, "/goal " + str(text or ""))
+            if ok:
+                self.info("goal replaced · continuing with the new objective" if kind == "replace"
+                          else "goal updated · continuing with the revised budget")
+            else:
+                self._return_goal_draft(draft, error or "The goal change was not applied.")
         return True
 
     def _flush_unsaved_todo_clear(self, sess) -> None:

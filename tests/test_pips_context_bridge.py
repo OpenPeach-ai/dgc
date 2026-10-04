@@ -102,7 +102,7 @@ class PipsContextBridgeTests(unittest.TestCase):
         other.mkdir()
         self.registry.resolve(other)
         self.root = other
-        with self.assertRaisesRegex(RegistryError, "not found in this workspace"):
+        with self.assertRaisesRegex(RegistryError, "not found in this project's Pips"):
             self.read(action="report", run_id=run["id"])
 
     def test_multibyte_context_is_bounded_valid_json(self):
@@ -167,7 +167,9 @@ class PipsContextBridgeTests(unittest.TestCase):
         manager = MCPManager(self.root)
         self.addCleanup(manager.stop_all)
         with patch("dgc.agent.discover_skills", return_value={}), patch("dgc.agent.load_memories", return_value=("", "")):
-            return Agent(self.cfg, UI(), mcp=manager)
+            agent = Agent(self.cfg, UI(), mcp=manager)
+        agent._pips_tools_loaded = True     # the Pips tools under test; use_pips is tested on its own
+        return agent
 
     def test_agent_advertises_only_when_enabled_and_honours_deny(self):
         agent = self.agent()

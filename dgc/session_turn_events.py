@@ -19,7 +19,7 @@ import uuid
 
 from .pip_access import restricted
 from .redaction import contains_secret, secret_values
-from .workspace_registry import RegistryError, WorkspaceRegistry
+from .workspace_registry import RegistryError, WorkspaceRegistry, in_use
 
 MAX_COMPLETIONS = 10000
 MAX_RECORD_BYTES = 2048
@@ -301,7 +301,8 @@ def _eligible(agent):
             and getattr(agent, '_agent_tool_allowlist', None) is None
             and not agent.config.get('subscription_engine', '')
             and agent.config.get('pips_enabled', False) is True and not restricted(agent.config)
-            and not agent.cancelled.is_set() and not getattr(agent, 'stopping', False))
+            and not agent.cancelled.is_set() and not getattr(agent, 'stopping', False)
+            and in_use())
 
 
 def _notice(agent):

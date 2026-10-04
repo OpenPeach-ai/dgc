@@ -1,5 +1,6 @@
 """Pips tools load on demand: off the default request, on after use_pips or a turn about a Pip."""
 import copy
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -103,6 +104,37 @@ class PipsToolLoadingTests(unittest.TestCase):
         self.assertIn("use_pips", seen[0])
         self.assertFalse(seen[0] & _PIPS_TOOL_NAMES, "an ordinary turn does not carry them")
         self.assertTrue(_PIPS_TOOL_NAMES <= seen[-1])
+
+
+    def private_profile(self):
+        from dgc import sessions
+        from dgc.workspace_registry import state_directory
+        home = Path(tempfile.mkdtemp(prefix="dgc-pips-profile-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        env = patch.dict(os.environ, {"DGC_HOME": str(home)})
+        env.start()
+        self.addCleanup(env.stop)
+        files = patch.object(sessions, "SESSIONS_DIR", home / "sessions")
+        files.start()
+        self.addCleanup(files.stop)
+        self.agent.session_file = sessions.new_path(self.config.project_root)
+        self.agent.session_root = self.config.project_root
+        return state_directory() / "registry.sqlite3"
+
+    def test_ordinary_turns_leave_no_pips_state_behind(self):
+        from dgc.session_turn_events import foreground_turn
+        registry = self.private_profile()
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="Done.", finish_reason="stop")), \
+                foreground_turn("foreground_prompt"):
+            self.assertTrue(self.agent.run_turn("Rename the helper"))
+        self.assertFalse(registry.exists(), "a profile that never used Pips gets no Pips registry")
+        self.assertFalse([event for event in self.events if "Pips" in str(event)], self.events)
+
+    def test_the_first_use_of_pips_binds_the_chat_to_its_workspace(self):
+        registry = self.private_profile()
+        self.agent._load_pips_tools()
+        self.assertTrue(registry.exists())
+        self.assertTrue(self.agent.workspace_identity, "the Pips tools can act for this chat")
 
 
 if __name__ == "__main__":

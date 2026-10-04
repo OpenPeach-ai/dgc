@@ -65,6 +65,7 @@ export function mountSetupCards(options) {
    detail(facts,'Run once now',s.run_now?'Yes, after approval':'No');detail(facts,'Source',s.source_policy==='personal'?'No project access':s.source_ref);detail(facts,s.pip_type==='pulse'?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:'Inherit main DGC model');
    if(s.verification_plan){detail(facts,'Execution','Fixed checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Exact check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → HTTP ${test.argv[2]}`:JSON.stringify(test.argv)+' · cwd '+test.cwd);}
    if(s.app_plan){detail(facts,'Connection',s.app_plan.server);for(const call of s.app_plan.calls||[])detail(facts,'Reviewed app read',call.tool+' · account '+(call.account||'server account')+' · '+JSON.stringify(call.arguments));}
+   if(s.web_plan)for(const read of s.web_plan.reads||[])detail(facts,read.kind==='page'?'Reviewed web page':'Reviewed web search',read.kind==='page'?read.url:read.query);
    body.append(facts,node('p','pip-setup-notice',s.scope_notice),node('p','pip-setup-notice',s.runner_notice));
    if(s.run_now_policy)body.append(node('p','pip-setup-notice',s.run_now_policy));
    const reason=node('details','pip-setup-reason');reason.append(node('summary','','Why this Pip'),node('p','',s.reason));body.append(reason);

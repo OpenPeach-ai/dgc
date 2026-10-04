@@ -393,6 +393,9 @@ class Pips:
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
                 and 'app_plan' in values['changes'] and version < 28):
             raise DGCUnsupportedError('Reviewed personal app reads require Pips API 28 or newer')
+        if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)
+                and 'web_plan' in values['changes'] and version < 40):
+            raise DGCUnsupportedError('Reviewed personal web reads require Pips API 40 or newer')
         plan = values.get('changes', {}).get('app_plan') if isinstance(values.get('changes'), dict) else None
         if command == 'propose_pip_update' and isinstance(plan, dict) and plan.get('schema_version') == 3 and version < 39:
             raise DGCUnsupportedError('Additional app searches require Pips API 39 or newer')

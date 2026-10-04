@@ -239,6 +239,10 @@ class ServiceTests(unittest.TestCase):
 
     def test_actual_isolated_python_ignores_home_import_shadow_and_refuses_disabled(self):
         (self.home / "dgc.py").write_text('raise RuntimeError("untrusted imported")')
+        # Pips are on by default; this profile turns them off, so the service must refuse.
+        (self.home / ".dgc").mkdir(mode=0o700, exist_ok=True)
+        (self.home / ".dgc" / "config.json").write_text('{"pips_enabled": false}')
+        os.chmod(self.home / ".dgc" / "config.json", 0o600)
         process = subprocess.run(self.spec["argv"], cwd=self.home, capture_output=True, timeout=15)
         self.assertNotEqual(process.returncode, 0)
         output = (process.stdout + process.stderr).decode()

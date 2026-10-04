@@ -144,8 +144,11 @@ class LocalStartupTests(unittest.TestCase):
         trusted = Path(runtime.__file__).resolve().parents[1]
         env = {"HOME": str(home), "DGC_HOME": str(home), "PATH": os.environ.get("PATH", ""),
                "PYTHONPATH": str(trusted), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
-        # No config exists: the actual trusted CLI must refuse disabled Pips.
-        # If cwd/project won import precedence, either hostile fixture would run.
+        # Pips are on by default; this profile turns them off, so the actual trusted CLI must
+        # refuse. If cwd/project won import precedence, either hostile fixture would run.
+        (home / ".dgc").mkdir(mode=0o700)
+        (home / ".dgc" / "config.json").write_text('{"pips_enabled": false}')
+        os.chmod(home / ".dgc" / "config.json", 0o600)
         child = subprocess.run(runtime._supervisor_command(project), cwd=trusted, env=env,
                                capture_output=True, text=True, timeout=20)
         self.assertEqual(child.returncode, 1, child.stdout + child.stderr)

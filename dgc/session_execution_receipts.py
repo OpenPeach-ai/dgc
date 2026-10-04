@@ -155,7 +155,8 @@ def begin(config, origin, command, turn_id, *, session_revision=0, mode='default
 The caller must refuse Pip children/monitor turns and clone the tool context.
 This function independently refuses disabled/restricted contexts before storage.
 """
-    if config.get('pips_enabled', False) is not True or restricted(config):
+    from .workspace_registry import in_use
+    if config.get('pips_enabled', False) is not True or restricted(config) or not in_use():
         return None
     try:
         if (not isinstance(command, str) or not command.strip() or len(command) > MAX_COMMAND_BYTES

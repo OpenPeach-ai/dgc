@@ -112,7 +112,7 @@ def _integer(value, label, lower, upper):
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -128,6 +128,10 @@ def validate_request(value):
         from .pip_app_access import validate as validate_apps
         request['app_plan'] = validate_apps(value['app_plan'])
         if not personal:_fail('App reads currently require personal scope.')
+    if 'web_plan' in value:
+        from .pip_web_reads import validate as validate_web
+        request['web_plan'] = validate_web(value['web_plan'])
+        if not personal:_fail('Web reads currently require personal scope.')
     pulse = value['pip_type'] == 'pulse' and not personal
     if type(value['pip_type']) is not str or value['pip_type'] not in _AUDIT | {'quill', 'pulse'}:
         _fail('Conversational setup supports source reviewers, Quill and reviewed Pulse plans.')
@@ -206,6 +210,7 @@ def _definition(store, request, workspace_id):
     personal=request.get('scope')=='personal'
     extra = {'source_policy': {'mode':'personal'}} if personal else {}
     if 'app_plan' in request:extra['app_plan']=request['app_plan']
+    if 'web_plan' in request:extra['web_plan']=request['web_plan']
     if 'pip_id' in request:
         from .pip_adaptation import can_propose
         from .pip_archive import require_live
@@ -222,7 +227,8 @@ def _definition(store, request, workspace_id):
             _fail('This Pip does not allow model setup proposals. Use its human controls.', 'permission_denied')
         if pip.get('event_trigger') is not None or pip['source_policy'] != {'mode': 'personal' if personal else 'committed_only'}:
             _fail('This Pip uses event triggers or current-tree source. Review those separately before using conversational calendar setup.', 'unsupported_setup')
-        extra = {**extra, **{key: pip[key] for key in ('model_choice', 'adaptation_policy', 'source_policy')}, 'app_plan': request.get('app_plan',pip.get('app_plan'))}
+        extra = {**extra, **{key: pip[key] for key in ('model_choice', 'adaptation_policy', 'source_policy')}, 'app_plan': request.get('app_plan',pip.get('app_plan')),
+                 'web_plan': request.get('web_plan',pip.get('web_plan'))}
     if 'model_choice' in request:
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
@@ -267,7 +273,7 @@ def _load(registry, setup_id, workspace_id):
             raise ValueError()
         from .pips import _definition as build_definition
         definition = body['definition']
-        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan')})
+        checked = build_definition(**{k: definition.get(k) for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type', 'model_choice', 'adaptation_policy', 'event_trigger', 'source_policy', 'verification_plan', 'app_plan', 'web_plan')})
         if checked != definition or any(definition[k] != request[k] for k in ('name', 'goal', 'source_ref', 'schedule', 'pip_type')):
             raise ValueError()
         if 'model_choice' in request and definition['model_choice'] != request['model_choice']:
@@ -320,9 +326,10 @@ def _projection(registry, row, body, receipt):
             'expected_version': req.get('expected_version'), 'expected_lifecycle_revision': req.get('expected_lifecycle_revision'),
             'model_choice': body['definition']['model_choice'],
             **({'app_plan': body['definition']['app_plan']} if body['definition'].get('app_plan') else {}),
+            **({'web_plan': body['definition']['web_plan']} if body['definition'].get('web_plan') else {}),
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
-            'scope_notice': ('Personal scope. No project, shell or browser access. Only separately reviewed app reads, if present.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
+            'scope_notice': ('Personal scope. No project files, shell or browsing. Only the reviewed app reads and web reads listed here, if any.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
             'runner_notice': 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.',
             'run_now_policy': ("The immediate run counts as today's daily occurrence; the next scheduled run is on the following local date."
                                if body['counts_for_date'] else 'Queue one run after approval, in addition to the displayed future schedule.' if req['run_now'] else None)}

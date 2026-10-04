@@ -540,6 +540,8 @@ def validate_enqueue(store, pin, pip, source_revision, model, actor):
             raise _error('The target Personal scope or lifecycle changed.', 'stale_handoff')
         manifest.update(source_policy=pip['source_policy'], run_kind='personal_task',
                         tools=[], policy='read_only', app_plan=pip.get('app_plan'))
+        if pip.get('web_plan') is not None:     # the recipient's own reviewed reads, pinned by job_version
+            manifest['web_plan'] = pip['web_plan']
     return validate_manifest(pin, manifest)
 
 

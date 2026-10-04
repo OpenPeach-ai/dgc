@@ -57,6 +57,9 @@ class PipProposalToolTests(unittest.TestCase):
                 return lambda *a, **kw: None
         with patch("dgc.agent.discover_skills", return_value={}), patch("dgc.agent.load_memories", return_value=("", "")):
             agent = Agent(self.cfg, UI())
+        # These tests exercise the Pips tools themselves; test_pips_tool_loading covers how a
+        # chat loads them (use_pips).
+        agent._pips_tools_loaded = True
         self.addCleanup(agent.mcp.stop_all)
         scope = patch.object(sessions, "SESSIONS_DIR", self.base / "session-files")
         scope.start()

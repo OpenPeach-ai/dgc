@@ -231,6 +231,7 @@ TOOL_SCHEMAS = [
          "pip_type": {"type": "string", "enum": ["scout", "lens", "rook", "lock", "quill", "pulse"]},
          "scope": {"type": "string", "enum": ["project", "personal"], "description": "Personal Pips persist across directories and receive no project files. Omitted means project."},
          "app_plan": {"type":"object", "description":"Optional exact read grant obtained from inspected app tools, with connection/schema digests and connected account IDs. Never invent these values."},
+         "web_plan": {"type":"object", "description":"Personal only, optional: {schema_version:1, reads:[{kind:'page', url:'https://...'} | {kind:'search', query:'...'}]}, 1-4 reads the user named. DGC reads exactly these before each run; the Pip cannot browse elsewhere."},
          "work_kind": {"type": "string", "enum": ["personal_task", "source_review", "documentation_draft", "command_verification", "app_smoke_test"]},
          "verification_plan": {"type": "object", "additionalProperties": False,
              "description": "Required for Pulse only. Exact human-reviewed commands or reserved local HTTP probes. No model runs during verification. Limits are fixed by DGC; omit limits to use defaults.",
@@ -3934,17 +3935,22 @@ def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES) -> tuple[s
     raise ValueError("fetch failed")
 
 
+def page_text(raw: str) -> str:
+    """A fetched page as readable text: scripts, styles and tags out, entities decoded."""
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=re.S | re.I)
+    text = _TAG.sub(" ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n\n", text).strip()
+
+
 def web_fetch(args: dict, ctx) -> str:
     url = str(args.get("url", ""))
     try:
         final_url, text = _fetch_public_text(url)
     except (requests.RequestException, ValueError) as e:
         return f"error: {e}"
-    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
-    text = _TAG.sub(" ", text)
-    text = html.unescape(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    text = page_text(text)
     text = _safe_output(text, ctx)
     if len(text) > MAX_FETCH_CHARS:
         text = _prefix_without_split_marker(text, MAX_FETCH_CHARS) + "\n… (truncated)"
