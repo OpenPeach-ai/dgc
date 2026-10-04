@@ -71,6 +71,21 @@ chat; nothing is sent until you send it. If you'd rather pick the character and
 fields yourself, choose **Advanced: choose a Pip** (or **Choose a Pip myself** for a
 Personal Pip).
 
+**From a starter.** The Pips view's **New** lists starter Pips for common jobs:
+
+| Starter | Pip | Runs |
+| --- | --- | --- |
+| Review each commit | Rook, this project | After each new commit to the branch, at most every 5 minutes |
+| Nightly security review | Lock, this project | Daily at 02:00 in your time zone |
+| Morning brief | Personal | Weekdays at 07:30, from up to four pages and searches you name |
+
+Choose one, adjust the branch, time or reads, and choose **Prepare setup card**. The
+card opens in its review straight away; approving it is still your decision. From the
+CLI, `dgc pips starters` lists them and `dgc pips starter commit-review` (or
+`nightly-security`, `morning-brief`) shows the exact job and asks before creating it.
+`--branch`, `--time`, `--timezone`, `--web-page` and `--web-search` change the
+choices; `--yes` approves the job shown without the question.
+
 **From the main chat.** Just ask, for example: "Review committed changes in this
 project every weekday at 9:00 Europe/London, and run once now." The main chat loads
 its Pips tools and prepares a **setup card**. The card shows the project folder,
@@ -81,8 +96,9 @@ until you approve the exact card. A card expires after seven days, or sooner if 
 next run time it shows has already passed.
 
 The main chat can set up Scout, Lens, Rook and Lock reviews, Quill drafts, Pulse
-command plans and Personal Pips. It cannot set up Patch, and it cannot add event
-triggers; use the Pips view or the CLI for those.
+command plans and Personal Pips. A new Scout, Lens, Rook, Lock or Quill can run after
+each new commit instead of on a schedule. The main chat cannot set up Patch or the
+other event triggers; use the Pips view or the CLI for those.
 
 **From the CLI.**
 

@@ -17,7 +17,7 @@ capabilities object, so strict older clients still accept the handshake.
 ```json
 {
   "pips_supported": true,
-  "pips_api_version": 40,
+  "pips_api_version": 41,
   "pips_enabled": true,
   "pips_setup_notifications": 1,
   "pip_references": 1,
@@ -79,6 +79,16 @@ The reply is a `pips_result` event that carries the nested request ID:
   or 96 KiB per page, with `next_cursor`, `oldest_cursor`, `has_more`,
   `retention_limit`, `retention_scope` and `history_may_be_truncated`. Each workspace keeps its latest 5,000 events.
 
+`list_pip_starters {request_id}` and `propose_starter_pip {request_id, starter, params}`
+(API 41) are nested controls handled by the chat backend, because a setup card belongs
+to a chat. The first returns `{starters: [...]}`: each has `id`, `title`, `summary`,
+`pip_type`, `scope`, `name`, `when`, `default_time` and the `params` it takes (`branch`,
+`time`, `timezone`, `web_reads`). The second saves one pending setup card for this chat
+from the starter's fixed job and the checked choices, and returns `{setup}`; it creates
+no Pip and starts nothing. A setup may carry `event_trigger`
+(`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
+the approved Pip reviews after each new commit to `source_ref`.
+
 `notify_pip_setup {request_id, setup_id}` is a nested control for the chat that
 proposed a setup card. After the user approves the card, send it to that chat; the
 backend checks the session, workspace and accepted receipt, then delivers a
@@ -90,7 +100,7 @@ refuse it; the approved setup stays saved.
 
 ```json
 {"type": "pips_enable", "enabled": false, "request_id": "e1"}
-{"type": "pips_status", "request_id": "e1", "enabled": false, "api_version": 40,
+{"type": "pips_status", "request_id": "e1", "enabled": false, "api_version": 41,
  "restart_required": true, "message": "Pips disabled. All jobs are paused and active runs are stopping."}
 ```
 

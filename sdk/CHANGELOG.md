@@ -6,7 +6,7 @@ Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips
 read and manage the Pips of the session's DGC profile: list, inspect and run Pips, read reports,
 and save proposals, setups and handoffs for review. Every mutation needs the host's explicit
 `approved=True`, and each command is refused before it is sent when the runtime's Pips API is too
-old for it. The CLI advertises Pips API 40. See [PIPS.md](PIPS.md).
+old for it. The CLI advertises Pips API 41. See [PIPS.md](PIPS.md).
 
 `turn_end.reason` and both `RunStatus` types gain `paused`: a run that stops at its goal's token
 budget is neither completed nor failed. The vendored editor protocol gains the Pips control,

@@ -5151,17 +5151,17 @@ class Agent(GoalLifecycle):
             raise RegistryError("scope", "Only the main user chat can draft Pip proposals.")
         if not self.session_file:
             raise RegistryError("session_required", "Save this chat before drafting a Pip proposal.")
-        identity = self._associate_workspace()
+        identity = self._associate_workspace(force=True)    # drafting a Pip is using Pips
         if identity is None:
             raise RegistryError("session_required", "This chat needs a valid local workspace association before proposing a Pip update.")
         return {"session_id": self.session_file.stem, "workspace_id": identity["workspace_id"]}
 
-    def _associate_workspace(self) -> dict | None:
+    def _associate_workspace(self, *, force: bool = False) -> dict | None:
         """Best-effort local identity, with one honest notice per distinct failure."""
         from .workspace_sessions import associate_current_session
         from .workspace_registry import RegistryError, in_use
         # A profile that has never used Pips gets no registry until a chat loads the Pips tools.
-        if not self.session_file or not (in_use() or self._pips_loaded()):
+        if not self.session_file or not (force or in_use() or self._pips_loaded()):
             self.workspace_identity = None
             return None
         try:

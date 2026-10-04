@@ -15,6 +15,12 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
 
 - `dgc pips` creates, runs, reviews and stops Pips from the terminal; `dgc pips serve` runs the
   local runner that schedules need.
+- Starter Pips cover three common jobs: review each new commit, a nightly security review, and a
+  weekday morning brief from pages and searches you choose. `dgc pips starters` lists them and
+  `dgc pips starter NAME` shows the exact job and creates it once you confirm. In the Pips view a
+  starter becomes a setup card you approve like any other.
+- A setup card from the chat or a starter can run a new project reviewer after each new commit
+  instead of on a schedule.
 - The main chat carries one small `use_pips` tool and loads the Pips tools only when a task needs
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them

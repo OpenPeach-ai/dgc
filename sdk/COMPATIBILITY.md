@@ -46,7 +46,7 @@ and older SDKs may not recognize it, so update the CLI and the SDK together.
 ## Pips (SDK 0.7.0)
 
 SDK 0.7.0 adds `session.pips` (Python sync and async, and TypeScript). It pairs with
-CLI 0.48.0, which advertises **Pips API 40** inside `ready.capabilities` on editor
+CLI 0.48.0, which advertises **Pips API 41** inside `ready.capabilities` on editor
 protocol v14. Each Pips control has a minimum Pips API (8 for the original controls,
 up to 40 for reviewed web reads), and the SDK refuses a control before sending it when
 the backend's `pips_api_version` is lower. The backend's Pips registry is schema 33;

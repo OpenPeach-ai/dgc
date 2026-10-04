@@ -33,6 +33,16 @@ def parser():
         target.add_argument("pip_id", help="Pip ID from list")
 
     command("enable", "enable Pips locally through Config.set")
+    command("starters", "list starter Pips: common jobs to review and approve")
+    starter = command("starter", "review a starter Pip's exact job here, then create it")
+    from .pip_starters import STARTERS
+    starter.add_argument("starter_id", choices=[key.replace("_", "-") for key in STARTERS])
+    starter.add_argument("--branch", help="project starters: the branch to review (default: the checked-out branch)")
+    starter.add_argument("--time", help="scheduled starters: HH:MM, 24-hour clock")
+    starter.add_argument("--timezone", help="scheduled starters: IANA zone such as Asia/Kolkata (default: this computer's)")
+    starter.add_argument("--web-page", action="append", metavar="URL", help="morning brief: an exact https page to read (repeat)")
+    starter.add_argument("--web-search", action="append", metavar="QUERY", help="morning brief: a fixed search (repeat)")
+    starter.add_argument("--yes", action="store_true", help="approve the displayed job without the question")
     command("execution", "inspect this runner’s bounded execution support and limits")
     command("models", "list models on the configured native connection")
     command("connections", "list existing Settings connections and scoped Pip support")
@@ -675,6 +685,9 @@ def _request(args):
 
 
 def _format(value):
+    if "starters" in value:
+        return "\n".join(f'{item["id"].replace("_", "-")}  {item["title"]} — {item["summary"]}' for item in value["starters"]) + (
+            "\n\nReview and create one with: dgc pips starter NAME (see --help for its options).")
     if "setups" in value:
         return "\n\n".join(_format({"setup": item}) for item in value["setups"]) or (
             "No setup drafts awaiting review. Describe a Pip task and its project in the main DGC chat.")
@@ -685,6 +698,7 @@ def _format(value):
                  f'Type: {item["pip_type"]} · work: {item["work_kind"]}',
                  f'Source: committed {item["source_ref"]}',
                  'Schedule: ' + json.dumps(item.get('schedule'), ensure_ascii=False),
+                 *(['Trigger: after each new commit to ' + item['source_ref']] if item.get('event_trigger') else []),
                  f'Next scheduled run: {item.get("next_run_at") or "None (manual)"}',
                  'Run once on approval: ' + ('Yes' if item['run_now'] else 'No'),
                  'Saving activates this Pip. It does not start or resume the local runner.',
@@ -1084,6 +1098,79 @@ def _workspace_command(config, args):
         return registry.sessions(workspace["id"], after=args.after, limit=args.limit)
 
 
+def _starter_command(config, args):
+    """Create a starter Pip from the terminal: show its exact job, ask, then create and apply it.
+
+    The terminal has no chat session to own a setup card, so the review happens here, the way
+    `dgc pips setup accept` asks before saving. The job is checked by the same rules a setup card
+    is, created by the local user, and its schedule or trigger applied as a reviewed job change.
+    """
+    from . import pips
+    from .pip_setup import validate_request
+    from .pip_starters import STARTERS, build, local_timezone
+    from .style import terminal_safe_text
+    starter_id = args.starter_id.replace("-", "_")
+    spec = STARTERS[starter_id]
+    params = {}
+    for key in ("branch", "time"):
+        if getattr(args, key):
+            params[key] = getattr(args, key)
+    if "timezone" in spec["params"]:
+        zone = args.timezone or local_timezone()
+        if not zone:
+            raise RegistryError("invalid_starter", "This computer's time zone is unknown. Repeat with --timezone, for example --timezone Asia/Kolkata.")
+        params["timezone"] = zone
+    elif args.timezone:
+        params["timezone"] = args.timezone
+    reads = [*({"kind": "page", "url": url} for url in args.web_page or ()),
+             *({"kind": "search", "query": query} for query in args.web_search or ())]
+    if reads:
+        params["web_reads"] = reads
+    checked = validate_request(build(starter_id, params, project_root=config.project_root,
+                                     request_key="cli-starter"))
+    personal = checked.get("scope") == "personal"
+    when = (f"after each new commit to {checked['source_ref']} (at most every 5 minutes)" if checked.get("event_trigger")
+            else (f"daily at {checked['schedule']['time']} {checked['schedule']['timezone']}" if checked["schedule"]["type"] == "daily"
+                  else f"weekdays at {checked['schedule']['cron'].split()[1].zfill(2)}:{checked['schedule']['cron'].split()[0].zfill(2)} {checked['schedule']['timezone']}"))
+    heading = checked["name"] if checked["name"] == spec["title"] else f"{spec['title']}: {checked['name']}"
+    lines = [f"{heading} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
+             f"Runs: {when}", f"Job: {checked['goal']}"]
+    if not personal:
+        lines.append(f"Reads: the committed source at {checked['source_ref']}. No tests, writes or network.")
+    for read in (checked.get("web_plan") or {}).get("reads", []):
+        lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
+    print(terminal_safe_text("\n".join(lines)), file=sys.stderr, flush=True)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise RegistryError("confirmation_required", "Review the displayed job, then repeat with --yes to create this Pip.")
+        try:
+            answer = input("Create this Pip and turn on its " + ("trigger" if checked.get("event_trigger") else "schedule") + "? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Cancelled. No Pip was created.")
+            return None
+
+    def control(request):
+        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
+        if not response["ok"]:
+            raise RegistryError(response["error"]["code"], response["error"]["message"])
+        return response["result"]
+    with WorkspaceRegistry() as registry:
+        workspace_id = registry.personal()["id"] if personal else registry.resolve(config.project_root)["id"]
+    pip = control({"type": "create_pip", "workspace_id": workspace_id, "name": checked["name"], "goal": checked["goal"],
+                   "pip_type": checked["pip_type"], **({} if personal else {"source_ref": checked["source_ref"]})})["pip"]
+    changes = {"event_trigger": checked["event_trigger"]} if checked.get("event_trigger") else {"schedule": checked["schedule"]}
+    if checked.get("web_plan"):
+        changes["web_plan"] = checked["web_plan"]
+    proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
+                        "changes": changes, "reason": checked["reason"]})["proposal"]
+    control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
+             "expected_version": pip["current_version"]})
+    return {"pip": control({"type": "get_pip", "pip_id": pip["id"]})["pip"],
+            "next": "Schedules and triggers run while the local runner is running: dgc pips serve."}
+
+
 def handle_command(config, argv, *, in_chat=False):
     try:
         args = parser().parse_args(argv or ["list"])
@@ -1116,6 +1203,13 @@ def handle_command(config, argv, *, in_chat=False):
                 result = pip_daemon.runner_status(registry)
         elif args.command == "workspace":
             result = _workspace_command(config, args)
+        elif args.command == "starters":
+            from .pip_starters import catalog
+            result = {"starters": catalog()}
+        elif args.command == "starter":
+            result = _starter_command(config, args)
+            if result is None:
+                return 0
         elif args.command == "capacity":
             if in_chat:
                 raise RegistryError("separate_terminal", "Inspect local capacity from a separate terminal with dgc pips capacity.")

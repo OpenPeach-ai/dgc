@@ -5,7 +5,7 @@ lets trusted host code read and manage the Pips of an existing DGC profile throu
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions.
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 40** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 41** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -118,7 +118,9 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. The current backend is API 40.
+needs a newer API, before sending it. The current backend is API 41. API 41 adds starter
+Pips for the Pips view and the CLI; the SDK does not wrap them, because a host can create
+the same job with `create_pip` and a reviewed update.
 
 | API | Commands or parameters |
 | --- | --- |

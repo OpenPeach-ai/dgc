@@ -9,7 +9,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.48.0 |
 | VS Code extension | 0.33.0 |
 | SDK (Python and TypeScript) | 0.7.0 |
-| Pips API | 40 |
+| Pips API | 41 |
 | Editor protocol | v14 |
 | Pips registry schema | 33 |
 
@@ -734,3 +734,4 @@ Clients check it before using a newer control.
 | 38 | Calendar guests, invitations and finite series |
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
+| 41 | Starter Pips; setup cards that run after each new commit |

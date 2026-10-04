@@ -112,7 +112,7 @@ def _integer(value, label, lower, upper):
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -156,6 +156,18 @@ def validate_request(value):
             _fail('The work kind must match the Pip role.', 'unsupported_work_kind')
     if type(value['run_now']) is not bool:
         _fail('run_now must be an explicit true or false.')
+    if 'event_trigger' in value:
+        # One trigger fits a setup card: review the committed source after each new commit to
+        # source_ref. Path rules and other events stay with the Pip's own job controls.
+        if personal or value['pip_type'] not in _AUDIT | {'quill'} or _PINS & set(value):
+            _fail('A commit trigger on a setup card is for a new project reviewer or Quill.', 'unsupported_setup')
+        if value['schedule'] is not None:
+            _fail('A Pip runs on a schedule or after commits, not both.', 'invalid_event_trigger')
+        from .pip_event_triggers import validate_event_trigger
+        trigger = validate_event_trigger(value['event_trigger'])
+        if trigger is None or trigger['events'] != ['commit_changed']:
+            _fail('A setup card can only trigger a review after each new commit.', 'unsupported_setup')
+        request['event_trigger'] = trigger
     from .pip_schedules import validate_schedule
     request['schedule'] = validate_schedule(value['schedule'])
     request['source_ref'] = _text(value.get('source_ref', 'HEAD'), 'source_ref', 200)
@@ -233,6 +245,8 @@ def _definition(store, request, workspace_id):
         extra['model_choice'] = request['model_choice']
     if 'verification_plan' in request:
         extra['verification_plan'] = request['verification_plan']
+    if 'event_trigger' in request:
+        extra['event_trigger'] = request['event_trigger']
     return build_definition(**{key: request[key] for key in ('name', 'goal', 'source_ref', 'schedule', 'pip_type')}, **extra)
 
 
@@ -281,7 +295,7 @@ def _load(registry, setup_id, workspace_id):
         if definition.get('verification_plan') != request.get('verification_plan'): raise ValueError()
         personal=request.get('scope')=='personal'
         if (definition['policy'] != ('review_required' if request['pip_type'] == 'pulse' and not personal else 'read_only') or definition['source_policy'] != {'mode': 'personal' if personal else 'committed_only'}
-                or definition['event_trigger'] is not None or body['project_root'] != request['target_root']):
+                or definition['event_trigger'] != request.get('event_trigger') or body['project_root'] != request['target_root']):
             raise ValueError()
         from .pip_approvals import expires_at
         if body['expires_at'] != expires_at(body['created_at']) or _plan(request['schedule'], request['run_now'], body['created_at']) != (body['next_run_at'], body['counts_for_date']):
@@ -327,10 +341,12 @@ def _projection(registry, row, body, receipt):
             'model_choice': body['definition']['model_choice'],
             **({'app_plan': body['definition']['app_plan']} if body['definition'].get('app_plan') else {}),
             **({'web_plan': body['definition']['web_plan']} if body['definition'].get('web_plan') else {}),
+            **({'event_trigger': req['event_trigger']} if req.get('event_trigger') else {}),
             'receipt': receipt, 'permissions': body['definition']['policy'], 'source_policy': 'personal' if req.get('scope')=='personal' else 'committed_only',
             **({'verification_plan': req['verification_plan']} if req['pip_type'] == 'pulse' and req.get('scope')!='personal' else {}),
             'scope_notice': ('Personal scope. No project files, shell or browsing. Only the reviewed app reads and web reads listed here, if any.' if req.get('scope')=='personal' else pulse_scope(req['verification_plan']) if req['pip_type'] == 'pulse' else SCOPE_NOTICE),
-            'runner_notice': 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.',
+            'runner_notice': (f"DGC checks {req['source_ref']} for new local commits only while the local Pips runner is enabled and running, and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Saving setup does not start or resume the runner."
+                              if req.get('event_trigger') else 'A schedule runs only while the local Pips runner is enabled and running. Saving setup does not start or resume the runner.'),
             'run_now_policy': ("The immediate run counts as today's daily occurrence; the next scheduled run is on the following local date."
                                if body['counts_for_date'] else 'Queue one run after approval, in addition to the displayed future schedule.' if req['run_now'] else None)}
 
@@ -601,6 +617,9 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
                 # allows interval previews to survive a later human acceptance.
                 registry.db.execute('INSERT INTO pip_schedule_state VALUES(?,?,?,?,NULL,NULL)',
                                     (pip_id, version, body['created_at'], body['next_run_at']))
+            if request.get('event_trigger') is not None:
+                from .pip_event_triggers import reset_trigger
+                reset_trigger(registry, pip_id, version, request['event_trigger'], now)
             pulse_request = None
             if request['pip_type'] == 'pulse' and not personal:
                 # This human setup decision is also the exact durable execution

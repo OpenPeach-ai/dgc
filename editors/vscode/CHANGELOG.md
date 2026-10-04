@@ -8,6 +8,9 @@
   Pips**). Create Project and Personal Pips, review their setups, proposals, findings, handoffs
   and drafts, and talk to each Pip in its own conversation. Each Pip has its own plush character,
   whose pose follows its real state.
+- **New** offers starter Pips: review each commit, a nightly security review, and a weekday
+  morning brief. Pick one, choose the branch or time, and DGC prepares a setup card that opens
+  straight into its review. Nothing is created until you approve the card.
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and
   connector draft rows in the main chat open the matching review in the Pips view.
 - Personal Pips: choose a connected account and exact app reads, add reviewed web reads (up to

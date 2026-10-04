@@ -152,3 +152,27 @@ test('personal app permissions require a readable bounded grant on the review',(
  assert.throws(()=>model.pipSetup({...s,app_plan:{...plan,calls:[{...plan.calls[0],tool:'GMAIL_SEND_EMAIL'}]}},workspace.id));
  assert.throws(()=>model.pipSetup({...s,app_plan:{...plan,calls:[{...plan.calls[0],account:'default'}]}},workspace.id));
 });
+
+// Starter Pips (Pips API 41): fixed jobs that become ordinary setup cards, plus the commit trigger they can carry.
+const trigger={events:['commit_changed'],minimum_minutes:5,missed_policy:'coalesce_latest'};
+const commitCard=(extra={})=>fixture({name:'Commit reviewer',source_ref:'main',schedule:null,next_run_at:null,run_now:false,run_now_policy:null,event_trigger:trigger,runner_notice:'DGC checks main for new local commits only while the local Pips runner is enabled and running, and reviews at most every 5 minutes. Saving setup does not start or resume the runner.',...extra});
+const starterList=[{id:'commit_review',title:'Review each commit',summary:'Rook reviews the committed source after each new commit.',pip_type:'rook',scope:'project',name:'Commit reviewer',when:'commit',default_time:null,params:['branch']},{id:'nightly_security',title:'Nightly security review',summary:'Lock reviews every night.',pip_type:'lock',scope:'project',name:'Nightly security review',when:'daily',default_time:'02:00',params:['branch','time','timezone']},{id:'morning_brief',title:'Morning brief',summary:'A Personal Pip writes a brief.',pip_type:'lens',scope:'personal',name:'Morning brief',when:'weekdays',default_time:'07:30',params:['time','timezone','web_reads']}];
+
+test('a commit trigger is a reviewed setup field only for a new project reviewer with no schedule',()=>{
+ const s=commitCard();assert.equal(model.pipSetup(s,workspace.id),s);
+ for(const change of [{schedule:fixture().schedule,next_run_at:'2099-10-03T05:30:00Z'},{event_trigger:{...trigger,events:['session_turn_completed']}},{event_trigger:{...trigger,minimum_minutes:1}},{event_trigger:{...trigger,commit_paths:['src/']}},{event_trigger:'commit'},{source_policy:'personal'},{pip_id:pipId,expected_version:1,expected_lifecycle_revision:1}])assert.throws(()=>model.pipSetup({...s,...change},workspace.id),JSON.stringify(change));
+});
+
+test('starters appear at API 41 only and a chosen starter becomes a setup card opened for review',async()=>{
+ const old=setup({api:40,proposal:null});await old.drain();old.click('#new-pip');await old.drain();assert.equal(old.requests('list_pip_starters').length,0);assert.equal(old.d.querySelector('[data-starter]'),null);
+ const x=setup({api:41,proposal:null});await x.drain({list_pip_starters:()=>({starters:starterList})});x.click('#new-pip');await x.drain({list_pip_starters:()=>({starters:starterList})});
+ assert.deepEqual([...x.d.querySelectorAll('[data-starter]')].map(b=>b.dataset.starter),['commit_review','nightly_security'],'project starters only in a project');
+ x.click('[data-starter=commit_review]');assert.ok(x.d.querySelector('#starter-branch'));assert.equal(x.d.querySelector('#starter-time'),null);
+ x.input('#starter-branch','main');x.click('#review-confirm');
+ const request=x.requests('propose_starter_pip')[0];assert.deepEqual(JSON.parse(JSON.stringify(request.request)),{type:'propose_starter_pip',starter:'commit_review',params:{branch:'main'}});
+ assert.equal(x.requests('create_pip').length+x.requests('accept_pip_setup').length,0,'a starter creates nothing');
+ const card=commitCard();x.answer(request,{setup:card});await x.drain({get_pip_setup:()=>({setup:card}),list_pip_setups:()=>({setups:[card]})});
+ const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog,'the card opens straight into its review');assert.match(dialog.textContent,/After each new commit to main, at most every 5 minutes/);assert.equal(x.requests('accept_pip_setup').length,0);
+});
+
+test('extension host gates starter commands at API 41',()=>{for(const api of [40,41]){const posted=[],sent=[],vscode={};const {PipsEditor}=load(viewCode,name=>name==='vscode'?vscode:require(name));const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});bridge.receive({type:'pipsRequest',id:'l',request:{type:'list_pip_starters'}});bridge.receive({type:'pipsRequest',id:'p',request:{type:'propose_starter_pip',starter:'commit_review',params:{}}});assert.equal(sent.length,api===41?2:0);if(api===40)assert.match(posted.at(-1).error.message,/API 41/);}});

@@ -200,7 +200,7 @@ _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under
 RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
-PIPS_API_VERSION = 40
+PIPS_API_VERSION = 41
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.
@@ -3981,6 +3981,30 @@ class Backend:
             if quiet:
                 self._suppress_wakes(False)
 
+    def _pip_starter(self, config, request):
+        """Starter Pips: list them, or save one as a pending setup card owned by this chat.
+
+        Handled here rather than in pips.handle_control because a setup card belongs to a chat
+        session, which only the chat backend knows; the editor never supplies one.
+        """
+        import uuid
+        from .pip_starters import build, catalog
+        from .workspace_registry import RegistryError, WorkspaceRegistry
+        allowed = {"type", "request_id", "starter", "params"} if request["type"] == "propose_starter_pip" else {"type", "request_id"}
+        if set(request) - allowed or not isinstance(request.get("params", {}), dict):
+            raise RegistryError("invalid_request", "Choose a starter and its options.")
+        if request["type"] == "list_pip_starters":
+            return {"starters": catalog()}
+        from . import pip_setup
+        from .redaction import contains_secret, secret_values
+        origin = self.agent._pip_proposal_origin()
+        setup_request = build(request.get("starter"), request.get("params") or {},
+                              project_root=config.project_root, request_key="starter-" + uuid.uuid4().hex[:24])
+        if contains_secret(setup_request, secret_values(config)):
+            raise RegistryError("secret_detected", "A starter choice looks like a configured secret. Nothing was saved.")
+        with WorkspaceRegistry() as registry:
+            return {"setup": pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])}
+
     def _pips_failure(self, cmd, code, message):
         from .redaction import redact_text
         message = redact_text(str(message), secret_values(self.config))[:1500]
@@ -4094,6 +4118,12 @@ class Backend:
                 value = notify(self, config, cmd["request"])
                 self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                              command="notify_pip_setup", ok=True, result=value)
+                return
+            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip"):
+                kind = cmd["request"]["type"]
+                value = self._pip_starter(config, cmd["request"])
+                self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
+                             command=kind, ok=True, result=value)
                 return
             from .pips import handle_control
             if cmd["request"].get("type") in ("run_pip", "send_pip_message", "accept_pip_handoff"):
