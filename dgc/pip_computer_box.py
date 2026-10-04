@@ -270,7 +270,10 @@ def find_chrome(home: Path | None = None) -> Path | None:
     Snap-packaged Chromium cannot run inside another sandbox, so it is never chosen.
     """
     home = home or Path.home()
-    for build in sorted((home / ".cache" / "ms-playwright").glob("chromium-*/chrome-linux*/chrome"), reverse=True):
+    roots = [Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])] if os.environ.get("PLAYWRIGHT_BROWSERS_PATH") else []
+    roots.append(home / ".cache" / "ms-playwright")
+    builds = [b for root in roots for b in root.glob("chromium-*/chrome-linux*/chrome")]
+    for build in sorted(builds, key=lambda b: b.parent.parent.name, reverse=True):
         if os.access(build, os.X_OK):
             return build
     for path in ("/opt/google/chrome/chrome", "/opt/chromium/chrome", "/usr/lib/chromium/chromium"):

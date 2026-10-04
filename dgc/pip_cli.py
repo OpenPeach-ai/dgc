@@ -43,6 +43,26 @@ def parser():
     notify.add_argument("--alerts", choices=(*severities, "off"),
                         help="the least severe new finding that brings the digest back before tomorrow, or off")
     job(command("outcomes", "what became of a Pip's findings: accepted, dismissed, gone after a change"))
+    computer = command("computer", "a Personal Pip's own browser: give one, see what waits for you, approve or stop")
+    computer_actions = computer.add_subparsers(dest="computer_action", required=True)
+    for action, help_text in (("status", "is the computer on, and what is waiting"),
+                              ("give", "give a Personal Pip its own computer (asks once)"),
+                              ("remove", "take a Pip's computer away (asks once)"),
+                              ("pending", "changes waiting for your approval"),
+                              ("approve", "send one waiting change exactly as shown"),
+                              ("reject", "drop one waiting change; nothing is sent"),
+                              ("stop", "close the Pip's browser now; anything waiting is dropped"),
+                              ("frames", "a run's screenshots, oldest first")):
+        item = computer_actions.add_parser(action, help=help_text, allow_abbrev=False)
+        item.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        if action in ("approve", "reject"):
+            item.add_argument("action_id")
+        elif action == "frames":
+            item.add_argument("run_id")
+        else:
+            item.add_argument("pip_id")
+        if action in ("give", "remove", "approve", "stop"):
+            item.add_argument("--yes", action="store_true", help="skip the question")
     starter = command("starter", "review a starter Pip's exact job here, then create it")
     from .pip_starters import STARTERS
     starter.add_argument("starter_id", choices=[key.replace("_", "-") for key in STARTERS])
@@ -722,6 +742,32 @@ def _request(args):
 
 
 def _format(value):
+    if "computer" in value and isinstance(value["computer"], dict) and "granted" in value["computer"]:
+        item = value["computer"]
+        lines = [("Has a computer." if item["granted"] else "No computer. Give one with: dgc pips computer give PIP")
+                 + ("" if item["available"] else " This computer cannot host one yet: " + item["reason"])]
+        if item["pending"]:
+            lines.append(f'{item["pending"]} change(s) waiting for you: dgc pips computer pending {item["pip_id"]}')
+        return "\n".join(lines)
+    if "actions" in value and all(isinstance(a, dict) and "summary" in a for a in value["actions"]):
+        if not value["actions"]:
+            return "Nothing is waiting for your approval."
+        lines = []
+        for a in value["actions"]:
+            s = a["summary"]
+            lines.append(f'{a["id"]}  {a["status"]}  {s["method"]} {s["host"]}{s["path"]}  (from {s.get("page", "")})')
+            lines += [f'    {f["name"]}: {f["value"]}' for f in s["fields"]]
+            if a["status"] == "pending":
+                lines.append(f'    Approve: dgc pips computer approve {a["id"]}    Reject: dgc pips computer reject {a["id"]}')
+        return "\n".join(lines)
+    if "action" in value and isinstance(value["action"], dict) and "summary" in value["action"]:
+        a = value["action"]
+        return {"approved": "Approved. DGC sends it within a few seconds while the Pips runner is running.",
+                "rejected": "Rejected. Nothing was sent."}.get(a["status"], f'Now {a["status"]}.')
+    if "frames" in value and "run_id" in value:
+        return "\n".join(f'{f["frame"]}  {f["label"]}  {f["url"]}' for f in value["frames"]) or "No screenshots for this run."
+    if set(value) == {"pip_id", "stopping"}:
+        return "Stopping. The browser closes within a few seconds; anything waiting was dropped."
     if set(value) == {"digest"}:          # dgc pips digest; other results carry a hash named digest
         return format_digest(value["digest"])
     if "settings" in value and "min_severity" in value["settings"]:
@@ -1186,6 +1232,73 @@ def _digest_command(config, args):
     return {"digest": digest}
 
 
+def _computer_command(config, args):
+    """`dgc pips computer ...`: one step each, with a plain question before anything consequential."""
+    from . import pips
+    from .pip_computer import PLAN
+
+    def control(request):
+        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
+        if not response["ok"]:
+            raise RegistryError(response["error"]["code"], response["error"]["message"])
+        return response["result"]
+
+    def confirm(question):
+        if getattr(args, "yes", False):
+            return True
+        if not sys.stdin.isatty():
+            raise RegistryError("confirmation_required", question + " Repeat with --yes to confirm.")
+        try:
+            return input(question + " [y/N] ").strip().lower() in ("y", "yes")
+        except EOFError:
+            return False
+
+    action = args.computer_action
+    if action in ("status", "pending"):
+        value = control({"type": "get_pip_computer", "pip_id": args.pip_id})["computer"]
+        if action == "pending":
+            value = {"actions": [a for a in control({"type": "list_pip_computer_actions", "pip_id": args.pip_id})["actions"]
+                                 if a["status"] == "pending"]}
+        return {"computer": value} if action == "status" else value
+    if action in ("give", "remove"):
+        pip = control({"type": "get_pip", "pip_id": args.pip_id})["pip"]
+        if action == "give":
+            print("This gives the Pip its own browser and files, separate from yours. It can read public websites.\n"
+                  "Anything that would submit or change something on a website waits for your approval.\n"
+                  "It never sees your passwords, cannot reach your local network, and cannot make payments.", file=sys.stderr)
+        if not confirm(("Give " if action == "give" else "Remove the computer from ") + pip["name"] + "?"):
+            print("Nothing changed.")
+            return None
+        proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
+                            "changes": {"computer_plan": dict(PLAN) if action == "give" else None},
+                            "reason": "Give this Pip a computer." if action == "give" else "Remove this Pip's computer."})["proposal"]
+        control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
+                 "expected_version": pip["current_version"]})
+        return {"computer": control({"type": "get_pip_computer", "pip_id": pip["id"]})["computer"]}
+    if action in ("approve", "reject"):
+        from .workspace_registry import WorkspaceRegistry
+        with WorkspaceRegistry() as registry:
+            row = registry.db.execute("SELECT pip_id FROM pip_computer_actions WHERE id=?", (args.action_id,)).fetchone()
+        if row is None:
+            raise RegistryError("not_found", "That computer action does not exist.")
+        current = next((a for a in control({"type": "list_pip_computer_actions", "pip_id": row[0], "limit": 50})["actions"]
+                        if a["id"] == args.action_id), None)
+        if current is None or current["status"] != "pending":
+            raise RegistryError("conflict", "That change is no longer waiting.")
+        print(_format({"actions": [current]}), file=sys.stderr)
+        if action == "approve" and not confirm("Send this exactly as shown?"):
+            print("Nothing was sent.")
+            return None
+        return {"action": control({"type": "decide_pip_computer_action", "action_id": current["id"],
+                                   "expected_digest": current["digest"], "approve": action == "approve"})["action"]}
+    if action == "stop":
+        if not confirm("Close this Pip's browser now? Anything waiting for approval is dropped."):
+            print("Nothing changed.")
+            return None
+        return control({"type": "stop_pip_computer", "pip_id": args.pip_id})
+    return control({"type": "list_pip_computer_frames", "run_id": args.run_id})
+
+
 def _local_time(stamp):
     from datetime import datetime
     return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -1341,6 +1454,10 @@ def handle_command(config, argv, *, in_chat=False):
                 return 0
         elif args.command in ("digest", "notify", "outcomes"):
             result = _digest_command(config, args)
+        elif args.command == "computer":
+            result = _computer_command(config, args)
+            if result is None:
+                return 0
         elif args.command == "capacity":
             if in_chat:
                 raise RegistryError("separate_terminal", "Inspect local capacity from a separate terminal with dgc pips capacity.")

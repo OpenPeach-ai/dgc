@@ -141,3 +141,37 @@ class PipComputerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComputerCommandLineTests(unittest.TestCase):
+    """One plain step to give or remove a computer; no browser needed."""
+    setUp_base = fixtures.LocalPipsTests.setUp
+
+    def setUp(self):
+        self.setUp_base()
+        self.cfg.data["pips_enabled"] = True
+
+    def cli(self, *argv):
+        import contextlib
+        import io
+        from dgc import pip_cli
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), patch("sys.stdin", io.StringIO()):
+            code = pip_cli.handle_command(self.cfg, list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_give_status_and_remove(self):
+        code, text, _ = self.cli("create", "Shopper", "--personal", "--goal", "Shop for me", "--json")
+        self.assertEqual(code, 0, text)
+        pip_id = json.loads(text)["pip"]["id"]
+        code, _, err = self.cli("computer", "give", pip_id)
+        self.assertNotEqual(code, 0, "without a terminal it asks for --yes")
+        self.assertIn("--yes", err)
+        code, text, err = self.cli("computer", "give", pip_id, "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertIn("never sees your passwords", err)
+        self.assertIn("Has a computer.", text)
+        code, text, _ = self.cli("computer", "pending", pip_id)
+        self.assertIn("Nothing is waiting", text)
+        code, text, _ = self.cli("computer", "remove", pip_id, "--yes")
+        self.assertIn("No computer.", text)
