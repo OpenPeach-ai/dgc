@@ -22,6 +22,8 @@
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
 - **Share this Pip → Export…** in the Job tab and **Import a shared Pip…** under **New**: an
   imported Pip opens as a setup card for you to review.
+- **Was this result useful?** under each finished Pip result, report and draft: a thumbs up or down
+  and an optional note, which the Pip's later runs read. The job itself does not change.
 - Each answer has **Make this a Pip**: it drafts the request in your composer to turn that task
   into a Pip on a schedule. Nothing is sent or created until you do.
 - On Windows the Pips view says Pips run on Linux and macOS instead of asking you to update the CLI.

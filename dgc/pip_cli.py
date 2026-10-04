@@ -439,6 +439,10 @@ def parser():
     command("status", "show runner status as JSON")
     keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
     keep.add_argument("state", nargs="?", choices=("on", "off"))
+    rate = command("feedback", "rate a Pip's result up or down, with an optional note its later runs read")
+    rate.add_argument("run_id")
+    rate.add_argument("rating", choices=("up", "down", "clear"))
+    rate.add_argument("--note", help="what it should keep doing or do differently (500 characters at most)")
     share = command("export", "save a Pip's job as a shareable file (no accounts, memory, history or findings)")
     share.add_argument("pip_id")
     share.add_argument("--output", metavar="FILE", help="write the file here (default: print it)")
@@ -763,6 +767,12 @@ def usage_text(item) -> str:
 
 
 def _format(value):
+    if set(value) == {"pip_id", "feedback"}:
+        rows = value["feedback"]
+        if not rows:
+            return "No ratings yet."
+        return "\n".join(("Up" if r["rating"] == "up" else "Down") + f" · {r['at'][:10]} · run {r['run_id']}"
+                         + (f" · {r['note']}" if r["note"] else "") for r in rows[:5])
     if set(value) == {"exported", "left_out"}:
         return "Saved " + value["exported"] + ". Not included: " + " ".join(value["left_out"])
     if set(value) == {"shared_pip"}:
@@ -1228,6 +1238,9 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "feedback":
+        return control({"type": "set_pip_feedback", "run_id": args.run_id,
+                        "rating": None if args.rating == "clear" else args.rating, "note": args.note or ""})
     if args.command == "export":
         value = control({"type": "export_pip", "pip_id": args.pip_id})
         if args.output:
@@ -1528,7 +1541,7 @@ def handle_command(config, argv, *, in_chat=False):
             result = _import_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage", "export"):
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage", "export", "feedback"):
             result = _digest_command(config, args)
         elif args.command == "capacity":
             if in_chat:

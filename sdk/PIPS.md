@@ -154,7 +154,7 @@ job with `create_pip` and a reviewed update.
 | 38 | `attendees`, `repeat` and `send_invitations` in a calendar `event` |
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
-| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`; `changes.github_plan` |
+| 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`, `get_pips_keep_running`, `set_pips_keep_running`, `get_pips_desktop_notifications`, `set_pips_desktop_notifications`, `get_pip_usage`, `set_pip_daily_cap`, `export_pip`, `list_pip_feedback`, `set_pip_feedback`; `changes.github_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -389,6 +389,8 @@ approves, rejects or starts nothing. Open the referenced record before acting.
 | `get_pip_usage` | R | `pip_id` |
 | `export_pip` | R | `pip_id`; returns a shareable `dgc-pip` file (no accounts, IDs, memory or history) |
 | `set_pip_daily_cap` | M | `pip_id`, `daily_tokens` (1,000 to 1,000,000,000, or null) |
+| `list_pip_feedback` | R | `pip_id`; the newest 20 ratings |
+| `set_pip_feedback` | M | `run_id`, `rating` (`"up"`, `"down"` or null), `note` (500 characters at most) |
 
 The digest is what the Pips bar and `dgc pips digest` show: what the profile's Pips did
 since the user last looked, and whether it is due. Marking it seen hides it for the user

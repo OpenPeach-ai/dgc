@@ -610,6 +610,15 @@ with the current secrets and cut to 6,000 characters. The worker shows it as ref
 "for comparison only", so a watch reports what changed and a digest leaves out what it
 already said. A conversation does not get it (its history is the chat).
 
+**Ratings** (API 41). `set_pip_feedback {run_id, rating, note}` (local only) rates a
+succeeded `personal_task`, `audit` or `draft` run: `rating` is `"up"`, `"down"` or null to
+clear, `note` at most 500 characters of plain text. It returns `{pip_id, feedback}`, the
+newest 20 `{run_id, rating, note, at}`; `list_pip_feedback {pip_id}` returns the same. The
+newest 50 per Pip are kept in registry metadata, outside the job, and each rating records
+`pip_feedback_recorded`. Those three run kinds pin `manifest.user_feedback`, the newest five
+ratings with notes redacted by the current secrets, and the worker shows them as reference
+"where it fits the approved goal", never as a new task, a job change or a permission.
+
 **Usage and daily limits** (API 41). `get_pip_usage {pip_id}` returns `{usage: {pip_id,
 today: {day, tokens, runs}, last_30_days: {tokens, runs}, days: [{day, tokens, runs}],
 daily_cap, capped_today}}` over local days. A run's tokens are the input plus output tokens

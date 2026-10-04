@@ -322,6 +322,21 @@ dgc pips import brief.pip.json        # shows the job, asks, then creates it
 Patch Pips can't be shared yet, and a Pulse Pip is imported in the Pips view, where its
 commands are reviewed on the card.
 
+## Rating results
+
+Under a finished result, report or Quill draft, **Was this result useful?** takes a thumbs
+up or down and an optional note: "Too long, lead with the three biggest movers", "Perfect,
+keep this format". The Pip's later runs read your five newest ratings and notes as
+guidance that fits its approved job. A rating never changes the job, and a note is not a
+new task: to change what a Pip does, edit its job. In the terminal:
+
+```sh
+dgc pips feedback RUN_ID down --note "Lead with the three biggest movers"
+dgc pips feedback RUN_ID clear
+```
+
+Only you can rate, on this computer; a Pip and the main chat cannot.
+
 ## Usage and daily limits
 
 Every Pip's **Job** tab shows what its runs cost in tokens, today and over the last 30

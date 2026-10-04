@@ -56,6 +56,8 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   changes, Market brief (news with sources before the market opens; it never trades or advises),
   Weekly research digest, Release watch and News on a topic. A Personal task now sees its own
   previous result, so a watch says what changed and a digest doesn't repeat itself.
+- Rate a Pip's result: `dgc pips feedback RUN_ID up|down --note "…"`. Its later runs read your
+  five newest ratings and notes as guidance; a rating never changes the job.
 - `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
   failed and timed-out runs too. `--daily-limit 200k` stops its schedules and triggers for the day
   once it reaches that many tokens; runs you start still run. The limit is your setting, not part

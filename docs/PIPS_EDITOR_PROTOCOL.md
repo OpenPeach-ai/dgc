@@ -90,6 +90,10 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`set_pip_feedback {run_id, rating, note}` and `list_pip_feedback {pip_id}` (API 41, local
+only) rate a succeeded Personal task, audit or Quill draft and list the newest 20 ratings
+`{pip_id, feedback: [{run_id, rating, note, at}]}`. `rating` is `"up"`, `"down"` or null.
+
 `export_pip {pip_id}` (API 41, local only) returns `{document, text}`, a shareable `dgc-pip`
 file. `import_pip_document {request_id, document}` is a nested control handled by the chat
 backend, like `propose_starter_pip`: it saves the file as a pending setup card for this chat

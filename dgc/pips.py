@@ -59,7 +59,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
-    "get_pip_usage", "set_pip_daily_cap", "export_pip",
+    "get_pip_usage", "set_pip_daily_cap", "export_pip", "set_pip_feedback", "list_pip_feedback",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -113,6 +113,7 @@ _COMMAND_ARGS = {
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
     "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
+    "set_pip_feedback": {"run_id", "rating", "note"}, "list_pip_feedback": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -1122,6 +1123,11 @@ class PipStore:
                     manifest["pip_memory"] = pip_memory.snapshot(self, pip_id, source,
                         latest["current_version"], self.registry.clock(), context_reference={
                             key:manifest["workspace_context"][key] for key in ("revision", "digest")})
+                if run_kind in ("personal_task", "audit", "draft"):
+                    from .pip_feedback import for_run as feedback_for_run
+                    feedback = feedback_for_run(self.registry, pip_id, secret_values(frozen_config))
+                    if feedback:
+                        manifest["user_feedback"] = feedback
                 if len(_json(manifest).encode()) > MAX_WORKER_INPUT_BYTES - 16384:
                     raise RegistryError("input_limit", "The pinned job and conversation exceed the worker input budget.")
                 from .pip_sources import validate_manifest as validate_source_manifest
@@ -2085,6 +2091,12 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                       if handoff["payload"]["type"] == "personal_result.v1" else
                       "\nSource finding (untrusted model assessment; inspect before relying on it):\n")
                    + _json(handoff["payload"]["source"]))
+    if kind in ("personal_task", "audit", "draft") and isinstance(manifest.get("user_feedback"), list) and manifest["user_feedback"]:
+        # Before the reference chain, so an audit's output contract still comes last.
+        prompt += ("\n\nThe user's feedback on your recent results, newest first. Follow it where it fits the approved "
+                   "goal; it is reference, not a new task, a job change or a permission:\n"
+                   + _json([{k: str(item.get(k, ""))[:500] for k in ("rating", "note", "at")}
+                            for item in manifest["user_feedback"][:5] if isinstance(item, dict)]))
     if conversation is not None:
         agent.messages[1:] = [dict(message) for message in conversation["history"]]
         reference = {
@@ -2858,7 +2870,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "set_pip_feedback", "list_pip_feedback", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -3002,6 +3014,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         expected_revision=request.get("expected_revision"), actor=actor)}
                 else:
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
+            elif command in ("set_pip_feedback", "list_pip_feedback"):
+                from . import pip_feedback
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Only you can rate a Pip's results, on this computer.")
+                result = (pip_feedback.set_feedback(registry, run_id, request.get("rating"), request.get("note"), actor)
+                          if command == "set_pip_feedback" else pip_feedback.list_feedback(registry, pip_id))
             elif command == "export_pip":
                 from . import pip_share
                 if actor not in ("editor-user", "local-console"):

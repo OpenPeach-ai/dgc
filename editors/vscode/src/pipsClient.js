@@ -6,7 +6,7 @@ import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage} from './pipsModel.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -58,7 +58,7 @@ let memories=[],memoryCursor=null,memoryLoaded=false,memoryLoading=false,memoryE
 let statementRows=[],statementPage=null,statementLoaded=false,statementLoading=false,statementError='',statementSeq=0,statementAnchorSeq=0,statementInspecting=false,statementRetry=null;
 let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,commandLoaded=false,commandLoading=false,commandError='',commandSession='',commandSeq=0,commandDetailSeq=0;
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
-const draft = {webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {feedbackNote:'',webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 let adaptationSeq=0,handoffSeq=0,handoffDetailSeq=0,checkpointSeq=0,refreshSeq=0,selectionSeq=0,detailSeq=0,historySeq=0,activitySeq=0,approvalSeq=0,polling=false,dialogReturn=null,lastMarkup='';
 const send = (type,args={}) => broker.request({type,...args});
 const usable = () => S.connected && S.supported && S.enabled;
@@ -338,6 +338,36 @@ async function loadUsage(){
  catch(error){if(token===scope()&&S.selected===pip)usageState.error=errorText(error);}
  finally{if(token===scope()&&S.selected===pip){usageState.loading=false;render();}}
 }
+// Thumbs up or down on a finished result; the Pip's later runs read it (API 41).
+const RATED_RUNS=['personal_task','audit','draft'];
+let feedbackState={pip:'',value:null,loading:false,error:'',run:''};
+async function loadFeedback(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||feedbackState.loading&&feedbackState.pip===pip)return;
+ const token=scope();feedbackState={pip,value:null,loading:true,error:'',run:''};
+ try{const value=pipFeedback(await send('list_pip_feedback',{pip_id:pip}),pip);if(token!==scope()||S.selected!==pip)return;feedbackState.value=value;}
+ catch(error){if(token===scope()&&S.selected===pip)feedbackState.error=errorText(error);}
+ finally{if(token===scope()&&S.selected===pip){feedbackState.loading=false;render();}}
+}
+function feedbackMarkup(run){
+ if(S.apiVersion<41||!run||run.id!==S.runId||run.status!=='succeeded'||!RATED_RUNS.includes(run.manifest?.run_kind??'audit'))return '';
+ if(feedbackState.pip!==S.selected){void loadFeedback();return '';}
+ const f=feedbackState.value;
+ if(!f)return feedbackState.error?`<section class="section feedback" aria-label="Your rating">${errorMarkup(feedbackState.error)}</section>`:'';
+ const mine=f.feedback.find(r=>r.run_id===run.id),off=S.busy||!usable();
+ if(feedbackState.run!==run.id){feedbackState.run=run.id;draft.feedbackNote=mine?.note||'';}
+ const thumb=(rating,label,glyph)=>`<button type="button" id="rate-${rating}" class="thumb${mine?.rating===rating?' is-on':''}" aria-pressed="${mine?.rating===rating}"${off?' disabled':''}><span aria-hidden="true">${glyph}</span> ${label}</button>`;
+ return `<section class="section feedback" aria-label="Your rating"><h3>Was this result useful?</h3><div class="actions">${thumb('up','Useful','👍')}${thumb('down','Not useful','👎')}${mine?button('rate-clear','Clear rating',off):''}</div><label for="feedbackNote">What should it keep doing, or do differently? <span class="muted">Optional</span></label><textarea id="feedbackNote" data-draft="feedbackNote" maxlength="500" rows="2"${off?' disabled':''}>${esc(draft.feedbackNote)}</textarea><p class="muted">Its next runs read your rating and note. The job itself does not change.</p>${errorMarkup(feedbackState.error)}</section>`;
+}
+function saveFeedback(rating){
+ const run=S.run,pip=S.selected;if(S.apiVersion<41||!run||run.id!==S.runId||!feedbackState.value||feedbackState.pip!==pip)return;
+ const note=rating===null?'':String(draft.feedbackNote||'').trim();
+ if(note.length>500){feedbackState.error='Keep the note to 500 characters.';render();return;}
+ feedbackState.error='';
+ void mutate({type:'set_pip_feedback',run_id:run.id,rating,note},result=>{const value=pipFeedback(result,pip);const mine=value.feedback.find(r=>r.run_id===run.id);
+  if(rating===null?mine:mine?.rating!==rating)throw Error('The saved rating differs from your choice. Refresh this Pip.');
+  feedbackState.value=value;draft.feedbackNote=mine?.note??'';
+  S.notice=rating===null?'Rating cleared.':`Saved. Its next runs will read your ${rating==='up'?'thumbs up':'thumbs down'}${note?' and note':''}.`;});
+}
 // "200k", "1.5m", "250,000" or empty (no limit). Null for empty; undefined when it is not a number.
 function parseTokens(text){
  const raw=String(text||'').trim().toLowerCase().replace(/[,_\s]/g,'');
@@ -526,7 +556,8 @@ function draftAutomationMarkup(manifest){
 function eventReceiptMarkup(manifest){
  if(manifest?.trigger!=='event')return '';try{const pin=eventRunPin(manifest);return `<section class="section" aria-label="Event-trigger receipt"><h3>Event-triggered ${manifest.pip_type==='quill'?'draft':'audit'}</h3><p>${esc(eventTriggerLabel(pin.policy))}</p><dl class="meta"><dt>Event</dt><dd>${esc(['workspace_session_turn_completed','workspace_committed_paths_changed'].includes(pin.event.event_type)?activityLabel(pin.event):pin.event.event_type.replaceAll('_',' '))}</dd><dt>Occurred</dt><dd>${esc(date(pin.event.created_at))}</dd><dt>${pin.commit_path_match?'Checked for enqueue':'Observed'}</dt><dd>${esc(date(pin.checked_at))}</dd><dt>Event identity</dt><dd class="mono">${esc(pin.event.event_id)} · ${pin.event.seq}</dd></dl>${pin.event.event_type==='workspace_session_turn_completed'?`<p class="muted">${esc(sessionTurnNotice)}</p>`:''}<p class="muted">${esc(pin.source_semantics)} This event grants no tool permission; its payload was not copied into the model input.</p>${commitMatchMarkup(pin,manifest)}${pin.history_may_be_incomplete?'<p class="notice">Earlier event history may be incomplete. This is not a replay of every change.</p>':''}</section>`;}catch(error){return errorMarkup(errorText(error));}
 }
-function reportMarkup() {
+function reportMarkup(){return runReportMarkup()+feedbackMarkup(S.run);}
+function runReportMarkup() {
   const run=S.run;
   if(!S.runId) return '<p class="muted">Choose a run to inspect its pinned inputs and report.</p>';
   if(!run || run.id!==S.runId) return '<p role="status">Loading run…</p>';
@@ -1539,6 +1570,9 @@ document.addEventListener('click',event=>{
     case 'setup-in-chat':if(S.apiVersion>=23&&!archived()){setupEditing=true;S.create=true;S.overview=false;S.createStep='describe';draft.setupTask=`Change the setup for ${S.pip.name}: `;render();$('setupTask')?.focus();}break;
     case 'refresh-setups':void loadSetups();break;
     case 'remove-usage-limit':saveUsageLimit(null);break;
+    case 'rate-up':saveFeedback('up');break;
+    case 'rate-down':saveFeedback('down');break;
+    case 'rate-clear':saveFeedback(null);break;
     case 'import-pip-file':void importPipFile();break;
     case 'export-pip-file':void exportPipFile();break;
     case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
