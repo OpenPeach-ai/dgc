@@ -118,6 +118,34 @@ class DigestTests(unittest.TestCase):
             self.assertTrue(self.build()["due"], "a new run is never hidden by the cache")
             self.assertEqual(built.call_count, 3)
 
+    def hold(self, created, expires="2026-10-02T10:00:00.000Z"):
+        """A submit a Pip's computer is holding for the user, as the supervisor records it."""
+        import secrets
+        action_id = "compact_" + secrets.token_hex(16)
+        with self.registry.transaction():
+            self.registry.db.execute(
+                "INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,NULL,'pending',?,?,NULL,NULL,NULL)",
+                (action_id, self.job["id"], self.job["workspace_id"], None, "host", "request",
+                 json.dumps({"method": "POST"}), "a" * 64, created, expires))
+        return action_id
+
+    def test_a_held_submit_is_said_at_once_and_counts_until_decided_or_expired(self):
+        digest.mark_seen(self.registry, self.build()["until"], "editor-user")
+        self.at("2026-10-01T10:05:00.000Z")
+        action_id = self.hold("2026-10-01T10:04:00.000Z")
+        value = self.build()
+        self.assertEqual((value["due"], value["reason"], value["pending_reviews"]), (True, "alert", 1))
+        self.assertTrue(value["headline"].startswith(self.job["name"] + " is waiting for your approval to send something"),
+                        value["headline"])
+        digest.mark_seen(self.registry, value["until"], "editor-user")
+        later = self.build()
+        self.assertFalse(later["due"], "seen: it is not raised again")
+        self.assertEqual(later["pending_reviews"], 1, "but it still waits")
+        with self.registry.transaction():           # expiry writes no event; the digest still follows it
+            self.registry.db.execute("UPDATE pip_computer_actions SET status='expired',resolved_at=? WHERE id=?",
+                                     (self.now, action_id))
+        self.assertEqual(self.build()["pending_reviews"], 0)
+
     def test_a_reworded_finding_is_neither_new_nor_gone(self):
         """Seen in a real run: the model reworded an unchanged finding after a commit to the same
         file. Its checkpoint identity changed with the title; the issue did not."""

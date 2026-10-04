@@ -223,7 +223,9 @@ def _fingerprint(registry, now):
     return (tuple(state) if state else None, local_day(now),
             registry.db.execute("SELECT max(finished_at), count(*) FROM pip_runs WHERE finished_at IS NOT NULL").fetchone()[:],
             registry.db.execute("SELECT max(id) FROM pip_checkpoints").fetchone()[0],
-            registry.db.execute("SELECT max(seq) FROM workspace_events").fetchone()[0])
+            registry.db.execute("SELECT max(seq) FROM workspace_events").fetchone()[0],
+            # Held submits that expire or are lost write no event.
+            registry.db.execute("SELECT count(*) FROM pip_computer_actions WHERE status='pending'").fetchone()[0])
 
 
 def build(registry, config=None) -> dict:
@@ -326,18 +328,24 @@ def _build(registry, config=None) -> dict:
         item["new_findings"] = item["new_findings"][:MAX_FINDINGS]
 
     reviews = pending_reviews(registry, limit=1)["total_pending"]
+    # A Pip's computer holds what it would submit until the user decides, for a day at most: they count
+    # as reviews, and one held since the user last looked is said straight away.
+    held = registry.db.execute("SELECT created_at>? AS new, pip_id FROM pip_computer_actions WHERE status='pending' AND expires_at>?",
+                               (since_s, until_s)).fetchall()
+    reviews += len(held)
+    new_held = [store._job(row["pip_id"])["name"] for row in held if row["new"]]
     setups = registry.db.execute("SELECT count(*) FROM pip_setup_proposals WHERE status='pending' AND expires_at>?",
                                  (until_s,)).fetchone()[0]
     ordered = sorted(pips.values(), key=lambda p: (not p["alert"], -p["new_total"], -p["runs"]["failed"],
                                                    -sum(p["runs"].values()), p["name"]))
     failed = sum(p["runs"]["failed"] for p in ordered)
-    alert = any(p["alert"] for p in ordered)
+    alert = any(p["alert"] for p in ordered) or bool(new_held)
     anything = bool(ordered) or reviews or setups
     today = local_day(now)
     daily = anything and (state is None or state["seen_day"] != today)
     return {"schema_version": 1, "since": since_s, "until": until_s, "first": state is None,
             "due": bool(alert or daily), "reason": "alert" if alert else "daily" if daily else None,
-            "headline": _headline(ordered, failed, reviews + setups),
+            "headline": _headline(ordered, failed, reviews + setups, new_held),
             "pips": ordered[:MAX_PIPS], "omitted_pips": max(0, len(ordered) - MAX_PIPS),
             "failed_runs": failed, "pending_reviews": reviews, "pending_setups": setups,
             "truncated": truncated}
@@ -347,9 +355,12 @@ def _plural(count, word):
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _headline(pips, failed, reviews) -> str:
+def _headline(pips, failed, reviews, held=()) -> str:
     """One line for a status bar or a terminal tip: what most needs attention first."""
     parts = []
+    if held:
+        parts.append(f"{held[0]} is waiting for your approval to send something" if len(set(held)) == 1
+                     else f"{len(held)} things are waiting for your approval to send")
     new = [p for p in pips if p["new_total"]]
     if new:
         total = sum(p["new_total"] for p in new)

@@ -20,6 +20,12 @@
 - A project reviewer or Quill can read open issues, open pull requests, CI checks and failed
   workflow runs from GitHub before each run, with your own GitHub login. Choose the reads under
   **GitHub reads** in its **Job** tab; the proposal review shows exactly what will be read.
+- **Computer** in a Personal Pip's **Job** tab (Linux, Pips API 42): **Give this Pip a
+  computer…** gives it its own browser and files in one step. **Open browser** shows its screen:
+  click, type and go to an address to sign in to the sites it needs. What the Pip would submit
+  appears under **Waiting for you**; **Review…** shows the screenshot and exactly what would be
+  sent, then **Send once** or **Reject**. The Pips bar says when something is waiting.
+  **Stop computer** closes it at once.
 - On macOS, Patch and Pulse run under Seatbelt; their reviews state how that confinement is
   weaker than Linux's (sampled memory and process limits, readable system folders).
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and

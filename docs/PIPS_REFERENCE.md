@@ -9,9 +9,9 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.48.0 |
 | VS Code extension | 0.33.0 |
 | SDK (Python and TypeScript) | 0.7.0 |
-| Pips API | 41 |
+| Pips API | 42 (CLI 0.48.0 advertises 41) |
 | Editor protocol | v14 |
-| Pips registry schema | 34 |
+| Pips registry schema | 35 (34 in CLI 0.48.0) |
 
 ## Security model
 
@@ -469,7 +469,7 @@ systemd.
 | `conversation` | Any | A chat message | Project: the same read tools. Personal: the five drafting tools only. |
 | `patch` | Patch | An accepted handoff | Read tools plus the four write tools on reviewed paths; `task` only with a specialists grant |
 | `test` | Pulse | An accepted handoff, or a standing verification plan (manual or scheduled) | Read tools (handoff); none, and no model (plan) |
-| `personal_task` | Any Personal Pip | Manual, schedule, main chat, Personal handoff | None |
+| `personal_task` | Any Personal Pip | Manual, schedule, main chat, Personal handoff, an approved computer action | None; `computer` when the job has a computer (API 42) |
 
 Conversations work while a Pip is paused, and are always read-only, including for
 Patch and Pulse. One reply per Pip can be queued at a time.
@@ -591,6 +591,37 @@ not by checkpoint identity (which hashes the title too), so a reworded finding i
 new nor gone. "Gone after a change" counts baseline findings a compared checkpoint no longer
 reports whose path is in that run's changed paths. Outcomes walk the latest
 200 checkpoints of one Pip.
+
+**Pip computers** (API 42). `computer_plan` is exactly `{schema_version: 1}`. It is allowed
+only on Personal Pips, never together with `app_plan`, and only the local user can propose or
+accept it. A `personal_task` run of a job with a computer pins it (`manifest.computer`) and its
+worker gets one tool, `computer`, with the operations `open`, `read`, `click`, `type`, `press`,
+`choose` and `back`. The browser belongs to the supervisor, not the worker: one Chromium per Pip
+in `bwrap --unshare-all`, its profile in `computers/PIP_ID/home`, launched with
+`--die-with-parent` from a keeper thread. The worker reaches it through a per-run Unix socket
+that checks a token. The box has no network except a Unix socket to an egress proxy in the
+supervisor, which allows `CONNECT` to port 443 and plain HTTP to port 80 of names that resolve
+only to global addresses, and connects to the address it checked. WebSockets are blocked.
+Every request from every page and popup is paused in the browser (CDP `Fetch`, Request stage).
+GET, HEAD and OPTIONS continue. Any other request carrying a Luhn-valid card number fails.
+The rest are held, at most eight at a time; more fail.
+
+A held request becomes a `pip_computer_actions` row: `pending` for 24 hours, with a summary
+(method, host, path, page, up to 24 fields with secret-named values masked), the digest of that
+summary and a screenshot. `decide_pip_computer_action` with the expected digest records
+`approved` or `rejected`. The supervisor's next tick then continues or fails the paused
+request, and after a send queues one continuation run (actor `local-computer`, request key
+`computer-ACTION_ID`) carrying `manifest.computer_continuation`. Status moves one way:
+`pending` to `approved`, `rejected`, `expired` or `lost`; `approved` to `sent` or `lost`. Every
+other column is immutable. Stopping the computer, a runner restart or a closed browser marks
+what it held `lost`; nothing is resent. A computer with nothing held closes after 15 idle minutes.
+
+The live view (`open_pip_computer`, `use_pip_computer_view`, operations `frame`, `click`,
+`type`, `key`, `scroll`, `go` and `back`) is served by the supervisor over its own socket.
+Its token stays in the controller and is never sent to the editor. While no run is active,
+requests the user submits in it are released at once, because the user made them. During a
+run the view only watches. All eight computer commands are for the local user only. Screenshots
+are JPEG, at most 90 KiB each and 200 per run, under the run's `artifacts/computer`.
 
 **Pulse verification plans** give a Pulse Pip a standing command list:
 
@@ -825,3 +856,4 @@ Clients check it before using a newer control.
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
 | 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes; reviewed GitHub reads (`github_plan`) |
+| 42 | Pip computers (`computer_plan`): `get_pip_computer`, `list_pip_computer_actions`, `decide_pip_computer_action`, `get_pip_computer_frame`, `list_pip_computer_frames`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view` |

@@ -38,6 +38,15 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   the reads with your own `gh` login or `GH_TOKEN`, GET only; the model never picks a read and
   never sees the credential. Add them with `dgc pips propose --github-issues --github-checks …`
   or in the Pips view; like every job change, they wait for your review.
+- Pip computers (Linux). A Personal Pip can have its own computer: a browser and files in a
+  sandbox, separate from yours. It reads public websites on its own. Anything it would submit
+  waits for your approval with a screenshot of the page, and is sent exactly once when you
+  approve; the Pip then carries on from the result. You sign in to sites yourself in its
+  browser, so it never sees your passwords. It can't reach your home network, can't make
+  payments and can't also have app reads. `dgc pips computer give PIP` gives one;
+  `status`, `pending`, `approve`, `reject`, `stop` and `frames` cover the rest, and the digest
+  says straight away when something is waiting. Needs bubblewrap and a Chromium build. Pips
+  API 42, registry schema 35.
 - The main chat carries one small `use_pips` tool and loads the Pips tools only when a task needs
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them

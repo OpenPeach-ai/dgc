@@ -1023,3 +1023,43 @@ export function githubReadLabel(read){
  if(read.kind==='commit_checks')return 'CI checks for the commit the run reviews';
  return `Up to ${read.limit} recent failed workflow runs`;
 }
+
+// Pip computers (Pips API 42): exact shapes, because review cards show their text and images.
+const COMPUTER_STATES=['pending','approved','rejected','expired','sent','lost'];
+const jpegData=v=>typeof v==='string'&&v.length<=140000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v);
+export function pipComputerAction(value,pip){
+ const fail=()=>{throw Error('A Pip computer action is invalid. Refresh this Pip.');};
+ if(!record(value)||Object.keys(value).sort().join()!=='continuation_run_id,created_at,digest,expires_at,frame,id,pip_id,resolved_at,resolved_by,run_id,status,summary,workspace_id'
+   ||!/^compact_[a-f0-9]{32}$/.test(value.id)||value.pip_id!==pip||!COMPUTER_STATES.includes(value.status)||!/^[a-f0-9]{64}$/.test(value.digest)
+   ||!(value.frame===null||/^\d{4}\.jpg$/.test(value.frame))||!(value.run_id===null||/^run_[a-f0-9]{32}$/.test(value.run_id)))fail();
+ const s=value.summary;
+ if(!record(s)||typeof s.method!=='string'||typeof s.host!=='string'||typeof s.path!=='string'||typeof s.page!=='string'
+   ||!Array.isArray(s.fields)||s.fields.length>24||!s.fields.every(f=>record(f)&&typeof f.name==='string'&&typeof f.value==='string')
+   ||!Number.isSafeInteger(s.more_fields)||!Number.isSafeInteger(s.body_bytes))fail();
+ return value;
+}
+export function pipComputer(value,pip){
+ if(!record(value)||Object.keys(value).sort().join()!=='actions,available,granted,pending,pip_id,reason'||value.pip_id!==pip
+   ||typeof value.granted!=='boolean'||typeof value.available!=='boolean'||typeof value.reason!=='string'
+   ||!Number.isSafeInteger(value.pending)||!Array.isArray(value.actions)||value.actions.length>5)
+  throw Error('This Pip\'s computer status is invalid. Refresh this Pip.');
+ value.actions.forEach(a=>pipComputerAction(a,pip));
+ return value;
+}
+export function pipComputerView(value){
+ if(!record(value))throw Error('The browser view reply is invalid.');
+ if(value.ok!==true)return {ok:false,error:typeof value.error==='string'?value.error.slice(0,300):'The browser is not available.',ready:value.ready!==false};
+ if(!jpegData(value.image)||typeof value.url!=='string'||typeof value.watching!=='boolean'||!Number.isSafeInteger(value.width)||!Number.isSafeInteger(value.height))
+  throw Error('The browser view reply is invalid.');
+ return value;
+}
+export function pipComputerFrames(value,run){
+ if(!record(value)||Object.keys(value).sort().join()!=='frames,run_id'||value.run_id!==run||!Array.isArray(value.frames)||value.frames.length>200
+   ||!value.frames.every(f=>record(f)&&Object.keys(f).sort().join()==='at,frame,label,url'&&/^\d{4}\.jpg$/.test(f.frame)&&['label','url','at'].every(k=>typeof f[k]==='string'&&f[k].length<=500)))
+  throw Error('This run\'s screenshots are invalid.');
+ return value;
+}
+export function pipComputerFrame(value,run,frame){
+ if(!record(value)||value.run_id!==run||value.frame!==frame||!jpegData(value.image))throw Error('That screenshot is invalid.');
+ return value;
+}

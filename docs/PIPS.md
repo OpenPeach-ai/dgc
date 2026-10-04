@@ -431,6 +431,46 @@ in forms. If a page redirects, DGC follows up to five redirects, each only to a
 public `https` address. Page text is cut at 8,000 characters. A page that can't be read is
 reported, and the run continues.
 
+### A computer of its own (Linux)
+
+A Personal Pip can have its own computer: a web browser and a home folder in a sandbox,
+separate from your browser and your files. Give it one with **Give this Pip a computer…** in
+its **Job** tab, or `dgc pips computer give PIP`. It is a job change like any other, and only
+you can make it: the main chat and the Pip itself can't.
+
+- **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
+  websites on its own.
+- **Anything it would send waits for you.** When a page would submit a form or send any other
+  data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
+  **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once.
+  **Review…** shows a screenshot of the page, where the request would go and its form fields.
+  Fields named like passwords, codes or card details are hidden in the review but are sent as
+  entered. **Send once** sends exactly that request, once, and starts a follow-up run so the Pip
+  carries on from the result. **Reject** drops it. A held request expires after 24 hours. It is
+  also lost, unsent, if the computer stops or the runner restarts, because the browser is what
+  holds it.
+- **You sign in, not the Pip.** **Open browser** shows the Pip's screen. Click on it, type and go
+  to an address to sign in to the sites the Pip needs; it keeps those sign-ins in its own
+  profile. The Pip never sees your passwords. What you submit in the open browser is sent at
+  once, because you did it. While a run is using the computer, the view only watches.
+- **Fenced in.** The browser reaches only public web addresses on ports 80 and 443. Your home
+  network, this computer's own services and cloud metadata addresses are refused. A request
+  that carries a payment card number is refused outright, even one you make yourself. A Pip with
+  a computer can't also have app reads, so private data from your accounts never sits in a
+  browser that could send it on.
+- **Stop it any time.** **Stop computer**, or `dgc pips computer stop PIP`, closes the browser at
+  once and cancels anything waiting, unsent. A computer with nothing waiting closes itself after 15 minutes idle.
+  **Remove computer…** takes it away; the Pip's saved sign-ins stay in its folder (see
+  [Privacy](#privacy-and-where-state-lives)) until you delete it.
+
+The terminal has the same steps: `dgc pips computer status PIP`, `pending PIP`,
+`approve ACTION_ID`, `reject ACTION_ID`, `stop PIP` and `frames RUN_ID` (a run's screenshots).
+`give`, `remove` and `approve` ask once; add `--yes` in a script.
+
+A computer needs Linux with bubblewrap (`bwrap`) and a Chromium build: Google Chrome, or the
+Chromium that Playwright installs. If either is missing, the **Job** tab says what to install.
+macOS and Windows are planned.
+
 ### Drafts and reviewed sends
 
 Ask a Personal Pip, in its own chat, to draft an email, a calendar event or a
@@ -470,10 +510,13 @@ show` and `dgc pips app-action accept ACTION_ID --expected-digest DIGEST`.
 - **Approve themselves.** No Pip, and not the main chat, can accept a setup,
   proposal, handoff or external action. Only you can, in the Pips view or the CLI.
 - **Act outside their reviewed reads.** Project Pips read only their approved
-  source. Personal Pips see only the app and web reads you approved.
+  source. Personal Pips see only the app and web reads you approved, and the public
+  websites their own computer opens if you gave them one.
 - **Send, create or call without you.** Every email, event and connector call is a
-  single attempt you approved on its exact content.
-- **Buy, pay or book on their own.** A Pip has no tool that can do this. A connector
+  single attempt you approved on its exact content. So is every form a Pip's computer
+  would submit.
+- **Buy, pay or book on their own.** A Pip has no tool that can do this, and a Pip's
+  computer refuses any request carrying a payment card number. A connector
   action you approve runs the exact tool call you reviewed, so check what that
   tool does before you approve it.
 - **Use a cloud service of DGC's.** There is no Pips account or hosted runner.
@@ -493,7 +536,14 @@ What leaves your computer is what you'd expect:
 - each Pip's model requests go to the model connection you configured;
 - approved app reads and actions go through the connector you chose, which runs
   them in its own service;
-- approved web reads fetch those pages and searches.
+- approved web reads fetch those pages and searches;
+- a Pip's computer reaches the public websites it opens, and the sites you sign in to
+  from it.
+
+A Pip's computer keeps its browser profile, with your sign-ins to the sites you used
+in it, in `computers/PIP_ID` in the same `pips` folder, readable only by you. Removing
+the computer leaves that folder; delete it to forget the sign-ins. Each run's
+screenshots are kept with the run's artifacts.
 
 Each run gets its own private home, with no access to your MCP servers, hooks or
 credentials. The model key reaches the run only for its own model requests.
@@ -546,6 +596,8 @@ than run unconfined.
   runner. The notification list keeps the newest 500.
 - Personal app reads: one connection, four reads, 20 items per read. Web reads:
   four per Pip.
+- A Pip's computer: up to eight requests waiting at once (more are dropped, unsent),
+  each for at most 24 hours; up to 200 screenshots per run, each at most 90 KiB.
 - `dgc pips export-run` and `dgc pips capacity` currently need Linux.
 
 ## More

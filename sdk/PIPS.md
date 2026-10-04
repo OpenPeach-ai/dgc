@@ -118,7 +118,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. The current backend is API 41. Starter Pips (also
+needs a newer API, before sending it. CLI 0.48.0 is API 41; Pip computers need API 42. Starter Pips (also
 API 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -155,6 +155,7 @@ job with `create_pip` and a reviewed update.
 | 39 | `app_plan` version 3 (Drive, Notion and Contacts searches) |
 | 40 | `changes.web_plan` |
 | 41 | `get_pip_digest`, `mark_pip_digest_seen`, `get_pip_notify_settings`, `set_pip_notify_settings`, `get_pip_outcomes`; `changes.github_plan` |
+| 42 | Pip computers: `get_pip_computer`, `list_pip_computer_actions`, `get_pip_computer_frame`, `list_pip_computer_frames`, `decide_pip_computer_action`, `stop_pip_computer`, `open_pip_computer`, `use_pip_computer_view`; `changes.computer_plan` |
 
 API 20 (scheduled Quill drafts) and API 26/27 (conversation continuity,
 conversational Pulse setup) add no SDK command. A request to an older backend
@@ -387,6 +388,28 @@ The digest is what the Pips bar and `dgc pips digest` show: what the profile's P
 since the user last looked, and whether it is due. Marking it seen hides it for the user
 everywhere, so a host should do that only when the user has seen it. Notification
 settings are display preferences outside the reviewed job; changing them grants nothing.
+
+### Pip computers (API 42)
+
+| Command | | Fields |
+| --- | --- | --- |
+| `get_pip_computer` | R | `pip_id` |
+| `list_pip_computer_actions` | R | `pip_id`, `limit?` (1–50) |
+| `get_pip_computer_frame` | R | `run_id`, `frame` (`0001.jpg` style) |
+| `list_pip_computer_frames` | R | `run_id` |
+| `decide_pip_computer_action` | M | `action_id`, `expected_digest`, `approve` (bool) |
+| `stop_pip_computer` | M | `pip_id` |
+| `open_pip_computer` | M | `pip_id` |
+| `use_pip_computer_view` | M | `pip_id`, `op` (`frame`, `click`, `type`, `key`, `scroll`, `go`, `back`), `x?`, `y?`, `text?`, `key?`, `dy?`, `url?` |
+
+A Personal Pip's computer is its own sandboxed browser (Linux only for now). It reads public
+websites freely; anything it would submit is held as a pending action until the user decides.
+Approving one sends that exact request once, so show the user the action's `summary` and
+screenshot first and pass its `digest` as `expected_digest`. `use_pip_computer_view` drives
+the Pip's browser as the user: while no run is using the computer, what it submits is sent
+at once. That is why it is a mutation, even for `op: "frame"`. Give a Pip a computer with
+`changes.computer_plan: {schema_version: 1}` on a reviewed update. See
+[docs/PIPS.md](../docs/PIPS.md#a-computer-of-its-own-linux).
 
 ### Personal Pips: connections, reads and external actions
 

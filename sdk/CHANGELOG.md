@@ -1,5 +1,13 @@
 # DGC SDK changelog
 
+## Unreleased
+
+Pip computers (Pips API 42). `session.pips` gains `get_pip_computer`,
+`list_pip_computer_actions`, `get_pip_computer_frame` and `list_pip_computer_frames`, and the
+mutations `decide_pip_computer_action`, `stop_pip_computer`, `open_pip_computer` and
+`use_pip_computer_view`; `changes.computer_plan` is accepted on a reviewed update. All of them
+are refused before sending to a runtime below API 42. See [PIPS.md](PIPS.md#pip-computers-api-42).
+
 ## 0.7.0 — 2026-10-04
 
 Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips` (TypeScript)

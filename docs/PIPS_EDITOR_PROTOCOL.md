@@ -17,7 +17,7 @@ capabilities object, so strict older clients still accept the handshake.
 ```json
 {
   "pips_supported": true,
-  "pips_api_version": 41,
+  "pips_api_version": 42,
   "pips_enabled": true,
   "pips_setup_notifications": 1,
   "pip_references": 1,
@@ -102,6 +102,23 @@ and shows the plan in the proposal review. The main chat's Pips bar polls
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md#schedules-and-event-triggers) for what a
 digest contains and when it is due.
 
+The computer controls (API 42) are local only (`editor-user`):
+`get_pip_computer {pip_id}` returns `{computer: {pip_id, granted, available, reason, pending,
+actions}}` with the newest five actions. `list_pip_computer_actions {pip_id, limit?}` returns
+`{actions}`, each `{id, pip_id, workspace_id, run_id, summary, digest, frame, status,
+created_at, expires_at, resolved_at, resolved_by, continuation_run_id}`; `summary` is
+`{method, host, path, page, fields: [{name, value}], more_fields, body_bytes}` with
+secret-named values already masked. `decide_pip_computer_action {action_id, expected_digest,
+approve}` returns `{action}`; the supervisor sends or drops the request within seconds.
+`get_pip_computer_frame {run_id, frame}` returns `{run_id, frame, image}` (a JPEG data URL) and
+`list_pip_computer_frames {run_id}` returns `{run_id, frames}`. `stop_pip_computer {pip_id}`
+returns `{pip_id, stopping: true}`. `open_pip_computer {pip_id}` asks the supervisor to open the
+live view and returns `{view: {pip_id, ready, host_id?}}`; `use_pip_computer_view {pip_id, op, x?, y?,
+text?, key?, dy?, url?}` returns `{view}`: `{ok: true, watching, url, width, height, image}`,
+or `{ok: false, error, ready?}` while it opens or after it closes. `propose_pip_update`
+accepts `changes.computer_plan` from API 42; the extension refuses to send it, or any of these
+commands, to an older backend.
+
 `notify_pip_setup {request_id, setup_id}` is a nested control for the chat that
 proposed a setup card. After the user approves the card, send it to that chat; the
 backend checks the session, workspace and accepted receipt, then delivers a
@@ -113,7 +130,7 @@ refuse it; the approved setup stays saved.
 
 ```json
 {"type": "pips_enable", "enabled": false, "request_id": "e1"}
-{"type": "pips_status", "request_id": "e1", "enabled": false, "api_version": 41,
+{"type": "pips_status", "request_id": "e1", "enabled": false, "api_version": 42,
  "restart_required": true, "message": "Pips disabled. All jobs are paused and active runs are stopping."}
 ```
 
