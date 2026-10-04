@@ -95,3 +95,13 @@ test('the desktop notifications switch says when this computer cannot show them'
  assert.match(x.d.body.textContent,/The editor still tells you while it is open/);
  assert.throws(()=>model.pipsDesktopNotifications(off({last:{shown:'no',at:'x'}})),/invalid/);
 });
+
+test('a current CLI that cannot run Pips here says why, not "update"', async()=>{
+ const make=(api)=>{const dom=new JSDOM('<main id="app"></main><div id="review-root"></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);let listener;
+  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.setInterval=()=>1;w.eval(client);
+  w.DgcPips.mount({root:w.document,host:'editor',postMessage:()=>{},onMessage:fn=>{listener=fn;},onSetupPrompt:()=>true});
+  listener({type:'pipsConnection',apiVersion:api,generation:1,connected:true,supported:false,enabled:true});return w.document;};
+ const windowsHost=make(41);await flush();
+ assert.match(windowsHost.body.textContent,/Pips run on Linux and macOS/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
+ const old=make(8);await flush();assert.match(old.body.textContent,/Update the DGC CLI to use Pips/);
+});

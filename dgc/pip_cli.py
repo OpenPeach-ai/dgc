@@ -1413,6 +1413,10 @@ def handle_command(config, argv, *, in_chat=False):
     from .redaction import redact_value, secret_values
     from .sandbox import AGENT_SHELL
     from .style import terminal_safe_text
+    from .pip_access import PLATFORM_SUPPORTED, UNSUPPORTED_PLATFORM
+    if not PLATFORM_SUPPORTED:
+        print("dgc pips: " + UNSUPPORTED_PLATFORM, file=sys.stderr)
+        return 2
     # A command the user typed in DGC (`/pips`, in_chat) is theirs; one from the chat's shell is not.
     if not in_chat and os.environ.get(AGENT_SHELL) == "1":
         if not agent_shell_allows(args):

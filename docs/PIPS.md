@@ -166,13 +166,19 @@ Otherwise:
 `dgc pips status` shows whether the runner is online and how much work is queued.
 The runner does one run at a time.
 
-**Platforms.** Linux and macOS can run audits, Quill drafts, Pip conversations and
-Personal tasks. Patch fixes and Pulse commands need either Linux with working
-bubblewrap (`/usr/bin/bwrap`, `/usr/bin/python3` and `/usr/bin/git`) or macOS with
-`sandbox-exec` and Xcode or the Command Line Tools (`xcode-select --install`).
-`dgc pips execution` shows whether this runner passed its confinement check.
-**Keep Pips running** uses a systemd user service on Linux and a LaunchAgent on macOS
-(it runs while you are logged in). Windows can't run Pips work yet.
+**Platforms.**
+
+| | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| Pips view, Pip chats, audits, Quill drafts, Personal tasks | Yes | Yes | Not yet |
+| Patch fixes and Pulse commands | With bubblewrap (`/usr/bin/bwrap`, `python3`, `git`) | Under Seatbelt, with Xcode or the Command Line Tools; weaker, see below | Not yet |
+| Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Not yet |
+| Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Not yet |
+
+`dgc pips execution` shows whether this runner passed its confinement check. On Windows
+the Pips view says Pips are not available, the main chat has no Pips tools and
+`dgc pips` explains the same, so nothing can be created that would never run. A DGC
+installed inside WSL is a Linux install.
 
 **macOS is weaker than Linux, and says so.** On macOS commands run under Seatbelt
 rather than in a private namespace. The project copy is still read-only, the network

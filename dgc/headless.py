@@ -201,6 +201,12 @@ RETIRE_REQUEST_PREFIX = "retire-"
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # The Pips control contract this backend speaks: the ready handshake and every pips_status say it.
 PIPS_API_VERSION = 41
+
+
+def _pips_platform_supported() -> bool:
+    """Linux and macOS: the editor shows Windows a plain explanation instead (pip_access)."""
+    from .pip_access import PLATFORM_SUPPORTED
+    return PLATFORM_SUPPORTED
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.
@@ -1985,7 +1991,7 @@ class Backend:
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
                           "editor_state": True,
-                          "pips_supported": True, "pips_api_version": PIPS_API_VERSION,
+                          "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
                           "pips_enabled": self.config.get("pips_enabled", False) is True,

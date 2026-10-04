@@ -16,5 +16,12 @@ def require_unrestricted(config):
         raise RegistryError("session_policy", MESSAGE)
 
 
+# Pips run on Linux and macOS. Elsewhere (Windows) nothing offers them: no Pips view, no chat tools,
+# and `dgc pips` says so, rather than letting a Pip be created that can never run.
+PLATFORM_SUPPORTED = __import__("os").name == "posix"
+UNSUPPORTED_PLATFORM = ("Pips run on Linux and macOS, not on Windows yet. A DGC installed inside WSL "
+                        "is a Linux install.")
+
+
 def tools_available(config):
-    return config.get("pips_enabled", False) is True and not restricted(config)
+    return PLATFORM_SUPPORTED and config.get("pips_enabled", False) is True and not restricted(config)

@@ -346,7 +346,8 @@ def _git_env():
 
 def _require_runner_platform():
     if os.name != "posix":
-        raise RegistryError("unsupported_platform", "This auditor currently requires POSIX process supervision; Windows execution is not enabled.")
+        from .pip_access import UNSUPPORTED_PLATFORM
+        raise RegistryError("unsupported_platform", UNSUPPORTED_PLATFORM)
 
 
 def _git(root, *args):
