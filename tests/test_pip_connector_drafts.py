@@ -8,6 +8,7 @@ from dgc import pip_connector_drafts as connector,pip_connector_actions as adapt
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
 from dgc import workspace_registry
 from tests import test_pip_connector_actions as fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 class ConnectorDraftTests(unittest.TestCase):
     def setUp(self):
@@ -78,7 +79,7 @@ class ConnectorDraftTests(unittest.TestCase):
             answer=pips.handle_control(self.cfg,{**req,'execute':True},'editor-user',start_worker=False);self.assertFalse(answer['ok'])
     def test_schema30_upgrade_preserves_existing_drafts_and_actions(self):
         before=self.store.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0]
-        self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=30')
+        self.store.db.execute('DROP TABLE pip_connector_drafts');drop_digest_schema(self.store.db);self.store.db.execute('PRAGMA user_version=30')
         with WorkspaceRegistry(self.registry.directory) as registry:
             self.assertEqual(registry.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION);self.assertEqual(registry.db.execute('SELECT count(*) FROM pip_app_actions').fetchone()[0],before)
     def test_native_worker_discovers_and_drafts_without_an_mcp_process(self):

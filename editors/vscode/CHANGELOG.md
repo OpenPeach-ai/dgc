@@ -11,6 +11,12 @@
 - **New** offers starter Pips: review each commit, a nightly security review, and a weekday
   morning brief. Pick one, choose the branch or time, and DGC prepares a setup card that opens
   straight into its review. Nothing is created until you approve the card.
+- The Pips bar above the composer shows the day's digest when there is something to say: new
+  findings, failed runs, reviews waiting and findings that went away after their file changed.
+  Expand it to open a finding's report; **Dismiss** marks it seen until the next day. A new
+  finding at a Pip's alert level brings it back straight away.
+- A project reviewer's **Job** tab has **Notifications** (which findings reach the digest, which
+  alert) and **What became of its findings**.
 - Reference a Pip in the main chat with `@`. Setup cards, run rows and email, calendar and
   connector draft rows in the main chat open the matching review in the Pips view.
 - Personal Pips: choose a connected account and exact app reads, add reviewed web reads (up to

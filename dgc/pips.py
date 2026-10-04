@@ -56,6 +56,7 @@ CONTROL_COMMANDS = frozenset({
     "list_workspace_sessions",
     "list_pip_notifications", "mark_pip_notification_read",
     "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories",
+    "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -102,6 +103,10 @@ _COMMAND_ARGS = {
     "revoke_pip_exception": {"pip_id", "memory_id", "expected_revision", "reason"},
     "list_pip_memories": {"pip_id", "before_id", "limit"},
     "list_pip_notifications": {"workspace_id", "before_seq", "limit"},
+    "get_pip_digest": set(), "mark_pip_digest_seen": {"until"},
+    "get_pip_notify_settings": {"pip_id"},
+    "set_pip_notify_settings": {"pip_id", "min_severity", "alert_severity", "expected_revision"},
+    "get_pip_outcomes": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -387,6 +392,19 @@ def _model_settings(config, model_choice=None, *, _prepared=None):
     if _prepared is not None and settings != _prepared['settings']:
         raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
     return settings
+
+
+def _unchanged_since_checkpoint(preparation, job, model, context):
+    """True when a scheduled or triggered audit would read exactly what its last report read:
+    the same committed tree, job version, model and workspace context. Its findings could only
+    repeat, so the occurrence is skipped instead of spending a run on it. Manual runs, chat
+    requests and handoffs always run."""
+    prior = preparation["checkpoint"]["checkpoint"]
+    changes = preparation["changes"]
+    return (prior is not None and changes.get("status") == "compared" and changes.get("total_changes") == 0
+            and prior["job_version"] == job["current_version"]
+            and prior["model"] == (model or {}).get("model")
+            and prior["context_digest"] == context["digest"])
 
 
 class PipStore:
@@ -1047,6 +1065,9 @@ class PipStore:
                     current_checkpoint = pip_checkpoints.snapshot(self, pip_id)
                     if current_checkpoint != audit_preparation["checkpoint"]:
                         raise RegistryError("conflict", "The audit checkpoint or finding reviews changed while preparing source references. Refresh and retry.")
+                    if ((schedule_occurrence is not None or event_occurrence is not None)
+                            and _unchanged_since_checkpoint(audit_preparation, latest, model, manifest["workspace_context"])):
+                        raise RegistryError("source_unchanged", "Nothing changed since this Pip's last report, so this occurrence was skipped.")
                     manifest["audit_checkpoint"] = audit_preparation["checkpoint"]
                     manifest["changes_since_checkpoint"] = audit_preparation["changes"]
                 if run_kind in ("audit", "conversation"):
@@ -2761,7 +2782,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -2887,6 +2908,24 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 else:
                     result = pip_notifications.mark_read(registry, request.get("notification_id"),
                         request.get("expected_revision"), actor, request.get("workspace_id"))
+            elif command in ("get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings",
+                             "set_pip_notify_settings", "get_pip_outcomes"):
+                from . import pip_digest
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Pip digests and notification settings are on this computer only.")
+                if command == "get_pip_digest":
+                    result = {"digest": pip_digest.build(registry, config)}
+                elif command == "mark_pip_digest_seen":
+                    result = pip_digest.mark_seen(registry, request.get("until"), actor)
+                elif command == "get_pip_notify_settings":
+                    result = {"settings": pip_digest.settings(registry, pip_id)}
+                elif command == "set_pip_notify_settings":
+                    result = {"settings": pip_digest.set_settings(
+                        registry, pip_id, min_severity=request.get("min_severity"),
+                        alert_severity=request.get("alert_severity"),
+                        expected_revision=request.get("expected_revision"), actor=actor)}
+                else:
+                    result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
             elif command in STATEMENT_COMMANDS:
                 from . import pip_memory_statements
                 if command == "get_pip_statement_anchor":

@@ -176,7 +176,10 @@ dgc pips accept PIP_ID PROPOSAL_ID --expected-version 1
 Schedules fire only while the runner is running. If it was off, or the computer
 was asleep, the Pip runs once for the latest missed time rather than catching up
 on each one. If the Pip is paused or already busy at a scheduled time, that time
-is skipped. On a daylight-saving change, a local time that doesn't exist is
+is skipped. A scheduled or triggered review is also skipped when nothing has
+changed since its last report: the same commit, job version, model and workspace
+context could only repeat it. The digest counts these skips; **Run now** always
+runs. On a daylight-saving change, a local time that doesn't exist is
 skipped and a repeated one runs once.
 
 Scout, Lens, Rook, Lock and Quill can have schedules. Pulse can run on a schedule
@@ -202,6 +205,43 @@ gap are merged into one run. Turning a trigger on never replays old events. Even
 triggers are for Scout, Lens, Rook, Lock and Quill on committed source, and a Pip
 can't have both a schedule and a trigger. Commit events only see committed work,
 and the run reviews the ref's commit at the moment it is queued.
+
+## The daily digest
+
+Pips don't message you after every run. Once a day, when there is something to
+say, the **Pips bar** above the main chat's composer shows a one-line digest: new
+findings, failed runs, reviews waiting, and earlier findings that went away after
+their file changed. Expand it for each Pip's details; select a finding to open its
+report. **Dismiss** marks the digest seen until the next day.
+
+A new finding at a Pip's alert level brings the bar back straight away. Each
+project reviewer (Scout, Lens, Rook, Lock) has two settings in its **Job** tab
+under **Notifications**:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Show new findings that are | medium or worse | Less severe new findings stay in the Pip's reports and out of the digest |
+| Bring the digest back straight away for | high or worse | Or nothing, to wait for the next day |
+
+These are your display settings, not part of the job: changing them needs no
+review, and no model can change them. A finding that a later run reports again is
+"repeated", not new, so it never brings the digest back.
+
+In the terminal, the welcome screen's tip says when the digest has something new,
+and `/pips` shows it. From any shell:
+
+```sh
+dgc pips digest                                      # show it and mark it seen
+dgc pips digest --keep                               # show it, leave it unseen
+dgc pips notify PIP_ID --min-severity high --alerts critical
+dgc pips outcomes PIP_ID                             # what became of its findings
+```
+
+**What became of its findings.** A project reviewer's **Job** tab (or
+`dgc pips outcomes`) counts what it reported, what you accepted or dismissed, what
+it still reports, and what went away: after its file changed, or without a change.
+"Gone after its file changed" suggests a fix; it doesn't prove one, because the
+run simply stopped reporting it.
 
 ## Reviewing what Pips propose
 
@@ -455,7 +495,8 @@ than run unconfined.
   runs, 20,000 Personal runs and replies, and 20,000 chat messages. When a ceiling
   is reached, new work is refused; run records are not deleted yet.
   `dgc pips capacity` shows how close your project runs are.
-- Audit checkpoints keep up to 20,000 per runner, one per project audit run.
+- Audit checkpoints keep up to 20,000 per runner, one per project audit run. A
+  digest looks back at most a week and counts at most 400 reports.
   Setup cards, handoffs and memory records each have a ceiling of 1,000 per
   runner. The notification list keeps the newest 500.
 - Personal app reads: one connection, four reads, 20 items per read. Web reads:

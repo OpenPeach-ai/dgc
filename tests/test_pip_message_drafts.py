@@ -11,6 +11,7 @@ from dgc import workspace_registry
 from dgc.workspace_registry import WorkspaceRegistry,RegistryError
 from tests import test_pip_app_actions as fixtures
 from tests import test_pip_personal_handoff_tool as tool_fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 class MessageDraftTests(unittest.TestCase):
     setUp=fixtures.AppActionTests.setUp
@@ -45,7 +46,7 @@ class MessageDraftTests(unittest.TestCase):
 
     def test_schema26_upgrade_rollback_and_old_reader_refusal(self):
         from dgc import workspace_registry as schema
-        self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('DROP TABLE pip_message_drafts');self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=26')
+        self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('DROP TABLE pip_message_drafts');self.store.db.execute('DROP TABLE pip_connector_drafts');drop_digest_schema(self.store.db);self.store.db.execute('PRAGMA user_version=26')
         before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_runs ORDER BY id')]
         original=schema._execute_schema
         def fail_after(db,sql):

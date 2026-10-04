@@ -11,6 +11,7 @@ from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from dgc import workspace_registry
 from tests import test_pip_personal_handoffs as fixtures
 from tests.test_app_connectors import spec
+from tests.pip_test_migrations import drop_digest_schema
 
 
 class Manager:
@@ -161,7 +162,7 @@ class ConnectorActionTests(unittest.TestCase):
             self.assertTrue(reply['ok'],reply);self.assertEqual(reply['result']['action']['payload']['call'],self.call)
         self.assertEqual(self.manager.calls,[])
     def test_schema29_upgrade_preserves_ledger_and_older_reader_refuses(self):
-        saved=self.propose();self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=29')
+        saved=self.propose();self.store.db.execute('DROP TABLE pip_connector_drafts');drop_digest_schema(self.store.db);self.store.db.execute('PRAGMA user_version=29')
         before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_app_actions')]
         with WorkspaceRegistry(self.registry.directory) as reg:
             self.assertEqual(reg.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)

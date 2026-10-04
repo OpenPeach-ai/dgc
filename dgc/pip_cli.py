@@ -34,6 +34,15 @@ def parser():
 
     command("enable", "enable Pips locally through Config.set")
     command("starters", "list starter Pips: common jobs to review and approve")
+    digest = command("digest", "what your Pips found since you last looked; marks it seen")
+    digest.add_argument("--keep", action="store_true", help="show the digest without marking it seen")
+    severities = ("low", "medium", "high", "critical")
+    notify = command("notify", "show or change which of a Pip's findings reach the digest and which alert")
+    job(notify)
+    notify.add_argument("--min-severity", choices=severities, help="the least severe new finding the digest shows")
+    notify.add_argument("--alerts", choices=(*severities, "off"),
+                        help="the least severe new finding that brings the digest back before tomorrow, or off")
+    job(command("outcomes", "what became of a Pip's findings: accepted, dismissed, gone after a change"))
     starter = command("starter", "review a starter Pip's exact job here, then create it")
     from .pip_starters import STARTERS
     starter.add_argument("starter_id", choices=[key.replace("_", "-") for key in STARTERS])
@@ -685,6 +694,23 @@ def _request(args):
 
 
 def _format(value):
+    if "digest" in value:
+        return format_digest(value["digest"])
+    if "settings" in value and "min_severity" in value["settings"]:
+        item = value["settings"]
+        return (f"The digest shows new findings at {item['min_severity']} or above. "
+                + (f"A new {item['alert_severity']} or worse finding brings it back straight away."
+                   if item["alert_severity"] else "No alerts: findings wait for the daily digest.")
+                + ("" if not item["is_default"] else " (default)"))
+    if "outcomes" in value:
+        item = value["outcomes"]
+        lines = [f"{item['name']}: {item['reported']} findings reported in {item['checkpoints_examined']} reports",
+                 f"  accepted {item['accepted']} · dismissed {item['dismissed']} · still reported {item['still_reported']}",
+                 f"  gone after their file changed {item['gone_after_change']} · gone without a change {item['gone_without_change']}",
+                 "A finding that is gone was no longer reported by a later run; it is not proof of a fix."]
+        if item["history_truncated"]:
+            lines.append("Counted from the latest 200 reports.")
+        return "\n".join(lines)
     if "starters" in value:
         return "\n".join(f'{item["id"].replace("_", "-")}  {item["title"]} — {item["summary"]}' for item in value["starters"]) + (
             "\n\nReview and create one with: dgc pips starter NAME (see --help for its options).")
@@ -1098,6 +1124,75 @@ def _workspace_command(config, args):
         return registry.sessions(workspace["id"], after=args.after, limit=args.limit)
 
 
+def _digest_command(config, args):
+    """`digest`, `notify` and `outcomes`: read through the same local controls as the Pips view."""
+    from . import pips
+    from .workspace_registry import in_use
+    if args.command == "digest" and not in_use():
+        return {"digest": None}
+
+    def control(request):
+        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
+        if not response["ok"]:
+            raise RegistryError(response["error"]["code"], response["error"]["message"])
+        return response["result"]
+    if args.command == "outcomes":
+        return control({"type": "get_pip_outcomes", "pip_id": args.pip_id})
+    if args.command == "notify":
+        current = control({"type": "get_pip_notify_settings", "pip_id": args.pip_id})["settings"]
+        if args.min_severity is None and args.alerts is None:
+            return {"settings": current}
+        alerts = current["alert_severity"] if args.alerts is None else (None if args.alerts == "off" else args.alerts)
+        return control({"type": "set_pip_notify_settings", "pip_id": args.pip_id,
+                        "min_severity": args.min_severity or current["min_severity"], "alert_severity": alerts,
+                        "expected_revision": current["revision"]})
+    digest = control({"type": "get_pip_digest"})["digest"]
+    if not args.keep:
+        control({"type": "mark_pip_digest_seen", "until": digest["until"]})
+    return {"digest": digest}
+
+
+def _local_time(stamp):
+    from datetime import datetime
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def format_digest(digest) -> str:
+    """The digest as plain lines, shared by `dgc pips digest` and the terminal UI."""
+    if digest is None:
+        return "No Pips yet. Create one with dgc pips starters, or ask the main chat."
+    lines = [f"Pips since {_local_time(digest['since'])}: {digest['headline']}"]
+    for pip in digest["pips"]:
+        ran = sum(pip["runs"].values())
+        facts = [f"{ran} run{'' if ran == 1 else 's'}"] if ran else []
+        if pip["runs"]["failed"]:
+            facts.append(f"{pip['runs']['failed']} failed")
+        if pip["new_total"]:
+            facts.append(f"{pip['new_total']} new at {pip['min_severity']} or above")
+        elif pip["scope"] == "project" and ran:
+            facts.append("nothing new")
+        if pip["below_threshold"]:
+            facts.append(f"{pip['below_threshold']} below {pip['min_severity']}")
+        if pip["skipped_unchanged"]:
+            facts.append(f"{pip['skipped_unchanged']} skipped, nothing changed")
+        if pip["gone_after_change"]:
+            facts.append(f"{pip['gone_after_change']} earlier gone after a change")
+        scope = "Personal" if pip["scope"] == "personal" else pip["pip_type"]
+        lines.append(f"{'!' if pip['alert'] else ' '} {pip['name']} ({scope}) — " + (" · ".join(facts) or "no runs"))
+        for finding in pip["new_findings"]:
+            lines.append(f"    {finding['severity']:<8} {finding['title']} — {finding['path']}:{finding['line']}")
+        if pip["new_findings"]:
+            lines.append(f"    Read the report: dgc pips report {pip['new_findings'][0]['run_id']}")
+    if digest["omitted_pips"]:
+        lines.append(f"  and {digest['omitted_pips']} more Pips")
+    if digest["pending_reviews"] or digest["pending_setups"]:
+        lines.append(f"Waiting for you: {digest['pending_reviews']} review(s), {digest['pending_setups']} setup card(s). "
+                     "Open the Pips view, or dgc pips setup list.")
+    if digest["truncated"]:
+        lines.append("Only the first 400 reports since then are counted.")
+    return "\n".join(lines)
+
+
 def _starter_command(config, args):
     """Create a starter Pip from the terminal: show its exact job, ask, then create and apply it.
 
@@ -1210,6 +1305,8 @@ def handle_command(config, argv, *, in_chat=False):
             result = _starter_command(config, args)
             if result is None:
                 return 0
+        elif args.command in ("digest", "notify", "outcomes"):
+            result = _digest_command(config, args)
         elif args.command == "capacity":
             if in_chat:
                 raise RegistryError("separate_terminal", "Inspect local capacity from a separate terminal with dgc pips capacity.")

@@ -13,6 +13,7 @@ from dgc.workspace_registry import WorkspaceRegistry,RegistryError
 from tests import test_pip_calendar_actions as action_fixtures
 from tests import test_pip_personal_handoff_tool as tool_fixtures
 from tests import test_pip_message_drafts as mail_fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 EVENT=action_fixtures.EVENT
 
@@ -103,7 +104,7 @@ class CalendarDraftTests(unittest.TestCase):
     def test_schema28_upgrade_preserves_email_and_action_rows_and_rolls_back(self):
         from dgc import workspace_registry as schema
         mail=drafts.save(self.store,self.run['id'],self.message,'main-email:'+'a'*32,'b'*64)
-        self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('PRAGMA user_version=28')
+        self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('DROP TABLE pip_connector_drafts');drop_digest_schema(self.store.db);self.store.db.execute('PRAGMA user_version=28')
         before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_message_drafts')]
         original=schema._execute_schema
         def fail_after(db,sql):

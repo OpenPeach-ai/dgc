@@ -10,6 +10,7 @@ from unittest.mock import patch
 from dgc import pip_app_actions as actions, pip_app_sends as sends, pip_app_access as apps, pips
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests import test_pip_personal_handoffs as fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 
 def schema(properties):
@@ -60,7 +61,7 @@ class AppActionTests(unittest.TestCase):
         from dgc import workspace_registry as schema
         from dgc.pips import PipStore
         db=self.registry.db
-        db.execute('DROP TABLE pip_connector_drafts');db.execute('DROP TABLE pip_calendar_drafts');db.execute('DROP TABLE pip_message_drafts');db.execute('DROP TABLE pip_app_actions');db.execute('PRAGMA user_version=25')
+        db.execute('DROP TABLE pip_connector_drafts');db.execute('DROP TABLE pip_calendar_drafts');db.execute('DROP TABLE pip_message_drafts');db.execute('DROP TABLE pip_app_actions');drop_digest_schema(db);db.execute('PRAGMA user_version=25')
         before=[tuple(r) for r in db.execute('SELECT * FROM pip_runs ORDER BY id')]
         original=schema._execute_schema
         def fail_after(db,sql):

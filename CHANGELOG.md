@@ -21,6 +21,18 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   starter becomes a setup card you approve like any other.
 - A setup card from the chat or a starter can run a new project reviewer after each new commit
   instead of on a schedule.
+- Fewer, better messages. `dgc pips digest` (and `/pips`, now in the full-screen terminal too)
+  shows what your Pips found since you last looked: new findings at each Pip's threshold, failed
+  runs, reviews waiting and earlier findings that went away after their file changed. The welcome
+  screen's tip says when there is something new. A new finding at a Pip's alert level brings the
+  digest back straight away; otherwise it is due once a day.
+- `dgc pips notify PIP` sets which new findings reach the digest (default medium or worse) and
+  which bring it back early (default high or worse). These are display settings, not part of the
+  job, so they need no review and no model can change them.
+- A scheduled or commit-triggered review is skipped when nothing changed since its last report:
+  the same commit, job, model and workspace context could only repeat it. Manual runs always run.
+- `dgc pips outcomes PIP` shows what became of a Pip's findings: accepted, dismissed, still
+  reported, or gone after their file changed.
 - The main chat carries one small `use_pips` tool and loads the Pips tools only when a task needs
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
@@ -34,7 +46,7 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   Pips never buy, pay or book anything.
 - A finished run removes its private source copy, worktree and worker home, keeping its report,
   artifacts and history, so a busy Pip's runs no longer fill the disk. A profile now keeps up to
-  20,000 project runs and 20,000 Personal runs.
+  20,000 project runs, 20,000 Personal runs and 20,000 audit checkpoints.
 - Set `pips_enabled` to `false` to turn Pips off.
 
 ### Goals

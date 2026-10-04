@@ -12,6 +12,7 @@ from dgc import pip_chat, pip_chat_continuity as continuity, pips
 from dgc.llm import ChatResult, LLMClient
 from dgc.workspace_registry import WorkspaceRegistry, RegistryError
 from tests import test_pips_local as fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 
 class ContinuityTests(unittest.TestCase):
@@ -161,6 +162,7 @@ class ContinuityTests(unittest.TestCase):
         self.registry.db.execute('DROP TABLE pip_calendar_drafts')
         self.registry.db.execute('DROP TABLE pip_message_drafts')
         self.registry.db.execute('DROP TABLE pip_app_actions')
+        drop_digest_schema(self.registry.db)
         self.registry.db.execute('PRAGMA user_version=23')
         with patch.object(continuity,'SCHEMA',continuity.SCHEMA+'\nINVALID SQL;'), self.assertRaises(sqlite3.Error):
             WorkspaceRegistry(self.registry.directory)

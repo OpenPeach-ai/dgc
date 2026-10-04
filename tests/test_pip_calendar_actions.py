@@ -11,6 +11,7 @@ from dgc import pip_calendar_actions as cal,pip_app_actions as actions,pip_app_a
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
 from dgc import workspace_registry
 from tests import test_pip_app_actions as fixtures
+from tests.pip_test_migrations import drop_digest_schema
 
 EVENT={'summary':'Quiet reading','description':'Read <one> chapter & make notes.',
        'start_datetime':'2026-12-01T11:00:00+05:30','end_datetime':'2026-12-01T11:30:00+05:30','timezone':'Asia/Kolkata'}
@@ -99,7 +100,7 @@ class CalendarActionTests(unittest.TestCase):
             self.assertTrue(value['ok'],value);self.assertEqual(value['result']['action']['payload']['event'],EVENT)
     def test_schema27_migration_preserves_rows_and_old_reader_refuses(self):
         saved=self.propose(kind='gmail_send',message=self.message,request_key='legacy');before=[tuple(r) for r in self.store.db.execute('SELECT * FROM pip_app_actions')]
-        self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('DROP TABLE pip_calendar_drafts');self.store.db.execute('PRAGMA user_version=27')
+        self.store.db.execute('DROP TABLE pip_connector_drafts');self.store.db.execute('DROP TABLE pip_calendar_drafts');drop_digest_schema(self.store.db);self.store.db.execute('PRAGMA user_version=27')
         with WorkspaceRegistry(self.registry.directory) as upgraded:
             self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)
             self.assertEqual([tuple(r) for r in upgraded.db.execute('SELECT * FROM pip_app_actions')],before)

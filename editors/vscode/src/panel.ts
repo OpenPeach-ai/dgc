@@ -6189,6 +6189,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <footer>
   <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit"><span class="codicon codicon-diff" aria-hidden="true"></span><span class="workspace-changes-label">Workspace changes</span></button>
   <div id="composer-rail" aria-label="Current work" hidden>
+    <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
+      <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>
+      <button type="button" id="pips-digest-main" class="rail-main" aria-expanded="false" aria-controls="pips-digest-panel"><span class="pips-digest-icon codicon codicon-bell rail-icon" aria-hidden="true"></span><span class="pips-digest-label">Pips</span><span id="pips-digest-text"></span></button>
+      <button type="button" id="pips-digest-open" class="rail-text-action" title="Open the Pips view">Open</button>
+      <button type="button" id="pips-digest-dismiss" class="rail-text-action" title="Mark this digest seen until something new">Dismiss</button>
+    </section>
     <section id="monitorsbar" class="rail-item" aria-label="Background monitors" hidden>
       <div class="rail-row">
         <span class="monitors-icon codicon codicon-pulse rail-icon" aria-hidden="true"></span>

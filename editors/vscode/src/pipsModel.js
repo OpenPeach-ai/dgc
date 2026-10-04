@@ -947,3 +947,52 @@ export function pipSetupResolution(value,review,accepted){
  if(setup.status!==(accepted?'accepted':'rejected')||setup.digest!==review.digest||JSON.stringify(before)!==JSON.stringify(after))throw Error('The setup receipt differs from the proposal you reviewed. Refresh before retrying.');
  return setup;
 }
+
+// Fewer, better messages (Pips API 41): per-Pip notification settings, the daily digest and
+// finding outcomes. Exact shapes: a digest is shown in the main chat, so nothing unexpected passes.
+export const SEVERITIES = ['low','medium','high','critical'];
+const digestKeys = (value, keys) => record(value) && Object.keys(value).sort().join() === [...keys].sort().join();
+const digestCount = value => Number.isSafeInteger(value) && value >= 0;
+const digestPip = value => typeof value === 'string' && /^pip_[a-f0-9]{32}$/.test(value);
+const digestRun = value => typeof value === 'string' && /^run_[a-f0-9]{32}$/.test(value);
+const digestTime = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value);
+export function pipNotifySettings(value, pip) {
+  if (!digestKeys(value, ['pip_id','min_severity','alert_severity','revision','is_default']) || value.pip_id !== pip
+    || !SEVERITIES.includes(value.min_severity) || !(value.alert_severity === null || SEVERITIES.includes(value.alert_severity))
+    || value.alert_severity !== null && SEVERITIES.indexOf(value.alert_severity) < SEVERITIES.indexOf(value.min_severity)
+    || !digestCount(value.revision) || typeof value.is_default !== 'boolean' || value.is_default !== (value.revision === 0))
+    throw Error('Notification settings are invalid or belong to another Pip.');
+  return value;
+}
+export function pipOutcomes(value, pip) {
+  const counts = ['reported','accepted','dismissed','still_reported','gone_after_change','gone_without_change','checkpoints_examined'];
+  if (!digestKeys(value, ['pip_id','name','pip_type','history_truncated',...counts]) || value.pip_id !== pip || typeof value.name !== 'string'
+    || typeof value.pip_type !== 'string' || typeof value.history_truncated !== 'boolean' || !counts.every(key => digestCount(value[key]))
+    || value.still_reported + value.gone_after_change + value.gone_without_change !== value.reported)
+    throw Error('Finding outcomes are invalid or belong to another Pip.');
+  return value;
+}
+export function pipDigest(value) {
+  if (value === null) return null;
+  const fail = () => { throw Error('The Pips digest is invalid. Update DGC or open the Pips view.'); };
+  if (!digestKeys(value, ['schema_version','since','until','first','due','reason','headline','pips','omitted_pips','failed_runs','pending_reviews','pending_setups','truncated'])
+    || value.schema_version !== 1 || !digestTime(value.since) || !digestTime(value.until) || value.since > value.until
+    || typeof value.first !== 'boolean' || typeof value.due !== 'boolean' || ![null,'alert','daily'].includes(value.reason) || (value.reason !== null) !== value.due
+    || typeof value.headline !== 'string' || !value.headline || value.headline.length > 400 || !Array.isArray(value.pips) || value.pips.length > 20
+    || !['omitted_pips','failed_runs','pending_reviews','pending_setups'].every(key => digestCount(value[key])) || typeof value.truncated !== 'boolean') fail();
+  for (const p of value.pips) {
+    if (!digestKeys(p, ['pip_id','workspace_id','name','pip_type','scope','status','min_severity','alert_severity','runs','skipped_unchanged','new_total','below_threshold','new_findings','gone_after_change','alert','latest_run_id'])
+      || !digestPip(p.pip_id) || !/^ws_[a-f0-9]{32}$/.test(p.workspace_id) || typeof p.name !== 'string' || typeof p.pip_type !== 'string'
+      || !['project','personal'].includes(p.scope) || typeof p.status !== 'string' || !SEVERITIES.includes(p.min_severity)
+      || !(p.alert_severity === null || SEVERITIES.includes(p.alert_severity)) || !digestKeys(p.runs, ['succeeded','failed','cancelled'])
+      || !Object.values(p.runs).every(digestCount) || !['skipped_unchanged','new_total','below_threshold','gone_after_change'].every(key => digestCount(p[key]))
+      || typeof p.alert !== 'boolean' || !(p.latest_run_id === null || digestRun(p.latest_run_id)) || !Array.isArray(p.new_findings)
+      || p.new_findings.length > 5 || p.new_findings.length > p.new_total) fail();
+    for (const f of p.new_findings)
+      if (!digestKeys(f, ['severity','title','path','line','run_id','finding_index']) || !SEVERITIES.includes(f.severity)
+        || SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(p.min_severity) || typeof f.title !== 'string' || f.title.length > 200
+        || typeof f.path !== 'string' || !f.path || !Number.isSafeInteger(f.line) || f.line < 1 || !digestRun(f.run_id)
+        || !Number.isSafeInteger(f.finding_index) || f.finding_index < 0 || f.finding_index > 15) fail();
+  }
+  return value;
+}

@@ -119,8 +119,9 @@ The backend's own validation is authoritative; it also checks required fields.
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
 needs a newer API, before sending it. The current backend is API 41. API 41 adds starter
-Pips for the Pips view and the CLI; the SDK does not wrap them, because a host can create
-the same job with `create_pip` and a reviewed update.
+Pips, the daily digest, notification settings and finding outcomes for the Pips view and
+the CLI. The SDK does not wrap them: a host can create the same jobs with `create_pip`
+and a reviewed update, and the digest is a reading of records the SDK already exposes.
 
 | API | Commands or parameters |
 | --- | --- |

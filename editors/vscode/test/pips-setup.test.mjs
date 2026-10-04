@@ -176,3 +176,26 @@ test('starters appear at API 41 only and a chosen starter becomes a setup card o
 });
 
 test('extension host gates starter commands at API 41',()=>{for(const api of [40,41]){const posted=[],sent=[],vscode={};const {PipsEditor}=load(viewCode,name=>name==='vscode'?vscode:require(name));const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});bridge.receive({type:'pipsRequest',id:'l',request:{type:'list_pip_starters'}});bridge.receive({type:'pipsRequest',id:'p',request:{type:'propose_starter_pip',starter:'commit_review',params:{}}});assert.equal(sent.length,api===41?2:0);if(api===40)assert.match(posted.at(-1).error.message,/API 41/);}});
+
+// Notifications and finding outcomes (Pips API 41): the user's own setting, saved without a job review.
+test('an audit Pip saves its notification threshold directly and shows what became of its findings',async()=>{
+ const p=job(),settings={pip_id:p.id,min_severity:'medium',alert_severity:'high',revision:0,is_default:true};
+ const outcomes={pip_id:p.id,name:p.name,pip_type:'rook',history_truncated:false,reported:4,accepted:2,dismissed:1,still_reported:1,gone_after_change:2,gone_without_change:1,checkpoints_examined:6};
+ const reads={get_pip_notify_settings:()=>({settings}),get_pip_outcomes:()=>({outcomes})};
+ const old=setup({api:40,proposal:null,jobs:[p]});await old.drain();old.click('[data-job]');await old.drain();old.click('[data-tab=job]');await old.drain();
+ assert.equal(old.d.querySelector('#notify-form'),null);assert.equal(old.requests('get_pip_notify_settings').length,0);
+ const x=setup({api:41,proposal:null,jobs:[p]});await x.drain(reads);x.click('[data-job]');await x.drain(reads);x.click('[data-tab=job]');await x.drain(reads);
+ assert.equal(x.d.querySelector('#notifyMin').value,'medium');assert.equal(x.d.querySelector('#notifyAlert').value,'high');
+ assert.match(x.d.querySelector('[aria-label="Finding outcomes"]').textContent,/Gone after their file changed2/);
+ assert.match(x.d.querySelector('[aria-label="Finding outcomes"]').textContent,/does not prove one/);
+ x.input('#notifyMin','high');x.input('#notifyAlert','low');x.submit('#notify-form');await flush();
+ assert.equal(x.requests('set_pip_notify_settings').length,0,'alerts below the threshold are refused here');
+ x.input('#notifyAlert','off');x.submit('#notify-form');
+ const saved=x.requests('set_pip_notify_settings')[0];
+ assert.deepEqual(JSON.parse(JSON.stringify(saved.request)),{type:'set_pip_notify_settings',pip_id:p.id,min_severity:'high',alert_severity:null,expected_revision:0});
+ assert.equal(x.requests('propose_pip_update').length,0,'no job review: the job does not change');
+ x.answer(saved,{settings:{...settings,min_severity:'high',alert_severity:null,revision:1,is_default:false}});await x.drain(reads);
+ assert.match(x.d.body.textContent,/Notifications saved. The job itself did not change./);
+});
+
+test('extension host gates the digest and notification controls at API 41',()=>{for(const api of [40,41]){const posted=[],sent=[],vscode={};const {PipsEditor}=load(viewCode,name=>name==='vscode'?vscode:require(name));const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});for(const [type,extra] of [['get_pip_digest',{}],['mark_pip_digest_seen',{until:'2026-10-04T09:00:00.000Z'}],['get_pip_notify_settings',{pip_id:pipId}],['set_pip_notify_settings',{pip_id:pipId,min_severity:'high',alert_severity:null,expected_revision:0}],['get_pip_outcomes',{pip_id:pipId}]])bridge.receive({type:'pipsRequest',id:type,request:{type,...extra}});assert.equal(sent.length,api===41?5:0);if(api===40)assert.match(posted.at(-1).error.message,/API 41/);}});

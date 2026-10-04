@@ -508,7 +508,7 @@
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
-  const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar");
+  const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   // Pips has its own durable conversations. Hiding the main chat preserves its
@@ -526,6 +526,19 @@
       });
     }
     return pipSetupCards;
+  }
+  // The Pips bar above the composer: today's digest, shown when the backend says it is due.
+  let pipDigestBar = null;
+  function digestBar() {
+    if (!pipDigestBar && window.DgcPips?.mountDigestBar && document.documentElement.dataset.pipsDocumentId) {
+      pipDigestBar = window.DgcPips.mountDigestBar({
+        document,
+        postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
+        onOpen: navigation => { showPips(); if (navigation) pipsApp?.navigate?.(navigation); },
+        onChange: () => syncComposerRail(),
+      });
+    }
+    return pipDigestBar;
   }
   function showPips() {
     const host = $("pips-host");
@@ -2625,6 +2638,7 @@
       : `${outcome} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     const finished = turn.block;
     pipSetupCards?.finish(finished);
+    pipDigestBar?.refresh();
     turn = null;
     // Repaint the checklist now that no turn is live. The row hides itself only when it renders
     // with every item done AND nothing running, and nothing re-rendered it at the end of a turn --
@@ -3796,7 +3810,7 @@
 
   function syncComposerRail() {
     composerRail.hidden = goalBar.hidden && changesBar.hidden && tasksBar.hidden && monitorsBar.hidden
-      && pasteBar.hidden;
+      && pasteBar.hidden && (!pipsBar || pipsBar.hidden);
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
@@ -6554,6 +6568,7 @@
     if (msg.type === "pipsOpen") { showPips(); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
+      pipDigestBar?.receive(msg);
       if (msg.type === "pipsVisibility") {
         pipsViewVisible = msg.visible === true;
         pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden);
@@ -10216,4 +10231,5 @@
   window.addEventListener("focus", sayAlive);
   sayAlive();
   vscode.postMessage({ type: "webviewReady" });
+  digestBar();
 })();

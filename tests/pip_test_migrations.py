@@ -1,6 +1,11 @@
 """Remove later additive objects when constructing genuine older-schema fixtures."""
 
+def drop_digest_schema(db):
+    db.execute('DROP TABLE IF EXISTS pip_notify_settings')
+    db.execute('DROP TABLE IF EXISTS pip_digest_state')
+
 def drop_setup_schema(db):
+    drop_digest_schema(db)
     db.execute('DROP TABLE IF EXISTS pip_connector_drafts')
     db.execute('DROP TABLE IF EXISTS pip_calendar_drafts')
     db.execute('DROP TABLE IF EXISTS pip_message_drafts')

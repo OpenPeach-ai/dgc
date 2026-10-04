@@ -5,7 +5,8 @@ import {accountChoices,accountReadPlan,appLabels,appReadNotices,extraReadTools,c
 import './pipsTranscript.css';
 import {messageMarkup,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {mountSetupCards} from './pipSetupCards.js';
-import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel} from './pipsModel.js';
+import {mountDigestBar} from './pipDigestBar.js';
+import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
@@ -234,6 +235,38 @@ async function sendChat(){
   finally{if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }
 function hydrateAdaptation(pip){const p=adaptationPolicy(pip.adaptation_policy);draft.adaptationMode=p.mode;draft.adaptationName=p.allowed_fields.includes('name');draft.adaptationSource=p.allowed_fields.includes('source_ref');S.adaptationDraftVersion=pip.current_version;}
+// Notifications and finding outcomes (Pips API 41). The settings are the user's display
+// preference, not the reviewed job, so they save directly; outcomes are read-only counts.
+const auditPip=(pip=S.pip)=>!!pip&&!personalPip(pip)&&['scout','lens','rook','lock'].includes(pip.pip_type??'rook');
+let notifyState={pip:'',value:null,loading:false,error:''},outcomeState={pip:'',value:null,loading:false,error:''};
+async function loadNotify(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||notifyState.loading&&notifyState.pip===pip)return;
+ const token=scope();notifyState={pip,value:null,loading:true,error:''};
+ try{const value=pipNotifySettings((await send('get_pip_notify_settings',{pip_id:pip})).settings,pip);if(token!==scope()||S.selected!==pip)return;notifyState.value=value;draft.notifyMin=value.min_severity;draft.notifyAlert=value.alert_severity||'off';}
+ catch(error){if(token===scope()&&S.selected===pip)notifyState.error=errorText(error);}
+ finally{if(token===scope()&&S.selected===pip){notifyState.loading=false;render();}}
+}
+async function loadFindingOutcomes(){
+ const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||outcomeState.loading&&outcomeState.pip===pip)return;
+ const token=scope();outcomeState={pip,value:null,loading:true,error:''};
+ try{const value=pipOutcomes((await send('get_pip_outcomes',{pip_id:pip})).outcomes,pip);if(token!==scope()||S.selected!==pip)return;outcomeState.value=value;}
+ catch(error){if(token===scope()&&S.selected===pip)outcomeState.error=errorText(error);}
+ finally{if(token===scope()&&S.selected===pip){outcomeState.loading=false;render();}}
+}
+function notifyMarkup(){
+ if(S.apiVersion<41||!auditPip())return '';
+ if(notifyState.pip!==S.selected){void loadNotify();return '<section class="section"><h2>Notifications</h2><p class="muted">Loading…</p></section>';}
+ const n=notifyState.value,off=S.busy||!usable()||!n;
+ const option=(value,label,chosen)=>`<option value="${value}"${chosen===value?' selected':''}>${label}</option>`;
+ return `<form id="notify-form" class="section form"><h2>Notifications</h2><p class="muted">New findings reach you in one daily digest in the main chat, not a message per run. Findings below the threshold stay in this Pip's reports.</p>${errorMarkup(notifyState.error)}<label for="notifyMin">Show new findings that are</label><select id="notifyMin" data-draft="notifyMin"${off?' disabled':''}>${SEVERITIES.map(l=>option(l,l+' or worse',draft.notifyMin)).join('')}</select><label for="notifyAlert">Bring the digest back straight away for</label><select id="notifyAlert" data-draft="notifyAlert"${off?' disabled':''}>${SEVERITIES.map(l=>option(l,l+' or worse',draft.notifyAlert)).join('')}${option('off','Nothing: wait for the next day',draft.notifyAlert)}</select><button type="submit"${off?' disabled':''}>Save notifications</button></form>${findingOutcomesMarkup()}`;
+}
+function findingOutcomesMarkup(){
+ if(S.apiVersion<41||!auditPip())return '';
+ if(outcomeState.pip!==S.selected){void loadFindingOutcomes();return '';}
+ const o=outcomeState.value;
+ const body=o?(o.reported?`<dl class="meta outcome-counts"><dt>Reported</dt><dd>${o.reported}</dd><dt>Accepted</dt><dd>${o.accepted}</dd><dt>Dismissed</dt><dd>${o.dismissed}</dd><dt>Still reported</dt><dd>${o.still_reported}</dd><dt>Gone after their file changed</dt><dd>${o.gone_after_change}</dd><dt>Gone without a change</dt><dd>${o.gone_without_change}</dd></dl><p class="muted">“Gone” means a later run stopped reporting it after a source change. It suggests a fix; it does not prove one.${o.history_truncated?' Counted from the latest 200 reports.':''}</p>`:'<p class="muted">No findings reported yet.</p>'):outcomeState.loading?'<p class="muted">Loading…</p>':'';
+ return `<section class="section" aria-label="Finding outcomes"><div class="section-head"><h2>What became of its findings</h2>${button('refresh-findings',outcomeState.loading?'Loading…':'Refresh',!usable()||outcomeState.loading)}</div>${errorMarkup(outcomeState.error)}${body}</section>`;
+}
 function adaptationMarkup(){
  if(S.apiVersion<10)return '<section class="section"><h2>Adaptation policy</h2><p class="muted">Update the computer to Pips API 10 to review adaptation policies.</p></section>';
  return `<form id="adaptation-form" class="section form"><h2>Adaptation policy</h2><p class="muted">Current: ${esc(adaptationLabel(S.pip.adaptation_policy))}</p><label for="adaptationMode">How the model may change this job</label><select id="adaptationMode" data-draft="adaptationMode">${Object.entries(ADAPTATION_MODES).map(([key,label])=>`<option value="${key}"${draft.adaptationMode===key?' selected':''}>${label}</option>`).join('')}</select><p class="muted">${draft.adaptationMode==='locked'?'The model cannot propose or automatically apply job changes.':draft.adaptationMode==='context_adaptive'?'Runs use Workspace Context. The model cannot propose or automatically apply job changes.':draft.adaptationMode==='suggest_changes'?'The model may save a proposal. Every change waits for your review.':draft.adaptationMode==='bounded_adaptive'?'Allow automatic updates only to the fields you select below. Changes are recorded as new job versions.':'In this build, autonomous means automatic name and source-ref updates only. It does not authorize unrestricted work.'}</p>${draft.adaptationMode==='bounded_adaptive'?`<fieldset><legend>Fields allowed without another job review</legend><label class="check-field"><input id="adaptationName" data-draft="adaptationName" type="checkbox"${draft.adaptationName?' checked':''}> Name</label><label class="check-field"><input id="adaptationSource" data-draft="adaptationSource" type="checkbox"${draft.adaptationSource?' checked':''}> Source ref</label></fieldset>`:''}<p class="notice">Changing the source ref changes the committed source of later authorized work. Under current-tree policy, the ref is dormant and cannot be automatically changed. No mode can automatically change the goal, model, schedule, event triggers, permissions, or this policy. Nothing runs just because metadata changes.</p>${field('adaptationReason','Reason for changing adaptation policy')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review policy change…</button>${S.adaptationDraftVersion!==S.pip.current_version?'<p class="notice">This draft began on an older job version. Reset before proposing.</p>':''}<div class="actions">${button('reset-adaptation','Reset to current policy',S.busy||!usable())}</div></form>${adaptationHistoryMarkup()}`;
@@ -288,7 +321,7 @@ function reviewLifecycle(restore){
 }
 function jobSettingsMarkup(){
   if(archived())return `<section class="section"><h2>Archived job</h2><p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} · ${esc(modelLabel(S.pip.model_choice))}</p>${lifecycleMarkup()}</section>`;
-  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}`;
+  return `<section class="section"><h2>Job and source</h2>${S.apiVersion>=23?button('setup-in-chat','Change setup in chat',S.busy||!usable()):''}<p class="goal">${esc(S.pip.goal)}</p><p class="muted">${esc(jobSourceLabel(S.pip))} ${personalPip()?'Conversations and scheduled tasks use the details you provide and any separately reviewed app reads. No files or external actions.':pulsePip(S.pip)?'Conversations use read-only tools. A reviewed command plan enables model-free manual and calendar runs on API 21. Separately approved handoffs remain independent.':executionPip(S.pip)?'Conversations use read-only tools. Every edit or test run requires its own reviewed handoff.':documentationPip(S.pip)?'Quill prepares private drafts. Drafts and messages use read-only tools; no project files are changed. Committed-source automation requires a reviewed schedule or trigger on Pips API 20.':'Scheduled audits and messages use the same read-only tool policy.'}</p>${button('toggle-pip',S.pip.status==='paused'?'Resume job':'Pause job',S.busy||!usable()||S.apiVersion>=16&&!canLifecycle())}${lifecycleMarkup()}</section>${sourceSettingsMarkup()}<form id="model-form" class="section form"><h2>Model for this Pip</h2><p class="muted">Current choice: ${esc(modelLabel(S.pip.model_choice))}. Model changes are saved for your review. Running work keeps its pinned model.${pulsePip(S.pip)?' Standalone command plans do not invoke this model; the choice applies to chat and model-based handoffs.':''}</p>${modelPicker('pipModel','Model',draft.pipModel)}${field('modelReason','Reason for changing model')}<button type="submit"${S.busy||!usable()?' disabled':''}>Review model change…</button></form>${adaptationMarkup()}${notifyMarkup()}`;
 }
 function chooseType(id){const type=S.types.find(t=>t.id===id);if(!S.create||!type?.available||S.busy||!usable())return;rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});S.createStep='configure';S.error='';render();$('name')?.focus();}
 function jobMarkup(p) {
@@ -1133,7 +1166,7 @@ function updateDraft(event) {
 document.addEventListener('input',updateDraft);
 document.addEventListener('change',event=>{if(event.target.id==='pip-workspace'){const chosen=S.workspaces.find(w=>w.id===event.target.value);if(chosen){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=chosen;setupRows=[];setupError='';S.error='';rememberView();void refresh(true);}return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
-  const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form'].includes(id))return;event.preventDefault();
+  const id=event.target.id;if(!['create-form','revision-form','context-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','outcome-form','pip-statement-form','web-reads-form','notify-form'].includes(id))return;event.preventDefault();
   if(!usable()||S.busy||!S.workspace)return;if(archived()&&['revision-form','schedule-form','chat-form','model-form','handoff-form','adaptation-form','source-form','pip-statement-form','web-reads-form'].includes(id)){setError('Restore this archived Pip to paused before changing it or starting work.');return;}
   if(id==='pip-statement-form'){void reviewStatement();return;}
   if(id==='outcome-form'){
@@ -1166,6 +1199,13 @@ document.addEventListener('submit',event=>{
     if(S.sourceDraftVersion!==S.pip.current_version){setError('The job changed while you edited its source policy. Reset before proposing.');return;}
     const changes={source_policy:policy,schedule:null,event_trigger:null};
     void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.sourceDraftVersion,changes,reason},result=>{const p=result.proposal;if(!record(p)||p.pip_id!==S.selected||JSON.stringify(sourcePolicy(p.definition?.source_policy))!==JSON.stringify(policy)||p.definition.schedule!==null||p.definition.event_trigger!==null)throw new Error('The saved source policy or removed automation differs from this review. Refresh before accepting.');S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(v=>v.id!==p.id),p]};S.notice='Source policy saved for review. No source access or automation changes until you accept it.';proposalReview(p.id);});return;
+  }
+  if(id==='notify-form'){
+    const n=notifyState.value,pip=S.selected;if(S.apiVersion<41||!n||n.pip_id!==pip)return;
+    const min=draft.notifyMin,alert=draft.notifyAlert==='off'?null:draft.notifyAlert;
+    if(!SEVERITIES.includes(min)||alert!==null&&SEVERITIES.indexOf(alert)<SEVERITIES.indexOf(min)){notifyState.error='Alerts must be at least as severe as the findings the digest shows.';render();return;}
+    void mutate({type:'set_pip_notify_settings',pip_id:pip,min_severity:min,alert_severity:alert,expected_revision:n.revision},result=>{const value=pipNotifySettings(result.settings,pip);if(value.min_severity!==min||value.alert_severity!==alert)throw Error('The saved settings differ from your choice. Refresh and try again.');notifyState={pip,value,loading:false,error:''};S.notice='Notifications saved. The job itself did not change.';});
+    return;
   }
   if(id==='adaptation-form'){
     if(S.apiVersion<10){setError('Update the computer to review adaptation policy.');return;}
@@ -1338,6 +1378,7 @@ document.addEventListener('click',event=>{
       if(personalPip()&&S.pip.app_plan)void mutate({type:'propose_pip_update',pip_id:S.selected,expected_version:S.pip.current_version,changes:{app_plan:null},reason:'Remove this personal Pip’s app-read access.'},result=>{S.pip={...S.pip,proposals:[...(S.pip.proposals||[]),result.proposal]};proposalReview(result.proposal.id);});break;
     case 'setup-in-chat':if(S.apiVersion>=23&&!archived()){setupEditing=true;S.create=true;S.overview=false;S.createStep='describe';draft.setupTask=`Change the setup for ${S.pip.name}: `;render();$('setupTask')?.focus();}break;
     case 'refresh-setups':void loadSetups();break;
+    case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
     case 'back-types':rememberCreationDraft();S.createStep='type';render();[...document.querySelectorAll('[data-pip-type]')].find(b=>b.dataset.pipType===S.createType)?.focus();break;
     case 'cancel-create':rememberCreationDraft();S.create=false;S.overview=!S.selected;render();break;
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
@@ -1502,7 +1543,7 @@ motion();render();vscode.postMessage({type:'pipsReady'});
 return {async navigate(value){if(!S.workspace||!usable()){options.navigation=value;navigationPending=true;return;}try{await refresh(false);await navigateFromHost(value);}catch(error){setError(error);}},setMotionPaused(paused){motionPaused=paused===true;motion();},setVisible(visible){S.visible=visible===true;motion();if(S.visible)void refresh(false);},dispose(){if(disposed)return;disposed=true;S.epoch++;broker.reset();window.clearInterval(pollingTimer);avatarObserver?.disconnect();characterCleanup?.();characterCleanup=null;for(const dispose of disposers)dispose?.();characterStyles.remove();if(embedded)shell.remove();}};
 
 }
-if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards};
+if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar};
 if(typeof window!=='undefined'&&typeof acquireVsCodeApi==='function'&&!window.document.getElementById('pips-host')){
   const api=acquireVsCodeApi();
   mountPips({root:window.document,postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});

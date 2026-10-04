@@ -4119,6 +4119,14 @@ class Backend:
                 self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                              command="notify_pip_setup", ok=True, result=value)
                 return
+            if cmd["request"].get("type") == "get_pip_digest":
+                from .workspace_registry import in_use
+                if not in_use():
+                    # The chat's digest bar asks on every connection; a profile that has never
+                    # used Pips gets an empty answer, not a new registry.
+                    self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
+                                 command="get_pip_digest", ok=True, result={"digest": None})
+                    return
             if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip"):
                 kind = cmd["request"]["type"]
                 value = self._pip_starter(config, cmd["request"])

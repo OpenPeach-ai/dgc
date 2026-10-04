@@ -89,6 +89,17 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+The digest controls (API 41) are local only (`editor-user`):
+`get_pip_digest {}` returns `{digest}`, or `{digest: null}` when the profile has never
+used Pips (no registry is created). `mark_pip_digest_seen {until}` takes the digest's
+own `until` and never moves backwards. `get_pip_notify_settings {pip_id}` and
+`set_pip_notify_settings {pip_id, min_severity, alert_severity, expected_revision}`
+read and change one Pip's display settings without a job review.
+`get_pip_outcomes {pip_id}` returns `{outcomes}` counts. The main chat's Pips bar polls
+`get_pip_digest` every minute while connected and after each turn; see
+[PIPS_REFERENCE.md](PIPS_REFERENCE.md#schedules-and-event-triggers) for what a
+digest contains and when it is due.
+
 `notify_pip_setup {request_id, setup_id}` is a nested control for the chat that
 proposed a setup card. After the user approves the card, send it to that chat; the
 backend checks the session, workspace and accepted receipt, then delivers a

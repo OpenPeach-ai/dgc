@@ -425,8 +425,8 @@ def tick(registry, config, *, now=None, limit=MAX_TICK_ITEMS, stop_event=None):
                 store.enqueue(pip_id, occurrence_key(version, occurrence["event"]["seq"]),
                               "local-event-trigger", config, event_occurrence=occurrence)
             except RegistryError as exc:
-                if exc.code in ("paused", "event_busy"):
-                    reason = "job_paused" if exc.code == "paused" else "job_busy"
+                if exc.code in ("paused", "event_busy", "source_unchanged"):
+                    reason = {"paused": "job_paused", "event_busy": "job_busy"}.get(exc.code, exc.code)
                     result["skipped"] += int(_touch(registry, pip_id, version, checked, occurrence=occurrence, reason=reason))
                     continue
                 raise

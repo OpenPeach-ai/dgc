@@ -11,7 +11,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | SDK (Python and TypeScript) | 0.7.0 |
 | Pips API | 41 |
 | Editor protocol | v14 |
-| Pips registry schema | 33 |
+| Pips registry schema | 34 |
 
 ## Security model
 
@@ -504,6 +504,25 @@ check.
 - `session_turn_completed` counts only foreground turns that end with a successful
   save: not goal resumes, monitor wake-ups, sub-agents, Pip runs or delegated
   subscription turns.
+- A scheduled or triggered audit is skipped (`source_unchanged`) when its last
+  checkpoint has the same job version, model and workspace context digest and the
+  committed tree comparison reports no changes. Current-tree sources never compare,
+  so they never skip. The occurrence is recorded as `pip_schedule_skipped` or
+  `pip_event_trigger_skipped` with that reason. Manual, chat, handoff and setup runs
+  always run.
+
+**Digest and notification settings** (API 41). `pip_notify_settings` holds one row
+per Pip that has left the defaults (`min_severity` medium, `alert_severity` high or
+null for no alerts, never below `min_severity`); only `editor-user` and
+`local-console` can change it, and it is not part of the job definition.
+`pip_digest_state` holds when the digest was last seen and on which local day. The
+digest is built from runs, checkpoints and reviews finished since then (first time:
+the last day; at most a week; at most 400 checkpoints, 20 Pips and 5 findings per
+Pip, titles cut to 200 characters and redacted). It is due when a new finding
+reaches a Pip's alert level, or when the local day changed and there is anything to
+report. "Gone after a change" counts baseline findings a compared checkpoint no
+longer reports whose path is in that run's changed paths. Outcomes walk the latest
+200 checkpoints of one Pip.
 
 **Pulse verification plans** give a Pulse Pip a standing command list:
 
@@ -661,15 +680,18 @@ A reference starts and approves nothing.
 `dgc pips COMMAND --help` shows each command's options. `--json` gives structured
 output. Commands that act on a workspace take `--workspace ID` or `--personal`;
 the default is the current folder. Plain `dgc pips` lists the current workspace's
-Pips. In the classic chat, `/pips …` runs the same commands, except `serve`,
-`capacity`, `export-run` and service changes, which need a separate terminal.
+Pips. In the chat, `/pips …` runs the same commands, except `serve`, `capacity`,
+`export-run` and service changes, which need a separate terminal; bare `/pips`
+shows the digest. The full-screen view asks no questions, so commands that would
+ask need `--yes` there.
 
 | Area | Commands |
 | --- | --- |
 | Runner | `enable`, `serve [--enable]`, `status`, `stop [--yes]`, `resume`, `execution` |
 | Linux service | `service preview\|install\|status\|start\|stop\|enable\|disable\|uninstall` |
 | Workspaces | `workspaces`, `workspace show\|sessions\|backfill\|rebind\|migrate-session`, `activity` |
-| Pips | `types`, `models`, `list`, `create`, `show`, `pause`, `resume-job`, `archive`, `restore` |
+| Pips | `types`, `models`, `list`, `create`, `show`, `pause`, `resume-job`, `archive`, `restore`, `starters`, `starter` |
+| Digest | `digest [--keep]`, `notify PIP [--min-severity] [--alerts]`, `outcomes PIP` |
 | Setup cards | `setup list\|show\|accept\|reject` |
 | Changes | `propose`, `schedule`, `trigger`, `verification-plan`, `adaptation`, `adaptations`, `accept`, `reject`, `approvals`, `versions` |
 | Runs | `run`, `runs`, `report`, `cancel`, `checkpoints`, `review-finding`, `review-execution`, `export-run` |
@@ -734,4 +756,4 @@ Clients check it before using a newer control.
 | 38 | Calendar guests, invitations and finite series |
 | 39 | Drive, Notion and Contacts reads |
 | 40 | Reviewed web reads |
-| 41 | Starter Pips; setup cards that run after each new commit |
+| 41 | Starter Pips; setup cards that run after each new commit; the digest, notification settings and finding outcomes |

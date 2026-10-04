@@ -3103,12 +3103,62 @@ class TUI:
             return True
         return w >= 40 and avail >= self._card_body_rows("stacked", upd) + 8
 
+    def _load_pips_digest(self) -> None:
+        """Put what Pips found since the user last looked into the welcome tip. Reading it here
+        does not mark it seen; /pips digest (or the editor's Pips bar) does. A profile that has
+        never used Pips is never touched."""
+        try:
+            from .workspace_registry import WorkspaceRegistry, in_use
+            if self.config.get("pips_enabled", False) is not True or not in_use():
+                return
+            from .pip_access import require_unrestricted
+            from .pip_digest import build
+            require_unrestricted(self.config)
+            with WorkspaceRegistry() as registry:
+                value = build(registry, self.config)
+        except Exception:
+            return                                  # a tip is never worth an error on the welcome screen
+        if value["due"]:
+            self._pips_digest_tip = value["headline"]
+            self._invalidate()
+
+    def _pips_command(self, rest: str) -> None:
+        """`/pips ARGS` runs `dgc pips ARGS` in the transcript; bare `/pips` shows the digest.
+        The full-screen view asks no questions, so a command that would ask needs --yes, and the
+        runner (`serve`) stays in its own terminal."""
+        import contextlib
+        import sys
+        from .pip_cli import handle_command
+        try:
+            argv = shlex.split(rest) or ["digest"]
+        except ValueError as exc:
+            self.error(str(exc)); return
+        out, err, stdin = io.StringIO(), io.StringIO(), sys.stdin
+        try:
+            sys.stdin = io.StringIO()               # not a terminal: confirmations ask for --yes
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                handle_command(self.config, argv, in_chat=True)
+        except Exception as exc:
+            err.write(str(exc))
+        finally:
+            sys.stdin = stdin
+        text = "\n".join(part for part in (err.getvalue().strip(), out.getvalue().strip()) if part)
+        if argv[0] == "digest" and "--keep" not in argv:
+            self._pips_digest_tip = None
+        self._append(self._rich(_esc(redact_text(text or "Done.", secret_values(self.config)))))
+
     def _tip(self):
         th = style_mod.theme()
         if (self.blocks or self._buf or self._overlay or self._pane is not None
                 or self._welcome_metrics()[2] == "compact"):
             return ANSI("")
         upd = cached_update()
+        pips = getattr(self, "_pips_digest_tip", None)
+        if pips and not upd:
+            room = max(20, self._width - 34)
+            text = pips if len(pips) <= room else pips[:room - 1] + "…"
+            return ANSI(self._rich(f"  [bold]Pips:[/] [{th.faint}]{_esc(text)} {glyphs.MIDDOT} "
+                                   f"type [bold]/pips[/] for the digest[/]"))
         if upd:                                            # echo the update CTA in the tip, like 
             return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]a newer DGC ([bold {self._GOLD}]v{upd}[/]) "
                                    f"is out — type [bold {self._GOLD}]/update[/] or click [ Update now ][/]"))
@@ -6831,6 +6881,8 @@ class TUI:
         elif cmd == "notes":
             from .notes import handle_command
             self._append_md(handle_command(self.agent, rest))
+        elif cmd == "pips":
+            self._pips_command(rest)
         elif cmd == "trust":
             from .trust import handle_trust_command
             # "here" is this agent's project -- for a fleet or /worktree agent the launch project,
@@ -9097,6 +9149,7 @@ class TUI:
                 time.sleep(0.5)
         threading.Thread(target=sizer, daemon=True).start()
         self._start_peer_heartbeat()
+        threading.Thread(target=self._load_pips_digest, name="dgc-pips-digest", daemon=True).start()
         from . import termbg
         termbg.apply(self.config)          # dark canvas on a light terminal (idempotent; CLI may have done it)
         try:

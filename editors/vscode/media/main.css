@@ -1593,6 +1593,29 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.tu
    than by a grid column that does not exist here. Only the goal bar wraps: the paste bar beside it
    must stay on one line. */
 #goalbar { flex-wrap: wrap; }
+/* The Pips bar: the digest's panel sits above its row, like the checklist above the tasks row. */
+#pipsbar { flex-wrap: wrap; }
+#pipsbar .pips-digest-icon { color: var(--accent-text); }
+#pipsbar[data-reason="alert"] .pips-digest-icon { color: var(--warn); }
+#pipsbar .pips-digest-label { flex: none; color: var(--text); font-weight: var(--w-med); }
+#pips-digest-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pips-digest-panel { order: -1; flex: 1 0 100%; max-height: min(30vh, 220px); overflow-y: auto;
+  padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--border); overscroll-behavior: contain;
+  color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.pips-digest-pip { display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); align-items: baseline; }
+.pips-digest-pip + .pips-digest-pip, .pips-digest-findings + .pips-digest-pip { margin-top: var(--sp-1); }
+.pips-digest-facts, .pips-digest-note { color: var(--muted); font-size: var(--t-xs); }
+.pips-digest-note { margin: var(--sp-1) 0 0; }
+.pips-digest-findings { margin: 2px 0 0; padding: 0; list-style: none; }
+.pips-digest-finding { display: flex; width: 100%; min-width: 0; gap: var(--sp-2); align-items: baseline; padding: 2px var(--sp-1);
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.pips-digest-finding:hover { background: var(--surface2); }
+.pips-digest-severity { flex: none; min-width: 4.2em; color: var(--muted); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .04em; }
+.pips-digest-severity.sev-high, .pips-digest-severity.sev-critical { color: var(--err-text); }
+.pips-digest-severity.sev-medium { color: var(--warn); }
+.pips-digest-title { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.pips-digest-path { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--faint); font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
 .goal-detail { flex: 1 0 100%; max-height: calc(3 * 1.5em + var(--sp-2)); overflow-y: auto;
   margin-top: var(--sp-1); padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--border);
   color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); overscroll-behavior: contain; }
