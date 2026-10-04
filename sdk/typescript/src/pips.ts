@@ -76,6 +76,8 @@ export type PipReadParams = {
 export type PipMutationParams = {
   decide_pip_computer_action: { action_id: string; expected_digest: string; approve: boolean };
   stop_pip_computer: { pip_id: string };
+  open_pip_computer: { pip_id: string };
+  use_pip_computer_view: { pip_id: string; op: string; x?: number; y?: number; text?: string; key?: string; dy?: number; url?: string };
   mark_pip_digest_seen: { until: string };
   set_pip_notify_settings: { pip_id: string; min_severity: PipSeverity; alert_severity: PipSeverity | null; expected_revision: number };
   prepare_pip_calendar_draft: { draft_id: string; expected_digest: string; server: string; connection_digest: string; account: string; schema_digest: string; event: PipCalendarEvent };
@@ -134,6 +136,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_computer_frames: ["run_id"],
   decide_pip_computer_action: ["action_id", "expected_digest", "approve"],
   stop_pip_computer: ["pip_id"],
+  open_pip_computer: ["pip_id"],
+  use_pip_computer_view: ["pip_id", "op", "x", "y", "text", "key", "dy", "url"],
   get_pip_digest: [],
   mark_pip_digest_seen: ["until"],
   get_pip_notify_settings: ["pip_id"],
@@ -407,7 +411,7 @@ for (const command of API41_READS) READS.add(command);
 for (const command of API41_MUTATIONS) MUTATIONS.add(command);
 // API 42: Pip computers; a decision releases or drops one held browser write (local only).
 const API42_READS = new Set(["get_pip_computer", "list_pip_computer_actions", "get_pip_computer_frame", "list_pip_computer_frames"]);
-const API42_MUTATIONS = new Set(["decide_pip_computer_action", "stop_pip_computer"]);
+const API42_MUTATIONS = new Set(["decide_pip_computer_action", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view"]);
 for (const command of API42_READS) READS.add(command);
 for (const command of API42_MUTATIONS) MUTATIONS.add(command);
 const API36_READS = new Set(["inspect_pip_connector_actions"]);

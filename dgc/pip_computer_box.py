@@ -484,6 +484,9 @@ class BoxedBrowser(BrowserSession):
         self.egress_socket = Path(egress_socket)
         self.log_path = Path(log_path)
         self.on_write = on_write            # called with a HeldWrite after it is held
+        # Starts the box process. bwrap --die-with-parent follows the THREAD that started it, so
+        # the owner passes a launcher that runs on a thread living as long as the computer.
+        self.launch = lambda start: start()
         self.held: dict[str, HeldWrite] = {}
         self.refused_payments = 0
         self._box: Box | None = None
@@ -496,7 +499,7 @@ class BoxedBrowser(BrowserSession):
         if self._ws is not None:
             return
         self._box = Box(self.home, self.egress_socket, self.binary, self.viewport)
-        self._box.start(self.log_path)
+        self.launch(lambda: self._box.start(self.log_path))
         self._pipe = _Pipe(self._box.read_fd, self._box.write_fd)
         try:
             self._browser_call("Browser.getVersion", timeout=25)
@@ -603,6 +606,20 @@ class BoxedBrowser(BrowserSession):
         held = self.held.pop(request_id, None)
         if held is not None:
             self._fire("Fetch.failRequest", {"requestId": held.request_id, "errorReason": "BlockedByClient"}, held.session_id)
+
+    # -- the user's own hands (live view); the model never uses these ----------------------
+
+    def click_at(self, x: float, y: float) -> None:
+        for kind in ("mousePressed", "mouseReleased"):
+            self.command("Input.dispatchMouseEvent", {"type": kind, "x": float(x), "y": float(y),
+                                                      "button": "left", "clickCount": 1})
+
+    def insert_text(self, text: str) -> None:
+        self.command("Input.insertText", {"text": str(text)[:2000]})
+
+    def scroll_by(self, dy: float) -> None:
+        self.command("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": self.viewport[0] / 2,
+                                                  "y": self.viewport[1] / 2, "deltaX": 0, "deltaY": float(dy)})
 
     def screenshot_jpeg(self, quality: int = 60) -> bytes:
         """A review frame small enough to travel in one Pips reply (about 60 KB)."""

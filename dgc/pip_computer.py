@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import secrets as _secrets
 import socket
 import tempfile
@@ -163,13 +164,44 @@ class Host:
         self._queued = []
         self.browser = BoxedBrowser(self.root / "home", self.proxy.path, chrome=find_chrome(),
                                     log_path=self.root / "browser.log", on_write=self._queued.append)
+        # The box dies with the thread that launched it, so one keeper thread launches it and
+        # lives until this computer closes; runs and views come and go on other threads.
+        self._launches = queue.Queue()
+        self._closed = threading.Event()
+        threading.Thread(target=self._keep, name=f"pip-computer-{pip_id[-8:]}", daemon=True).start()
+        self.browser.launch = self._launch
+        self.viewer = None
         self.run_id = None
         self.frames_dir = None
         self.frames = 0
         self.waiting = []          # action ids this run produced
 
+    def _keep(self) -> None:
+        while not self._closed.is_set():
+            try:
+                start, done = self._launches.get(timeout=1)
+            except queue.Empty:
+                continue
+            try:
+                start()
+                done.put(None)
+            except BaseException as error:      # noqa: BLE001 - handed back to the caller
+                done.put(error)
+        # Leaving this thread ends the box (die-with-parent); close() has already stopped it.
+
+    def _launch(self, start) -> None:
+        done = queue.Queue()
+        self._launches.put((start, done))
+        error = done.get(timeout=60)
+        if error is not None:
+            raise error
+
     def close(self) -> None:
         with self.lock:
+            self._closed.set()
+            if self.viewer is not None:
+                self.viewer.close()
+                self.viewer = None
             for request_id in list(self.browser.held):
                 self.browser.drop(request_id)
             self.browser.close()
@@ -558,3 +590,216 @@ def handle_stops(registry) -> int:
                                 (_now(), pip_id))
             registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
     return len(rows)
+
+
+# --------------------------------------------------------------------------- the user's live view
+
+VIEW_IDLE_SECONDS = 10 * 60
+VIEW_OPS = ("frame", "click", "type", "key", "scroll", "go", "back")
+
+
+class ViewServer:
+    """The user's own window into a Pip's browser: frames out, clicks and typing in.
+
+    While the user drives and no run is using the browser, what the user submits is sent (it is
+    their own action, a sign-in for example). During a run the view only watches. The model is
+    never connected to this socket and never sees what is typed here.
+    """
+
+    def __init__(self, host: "Host"):
+        self.host = host
+        self.token = _secrets.token_hex(24)
+        self.path = socket_dir() / f"{host.pip_id[-12:]}-view.sock"
+        if self.path.exists():
+            self.path.unlink()
+        self.server = socket.socket(socket.AF_UNIX)
+        self.server.bind(str(self.path))
+        os.chmod(self.path, 0o600)
+        self.server.listen(8)
+        self.last_used = time.monotonic()
+        self._stopped = threading.Event()
+        threading.Thread(target=self._serve, name="pip-computer-view", daemon=True).start()
+
+    def endpoint(self) -> dict:
+        return {"socket": str(self.path), "token": self.token, "host_id": self.host.id}
+
+    def _serve(self) -> None:
+        while not self._stopped.is_set():
+            try:
+                client, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._one, args=(client,), daemon=True).start()
+
+    def _one(self, client) -> None:
+        with client:
+            try:
+                client.settimeout(30)
+                raw = b""
+                while not raw.endswith(b"\n") and len(raw) < 16384:
+                    chunk = client.recv(16384)
+                    if not chunk:
+                        break
+                    raw += chunk
+                request = json.loads(raw.decode("utf-8"))
+                if not isinstance(request, dict) or not _secrets.compare_digest(str(request.get("token", "")), self.token):
+                    reply = {"ok": False, "error": "refused"}
+                else:
+                    self.last_used = time.monotonic()
+                    reply = self.host.view(str(request.get("op", "")), request)
+                client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
+            except (OSError, ValueError):
+                return
+
+    def close(self) -> None:
+        self._stopped.set()
+        try:
+            self.server.close()
+        except OSError:
+            pass
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+
+
+def _host_view(self, op: str, request: dict) -> dict:
+    """One live-view request from the user. Returns a frame after anything that acts."""
+    import base64
+    from .browser import BrowserError
+    with self.lock:
+        self.last_used = time.monotonic()
+        watching = self.run_id is not None
+        try:
+            if op != "frame":
+                if watching:
+                    return {"ok": False, "error": "The Pip is using its computer right now. Watch, or stop it first."}
+                if op == "click":
+                    self.browser.click_at(float(request.get("x", 0)), float(request.get("y", 0)))
+                elif op == "type":
+                    self.browser.insert_text(str(request.get("text", "")))
+                elif op == "key":
+                    self.browser.press(str(request.get("key", "")))
+                elif op == "scroll":
+                    self.browser.scroll_by(float(request.get("dy", 0)))
+                elif op == "go":
+                    self.browser.navigate(_safe_url(request.get("url")))
+                elif op == "back":
+                    self.browser.evaluate_json("(() => { history.back(); return true; })()")
+                else:
+                    return {"ok": False, "error": "Unknown view action."}
+                self.browser.pump(0.8)
+                self._user_writes()
+            self.browser.start()
+            data = self.browser.screenshot_jpeg(55)
+            return {"ok": True, "watching": watching, "url": self.browser.current_url[:500],
+                    "width": self.browser.viewport[0], "height": self.browser.viewport[1],
+                    "image": "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")}
+        except (BrowserError, RegistryError, OSError, ValueError) as error:
+            return {"ok": False, "error": str(error)[:300]}
+
+
+def _user_writes(self) -> None:
+    """While the user drives (no run), what they submit is theirs to send: release it now."""
+    if self.run_id is not None:
+        return
+    while self._queued:
+        held = self._queued.pop(0)
+        if held.request_id in self.browser.held:
+            self.browser.release(held.request_id)
+
+
+Host.view = _host_view
+Host._user_writes = _user_writes
+
+
+def request_open(registry, pip_id: str, actor: str) -> dict:
+    """Ask the supervisor to open this Pip's browser for the user. Ready within a few seconds."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Open a Pip's computer on this computer.")
+    from .pips import PipStore
+    job = PipStore(registry)._job(pip_id)
+    if job.get("computer_plan") is None:
+        raise RegistryError("no_computer", "This Pip has no computer. Give it one first.")
+    with registry.transaction():
+        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", ("computer_open:" + pip_id, _now()))
+    return view_endpoint(registry, pip_id) or {"pip_id": pip_id, "ready": False}
+
+
+def view_endpoint(registry, pip_id: str) -> dict | None:
+    row = registry.db.execute("SELECT value FROM metadata WHERE key=?", ("computer_view:" + pip_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        value = json.loads(row[0])
+    except ValueError:
+        return None
+    return {"pip_id": pip_id, "ready": True, **value} if isinstance(value, dict) else None
+
+
+def view_call(registry, pip_id: str, op: str, fields: dict, actor: str) -> dict:
+    """The editor's side of the live view: one request to the supervisor's view socket."""
+    if actor not in ("editor-user", "local-console"):
+        raise RegistryError("local_only", "Use a Pip's computer on this computer.")
+    if op not in VIEW_OPS:
+        raise RegistryError("invalid_request", "Unknown view action.")
+    endpoint = view_endpoint(registry, pip_id)
+    if endpoint is None:
+        return {"ok": False, "ready": False, "error": "The browser is opening. Try again in a moment."}
+    allowed = {"x", "y", "text", "key", "dy", "url"}
+    request = {"token": endpoint["token"], "op": op, **{k: v for k, v in (fields or {}).items() if k in allowed}}
+    try:
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(40)
+            client.connect(endpoint["socket"])
+            client.sendall(json.dumps(request).encode("utf-8") + b"\n")
+            raw = b""
+            while not raw.endswith(b"\n"):
+                chunk = client.recv(1 << 20)
+                if not chunk:
+                    break
+                raw += chunk
+        reply = json.loads(raw.decode("utf-8"))
+        return reply if isinstance(reply, dict) else {"ok": False, "error": "No reply."}
+    except (OSError, ValueError):
+        return {"ok": False, "ready": False, "error": "The browser closed. Open it again."}
+
+
+def handle_opens(registry) -> int:
+    """In the supervisor: start requested views; close idle ones."""
+    opened = 0
+    for (key,) in registry.db.execute("SELECT key FROM metadata WHERE key LIKE 'computer_open:%'").fetchall():
+        pip_id = key.split(":", 1)[1]
+        workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()
+        with registry.transaction():
+            registry.db.execute("DELETE FROM metadata WHERE key=?", (key,))
+        if workspace is None:
+            continue
+        host = host_for(registry.directory, pip_id, workspace[0])
+        with host.lock:
+            if getattr(host, "viewer", None) is None:
+                host.viewer = ViewServer(host)
+        with registry.transaction():
+            registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                                ("computer_view:" + pip_id, json.dumps(host.viewer.endpoint())))
+        opened += 1
+    for pip_id, host in list(HOSTS.items()):
+        viewer = getattr(host, "viewer", None)
+        if viewer is not None and time.monotonic() - viewer.last_used > VIEW_IDLE_SECONDS:
+            close_view(registry, host)
+    return opened
+
+
+def close_view(registry, host: "Host") -> None:
+    viewer = getattr(host, "viewer", None)
+    if viewer is not None:
+        viewer.close()
+        host.viewer = None
+    with registry.transaction():
+        registry.db.execute("DELETE FROM metadata WHERE key=?", ("computer_view:" + host.pip_id,))
+
+
+def forget_views(registry) -> None:
+    """Endpoints left by a previous supervisor point at closed sockets; remove them."""
+    with registry.transaction():
+        registry.db.execute("DELETE FROM metadata WHERE key LIKE 'computer_view:%'")

@@ -139,8 +139,32 @@ class PipComputerTests(unittest.TestCase):
         self.assertEqual(self.received, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_the_user_drives_the_browser_and_their_own_submit_is_sent(self):
+        pip = self.personal()
+        with self.assertRaises(RegistryError):
+            pip_computer.request_open(self.registry, pip["id"], "main-chat")
+        self.assertFalse(pip_computer.request_open(self.registry, pip["id"], "editor-user")["ready"])
+        self.assertEqual(pip_computer.handle_opens(self.registry), 1)            # the supervisor's tick
+        first = pip_computer.view_call(self.registry, pip["id"], "frame", {}, "editor-user")
+        self.assertTrue(first["ok"], first)
+        self.assertTrue(first["image"].startswith("data:image/jpeg;base64,"))
+        page = pip_computer.view_call(self.registry, pip["id"], "go", {"url": self.url}, "editor-user")
+        self.assertTrue(page["ok"], page)
+        host = pip_computer.HOSTS[pip["id"]]
+        box_ = host.browser.evaluate_json("(() => { const r=document.getElementById('go').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()")
+        clicked = pip_computer.view_call(self.registry, pip["id"], "click", {"x": box_["x"], "y": box_["y"]}, "editor-user")
+        self.assertTrue(clicked["ok"], clicked)
+        end = time.monotonic() + 10
+        while not self.received and time.monotonic() < end:
+            pip_computer.view_call(self.registry, pip["id"], "frame", {}, "editor-user")
+        self.assertEqual(self.received, [("/submit", "name=Ada&password=hunter2")], "the user's own submit is theirs to send")
+        self.assertEqual(pip_computer.list_actions(self.registry, pip["id"]), [], "nothing waits for approval")
+        host.run_id = "run_" + "0" * 32                                           # a run is using it now
+        watching = pip_computer.view_call(self.registry, pip["id"], "click", {"x": 1, "y": 1}, "editor-user")
+        self.assertFalse(watching["ok"])
+        self.assertIn("using its computer", watching["error"])
+        self.assertTrue(pip_computer.view_call(self.registry, pip["id"], "frame", {}, "editor-user")["watching"])
+        host.run_id = None
 
 
 class ComputerCommandLineTests(unittest.TestCase):
@@ -175,3 +199,7 @@ class ComputerCommandLineTests(unittest.TestCase):
         self.assertIn("Nothing is waiting", text)
         code, text, _ = self.cli("computer", "remove", pip_id, "--yes")
         self.assertIn("No computer.", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

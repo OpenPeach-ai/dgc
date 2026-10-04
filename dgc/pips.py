@@ -58,7 +58,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories",
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
     "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame",
-    "list_pip_computer_frames", "stop_pip_computer",
+    "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -112,7 +112,8 @@ _COMMAND_ARGS = {
     "get_pip_computer": {"pip_id"}, "list_pip_computer_actions": {"pip_id", "limit"},
     "decide_pip_computer_action": {"action_id", "expected_digest", "approve"},
     "get_pip_computer_frame": {"run_id", "frame"}, "list_pip_computer_frames": {"run_id"},
-    "stop_pip_computer": {"pip_id"},
+    "stop_pip_computer": {"pip_id"}, "open_pip_computer": {"pip_id"},
+    "use_pip_computer_view": {"pip_id", "op", "x", "y", "text", "key", "dy", "url"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -2882,7 +2883,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -3027,7 +3028,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 else:
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
             elif command in ("get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action",
-                             "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer"):
+                             "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer",
+                             "open_pip_computer", "use_pip_computer_view"):
                 from . import pip_computer
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "A Pip's computer is used on this computer only.")
@@ -3042,6 +3044,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     result = {"run_id": run_id, "frames": pip_computer.frames(registry.directory, run_id)}
                 elif command == "get_pip_computer_frame":
                     result = pip_computer.frame(registry.directory, run_id, request.get("frame"))
+                elif command == "open_pip_computer":
+                    result = {"view": pip_computer.request_open(registry, pip_id, actor)}
+                    result["view"].pop("token", None)
+                    result["view"].pop("socket", None)
+                elif command == "use_pip_computer_view":
+                    result = {"view": pip_computer.view_call(registry, pip_id, request.get("op"), request, actor)}
                 else:
                     result = pip_computer.request_stop(registry, pip_id, actor)
             elif command in STATEMENT_COMMANDS:

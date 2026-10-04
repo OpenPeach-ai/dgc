@@ -196,6 +196,7 @@ def _computer_tick(registry, config) -> None:
     from . import pip_computer
     try:
         pip_computer.handle_stops(registry)
+        pip_computer.handle_opens(registry)
         pip_computer.tick(registry, config)
     except Exception as exc:                      # noqa: BLE001 - isolated by design
         print(f"[pip computers] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
@@ -272,6 +273,10 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                         record["error"] = {"code": exc.code, "message": str(exc)}
                 from . import pip_computer
                 pip_computer.stop_all()          # held writes die with their browser; marked lost next start
+                try:
+                    pip_computer.forget_views(registry)
+                except Exception:                # noqa: BLE001 - shutdown continues
+                    pass
                 _shutdown_owned(registry, runtime_config, record)
                 failure = pips.drain_failure(directory)
                 if failure:

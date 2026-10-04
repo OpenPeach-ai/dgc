@@ -59,7 +59,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
-    "decide_pip_computer_action", "stop_pip_computer",
+    "decide_pip_computer_action", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view",
     "mark_pip_digest_seen", "set_pip_notify_settings",
     "prepare_pip_connector_draft", "dismiss_pip_connector_draft", "propose_pip_connector_action", "propose_pip_calendar_action", "prepare_pip_calendar_draft", "dismiss_pip_calendar_draft",
     "prepare_pip_message_draft", "dismiss_pip_message_draft",
@@ -166,7 +166,7 @@ READ_COMMANDS |= API41_READS
 MUTATION_COMMANDS |= API41_MUTATIONS
 # API 42: Pip computers. Decisions release or drop one held browser write; local only.
 API42_READS = frozenset({'get_pip_computer', 'list_pip_computer_actions', 'get_pip_computer_frame', 'list_pip_computer_frames'})
-API42_MUTATIONS = frozenset({'decide_pip_computer_action', 'stop_pip_computer'})
+API42_MUTATIONS = frozenset({'decide_pip_computer_action', 'stop_pip_computer', 'open_pip_computer', 'use_pip_computer_view'})
 READ_COMMANDS |= API42_READS
 MUTATION_COMMANDS |= API42_MUTATIONS
 COMMAND_FIELDS = {
@@ -176,6 +176,8 @@ COMMAND_FIELDS = {
     'list_pip_computer_frames': frozenset({'run_id'}),
     'decide_pip_computer_action': frozenset({'action_id', 'expected_digest', 'approve'}),
     'stop_pip_computer': frozenset({'pip_id'}),
+    'open_pip_computer': frozenset({'pip_id'}),
+    'use_pip_computer_view': frozenset({'pip_id', 'op', 'x', 'y', 'text', 'key', 'dy', 'url'}),
     'get_pip_digest': frozenset(),
     'mark_pip_digest_seen': frozenset({'until'}),
     'get_pip_notify_settings': frozenset({'pip_id'}),
