@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
-    "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
+    "export_pip", "get_pip_usage", "get_pips_desktop_notifications", "get_pips_keep_running", "get_pip_digest", "get_pip_notify_settings", "get_pip_outcomes",
     "get_pip_connector_draft", "list_pip_connector_drafts", "inspect_pip_connector_actions", "inspect_pip_calendar_connection", "get_pip_calendar_draft", "list_pip_calendar_drafts",
     "get_pip_message_draft", "list_pip_message_drafts",
     'inspect_pip_send_connection', 'get_pip_app_action', 'list_pip_app_actions',
@@ -158,11 +158,12 @@ READ_COMMANDS |= API37_READS
 MUTATION_COMMANDS |= API37_MUTATIONS
 # API 41: the daily digest, per-Pip notification settings and finding outcomes. Local
 # display state only; setting a threshold changes no job and grants nothing.
-API41_READS = frozenset({'get_pip_usage', 'get_pips_desktop_notifications', 'get_pips_keep_running', 'get_pip_digest', 'get_pip_notify_settings', 'get_pip_outcomes'})
+API41_READS = frozenset({'export_pip', 'get_pip_usage', 'get_pips_desktop_notifications', 'get_pips_keep_running', 'get_pip_digest', 'get_pip_notify_settings', 'get_pip_outcomes'})
 API41_MUTATIONS = frozenset({'set_pip_daily_cap', 'set_pips_desktop_notifications', 'set_pips_keep_running', 'mark_pip_digest_seen', 'set_pip_notify_settings'})
 READ_COMMANDS |= API41_READS
 MUTATION_COMMANDS |= API41_MUTATIONS
 COMMAND_FIELDS = {
+    'export_pip': frozenset({'pip_id'}),
     'get_pip_usage': frozenset({'pip_id'}),
     'set_pip_daily_cap': frozenset({'pip_id', 'daily_tokens'}),
     'get_pips_desktop_notifications': frozenset(),

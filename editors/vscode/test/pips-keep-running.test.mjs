@@ -105,3 +105,31 @@ test('a current CLI that cannot run Pips here says why, not "update"', async()=>
  assert.match(windowsHost.body.textContent,/Pips run on Linux and macOS/);assert.doesNotMatch(windowsHost.body.textContent,/Update the DGC CLI/);
  const old=make(8);await flush();assert.match(old.body.textContent,/Update the DGC CLI to use Pips/);
 });
+
+test('sharing: export opens the file for Save As, import reads the picked file and never more than 24 KiB', async()=>{
+ const calls=[];let picked=[{path:'/home/u/brief.pip.json'}],bytes=new TextEncoder().encode('{"format":"dgc-pip"}');
+ const vs={window:{showOpenDialog:async()=>picked,showTextDocument:async(d)=>calls.push(['show',d.language])},
+  workspace:{fs:{readFile:async()=>bytes},openTextDocument:async(o)=>{calls.push(['open',o.language,o.content]);return {...o,uri:'untitled:x'};}},
+  commands:{executeCommand:async(...a)=>calls.push(['command',a[0]])},ViewColumn:{Active:1},Uri:{joinPath:()=>''}};
+ const sent=[],posted=[];const {PipsEditor}=load(viewCode,name=>name==='vscode'?vs:require(name));
+ const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));
+ bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:40},{});
+ bridge.receive({type:'pipsRequest',id:'e0',request:{type:'export_pip_file',pip_id:'pip_1'}});
+ assert.match(posted.at(-1).error.message,/API 41/);
+ bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:41},{b:1});
+ bridge.receive({type:'pipsRequest',id:'e1',request:{type:'export_pip_file',pip_id:'pip_1'}});
+ const exp=sent.at(-1);assert.deepEqual([exp.type,exp.request.type,exp.request.pip_id],['pips_control','export_pip','pip_1']);
+ bridge.event({type:'pips_result',request_id:exp.request.request_id,command:'export_pip',ok:true,result:{text:'{"format":"dgc-pip"}\n',document:{left_out:['Memory stays.']}}});
+ await flush();await flush();
+ assert.deepEqual(calls.map(c=>c[0]+':'+c[1]),['open:json','show:json','command:workbench.action.files.saveAs']);
+ assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1))),{type:'pipsReply',id:'e1',ok:true,result:{opened:true,left_out:['Memory stays.']}});
+ bridge.receive({type:'pipsRequest',id:'i1',request:{type:'import_pip_file'}});await flush();await flush();
+ const imp=sent.at(-1);assert.deepEqual([imp.request.type,imp.request.document],['import_pip_document','{"format":"dgc-pip"}']);
+ bridge.event({type:'pips_result',request_id:imp.request.request_id,command:'import_pip_document',ok:true,result:{setup:{id:'s'},left_out:[]}});
+ assert.equal(posted.at(-1).id,'i1');assert.equal(posted.at(-1).ok,true);
+ picked=undefined;bridge.receive({type:'pipsRequest',id:'i2',request:{type:'import_pip_file'}});await flush();await flush();
+ assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1).result)),{cancelled:true},'cancelling sends nothing');
+ picked=[{path:'/big.json'}];bytes=new Uint8Array(24577);const before=sent.length;
+ bridge.receive({type:'pipsRequest',id:'i3',request:{type:'import_pip_file'}});await flush();await flush();
+ assert.equal(sent.length,before);assert.match(posted.at(-1).error.message,/at most 24 KiB/);
+});

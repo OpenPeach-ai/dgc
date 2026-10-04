@@ -59,7 +59,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_digest", "mark_pip_digest_seen", "get_pip_notify_settings", "set_pip_notify_settings", "get_pip_outcomes",
     "get_pips_keep_running", "set_pips_keep_running",
     "get_pips_desktop_notifications", "set_pips_desktop_notifications",
-    "get_pip_usage", "set_pip_daily_cap",
+    "get_pip_usage", "set_pip_daily_cap", "export_pip",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -112,7 +112,7 @@ _COMMAND_ARGS = {
     "get_pip_outcomes": {"pip_id"},
     "get_pips_keep_running": set(), "set_pips_keep_running": {"enabled"},
     "get_pips_desktop_notifications": set(), "set_pips_desktop_notifications": {"enabled"},
-    "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"},
+    "get_pip_usage": {"pip_id"}, "set_pip_daily_cap": {"pip_id", "daily_tokens"}, "export_pip": {"pip_id"},
     "mark_pip_notification_read": {"workspace_id", "notification_id", "expected_revision"},
     "list_workspace_sessions": {"workspace_id", "after", "limit"},
     "inspect_workspace_session_outcome": {"workspace_id", "session_id"},
@@ -2858,7 +2858,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "export_pip", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -3002,6 +3002,12 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         expected_revision=request.get("expected_revision"), actor=actor)}
                 else:
                     result = {"outcomes": pip_digest.outcomes(registry, pip_id)}
+            elif command == "export_pip":
+                from . import pip_share
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Sharing a Pip is done on this computer only.")
+                document = pip_share.export(store, pip_id)
+                result = {"document": document, "text": pip_share.dumps(document)}
             elif command in ("get_pip_usage", "set_pip_daily_cap"):
                 from . import pip_spend
                 if actor not in ("editor-user", "local-console"):

@@ -304,6 +304,24 @@ it still reports, and what went away: after its file changed, or without a chang
 "Gone after its file changed" suggests a fix; it doesn't prove one, because the
 run simply stopped reporting it.
 
+## Sharing a Pip
+
+A Pip's **Job** tab has **Share this Pip → Export…**, which saves its job as a small file
+someone else can import: name, goal, type, schedule or trigger, the pages and searches it
+reads, a Pulse's reviewed commands, and its model if you chose one. The file never carries
+your connected accounts, memory, history, findings or results, and it says what it left out.
+
+To use one, choose **Import a shared Pip…** under **New**. It becomes an ordinary setup
+card that opens for your review; nothing runs until you approve it. In the terminal:
+
+```sh
+dgc pips export PIP --output brief.pip.json
+dgc pips import brief.pip.json        # shows the job, asks, then creates it
+```
+
+Patch Pips can't be shared yet, and a Pulse Pip is imported in the Pips view, where its
+commands are reviewed on the card.
+
 ## Usage and daily limits
 
 Every Pip's **Job** tab shows what its runs cost in tokens, today and over the last 30

@@ -586,6 +586,15 @@ reaches the worker. Each read gives the worker at most 8,000 characters of JSON,
 whole items rather than cutting text; a failed read is reported with its error. The run
 records `pip_run_github_reads` with each read's kind and item count or error, not the text.
 
+**Sharing** (API 41). `export_pip {pip_id}` (local only) returns `{document, text}`: a
+`dgc-pip` version 1 document `{format, version, pip: {name, goal, pip_type, scope,
+schedule, event_trigger?, model_choice?, web_plan?, source_ref?, verification_plan?},
+left_out}`. App plans, GitHub plans, IDs, memory, history, findings and results are never
+included; a default model choice is left to the importer. Patch cannot be exported. Files
+are at most 24 KiB. The editor's `import_pip_document {document}` (chat backend, like a
+starter) checks the document and saves it as a pending setup card for that chat; the CLI's
+`dgc pips import` shows the job and what was left out, asks, then creates it (not Pulse).
+
 **Offering a Pip** (API 41). On a chat's first prompt the main chat compares it with how
 the newest 40 chats of the last 30 days in this project began (word overlap of at least
 0.6, at least four significant words, files above 2 MB skipped). Two or more alike add one

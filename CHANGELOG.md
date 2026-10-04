@@ -42,6 +42,9 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   them, so an ordinary request costs about 115 more prompt tokens, not the 6,500 the full set
   would. A message that references a Pip with `@` loads them directly. `deny: UsePips` keeps them
   out of the main chat.
+- Share a Pip: `dgc pips export PIP --output FILE` saves its job (no accounts, memory, history or
+  findings; the file says what it left out) and `dgc pips import FILE` shows the job and creates it
+  after you confirm.
 - The main chat offers to make recurring work a Pip: when you ask for something that repeats, and
   when you start a chat with work you have started chats with before (once per chat; it does not
   ask again if you say no). It also knows that no Pip buys, sells, trades or pays, and that

@@ -90,6 +90,12 @@ no Pip and starts nothing. A setup may carry `event_trigger`
 (`{events: ["commit_changed"], minimum_minutes, missed_policy}`) with a null `schedule`:
 the approved Pip reviews after each new commit to `source_ref`.
 
+`export_pip {pip_id}` (API 41, local only) returns `{document, text}`, a shareable `dgc-pip`
+file. `import_pip_document {request_id, document}` is a nested control handled by the chat
+backend, like `propose_starter_pip`: it saves the file as a pending setup card for this chat
+and returns `{setup, left_out}`. The extension host reads and writes the files itself
+(`export_pip_file`, `import_pip_file` from the Pips view).
+
 `get_pip_usage {pip_id}` and `set_pip_daily_cap {pip_id, daily_tokens}` (API 41, local
 only) return `{usage: {pip_id, today, last_30_days, days, daily_cap, capped_today}}`; the
 Job tab draws it as Usage with the limit field.

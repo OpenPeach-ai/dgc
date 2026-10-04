@@ -439,6 +439,12 @@ def parser():
     command("status", "show runner status as JSON")
     keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
     keep.add_argument("state", nargs="?", choices=("on", "off"))
+    share = command("export", "save a Pip's job as a shareable file (no accounts, memory, history or findings)")
+    share.add_argument("pip_id")
+    share.add_argument("--output", metavar="FILE", help="write the file here (default: print it)")
+    take = command("import", "show a shared Pip file's job, then create it once you confirm")
+    take.add_argument("file")
+    take.add_argument("--yes", action="store_true", help="create the displayed job without the question")
     spend = command("usage", "what a Pip's runs cost in tokens, today and over 30 days; set or remove its daily limit")
     spend.add_argument("pip_id")
     spend.add_argument("--daily-limit", metavar="TOKENS|off", help="stop its schedules and triggers for the day once its runs reach this many tokens")
@@ -757,6 +763,11 @@ def usage_text(item) -> str:
 
 
 def _format(value):
+    if set(value) == {"exported", "left_out"}:
+        return "Saved " + value["exported"] + ". Not included: " + " ".join(value["left_out"])
+    if set(value) == {"shared_pip"}:
+        from .pip_share import dumps
+        return dumps(value["shared_pip"]).rstrip()
     if set(value) == {"usage"} and isinstance(value["usage"], dict) and "last_30_days" in value["usage"]:
         return usage_text(value["usage"])
     if set(value) == {"desktop_notifications"}:
@@ -1217,6 +1228,17 @@ def _digest_command(config, args):
         if not response["ok"]:
             raise RegistryError(response["error"]["code"], response["error"]["message"])
         return response["result"]
+    if args.command == "export":
+        value = control({"type": "export_pip", "pip_id": args.pip_id})
+        if args.output:
+            path = Path(args.output).expanduser()
+            if path.exists() and (path.is_dir() or path.is_symlink()):
+                raise RegistryError("invalid_request", "Choose a new file to write, not a folder or a link.")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(value["text"])
+            return {"exported": str(path), "left_out": value["document"]["left_out"]}
+        return {"shared_pip": value["document"]}
     if args.command == "usage":
         if args.daily_limit is None:
             return control({"type": "get_pip_usage", "pip_id": args.pip_id})
@@ -1294,6 +1316,74 @@ def format_digest(digest) -> str:
     return "\n".join(lines)
 
 
+def _import_command(config, args):
+    """Create a Pip from a shared file: show its exact job and what it left out, ask, then create."""
+    from . import pip_share
+    from .pip_setup import validate_request  # noqa: F401  (pip_share checks through it)
+    from .style import terminal_safe_text
+    path = Path(args.file).expanduser()
+    try:
+        if path.stat().st_size > pip_share.MAX_BYTES:
+            raise RegistryError("invalid_pip_file", f"A shared Pip file is at most {pip_share.MAX_BYTES // 1024} KiB.")
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RegistryError("invalid_request", f"Could not read {path}: {exc.strerror or exc}") from None
+    document = pip_share.parse(text)
+    checked = pip_share.setup_request(document, project_root=config.project_root, request_key="cli-import")
+    if checked["pip_type"] == "pulse":
+        raise RegistryError("unsupported_share", "Import a Pulse Pip in the Pips view, where its commands are reviewed on a setup card.")
+    personal = checked.get("scope") == "personal"
+    lines = [f"{checked['name']} ({checked['pip_type']}, {'Personal' if personal else 'this project'})",
+             f"Job: {checked['goal']}"]
+    for read in (checked.get("web_plan") or {}).get("reads", []):
+        lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
+    for note in document.get("left_out", []):
+        lines.append("Not included: " + note)
+    print(terminal_safe_text("\n".join(lines)), file=sys.stderr, flush=True)
+    return _create_checked(config, args, checked, personal)
+
+
+def _create_checked(config, args, checked, personal):
+    """Ask (unless --yes), then create the checked job and apply its schedule, trigger and reads."""
+    from . import pips
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise RegistryError("confirmation_required", "Review the displayed job, then repeat with --yes to create this Pip.")
+        try:
+            answer = input("Create this Pip" + (" and turn on its trigger" if checked.get("event_trigger")
+                           else " and turn on its schedule" if checked.get("schedule") else "") + "? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Cancelled. No Pip was created.")
+            return None
+
+    def control(request):
+        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
+        if not response["ok"]:
+            raise RegistryError(response["error"]["code"], response["error"]["message"])
+        return response["result"]
+    with WorkspaceRegistry() as registry:
+        workspace_id = registry.personal()["id"] if personal else registry.resolve(config.project_root)["id"]
+    pip = control({"type": "create_pip", "workspace_id": workspace_id, "name": checked["name"], "goal": checked["goal"],
+                   "pip_type": checked["pip_type"], **({} if personal else {"source_ref": checked["source_ref"]})})["pip"]
+    changes = {}
+    if checked.get("event_trigger"):
+        changes["event_trigger"] = checked["event_trigger"]
+    elif checked.get("schedule"):
+        changes["schedule"] = checked["schedule"]
+    for key in ("web_plan", "model_choice"):
+        if checked.get(key):
+            changes[key] = checked[key]
+    if changes:
+        proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
+                            "changes": changes, "reason": checked["reason"]})["proposal"]
+        control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
+                 "expected_version": pip["current_version"]})
+    return {"pip": control({"type": "get_pip", "pip_id": pip["id"]})["pip"],
+            "next": "Schedules and triggers run while the local runner is running: dgc pips serve, or dgc pips keep-running on."}
+
+
 def _starter_command(config, args):
     """Create a starter Pip from the terminal: show its exact job, ask, then create and apply it.
 
@@ -1337,41 +1427,13 @@ def _starter_command(config, args):
     for read in (checked.get("web_plan") or {}).get("reads", []):
         lines.append("Web read: " + (read["url"] if read["kind"] == "page" else "search: " + read["query"]))
     print(terminal_safe_text("\n".join(lines)), file=sys.stderr, flush=True)
-    if not args.yes:
-        if not sys.stdin.isatty():
-            raise RegistryError("confirmation_required", "Review the displayed job, then repeat with --yes to create this Pip.")
-        try:
-            answer = input("Create this Pip and turn on its " + ("trigger" if checked.get("event_trigger") else "schedule") + "? [y/N] ").strip().lower()
-        except EOFError:
-            answer = ""
-        if answer not in ("y", "yes"):
-            print("Cancelled. No Pip was created.")
-            return None
-
-    def control(request):
-        response = pips.handle_control(config, {**request, "request_id": identifier("cli")}, "local-console", start_worker=False)
-        if not response["ok"]:
-            raise RegistryError(response["error"]["code"], response["error"]["message"])
-        return response["result"]
-    with WorkspaceRegistry() as registry:
-        workspace_id = registry.personal()["id"] if personal else registry.resolve(config.project_root)["id"]
-    pip = control({"type": "create_pip", "workspace_id": workspace_id, "name": checked["name"], "goal": checked["goal"],
-                   "pip_type": checked["pip_type"], **({} if personal else {"source_ref": checked["source_ref"]})})["pip"]
-    changes = {"event_trigger": checked["event_trigger"]} if checked.get("event_trigger") else {"schedule": checked["schedule"]}
-    if checked.get("web_plan"):
-        changes["web_plan"] = checked["web_plan"]
-    proposal = control({"type": "propose_pip_update", "pip_id": pip["id"], "expected_version": pip["current_version"],
-                        "changes": changes, "reason": checked["reason"]})["proposal"]
-    control({"type": "accept_pip_update", "pip_id": pip["id"], "proposal_id": proposal["id"],
-             "expected_version": pip["current_version"]})
-    return {"pip": control({"type": "get_pip", "pip_id": pip["id"]})["pip"],
-            "next": "Schedules and triggers run while the local runner is running: dgc pips serve."}
+    return _create_checked(config, args, checked, personal)
 
 
 # What a DGC chat's own shell may run (sandbox.AGENT_SHELL): reading, and the emergency stop.
 # Everything else changes Pips, which is the user's decision; the chat prepares it as a setup card
 # or proposal (pips_setup, pips_propose) for the user to approve.
-_AGENT_SHELL_READS = {"starters", "digest", "outcomes", "execution", "models", "connections", "accounts",
+_AGENT_SHELL_READS = {"export", "starters", "digest", "outcomes", "execution", "models", "connections", "accounts",
                       "inspect-connection", "types", "workspaces", "list", "show", "messages", "runs",
                       "report", "capacity", "export-run", "checkpoints", "adaptations", "approvals",
                       "versions", "activity", "status", "stop"}
@@ -1462,7 +1524,11 @@ def handle_command(config, argv, *, in_chat=False):
             result = _starter_command(config, args)
             if result is None:
                 return 0
-        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage"):
+        elif args.command == "import":
+            result = _import_command(config, args)
+            if result is None:
+                return 0
+        elif args.command in ("digest", "notify", "outcomes", "keep-running", "desktop-notifications", "usage", "export"):
             result = _digest_command(config, args)
         elif args.command == "capacity":
             if in_chat:

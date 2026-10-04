@@ -4011,6 +4011,26 @@ class Backend:
         with WorkspaceRegistry() as registry:
             return {"setup": pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])}
 
+    def _pip_import(self, config, request):
+        """An imported Pip file becomes a pending setup card owned by this chat, like a starter."""
+        import uuid
+        from . import pip_setup, pip_share
+        from .redaction import contains_secret, secret_values
+        from .workspace_registry import RegistryError, WorkspaceRegistry
+        if set(request) - {"type", "request_id", "document"}:
+            raise RegistryError("invalid_request", "Send the shared Pip file's contents.")
+        document = request.get("document")
+        if isinstance(document, str):
+            document = pip_share.parse(document)
+        setup_request = pip_share.setup_request(document, project_root=config.project_root,
+                                                request_key="import-" + uuid.uuid4().hex[:24])
+        if contains_secret(setup_request, secret_values(config)):
+            raise RegistryError("secret_detected", "The shared Pip file contains a configured secret. Nothing was saved.")
+        origin = self.agent._pip_proposal_origin()
+        with WorkspaceRegistry() as registry:
+            setup = pip_setup.propose(registry, setup_request, config.project_root, origin["session_id"])
+        return {"setup": setup, "left_out": [str(item)[:300] for item in pip_share.check(document).get("left_out", [])][:8]}
+
     def _pips_failure(self, cmd, code, message):
         from .redaction import redact_text
         message = redact_text(str(message), secret_values(self.config))[:1500]
@@ -4133,9 +4153,10 @@ class Backend:
                     self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                                  command="get_pip_digest", ok=True, result={"digest": None})
                     return
-            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip"):
+            if cmd["request"].get("type") in ("list_pip_starters", "propose_starter_pip", "import_pip_document"):
                 kind = cmd["request"]["type"]
-                value = self._pip_starter(config, cmd["request"])
+                value = (self._pip_import(config, cmd["request"]) if kind == "import_pip_document"
+                         else self._pip_starter(config, cmd["request"]))
                 self.em.emit("pips_result", request_id=cmd["request"].get("request_id", ""),
                              command=kind, ok=True, result=value)
                 return

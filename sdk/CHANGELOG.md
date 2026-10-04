@@ -9,7 +9,8 @@ and save proposals, setups and handoffs for review. Every mutation needs the hos
 old for it. The CLI advertises Pips API 41, which adds the daily digest, notification
 settings, finding outcomes and reviewed GitHub reads (`changes.github_plan`). See [PIPS.md](PIPS.md).
 
-`get_pip_usage` and `set_pip_daily_cap` read a Pip's token usage and set its daily limit.
+`get_pip_usage` and `set_pip_daily_cap` read a Pip's token usage and set its daily limit. `export_pip` returns a Pip's
+job as a shareable file.
 `get_pips_desktop_notifications` and `set_pips_desktop_notifications` read and set the
 runner's desktop notifications. `get_pips_keep_running` and `set_pips_keep_running` read and set the "keep Pips running"
 switch (local mutation; it never enables Pips or clears an emergency stop).

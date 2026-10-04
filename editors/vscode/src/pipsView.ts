@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 
-const commands = new Set(['get_pip_usage','set_pip_daily_cap','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context']);
+const commands = new Set(['export_pip','get_pip_usage','set_pip_daily_cap','get_pips_desktop_notifications','set_pips_desktop_notifications','get_pips_keep_running','set_pips_keep_running','list_pip_starters','propose_starter_pip','get_pip_digest','mark_pip_digest_seen','get_pip_notify_settings','set_pip_notify_settings','get_pip_outcomes','get_pip_connector_draft','list_pip_connector_drafts','prepare_pip_connector_draft','dismiss_pip_connector_draft','inspect_pip_connector_actions','propose_pip_connector_action','get_pip_calendar_draft','list_pip_calendar_drafts','prepare_pip_calendar_draft','dismiss_pip_calendar_draft','inspect_pip_calendar_connection','propose_pip_calendar_action','get_pip_message_draft','list_pip_message_drafts','prepare_pip_message_draft','dismiss_pip_message_draft','inspect_pip_send_connection', 'propose_pip_app_action', 'get_pip_app_action', 'list_pip_app_actions', 'accept_pip_app_action', 'reject_pip_app_action', 'propose_pip_personal_handoff', 'list_pip_accounts', 'list_pip_connections', 'inspect_pip_connection', 'notify_pip_setup', 'revise_pip_setup', 'list_pip_setups', 'get_pip_setup', 'accept_pip_setup', 'reject_pip_setup', 'get_pip_statement_anchor', 'record_pip_statement', 'revoke_pip_statement', 'list_pip_statements', 'list_workspace_execution_receipts', 'get_workspace_execution_receipt', 'record_workspace_execution_context', 'archive_pip', 'restore_pip', 'get_pip_exception_source', 'record_pip_exception', 'revoke_pip_exception', 'list_pip_memories', 'list_pip_notifications', 'mark_pip_notification_read', 'list_workspace_sessions', 'inspect_workspace_session_outcome', 'propose_workspace_session_outcome', 'get_workspace_session_outcome', 'list_workspace_session_outcomes', 'accept_workspace_session_outcome', 'reject_workspace_session_outcome', 'list_pip_types', 'list_pip_models', 'list_pip_messages', 'send_pip_message', 'list_workspaces', 'list_pips', 'create_pip', 'get_pip', 'get_pip_proposal', 'list_pip_adaptations', 'run_pip', 'list_pip_runs', 'get_pip_run', 'list_pip_run_activity', 'pause_pip', 'resume_pip', 'cancel_pip_run', 'propose_pip_update', 'accept_pip_update', 'reject_pip_update', 'list_pip_versions', 'list_pip_approvals', 'list_pip_checkpoints', 'review_pip_finding', 'review_pip_execution', 'get_pip_execution', 'propose_pip_handoff', 'propose_pip_artifact_handoff', 'get_pip_handoff', 'list_pip_handoffs', 'accept_pip_handoff', 'reject_pip_handoff', 'get_pip_runner', 'stop_pips', 'get_workspace_context', 'record_workspace_context', 'archive_workspace_context', 'accept_pip_finding', 'accept_pip_execution_context']);
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function pipsDocument(scriptUri = '', styleUri = '', cspSource = ''): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div><script src="${attr(scriptUri)}"></script></body></html>`;
@@ -11,7 +11,7 @@ export function pipsDocument(scriptUri = '', styleUri = '', cspSource = ''): str
 export class PipsEditor implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private embeddedPost?: (message: any) => void;
-  private pending = new Map<string, { client: string; command: string; at: number; document?: { run: string; save: boolean; generation: number } }>();
+  private pending = new Map<string, { client: string; command: string; at: number; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number } }>();
   private generation = 0;
   private apiVersion = 0;
   private backendIdentity?: object;
@@ -85,12 +85,50 @@ export class PipsEditor implements vscode.Disposable {
       void this.openResultDocument(owner.client, owner.document, event.result?.run);
       return true;
     }
+    if (owner.exportFile && event.type === 'pips_result' && event.ok === true) {
+      void this.openExport(owner.client, owner.exportFile.generation, event.result);
+      return true;
+    }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
       result: event.type === 'pips_status' ? event : event.result,
       error: event.type === 'command_rejected' ? {message: event.message} : event.error });
     return true;
+  }
+  /** A shared Pip file opens as an unsaved JSON document, then Save As: the user picks where. */
+  private async openExport(client: string, generation: number, result: any): Promise<void> {
+    try {
+      if (generation !== this.generation || !this.state.connected) throw Error('The DGC connection changed. Export again.');
+      const text = result?.text;
+      if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 24576) throw Error('The shared Pip file is invalid.');
+      const document = await vscode.workspace.openTextDocument({ language: 'json', content: text });
+      await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+      await vscode.commands.executeCommand('workbench.action.files.saveAs', document.uri);
+      const leftOut = Array.isArray(result?.document?.left_out) ? result.document.left_out.filter((x: any) => typeof x === 'string').slice(0, 8) : [];
+      this.post({ type: 'pipsReply', id: client, ok: true, result: { opened: true, left_out: leftOut } });
+    } catch (error) {
+      this.post({ type: 'pipsReply', id: client, ok: false, error: { message: error instanceof Error ? error.message : 'Could not export the Pip.' } });
+    }
+  }
+  /** The user picks a shared Pip file; the host reads it and the chat saves it as a setup card. */
+  private async importFile(client: string): Promise<void> {
+    const fail = (text: string) => this.post({ type: 'pipsReply', id: client, ok: false, error: { message: text } });
+    try {
+      const generation = this.generation;
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Import Pip', filters: { 'Shared Pip': ['json'] } });
+      if (!picked || !picked.length) { this.post({ type: 'pipsReply', id: client, ok: true, result: { cancelled: true } }); return; }
+      const bytes = await vscode.workspace.fs.readFile(picked[0]);
+      if (bytes.byteLength > 24576) { fail('A shared Pip file is at most 24 KiB.'); return; }
+      if (generation !== this.generation || !this.state.connected) { fail('The DGC connection changed. Import again.'); return; }
+      const requestId = 'pips-editor-' + randomBytes(12).toString('hex');
+      this.pending.set(requestId, { client, command: 'import_pip_document', at: Date.now() });
+      if (!this.send({ type: 'pips_control', request: { type: 'import_pip_document', document: Buffer.from(bytes).toString('utf8'), request_id: requestId } }, this.backendIdentity)) {
+        this.pending.delete(requestId); fail('DGC could not send the file. Nothing was saved.');
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : 'Could not read the shared Pip file.');
+    }
   }
   private async openResultDocument(client: string, requested: { run: string; save: boolean; generation: number }, run: any): Promise<void> {
     try {
@@ -122,6 +160,20 @@ export class PipsEditor implements vscode.Disposable {
     if (this.pending.size >= 64) { fail('Too many requests are pending. Reconnect before trying again.'); return; }
     const request = message.request;
     if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.type !== 'string') return;
+    if (request.type === 'export_pip_file' || request.type === 'import_pip_file') {
+      if (this.apiVersion < 41) { fail('Update the DGC CLI (Pips API 41) to share Pips.'); return; }
+      if (request.type === 'import_pip_file') {
+        if (Object.keys(request).some(key => key !== 'type')) { fail('Choose a shared Pip file to import.'); return; }
+        void this.importFile(message.id); return;
+      }
+      if (Object.keys(request).some(key => !['type','pip_id'].includes(key)) || typeof request.pip_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.pip_id)) { fail('Choose a Pip to export.'); return; }
+      const requestId = 'pips-export-' + randomBytes(12).toString('hex');
+      this.pending.set(requestId, { client: message.id, command: 'export_pip', at: Date.now(), exportFile: { generation: this.generation } });
+      if (!this.send({ type: 'pips_control', request: { type: 'export_pip', pip_id: request.pip_id, request_id: requestId } }, this.backendIdentity)) {
+        this.pending.delete(requestId); fail('DGC could not export the Pip.');
+      }
+      return;
+    }
     if (request.type === 'open_pip_document') {
       if (Object.keys(request).some(key => !['type','run_id','save'].includes(key)) || !/^run_[a-f0-9]{32}$/.test(request.run_id) || typeof request.save !== 'boolean') {
         fail('Choose a saved Pip result to open.'); return;
