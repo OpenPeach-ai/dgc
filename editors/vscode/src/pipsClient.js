@@ -91,10 +91,10 @@ function contextEntries(entries,archivable=false) {
 let keepState={value:null,loading:false,error:'',asked:false};
 async function loadKeepRunning(){
  if(remoteHost||S.apiVersion<41||!usable()||keepState.loading)return;
- const token=scope();keepState={...keepState,loading:true,asked:true};
- try{const value=pipsKeepRunning((await send('get_pips_keep_running')).keep_running);if(token===scope()){keepState.value=value;keepState.error='';}}
- catch(error){if(token===scope())keepState.error=errorText(error);}
- finally{keepState.loading=false;render();}
+ const token=S.epoch;keepState={...keepState,loading:true,asked:true};   // runner-wide: not tied to a selected Pip
+ try{const value=pipsKeepRunning((await send('get_pips_keep_running')).keep_running);if(token===S.epoch){keepState.value=value;keepState.error='';}}
+ catch(error){if(token===S.epoch)keepState.error=errorText(error);}
+ finally{keepState.loading=false;if(token!==S.epoch)keepState.asked=false;render();}
 }
 async function setKeepRunning(enabled){
  if(S.busy||!usable())return;const token=scope();S.busy=true;render();
@@ -106,10 +106,10 @@ async function setKeepRunning(enabled){
 let desktopState={value:null,loading:false,error:'',asked:false};
 async function loadDesktopNotifications(){
  if(remoteHost||S.apiVersion<41||!usable()||desktopState.loading)return;
- const token=scope();desktopState={...desktopState,loading:true,asked:true};
- try{const value=pipsDesktopNotifications((await send('get_pips_desktop_notifications')).desktop_notifications);if(token===scope()){desktopState.value=value;desktopState.error='';}}
- catch(error){if(token===scope())desktopState.error=errorText(error);}
- finally{desktopState.loading=false;render();}
+ const token=S.epoch;desktopState={...desktopState,loading:true,asked:true};   // runner-wide: not tied to a selected Pip
+ try{const value=pipsDesktopNotifications((await send('get_pips_desktop_notifications')).desktop_notifications);if(token===S.epoch){desktopState.value=value;desktopState.error='';}}
+ catch(error){if(token===S.epoch)desktopState.error=errorText(error);}
+ finally{desktopState.loading=false;if(token!==S.epoch)desktopState.asked=false;render();}
 }
 async function setDesktopNotifications(enabled){
  if(S.busy||!usable())return;const token=scope();S.busy=true;render();
@@ -333,20 +333,20 @@ function githubProposalMarkup(proposal){
 let usageState={pip:'',value:null,loading:false,error:''};
 async function loadUsage(){
  const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||usageState.loading&&usageState.pip===pip)return;
- const token=scope();usageState={pip,value:null,loading:true,error:''};
+ const token=scope();usageState={pip,value:null,loading:true,error:'',token};
  try{const value=pipUsage((await send('get_pip_usage',{pip_id:pip})).usage,pip);if(token!==scope()||S.selected!==pip)return;usageState.value=value;draft.usageLimit=value.daily_cap===null?'':String(value.daily_cap);}
  catch(error){if(token===scope()&&S.selected===pip)usageState.error=errorText(error);}
- finally{if(token===scope()&&S.selected===pip){usageState.loading=false;render();}}
+ finally{if(usageState.token===token){usageState.loading=false;if(token!==scope()||S.selected!==pip)usageState.pip='';render();}}
 }
 // Thumbs up or down on a finished result; the Pip's later runs read it (API 41).
 const RATED_RUNS=['personal_task','audit','draft'];
 let feedbackState={pip:'',value:null,loading:false,error:'',run:''};
 async function loadFeedback(){
  const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||feedbackState.loading&&feedbackState.pip===pip)return;
- const token=scope();feedbackState={pip,value:null,loading:true,error:'',run:''};
+ const token=scope();feedbackState={pip,value:null,loading:true,error:'',run:'',token};
  try{const value=pipFeedback(await send('list_pip_feedback',{pip_id:pip}),pip);if(token!==scope()||S.selected!==pip)return;feedbackState.value=value;}
  catch(error){if(token===scope()&&S.selected===pip)feedbackState.error=errorText(error);}
- finally{if(token===scope()&&S.selected===pip){feedbackState.loading=false;render();}}
+ finally{if(feedbackState.token===token){feedbackState.loading=false;if(token!==scope()||S.selected!==pip)feedbackState.pip='';render();}}
 }
 function feedbackMarkup(run){
  if(S.apiVersion<41||!run||run.id!==S.runId||run.status!=='succeeded'||!RATED_RUNS.includes(run.manifest?.run_kind??'audit'))return '';
@@ -392,7 +392,7 @@ function usageMarkup(){
  const u=usageState.value,off=S.busy||!usable()||!u;
  if(!u)return `<section class="section"><h2>Usage</h2>${errorMarkup(usageState.error)||'<p class="muted">Loading…</p>'}</section>`;
  const n=v=>v.toLocaleString('en-US'),runs=v=>`${v} run${v===1?'':'s'}`;
- return `<form id="usage-form" class="section form"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${u.capped_today?'<p class="notice">It reached its daily limit: its schedules and triggers wait until tomorrow. Runs you start still run.</p>':''}${errorMarkup(usageState.error)}<label for="usageLimit">Daily limit for automatic runs, in tokens</label><input id="usageLimit" data-draft="usageLimit" inputmode="numeric" autocomplete="off" placeholder="No limit (for example 200k)" value="${esc(draft.usageLimit||'')}"${off?' disabled':''}><p class="muted">Once its runs today reach the limit, its schedules and triggers are skipped until tomorrow. Runs you start, chat replies and handoffs you approve still run. This is your setting, not part of the job, so it needs no review.</p><div class="actions"><button type="submit"${off?' disabled':''}>Save limit</button>${u.daily_cap!==null?button('remove-usage-limit','Remove limit',off):''}</div></form>`;
+ return `<form id="usage-form" class="section form"><h2>Usage</h2><dl class="meta usage-counts"><dt>Today</dt><dd>${n(u.today.tokens)} tokens · ${runs(u.today.runs)}</dd><dt>Last 30 days</dt><dd>${n(u.last_30_days.tokens)} tokens · ${runs(u.last_30_days.runs)}</dd></dl>${usageChart(u)}${u.capped_today?'<p class="notice">It reached its daily limit: its schedules and triggers are skipped for the rest of the day. Runs you start still run.</p>':''}${errorMarkup(usageState.error)}<label for="usageLimit">Daily limit for automatic runs, in tokens</label><input id="usageLimit" data-draft="usageLimit" inputmode="numeric" autocomplete="off" placeholder="No limit (for example 200k)" value="${esc(draft.usageLimit||'')}"${off?' disabled':''}><p class="muted">Once its runs today reach the limit, its schedules and triggers are skipped until tomorrow. Runs you start, chat replies and handoffs you approve still run. This is your setting, not part of the job, so it needs no review.</p><div class="actions"><button type="submit"${off?' disabled':''}>Save limit</button>${u.daily_cap!==null?button('remove-usage-limit','Remove limit',off):''}</div></form>`;
 }
 function saveUsageLimit(limit){
  const u=usageState.value,pip=S.selected;if(S.apiVersion<41||!u||u.pip_id!==pip)return;

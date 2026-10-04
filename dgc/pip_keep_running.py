@@ -64,6 +64,10 @@ def _linux_status(home, options):
             "restarts_after_failure": on, "while_logged_out": on and linger}
 
 
+def _linger_mark(home):
+    return Path(home) / ".dgc" / "pips-linger-enabled"
+
+
 def _linux_on(home, options, runner_online):
     pip_service.install(home, upgrade=True, **options)
     pip_service.enable(home, **options)
@@ -73,13 +77,22 @@ def _linux_on(home, options, runner_online):
         # Lets the user's services run while they are logged out (a server, or a remote editor).
         # Most systems allow it for your own account; when one does not, the switch still works
         # whenever you are logged in, and the status says so.
-        _run(["/usr/bin/loginctl", "enable-linger"], check=False)
+        if _run(["/usr/bin/loginctl", "enable-linger"], check=False).returncode == 0 and _linger_state():
+            mark = _linger_mark(home)
+            mark.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            mark.write_text("DGC turned lingering on for Pips; turning Keep Pips running off turns it off.\n")
     return _linux_status(home, options)
 
 
 def _linux_off(home, options):
     if pip_service.status(home, **options)["installed"]:
         pip_service.disable(home, **options)
+    mark = _linger_mark(home)
+    if mark.exists():
+        # Lingering was off until this switch turned it on. Lingering someone set up themselves
+        # (no mark) is theirs and stays.
+        _run(["/usr/bin/loginctl", "disable-linger"], check=False)
+        mark.unlink(missing_ok=True)
     return _linux_status(home, options)
 
 
@@ -140,6 +153,7 @@ def _mac_status(spec):
 def _mac_on(spec, runner_online):
     directory = spec["directory"]
     directory.mkdir(mode=0o755, parents=True, exist_ok=True)
+    existed = spec["path"].exists()
     changed = not _agent_written(spec)
     if changed:
         staged = spec["path"].with_name("." + spec["path"].name + ".tmp")
@@ -149,8 +163,9 @@ def _mac_on(spec, runner_online):
     target = f'{_domain()}/{spec["label"]}'
     _run(["/bin/launchctl", "enable", target])
     loaded = _run(["/bin/launchctl", "print", target], check=False).returncode == 0
-    if loaded and changed:
-        # Only a changed agent (a DGC upgrade) is reloaded. Unloading stops the runner launchd
+    if loaded and changed and existed:
+        # Only a changed agent (a DGC upgrade) is reloaded. After off the file is gone while the job
+        # stays loaded, so writing it back is turning it on again, not a change. Unloading stops the runner launchd
         # started; the new one starts at once (RunAtLoad).
         _run(["/bin/launchctl", "bootout", target], check=False)
         loaded = False

@@ -34,10 +34,15 @@ user's own controllers.
 
 The `dgc pips` CLI acts as the local user, so a chat that ran it in its shell (in auto
 mode, without asking) could approve its own Pips. Every shell DGC runs for the model
-(`bash`, `python`, monitors, hooks) carries `DGC_AGENT_SHELL=1`; a command you type
-yourself (`!cmd`, `/pips`) does not. With the marker, `dgc pips` allows only reading
-commands and the emergency stop, never marks the digest seen, and refuses the rest
-with exit status 2. This is a guard against a chat taking the wrong path, not a
+(`bash`, `python`, monitors) carries `DGC_AGENT_SHELL=1`, and so does a subscription
+engine's CLI (Claude Code, Codex), whose own shell is the model's too. A command you type
+yourself (`!cmd`) and your own hooks and gate command do not. With the marker, `dgc pips`
+allows only reading commands and the emergency stop, never marks the digest seen, and
+refuses the rest with exit status 2. Memory statements can be listed (and anchored for
+reading), never recorded or revoked. A DGC started from a marked shell inherits the
+marker: its `/pips` is refused the same way, and its `dgc serve` (the backend an SDK
+script starts) serves `get_`, `list_` and `inspect_` controls, `export_pip`, `stop_pips`
+and turning Pips off, and refuses everything else with `agent_shell`. This is a guard against a chat taking the wrong path, not a
 security boundary: an unsandboxed shell runs as you and could edit the registry
 directly, like any other process of yours.
 
@@ -628,8 +633,9 @@ totals, all of its requests); a run not imported yet counts its result's `usage`
 is kept in registry metadata, outside the job definition, and records
 `pip_daily_cap_changed`. While today's tokens are at or over the limit, `enqueue` refuses
 schedule and event occurrences with `daily_cap_reached`, which the scheduler and the
-trigger controller record as an ordinary skip; manual, chat, handoff and main-chat runs are
-not limited.
+trigger controller record as an ordinary skip (a skipped occurrence does not run later);
+manual, chat, handoff and main-chat runs are not limited, and neither is a standalone
+Pulse schedule, which runs its reviewed commands without a model.
 
 **Desktop notifications** (API 41). The runner checks once a minute (`pip_desktop.Notifier`)
 for alert findings in the digest and for pending reviews and setup cards, and shows one

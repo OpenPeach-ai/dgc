@@ -55,6 +55,20 @@ class PreviousResultTests(unittest.TestCase):
         third, _ = self.run_worker(pip["id"], "three", "Nothing changed since yesterday.", "Still nothing.")
         self.assertEqual(third["manifest"]["previous_result"]["run_id"], second["id"], "always the latest")
 
+    def test_a_handoff_into_the_pip_is_not_its_previous_result(self):
+        pip = self.store.create(self.registry.personal()["id"], "Brief", "Brief me", "local-console")
+        first, _ = self.run_worker(pip["id"], "one", "", "SCHEDULED_BRIEF")
+        # A later finished run of the same Pip that came in as a reviewed handoff, as the registry records it.
+        db = self.registry.db
+        columns = [row[1] for row in db.execute("PRAGMA table_info(pip_runs)")]
+        chosen = {"id": "?", "idempotency_key": "?", "manifest": "json_set(manifest,'$.handoff',json(?))"}
+        values = {"id": "run_handoff_1", "idempotency_key": "handoff-1", "manifest": '{"handoff_id": "handoff_1"}'}
+        with self.registry.transaction():
+            db.execute(f"INSERT INTO pip_runs({','.join(columns)}) SELECT {','.join(chosen.get(c, c) for c in columns)} "
+                       "FROM pip_runs WHERE id=?", [values[c] for c in columns if c in chosen] + [first["id"]])
+        third = self.store.enqueue(pip["id"], "three", "local-console", self.cfg)
+        self.assertEqual(third["manifest"]["previous_result"]["run_id"], first["id"])
+
     def test_the_previous_text_is_redacted_and_bounded(self):
         # A secret configured after the result was saved is still kept out of the next prompt.
         pip = self.store.create(self.registry.personal()["id"], "Watch", "Watch", "local-console")

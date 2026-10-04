@@ -55,6 +55,19 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(request["web_plan"], WEB)
         self.assertEqual(request["reason"], "Imported from a shared Pip file.")
 
+    def test_a_job_carrying_a_credential_is_not_exported(self):
+        pip = self.personal({"web_plan": {"schema_version": 1, "reads": [
+            {"kind": "page", "url": "https://example.com/feed?key=plain-later-words-77"}]}})
+        from dgc import pips
+        self.cfg.data["pips_enabled"] = True
+        with patch("dgc.pips.WorkspaceRegistry", return_value=self.registry), patch.object(self.registry, "close"), \
+                patch("dgc.redaction.secret_values", return_value=["plain-later-words-77"]):
+            response = pips.handle_control(self.cfg, {"type": "export_pip", "pip_id": pip["id"], "request_id": "r"},
+                                           "editor-user", start_worker=False)
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "secret_detected")
+        self.assertNotIn("plain-later-words-77", json.dumps(response))
+
     def test_a_file_that_is_not_a_shared_pip_is_refused_plainly(self):
         good = {"format": "dgc-pip", "version": 1, "pip": {"name": "n", "goal": "g", "pip_type": "lens", "scope": "personal", "schedule": None}}
         share.check(good)
@@ -121,6 +134,10 @@ class CommandLineTests(unittest.TestCase):
         code, _, err = self.cli("import", str(path))
         self.assertNotEqual(code, 0, "without a terminal it asks for --yes")
         self.assertIn("Job: Watch the pricing page", err, "the job is shown first")
+        with patch("dgc.redaction.secret_values", return_value=["Watch the pricing page"]):
+            code, _, err = self.cli("import", str(path), "--yes", "--json")
+        self.assertNotEqual(code, 0, "a file carrying a configured credential is not imported")
+        self.assertIn("configured credentials", err)
         code, text, err = self.cli("import", str(path), "--yes", "--json")
         self.assertEqual(code, 0, err)
         code, text, _ = self.cli("list", "--personal", "--json")

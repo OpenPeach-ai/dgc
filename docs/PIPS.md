@@ -350,9 +350,10 @@ To keep a scheduled Pip from running up a bill, give it a **daily limit**:
 dgc pips usage PIP --daily-limit 200k     # or 1.5m, 250000; off removes it
 ```
 
-Once its runs today reach the limit, its schedules and event triggers are skipped until
-the next day, and the skip says why. A run you start yourself, a chat reply and a handoff
-you approve still run. The limit is your setting, not part of the job: it needs no review
+Once its runs today reach the limit, its schedules and event triggers are skipped for the
+rest of the day, and the skip says why; a skipped run does not run later. A run you start
+yourself, a chat reply and a handoff you approve still run, and a Pulse running its
+reviewed commands uses no model, so its schedule is never skipped. The limit is your setting, not part of the job: it needs no review
 and no model can change it.
 
 ## Reviewing what Pips propose

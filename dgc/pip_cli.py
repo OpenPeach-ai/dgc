@@ -762,7 +762,7 @@ def usage_text(item) -> str:
         return text + " No daily limit."
     text += f" Daily limit for automatic runs: {item['daily_cap']:,} tokens."
     if item["capped_today"]:
-        text += " Reached today: its schedules and triggers wait until tomorrow; runs you start still run."
+        text += " Reached today: its schedules and triggers are skipped for the rest of the day; runs you start still run."
     return text
 
 
@@ -1261,7 +1261,7 @@ def _digest_command(config, args):
         else:
             try:
                 limit = int(float(raw[:-1]) * 1000) if raw.endswith("k") else int(float(raw[:-1]) * 1_000_000) if raw.endswith("m") else int(raw)
-            except ValueError:
+            except (ValueError, OverflowError):
                 raise RegistryError("invalid_request", "Give the daily limit in tokens, for example 200000, 200k or 1.5m, or off.") from None
         return control({"type": "set_pip_daily_cap", "pip_id": args.pip_id, "daily_tokens": limit})
     if args.command == "desktop-notifications":
@@ -1343,6 +1343,9 @@ def _import_command(config, args):
         raise RegistryError("invalid_request", f"Could not read {path}: {exc.strerror or exc}") from None
     document = pip_share.parse(text)
     checked = pip_share.setup_request(document, project_root=config.project_root, request_key="cli-import")
+    from .redaction import contains_secret, secret_values
+    if contains_secret(checked, secret_values(config)):
+        raise RegistryError("secret_detected", "The shared Pip contains one of your configured credentials; it was not imported.")
     if checked["pip_type"] == "pulse":
         raise RegistryError("unsupported_share", "Import a Pulse Pip in the Pips view, where its commands are reviewed on a setup card.")
     personal = checked.get("scope") == "personal"
@@ -1475,6 +1478,8 @@ def agent_shell_allows(args) -> bool:
         return args.state is None
     if args.command == "usage":
         return args.daily_limit is None
+    if args.command == "memory" and args.memory_action == "statements":
+        return args.statement_action in ("anchor", "list")   # record and revoke are the user's
     spec = _AGENT_SHELL_READ_ACTIONS.get(args.command)
     return bool(spec) and getattr(args, spec[0], None) in spec[1]
 
@@ -1492,8 +1497,9 @@ def handle_command(config, argv, *, in_chat=False):
     if not PLATFORM_SUPPORTED:
         print("dgc pips: " + UNSUPPORTED_PLATFORM, file=sys.stderr)
         return 2
-    # A command the user typed in DGC (`/pips`, in_chat) is theirs; one from the chat's shell is not.
-    if not in_chat and os.environ.get(AGENT_SHELL) == "1":
+    # The model's shell carries the marker, and so does any DGC started from it: its `/pips` is no
+    # more the user's than `dgc pips` is. The DGC the user starts never has it.
+    if os.environ.get(AGENT_SHELL) == "1":
         if not agent_shell_allows(args):
             print("dgc pips: " + AGENT_SHELL_REFUSAL, file=sys.stderr)
             return 2

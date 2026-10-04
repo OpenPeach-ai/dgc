@@ -1801,6 +1801,22 @@ def _chat_field(name: str) -> property:
     return property(get, set_, delete, doc=f"Per-chat `{name}`, stored on this backend's Chat.")
 
 
+# A backend started from a model's shell (`dgc serve`, or a script using the SDK) carries
+# sandbox.AGENT_SHELL, like `dgc pips` there: it may read Pips and stop them, never decide for the user.
+AGENT_SHELL_PIPS_REFUSAL = ("This DGC was started from a chat's own shell, and changing Pips is your decision, so it was "
+                            "refused. Reading Pips and stopping them still work; make the change in your own editor or terminal.")
+
+
+def _agent_shell_pips_read(cmd) -> bool:
+    if cmd.get("type") == "pips_enable":
+        return cmd.get("enabled") is False
+    if cmd.get("type") != "pips_control":
+        return False                         # pips_runtime starts the runner or clears a stop
+    request = cmd.get("request") if isinstance(cmd.get("request"), dict) else {}
+    kind = request.get("type") if isinstance(request.get("type"), str) else ""
+    return kind.startswith(("get_", "list_", "inspect_")) or kind in ("stop_pips", "export_pip")
+
+
 class Backend:
     # Step 3: the first two per-chat names. Everything else stays a plain attribute until its own
     # step, so each move is verified alone.
@@ -4093,6 +4109,10 @@ class Backend:
     def _pips_policy_refusal(self, cmd):
         if getattr(self, "_pips_closing", False):
             self._pips_failure(cmd, "chat_closed", "This chat closed before its Pip control could run.")
+            return True
+        from .sandbox import AGENT_SHELL
+        if os.environ.get(AGENT_SHELL) == "1" and not _agent_shell_pips_read(cmd):
+            self._pips_failure(cmd, "agent_shell", AGENT_SHELL_PIPS_REFUSAL)
             return True
         from .pip_access import restricted, MESSAGE
         if restricted(self.config):

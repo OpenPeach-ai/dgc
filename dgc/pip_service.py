@@ -353,7 +353,7 @@ def install(dgc_home=None, *, upgrade=False, **options):
 
 def status(dgc_home=None, **options):
     spec = preview(dgc_home, **options)
-    if not _check_file(spec, required=False):
+    if not _check_file(spec, required=False, upgrade=True):
         return _public(spec, installed=False, active_state="not_installed", enabled_state="disabled")
     return _public(spec, installed=True, **_loaded(spec))
 
@@ -361,13 +361,13 @@ def status(dgc_home=None, **options):
 def _control(operation, dgc_home, options):
     spec = preview(dgc_home, **options)
     with _lock(spec):
-        _check_file(spec)
+        _check_file(spec, upgrade=True)       # an earlier DGC format is still ours to control
         before = _loaded(spec)
         if operation == "uninstall":
             if before["active_state"] not in ("inactive", "failed"):
                 _error("service_running", "Stop this Pips service before uninstalling it. Other DGC instances will not be stopped.")
             _systemctl(["disable", spec["unit_name"]])
-            _check_file(spec)
+            _check_file(spec, upgrade=True)
             Path(spec["unit_path"]).unlink()
             _systemctl(["daemon-reload"])
             return _public(spec, installed=False, active_state="not_installed", enabled_state="disabled")

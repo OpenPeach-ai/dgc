@@ -51,6 +51,9 @@ class LinuxSwitchTests(unittest.TestCase):
         if "enable-linger" in argv:
             self.linger = "yes"
             return Done()
+        if "disable-linger" in argv:
+            self.linger = "no"
+            return Done()
         return Done(out=self.linger.encode() + b"\n")
 
     def test_on_installs_registers_for_login_and_starts_the_runner(self):
@@ -85,6 +88,26 @@ class LinuxSwitchTests(unittest.TestCase):
         self.assertEqual(self.enabled, "disabled")
         self.assertEqual(self.active, "active", "a run in progress is never cut off by a settings change")
         self.assertIn("off", pip_cli.keep_running_text(value))
+
+    def test_an_earlier_dgc_unit_can_still_be_read_and_turned_off(self):
+        # Someone who installed the service before this format: the switch must still show and work.
+        self.unit.parent.mkdir(parents=True)
+        old = self.spec["content"].replace("format 2", "format 1").replace("Restart=on-failure\nRestartSec=30\n", "Restart=no\n")
+        self.unit.write_text(old); self.unit.chmod(0o600)
+        self.enabled = "enabled"
+        self.assertTrue(keep.status(dgc_home=self.home, **self.options)["on"])
+        self.assertFalse(keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)["on"])
+        self.assertEqual(service.status(self.home, **self.options)["installed"], True)
+
+    def test_lingering_this_switch_turned_on_is_turned_off_with_it_and_only_that(self):
+        keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
+        keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertIn(["/usr/bin/loginctl", "disable-linger"], self.calls)
+        self.calls.clear()
+        self.linger = "yes"                       # lingering the user set up themselves
+        keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
+        keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertNotIn(["/usr/bin/loginctl", "disable-linger"], self.calls, "theirs stays")
 
     def test_an_earlier_dgc_unit_is_upgraded_and_a_foreign_one_is_never_overwritten(self):
         self.unit.parent.mkdir(parents=True)
@@ -163,6 +186,15 @@ class MacSwitchTests(unittest.TestCase):
         self.calls.clear()
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
         self.assertEqual([c[0] for c in self.calls if c[0] in ("bootout", "bootstrap")], ["bootout", "bootstrap"])
+        self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+
+    def test_on_again_after_off_never_unloads_the_running_runner(self):
+        keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
+        keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)
+        self.calls.clear()
+        value = keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertNotIn("bootout", [c[0] for c in self.calls], "off left the job loaded; on again must not unload it")
+        self.assertTrue(value["on"])
         self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
 
     def test_off_removes_the_agent_and_never_stops_the_runner(self):

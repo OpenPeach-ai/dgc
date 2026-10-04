@@ -166,6 +166,16 @@ class PipsRepeatHintTests(PipsToolLoadingTests):
         self.config.data["pips_enabled"] = False
         self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt(), "Pips off: nothing to offer")
 
+    def test_a_new_chat_is_checked_for_repeated_work_afresh(self):
+        with patch("dgc.pip_repeat.hint", return_value="- REPEAT_HINT_LINE"):
+            self.agent._check_pips_repeat("Summarise the overnight sales numbers and email the team")
+        self.assertIn("REPEAT_HINT_LINE", self.agent.system_prompt())
+        self.agent.reset()
+        self.assertNotIn("REPEAT_HINT_LINE", self.agent.system_prompt(), "the last chat's hint does not follow")
+        with patch("dgc.pip_repeat.hint", return_value="") as hint:
+            self.agent._check_pips_repeat("A first prompt for the new chat about something else")
+        hint.assert_called_once()
+
     def test_the_loader_tells_the_model_when_to_offer_a_pip_and_what_pips_cannot_do(self):
         loader = next(t for t in self.agent._tool_schemas() if t["function"]["name"] == "use_pips")
         text = loader["function"]["description"]

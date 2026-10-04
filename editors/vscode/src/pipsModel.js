@@ -999,7 +999,7 @@ export function pipFeedback(value, pip) {
   const fail = () => { throw Error("This Pip's ratings are invalid. Refresh this Pip."); };
   const row = (r) => record(r) && Object.keys(r).sort().join() === 'at,note,rating,run_id'
     && typeof r.run_id === 'string' && r.run_id.length > 0 && r.run_id.length <= 128 && (r.rating === 'up' || r.rating === 'down')
-    && typeof r.note === 'string' && r.note.length <= 500 && typeof r.at === 'string' && r.at.length <= 40;
+    && typeof r.note === 'string' && [...r.note].length <= 500 && typeof r.at === 'string' && r.at.length <= 40;
   if (!record(value) || Object.keys(value).sort().join() !== 'feedback,pip_id' || value.pip_id !== pip
     || !Array.isArray(value.feedback) || value.feedback.length > 20 || !value.feedback.every(row)) fail();
   return value;

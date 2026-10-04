@@ -59,8 +59,8 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
 - Rate a Pip's result: `dgc pips feedback RUN_ID up|down --note "…"`. Its later runs read your
   five newest ratings and notes as guidance; a rating never changes the job.
 - `dgc pips usage PIP` shows what a Pip's runs cost in tokens, today and over 30 days, counting
-  failed and timed-out runs too. `--daily-limit 200k` stops its schedules and triggers for the day
-  once it reaches that many tokens; runs you start still run. The limit is your setting, not part
+  failed and timed-out runs too. `--daily-limit 200k` skips its schedules and triggers for the rest of
+  the day once it reaches that many tokens; runs you start still run. The limit is your setting, not part
   of the job.
 - The runner shows a desktop notification for a new alert or a review waiting for you, even with
   the editor closed: once per item, at most one a minute, never a backlog. `dgc pips
@@ -75,7 +75,9 @@ the model drafts, you approve. See [docs/PIPS.md](docs/PIPS.md).
   you (Ubuntu's default) no longer blocks the service.
 - A chat can no longer approve its own Pips by running `dgc pips` in its shell (the CLI acts as you,
   and auto mode approves every shell command). In a chat's shell the CLI only reads and can make
-  the emergency stop; changes are refused and the chat prepares a setup card for you instead.
+  the emergency stop; changes are refused and the chat prepares a setup card for you instead. The
+  same holds for a DGC, or an SDK script, started from that shell, and for a chat run by Claude
+  Code or Codex through your subscription.
 - A profile that has never used Pips gets no Pips state: per-turn Pips bookkeeping starts the
   first time a chat or command uses them.
 - Personal Pips can use reviewed reads from connected apps (Gmail, Google Calendar, Google

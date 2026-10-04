@@ -116,9 +116,36 @@ class AgentShellCommandTests(unittest.TestCase):
         code, _, err = self.cli("stop", "--yes", "--json", shell=True)
         self.assertEqual(code, 0, err)
 
-    def test_the_user_typing_pips_in_dgc_is_the_user(self):
-        code, text, err = self.cli("create", "Mine", "--personal", "--goal", "Mine", "--json", shell=True, in_chat=True)
-        self.assertEqual(code, 0, err)
+    def test_a_dgc_started_from_a_chats_shell_is_not_the_user(self):
+        # `printf '/pips create ...' | dgc --classic` from the model's shell reached /pips (in_chat)
+        # carrying the marker, and the guard waved it through.
+        argv = ("create", "Mine", "--personal", "--goal", "Mine", "--json")
+        code, _, err = self.cli(*argv, shell=True, in_chat=True)
+        self.assertEqual(code, 2, err)
+        self.assertIn("changing Pips is your decision", err)
+        code, _, err = self.cli(*argv, in_chat=True)
+        self.assertEqual(code, 0, err)   # the DGC the user started has no marker: its /pips is theirs
+
+    def test_memory_statements_are_read_here_but_never_recorded_or_revoked(self):
+        parse = lambda *argv: pip_cli.parser().parse_args(list(argv))
+        pip = "pip_" + "1" * 32
+        self.assertTrue(pip_cli.agent_shell_allows(parse("memory", "statements", "list", pip)))
+        self.assertTrue(pip_cli.agent_shell_allows(parse("memory", "statements", "anchor", pip)))
+        for argv in (("memory", "statements", "record", pip, "--kind", "preference", "--title", "t", "--statement", "s",
+                      "--reason", "r", "--request-key", "k", "--anchor-digest", "a" * 64, "--no-expiry"),
+                     ("memory", "statements", "revoke", pip, "m1", "--expected-revision", "1", "--reason", "r"),
+                     ("memory", "record", pip, "run_1", "0", "--source-digest", "d", "--reason", "r", "--request-key", "k"),
+                     ("memory", "revoke", pip, "m1", "--expected-revision", "1", "--reason", "r")):
+            with self.subTest(argv=argv[:3]):
+                self.assertFalse(pip_cli.agent_shell_allows(parse(*argv)))
+
+    def test_a_daily_limit_too_large_to_count_is_refused_plainly(self):
+        pip_id = self.personal()
+        for raw in ("inf", "1e400k", "nan"):
+            with self.subTest(raw=raw):
+                code, _, err = self.cli("usage", pip_id, "--daily-limit", raw)
+                self.assertNotEqual(code, 0)
+                self.assertIn("Give the daily limit in tokens", err)
 
     def test_every_allowed_name_is_a_real_read_command(self):
         """The allow list names only commands and actions that exist, and only reading ones."""
@@ -136,6 +163,88 @@ class AgentShellCommandTests(unittest.TestCase):
                              f"{name}: only reading actions")
         self.assertFalse(pip_cli._AGENT_SHELL_READS & {"create", "accept", "reject", "propose", "run", "enable", "resume",
                                                        "starter", "serve", "service", "schedule", "send"})
+
+
+class AgentShellBackendTests(unittest.TestCase):
+    """`dgc serve`, or a script's SDK, started from the model's shell: it reads and stops, never decides."""
+
+    def setUp(self):
+        fixtures.LocalPipsTests.setUp(self)
+        from dgc.headless import Backend
+        self.backend = Backend.__new__(Backend)
+        self.backend.config = self.cfg
+        self.failures = []
+        self.backend._pips_failure = lambda cmd, code, message: self.failures.append((code, message))
+
+    def refused(self, cmd, marked=True):
+        env = {k: v for k, v in os.environ.items() if k != sandbox.AGENT_SHELL}
+        if marked:
+            env[sandbox.AGENT_SHELL] = "1"
+        with patch.dict(os.environ, env, clear=True):
+            return self.backend._pips_policy_refusal(cmd)
+
+    def test_decisions_are_refused_and_reads_and_stops_are_served(self):
+        control = lambda kind: {"type": "pips_control", "request": {"type": kind, "request_id": "r"}}
+        for cmd in (control("accept_pip_setup"), control("create_pip"), control("run_pip"), control("set_pip_feedback"),
+                    control("propose_starter_pip"), control("import_pip_document"), control("set_pips_keep_running"),
+                    control("set_pip_daily_cap"), {"type": "pips_enable", "enabled": True},
+                    {"type": "pips_runtime", "action": "resume", "request_id": "r"}):
+            with self.subTest(cmd=cmd.get("request", cmd)["type"]):
+                self.assertTrue(self.refused(cmd))
+        self.assertEqual({code for code, _ in self.failures}, {"agent_shell"})
+        self.assertIn("changing Pips is your decision", self.failures[0][1])
+        self.failures.clear()
+        for cmd in (control("list_pips"), control("get_pip_usage"), control("inspect_pip_connection"),
+                    control("list_pip_starters"), control("stop_pips"), control("export_pip"),
+                    {"type": "pips_enable", "enabled": False}):
+            with self.subTest(cmd=cmd.get("request", cmd)["type"]):
+                self.assertFalse(self.refused(cmd))
+        self.assertEqual(self.failures, [])
+        self.assertFalse(self.refused(control("accept_pip_setup"), marked=False), "the user's own editor decides")
+
+
+class OtherMarkedShellsTests(unittest.TestCase):
+    def setUp(self):
+        fixtures.LocalPipsTests.setUp(self)
+        clean = {k: v for k, v in os.environ.items() if k != sandbox.AGENT_SHELL}
+        p = patch.dict(os.environ, clean, clear=True)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_a_subscription_engine_runs_marked_like_dgcs_own_shell(self):
+        # Claude Code or Codex driving a chat has its own Bash tool; it is the model's shell too.
+        from dgc import subscriptions
+        seen = {}
+
+        def popen(argv, **kwargs):
+            seen.update(kwargs["env"])
+            raise OSError("stop before launching")
+        with patch.object(subscriptions, "preflight", return_value="/bin/true"), patch("subprocess.Popen", side_effect=popen):
+            with self.assertRaises(subscriptions.EngineLaunchError):
+                subscriptions.run_turn(subscriptions.ENGINES["claude"], "hi", str(self.root), env={sandbox.AGENT_SHELL: "0"})
+        self.assertEqual(seen[sandbox.AGENT_SHELL], "1")
+
+    def test_the_users_own_hooks_and_gate_are_not_marked_as_the_models(self):
+        from types import SimpleNamespace
+        from dgc import hooks
+        from dgc.agent import Agent
+        probe = 'printf "marker=%s" "${DGC_AGENT_SHELL:-none}"'
+        _, out, _ = hooks._run_one(probe, b"{}", self.cfg, self.root, 10)
+        self.assertIn("marker=none", out)
+        with patch.dict(os.environ, {sandbox.AGENT_SHELL: "1"}):
+            _, out, _ = hooks._run_one(probe, b"{}", self.cfg, self.root, 10)
+        self.assertIn("marker=1", out, "a DGC the model started keeps its children marked")
+        agent = Agent.__new__(Agent)
+        agent.autonomous_gate, agent.config = probe, self.cfg
+        agent.ctx = SimpleNamespace(project_root=self.root)
+        agent._safe_text = lambda value: value
+        seen = {}
+
+        def popen(argv, **kwargs):
+            seen.update(kwargs["env"])
+            raise OSError("stop before launching")
+        with patch("subprocess.Popen", side_effect=popen):
+            agent._run_autonomous_gate()
+        self.assertNotIn(sandbox.AGENT_SHELL, seen, "the gate is the user's command")
 
 
 if __name__ == "__main__":

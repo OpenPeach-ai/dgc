@@ -3707,6 +3707,7 @@ class Agent(GoalLifecycle):
         # Likewise a live browser: its page, cookies and temp profile are this session's, and a
         # new session must not inherit whatever was left on screen.
         shutdown_browsers(getattr(self.ctx, "tool_owner", None))
+        self._pips_repeat_checked, self._pips_repeat_line = False, ""   # a new chat is checked afresh
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
         self._goal_elapsed_seconds = 0.0
@@ -6268,7 +6269,7 @@ class Agent(GoalLifecycle):
                 stdin=subprocess.DEVNULL,              # never the editor's command pipe
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", start_new_session=True,
-                env=sandbox.tool_env())                # never DGC's provider credentials
+                env=sandbox.tool_env(agent=False))     # the user's gate; never DGC's provider credentials
         except OSError as exc:
             return 1, self._safe_text(f"error: {type(exc).__name__}: {exc}")
         capture = _BoundedCommandCapture(self.ctx)

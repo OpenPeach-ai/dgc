@@ -419,7 +419,8 @@ def _previous_task_result(registry, pip_id, secrets):
     from .redaction import redact_text
     row = registry.db.execute(
         "SELECT id,finished_at,result FROM pip_runs WHERE pip_id=? AND status='succeeded' "
-        "AND json_extract(manifest,'$.run_kind')='personal_task' ORDER BY finished_at DESC, rowid DESC LIMIT 1", (pip_id,)).fetchone()
+        "AND json_extract(manifest,'$.run_kind')='personal_task' AND json_extract(manifest,'$.handoff') IS NULL "
+        "ORDER BY finished_at DESC, rowid DESC LIMIT 1", (pip_id,)).fetchone()
     if row is None:
         return None
     try:
@@ -795,11 +796,6 @@ class PipStore:
 
     def enqueue(self, pip_id, idempotency_key, actor, config, *, schedule_occurrence=None, conversation_request=None, handoff=None, event_occurrence=None, _audit_preparation=None, main_chat_request=None, pulse_request=None, _model_preparation=None):
         _require_runner_platform()
-        if schedule_occurrence is not None or event_occurrence is not None:
-            # The user's daily limit stops automatic runs only; anything they start still runs.
-            from .pip_spend import over_daily_cap
-            if over_daily_cap(self.registry, pip_id):
-                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this automatic run was skipped. Raise or remove the limit in its Job tab.")
         key = _text(idempotency_key, "idempotency_key", 128)
         pulse_request = _pulse_request(pulse_request, actor, key)
         if pulse_request is not None and any(value is not None for value in
@@ -877,6 +873,12 @@ class PipStore:
         executable = not personal and pip["pip_type"] in ("patch", "pulse") and conversation_request is None
         standalone = (not personal and pip['pip_type'] == 'pulse' and handoff is None
                       and (pulse_request is not None or schedule_occurrence is not None))
+        if (schedule_occurrence is not None or event_occurrence is not None) and not standalone:
+            # The user's daily limit stops automatic runs only; anything they start still runs. A
+            # standalone Pulse runs its reviewed commands without a model, so it spends no tokens.
+            from .pip_spend import over_daily_cap
+            if over_daily_cap(self.registry, pip_id):
+                raise RegistryError("daily_cap_reached", "This Pip reached its daily token limit, so this automatic run was skipped. Raise or remove the limit in its Job tab.")
         if pulse_request is not None and pip['pip_type'] != 'pulse':
             raise RegistryError('invalid_request', 'Verification-plan run pins apply only to standalone Pulse.')
         if standalone:
@@ -1105,7 +1107,8 @@ class PipStore:
                     from .pip_chat_setup import task_reference
                     manifest['personal_history'] = task_reference(self, latest, model['context_size'],
                         secrets=secret_values(frozen_config))
-                    previous = _previous_task_result(self.registry, pip_id, secret_values(frozen_config))
+                    previous = (_previous_task_result(self.registry, pip_id, secret_values(frozen_config))
+                                if handoff is None else None)
                     if previous is not None:
                         manifest['previous_result'] = previous
                 elif run_kind == "audit":
@@ -3025,6 +3028,10 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ("editor-user", "local-console"):
                     raise RegistryError("local_only", "Sharing a Pip is done on this computer only.")
                 document = pip_share.export(store, pip_id)
+                from .redaction import contains_secret
+                if contains_secret(document, secret_values(config)):
+                    raise RegistryError("secret_detected", "This Pip's job contains one of your configured credentials "
+                                        "(in a page address or search). Remove it from the job before sharing.")
                 result = {"document": document, "text": pip_share.dumps(document)}
             elif command in ("get_pip_usage", "set_pip_daily_cap"):
                 from . import pip_spend

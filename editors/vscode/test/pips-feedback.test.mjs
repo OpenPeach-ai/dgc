@@ -73,3 +73,10 @@ test('only finished results are rated, and only with API 41', async()=>{
   assert.equal(x.requests('list_pip_feedback').length,0,label);
  }
 });
+
+test('a long note in emoji, counted as the runner counts characters, still shows', async()=>{
+ const note='😀'.repeat(300);                      // 300 characters, 600 UTF-16 units
+ const x=setup({feedback:rated([{run_id:runId,rating:'up',note,at:'2026-10-05T04:00:00.000Z'}])});await x.open();
+ assert.equal(x.d.getElementById('rate-up')?.getAttribute('aria-pressed'),'true');
+ assert.equal(x.d.getElementById('feedbackNote').value,note);
+});
