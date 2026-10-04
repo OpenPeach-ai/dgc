@@ -6191,7 +6191,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
       <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>
-      <button type="button" id="pips-digest-main" class="rail-main" aria-expanded="false" aria-controls="pips-digest-panel"><span class="pips-digest-icon codicon codicon-bell rail-icon" aria-hidden="true"></span><span class="pips-digest-label">Pips</span><span id="pips-digest-text"></span></button>
+      <button type="button" id="pips-digest-main" class="rail-main" aria-expanded="false" aria-controls="pips-digest-panel" title="Show what your Pips found"><span class="pips-digest-icon codicon codicon-bell rail-icon" aria-hidden="true"></span><span class="pips-digest-label">Pips</span><span id="pips-digest-text"></span></button>
       <button type="button" id="pips-digest-open" class="rail-text-action" title="Open the Pips view">Open</button>
       <button type="button" id="pips-digest-dismiss" class="rail-text-action" title="Mark this digest seen until something new">Dismiss</button>
     </section>

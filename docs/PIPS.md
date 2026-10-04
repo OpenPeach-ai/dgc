@@ -225,7 +225,9 @@ under **Notifications**:
 
 These are your display settings, not part of the job: changing them needs no
 review, and no model can change them. A finding that a later run reports again is
-"repeated", not new, so it never brings the digest back.
+"repeated", not new, so it never brings the digest back. The digest matches findings by
+file and quoted source lines, so one the model words differently next time is still the
+same finding.
 
 In the terminal, the welcome screen's tip says when the digest has something new,
 and `/pips` shows it. From any shell:

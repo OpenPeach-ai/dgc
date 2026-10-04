@@ -93,10 +93,11 @@ test("the session checklist is a composer-rail row above the goal and updates in
   assert.equal(doc.getElementById("tasks"), null, "the old standalone slot is gone");
   assert.equal(doc.querySelectorAll("#tasks-list").length, 1, "exactly one task surface");
   // pastebar sits LAST, directly against the composer, because it is about the text in the box
-  // rather than about the session -- and it is the one row that survives a docked question.
+  // rather than about the session -- and it is the one row that survives a docked question. The
+  // Pips digest sits FIRST, furthest from the box: it is about work outside this chat.
   assert.deepEqual([...rail.children].map(node => node.id),
-    ["monitorsbar", "changesbar", "tasksbar", "goalbar", "pastebar"],
-    "rail order: monitors, changes, tasks, goal — the whole rail sits on the prompt box");
+    ["pipsbar", "monitorsbar", "changesbar", "tasksbar", "goalbar", "pastebar"],
+    "rail order: Pips, monitors, changes, tasks, goal — the whole rail sits on the prompt box");
   assert.equal(rail.nextElementSibling.id, "cbox");
   assert.equal(bar.classList.contains("rail-item"), true);
   assert.equal(bar.hidden, true, "an empty checklist takes no room");

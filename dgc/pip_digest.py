@@ -149,23 +149,40 @@ def _changed_paths(store, run_id):
     return paths, changes.get("omitted_changes") == 0
 
 
-def _gone(store, checkpoint, baseline_cache):
-    """Findings of the baseline checkpoint that this one no longer reports, split by whether
-    their file changed in between. Uncompared checkpoints say nothing."""
+def issue(finding) -> tuple:
+    """The same issue at the same source lines, however the model worded it this time.
+
+    A checkpoint's identity hashes the title too, so a reworded finding is "new" there and its
+    old wording "not observed". For telling the user what is new and what went away, the place
+    and the quoted source decide: the same path and evidence lines are the same issue.
+    """
+    return finding["path"], " ".join(str(finding["evidence"]).split())
+
+
+def _baseline(store, checkpoint, cache):
     from .pip_checkpoints import _load
     baseline_id = checkpoint.get("baseline_checkpoint_id")
-    if baseline_id is None or checkpoint["counts"].get("not_observed") in (None, 0):
-        return [], []
-    if baseline_id not in baseline_cache:
+    if baseline_id is None:
+        return None
+    if baseline_id not in cache:
         try:
-            baseline_cache[baseline_id] = _load(store, baseline_id, reviews=False)["findings"]
+            cache[baseline_id] = _load(store, baseline_id, reviews=False)["findings"]
         except RegistryError:
-            baseline_cache[baseline_id] = []
-    current = {item["identity"] for item in checkpoint["findings"]}
+            cache[baseline_id] = []
+    return cache[baseline_id]
+
+
+def _gone(store, checkpoint, baseline_cache):
+    """Findings of the baseline checkpoint that this one no longer reports, under any wording,
+    split by whether their file changed in between. Uncompared checkpoints say nothing."""
+    baseline = _baseline(store, checkpoint, baseline_cache)
+    if baseline is None or checkpoint["counts"].get("not_observed") in (None, 0):
+        return [], []
+    current = {issue(item) for item in checkpoint["findings"]}
     paths, _complete = _changed_paths(store, checkpoint["run_id"])
     after_change, without = [], []
-    for item in baseline_cache[baseline_id]:
-        if item["identity"] not in current:
+    for item in baseline:
+        if issue(item) not in current:
             (after_change if item["path"] in paths else without).append(item)
     return after_change, without
 
@@ -232,8 +249,9 @@ def build(registry, config=None) -> dict:
             continue
         item = entry(checkpoint["pip_id"])
         floor, alert = _rank(item["min_severity"]), item["alert_severity"]
+        earlier = {issue(f) for f in _baseline(store, checkpoint, baselines) or ()}
         for finding in checkpoint["findings"]:
-            if finding["comparison"] != "new":
+            if finding["comparison"] != "new" or issue(finding) in earlier:   # reworded is not new
                 continue
             if _rank(finding["severity"]) < floor:
                 item["below_threshold"] += 1
@@ -333,7 +351,7 @@ def outcomes(registry, pip_id) -> dict:
                                (pip_id, MAX_OUTCOME_CHECKPOINTS + 1)).fetchall()
     truncated = len(rows) > MAX_OUTCOME_CHECKPOINTS
     ids = [row[0] for row in rows[:MAX_OUTCOME_CHECKPOINTS]][::-1]
-    reported, reviews, state = set(), {}, {}
+    reported, reviews, state = set(), {}, {}       # keyed by issue(): place and quoted source
     examined = 0
     for checkpoint_id in ids:
         try:
@@ -341,7 +359,7 @@ def outcomes(registry, pip_id) -> dict:
         except RegistryError:
             continue
         examined += 1
-        current = {item["identity"]: item for item in checkpoint["findings"]}
+        current = {issue(item): item for item in checkpoint["findings"]}
         compared = checkpoint.get("baseline_checkpoint_id") is not None and checkpoint["counts"].get("not_observed") is not None
         if compared:
             paths, _complete = _changed_paths(store, checkpoint["run_id"])

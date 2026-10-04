@@ -533,8 +533,10 @@ digest is built from runs, checkpoints and reviews finished since then (first ti
 the last day; at most a week; at most 400 checkpoints, 20 Pips and 5 findings per
 Pip, titles cut to 200 characters and redacted). It is due when a new finding
 reaches a Pip's alert level, or when the local day changed and there is anything to
-report. "Gone after a change" counts baseline findings a compared checkpoint no
-longer reports whose path is in that run's changed paths. Outcomes walk the latest
+report. The digest and outcomes match findings by path and whitespace-normalized evidence,
+not by checkpoint identity (which hashes the title too), so a reworded finding is neither
+new nor gone. "Gone after a change" counts baseline findings a compared checkpoint no longer
+reports whose path is in that run's changed paths. Outcomes walk the latest
 200 checkpoints of one Pip.
 
 **Pulse verification plans** give a Pulse Pip a standing command list:
