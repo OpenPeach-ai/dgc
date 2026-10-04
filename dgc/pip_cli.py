@@ -231,6 +231,12 @@ def parser():
         propose.add_argument("--" + flag)
     propose.add_argument('--source-policy', choices=('committed_only', 'current_tree'),
                          help='propose a source choice; current_tree also proposes removing schedules and event triggers')
+    web = propose.add_mutually_exclusive_group()
+    web.add_argument("--web-page", action="append", default=None, metavar="URL",
+                     help="Personal Pips: an exact https page DGC reads before each run (repeat, up to four reads in all)")
+    web.add_argument("--no-web-reads", action="store_true", help="Personal Pips: propose removing all web reads")
+    propose.add_argument("--web-search", action="append", default=None, metavar="QUERY",
+                         help="Personal Pips: a fixed search DGC runs before each run (repeat; counts toward the four)")
     plan = command("verification-plan", "propose exact Pulse commands for separate review; no model, network or source writes")
     job(plan); plan.add_argument("--expected-version", type=int, required=True)
     payload = plan.add_mutually_exclusive_group(required=True)
@@ -650,8 +656,18 @@ def _request(args):
             if args.source_policy == 'current_tree':
                 changes['source_policy']['exclusions'] = 'safe_source_v1'
                 changes.update(schedule=None, event_trigger=None)
+        if args.no_web_reads and args.web_search:
+            raise RegistryError("invalid_request", "Use --no-web-reads alone, or list the reads to keep.")
+        if args.no_web_reads:
+            changes["web_plan"] = None
+        elif args.web_page or args.web_search:
+            # The complete reviewed set replaces the current one: list every read to keep.
+            from .pip_web_reads import validate as validate_web_plan
+            changes["web_plan"] = validate_web_plan({"schema_version": 1, "reads": [
+                *({"kind": "page", "url": url} for url in args.web_page or ()),
+                *({"kind": "search", "query": query} for query in args.web_search or ())]})
         if not changes:
-            raise RegistryError("invalid_request", "Provide --name, --goal or --source-ref for the proposed change.")
+            raise RegistryError("invalid_request", "Provide --name, --goal, --source-ref or web reads for the proposed change.")
         request["changes"] = changes
         if args.reason:
             request["reason"] = args.reason

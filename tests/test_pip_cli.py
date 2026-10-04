@@ -518,5 +518,29 @@ with patch.object(pips.subprocess,"Popen",side_effect=process), patch.object(pip
         self.assertFalse(self.child_cli("status")["paused"])
 
 
+
+class PipCliWebReadTests(unittest.TestCase):
+    setUp = PipCliTests.setUp
+    invoke = PipCliTests.invoke
+    value = PipCliTests.value
+
+    def test_web_reads_are_proposed_from_the_terminal_and_granted_only_on_accept(self):
+        self.cfg.data["pips_enabled"] = True
+        pip = self.value("create", "Morning status", "--goal", "Say whether anything is degraded", "--personal")["pip"]
+        proposal = self.value("propose", pip["id"], "--expected-version", "1",
+                              "--web-page", "https://www.githubstatus.com/",
+                              "--web-search", "GitHub incident today")["proposal"]
+        self.assertEqual(proposal["definition"]["web_plan"], {"schema_version": 1, "reads": [
+            {"kind": "page", "url": "https://www.githubstatus.com/"},
+            {"kind": "search", "query": "GitHub incident today"}]})
+        self.assertIsNone(self.store.get(pip["id"]).get("web_plan"), "a proposal grants nothing")
+        self.value("accept", pip["id"], proposal["id"], "--expected-version", "1")
+        self.assertEqual(len(self.store.get(pip["id"])["web_plan"]["reads"]), 2)
+        removal = self.value("propose", pip["id"], "--expected-version", "2", "--no-web-reads")["proposal"]
+        self.assertIsNone(removal["definition"].get("web_plan"))
+        refused = self.value("propose", pip["id"], "--expected-version", "2",
+                             "--web-page", "http://plain.example.com/", expected=1)
+        self.assertEqual(refused["error"]["code"], "invalid_web_plan")
+
 if __name__ == "__main__":
     unittest.main()
